@@ -31,7 +31,29 @@ Format:
 <Icon> <type>(<modul>): summary
 ```
 
-Der Betreff steht im Imperativ und ist höchstens 50 Zeichen lang. Der Body nutzt gruppierte Bullets, wenn zusätzliche Erklärung nötig ist. Keine Attribution-Trailer und keine `claude.ai/code`- oder `session_`-URLs in Commits, Pull Requests oder Dateien. Commit-Messages und Projektdokumentation sind auf Deutsch; technische Bezeichner bleiben unverändert.
+**Granularität:** Ein Commit ist eine inhaltlich vollständige Änderung samt Tests, Doku und Config. Keine Mikro-Commits, kein Commit pro Datei, kein Zwischenstand, der für sich nicht steht.
+
+**Betreff:** Imperativ, höchstens 50 Zeichen, danach eine Leerzeile.
+
+**Body:** Bullet Points, nach Art gruppiert, jede Gruppe mit ihrem eigenen Icon und Unterpunkten, zum Beispiel eine Gruppe `- 🐛 Defects:` mit darunterliegenden Punkten. Konkret statt allgemein: Funktion, Wert und beobachtetes Verhalten benennen. Nur was ein Leser braucht, kompakt. Issue- oder Ticketnummer referenzieren, falls vorhanden.
+
+Keine Attribution-Trailer und keine `claude.ai/code`- oder `session_`-URLs in Commits, Pull Requests oder Dateien. Commit-Messages und Projektdokumentation sind auf Deutsch; technische Bezeichner bleiben unverändert.
+
+**Icon-Legende:**
+
+🚀 perf · ✨ feat · 🛠 improve · 🐛 fix · 📊 db · 🔄 refactor · 📝 docs · 🧪 test · 🔒 security · ⚙️ config · 🎨 style · ⬆️ deps · 🔧 chore
+
+**Beispiel:**
+
+```text
+🐛 fix(worker): healthz meldet alle fehlenden Secrets
+
+- 🐛 Defects:
+  - /healthz brach bei fehlendem Secret nach dem ersten Namen ab
+    statt alle fehlenden Namen aus secrets.required zu melden
+- 🧪 Tests:
+  - Testfall für mehrere gleichzeitig fehlende Secrets ergänzt
+```
 
 ## Sicherheit
 

@@ -2,7 +2,7 @@
 
 Dieses Projekt ist ein modularer Twitch-Bot auf Cloudflare Workers mit Dashboard und Overlay.
 
-Projektdokumentation: `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, `docs/CONTRIBUTING.md`.
+Projektdokumentation: `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, `docs/CONTRIBUTING.md`, `docs/AI-WORKFLOW.md`.
 Modulkonventionen: `src/modules/README.md`.
 
 ## Skill routing
@@ -34,3 +34,5 @@ Key routing rules:
 - Vor jedem Push: `pnpm run check`.
 - Keine Secrets im Repository.
 - Keine Attribution-Trailer und keine `claude.ai/code`- oder `session_`-URLs in Commits, PRs oder Dateien.
+- Commit-Format samt Icon-Legende: `docs/CONTRIBUTING.md`.
+- Implementierung wird nach `docs/AI-WORKFLOW.md` delegiert.
