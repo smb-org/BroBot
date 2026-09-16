@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Lokale Testkonfiguration erzeugen
+        run: |
+          key() { openssl rand -base64 32 | tr '+/' '-_' | tr -d '='; }
+          sed -e "s|^TWITCH_CLIENT_SECRET=.*|TWITCH_CLIENT_SECRET=local-twitch-client-secret|" \
+              -e "s|^TWITCH_EVENTSUB_SECRET=.*|TWITCH_EVENTSUB_SECRET=local-twitch-eventsub-secret|" \
+              -e "s|^SESSION_ENCRYPTION_KEYS=.*|SESSION_ENCRYPTION_KEYS={\"active\":{\"id\":\"ci-encryption-v1\",\"key\":\"$(key)\"}}|" \
+              -e "s|^SESSION_COOKIE_KEYS=.*|SESSION_COOKIE_KEYS={\"active\":{\"id\":\"ci-cookie-v1\",\"key\":\"$(key)\"}}|" \
+              -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
+              .dev.vars.example > .dev.vars
+      - run: pnpm run check
+      - name: Browser-Artefakte hochladen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14

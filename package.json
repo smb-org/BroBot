@@ -1,0 +1,60 @@
+{
+  "name": "brobot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.1.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=12.0.0"
+  },
+  "scripts": {
+    "config:verify": "node scripts/verify-deployment-config.mjs",
+    "dev": "cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log vite",
+    "build": "cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log vite build",
+    "build:staging": "cross-env CLOUDFLARE_ENV=staging WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log node --env-file-if-exists=.env.staging ./node_modules/vite/bin/vite.js build --mode cloudflare-staging",
+    "build:production": "cross-env CLOUDFLARE_ENV=production WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log node --env-file-if-exists=.env.production ./node_modules/vite/bin/vite.js build --mode cloudflare-production",
+    "preview": "cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "pretest:worker": "pnpm run build",
+    "test:worker": "cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log vitest run --config vitest.worker.config.ts",
+    "test:e2e": "playwright test",
+    "types:worker": "cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler types",
+    "types:check": "cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler types --check",
+    "check": "pnpm run config:verify && pnpm run types:check && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run test:worker && pnpm run test:e2e && pnpm run build",
+    "deploy:staging": "node --env-file=.env.staging scripts/verify-deployment-config.mjs validate-env staging .env.staging && pnpm run check && pnpm run build:staging && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env staging --secrets-file .env.staging",
+    "deploy:production": "node --env-file=.env.production scripts/verify-deployment-config.mjs validate-env production .env.production && pnpm run check && pnpm run build:production && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env production --secrets-file .env.production"
+  },
+  "dependencies": {
+    "hono": "^4.13.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.5.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.54.2",
+    "@cloudflare/vitest-plugin": "^1.1.2",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "cross-env": "^10.1.0",
+    "eslint": "^10.9.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.5",
+    "globals": "^17.11.0",
+    "jsdom": "^30.0.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.68.0",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.127.1"
+  }
+}
