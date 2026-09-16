@@ -38,6 +38,76 @@ const requiredSecretsFor = (config, environment) => {
   return Array.isArray(required) ? required : deploymentBindings;
 };
 
+// Die erforderlichen Secret-Namen existieren dreifach: hier als
+// `deploymentBindings`, in wrangler.jsonc unter `secrets.required` (je
+// Umgebung) und in src/worker/index.ts als `REQUIRED_SECRET_NAMES`. Läuft
+// eine Liste bei einer Ergänzung aus dem Gleichschritt, meldet /healthz
+// trotzdem 200, obwohl ein Secret fehlt — genau der Fehler, den der
+// Health-Check eigentlich anzeigen soll. Diese Prüfung hält alle drei
+// synchron, ohne sie zusammenzuführen (der Worker kann wrangler.jsonc zur
+// Laufzeit nicht lesen).
+const extractWorkerRequiredSecretNames = (workerSource) => {
+  const arrayMatch = workerSource.match(/REQUIRED_SECRET_NAMES\s*=\s*\[([\s\S]*?)\]/);
+  if (arrayMatch === null) return null;
+  const names = [...arrayMatch[1].matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
+  return names.length > 0 ? names : null;
+};
+
+const rawRequiredSecretsFor = (config, environment) => {
+  const required = environment === "local"
+    ? config.secrets?.required
+    : config.env?.[environment]?.secrets?.required;
+  return Array.isArray(required) ? required : null;
+};
+
+const checkSecretListDrift = async (config, failures) => {
+  let workerSource;
+  try {
+    workerSource = await readFile(path.join(projectRoot, "src/worker/index.ts"), "utf8");
+  } catch (error) {
+    failures.push(
+      `src/worker/index.ts konnte nicht gelesen werden: ` +
+      (error instanceof Error ? error.message : "unbekannter Fehler"),
+    );
+    return;
+  }
+
+  const workerNames = extractWorkerRequiredSecretNames(workerSource);
+  if (workerNames === null) {
+    failures.push(
+      "REQUIRED_SECRET_NAMES konnte nicht aus src/worker/index.ts extrahiert werden " +
+      "(Array-Block nicht gefunden). Drift-Prüfung der Secret-Namen kann nicht laufen.",
+    );
+    return;
+  }
+  const workerSet = new Set(workerNames);
+
+  const diffAgainstWorker = (label, otherNames) => {
+    const otherSet = new Set(otherNames);
+    const missing = workerNames.filter((name) => !otherSet.has(name));
+    const extra = otherNames.filter((name) => !workerSet.has(name));
+    if (missing.length > 0) {
+      failures.push(`${label}: fehlt gegenüber REQUIRED_SECRET_NAMES: ${missing.join(", ")}`);
+    }
+    if (extra.length > 0) {
+      failures.push(`${label}: zusätzlich gegenüber REQUIRED_SECRET_NAMES: ${extra.join(", ")}`);
+    }
+  };
+
+  diffAgainstWorker("scripts/verify-deployment-config.mjs (deploymentBindings)", deploymentBindings);
+
+  for (const environment of ["local", ...environmentNames]) {
+    const raw = rawRequiredSecretsFor(config, environment);
+    if (raw === null) {
+      failures.push(
+        `wrangler.jsonc secrets.required (${environment}) fehlt oder ist kein Array.`,
+      );
+      continue;
+    }
+    diffAgainstWorker(`wrangler.jsonc secrets.required (${environment})`, raw);
+  }
+};
+
 const checkEnvironmentShape = (config, environment, failures) => {
   const section = environment === "local" ? config : config.env?.[environment];
   if (section === undefined) {
@@ -131,6 +201,7 @@ const validateSourceConfig = async () => {
   const failures = [];
   const config = await readSourceConfig();
 
+  await checkSecretListDrift(config, failures);
   checkEnvironmentShape(config, "local", failures);
   for (const environment of environmentNames) checkEnvironmentShape(config, environment, failures);
 

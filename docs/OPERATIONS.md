@@ -23,6 +23,41 @@
 
 Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` dokumentiert. Die aktuelle Wrangler-Konfiguration akzeptiert dieses Feld und nutzt es auch für die Typgenerierung; Secret-Werte werden ausschließlich über Secret-Bindings beziehungsweise lokale Env-Dateien bereitgestellt.
 
+## Umgebungsvariablen und Bindings
+
+**Konfigurationsvariablen** (stehen als `vars` in `wrangler.jsonc`, sind keine Secrets, landen im Repo):
+
+| Name | Bedeutung |
+|---|---|
+| `APP_ENV` | `local`, `staging` oder `production`; unterscheidet Umgebungsverhalten und wird vom Deploy-Preflight geprüft |
+| `ALLOWED_CHANNEL_LOGINS` | Komma-Liste freigeschalteter Twitch-Logins. Funktional bleibt genau ein Login aktiv; das Datenmodell ist über `channelId` trotzdem mandantenfähig |
+| `TIMEZONE` | IANA-Zeitzone, zum Beispiel `Europe/Berlin` |
+
+**Secrets** (nur als Namen unter `secrets.required` in `wrangler.jsonc`; Werte kommen aus `.dev.vars` beziehungsweise `.env.staging`/`.env.production`):
+
+| Name | Bedeutung | Format |
+|---|---|---|
+| `TWITCH_CLIENT_ID` | Client-ID der Twitch-Anwendung | Zeichenkette aus der Developer Console |
+| `TWITCH_CLIENT_SECRET` | Client-Secret derselben Anwendung; trägt den OAuth-Austausch | Zeichenkette aus der Developer Console |
+| `TWITCH_EVENTSUB_SECRET` | gemeinsames Geheimnis für die HMAC-Signaturprüfung eingehender EventSub-Webhooks | frei gewählte Zufallszeichenkette, mindestens 10 Zeichen |
+| `PUBLIC_ORIGIN` | öffentliche Origin der Umgebung; bestimmt OAuth-Redirect und Overlay-URLs | absolute URL ohne Schrägstrich am Ende |
+| `SESSION_COOKIE_KEYS` | Schlüsselsatz für die Signatur der Session-Cookies | JSON `{"active":{"id":"...","key":"..."}}`, Schlüssel 32 Byte base64url |
+| `SESSION_ENCRYPTION_KEYS` | Schlüsselsatz für die Verschlüsselung der Session-Inhalte | wie oben, eigener Wert |
+| `OVERLAY_TOKEN_PEPPER` | Pepper für die Hashes widerrufbarer Overlay-Tokens | 32 Byte base64url |
+
+Die drei Schlüsselwerte (`SESSION_COOKIE_KEYS`, `SESSION_ENCRYPTION_KEYS`, `OVERLAY_TOKEN_PEPPER`) werden mit dem im Erstaufsetzen dokumentierten `openssl`-Befehl erzeugt und sind je Umgebung und je Zweck unterschiedlich — niemals denselben Wert doppelt verwenden.
+
+**Bindings** (keine Umgebungsvariablen, sondern Cloudflare-Ressourcen aus `wrangler.jsonc`):
+
+| Binding | Ressource |
+|---|---|
+| `DB` | D1-Datenbank der Umgebung |
+| `CHANNEL` | Durable-Object-Namespace `ChannelObject`, ein Objekt je Kanal |
+| `ASSETS` | statische Dashboard- und Overlay-Dateien aus `dist/client` |
+| `CF_VERSION_METADATA` | Versionsmetadaten des Deployments |
+
+`/healthz` prüft eine im Worker hinterlegte Liste (`REQUIRED_SECRET_NAMES`) und meldet einen Namen als fehlend, wenn der zugehörige Wert leer ist oder noch einen Platzhalter (`replace-with`, `example.invalid`) enthält — niemals den Wert selbst. `pnpm run config:verify` stellt sicher, dass diese Liste im Worker, `secrets.required` in `wrangler.jsonc` (alle Umgebungen) und das Verify-Script selbst übereinstimmen; weichen sie voneinander ab, schlägt die Prüfung fehl.
+
 ## Lokale Entwicklung
 
 ```bash
@@ -67,7 +102,6 @@ Eine Rotation erfolgt durch Aktualisieren der sicheren Betreiberdatei und erneut
 
 ## Sicherheits- und Betriebsgrenzen
 
-- `ALLOWED_CHANNEL_LOGINS` ist Konfiguration, kein Secret; funktional bleibt genau ein Login freigeschaltet.
 - `channelId` darf nicht durch eine globale Rolle oder eine globale Token-Tabelle ersetzt werden.
 - Die alte Twitch- oder Session-Autorisierung bei einem Incident bewusst über die vorgesehenen Secrets rotieren.
 - Vor einem öffentlichen Betrieb die aktuellen Cloudflare-Quoten und Wrangler-Dokumentation erneut prüfen.
