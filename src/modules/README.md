@@ -11,17 +11,18 @@ src/modules/<id>/
 ├── service.ts     # Anwendungsfälle; orchestriert Domain und Repository
 ├── repository.ts  # kleines Interface für dauerhafte Daten
 ├── adapters/      # konkrete D1-, Durable-Object- oder externe Adapter
-└── ui/            # React-Oberfläche und Overlay-nahe Darstellung
+├── overlay/       # schlanke Overlay-Ansicht mit strikten Bundle-Grenzen
+└── panel/         # Panel-Ansicht für Formulare und Bedienung
 ```
 
-`contracts/` beschreibt, was das Modul nach außen anbietet. `domain/` kennt keine Cloudflare-Bindings und kein React. `service.ts` verbindet die fachlichen Regeln mit dem Repository-Interface. `repository.ts` beschreibt nur die benötigte Persistenz. `adapters/` enthält die Infrastrukturimplementierungen. `ui/` rendert und sammelt Eingaben, aber enthält keine Persistenz- oder Service-Aufrufe.
+`contracts/` beschreibt, was das Modul nach außen anbietet. `domain/` kennt keine Cloudflare-Bindings und kein React. `service.ts` verbindet die fachlichen Regeln mit dem Repository-Interface. `repository.ts` beschreibt nur die benötigte Persistenz. `adapters/` enthält die Infrastrukturimplementierungen. `overlay/` und `panel/` rendern und sammeln Eingaben, greifen aber nur über die jeweils beschriebenen Grenzen auf den Rest des Moduls zu.
 
-Overlay-Code bleibt möglichst klein. Unter `ui/` darf kein Worker-, Service-, Repository- oder Adaptercode und kein Zod importiert werden. Das wird durch ESLint geprüft.
+`overlay/` enthält ausschließlich die möglichst kleine Overlay-Ansicht. Dort darf kein Worker-, Service-, Repository- oder Adaptercode und kein Zod importiert werden. `panel/` enthält Formulare und Bedienung; dort sind Zod für Formularvalidierung und Zugriffe auf `service.ts` für das Auslösen von Anwendungsfällen erlaubt. Worker-, Repository- und Adaptercode bleibt auch dort verboten. Das wird durch ESLint geprüft.
 
 ## Registrierung
 
 1. Das Modulverzeichnis mit der Pflichtstruktur anlegen.
-2. Einen `BotModule`-Wert mit `id`, Settings-Schema und Defaults definieren; optionale EventSub-Typen, Routen und ein lazy Overlay nur bei Bedarf ergänzen.
+2. Einen `BotModule`-Wert mit `id`, Settings-Schema und Defaults definieren; optionale EventSub-Typen, Routen sowie ein lazy Overlay und/oder Panel nur bei Bedarf ergänzen.
 3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
 4. Prüfen: `pnpm run check`.
 
@@ -38,7 +39,7 @@ VALUES ('<channelId>', '<id>', 1, '{}');
 
 Das erfordert keinen Deploy. `settings` ist JSON und bleibt dem Modul-Contract untergeordnet.
 
-Das optionale Overlay-Feld des Contracts muss eine Funktion sein, die ein `import()`-Promise zurückgibt. So kann Vite einen eigenen Chunk schneiden; ein deaktiviertes Modul kostet im Overlay-Bundle null Bytes. Ein direkter Import würde diese Bundle-Grenze aufheben.
+Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben.
 
 ## Grenzen
 

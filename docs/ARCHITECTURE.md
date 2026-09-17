@@ -24,13 +24,19 @@ Der spätere Ereignisfluss ist: EventSub → Worker → fachliches Modul → Cha
 
 ## Modulsystem
 
-Ein Modul ist ein Feature-Slice unter `src/modules/<id>/` mit `contracts/`, `domain/`, `service.ts`, `repository.ts`, `adapters/` und `ui/`. Sein `BotModule`-Contract beschreibt Settings, Migrationen, EventSub-Typen, Commands, Routen und ein lazy Overlay.
+Ein Modul ist ein Feature-Slice unter `src/modules/<id>/` mit `contracts/`, `domain/`, `service.ts`, `repository.ts`, `adapters/`, `overlay/` und `panel/`. Sein `BotModule`-Contract beschreibt Settings, Migrationen, EventSub-Typen, Commands, Routen sowie ein lazy Overlay und eine optionale lazy Panel-Ansicht.
 
 `src/modules/registry.ts` ist die einzige Stelle, die alle Module kennt. Später mountet der Worker die registrierten Router unter `/api/modules/<id>`. Ein Modul wird aktiviert, indem in `channel_modules` eine Zeile für den jeweiligen `channel_id` und `module_id` mit `enabled = 1` steht. Dafür ist kein Deploy erforderlich.
 
-Das Overlay lädt seine Quelle über einen `import()`-Promise. Dadurch kann Vite Overlay-Code in einen eigenen Chunk schneiden; ein deaktiviertes Modul kostet im Overlay-Bundle null Bytes. Der direkte Import wäre deshalb eine bewusst zu vermeidende Bundle-Kopplung.
+Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 
-ESLint schützt die Grenze: Overlay- und Modul-UIs importieren weder Worker-, Service-, Repository- oder Adaptercode noch Zod. Module importieren keine Geschwistermodule. Der Worker importiert kein React.
+ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service-, Repository- oder Adaptercode noch Zod. Panel-Ansichten importieren weder Worker-, Repository- noch Adaptercode; Zod und der Service sind dort für Formulare und ausgelöste Anwendungsfälle erlaubt. Module importieren keine Geschwistermodule. Der Worker importiert kein React.
+
+### Panel
+
+Das Admin- und Mod-Panel ist die primäre Bedienoberfläche. Sein Grundgerüst gehört dem Host; die konkrete Ansicht kommt pro Modul optional über den `BotModule`-Contract hinzu. Overlay- und Panel-Ansichten werden lazy geladen, damit ein deaktiviertes Modul in keinem der beiden Bundles Gewicht trägt.
+
+Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach.
 
 ## Verbindliche Architekturentscheidungen
 

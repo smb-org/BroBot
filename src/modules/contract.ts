@@ -18,4 +18,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
    * direkten Import umwandeln.
    */
   overlay?: () => Promise<{ default: ComponentType }>;
+  /**
+   * Auch diese Ansicht bleibt bewusst lazy: Ein deaktiviertes Modul soll
+   * ebenso im Panel-Bundle null Bytes kosten. Nicht in einen direkten Import
+   * umwandeln.
+   */
+  panel?: () => Promise<{ default: ComponentType }>;
 };

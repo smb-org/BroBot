@@ -42,9 +42,9 @@ export default defineConfig(
     },
   },
   {
-    // Das Overlay und die Modul-UIs dürfen keine schwere Worker- oder
-    // Persistenzschicht und kein Zod in ihr eigenes Bundle ziehen.
-    files: ["src/overlay/**/*.{ts,tsx}", "src/modules/*/ui/**/*.{ts,tsx}"],
+    // Das Overlay bleibt eine minimale Darstellung: Es darf keine Worker-,
+    // Persistenz- oder Serviceschicht und kein Zod in sein Bundle ziehen.
+    files: ["src/overlay/**/*.{ts,tsx}", "src/modules/*/overlay/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -52,15 +52,38 @@ export default defineConfig(
           patterns: [
             {
               regex: "(^|/)worker(/|$)",
-              message: "Overlay- und Modul-UIs dürfen nichts aus src/worker importieren.",
+              message: "Overlay-Ansichten dürfen nichts aus src/worker importieren.",
             },
             {
               regex: "(^|/)(service|repository|adapters)(/|$)",
-              message: "Overlay- und Modul-UIs dürfen keine Service-, Repository- oder Adapterdateien importieren.",
+              message: "Overlay-Ansichten dürfen keine Service-, Repository- oder Adapterdateien importieren.",
             },
             {
               regex: "^zod$",
-              message: "Overlay- und Modul-UIs dürfen Zod nicht importieren.",
+              message: "Overlay-Ansichten dürfen Zod nicht importieren.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Das Panel ist die primäre Bedienoberfläche: Es darf für Formulare Zod
+    // und für auszulösende Anwendungsfälle den Service verwenden. Repository-
+    // und Adapterzugriff bleiben trotzdem hinter dem Service verborgen.
+    files: ["src/dashboard/**/*.{ts,tsx}", "src/modules/*/panel/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              regex: "(^|/)worker(/|$)",
+              message: "Panel-Ansichten dürfen nichts aus src/worker importieren.",
+            },
+            {
+              regex: "(^|/)(repository|adapters)(/|$)",
+              message: "Panel-Ansichten dürfen keine Repository- oder Adapterdateien importieren.",
             },
           ],
         },
@@ -78,7 +101,7 @@ export default defineConfig(
         {
           patterns: [
             {
-              regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:contract|contracts|domain|service|repository|adapters|ui)(?:/|$))[^/]+(?:/|$))",
+              regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:contract|contracts|domain|service|repository|adapters|overlay|panel)(?:/|$))[^/]+(?:/|$))",
               message: "Module dürfen kein anderes Modul importieren.",
             },
             {
