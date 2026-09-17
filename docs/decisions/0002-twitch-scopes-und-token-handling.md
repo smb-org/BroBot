@@ -52,7 +52,10 @@ moderator:read:chatters          Get Chatters — aktive Chatter für #14
 moderator:read:followers         Follow-Ereignisse für die Timeline  (#14)
 moderator:read:shoutouts         erkennt Shoutouts des vorhandenen Bots  (#5)
 moderator:manage:chat_messages   Déjà-vu-Antwort anpinnen  (#12)
+user:read:moderated_channels     eigener Moderatorstatus je Kanal, siehe Abschnitt 9
 ```
+
+`user:read:moderated_channels` steht bewusst **zweimal** in diesem Dokument: am Login-Token, um dem angemeldeten Nutzer seine Kanäle vorzuschlagen, und am Bot-Token, damit der Bot seinen eigenen Moderatorstatus ohne Broadcaster-Token prüfen kann. Es sind zwei verschiedene Token derselben Anwendung.
 
 **Bewusst nicht:** die gesamte Moderationsfläche — AutoMod, Banns, Blocked Terms, Warnings, Unban-Requests, Shield Mode, Suspicious Users. Moderation bleibt laut #5 beim vorhandenen Bot. Ebenso Whispers, Emotes, Follows, Blocked Users, Chat-Farbe, Analytics und Guest Star.
 
@@ -132,6 +135,13 @@ Wer nie schreibt, fehlt in dieser Liste — das ist hinnehmbar, weil #16 ohnehin
 ---
 
 ## 7. Token-Erneuerung
+
+**Kein PKCE.** Twitch unterstützt es nicht: Weder `code_challenge` noch `code_challenge_method` noch `code_verifier` kommen in der Authentifizierungs-Doku oder im Changelog vor, und im Entwicklerforum ist es mehrfach bestätigt — zuletzt bestätigt durch einen Nutzerbeitrag im Januar 2026. Feature-Requests dafür laufen seit 2019 ins Leere. Der Authorization-Code-Flow verlangt bei Twitch zwingend das Client-Secret; als CSRF-Schutz nennt die Doku ausschließlich den `state`-Parameter.
+
+Wir schicken deshalb keine PKCE-Parameter mit — sie wären wirkungslos, und ihr Verhalten ist nicht dokumentiert. Geschützt wird der Flow durch den signierten, kurzlebigen `state` und eine serverseitige Einmal-Transaktion, die beim Callback atomar verbraucht wird.
+
+### Erneuerung
+
 
 - Der Worker ist ein **Confidential Client** — das Client-Secret liegt in einem Worker-Secret und erreicht keinen Browser. Dadurch laufen Refresh-Tokens nicht nach 30 Tagen ab, anders als bei einem Public Client.
 - **Refresh-Tokens rotieren:** Jeder Refresh gibt einen neuen aus. Der alte wird im selben Schreibvorgang ersetzt, sonst entsteht bei einem Fehlschlag eine Verbindung ohne gültigen Refresh-Token.
