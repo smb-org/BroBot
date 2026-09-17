@@ -1,7 +1,7 @@
 # Twitch-Scopes und Token-Handling
 
 **Stand:** 17. September 2026
-**Status:** Vorlage — zur Entscheidung, siehe [#2](https://github.com/smb-org/BroBot/issues/2)
+**Status:** entschieden, siehe [#2](https://github.com/smb-org/BroBot/issues/2)
 **Betrifft:** `twitch_connections`, den OAuth-Flow aus #18, jedes Modul, das Helix aufruft
 
 ---
@@ -10,7 +10,7 @@
 
 1. **Es gibt drei Token, nicht zwei** — Login, Bot und Broadcaster. Sie unterscheiden sich vor allem darin, wie teuer ein nachträglicher Scope ist.
 2. **Der Bot postet als eigener Bot-Account**, nicht als Broadcaster. Zuschauer müssen Bot-Nachrichten vom Streamer unterscheiden können, und ein Broadcaster-Token, das auch Chat schreibt, bündelt zwei Zwecke in einem Geheimnis.
-3. **Ein Kanal ist betriebsbereit, sobald der Bot dort gemoddet ist.** Die Broadcaster-Verbindung ist kein Fundament, sondern ein optionaler Schalter je Kanal. Sie wird erst gebaut, wenn ein Modul sie belegt braucht.
+3. **Ein Kanal ist betriebsbereit, sobald der Bot dort gemoddet ist.** Die Broadcaster-Verbindung ist kein Fundament, sondern ein optionaler Schalter je Kanal. Sie wird erst gebaut, wenn ein Modul sie belegt braucht — das sind #8, #21 und #22.
 4. **EventSub läuft über Webhook mit App-Token.** Das passt zum Worker, der kein dauerhaft laufender Prozess ist. WebSocket-Transport scheidet aus, weil er einen offenen Prozess und ein User-Token verlangt.
 
 ---
@@ -54,13 +54,6 @@ moderator:read:shoutouts         erkennt Shoutouts des vorhandenen Bots  (#5)
 moderator:manage:chat_messages   Déjà-vu-Antwort anpinnen  (#12)
 ```
 
-Dazu unter Vorbehalt, siehe Abschnitt 4:
-
-```
-channel:manage:polls             Polls anlegen und beenden  (#8)
-channel:manage:predictions       Predictions anlegen und beenden  (#8)
-```
-
 **Bewusst nicht:** die gesamte Moderationsfläche — AutoMod, Banns, Blocked Terms, Warnings, Unban-Requests, Shield Mode, Suspicious Users. Moderation bleibt laut #5 beim vorhandenen Bot. Ebenso Whispers, Emotes, Follows, Blocked Users, Chat-Farbe, Analytics und Guest Star.
 
 ### Broadcaster — optional je Kanal, erst wenn gebraucht
@@ -69,6 +62,7 @@ Es gibt **keine feste Liste**. Scopes werden **je Modul** angefragt, wenn der Br
 
 | Modul | Scopes |
 |---|---|
+| #8 Poll- und Prediction-Verwaltung | `channel:manage:polls`, `channel:manage:predictions` |
 | #22 Werbepausen-Ankündigung | `channel:read:ads`, optional `channel:manage:ads` |
 | #21 Channel Points als Auslöser | `channel:read:redemptions`, `channel:manage:redemptions` |
 
@@ -88,27 +82,28 @@ Mehr ist derzeit nicht vorgesehen. Jedes optionale Modul bringt seine Scopes sel
 
 ---
 
-## 4. Annahme zu #8 — ausdrücklich ungeprüft
+## 4. Polls und Predictions: Broadcaster-Token, empirisch belegt
 
-**Angenommen wird:** Der Bot-Account kann mit `channel:manage:polls` und `channel:manage:predictions` als Moderator des Kanals Polls und Predictions des Broadcasters anlegen und beenden.
+**Geprüft am 17. September 2026 gegen die echte API.** Ein Zweitaccount mit Moderatorrolle im Zielkanal wurde mit `channel:manage:polls` autorisiert; das Token trug den Scope nachweislich. Der Aufruf `POST /helix/polls` gegen die fremde `broadcaster_id` antwortete:
 
-Grundlage ist der Guide-Text unter `dev.twitch.tv/docs/api/polls/`: „The broadcaster's moderators or editors can create or manage the broadcaster's polls." Derselbe Satz steht sinngleich im Predictions-Guide.
+```
+401 Unauthorized
+The ID in broadcaster_id must match the user ID found in the request's OAuth token.
+```
 
-**Dagegen spricht:** Die Endpoint-Referenz sagt bei allen vier Endpunkten „This ID must match the user ID in the user access token", es gibt keinen `moderator_id`-Parameter, und der einzige auffindbare Erfahrungsbericht im Entwicklerforum endet mit genau diesem Fehler.
+**Damit ist die Frage abschließend beantwortet:** Polls und Predictions verlangen das User-Token des Broadcasters. Eine Moderatorrolle genügt nicht, und daran ändert auch kein Scope etwas.
 
-**Deshalb gilt:** Die Annahme wird durch einen echten API-Aufruf geprüft, bevor #8 gebaut wird — ein `POST /helix/polls` mit dem Token eines gemoddeten Zweitaccounts gegen eine fremde `broadcaster_id`. Die dafür nötige Twitch-App steht ohnehin vor #18 an.
+Der anderslautende Satz in den Guides — „The broadcaster's moderators or editors can create or manage the broadcaster's polls", sinngleich bei Predictions — beschreibt die Twitch-**Oberfläche**: Moderatoren bedienen Umfragen dort über das Menü, das `/poll` im Webchat öffnet. Er beschreibt keinen API-Pfad. Wer ihn so liest, baut auf Sand; das ist hier einmal ausprobiert und muss nicht erneut geprüft werden.
 
-**Fällt die Prüfung negativ aus**, wandern die beiden Scopes aus der Bot- in die Broadcaster-Liste und #8 setzt eine verbundene Broadcaster-Autorisierung voraus. Weil die Broadcaster-Verbindung ohnehin als optionaler Schalter vorgesehen ist, kostet das einen Scope-Nachtrag, keinen Umbau. Auf die übrigen Module hat der Ausgang keinen Einfluss.
-
----
+**Folge:** `channel:manage:polls` und `channel:manage:predictions` liegen in der Broadcaster-Liste. #8 ist damit das einzige Pflichtmodul der Roadmap, das eine verbundene Broadcaster-Autorisierung voraussetzt — und reiht sich neben #21 und #22 als Modul ein, das die optionale Verbindung braucht.
 
 ## 5. Was der Broadcaster freischaltet
 
 Ein Kanal läuft, sobald der Bot gemoddet ist. Verbindet der Broadcaster zusätzlich, kommt hinzu:
 
-Die Verbindung ist kein Schalter für Auswertungsqualität, sondern für **optionale Module**: #22 Werbepausen-Ankündigung und #21 Channel Points als Auslöser. Beides sind Funktionen, die ein Streamer sofort versteht — deutlich greifbarer als „genauere Auswertung".
+Die Verbindung ist kein Schalter für Auswertungsqualität, sondern für **Module**: #8 Poll- und Prediction-Verwaltung, #22 Werbepausen-Ankündigung und #21 Channel Points als Auslöser. Beides sind Funktionen, die ein Streamer sofort versteht — deutlich greifbarer als „genauere Auswertung".
 
-Keines der geplanten Pflichtmodule hängt daran. Die Verbindung entsteht, wenn jemand eines der optionalen Module einschaltet — oder mit #8, falls die Prüfung aus Abschnitt 4 negativ ausfällt. In Phase 1 sowie für #9, #10, #11, #12 und #13 entsteht sie nicht.
+Außer #8 hängt kein Pflichtmodul daran. Die Verbindung entsteht, wenn jemand eines dieser Module einschaltet. In Phase 1 sowie für #9, #10, #11, #12 und #13 entsteht sie nicht.
 
 **Bewusst nicht als Modul vorgesehen**, obwohl technisch möglich: Stream-Key lesen, VODs löschen, Sendeplan pflegen, Moderatoren verwalten, Werbung auslösen, Raids starten. Der Stream-Marker beim Clip-Auslöser (`channel:manage:broadcast`) ist ein Kandidat für #11, aber kein eigenes Modul; Goals und Hype Train im Overlay warten, bis die Strecke aus #7 steht.
 
@@ -187,7 +182,7 @@ Ein Abonnement kostet nichts, wenn der betroffene Nutzer die Anwendung autorisie
 
 ## 9. Moderatorstatus des Bots
 
-Die Moderatorrolle des Bots ist **Betriebsvoraussetzung**, nicht Komfort: Ohne sie scheitern Shoutout, Announcement, Chatter-Liste und — je nach Ausgang von Abschnitt 4 — auch #8, ohne das Problem anzuzeigen. Der Bot prüft seinen eigenen Status **ohne Broadcaster-Token**: Get Moderated Channels mit seinem eigenen Token, gefiltert auf den Zielkanal. Das läuft im stündlichen Cron-Lauf mit und wird im Panel sichtbar.
+Die Moderatorrolle des Bots ist **Betriebsvoraussetzung**, nicht Komfort: Ohne sie scheitern Shoutout, Announcement und Chatter-Liste, ohne das Problem anzuzeigen. Der Bot prüft seinen eigenen Status **ohne Broadcaster-Token**: Get Moderated Channels mit seinem eigenen Token, gefiltert auf den Zielkanal. Das läuft im stündlichen Cron-Lauf mit und wird im Panel sichtbar.
 
 ---
 
@@ -199,4 +194,4 @@ Die Moderatorrolle des Bots ist **Betriebsvoraussetzung**, nicht Komfort: Ohne s
 - #18 legt Login und Bot-Verbindung an. Die Broadcaster-Verbindung entsteht erst mit dem Modul, das sie belegt braucht.
 - #16 verliert die Moderator-Vorschlagsliste; erkannt wird über Chat-Abzeichen.
 - Die Broadcaster-Verbindung trägt #21 und #22. Beide Module deaktivieren sich sichtbar, wenn sie fehlt.
-- Vor #8 steht der API-Test aus Abschnitt 4.
+- #8 setzt eine verbundene Broadcaster-Autorisierung voraus; siehe Abschnitt 4.
