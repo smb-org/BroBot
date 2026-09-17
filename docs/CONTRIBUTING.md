@@ -1,5 +1,31 @@
 # Mitarbeit
 
+## Issues
+
+**Kategorisierung.** Jedes Issue trägt genau ein Modul-Label und, wo zutreffend, ein Art-Label:
+
+- Modul-Labels: `modul:host` (Worker, Auth, Overlay-Grundlage, alles ohne eigenes Modul), `modul:polls`, `modul:voting`, `modul:clips`, `modul:themen`, `modul:raid`, `modul:quiz`, `modul:statistik`
+- Art-Labels: `typ:epic` für ein Modul-Sammelissue mit Akzeptanzkriterien, `typ:spike` für eine zeitlich begrenzte Untersuchung, deren Ergebnis eine Entscheidung ist, kein Feature
+- Die GitHub-Standardlabels bleiben in Gebrauch: `enhancement` für neue Funktionalität, `bug`, `documentation`, `question`
+- **Milestones sind die Phasen** der Roadmap, nicht die Labels. Ein Issue ohne Milestone ist noch nicht eingeplant.
+
+**Beanspruchen (Claiming).**
+
+- Ein Issue wird beansprucht, indem man sich selbst zuweist. Nicht durch einen Kommentar allein.
+- An einem Issue, das jemand anderem zugewiesen ist, wird nicht gearbeitet. Wenn es festhängt, erst im Issue nachfragen.
+- Wer ein Issue länger nicht bearbeitet, gibt die Zuweisung zurück, statt es zu blockieren.
+- Ein Epic wird nicht als Ganzes beansprucht; beansprucht werden die daraus geschnittenen Teilaufgaben.
+
+**Schneiden.** Ein Epic beschreibt das Modul mit Akzeptanzkriterien. Teilaufgaben entstehen daraus erst, wenn das Modul näher rückt und man mehr weiß — nicht auf Vorrat.
+
+**Verknüpfung mit Code.**
+
+- Branch-Name enthält die Issue-Nummer, zum Beispiel `42-poll-queue`.
+- Der Pull Request referenziert das Issue mit `Closes #42`, damit es beim Merge automatisch schließt. Issues werden nicht von Hand geschlossen, wenn Code sie erledigt.
+- Ein Spike schließt mit einem Kommentar, der die getroffene Entscheidung festhält — das Ergebnis eines Spikes ist eine Entscheidung, kein Merge.
+
+**Öffentliches Repo.** Das Repo ist öffentlich. Issues, Kommentare und Titel sind für jeden lesbar. Interne Einschätzungen, Zuschauerzahlen, Bewertungen fremder Dienste und persönliche Anekdoten gehören nicht hinein, sondern bleiben in den nicht versionierten Notizen unter [docs/input/](./input/). Issues beschreiben Anforderung, Akzeptanzkriterien und Technik.
+
 ## Branches und Pull Requests
 
 1. Ausgangspunkt ist der aktuelle `main`-Branch.

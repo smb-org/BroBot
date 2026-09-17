@@ -30,4 +30,11 @@ Voneinander unabhängige Delegationen in einer Nachricht gemeinsam starten, stat
 - Die Projektregeln aus [CLAUDE.md](../CLAUDE.md) und [CONTRIBUTING.md](./CONTRIBUTING.md) gelten für Agenten unverändert — besonders die Modulgrenzen und das Verbot von Attribution-Trailern.
 - Ein Agent, der etwas nicht Beauftragtes hinzufügt (zum Beispiel selbst geschriebene Typdeklarationen anstelle generierter), wird korrigiert statt übernommen.
 
+## GitHub-Issues durch Agenten
+
+- Agenten dürfen Issues anlegen und kommentieren, aber **nicht sich selbst oder anderen zuweisen** und **nicht schließen**. Beanspruchen und Schließen bleibt bei Menschen beziehungsweise passiert über `Closes #N` beim Merge.
+- Ein Agent, der eine Aufgabe bearbeitet, prüft vorher, ob das Issue jemandem zugewiesen ist, und arbeitet nicht an fremd zugewiesenen Issues.
+- Vor dem Anlegen eines Issues wird geprüft, ob es das Thema schon gibt — Duplikate kosten mehr als die Suche.
+- Die Regel zum öffentlichen Repo aus [CONTRIBUTING.md](./CONTRIBUTING.md) gilt für Agenten unverändert: keine internen Einschätzungen in Issue-Texte übernehmen, auch nicht aus `docs/input/`.
+
 Das Skill-Routing (welcher Assistenz-Skill für welche Aufgabe) steht in [CLAUDE.md](../CLAUDE.md).

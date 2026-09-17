@@ -36,3 +36,5 @@ Key routing rules:
 - Keine Attribution-Trailer und keine `claude.ai/code`- oder `session_`-URLs in Commits, PRs oder Dateien.
 - Commit-Format samt Icon-Legende: `docs/CONTRIBUTING.md`.
 - Implementierung wird nach `docs/AI-WORKFLOW.md` delegiert.
+- Issue-Handling (Labels, Claiming, Verknüpfung mit Code): `docs/CONTRIBUTING.md`.
+- Das Repo ist öffentlich; `docs/input/` bleibt bewusst unversioniert für interne Notizen.
