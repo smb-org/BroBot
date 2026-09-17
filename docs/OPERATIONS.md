@@ -20,6 +20,7 @@
 
    Für `SESSION_COOKIE_KEYS`, `SESSION_ENCRYPTION_KEYS` und `OVERLAY_TOKEN_PEPPER` getrennte Werte verwenden. Zusätzlich `TWITCH_EVENTSUB_SECRET` und die übrigen Werte als echte Betreiber-Secrets festlegen.
 4. Für lokal `.dev.vars.example` nach `.dev.vars` kopieren und die Platzhalter ersetzen. Für Staging und Production `.env.staging` beziehungsweise `.env.production` aus dem sicheren Betreiber-Backup bereitstellen.
+5. Einen neuen Kanal gibt der Betreiber frei, indem er ihn in `channels` anlegt. Anschließend verbindet der Broadcaster den Kanal per OAuth.
 
 Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` dokumentiert. Die aktuelle Wrangler-Konfiguration akzeptiert dieses Feld und nutzt es auch für die Typgenerierung; Secret-Werte werden ausschließlich über Secret-Bindings beziehungsweise lokale Env-Dateien bereitgestellt.
 
@@ -30,7 +31,6 @@ Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` doku
 | Name | Bedeutung |
 |---|---|
 | `APP_ENV` | `local`, `staging` oder `production`; unterscheidet Umgebungsverhalten und wird vom Deploy-Preflight geprüft |
-| `ALLOWED_CHANNEL_LOGINS` | Komma-Liste freigeschalteter Twitch-Logins. Funktional bleibt genau ein Login aktiv; das Datenmodell ist über `channelId` trotzdem mandantenfähig |
 | `TIMEZONE` | IANA-Zeitzone, zum Beispiel `Europe/Berlin` |
 
 **Secrets** (nur als Namen unter `secrets.required` in `wrangler.jsonc`; Werte kommen aus `.dev.vars` beziehungsweise `.env.staging`/`.env.production`):
@@ -102,6 +102,7 @@ Eine Rotation erfolgt durch Aktualisieren der sicheren Betreiberdatei und erneut
 
 ## Sicherheits- und Betriebsgrenzen
 
+- Ein Kanal wird durch eine Zeile in `channels` freigegeben; dafür gibt es bewusst keine Konfigurationsvariable.
 - `channelId` darf nicht durch eine globale Rolle oder eine globale Token-Tabelle ersetzt werden.
 - Die alte Twitch- oder Session-Autorisierung bei einem Incident bewusst über die vorgesehenen Secrets rotieren.
 - Vor einem öffentlichen Betrieb die aktuellen Cloudflare-Quoten und Wrangler-Dokumentation erneut prüfen.

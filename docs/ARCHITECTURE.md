@@ -40,8 +40,8 @@ Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas
 
 ## Verbindliche Architekturentscheidungen
 
-1. **Kein `BROADCASTER_ID`-Secret.** Der Kanal kommt aus Route und Session. `ALLOWED_CHANNEL_LOGINS` ist eine nicht geheime Komma-Liste und steuert, welcher Kanal freigeschaltet ist. So wird ein Kanal nicht durch einen geheimen Konfigurationswert mit der Identität des Benutzers verwechselt.
-2. **`channelId` ist der Mandantenschlüssel.** Jede Tabelle trägt `channel_id`; derselbe Schlüssel bildet später den Durable-Object-Namen. Funktional bleibt genau ein Kanal freigeschaltet. Es gibt kein Onboarding, keine Quoten und keine Abrechnung.
+1. **Kein `BROADCASTER_ID`-Secret.** Der Kanal kommt aus Route und Session; die Freigabe erfolgt über eine Zeile in `channels`, nicht über einen Konfigurationswert. So wird ein Kanal nicht durch einen geheimen Konfigurationswert mit der Identität des Benutzers verwechselt.
+2. **`channelId` ist der Mandantenschlüssel.** Jede Tabelle trägt `channel_id`; derselbe Schlüssel bildet den Durable-Object-Namen. Der Bot unterstützt den Mehrkanalbetrieb mit kanalweiser Drosselung; offene Selbstanmeldung und Abrechnung sind nicht vorgesehen.
 3. **`twitch_connections` ist eine eigene Tabelle.** Eine Verbindung gehört zu Kanal und Zweck (`broadcaster` oder `bot`) und speichert Scopes sowie Ablauf. Verschlüsselte Tokens hängen an der Verbindung, nicht am Kanal, damit beide Twitch-Zwecke getrennt rotierbar bleiben.
 4. **`channel_members` existiert ab Tag 1.** Autorisierung fragt immer, ob ein User in genau diesem Kanal zugelassen ist. Eine globale Rolle außerhalb des Kanalmandanten gibt es nicht.
 
@@ -49,6 +49,12 @@ Diese Entscheidungen halten den ersten Betrieb klein und bewahren trotzdem die n
 
 ## Mandantenmodell
 
-`channelId` wird aus Route und Session in die jeweilige Kanaloperation übernommen und in jeder persistierenden Tabelle als `channel_id` geführt. Die Initialmigration enthält nur die Tabellen, die das Grundgerüst trägt: `channels`, `channel_members`, `twitch_connections` und `channel_modules`.
+`channelId` ist überall der Mandantenschlüssel: Jede persistierende Tabelle führt `channel_id`, und für jeden Kanal gibt es ein eigenes Durable Object. Der Bot läuft gleichzeitig in mehreren Kanälen.
 
-Die Datenstruktur ist damit mandantenfähig geschnitten, aber das Produkt ist absichtlich auf genau einen freigeschalteten Login begrenzt. Weitere Kanäle werden nicht automatisch angelegt und erhalten keine implizite Berechtigung.
+Die Autorisierung ist ausdrücklich: Nur eine Zeile mit Rolle in `channel_members` berechtigt zur Bedienung. Eine Twitch-Moderatorrolle berechtigt nicht; sie dient beim Einrichten lediglich dazu, eine Vorschlagsliste vorzubelegen, standardmäßig ohne Zugriff. Auch Twitch-Nutzer ohne Rolle im Kanal sind berechtigbar, dann mit ausdrücklicher Sicherheitsabfrage.
+
+Ein Kanal erscheint in der Auswahl eines Nutzers nur, wenn alle drei Bedingungen erfüllt sind: Es gibt eine Zugriffszeile in `channel_members`, der Kanal ist per OAuth verbunden und der Kanal ist in `channels` freigegeben.
+
+Eine offene Selbstanmeldung ist bewusst nicht vorgesehen. Sie ließe sich ohne Datenmodelländerung ergänzen, bräuchte dann aber Quoten, Missbrauchsschutz sowie Datenexport und -löschung je Mandant.
+
+EventSub-Kontingent und Helix-Rate-Limit gelten pro Client-ID, nicht pro Kanal. Deshalb braucht es eine Drosselung je Kanal, damit ein aktiver Kanal den anderen nicht die Aufrufe wegnimmt.

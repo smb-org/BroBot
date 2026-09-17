@@ -28,7 +28,6 @@
   ],
   "vars": {
     "APP_ENV": "local",
-    "ALLOWED_CHANNEL_LOGINS": "beispielkanal",
     "TIMEZONE": "Europe/Berlin"
   },
   "secrets": {
@@ -74,7 +73,6 @@
       ],
       "vars": {
         "APP_ENV": "staging",
-        "ALLOWED_CHANNEL_LOGINS": "beispielkanal",
         "TIMEZONE": "Europe/Berlin"
       },
       "secrets": {
@@ -120,7 +118,6 @@
       ],
       "vars": {
         "APP_ENV": "production",
-        "ALLOWED_CHANNEL_LOGINS": "beispielkanal",
         "TIMEZONE": "Europe/Berlin"
       },
       "secrets": {

@@ -30,6 +30,7 @@ Key routing rules:
 - Single-Package, kein Monorepo.
 - Module werden ausschließlich über Contract und Registry bekannt gemacht.
 - `channelId` ist überall Mandantenschlüssel; es gibt kein `BROADCASTER_ID`-Secret.
+- Der Bot ist mehrkanalfähig; ein Kanal wird ausschließlich über eine Zeile in `channels` freigegeben, nicht über Konfiguration. Zugriff berechtigt nur über `channel_members`, nicht über die Twitch-Rolle.
 - Overlay-Imports sind durch ESLint begrenzt und bleiben lazy.
 - Vor jedem Push: `pnpm run check`.
 - Keine Secrets im Repository.
