@@ -82,26 +82,32 @@ Mehr ist derzeit nicht vorgesehen. Jedes optionale Modul bringt seine Scopes sel
 
 ---
 
-## 4. Polls und Predictions: Broadcaster-Token, sehr wahrscheinlich
+## 4. Polls und Predictions: Broadcaster-Token, empirisch belegt
 
-**Stand: starkes Indiz, kein abschließender Beweis.**
+**Zwei Versuche am 17. September 2026 gegen die echte API.**
 
-Geprüft am 17. September 2026: Ein Zweitaccount mit belegter Moderatorrolle im Zielkanal wurde mit `channel:manage:polls` autorisiert. `POST /helix/polls` gegen die fremde `broadcaster_id` antwortete:
+**Erster Versuch, nicht aussagekräftig.** Ein gemoddeter Zweitaccount rief mit `channel:manage:polls` ein `POST /helix/polls` gegen einen fremden Kanal auf und erhielt 401 mit „The ID in `broadcaster_id` must match the user ID found in the request's OAuth token." Der Zielkanal hatte allerdings `broadcaster_type: ""` — weder Affiliate noch Partner. Dort sind Umfragen grundsätzlich unmöglich, auch für den Broadcaster selbst. Der Versuch konnte die eigentliche Frage deshalb nicht erreichen.
+
+**Zweiter Versuch, aussagekräftig.** Aufbau so gewählt, dass alle drei Einwände ausgeschlossen sind:
+
+- Zielkanal ist **Partner** (`broadcaster_type: "partner"`), Umfragen dort also möglich
+- Die Moderatorrolle des aufrufenden Accounts ist über Get Moderated Channels **belegt**, nicht behauptet
+- Der Aufruf war rein **lesend** — `GET /helix/polls` mit ausschließlich `channel:read:polls`, damit der Fehler nicht am Schreiben liegen kann
+
+Antwort:
 
 ```
 401 Unauthorized
 The ID in broadcaster_id must match the user ID found in the request's OAuth token.
 ```
 
-**Warum das nicht abschließend ist:** Der getestete Kanal hat `broadcaster_type: ""` — weder Affiliate noch Partner. Auf einem solchen Kanal sind Umfragen grundsätzlich nicht möglich, auch nicht für den Broadcaster selbst. Der Versuch konnte die Mod-Frage deshalb gar nicht erreichen.
+**Damit ist die Frage abschließend beantwortet.** Der ID-Abgleich greift unabhängig von Broadcaster-Typ, Moderatorrolle und Zugriffsart. Polls und Predictions verlangen das User-Token des Broadcasters; kein Scope und keine Rolle ändern daran etwas.
 
-**Warum es trotzdem als Grundlage taugt:** Die Antwort nennt ausdrücklich den ID-Abgleich zwischen `broadcaster_id` und Token, nicht den fehlenden Broadcaster-Typ. Die Prüfung ist also real und greift vor allem anderen. Dazu kommt die Endpoint-Referenz mit derselben Aussage, das Fehlen eines `moderator_id`-Parameters — den Twitch überall dort führt, wo Moderatoren handeln dürfen — und der einzige auffindbare Erfahrungsbericht im Entwicklerforum, der denselben Fehler zeigt.
+Der anderslautende Satz in den Guides — „The broadcaster's moderators or editors can create or manage the broadcaster's polls", sinngleich bei Predictions — beschreibt die Twitch-**Oberfläche**: Moderatoren bedienen Umfragen dort über das Menü, das `/poll` im Webchat öffnet. Das ist kein API-Pfad. Wer ihn so liest, baut auf Sand; das ist hier zweimal ausprobiert und muss nicht erneut geprüft werden.
 
-Der anderslautende Satz in den Guides beschreibt die Twitch-**Oberfläche**: Moderatoren bedienen Umfragen dort über das Menü, das `/poll` im Webchat öffnet. Das ist kein API-Pfad.
+**Folgen:** `channel:manage:polls` und `channel:manage:predictions` liegen in der Broadcaster-Liste. #8 ist damit das einzige Pflichtmodul, das eine verbundene Broadcaster-Autorisierung voraussetzt, und reiht sich neben #21 und #22 ein.
 
-**Wir bauen auf dieser Grundlage**, weil sie in dieselbe Richtung zeigt wie jede andere Quelle und weil ein Irrtum billig bleibt: Die beiden Scopes lägen dann in der Bot- statt in der Broadcaster-Liste, sonst ändert sich nichts.
-
-**Abschließend klären lässt sich das nur auf einem Affiliate- oder Partner-Kanal.** Das steht als Aufgabe in #8, nicht als Blocker — denn ohne Affiliate-Status ist das Modul dort ohnehin nicht nutzbar.
+**Zweite Voraussetzung, unabhängig vom Token:** Umfragen und Predictions gibt es nur auf Kanälen mit Affiliate- oder Partner-Status. Das Modul prüft `broadcaster_type` und deaktiviert sich mit Begründung, statt beim ersten Startversuch zu scheitern. Einzelheiten in #8.
 
 ## 5. Was der Broadcaster freischaltet
 
