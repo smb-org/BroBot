@@ -82,20 +82,26 @@ Mehr ist derzeit nicht vorgesehen. Jedes optionale Modul bringt seine Scopes sel
 
 ---
 
-## 4. Polls und Predictions: Broadcaster-Token, empirisch belegt
+## 4. Polls und Predictions: Broadcaster-Token, sehr wahrscheinlich
 
-**Geprüft am 17. September 2026 gegen die echte API.** Ein Zweitaccount mit Moderatorrolle im Zielkanal wurde mit `channel:manage:polls` autorisiert; das Token trug den Scope nachweislich. Der Aufruf `POST /helix/polls` gegen die fremde `broadcaster_id` antwortete:
+**Stand: starkes Indiz, kein abschließender Beweis.**
+
+Geprüft am 17. September 2026: Ein Zweitaccount mit belegter Moderatorrolle im Zielkanal wurde mit `channel:manage:polls` autorisiert. `POST /helix/polls` gegen die fremde `broadcaster_id` antwortete:
 
 ```
 401 Unauthorized
 The ID in broadcaster_id must match the user ID found in the request's OAuth token.
 ```
 
-**Damit ist die Frage abschließend beantwortet:** Polls und Predictions verlangen das User-Token des Broadcasters. Eine Moderatorrolle genügt nicht, und daran ändert auch kein Scope etwas.
+**Warum das nicht abschließend ist:** Der getestete Kanal hat `broadcaster_type: ""` — weder Affiliate noch Partner. Auf einem solchen Kanal sind Umfragen grundsätzlich nicht möglich, auch nicht für den Broadcaster selbst. Der Versuch konnte die Mod-Frage deshalb gar nicht erreichen.
 
-Der anderslautende Satz in den Guides — „The broadcaster's moderators or editors can create or manage the broadcaster's polls", sinngleich bei Predictions — beschreibt die Twitch-**Oberfläche**: Moderatoren bedienen Umfragen dort über das Menü, das `/poll` im Webchat öffnet. Er beschreibt keinen API-Pfad. Wer ihn so liest, baut auf Sand; das ist hier einmal ausprobiert und muss nicht erneut geprüft werden.
+**Warum es trotzdem als Grundlage taugt:** Die Antwort nennt ausdrücklich den ID-Abgleich zwischen `broadcaster_id` und Token, nicht den fehlenden Broadcaster-Typ. Die Prüfung ist also real und greift vor allem anderen. Dazu kommt die Endpoint-Referenz mit derselben Aussage, das Fehlen eines `moderator_id`-Parameters — den Twitch überall dort führt, wo Moderatoren handeln dürfen — und der einzige auffindbare Erfahrungsbericht im Entwicklerforum, der denselben Fehler zeigt.
 
-**Folge:** `channel:manage:polls` und `channel:manage:predictions` liegen in der Broadcaster-Liste. #8 ist damit das einzige Pflichtmodul der Roadmap, das eine verbundene Broadcaster-Autorisierung voraussetzt — und reiht sich neben #21 und #22 als Modul ein, das die optionale Verbindung braucht.
+Der anderslautende Satz in den Guides beschreibt die Twitch-**Oberfläche**: Moderatoren bedienen Umfragen dort über das Menü, das `/poll` im Webchat öffnet. Das ist kein API-Pfad.
+
+**Wir bauen auf dieser Grundlage**, weil sie in dieselbe Richtung zeigt wie jede andere Quelle und weil ein Irrtum billig bleibt: Die beiden Scopes lägen dann in der Bot- statt in der Broadcaster-Liste, sonst ändert sich nichts.
+
+**Abschließend klären lässt sich das nur auf einem Affiliate- oder Partner-Kanal.** Das steht als Aufgabe in #8, nicht als Blocker — denn ohne Affiliate-Status ist das Modul dort ohnehin nicht nutzbar.
 
 ## 5. Was der Broadcaster freischaltet
 
