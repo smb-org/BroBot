@@ -23,7 +23,7 @@
     {
       "binding": "DB",
       "database_name": "brobot-local",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "60e10fe4-4f43-4220-a9f8-187fadb35c18"
     }
   ],
   "vars": {
@@ -68,7 +68,7 @@
         {
           "binding": "DB",
           "database_name": "brobot-staging",
-          "database_id": "00000000-0000-0000-0000-000000000000"
+          "database_id": "71609420-fec6-43ff-b146-57ae5356c816"
         }
       ],
       "vars": {
@@ -113,7 +113,7 @@
         {
           "binding": "DB",
           "database_name": "brobot-production",
-          "database_id": "00000000-0000-0000-0000-000000000000"
+          "database_id": "4bcaf2f1-3e5e-4baf-9296-b1434f4dc8eb"
         }
       ],
       "vars": {
