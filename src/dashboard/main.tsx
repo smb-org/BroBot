@@ -36,6 +36,8 @@ interface LoadState<T> {
   status: "idle" | "loading" | "success" | "error";
   data: T | null;
   error: string | null;
+  /** Wann diese Antwort eintraf. Traegt das Datenalter in der Anzeige. */
+  loadedAt?: number;
 }
 
 interface ModeratorCheckState {
@@ -345,16 +347,39 @@ const ModeratorCard = ({ moderator }: ModeratorCardProperties): ReactElement => 
  * nicht in der Moderatorzeile, weil diese bei gesundem Zustand gar nicht
  * erscheint — die Nachpruefung muss trotzdem jederzeit erreichbar sein.
  */
-const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, checkedAt, onCheck }: {
+const relativeZeit = (seit: number, jetzt: number): string => {
+  const s = Math.max(0, Math.round((jetzt - seit) / 1000));
+  if (s < 60) return `vor ${String(s)} s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `vor ${String(m)} Min.`;
+  return `vor ${String(Math.round(m / 60))} Std.`;
+};
+
+/**
+ * Beweist Leben, ohne einen Zustand zu behaupten. Steht bewusst neutral und
+ * nie in Zustandsfarbe.
+ */
+const Datenalter = ({ seit }: { seit: number }): ReactElement => {
+  const [jetzt, setJetzt] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => { setJetzt(Date.now()); }, 1000);
+    return () => { clearInterval(id); };
+  }, []);
+  return <span className="datenalter mono">aktualisiert {relativeZeit(seit, jetzt)}</span>;
+};
+
+const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, checkedAt, dringend, onCheck }: {
   canCheck: boolean; checking: boolean; checkError: string | null;
-  nextAllowedAt: string | null; checkedAt: string | null; onCheck: () => void;
+  nextAllowedAt: string | null; checkedAt: string | null; dringend: boolean; onCheck: () => void;
 }): ReactElement | null => {
   if (!canCheck) {
     return checkedAt === null ? null : <p className="muted moderator-check-time">Letzte Prüfung: {formatTimestamp(checkedAt)}</p>;
   }
   return (
     <div className="page-heading__actions">
-      <button className="button" type="button" onClick={onCheck} disabled={checking} aria-busy={checking}>
+      {/* Gefuellt nur bei Anlass. Auf einer gesunden Seite ist die kraeftigste
+          Flaeche keine Handlungsaufforderung, die niemand braucht. */}
+      <button className={dringend ? "button button--primary" : "button"} type="button" onClick={onCheck} disabled={checking} aria-busy={checking}>
         {checking ? "Prüfung läuft …" : "Moderatorstatus prüfen"}
       </button>
       {checkedAt === null ? null : <p className="muted moderator-check-time">Letzte Prüfung: {formatTimestamp(checkedAt)}</p>}
@@ -410,11 +435,12 @@ const ErrorCard = ({ error }: { error: PanelLastError | null }): ReactElement =>
 
 interface ChannelOverviewPageProperties {
   overview: PanelChannelOverview;
+  geladenAm: number | undefined;
   moderatorCheck: ModeratorCheckState;
   onCheckModeratorStatus: () => void;
 }
 
-const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus }: ChannelOverviewPageProperties): ReactElement => {
+const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModeratorStatus }: ChannelOverviewPageProperties): ReactElement => {
   // Die Kanaluebersicht ist die Blickflaeche. Was in Ordnung ist, erscheint hier
   // nicht; laeuft alles, beginnt der Inhalt sofort. Die Werte stehen weiterhin
   // vollstaendig auf der Systemseite.
@@ -450,12 +476,14 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus 
     <>
       <header className="page-heading">
         <h1>{overview.displayName}</h1><span className="muted">{roleLabel(overview.role)}</span>
+        {geladenAm === undefined ? null : <Datenalter seit={geladenAm} />}
         <ModeratorCheckAction
           canCheck={overview.role !== "bediener"}
           checking={moderatorCheck.status === "loading"}
           checkError={moderatorCheck.error}
           nextAllowedAt={moderatorCheck.nextAllowedAt}
           checkedAt={overview.moderator?.checkedAt ?? null}
+          dringend={overview.moderator === null || !overview.moderator.isModerator}
           onCheck={onCheckModeratorStatus}
         />
       </header>
@@ -571,7 +599,7 @@ export const DashboardApp = (): ReactElement => {
       if (route.section === "overview") {
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
-          if (!cancelled) setOverview({ status: "success", data: response, error: null });
+          if (!cancelled) setOverview({ status: "success", data: response, error: null, loadedAt: Date.now() });
         } catch (error) {
           if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
             setOverview({ status: "error", data: null, error: errorMessage(error) });
@@ -774,7 +802,7 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "channel" && selectedChannel === null && channels.status === "success" ? <ErrorPanel message="Dieser Kanal ist für dein Konto nicht freigegeben." /> : null}
         {route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">Kanalzustand wird geladen …</p> : null}
         {route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {route.kind === "channel" && route.section === "overview" && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} /> : null}
+        {route.kind === "channel" && route.section === "overview" && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} geladenAm={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} /> : null}
         {route.kind === "channel" && route.section === "members" && members.status === "loading" ? <p className="loading-line">Mitglieder werden geladen …</p> : null}
         {route.kind === "channel" && route.section === "members" && members.error !== null ? <ErrorPanel message={members.error} /> : null}
         {route.kind === "channel" && route.section === "members" && members.data !== null && selectedChannel !== null ? <MembersPage channelId={route.channelId} ownRole={selectedChannel.role} members={members.data.members} nextCursor={members.data.nextCursor} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}

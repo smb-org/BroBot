@@ -109,7 +109,8 @@ describe("Dashboard-Grundgerüst", () => {
 
     expect(await screen.findByRole("heading", { name: "Mitglieder", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Streamerin")).toBeInTheDocument();
-    expect(screen.getByText("@streamer")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "twitch.tv/streamer" }))
+      .toHaveAttribute("href", "https://twitch.tv/streamer");
     expect(screen.queryByText("100")).not.toBeInTheDocument();
     expect(screen.getByText("Nicht auflösbar")).toBeInTheDocument();
     expect(screen.getByText("Twitch-ID 200")).toBeInTheDocument();
