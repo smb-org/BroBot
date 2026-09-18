@@ -57,6 +57,18 @@ jobs:
           cache: pnpm
       - if: steps.freshness.outputs.current == 'true'
         run: pnpm install --frozen-lockfile
+      # Vor dem Code-Deploy: Neuer Code erwartet das neue Schema, nicht
+      # umgekehrt. Schlaegt die Migration fehl, bricht der Job hier ab und der
+      # bisherige Worker laeuft unveraendert gegen das bisherige Schema weiter —
+      # der Zustand, der vorher funktioniert hat.
+      #
+      # Nur Staging. Production migriert bewusst von Hand: D1 kann DDL nicht
+      # zurueckrollen, eine abgebrochene Migration hinterlaesst dort einen
+      # Zwischenzustand, den niemand angesehen hat. Eine vergessene
+      # Production-Migration faengt stattdessen der Healthcheck ab.
+      - if: steps.freshness.outputs.current == 'true'
+        name: Ausstehende Staging-Migrationen anwenden
+        run: pnpm run migrate:staging:ci
       - if: steps.freshness.outputs.current == 'true'
         name: Staging code-only deployen
         run: pnpm run deploy:staging:ci-code-only
