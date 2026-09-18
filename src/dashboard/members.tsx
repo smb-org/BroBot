@@ -1,6 +1,7 @@
 import { useState, type ReactElement, type SyntheticEvent } from "react";
 
 import type { PanelChannelRole, PanelMember, PanelTwitchUser } from "../panel-contract";
+import { roleLabel } from "./labels";
 import {
   addChannelMember,
   PanelApiError,
@@ -24,18 +25,12 @@ interface MembersPageProperties {
 
 const manageableRoles: readonly PanelChannelRole[] = ["broadcaster", "verwalter", "bediener"];
 
-const roleLabel = (role: PanelChannelRole): string => {
-  if (role === "broadcaster") return "Broadcaster";
-  if (role === "verwalter") return "Verwalter";
-  return "Bediener";
-};
-
-const formatTimestamp = (value: string): string => {
+/** Der Beitritt liegt Tage bis Jahre zurueck; die Uhrzeit traegt dort nichts bei. */
+const formatJoinDate = (value: string): string => {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(date);
 };
 
 const errorMessage = (error: unknown): string => {
@@ -93,8 +88,8 @@ const MemberTable = ({
                   </select>
                 ) : roleLabel(member.role)}
               </td>
-              <td>{formatTimestamp(member.joinedAt)}</td>
-              {canManageMembers ? <td><button className="button button--quiet" type="button" disabled={busyUserId === member.userId} onClick={() => onRemove(member)}>Zugriff für {memberLabel(member)} entziehen</button></td> : null}
+              <td className="zahl">{formatJoinDate(member.joinedAt)}</td>
+              {canManageMembers ? <td><button className="button button--quiet" type="button" aria-label={`Zugriff für ${memberLabel(member)} entziehen`} disabled={busyUserId === member.userId} onClick={() => onRemove(member)}>Entziehen</button></td> : null}
             </tr>
           ))}
         </tbody>
@@ -188,12 +183,12 @@ export const MembersPage = ({
   return (
     <>
       <header className="page-heading">
-        <div><span className="eyebrow">Kanalzugriff · {roleLabel(ownRole)}</span><h1>Mitglieder</h1></div>
-        <p>Wer eine Zeile in diesem Kanal hat, darf ihn im Panel bedienen.</p>
+        <h1>Mitglieder</h1>
+        <span className="muted zahl">{String(members.length)}</span>
       </header>
       {canManageMembers ? (
-        <section className="content-section member-add-panel" aria-label="Mitglied hinzufügen">
-          <div className="section-heading"><div><span className="eyebrow">Zugriff vergeben</span><h2>Person über Twitch-Namen finden</h2></div></div>
+        <section className="content-section" aria-label="Mitglied hinzufügen">
+          <div className="section-heading"><h2>Zugriff vergeben</h2></div>
           <form className="member-search-form" onSubmit={(event) => { void handleSearch(event); }}>
             <label htmlFor="member-search">Twitch-Name</label>
             <div className="member-search-row"><input id="member-search" value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="off" /><button className="button" type="submit" disabled={searching || login.trim().length === 0}>{searching ? "Suche läuft …" : "Suchen"}</button></div>
@@ -209,7 +204,7 @@ export const MembersPage = ({
         </section>
       ) : null}
       <section className="content-section" aria-label="Mitgliederliste">
-        <div className="section-heading"><div><span className="eyebrow">Kanalzugriff</span><h2>Freigegebene Mitglieder</h2></div><span className="muted">{String(members.length)}</span></div>
+        <div className="section-heading"><h2>Freigegebene Mitglieder</h2></div>
         {loading ? <p className="loading-line">Mitglieder werden geladen …</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}

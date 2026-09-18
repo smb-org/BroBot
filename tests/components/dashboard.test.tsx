@@ -267,7 +267,9 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Alpha", level: 2 });
-    expect(screen.getByText("Nicht verbunden")).toHaveAttribute("data-status", "neutral");
+    expect(screen.getByText("Nicht verbunden")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Alpha", level: 2 }).closest("article"))
+      .not.toHaveAttribute("data-status", "error");
 
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
@@ -314,8 +316,8 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
 
-    const moderatorCard = await screen.findByRole("article", { name: "Moderatorstatus" });
-    expect(within(moderatorCard).getByText(/Letzte Prüfung:/)).toBeInTheDocument();
+    await screen.findByRole("article", { name: "Moderatorstatus" });
+    expect(screen.getByText(/Letzte Prüfung:/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Moderatorstatus prüfen" })).toBeInTheDocument();
 
     cleanup();
@@ -362,7 +364,11 @@ describe("Dashboard-Grundgerüst", () => {
       nextAllowedAt: "2026-09-18T04:05:00.000Z",
     }));
 
-    await waitFor(() => expect(screen.getByText("Moderator", { selector: "strong" })).toBeInTheDocument());
+    // Nach erfolgreicher Prüfung ist der Kanal gesund; die Moderatorzeile
+    // verschwindet deshalb. Beweis für den neuen Stand ist die aktualisierte
+    // Prüfzeit neben der Aktion.
+    await waitFor(() => expect(screen.getByText(/Letzte Prüfung:/)).toBeInTheDocument());
+    expect(screen.queryByRole("article", { name: "Moderatorstatus" })).not.toBeInTheDocument();
     expect(screen.getByText(/Letzte Prüfung:/)).toBeInTheDocument();
   });
 
@@ -386,7 +392,8 @@ describe("Dashboard-Grundgerüst", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
 
     expect(await screen.findByText("Twitch ist vorübergehend nicht erreichbar.", { selector: "p" })).toBeInTheDocument();
-    expect(screen.getByText("Moderator", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.queryByText("Nicht geprüft")).not.toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Moderatorstatus" })).not.toBeInTheDocument();
   });
 
   it("zeigt fehlende Token-Ablaufdaten nicht als gültig oder gesund", async () => {
@@ -411,7 +418,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     const tokenCard = await screen.findByRole("article", { name: "Token-Zustand" });
     expect(tokenCard).toHaveAttribute("data-status", "neutral");
-    expect(within(tokenCard).getByText("Nicht geprüft", { selector: "strong" })).toBeInTheDocument();
+    expect(within(tokenCard).getByText("Nicht geprüft")).toBeInTheDocument();
     expect(within(tokenCard).queryByText("Gültig")).not.toBeInTheDocument();
     expect(within(tokenCard).queryByText("Gesund")).not.toBeInTheDocument();
     expect(tokenCard.querySelector('[data-status="healthy"]')).toBeNull();
@@ -436,11 +443,14 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(channelCard as HTMLElement).getByText("Gesund", { selector: "span" })).toBeInTheDocument();
     expect(within(channelCard as HTMLElement).queryByText("Warnung")).not.toBeInTheDocument();
 
+    // Auf der Kanalseite ist Gesundheit die Abwesenheit von Meldungen: keine
+    // Zustandszeile erscheint, der Inhalt beginnt sofort. Die Werte selbst
+    // stehen weiterhin vollständig auf der Systemseite.
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
-    const tokenCard = await screen.findByRole("article", { name: "Token-Zustand" });
-    expect(tokenCard).toHaveAttribute("data-status", "healthy");
-    expect(within(tokenCard).getByText("Gültig", { selector: "strong" })).toBeInTheDocument();
-    expect(within(tokenCard).queryByText("Warnung")).not.toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    expect(screen.queryByRole("article", { name: "Token-Zustand" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Bot-Account" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Warnung")).not.toBeInTheDocument();
   });
 
   it("bleibt gesund, solange der Ablauf nur turnusmäßig näherrückt", async () => {

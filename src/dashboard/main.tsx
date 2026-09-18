@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { Fragment, StrictMode, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
 import type {
@@ -28,6 +28,7 @@ import {
 } from "./api";
 import { ModulePanelMount } from "./module-panels";
 import { MembersPage } from "./members";
+import { roleLabel } from "./labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import "./styles.css";
 
@@ -166,7 +167,7 @@ const mergeModeratorStatus = <T extends { moderator: PanelModeratorStatus | null
 interface LinkProperties {
   route: DashboardRoute;
   current: DashboardRoute;
-  children: ReactElement | string;
+  children: ReactNode;
   onNavigate: (route: DashboardRoute) => void;
 }
 
@@ -199,6 +200,15 @@ const StatusBadge = ({ tone, children }: StatusBadgeProperties): ReactElement =>
   <span className="status-badge" data-status={tone}>{children}</span>
 );
 
+/**
+ * Der Zustandspunkt in der Navigation zeigt ein Problem, bevor man klickt.
+ * Der Text daneben ist fuer Hilfsmittel: Farbe informiert nie allein.
+ */
+const NavDot = ({ tone }: { tone: "healthy" | "warning" | "error" }): ReactElement | null =>
+  tone === "healthy" ? null : (
+    <span className="nav-dot" data-status={tone} role="img" aria-label={tone === "error" ? "Fehler" : "Warnung"} />
+  );
+
 const formatTimestamp = (value: string): string => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("de-DE", {
@@ -214,15 +224,13 @@ const tokenSummary = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): str
 const ChannelStateCard = ({ channel }: { channel: PanelChannelState }): ReactElement => (
   <article className="channel-card" data-status={channelStatus(channel)}>
     <div className="channel-card__heading">
-      <div>
-        <span className="eyebrow">{channel.login}</span>
-        <h2>{channel.displayName}</h2>
-      </div>
+      <h2>{channel.displayName}</h2>
+      <span className="muted mono">{channel.login}</span>
       <StatusBadge tone={channelStatus(channel)}>{statusText(channel)}</StatusBadge>
     </div>
     <dl className="compact-list">
-      <div><dt>Deine Rolle</dt><dd>{channel.role}</dd></div>
-      <div><dt>Broadcaster-OAuth</dt><dd><StatusBadge tone={channel.broadcasterConnection === "connected" ? "healthy" : "neutral"}>{broadcasterConnectionLabel(channel.broadcasterConnection)}</StatusBadge></dd></div>
+      <div><dt>Deine Rolle</dt><dd>{roleLabel(channel.role)}</dd></div>
+      <div><dt>Broadcaster-OAuth</dt><dd>{broadcasterConnectionLabel(channel.broadcasterConnection)}</dd></div>
       <div><dt>Bot-Account</dt><dd>{channel.bot === null ? "Nicht eingerichtet" : statusLabel(channel.bot.status)}</dd></div>
       <div><dt>Moderatorstatus</dt><dd>{channel.moderator === null ? "Nicht geprüft" : channel.moderator.isModerator ? "Moderator" : "Fehlt"}</dd></div>
       <div><dt>Token</dt><dd>{tokenSummary(channel.tokens, channel.bot)}</dd></div>
@@ -230,21 +238,20 @@ const ChannelStateCard = ({ channel }: { channel: PanelChannelState }): ReactEle
   </article>
 );
 
-const StatusCard = ({ title, tone, value, detail, badgeLabel, footer }: { title: string; tone: StatusBadgeProperties["tone"]; value: string; detail?: ReactElement | string; badgeLabel?: string; footer?: ReactElement | undefined }): ReactElement => (
+const StatusCard = ({ title, tone, value, detail, footer }: { title: string; tone: StatusBadgeProperties["tone"]; value: string; detail?: ReactElement | string | undefined; footer?: ReactElement | undefined }): ReactElement => (
   <article className="status-card" aria-label={title} data-status={tone}>
     <div className="status-card__heading">
-      <span className="eyebrow">{title}</span>
-      <StatusBadge tone={tone}>{badgeLabel ?? (tone === "healthy" ? "Gesund" : tone === "warning" ? "Warnung" : tone === "error" ? "Fehler" : "Nicht geprüft")}</StatusBadge>
+      <strong>{title}</strong>
+      <p>{value}</p>
+      {detail === undefined ? null : <p className="status-card__detail">{detail}</p>}
     </div>
-    <strong>{value}</strong>
-    {detail === undefined ? null : <p>{detail}</p>}
-    {footer}
+    <div className="status-card__action">{footer}</div>
   </article>
 );
 
 const ErrorPanel = ({ message }: { message: string }): ReactElement => (
   <section className="error-panel" data-status="error" role="alert">
-    <span className="eyebrow">Fehler</span>
+    <strong>Fehler</strong>
     <p>{message}</p>
   </section>
 );
@@ -259,18 +266,20 @@ interface SidebarProperties {
 
 const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarProperties): ReactElement => {
   const selectedChannelId = route.kind === "channel" ? route.channelId : "";
+  const activeChannel = route.kind === "channel"
+    ? channels.find((channel) => channel.channelId === route.channelId)
+    : undefined;
   return (
     <aside className="sidebar">
       <div className="brand-mark"><span className="brand-mark__dot" />BroBot</div>
-      <div className="sidebar__intro">
-        <span className="eyebrow">Admin- und Mod-Panel</span>
-        <p>Der verlässliche Blick auf deinen Bot.</p>
-      </div>
       <nav className="primary-nav" aria-label="Hauptnavigation">
         <RouteLink route={{ kind: "overview" }} current={route} onNavigate={onNavigate}>Übersicht</RouteLink>
         {route.kind === "channel" ? (
           <>
-            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "overview" }} current={route} onNavigate={onNavigate}>Kanal</RouteLink>
+            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "overview" }} current={route} onNavigate={onNavigate}>
+              Kanal
+              {activeChannel === undefined ? null : <NavDot tone={channelStatus(activeChannel)} />}
+            </RouteLink>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "system" }} current={route} onNavigate={onNavigate}>System</RouteLink>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "members" }} current={route} onNavigate={onNavigate}>Mitglieder</RouteLink>
           </>
@@ -278,7 +287,7 @@ const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarP
       </nav>
       {channels.length > 1 ? (
         <label className="channel-picker">
-          <span className="eyebrow">Kanal auswählen</span>
+          <span>Kanal</span>
           <select
             aria-label="Kanal auswählen"
             value={selectedChannelId}
@@ -300,7 +309,7 @@ const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarP
 const OverviewPage = ({ channels, onNavigate }: { channels: PanelChannelState[]; onNavigate: (route: DashboardRoute) => void }): ReactElement => (
   <>
     <header className="page-heading">
-      <div><span className="eyebrow">Arbeitsbereich</span><h1>Übersicht</h1></div>
+      <h1>Übersicht</h1>
       <p>{channels.length === 1 ? "Ein Kanal ist für dich freigegeben." : `${String(channels.length)} Kanäle sind für dich freigegeben.`}</p>
     </header>
     {channels.length === 0 ? (
@@ -319,31 +328,40 @@ const OverviewPage = ({ channels, onNavigate }: { channels: PanelChannelState[];
 
 interface ModeratorCardProperties {
   moderator: PanelModeratorStatus | null;
-  canCheck: boolean;
-  checking: boolean;
-  checkError: string | null;
-  nextAllowedAt: string | null;
-  onCheck: () => void;
 }
 
-const ModeratorCard = ({ moderator, canCheck, checking, checkError, nextAllowedAt, onCheck }: ModeratorCardProperties): ReactElement => {
+const ModeratorCard = ({ moderator }: ModeratorCardProperties): ReactElement => {
   const tone = moderator === null ? "neutral" : moderator.isModerator ? "healthy" : "error";
   const value = moderator === null ? "Nicht geprüft" : moderator.isModerator ? "Moderator" : "Moderatorrolle fehlt";
   const detail = moderator === null
     ? "Für diesen Kanal liegt noch keine Prüfung vor."
-    : moderator.reason ?? "Ohne diese Rolle scheitern mehrere Bot-Funktionen.";
-  const checkTime = moderator === null ? null : `Letzte Prüfung: ${formatTimestamp(moderator.checkedAt)}`;
-  const footer = canCheck ? (
-    <div className="moderator-check-action">
-      <button className="button button--secondary" type="button" onClick={onCheck} disabled={checking} aria-busy={checking}>
+    : moderator.reason ?? undefined;
+  const checkTime = moderator === null ? undefined : `Letzte Prüfung: ${formatTimestamp(moderator.checkedAt)}`;
+  return <StatusCard title="Moderatorstatus" tone={tone} value={value} detail={detail ?? checkTime} />;
+};
+
+/**
+ * Die einzige helle Aktion der Kanalseite. Sie steht in der Titelzeile und
+ * nicht in der Moderatorzeile, weil diese bei gesundem Zustand gar nicht
+ * erscheint — die Nachpruefung muss trotzdem jederzeit erreichbar sein.
+ */
+const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, checkedAt, onCheck }: {
+  canCheck: boolean; checking: boolean; checkError: string | null;
+  nextAllowedAt: string | null; checkedAt: string | null; onCheck: () => void;
+}): ReactElement | null => {
+  if (!canCheck) {
+    return checkedAt === null ? null : <p className="muted moderator-check-time">Letzte Prüfung: {formatTimestamp(checkedAt)}</p>;
+  }
+  return (
+    <div className="page-heading__actions">
+      <button className="button" type="button" onClick={onCheck} disabled={checking} aria-busy={checking}>
         {checking ? "Prüfung läuft …" : "Moderatorstatus prüfen"}
       </button>
-      {checkTime === null ? null : <p className="muted">{checkTime}</p>}
-      {nextAllowedAt === null ? null : <p className="muted">Nächste Prüfung ab {formatTimestamp(nextAllowedAt)}.</p>}
+      {checkedAt === null ? null : <p className="muted moderator-check-time">Letzte Prüfung: {formatTimestamp(checkedAt)}</p>}
+      {nextAllowedAt === null ? null : <p className="muted moderator-check-time">Nächste Prüfung ab {formatTimestamp(nextAllowedAt)}.</p>}
       {checkError === null ? null : <p className="form-error" role="alert">{checkError}</p>}
     </div>
-  ) : checkTime === null ? undefined : <p className="muted moderator-check-time">{checkTime}</p>;
-  return <StatusCard title="Moderatorstatus" tone={tone} value={value} detail={detail} footer={footer} />;
+  );
 };
 
 const BotCard = ({ bot }: { bot: PanelBotStatus | null }): ReactElement => {
@@ -353,7 +371,7 @@ const BotCard = ({ bot }: { bot: PanelBotStatus | null }): ReactElement => {
 };
 
 const TokenCard = ({ tokens, bot }: { tokens: PanelTokenStatus; bot: PanelBotStatus | null }): ReactElement => (
-  <StatusCard title="Token-Zustand" tone={tokenView(tokens, bot).tone} value={tokenSummary(tokens, bot)} detail={tokens.loginReason ?? "Ablaufzeiten werden aus der Datenbank gelesen."} />
+  <StatusCard title="Token-Zustand" tone={tokenView(tokens, bot).tone} value={tokenSummary(tokens, bot)} detail={tokens.loginReason ?? undefined} />
 );
 
 const BroadcasterConnectionCard = ({ status }: { status: PanelChannelState["broadcasterConnection"] }): ReactElement => (
@@ -361,14 +379,33 @@ const BroadcasterConnectionCard = ({ status }: { status: PanelChannelState["broa
     title="Broadcaster-OAuth"
     tone={status === "connected" ? "healthy" : "neutral"}
     value={broadcasterConnectionLabel(status)}
-    badgeLabel={broadcasterConnectionLabel(status)}
     detail={status === "connected" ? "Für optionale Broadcaster-Module verbunden." : "Optional; für den normalen Bot-Betrieb nicht erforderlich."}
   />
 );
 
+/**
+ * Rang der Dringlichkeit. Fehler zuerst, dann Warnung; gesunde Zeilen
+ * erscheinen auf der Blickflaeche gar nicht.
+ */
+const toneRank: Record<StatusBadgeProperties["tone"], number> = {
+  error: 0, warning: 1, neutral: 2, healthy: 3,
+};
+
+/** Die Meldungszeile eines Kanals samt ihrem Rang, damit sie sortierbar ist. */
+interface StatusEntry {
+  key: string;
+  tone: StatusBadgeProperties["tone"];
+  node: ReactElement;
+}
+
+const sortBySeverity = (entries: StatusEntry[]): StatusEntry[] =>
+  [...entries]
+    .filter((entry) => entry.tone !== "healthy")
+    .sort((a, b) => toneRank[a.tone] - toneRank[b.tone]);
+
 const ErrorCard = ({ error }: { error: PanelLastError | null }): ReactElement =>
   error === null
-    ? <StatusCard title="Letzter Fehler" tone="neutral" value="Keine gespeicherte Ursache" detail="Es gibt keinen Fehlergrund in den gelesenen Zustandsdaten." />
+    ? <StatusCard title="Letzter Fehler" tone="neutral" value="Keine gespeicherte Ursache" />
     : <StatusCard title="Letzter Fehler" tone="error" value={error.reason} detail={`${error.source} · ${formatTimestamp(error.at)}`} />;
 
 interface ChannelOverviewPageProperties {
@@ -377,35 +414,66 @@ interface ChannelOverviewPageProperties {
   onCheckModeratorStatus: () => void;
 }
 
-const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus }: ChannelOverviewPageProperties): ReactElement => (
-  <>
-    <header className="page-heading">
-      <div><span className="eyebrow">Kanalübersicht · {overview.role}</span><h1>{overview.displayName}</h1></div>
-      <p>Nur Zustände, die für diesen Kanal tatsächlich gespeichert sind.</p>
-    </header>
-    <div className="status-grid">
-      <BroadcasterConnectionCard status={overview.broadcasterConnection} />
-      <ModeratorCard
-        moderator={overview.moderator}
-        canCheck={overview.role !== "bediener"}
-        checking={moderatorCheck.status === "loading"}
-        checkError={moderatorCheck.error}
-        nextAllowedAt={moderatorCheck.nextAllowedAt}
-        onCheck={onCheckModeratorStatus}
-      />
-      <BotCard bot={overview.bot} />
-      <TokenCard tokens={overview.tokens} bot={overview.bot} />
-      <ErrorCard error={overview.lastError} />
-    </div>
-    <section className="content-section"><div className="section-heading"><div><span className="eyebrow">Aktivierung</span><h2>Aktive Module</h2></div><span className="muted">{String(overview.activeModules.length)}</span></div><ModulePanelMount activeModules={overview.activeModules} /></section>
-  </>
-);
+const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus }: ChannelOverviewPageProperties): ReactElement => {
+  // Die Kanaluebersicht ist die Blickflaeche. Was in Ordnung ist, erscheint hier
+  // nicht; laeuft alles, beginnt der Inhalt sofort. Die Werte stehen weiterhin
+  // vollstaendig auf der Systemseite.
+  const eintraege = sortBySeverity([
+    {
+      key: "broadcaster",
+      tone: overview.broadcasterConnection === "connected" ? "healthy" : "neutral",
+      node: <BroadcasterConnectionCard status={overview.broadcasterConnection} />,
+    },
+    {
+      key: "moderator",
+      tone: overview.moderator === null ? "neutral" : overview.moderator.isModerator ? "healthy" : "error",
+      node: <ModeratorCard moderator={overview.moderator} />,
+    },
+    {
+      key: "bot",
+      tone: overview.bot === null ? "neutral" : overview.bot.status === "connected" ? "healthy" : "error",
+      node: <BotCard bot={overview.bot} />,
+    },
+    {
+      key: "token",
+      tone: tokenView(overview.tokens, overview.bot).tone,
+      node: <TokenCard tokens={overview.tokens} bot={overview.bot} />,
+    },
+    {
+      key: "fehler",
+      tone: overview.lastError === null ? "healthy" : "error",
+      node: <ErrorCard error={overview.lastError} />,
+    },
+  ]);
+
+  return (
+    <>
+      <header className="page-heading">
+        <h1>{overview.displayName}</h1><span className="muted">{roleLabel(overview.role)}</span>
+        <ModeratorCheckAction
+          canCheck={overview.role !== "bediener"}
+          checking={moderatorCheck.status === "loading"}
+          checkError={moderatorCheck.error}
+          nextAllowedAt={moderatorCheck.nextAllowedAt}
+          checkedAt={overview.moderator?.checkedAt ?? null}
+          onCheck={onCheckModeratorStatus}
+        />
+      </header>
+      {eintraege.length === 0 ? null : (
+        <div className="status-grid">
+          {eintraege.map((eintrag) => <Fragment key={eintrag.key}>{eintrag.node}</Fragment>)}
+        </div>
+      )}
+      <section className="content-section"><div className="section-heading"><h2>Aktive Module</h2><span className="muted zahl">{String(overview.activeModules.length)}</span></div><ModulePanelMount activeModules={overview.activeModules} /></section>
+    </>
+  );
+};
 
 const SystemPage = ({ system, auditState, onNextPage, loadingNextPage }: { system: PanelSystemResponse; auditState: LoadState<PanelAuditResponse>; onNextPage: () => void; loadingNextPage: boolean }): ReactElement => (
   <>
-    <header className="page-heading"><div><span className="eyebrow">Betrieb</span><h1>System</h1></div><p>Token-Zustand und gespeicherte Audit-Einträge.</p></header>
-    <div className="status-grid status-grid--system"><BroadcasterConnectionCard status={system.broadcasterConnection} /><BotCard bot={system.bot} /><TokenCard tokens={system.tokens} bot={system.bot} /></div>
-    <section className="content-section"><div className="section-heading"><div><span className="eyebrow">Nachvollziehbarkeit</span><h2>Audit-Log</h2></div>{auditState.data === null ? null : <span className="muted">{String(auditState.data.entries.length)} Einträge</span>}</div>
+    <header className="page-heading"><h1>System</h1></header>
+    <div className="status-grid"><BroadcasterConnectionCard status={system.broadcasterConnection} /><BotCard bot={system.bot} /><TokenCard tokens={system.tokens} bot={system.bot} /></div>
+    <section className="content-section"><div className="section-heading"><h2>Audit-Log</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{String(auditState.data.entries.length)}</span> Einträge</span>}</div>
       {auditState.status === "loading" ? <p className="loading-line">Audit-Log wird geladen …</p> : null}
       {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
       {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="muted">Noch keine Audit-Einträge gespeichert.</p> : null}
@@ -693,7 +761,7 @@ export const DashboardApp = (): ReactElement => {
   };
 
   if (authenticationRequired) {
-    return <main className="auth-screen"><div className="auth-card"><span className="eyebrow">BroBot Panel</span><h1>Anmeldung erforderlich</h1><p>Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.</p><a className="button" href="/auth/login">Mit Twitch anmelden</a></div></main>;
+    return <main className="auth-screen"><div className="auth-card"><h1>Anmeldung erforderlich</h1><p>Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.</p><a className="button" href="/auth/login">Mit Twitch anmelden</a></div></main>;
   }
 
   return (
