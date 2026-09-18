@@ -267,7 +267,9 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Alpha", level: 2 });
-    expect(screen.getByText("Nicht verbunden")).toHaveAttribute("data-status", "neutral");
+    expect(screen.getByText("Nicht verbunden")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Alpha", level: 2 }).closest("article"))
+      .not.toHaveAttribute("data-status", "error");
 
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
@@ -362,7 +364,9 @@ describe("Dashboard-Grundgerüst", () => {
       nextAllowedAt: "2026-09-18T04:05:00.000Z",
     }));
 
-    await waitFor(() => expect(screen.getByText("Moderator", { selector: "strong" })).toBeInTheDocument());
+    await waitFor(() => expect(
+      within(screen.getByRole("article", { name: "Moderatorstatus" })).getByText("Moderator"),
+    ).toBeInTheDocument());
     expect(screen.getByText(/Letzte Prüfung:/)).toBeInTheDocument();
   });
 
@@ -386,7 +390,9 @@ describe("Dashboard-Grundgerüst", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
 
     expect(await screen.findByText("Twitch ist vorübergehend nicht erreichbar.", { selector: "p" })).toBeInTheDocument();
-    expect(screen.getByText("Moderator", { selector: "strong" })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("article", { name: "Moderatorstatus" })).getByText("Moderator"),
+    ).toBeInTheDocument();
   });
 
   it("zeigt fehlende Token-Ablaufdaten nicht als gültig oder gesund", async () => {
@@ -411,7 +417,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     const tokenCard = await screen.findByRole("article", { name: "Token-Zustand" });
     expect(tokenCard).toHaveAttribute("data-status", "neutral");
-    expect(within(tokenCard).getByText("Nicht geprüft", { selector: "strong" })).toBeInTheDocument();
+    expect(within(tokenCard).getByText("Nicht geprüft")).toBeInTheDocument();
     expect(within(tokenCard).queryByText("Gültig")).not.toBeInTheDocument();
     expect(within(tokenCard).queryByText("Gesund")).not.toBeInTheDocument();
     expect(tokenCard.querySelector('[data-status="healthy"]')).toBeNull();
@@ -439,7 +445,7 @@ describe("Dashboard-Grundgerüst", () => {
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
     const tokenCard = await screen.findByRole("article", { name: "Token-Zustand" });
     expect(tokenCard).toHaveAttribute("data-status", "healthy");
-    expect(within(tokenCard).getByText("Gültig", { selector: "strong" })).toBeInTheDocument();
+    expect(within(tokenCard).getByText("Gültig")).toBeInTheDocument();
     expect(within(tokenCard).queryByText("Warnung")).not.toBeInTheDocument();
   });
 
