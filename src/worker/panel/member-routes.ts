@@ -241,7 +241,13 @@ memberRouter.get("/api/channels/:channelId/members", async (context) => {
   if (serializedCursor !== undefined && cursor === null) return context.text("Mitglieder-Cursor ist ungültig.", 400);
   const page = await listChannelMembers(context.env.DB, channelId, limit, cursor);
   const names = await fetchTwitchUsersById(fetch, context.env, page.members.map((member) => member.userId));
-  return context.json({ members: page.members.map((member) => memberResponseWithNames(member, names)), nextCursor: page.nextCursor });
+  const broadcasterCount = await countBroadcasterMembers(context.env.DB, channelId);
+  return context.json({
+    members: page.members.map((member) => memberResponseWithNames(member, names)),
+    nextCursor: page.nextCursor,
+    broadcasterCount,
+    viewerUserId: context.get("session").userId,
+  });
 });
 
 memberRouter.get("/api/channels/:channelId/members/search", async (context) => {
