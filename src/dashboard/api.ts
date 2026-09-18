@@ -15,8 +15,40 @@ export class PanelApiError extends Error {
   }
 }
 
-const requestJson = async <T>(input: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(input, { ...init, credentials: "same-origin" });
+const hasParentPathSegment = (input: string): boolean => {
+  const pathEnd = input.search(/[?#]/);
+  const path = pathEnd === -1 ? input : input.slice(0, pathEnd);
+  return path.split("/").some((segment) => {
+    try {
+      return decodeURIComponent(segment) === "..";
+    } catch {
+      return false;
+    }
+  });
+};
+
+const isAllowedRequestPath = (pathname: string): boolean =>
+  pathname === "/api/channels" ||
+  pathname.startsWith("/api/channels/") ||
+  pathname === "/api/csrf" ||
+  pathname === "/auth/logout";
+
+const resolveRequestUrl = (input: string): URL => {
+  let url: URL;
+  try {
+    url = new URL(input, window.location.origin);
+  } catch {
+    throw new PanelApiError(400, "Die Panel-Anfrage ist nicht erlaubt.");
+  }
+  if (url.origin !== window.location.origin || hasParentPathSegment(input) || !isAllowedRequestPath(url.pathname)) {
+    throw new PanelApiError(400, "Die Panel-Anfrage ist nicht erlaubt.");
+  }
+  return url;
+};
+
+export const requestJson = async <T>(input: string, init?: RequestInit): Promise<T> => {
+  const url = resolveRequestUrl(input);
+  const response = await fetch(url, { ...init, credentials: "same-origin" });
   if (!response.ok) {
     const message = (await response.text()) || "Die Panel-Anfrage ist fehlgeschlagen.";
     throw new PanelApiError(response.status, message);
