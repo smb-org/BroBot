@@ -25,7 +25,7 @@
    gelesen. Für `OVERLAY_TOKEN_PEPPER` einen einzelnen, getrennten Wert und
    für die übrigen Variablen echte Betreiber-Secrets festlegen. Die
    Beispieldateien zeigen die genaue JSON-Struktur.
-4. Für lokal `.dev.vars.example` nach `.dev.vars` kopieren und die Platzhalter ersetzen. Für Staging und Production `.env.staging` beziehungsweise `.env.production` aus dem sicheren Betreiber-Backup bereitstellen.
+4. Für lokal `.dev.vars.example` nach `.dev.vars` kopieren und die Platzhalter ersetzen. Die produktiven Staging- und Production-Secrets werden einmalig mit `wrangler secret put` in Cloudflare gesetzt. `.env.staging` und `.env.production` bleiben nur als sicherer Betreiberbestand für den ausdrücklich benannten lokalen Notfallweg erhalten.
 5. Einen neuen Kanal gibt der Betreiber frei, indem er ihn in `channels` anlegt
    und den Broadcaster in `channel_members` einträgt. Der Bot wird anschließend
    als reine Twitch-Aktion gemoddet. Der Betreiber autorisiert den Bot einmal
@@ -142,7 +142,7 @@ Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` doku
 | `TIMEZONE` | IANA-Zeitzone, zum Beispiel `Europe/Berlin` |
 | `TWITCH_BOT_LOGIN` | Öffentlicher Twitch-Login des einzigen Bot-Accounts; der Bot-Callback akzeptiert keine andere Identität |
 
-**Secrets** (nur als Namen unter `secrets.required` in `wrangler.jsonc`; Werte kommen aus `.dev.vars` beziehungsweise `.env.staging`/`.env.production`):
+**Secrets** (nur als Namen unter `secrets.required` in `wrangler.jsonc`; produktive Werte liegen als Secret-Bindings in Cloudflare, lokal kommen sie aus `.dev.vars`):
 
 | Name | Bedeutung | Format |
 |---|---|---|
@@ -164,6 +164,51 @@ Bei `SESSION_COOKIE_KEYS`, `SESSION_ENCRYPTION_KEYS` und
 `active` neu. Ein Eintrag unter `retired` bleibt so lange erhalten, bis keine
 alten Cookies oder EventSub-Abonnements mehr existieren. Die Rotation wird
 danach durch Entfernen des alten Eintrags abgeschlossen.
+
+### Cloudflare-Secrets, CI und GitHub
+
+Die sieben Anwendungs-Secrets werden je Umgebung einmalig beziehungsweise bei
+einer Rotation direkt in Cloudflare gepflegt. `wrangler secret put` fragt den
+Wert interaktiv ab; Secret-Werte nicht in Befehlszeilen, Shell-Historien oder
+Logs schreiben:
+
+```bash
+for environment in staging production; do
+  for name in \
+    TWITCH_CLIENT_ID \
+    TWITCH_CLIENT_SECRET \
+    TWITCH_EVENTSUB_SECRET \
+    PUBLIC_ORIGIN \
+    SESSION_COOKIE_KEYS \
+    SESSION_ENCRYPTION_KEYS \
+    OVERLAY_TOKEN_PEPPER; do
+    pnpm exec wrangler secret put "$name" --env "$environment"
+  done
+done
+```
+
+Für eine Rotation genügt derselbe Befehl für das betroffene Secret. Bei einem
+Schlüsselring den neuen Schlüssel als `active` setzen und den bisherigen
+Schlüssel zunächst unter `retired` behalten; erst nach Ablauf der Übergangszeit
+den alten Eintrag entfernen. Der CI-Deploy überträgt ausschließlich den Code:
+Er verwendet weder `--secrets-file` noch `wrangler secret put` und benötigt
+keine `.env.staging`- oder `.env.production`-Datei. `/healthz` schlägt nach dem
+Deploy fehl, wenn ein erwartetes Secret oder Binding in Cloudflare fehlt.
+
+Für den CI-Deploy werden in GitHub nur folgende Werte hinterlegt:
+
+- Repository-Variable `CLOUDFLARE_ACCOUNT_ID` mit der Cloudflare-Account-ID.
+- Repository-Secret `CLOUDFLARE_API_TOKEN` mit einem auf diesen Account
+  beschränkten API-Token.
+
+Der Token braucht nur die Account-Berechtigung **Workers Scripts: Edit** für
+Worker-Deployments. Er braucht für den CI-Deploy keine D1-, KV-, R2- oder
+DNS-Berechtigung; Datenbankmigrationen und Anwendungs-Secrets werden nicht von
+der CI-Strecke verändert. In GitHub unter **Settings → Environments** die
+Umgebung `production` anlegen und dort unter **Required reviewers** die
+Freigabepflicht konfigurieren. Der Production-Job ist ausschließlich über
+`workflow_dispatch` von `main` startbar und wartet vor dem Deploy auf diese
+Freigabe.
 
 **Bindings** (keine Umgebungsvariablen, sondern Cloudflare-Ressourcen aus `wrangler.jsonc`):
 
@@ -203,7 +248,10 @@ Vor dem ersten Rollout dieser Version die D1-Migrationen in jeder Zielumgebung
 anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
 Session-, OAuth- und Token-Tabellen, `0002` die feste Rollenmenge sowie das
 Audit-Log, `0003` die Overlay-Token-Tabelle und `0004` die kanalbezogene
-Sperre für manuelle Moderatorstatus-Prüfungen anlegen:
+Sperre für manuelle Moderatorstatus-Prüfungen anlegen. Die GitHub-Workflows
+wenden niemals Migrationen automatisch an. Bei jedem Release gilt: Wenn der
+Code eine noch nicht angewandte Migration voraussetzt, muss sie vor dem Deploy
+von Hand in der jeweiligen Zielumgebung laufen:
 
 ```bash
 pnpm exec wrangler d1 migrations apply brobot-local
@@ -215,14 +263,27 @@ Bei späteren Releases gilt dieselbe Reihenfolge: Migration anwenden, danach
 den Worker deployen. Die Befehle verändern ausschließlich die angegebene D1-
 Datenbank; die Betreiberdateien mit Secrets werden dabei nicht gelesen.
 
-Staging und Production werden lokal mit den jeweiligen Betreiberdateien ausgerollt:
+Staging und Production werden im Normalfall durch GitHub deployed: Staging nach
+einem erfolgreichen `quality`-Job bei einem Push auf `main`, Production nur
+manuell über `workflow_dispatch` nach der Freigabe der GitHub-Umgebung
+`production`. Beide CI-Skripte deployen code-only und bringen keine
+Anwendungs-Secrets mit.
+
+Für Erstsetzen der Cloudflare-Secrets sowie für Notfälle bleibt der lokale Weg
+mit den sicheren Betreiberdateien erhalten:
 
 ```bash
-pnpm run deploy:staging
-pnpm run deploy:production
+pnpm run deploy:staging:local-with-secrets
+pnpm run deploy:production:local-with-secrets
 ```
 
-Die Skripte prüfen vor dem Deploy Umgebung, Worker-Namen, `APP_ENV`, Secret-Namen und Platzhalter. Sie verwenden die vollständige Wrangler-Umgebung; `env.*` erbt Bindings nicht automatisch.
+Diese beiden Skripte prüfen vor dem Deploy Umgebung, Worker-Namen, `APP_ENV`,
+Secret-Namen und Platzhalter und übergeben ausnahmsweise mit
+`--secrets-file` alle sieben Werte. Die `.env`-Dateien bleiben außerhalb des
+Repositories. Die CI-Skripte heißen ausdrücklich
+`deploy:staging:ci-code-only` und `deploy:production:ci-code-only`; sie
+verwenden keine Secret-Datei. Beide Wege verwenden die vollständige Wrangler-
+Umgebung; `env.*` erbt Bindings nicht automatisch.
 
 Nach einem Deploy prüfen:
 
@@ -270,7 +331,12 @@ Moderated Channels und speichert den Moderatorstatus je freigegebenem Kanal.
 
 ## Secret-Rotation
 
-Eine Rotation erfolgt durch Aktualisieren der sicheren Betreiberdatei und erneutes Ausführen des passenden Deploy-Skripts. Cookie-, Verschlüsselungs- und Overlay-Schlüssel getrennt erzeugen. Der bisherige Wert darf weder in Logs noch in Tickets oder Git landen. Vor dem Rotieren sicherstellen, dass die neue Datei im Betreiber-Backup gesichert ist.
+Eine Rotation erfolgt grundsätzlich mit `wrangler secret put` direkt in der
+betroffenen Cloudflare-Umgebung. Cookie-, Verschlüsselungs- und Overlay-
+Schlüssel getrennt erzeugen und den bisherigen Wert wie oben beschrieben als
+`retired` behalten. Der bisherige Wert darf weder in Logs noch in Tickets oder
+Git landen. Der lokale Deploy mit `--secrets-file` ist nur der dokumentierte
+Notfall- und Erstsetzungsweg.
 
 `.env.staging` und `.env.production` sind ignoriert und werden aus dem Betreiber-Backup bereitgestellt. Ihre Inhalte gehören niemals in Terminalausgaben, Tickets, Pull Requests oder das Repository. Gleiches gilt für `.dev.vars`.
 
