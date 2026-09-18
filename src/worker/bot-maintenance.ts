@@ -1,0 +1,339 @@
+import {
+  getBotIdentity,
+  getBotIdentityStatus,
+  listChannelIds,
+  purgeExpiredOAuthTransactions,
+  setBotChannelStatus,
+  setBotIdentityStatusIfCurrent,
+  rotateBotTokens,
+} from "./auth/repository";
+import { decryptJson, encryptJson, parseKeyRing } from "./auth/crypto";
+
+export interface TwitchClientEnvironment {
+  TWITCH_CLIENT_ID: string;
+  TWITCH_CLIENT_SECRET: string;
+}
+
+export interface RefreshedBotToken {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  scopes: string[];
+}
+
+export interface ValidatedBotToken {
+  userId: string;
+  login: string;
+  expiresIn: number;
+}
+
+export class TwitchApiError extends Error {
+  public readonly status: number;
+  public readonly code: string | null;
+
+  public constructor(message: string, status: number, code: string | null = null) {
+    super(message);
+    this.name = "TwitchApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+const isFinitePositiveNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
+const responseJson = async (response: Response): Promise<Record<string, unknown>> => {
+  try {
+    const body: unknown = await response.json();
+    return body !== null && typeof body === "object" && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+export const shouldRefreshBotToken = (expiresAt: string, now: string): boolean =>
+  Date.parse(expiresAt) <= Date.parse(now) + 60 * 60 * 1000;
+
+export const refreshBotToken = async (
+  fetcher: typeof fetch,
+  environment: TwitchClientEnvironment,
+  refreshToken: string,
+): Promise<RefreshedBotToken> => {
+  const response = await fetcher("https://id.twitch.tv/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: environment.TWITCH_CLIENT_ID,
+      client_secret: environment.TWITCH_CLIENT_SECRET,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+  const body = await responseJson(response);
+  if (!response.ok || typeof body.access_token !== "string" || body.access_token.length === 0 ||
+      typeof body.refresh_token !== "string" || body.refresh_token.length === 0 ||
+      !isFinitePositiveNumber(body.expires_in)) {
+    throw new TwitchApiError(
+      "Twitch-Refresh wurde abgelehnt.",
+      response.status,
+      typeof body.error === "string" ? body.error : null,
+    );
+  }
+  const scopes = Array.isArray(body.scope)
+    ? body.scope.map((scope: unknown) => scope).filter((scope): scope is string => typeof scope === "string")
+    : [];
+  return {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token,
+    expiresIn: body.expires_in,
+    scopes,
+  };
+};
+
+export const validateBotToken = async (
+  fetcher: typeof fetch,
+  environment: TwitchClientEnvironment,
+  accessToken: string,
+): Promise<ValidatedBotToken> => {
+  const response = await fetcher("https://id.twitch.tv/oauth2/validate", {
+    headers: { Authorization: `OAuth ${accessToken}` },
+  });
+  const body = await responseJson(response);
+  if (!response.ok || typeof body.user_id !== "string" || typeof body.login !== "string" ||
+      !isFinitePositiveNumber(body.expires_in)) {
+    throw new TwitchApiError(
+      "Twitch-Token ist ungültig.",
+      response.status,
+      typeof body.error === "string" ? body.error : null,
+    );
+  }
+  if (typeof body.client_id === "string" && body.client_id !== environment.TWITCH_CLIENT_ID) {
+    throw new TwitchApiError("Twitch-Token gehört zu einer anderen Anwendung.", 502);
+  }
+  return { userId: body.user_id, login: body.login, expiresIn: body.expires_in };
+};
+
+export const fetchModeratedChannels = async (
+  fetcher: typeof fetch,
+  clientId: string,
+  userId: string,
+  accessToken: string,
+): Promise<string[]> => {
+  const seenCursors = new Set<string>();
+  const fetchPage = async (cursor: string | null): Promise<string[]> => {
+    const url = new URL("https://api.twitch.tv/helix/moderation/channels");
+    url.searchParams.set("user_id", userId);
+    url.searchParams.set("first", "100");
+    if (cursor !== null) url.searchParams.set("after", cursor);
+    const response = await fetcher(url.toString(), {
+      headers: {
+        "Client-ID": clientId,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const body = await responseJson(response);
+    if (!response.ok || !Array.isArray(body.data)) {
+      throw new TwitchApiError("Moderatorstatus konnte nicht gelesen werden.", response.status);
+    }
+    const data: unknown[] = body.data.map((entry: unknown): unknown => entry);
+    const pagination = body.pagination;
+    const nextCursor = pagination !== null && typeof pagination === "object" &&
+      "cursor" in pagination && typeof pagination.cursor === "string" && pagination.cursor.length > 0
+      ? pagination.cursor
+      : null;
+    const channelIds: string[] = data.flatMap((entry: unknown) => {
+      if (entry !== null && typeof entry === "object" &&
+          "broadcaster_id" in entry && typeof entry.broadcaster_id === "string") {
+        return [entry.broadcaster_id];
+      }
+      return [];
+    });
+    if (nextCursor === null) return channelIds;
+    if (seenCursors.has(nextCursor)) {
+      throw new TwitchApiError("Twitch liefert einen wiederholten Pagination-Cursor.", 502);
+    }
+    seenCursors.add(nextCursor);
+    return channelIds.concat(await fetchPage(nextCursor));
+  };
+
+  return fetchPage(null);
+};
+
+export const decryptStoredToken = async (ciphertext: string, keys: string): Promise<string | null> => {
+  const value = await decryptJson<{ token: string }>(ciphertext, parseKeyRing(keys));
+  return value !== null && typeof value.token === "string" && value.token.length > 0 ? value.token : null;
+};
+
+const rotateBotTokensWithRetry = async (
+  db: D1Database,
+  expectedAccessTokenCiphertext: string,
+  expectedRefreshTokenCiphertext: string,
+  accessTokenCiphertext: string,
+  refreshTokenCiphertext: string,
+  expiresAt: string,
+  updatedAt: string,
+): Promise<boolean> => {
+  try {
+    return await rotateBotTokens(
+      db,
+      expectedAccessTokenCiphertext,
+      expectedRefreshTokenCiphertext,
+      accessTokenCiphertext,
+      refreshTokenCiphertext,
+      expiresAt,
+      updatedAt,
+    );
+  } catch (firstError: unknown) {
+    try {
+      return await rotateBotTokens(
+        db,
+        expectedAccessTokenCiphertext,
+        expectedRefreshTokenCiphertext,
+        accessTokenCiphertext,
+        refreshTokenCiphertext,
+        expiresAt,
+        updatedAt,
+      );
+    } catch {
+      throw firstError;
+    }
+  }
+};
+
+const isInvalidGrant = (error: unknown): boolean =>
+  error instanceof TwitchApiError && error.code === "invalid_grant";
+
+const refreshFailureReason = (error: unknown): string =>
+  error instanceof TwitchApiError && error.code !== null ? error.code : "refresh_failed";
+
+export const maintainBotIdentity = async (
+  env: Env,
+  now: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> => {
+  await purgeExpiredOAuthTransactions(env.DB, now);
+  const status = await getBotIdentityStatus(env.DB);
+  if (status?.status === "revoked") return;
+  const identity = await getBotIdentity(env.DB);
+  if (identity === null) return;
+
+  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, env.SESSION_ENCRYPTION_KEYS);
+  const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, env.SESSION_ENCRYPTION_KEYS);
+  if (accessToken === null || refreshToken === null) {
+    await setBotIdentityStatusIfCurrent(
+      env.DB,
+      "error",
+      "Token-Ciphertext konnte nicht gelesen werden.",
+      now,
+      identity.accessTokenCiphertext,
+      identity.refreshTokenCiphertext,
+    );
+    return;
+  }
+
+  const tokenIsExpiring = shouldRefreshBotToken(identity.expiresAt, now);
+  let validateReturned401 = false;
+  let currentStatus: ValidatedBotToken;
+  try {
+    currentStatus = await validateBotToken(fetcher, env, accessToken);
+  } catch (error: unknown) {
+    if (error instanceof TwitchApiError && error.status === 401) {
+      currentStatus = { userId: identity.userId, login: identity.login, expiresIn: 0 };
+      validateReturned401 = true;
+    } else {
+      await setBotIdentityStatusIfCurrent(
+        env.DB,
+        "error",
+        "validate_failed",
+        now,
+        identity.accessTokenCiphertext,
+        identity.refreshTokenCiphertext,
+      );
+      return;
+    }
+  }
+
+  let currentAccessToken = accessToken;
+  let statusExpectedAccessTokenCiphertext = identity.accessTokenCiphertext;
+  let statusExpectedRefreshTokenCiphertext = identity.refreshTokenCiphertext;
+  if (tokenIsExpiring || validateReturned401) {
+    try {
+      const refreshed = await refreshBotToken(fetcher, env, refreshToken);
+      const expiresAt = new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString();
+      const accessTokenCiphertext = await encryptJson(
+        { token: refreshed.accessToken },
+        parseKeyRing(env.SESSION_ENCRYPTION_KEYS),
+      );
+      const refreshTokenCiphertext = await encryptJson(
+        { token: refreshed.refreshToken },
+        parseKeyRing(env.SESSION_ENCRYPTION_KEYS),
+      );
+      const replaced = await rotateBotTokensWithRetry(
+        env.DB,
+        identity.accessTokenCiphertext,
+        identity.refreshTokenCiphertext,
+        accessTokenCiphertext,
+        refreshTokenCiphertext,
+        expiresAt,
+        now,
+      );
+      if (!replaced) return;
+      currentAccessToken = refreshed.accessToken;
+      statusExpectedAccessTokenCiphertext = accessTokenCiphertext;
+      statusExpectedRefreshTokenCiphertext = refreshTokenCiphertext;
+    } catch (error: unknown) {
+      if (isInvalidGrant(error)) {
+        await setBotIdentityStatusIfCurrent(
+          env.DB,
+          "revoked",
+          "authorization_revoked",
+          now,
+          identity.accessTokenCiphertext,
+          identity.refreshTokenCiphertext,
+        );
+      } else {
+        await setBotIdentityStatusIfCurrent(
+          env.DB,
+          "error",
+          refreshFailureReason(error),
+          now,
+          identity.accessTokenCiphertext,
+          identity.refreshTokenCiphertext,
+        );
+      }
+      return;
+    }
+  }
+
+  const channelIds = await listChannelIds(env.DB);
+  try {
+    const moderatedChannels = new Set(await fetchModeratedChannels(
+      fetcher,
+      env.TWITCH_CLIENT_ID,
+      currentStatus.userId,
+      currentAccessToken,
+    ));
+    await Promise.all(channelIds.map((channelId) =>
+      setBotChannelStatus(env.DB, channelId, moderatedChannels.has(channelId), now, null)));
+    await setBotIdentityStatusIfCurrent(
+      env.DB,
+      "connected",
+      null,
+      now,
+      statusExpectedAccessTokenCiphertext,
+      statusExpectedRefreshTokenCiphertext,
+    );
+  } catch (error: unknown) {
+    const reason = error instanceof TwitchApiError ? "moderator_status_failed" : "maintenance_failed";
+    await setBotIdentityStatusIfCurrent(
+      env.DB,
+      "error",
+      reason,
+      now,
+      statusExpectedAccessTokenCiphertext,
+      statusExpectedRefreshTokenCiphertext,
+    );
+  }
+};

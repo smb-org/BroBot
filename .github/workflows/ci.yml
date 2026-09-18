@@ -25,9 +25,9 @@ jobs:
         run: |
           key() { openssl rand -base64 32 | tr '+/' '-_' | tr -d '='; }
           sed -e "s|^TWITCH_CLIENT_SECRET=.*|TWITCH_CLIENT_SECRET=local-twitch-client-secret|" \
-              -e "s|^TWITCH_EVENTSUB_SECRET=.*|TWITCH_EVENTSUB_SECRET=local-twitch-eventsub-secret|" \
-              -e "s|^SESSION_ENCRYPTION_KEYS=.*|SESSION_ENCRYPTION_KEYS={\"active\":{\"id\":\"ci-encryption-v1\",\"key\":\"$(key)\"}}|" \
-              -e "s|^SESSION_COOKIE_KEYS=.*|SESSION_COOKIE_KEYS={\"active\":{\"id\":\"ci-cookie-v1\",\"key\":\"$(key)\"}}|" \
+              -e "s|^TWITCH_EVENTSUB_SECRET=.*|TWITCH_EVENTSUB_SECRET={\"active\":{\"id\":\"ci-eventsub-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^SESSION_ENCRYPTION_KEYS=.*|SESSION_ENCRYPTION_KEYS={\"active\":{\"id\":\"ci-encryption-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^SESSION_COOKIE_KEYS=.*|SESSION_COOKIE_KEYS={\"active\":{\"id\":\"ci-cookie-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
               -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
               .dev.vars.example > .dev.vars
       - run: pnpm run check
