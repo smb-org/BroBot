@@ -27,13 +27,37 @@
   --grund: #0a0c10;
   --rail: #0d1016;
   --erhoben: #0e1218;
-  --linie: #1b1f27;
-  --linie-stark: #272c36;
+  --linie: #1b1f27;        /* gliedert innerhalb eines Blocks */
+  --linie-stark: #272c36;  /* trennt Bloecke */
   --linie-hell: #414a5a;
 
-  --text: #e6e9ef;
-  --text-2: #98a0ae;
+  /* Vier Textstufen statt zwei. Zwei Stufen sind das sicherste Anzeichen
+     eines unfertigen Grau-Entwurfs: Kanalnamen und Fehlerursachen duerfen
+     nicht im selben schwachen Grau stehen wie Metadaten. */
+  --text: #e3e7ed;
+  --text-2: #a2abb8;
   --text-3: #7d8595;
+  --text-4: #5f6773;
+
+  /* Markenfarbe. Sie markiert NIE Wichtigkeit, sondern ausschliesslich den
+     Ort des Bedieners: aktiver Navigationseintrag, primaere Aktion, gewaehlte
+     Zeile, sortierte Spalte, Fokusring, Verknuepfung. Das System spricht nie
+     in Markenfarbe — es spricht in Grau und in den Zustandsfarben. Dadurch
+     kollidieren die beiden Rollen strukturell nicht, nicht nur farbmetrisch.
+
+     Blau statt Violett, weil BroBot die Oberflaeche fuer mehrere Kanaele ist
+     und neben Twitch als eigenes Werkzeug erkennbar bleiben soll. */
+  --marke: #538dcc;
+  --marke-hover: #659cd7;
+  --marke-press: #4c80bc;
+  --marke-text: #9bc3ed;
+  --marke-linie: #60758c;
+  --marke-auf: #0a0c10;
+  /* Getoente Flaechen tragen Farbe ueber grosse Flaeche, aber so entsaettigt,
+     dass niemand sie als Farbe benennt. Man liest sie als Material. Genau
+     daher kommt der Unterschied zwischen asketisch und souveraen. */
+  --tint-1: #172638;
+  --tint-2: #14202e;
 
   /* Die einzigen Farben im System. Alle drei bedeuten Zustand. */
   --warn: #d9a441;
@@ -67,8 +91,8 @@ a { color: inherit; }
 h1, h2, h3, p { margin-top: 0; }
 
 /* Browser-Oberflaechen gehoeren zum Entwurf, auch die nicht gezeichneten. */
-::selection { background: #2b3442; color: #fff; }
-:focus-visible { outline: 2px solid var(--text-2); outline-offset: 2px; border-radius: var(--r-control); }
+::selection { background: var(--tint-1); color: #fff; }
+:focus-visible { outline: 2px solid var(--marke-text); outline-offset: 2px; border-radius: var(--r-control); }
 ::placeholder { color: var(--text-3); opacity: 1; }
 * { scrollbar-color: var(--linie-stark) transparent; scrollbar-width: thin; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -119,7 +143,7 @@ select:hover { border-color: var(--linie-hell); }
   transition: background .15s ease, color .15s ease;
 }
 .nav-link:hover { color: var(--text); background: #12161d; }
-.nav-link--active { color: var(--text); background: #141922; border-left-color: var(--text); }
+.nav-link--active { color: var(--marke-text); background: var(--tint-1); border-left-color: var(--marke-linie); }
 /* Zustandspunkt in der Navigation: das Problem ist sichtbar, bevor man klickt.
    Er traegt zusaetzlich einen Text fuer Hilfsmittel, damit Farbe nie allein informiert. */
 .nav-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
@@ -131,8 +155,12 @@ select:hover { border-color: var(--linie-hell); }
   margin-top: auto; color: var(--text-3); font-size: 12px;
 }
 .sidebar__footer .button { padding-left: 0; padding-right: var(--s2); }
-.login-link { color: var(--text-2); text-decoration: none; }
-.login-link:hover { color: var(--text); text-decoration: underline; }
+.login-link, .member-profile-link {
+  color: var(--marke-text); text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--marke-text) 40%, transparent);
+  text-underline-offset: 2px;
+}
+.login-link:hover, .member-profile-link:hover { text-decoration-color: currentColor; }
 
 .main-content { width: min(1120px, 100%); padding: var(--s6) var(--s10) var(--s12); }
 
@@ -184,7 +212,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .status-card__heading { grid-column: 2; padding: var(--s3) var(--s4); display: grid; gap: 2px; min-width: 0; }
 .status-card strong { display: block; font-size: 13.5px; font-weight: 600; }
 .status-card p { margin: 0; color: var(--text-2); font-size: 12.5px; }
-.status-card__detail { color: var(--text-3); font-size: 12px; }
+.status-card__detail { color: var(--text-4); font-size: 12px; }
 .status-card[data-status="warning"] p { color: var(--warn); }
 .status-card[data-status="error"] p { color: var(--fehler); }
 .status-card[data-status="warning"] .status-card__detail,
@@ -230,7 +258,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 
 .compact-list { grid-column: 2; display: grid; gap: var(--s2); margin: 0; padding: 0 var(--s4) var(--s3); }
 .compact-list div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
-.compact-list dt { color: var(--text-3); font-size: 12px; }
+.compact-list dt { color: var(--text-4); font-size: 12px; }
 .compact-list dd { margin: 0; color: var(--text-2); font-size: 12.5px; text-align: right; }
 
 /* ── Tabellen ────────────────────────────────────────────
@@ -244,10 +272,15 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
   text-align: left; vertical-align: middle; font-size: 13.5px;
 }
 .member-table thead th {
-  padding-top: 0; padding-bottom: var(--s2);
+  padding: var(--s2) var(--s3);
+  background: var(--tint-1); border-bottom: 1px solid var(--linie-stark);
   color: var(--text-3); font-size: 11px; font-weight: 650;
   letter-spacing: .07em; text-transform: uppercase;
 }
+.member-table thead th[aria-sort] { color: var(--marke-text); }
+.member-table tbody tr[aria-selected="true"] td,
+.member-table tbody tr[aria-selected="true"] th { background: var(--tint-2); }
+.member-table tbody tr[aria-selected="true"] > *:first-child { box-shadow: inset 2px 0 0 var(--marke-linie); }
 .member-table tbody tr:last-child td, .member-table tbody tr:last-child th { border-bottom: 0; }
 .member-table tbody tr:hover { background: var(--erhoben); }
 .member-table tbody th { font-weight: 600; }
@@ -273,15 +306,16 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .button:active { background: #141922; }
 .button:disabled { cursor: not-allowed; opacity: .5; }
 .button--primary,
-.page-heading__actions .button,
 .member-search-result .button,
 .auth-card .button {
-  color: var(--grund); background: var(--text); border-color: var(--text); font-weight: 600;
+  color: var(--marke-auf); background: var(--marke); border-color: var(--marke); font-weight: 600;
 }
 .button--primary:hover,
-.page-heading__actions .button:hover,
 .member-search-result .button:hover,
-.auth-card .button:hover { background: #fff; border-color: #fff; }
+.auth-card .button:hover { background: var(--marke-hover); border-color: var(--marke-hover); }
+.button--primary:active,
+.member-search-result .button:active,
+.auth-card .button:active { background: var(--marke-press); border-color: var(--marke-press); }
 .button--secondary { margin-top: var(--s4); }
 .button--quiet {
   width: auto; border-color: transparent; background: none;
@@ -294,6 +328,13 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 
 .moderator-check-action { display: grid; gap: var(--s1); justify-items: end; }
 .moderator-check-time { font-size: 11.5px; }
+
+/* Der letzte bekannte Wert bleibt stehen, statt durch einen Schimmer ersetzt
+   zu werden: Bewegung im Augenwinkel sieht neben einem laufenden Stream wie
+   eine Aenderung aus. Das ist die teuerste Fehlinterpretation, die es hier
+   gibt. */
+.veraltet { opacity: .55; }
+.datenalter { color: var(--text-4); font-size: 11px; }
 
 /* ── Formulare ───────────────────────────────────────────── */
 
