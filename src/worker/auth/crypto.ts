@@ -34,6 +34,15 @@ const decodeBase64url = (value: string): Uint8Array<ArrayBuffer> => {
   return bytes;
 };
 
+export const isBase64url32Byte = (value: string): boolean => {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(value)) return false;
+  try {
+    return decodeBase64url(value).byteLength === 32;
+  } catch {
+    return false;
+  }
+};
+
 const encodeBase64url = (value: ArrayBuffer | Uint8Array): string => {
   const bytes = ArrayBuffer.isView(value)
     ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
@@ -59,7 +68,7 @@ const decodeJson = (value: string): unknown => {
 
 const validateKeyEntry = (value: unknown): KeyEntry => {
   if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 ||
-      typeof value.key !== "string" || decodeBase64url(value.key).byteLength !== 32) {
+      typeof value.key !== "string" || !isBase64url32Byte(value.key)) {
     throw new Error("Schlüsselring enthält einen ungültigen Schlüssel.");
   }
   return { id: value.id, key: value.key };
@@ -90,6 +99,20 @@ const importAesKey = async (entry: KeyEntry): Promise<CryptoKey> =>
 
 const importHmacKey = async (entry: KeyEntry): Promise<CryptoKey> =>
   crypto.subtle.importKey("raw", toArrayBuffer(decodeBase64url(entry.key)), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+
+export const hashOverlayToken = async (token: string, pepper: string): Promise<string> => {
+  const pepperBytes = decodeBase64url(pepper);
+  if (pepperBytes.byteLength !== 32) throw new Error("Overlay-Pepper muss 32 Byte lang sein.");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(pepperBytes),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const hash = await crypto.subtle.sign("HMAC", key, toArrayBuffer(encoder.encode(token)));
+  return encodeBase64url(hash);
+};
 
 export const encryptJson = async (value: unknown, keys: KeyRing): Promise<string> => {
   const iv = new Uint8Array(new ArrayBuffer(12));
