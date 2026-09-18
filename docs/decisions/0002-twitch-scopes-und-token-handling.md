@@ -138,7 +138,9 @@ Wer nie schreibt, fehlt in dieser Liste — das ist hinnehmbar, weil #16 ohnehin
 
 **Kein PKCE.** Twitch unterstützt es nicht: Weder `code_challenge` noch `code_challenge_method` noch `code_verifier` kommen in der Authentifizierungs-Doku oder im Changelog vor, und im Entwicklerforum ist es mehrfach bestätigt — zuletzt bestätigt durch einen Nutzerbeitrag im Januar 2026. Feature-Requests dafür laufen seit 2019 ins Leere. Der Authorization-Code-Flow verlangt bei Twitch zwingend das Client-Secret; als CSRF-Schutz nennt die Doku ausschließlich den `state`-Parameter.
 
-Wir schicken deshalb keine PKCE-Parameter mit — sie wären wirkungslos, und ihr Verhalten ist nicht dokumentiert. Geschützt wird der Flow durch den signierten, kurzlebigen `state` und eine serverseitige Einmal-Transaktion, die beim Callback atomar verbraucht wird.
+Wir schicken deshalb keine PKCE-Parameter mit — sie wären wirkungslos, und ihr Verhalten ist nicht dokumentiert. Geschützt wird der Flow durch den signierten, kurzlebigen `state`, eine serverseitige Einmal-Transaktion, die beim Callback atomar verbraucht wird, und eine Bindung des `state` an den Browser.
+
+Diese Bindung ist kein Zusatz, sondern Voraussetzung: Ein signierter `state` allein schützt nur gegen Wiederholung, nicht gegen Unterschieben. Ein Angreifer kann seinen eigenen Login starten, die noch unverbrauchte Callback-URL abfangen und das Opfer darauf schicken — ohne Bindung ist das Opfer danach als Angreifer angemeldet. Der `state` trägt deshalb einen Nonce, dessen Gegenstück in einem kurzlebigen `__Host-`-Cookie nur im startenden Browser liegt; der Callback verlangt beides und verbraucht das Cookie in jedem Fall.
 
 ### Erneuerung
 

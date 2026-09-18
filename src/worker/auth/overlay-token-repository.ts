@@ -1,3 +1,10 @@
+import {
+  ANY_MEMBER_ROLES,
+  actorGuard,
+  bindActorGuard,
+  type ActorContext,
+} from "./repository";
+
 export interface NewOverlayTokenRecord {
   tokenId: string;
   channelId: string;
@@ -47,15 +54,26 @@ const overlayTokenReturningColumns = `
   token_id, channel_id, token_hash, expires_at, created_at,
   revoked_at, revocation_reason, last_used_at`;
 
+/**
+ * Zwischen dem Guard und dieser Mutation liegt `request.text()`. Ein Client
+ * kann den Body offen lassen, bis seine Mitgliedschaft entzogen oder die
+ * Session widerrufen wurde, und erst danach abschliessen. Deshalb wiederholt
+ * der INSERT die Pruefung selbst; ohne lebende Session entsteht keine Zeile.
+ *
+ * Rueckgabe: true, wenn das Token ausgegeben wurde.
+ */
 export const createOverlayToken = async (
   db: D1Database,
   token: NewOverlayTokenRecord,
-): Promise<void> => {
-  await db.prepare(
+  actor: ActorContext,
+): Promise<boolean> => {
+  const result = await db.prepare(
     `INSERT INTO overlay_tokens
       (token_id, channel_id, token_hash, expires_at, created_at,
        revoked_at, revocation_reason, last_used_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE 1 = 1
+      ${actorGuard(ANY_MEMBER_ROLES)}`,
   ).bind(
     token.tokenId,
     token.channelId,
@@ -65,7 +83,9 @@ export const createOverlayToken = async (
     token.revokedAt,
     token.revocationReason,
     token.lastUsedAt,
+    ...bindActorGuard(actor, token.channelId, token.createdAt),
   ).run();
+  return result.meta.changes > 0;
 };
 
 export const getUsableOverlayToken = async (
@@ -117,13 +137,21 @@ export const revokeOverlayToken = async (
   tokenId: string,
   revokedAt: string,
   reason: string,
+  actor: ActorContext,
 ): Promise<boolean> => {
   const result = await db.prepare(
     `UPDATE overlay_tokens
         SET revoked_at = ?, revocation_reason = ?
       WHERE token_id = ?
         AND channel_id = ?
-        AND revoked_at IS NULL`,
-  ).bind(revokedAt, reason, tokenId, channelId).run();
+        AND revoked_at IS NULL
+      ${actorGuard(ANY_MEMBER_ROLES)}`,
+  ).bind(
+    revokedAt,
+    reason,
+    tokenId,
+    channelId,
+    ...bindActorGuard(actor, channelId, revokedAt),
+  ).run();
   return result.meta.changes > 0;
 };

@@ -547,7 +547,10 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("heading", { name: "Alpha", level: 1 })).not.toBeInTheDocument();
   });
 
-  it("führt bei einer mit 403 abgewiesenen Abmeldung zur Anmeldung und entfernt geschützte Daten", async () => {
+  it("bleibt bei einer mit 403 abgewiesenen Abmeldung angemeldet und meldet den Fehler", async () => {
+    // 403 heisst, dass das CSRF-Token nicht passte — der Worker hat die Session
+    // nicht widerrufen. Wer hier zur Anmeldung fuehrt, meldet eine Abmeldung,
+    // die nicht stattgefunden hat: nach einem Neuladen ist der Nutzer wieder da.
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
@@ -562,8 +565,12 @@ describe("Dashboard-Grundgerüst", () => {
     await screen.findByRole("heading", { name: "Alpha", level: 2 });
     fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
 
-    await screen.findByRole("heading", { name: "Anmeldung erforderlich", level: 1 });
-    expect(screen.queryByRole("heading", { name: "Alpha", level: 2 })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Abmelden" })).toBeEnabled();
+    });
+    expect(screen.queryByRole("heading", { name: "Anmeldung erforderlich", level: 1 }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Alpha", level: 2 })).toBeInTheDocument();
   });
 
   it("holt vor dem Logout den CSRF-Token und sendet ihn im Header", async () => {

@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 
-import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "./guards";
+import {
+  requireChannelAuthorization,
+  requireSessionAuthorization,
+  type ChannelAuthorizationVariables,
+} from "./guards";
 import {
   consumeOAuthTransaction,
   createSession,
@@ -16,19 +20,25 @@ import {
   exchangeAuthorizationCode,
   fetchTwitchUser,
   OAuthExchangeError,
+  OAUTH_STATE_COOKIE_NAME,
+  clearOAuthStateCookie,
+  serializeOAuthStateCookie,
   startOAuthAuthorization,
   verifyOAuthState,
 } from "./oauth";
 import { encryptJson, parseKeyRing } from "./crypto";
 import {
+  CSRF_COOKIE_NAME,
   createCsrfToken,
   serializeCsrfCookie,
   verifyCsrfRequest,
+  verifyCsrfToken,
 } from "./csrf";
 import {
   SESSION_COOKIE_MAX_AGE_SECONDS,
   clearSessionCookie,
   createSessionCookie,
+  readCookieValue,
   serializeSessionCookie,
 } from "./session";
 import { getSessionFromRequest } from "./session-access";
@@ -113,10 +123,29 @@ const readBearerToken = (authorization: string | undefined): string | null => {
   return match?.[1] ?? null;
 };
 
+/**
+ * Gibt ein bereits gueltiges Token unveraendert zurueck, statt bei jedem Aufruf
+ * ein neues auszustellen. Cookie und Header muessen uebereinstimmen; holen zwei
+ * Tabs zeitversetzt je ein eigenes Token, ueberschreibt der zweite Aufruf das
+ * gemeinsame Cookie und der erste Tab scheitert danach mit 403 — unter anderem
+ * beim Logout, der dann nichts widerruft, obwohl die Oberflaeche es meldet.
+ */
 authRouter.get("/api/csrf", async (context) => {
   const session = await getSessionFromRequest(context.req.raw, context.env);
   if (session === null) return context.text("Session fehlt.", 401);
-  const token = await createCsrfToken(session.sessionId, context.env.SESSION_COOKIE_KEYS, nowIso());
+
+  const now = nowIso();
+  const existing = readCookieValue(context.req.raw.headers.get("Cookie"), CSRF_COOKIE_NAME);
+  if (existing !== null && await verifyCsrfToken(
+    existing,
+    session.sessionId,
+    context.env.SESSION_COOKIE_KEYS,
+    now,
+  )) {
+    return context.json({ token: existing });
+  }
+
+  const token = await createCsrfToken(session.sessionId, context.env.SESSION_COOKIE_KEYS, now);
   context.header("Set-Cookie", serializeCsrfCookie(token));
   return context.json({ token });
 });
@@ -133,11 +162,16 @@ authRouter.post(
 
     const issued = await issueOverlayToken(context.env.DB, {
       channelId,
+      actor: {
+        userId: context.get("session").userId,
+        sessionId: context.get("session").sessionId,
+      },
       pepper: context.env.OVERLAY_TOKEN_PEPPER,
       publicOrigin: context.env.PUBLIC_ORIGIN,
       expiresAt: expiry.expiresAt,
       createdAt: now,
     });
+    if (issued === null) return context.text("Kanalzugriff verweigert.", 403);
     context.header("Cache-Control", "no-store");
     return context.json(issued, 201);
   },
@@ -154,6 +188,10 @@ authRouter.post(
 
     const revoked = await revokeOverlayToken(context.env.DB, {
       channelId,
+      actor: {
+        userId: context.get("session").userId,
+        sessionId: context.get("session").sessionId,
+      },
       tokenId,
       reason,
       revokedAt: nowIso(),
@@ -181,11 +219,17 @@ authRouter.get("/api/overlay/status", async (context) => {
 
 authRouter.get("/auth/login", async (context) => {
   const started = await startOAuthAuthorization(context.env.DB, context.env, "login", nowIso());
+  context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);
 });
 
-authRouter.get("/auth/bot/login", async (context) => {
+/**
+ * Verlangt eine Session: Ohne diese Pruefung kann jeder den Bot-Verbindungsfluss
+ * starten und damit bestimmen, welches Twitch-Konto der Bot benutzt.
+ */
+authRouter.get("/auth/bot/login", requireSessionAuthorization(), async (context) => {
   const started = await startOAuthAuthorization(context.env.DB, context.env, "bot", nowIso());
+  context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);
 });
 
@@ -194,7 +238,16 @@ authRouter.get("/auth/twitch/callback", async (context) => {
   if (serializedState === undefined) return oauthError(context, "OAuth-State fehlt.");
 
   const now = nowIso();
-  const state = await verifyOAuthState(serializedState, context.env.SESSION_COOKIE_KEYS, now);
+  const stateNonce = readCookieValue(context.req.raw.headers.get("Cookie"), OAUTH_STATE_COOKIE_NAME);
+  const state = await verifyOAuthState(
+    serializedState,
+    context.env.SESSION_COOKIE_KEYS,
+    now,
+    stateNonce,
+  );
+  // Das Cookie ist in jedem Fall verbraucht — auch wenn die Pruefung scheitert,
+  // damit ein abgefangener Callback nicht spaeter erneut versucht werden kann.
+  context.header("Set-Cookie", clearOAuthStateCookie());
   if (state === null) return oauthError(context, "OAuth-State ist ungültig oder abgelaufen.");
 
   const transaction = await consumeOAuthTransaction(context.env.DB, state.transactionId, now);
@@ -224,6 +277,18 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         return oauthError(context, "Der Twitch-Login gehört nicht zum konfigurierten Bot.", 403);
       }
       const current = await getBotIdentity(context.env.DB);
+      // Der Login ist aenderbar und wird nach einer Umbenennung neu vergeben.
+      // Steht bereits eine Bot-Identitaet, ist ihre User-ID massgeblich: sonst
+      // koennte sich jemand den frei gewordenen Namen sichern und den Bot in
+      // allen Kanaelen aus seinem Konto posten lassen.
+      if (current !== null && current.userId !== identity.userId) {
+        await failOAuthTransaction(context.env.DB, state.transactionId, "bot_identity_user_mismatch");
+        return oauthError(
+          context,
+          "Der Twitch-Login gehört nicht zur hinterlegten Bot-Identität.",
+          403,
+        );
+      }
       await upsertBotIdentity(context.env.DB, {
         id: 1,
         userId: identity.userId,

@@ -56,6 +56,36 @@ const seedMember = async (
   ).run();
 };
 
+const seedSession = async (database: TestD1Database, userId: string): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO auth_sessions (session_id, user_id, login, expires_at, created_at, updated_at, revoked_at, revocation_reason)
+     VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)`,
+  ).bind(
+    `session-${userId}`,
+    userId,
+    userId,
+    "2099-09-19T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+  ).run();
+  await database.prepare(
+    `INSERT INTO twitch_login_identity
+      (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, status, reason, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'connected', NULL, ?, ?)`,
+  ).bind(
+    userId,
+    userId,
+    "[]",
+    "access-ciphertext",
+    "refresh-ciphertext",
+    "2099-09-19T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+  ).run();
+};
+
+const actorContext = (userId: string) => ({ userId, sessionId: `session-${userId}` });
+
 const readMember = async (database: TestD1Database, channelId: string, userId: string) => database.prepare(
   `SELECT channel_id, user_id, role, created_at, updated_at
      FROM channel_members
@@ -267,10 +297,11 @@ describe("atomare Mitgliedsänderung und Audit", () => {
   it("schreibt Änderung und Audit-Eintrag gemeinsam", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedSession(database, "actor-1");
 
     await createChannelMemberWithAudit(
       database as unknown as D1Database,
-      "actor-1",
+      actorContext("actor-1"),
       {
         channelId: "kanal-a",
         userId: "user-1",
@@ -305,10 +336,11 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedSession(database, "actor-1");
 
     await updateChannelMemberWithAudit(
       database as unknown as D1Database,
-      "actor-1",
+      actorContext("actor-1"),
       {
         channelId: "kanal-a",
         userId: "user-1",
@@ -336,6 +368,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedSession(database, "actor-1");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
       batch: async (statements: TestPreparedStatement[]) => {
@@ -355,7 +388,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await updateChannelMemberWithAudit(
       racingDatabase,
-      "actor-1",
+      actorContext("actor-1"),
       {
         channelId: "kanal-a",
         userId: "user-1",
@@ -375,6 +408,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedSession(database, "actor-1");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
       batch: async (statements: TestPreparedStatement[]) => {
@@ -387,7 +421,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await updateChannelMemberWithAudit(
       racingDatabase,
-      "actor-1",
+      actorContext("actor-1"),
       {
         channelId: "kanal-a",
         userId: "user-1",
@@ -406,6 +440,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
   it("verweigert INSERT, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedSession(database, "actor-1");
     const racingDatabase = databaseRacingBeforeBatch(database, () => {
       database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
         .bind("kanal-a", "actor-1").runSync();
@@ -413,7 +448,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await expect(createChannelMemberWithAudit(
       racingDatabase,
-      "actor-1",
+      actorContext("actor-1"),
       {
         channelId: "kanal-a",
         userId: "user-1",
@@ -433,6 +468,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedSession(database, "actor-1");
     const racingDatabase = databaseRacingBeforeBatch(database, () => {
       database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
         .bind("kanal-a", "actor-1").runSync();
@@ -440,7 +476,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await expect(updateChannelMemberWithAudit(
       racingDatabase,
-      "actor-1",
+      actorContext("actor-1"),
       {
         channelId: "kanal-a",
         userId: "user-1",
@@ -460,6 +496,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedSession(database, "actor-1");
     const racingDatabase = databaseRacingBeforeBatch(database, () => {
       database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
         .bind("kanal-a", "actor-1").runSync();
@@ -467,7 +504,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await expect(deleteChannelMemberWithAudit(
       racingDatabase,
-      "actor-1",
+      actorContext("actor-1"),
       "kanal-a",
       "user-1",
       "mitglied.entfernt",
@@ -483,6 +520,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "broadcaster-1", "broadcaster");
     await seedMember(database, "kanal-a", "broadcaster-2", "broadcaster");
+    await seedSession(database, "actor-1");
     const racingDatabase = databaseRacingBeforeBatch(database, () => {
       database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
         .bind("kanal-a", "broadcaster-2").runSync();
@@ -490,7 +528,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await expect(deleteChannelMemberWithAudit(
       racingDatabase,
-      "actor-1",
+      actorContext("actor-1"),
       "kanal-a",
       "broadcaster-1",
       "mitglied.entfernt",
@@ -506,6 +544,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "broadcaster-1", "broadcaster");
     await seedMember(database, "kanal-a", "broadcaster-2", "broadcaster");
+    await seedSession(database, "actor-1");
     const racingDatabase = databaseRacingBeforeBatch(database, () => {
       database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
         .bind("kanal-a", "broadcaster-2").runSync();
@@ -513,7 +552,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await expect(updateChannelMemberWithAudit(
       racingDatabase,
-      "actor-1",
+      actorContext("actor-1"),
       {
         channelId: "kanal-a",
         userId: "broadcaster-1",
@@ -532,6 +571,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
   it("verwandelt einen zweiten Create nicht in ein UPDATE", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedSession(database, "actor-1");
     const member = {
       channelId: "kanal-a",
       userId: "user-1",
@@ -542,14 +582,14 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await expect(createChannelMemberWithAudit(
       database as unknown as D1Database,
-      "actor-1",
+      actorContext("actor-1"),
       member,
       "mitglied.hinzugefügt",
       "2026-09-18T00:01:00.000Z",
     )).resolves.toBe(true);
     await expect(createChannelMemberWithAudit(
       database as unknown as D1Database,
-      "actor-1",
+      actorContext("actor-1"),
       { ...member, role: "verwalter" },
       "mitglied.hinzugefügt",
       "2026-09-18T00:02:00.000Z",
@@ -562,10 +602,11 @@ describe("atomare Mitgliedsänderung und Audit", () => {
   it("hinterlässt bei einer fehlgeschlagenen Änderung keinen Audit-Eintrag", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedSession(database, "actor-1");
 
     await expect(createChannelMemberWithAudit(
       database as unknown as D1Database,
-      "actor-1",
+      actorContext("actor-1"),
       {
         channelId: "kanal-a",
         userId: "user-1",
@@ -616,10 +657,11 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedSession(database, "actor-1");
 
     await deleteChannelMemberWithAudit(
       database as unknown as D1Database,
-      "actor-1",
+      actorContext("actor-1"),
       "kanal-a",
       "user-1",
       "mitglied.entfernt",
@@ -641,6 +683,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedSession(database, "actor-1");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
       batch: async (statements: TestPreparedStatement[]) => {
@@ -653,7 +696,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
     await deleteChannelMemberWithAudit(
       racingDatabase,
-      "actor-1",
+      actorContext("actor-1"),
       "kanal-a",
       "user-1",
       "mitglied.entfernt",

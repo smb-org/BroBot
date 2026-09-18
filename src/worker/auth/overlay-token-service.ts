@@ -6,9 +6,11 @@ import {
   touchOverlayToken,
   type OverlayTokenRecord,
 } from "./overlay-token-repository";
+import type { ActorContext } from "./repository";
 
 export interface IssueOverlayTokenInput {
   channelId: string;
+  actor: ActorContext;
   pepper: string;
   publicOrigin: string;
   expiresAt: string | null;
@@ -29,6 +31,7 @@ export interface AuthenticateOverlayTokenInput {
 
 export interface RevokeOverlayTokenInput {
   channelId: string;
+  actor: ActorContext;
   tokenId: string;
   reason: string;
   revokedAt: string;
@@ -70,11 +73,11 @@ const shouldTouchLastUsed = (lastUsedAt: string | null, now: string): boolean =>
 export const issueOverlayToken = async (
   db: D1Database,
   input: IssueOverlayTokenInput,
-): Promise<IssuedOverlayToken> => {
+): Promise<IssuedOverlayToken | null> => {
   const expiresAt = normalizeExpiry(input.expiresAt, input.createdAt);
   const token = randomToken();
   const tokenId = crypto.randomUUID();
-  await createOverlayToken(db, {
+  const issued = await createOverlayToken(db, {
     tokenId,
     channelId: input.channelId,
     tokenHash: await hashOverlayToken(token, input.pepper),
@@ -83,7 +86,10 @@ export const issueOverlayToken = async (
     revokedAt: null,
     revocationReason: null,
     lastUsedAt: null,
-  });
+  }, input.actor);
+  // Die Mitgliedschaft oder die Session ist zwischen Guard und Mutation
+  // erloschen. Es gibt kein Token, also auch keine URL.
+  if (!issued) return null;
 
   const overlayUrl = new URL("/overlay", input.publicOrigin);
   overlayUrl.hash = new URLSearchParams({ token }).toString();
@@ -120,4 +126,5 @@ export const revokeOverlayToken = async (
   input.tokenId,
   input.revokedAt,
   input.reason,
+  input.actor,
 );
