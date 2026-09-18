@@ -56,6 +56,37 @@ nicht-HttpOnly-Cookie als auch im `X-CSRF-Token`-Header zurückkommen; dadurch
 bleibt der Worker zustandslos und `SameSite=Lax` ist nicht die alleinige
 Abwehr.
 
+### OBS-Overlay-Nachweis
+
+Der Overlay-Zugang wird als langer, zufälliger Token in einer URL mit
+Fragment ausgegeben: `/overlay.html#token=...`. Das Fragment wird vom Browser
+weder beim HTTP-Request an den Worker gesendet noch in den `Referer`-Header
+übernommen. Deshalb gelangt der Token nicht über den initialen Seitenrequest
+oder an verlinkte Ziele. Die Overlay-Seite liest ihn lokal und verwendet ihn nur als
+`Authorization: Bearer`-Header für `GET /api/overlay/status`; ein OAuth- oder
+Twitch-Token steht nie in der Overlay-URL. Dieser Header ist ein Secret und
+darf ebenfalls nicht protokolliert werden.
+
+Diese Wahl schützt nicht vor Zugriff auf die OBS-Konfiguration: OBS speichert
+die vollständige Browserquellen-URL einschließlich Fragment im Klartext in
+der Szenensammlung. Wer Zugriff auf die Szenensammlung hat, hat damit Zugriff
+auf das Overlay. Die Ausgabe- und Widerrufs-Routen sind deshalb
+kanalgebunden und durch den gemeinsamen Session-, CSRF- und
+Mitgliedschafts-Guard geschützt.
+
+D1 speichert nur den mit `OVERLAY_TOKEN_PEPPER` gebildeten HMAC-Hash. Der
+Token gehört genau zu dem Kanal, der beim Guard aus dem Routenparameter
+ermittelt wird; der Status-Endpunkt ermittelt den Kanal ausschließlich aus
+dem Token. `expires_at` ist standardmäßig `NULL`, weil eine OBS-Quelle über
+Monate unverändert bleiben kann. Ein Ablaufzeitpunkt ist für zeitlich
+begrenzte Freigaben optional. `last_used_at` wird nur bei der ersten Nutzung
+oder nach mindestens fünf Minuten aktualisiert, damit regelmäßige
+HTTP-Statusabrufe keine fortlaufenden D1-Schreibvorgänge erzeugen.
+
+Der Status-Endpunkt liefert `CF_VERSION_METADATA.id`. Damit stammt die
+angezeigte Version aus dem laufenden Deployment und nicht aus einem statischen
+Bild oder einer im Overlay-Bundle fest eingetragenen Versionszeichenkette.
+
 ## Verbindliche Architekturentscheidungen
 
 1. **Kein `BROADCASTER_ID`-Secret.** Der Kanal kommt aus Route und Session; die Freigabe erfolgt über eine Zeile in `channels`, nicht über einen Konfigurationswert. So wird ein Kanal nicht durch einen geheimen Konfigurationswert mit der Identität des Benutzers verwechselt.

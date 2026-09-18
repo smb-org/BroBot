@@ -45,7 +45,7 @@ const requiredSecretsFor = (config, environment) => {
 
 // Die erforderlichen Secret-Namen existieren dreifach: hier als
 // `deploymentBindings`, in wrangler.jsonc unter `secrets.required` (je
-// Umgebung) und in src/worker/index.ts als `REQUIRED_SECRET_NAMES`. Läuft
+// Umgebung) und in src/worker/config.ts als `REQUIRED_SECRET_NAMES`. Läuft
 // eine Liste bei einer Ergänzung aus dem Gleichschritt, meldet /healthz
 // trotzdem 200, obwohl ein Secret fehlt — genau der Fehler, den der
 // Health-Check eigentlich anzeigen soll. Diese Prüfung hält alle drei
@@ -68,10 +68,10 @@ const rawRequiredSecretsFor = (config, environment) => {
 const checkSecretListDrift = async (config, failures) => {
   let workerSource;
   try {
-    workerSource = await readFile(path.join(projectRoot, "src/worker/index.ts"), "utf8");
+    workerSource = await readFile(path.join(projectRoot, "src/worker/config.ts"), "utf8");
   } catch (error) {
     failures.push(
-      `src/worker/index.ts konnte nicht gelesen werden: ` +
+      `src/worker/config.ts konnte nicht gelesen werden: ` +
       (error instanceof Error ? error.message : "unbekannter Fehler"),
     );
     return;
@@ -80,7 +80,7 @@ const checkSecretListDrift = async (config, failures) => {
   const workerNames = extractWorkerRequiredSecretNames(workerSource);
   if (workerNames === null) {
     failures.push(
-      "REQUIRED_SECRET_NAMES konnte nicht aus src/worker/index.ts extrahiert werden " +
+      "REQUIRED_SECRET_NAMES konnte nicht aus src/worker/config.ts extrahiert werden " +
       "(Array-Block nicht gefunden). Drift-Prüfung der Secret-Namen kann nicht laufen.",
     );
     return;
@@ -153,10 +153,24 @@ const checkExampleFile = async (fileName, required, failures) => {
         failures.push(`${fileName}: ${name} hat nicht das active/retired-Format.`);
       }
     }
+    const pepper = values.OVERLAY_TOKEN_PEPPER;
+    if (pepper !== undefined && !placeholderPattern.test(pepper) && !isBase64url32Byte(pepper)) {
+      failures.push(`${fileName}: OVERLAY_TOKEN_PEPPER hat nicht das 32-Byte-base64url-Format.`);
+    }
   } catch (error) {
     failures.push(
       `${fileName}: ${error instanceof Error ? error.message : "konnte nicht gelesen werden"}`,
     );
+  }
+};
+
+const isBase64url32Byte = (value) => {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(value)) return false;
+  try {
+    const normalized = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(44, "=");
+    return Buffer.from(normalized, "base64").byteLength === 32;
+  } catch {
+    return false;
   }
 };
 
@@ -177,18 +191,8 @@ const isKeyRingShape = (value) => {
     if (new Set(ids).size !== ids.length) return false;
 
     const isPlaceholder = (key) => placeholderPattern.test(key);
-    const is32ByteBase64url = (key) => {
-      try {
-        if (!/^[A-Za-z0-9_-]+$/.test(key) || key.length % 4 === 1) return false;
-        const normalized = key.replaceAll("-", "+").replaceAll("_", "/")
-          .padEnd(Math.ceil(key.length / 4) * 4, "=");
-        return Buffer.from(normalized, "base64").byteLength === 32;
-      } catch {
-        return false;
-      }
-    };
     const keys = [parsed.active.key, ...retired.map((entry) => entry.key)];
-    return keys.every((key) => isPlaceholder(key) || is32ByteBase64url(key));
+    return keys.every((key) => isPlaceholder(key) || isBase64url32Byte(key));
   } catch {
     return false;
   }
@@ -212,6 +216,11 @@ const validateDeploymentValues = (environment, values, required) => {
   );
   if (malformedKeyRings.length > 0) {
     failures.push(`Ungültiges active/retired-Format: ${malformedKeyRings.join(", ")}`);
+  }
+
+  const pepper = values.OVERLAY_TOKEN_PEPPER;
+  if (pepper !== undefined && !placeholderPattern.test(pepper) && !isBase64url32Byte(pepper)) {
+    failures.push("Ungültiges 32-Byte-base64url-Format: OVERLAY_TOKEN_PEPPER");
   }
 
   const unexpected = Object.keys(values).filter((name) => !deploymentBindingSet.has(name));

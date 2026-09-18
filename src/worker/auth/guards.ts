@@ -2,7 +2,7 @@ import { createMiddleware } from "hono/factory";
 
 import { authorizeChannelAccess, type ChannelMemberRole } from "./authorization";
 import { verifyCsrfRequest } from "./csrf";
-import { getSessionFromRequest } from "./routes";
+import { getSessionFromRequest } from "./session-access";
 import type { SessionRecord } from "./repository";
 
 export interface ChannelAuthorizationVariables {

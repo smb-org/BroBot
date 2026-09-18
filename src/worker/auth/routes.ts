@@ -1,18 +1,17 @@
 import { Hono } from "hono";
 
+import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "./guards";
 import {
   consumeOAuthTransaction,
   createSession,
   failOAuthTransaction,
   getBotIdentity,
   getLoginIdentity,
-  getSessionWithLoginIdentity,
   revokeSession,
   setBotIdentityStatus,
   upsertLoginIdentity,
   upsertBotIdentity,
 } from "./repository";
-import type { SessionRecord } from "./repository";
 import {
   exchangeAuthorizationCode,
   fetchTwitchUser,
@@ -28,13 +27,16 @@ import {
 } from "./csrf";
 import {
   SESSION_COOKIE_MAX_AGE_SECONDS,
-  SESSION_COOKIE_NAME,
   clearSessionCookie,
   createSessionCookie,
-  readCookieValue,
-  readSessionCookie,
   serializeSessionCookie,
 } from "./session";
+import { getSessionFromRequest } from "./session-access";
+import {
+  authenticateOverlayToken,
+  issueOverlayToken,
+  revokeOverlayToken,
+} from "./overlay-token-service";
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -53,7 +55,63 @@ const oauthError = (
   status: 400 | 403 = 400,
 ): Response => context.text(message, status);
 
-export const authRouter = new Hono<{ Bindings: Env }>();
+export const authRouter = new Hono<{ Bindings: Env; Variables: ChannelAuthorizationVariables }>();
+
+export { getSessionFromRequest } from "./session-access";
+
+interface JsonRecord {
+  [key: string]: unknown;
+}
+
+const isJsonRecord = (value: unknown): value is JsonRecord =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+interface OverlayTokenExpiry {
+  valid: boolean;
+  expiresAt: string | null;
+}
+
+const readOverlayTokenExpiry = async (
+  request: Request,
+  now: string,
+): Promise<OverlayTokenExpiry> => {
+  const body = await request.text();
+  if (body.trim().length === 0) return { valid: true, expiresAt: null };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body) as unknown;
+  } catch {
+    return { valid: false, expiresAt: null };
+  }
+  if (!isJsonRecord(parsed) || parsed.expiresAt === undefined || parsed.expiresAt === null) {
+    return isJsonRecord(parsed) ? { valid: true, expiresAt: null } : { valid: false, expiresAt: null };
+  }
+  if (typeof parsed.expiresAt !== "string") return { valid: false, expiresAt: null };
+  const expiresTimestamp = Date.parse(parsed.expiresAt);
+  const nowTimestamp = Date.parse(now);
+  if (!Number.isFinite(expiresTimestamp) || !Number.isFinite(nowTimestamp) || expiresTimestamp <= nowTimestamp) {
+    return { valid: false, expiresAt: null };
+  }
+  return { valid: true, expiresAt: new Date(expiresTimestamp).toISOString() };
+};
+
+const readRevocationReason = async (request: Request): Promise<string | null> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await request.text()) as unknown;
+  } catch {
+    return null;
+  }
+  if (!isJsonRecord(parsed) || typeof parsed.reason !== "string") return null;
+  const reason = parsed.reason.trim();
+  return reason.length > 0 && reason.length <= 200 ? reason : null;
+};
+
+const readBearerToken = (authorization: string | undefined): string | null => {
+  const match = /^Bearer ([A-Za-z0-9_-]+)$/.exec(authorization ?? "");
+  return match?.[1] ?? null;
+};
 
 authRouter.get("/api/csrf", async (context) => {
   const session = await getSessionFromRequest(context.req.raw, context.env);
@@ -61,6 +119,64 @@ authRouter.get("/api/csrf", async (context) => {
   const token = await createCsrfToken(session.sessionId, context.env.SESSION_COOKIE_KEYS, nowIso());
   context.header("Set-Cookie", serializeCsrfCookie(token));
   return context.json({ token });
+});
+
+authRouter.post(
+  "/api/channels/:channelId/overlay-tokens",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+
+    const now = nowIso();
+    const expiry = await readOverlayTokenExpiry(context.req.raw, now);
+    if (!expiry.valid) return context.json({ error: "Ablaufzeit ist ungültig." }, 400);
+
+    const issued = await issueOverlayToken(context.env.DB, {
+      channelId,
+      pepper: context.env.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: context.env.PUBLIC_ORIGIN,
+      expiresAt: expiry.expiresAt,
+      createdAt: now,
+    });
+    context.header("Cache-Control", "no-store");
+    return context.json(issued, 201);
+  },
+);
+
+authRouter.post(
+  "/api/channels/:channelId/overlay-tokens/:tokenId/revoke",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    const tokenId = context.req.param("tokenId");
+    const reason = await readRevocationReason(context.req.raw);
+    if (reason === null) return context.json({ error: "Widerrufsgrund fehlt oder ist ungültig." }, 400);
+
+    const revoked = await revokeOverlayToken(context.env.DB, {
+      channelId,
+      tokenId,
+      reason,
+      revokedAt: nowIso(),
+    });
+    if (!revoked) return context.text("Overlay-Token nicht gefunden.", 404);
+    context.header("Cache-Control", "no-store");
+    return context.body(null, 204);
+  },
+);
+
+authRouter.get("/api/overlay/status", async (context) => {
+  const token = readBearerToken(context.req.header("Authorization"));
+  if (token === null) return context.json({ error: "Overlay-Zugang ungültig." }, 401);
+
+  const record = await authenticateOverlayToken(context.env.DB, {
+    token,
+    pepper: context.env.OVERLAY_TOKEN_PEPPER,
+    now: nowIso(),
+  });
+  if (record === null) return context.json({ error: "Overlay-Zugang ungültig." }, 401);
+
+  context.header("Cache-Control", "no-store");
+  return context.json({ version: context.env.CF_VERSION_METADATA.id });
 });
 
 authRouter.get("/auth/login", async (context) => {
@@ -195,21 +311,3 @@ authRouter.post("/auth/logout", async (context) => {
   context.header("Set-Cookie", serializeCsrfCookie("", 0), { append: true });
   return context.body(null, 204);
 });
-
-export const getSessionFromRequest = async (
-  request: Request,
-  env: Env,
-): Promise<SessionRecord | null> => {
-  const serialized = readCookieValue(request.headers.get("Cookie"), SESSION_COOKIE_NAME);
-  if (serialized === null) return null;
-  const session = await readSessionCookie(
-    serialized,
-    env.SESSION_COOKIE_KEYS,
-    env.SESSION_ENCRYPTION_KEYS,
-  );
-  if (session === null) return null;
-  const stored = await getSessionWithLoginIdentity(env.DB, session.sessionId);
-  const expiresAt = stored === null ? Number.NaN : Date.parse(stored.expiresAt);
-  if (stored === null || stored.revokedAt !== null || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
-  return stored;
-};
