@@ -49,6 +49,9 @@ const canManage = (role: PanelChannelRole): boolean => role !== "bediener";
 const memberLabel = (member: PanelMember): string =>
   member.displayName ?? (member.login === null ? "Nicht auflösbar" : `@${member.login}`);
 
+const roleOptions = (): ReactElement[] =>
+  manageableRoles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>);
+
 const accessConfirmation = (role: PanelChannelRole): string =>
   `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${roleLabel(role)}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt. Zugriff freigeben?`;
 
@@ -86,7 +89,7 @@ const MemberTable = ({
                     disabled={busyUserId === member.userId}
                     onChange={(event) => onRoleChange(member.userId, event.target.value as PanelChannelRole)}
                   >
-                    {manageableRoles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
+                    {roleOptions()}
                   </select>
                 ) : roleLabel(member.role)}
               </td>
@@ -199,7 +202,7 @@ export const MembersPage = ({
           {foundUser === null ? null : (
             <div className="member-search-result">
               <div><strong>{foundUser.displayName}</strong><span>@{foundUser.login} · Twitch-ID {foundUser.userId}</span></div>
-              <label>Rolle<select aria-label="Rolle für neue Mitgliedschaft" value={newRole} onChange={(event) => setNewRole(event.target.value as PanelChannelRole)}>{manageableRoles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}</select></label>
+              <label>Rolle<select aria-label="Rolle für neue Mitgliedschaft" value={newRole} onChange={(event) => setNewRole(event.target.value as PanelChannelRole)}>{roleOptions()}</select></label>
               <button className="button" type="button" onClick={() => { void handleAdd(); }} disabled={busyUserId === foundUser.userId}>Zugriff freigeben</button>
             </div>
           )}

@@ -66,10 +66,10 @@ const readRole = (value: unknown): ChannelMemberRole | null =>
 const readUserId = (value: unknown): string | null =>
   typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : null;
 
-const memberResponse = (member: ChannelMemberRecord) => ({
+const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
   userId: member.userId,
-  login: null,
-  displayName: null,
+  login: user?.login ?? null,
+  displayName: user?.displayName ?? null,
   role: member.role,
   joinedAt: member.createdAt,
 });
@@ -179,16 +179,7 @@ const fetchTwitchUsersById = async (
 const memberResponseWithNames = (
   member: ChannelMemberRecord,
   names: Map<string, TwitchUser>,
-) => {
-  const user = names.get(member.userId);
-  return {
-    userId: member.userId,
-    login: user?.login ?? null,
-    displayName: user?.displayName ?? null,
-    role: member.role,
-    joinedAt: member.createdAt,
-  };
-};
+) => memberResponse(member, names.get(member.userId));
 
 const searchLogin = (value: string | undefined): string | null => {
   const login = value?.trim() ?? "";

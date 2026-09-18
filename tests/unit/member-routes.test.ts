@@ -6,6 +6,8 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
+type MemberRole = "broadcaster" | "verwalter" | "bediener";
+
 const key = (byte: number): string =>
   btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
     .replaceAll("+", "-")
@@ -49,12 +51,46 @@ const insertMember = async (
   database: TestD1Database,
   channelId: string,
   userId: string,
-  role: "broadcaster" | "verwalter" | "bediener",
+  role: MemberRole,
 ): Promise<void> => {
   await database.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?)`,
   ).bind(channelId, userId, role, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+};
+
+const setupChannel = async (
+  database: TestD1Database,
+  role: MemberRole = "broadcaster",
+  channelId = "kanal-a",
+  userId = "user-1",
+): Promise<void> => {
+  await insertChannel(database, channelId);
+  await insertSession(database, userId);
+  await insertMember(database, channelId, userId, role);
+};
+
+const deleteMemberImmediately = (database: TestD1Database, channelId: string, userId: string): void => {
+  database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+    .bind(channelId, userId).runSync();
+};
+
+const insertMemberImmediately = (
+  database: TestD1Database,
+  channelId: string,
+  userId: string,
+  role: MemberRole,
+): void => {
+  database.prepare(
+    `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).bind(
+    channelId,
+    userId,
+    role,
+    "2026-09-18T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+  ).runSync();
 };
 
 const insertBotIdentity = async (database: TestD1Database): Promise<void> => {
@@ -130,9 +166,10 @@ const requestUrl = (input: RequestInfo | URL): URL => {
   return new URL(input);
 };
 
-const databaseRacingAfterMemberRead = (
+const databaseRacingAroundMemberRead = (
   database: TestD1Database,
   race: () => void,
+  timing: "before" | "after",
 ): D1Database => {
   let raced = false;
   return {
@@ -147,8 +184,12 @@ const databaseRacingAfterMemberRead = (
           return racedStatement;
         },
         first: async <T>() => {
+          if (timing === "before" && !raced) {
+            raced = true;
+            race();
+          }
           const result = await statement.first<T>();
-          if (!raced) {
+          if (timing === "after" && !raced) {
             raced = true;
             race();
           }
@@ -161,35 +202,11 @@ const databaseRacingAfterMemberRead = (
   } as unknown as D1Database;
 };
 
-const databaseRacingBeforeMemberRead = (
-  database: TestD1Database,
-  race: () => void,
-): D1Database => {
-  let raced = false;
-  return {
-    prepare: (sql: string) => {
-      const statement = database.prepare(sql);
-      if (!sql.includes("SELECT channel_id, user_id, role, created_at, updated_at") || !sql.includes("WHERE channel_id = ? AND user_id = ?")) {
-        return statement;
-      }
-      const racedStatement = {
-        bind: (...values: Parameters<TestPreparedStatement["bind"]>) => {
-          statement.bind(...values);
-          return racedStatement;
-        },
-        first: async <T>() => {
-          if (!raced) {
-            raced = true;
-            race();
-          }
-          return statement.first<T>();
-        },
-      };
-      return racedStatement as unknown as TestPreparedStatement;
-    },
-    batch: database.batch.bind(database),
-  } as unknown as D1Database;
-};
+const databaseRacingAfterMemberRead = (database: TestD1Database, race: () => void): D1Database =>
+  databaseRacingAroundMemberRead(database, race, "after");
+
+const databaseRacingBeforeMemberRead = (database: TestD1Database, race: () => void): D1Database =>
+  databaseRacingAroundMemberRead(database, race, "before");
 
 describe("Mitgliederverwaltung", () => {
   let database: TestD1Database;
@@ -207,9 +224,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("lässt einen Bediener die Liste lesen, aber keine Änderung ausführen", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await setupChannel(database, "bediener");
     await insertMember(database, "kanal-a", "user-2", "bediener");
 
     const listResponse = await panelRouter.fetch(
@@ -237,9 +252,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("liefert für auflösbare Mitglieder Login und Anzeigename aus Helix", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
     await insertMember(database, "kanal-a", "user-2", "bediener");
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
@@ -273,9 +286,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("behält unauflösbare Mitglieder in der Liste und macht ihren Entzug weiter möglich", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
     await insertMember(database, "kanal-a", "user-2", "bediener");
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
@@ -300,9 +311,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("liefert die Mitgliederliste auch bei einem Helix-Fehler mit nicht auflösbaren Namen", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
     await insertMember(database, "kanal-a", "user-2", "bediener");
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response("Twitch ist nicht erreichbar.", { status: 503 }));
@@ -321,9 +330,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("begrenzt Mitgliederseiten auf 100 und löst jede Seite mit höchstens einem Helix-Aufruf auf", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
     for (let index = 0; index < 100; index += 1) {
       await insertMember(database, "kanal-a", `user-${String(index).padStart(3, "0")}`, "bediener");
     }
@@ -355,9 +362,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("weist eine unbegrenzte oder zu große Mitglieder-Seitengröße zurück", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members?limit=101"),
@@ -368,9 +373,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("verhindert, dass ein Verwalter sich selbst zum Broadcaster macht", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await setupChannel(database, "verwalter");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members/user-1", "PATCH", { role: "broadcaster" }),
@@ -383,12 +386,9 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("verhindert Self-DELETE gegen Self-POST auch bei einer Löschung im Zwischenzustand", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await setupChannel(database, "verwalter");
     const racingDatabase = databaseRacingBeforeMemberRead(database, () => {
-      database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
-        .bind("kanal-a", "user-1").runSync();
+      deleteMemberImmediately(database, "kanal-a", "user-1");
     });
     environment = { ...environment, DB: racingDatabase };
 
@@ -406,13 +406,10 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("macht aus DELETE gegen PATCH desselben Mitglieds kein neues Mitglied", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await setupChannel(database, "verwalter");
     await insertMember(database, "kanal-a", "user-2", "bediener");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
-      database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
-        .bind("kanal-a", "user-2").runSync();
+      deleteMemberImmediately(database, "kanal-a", "user-2");
     });
     environment = { ...environment, DB: racingDatabase };
 
@@ -429,20 +426,9 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("macht aus POST gegen ein gleichzeitiges Anlegen kein UPDATE", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await setupChannel(database, "verwalter");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
-      database.prepare(
-        `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      ).bind(
-        "kanal-a",
-        "user-2",
-        "bediener",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).runSync();
+      insertMemberImmediately(database, "kanal-a", "user-2", "bediener");
     });
     environment = { ...environment, DB: racingDatabase };
 
@@ -489,9 +475,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("schützt den letzten Broadcaster vor Entzug und Herabstufung", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
 
     const changeResponse = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members/user-1", "PATCH", { role: "verwalter" }),
@@ -524,9 +508,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("erzeugt für jede erfolgreiche Mutation genau einen Audit-Eintrag", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
 
     const addResponse = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "bediener" }),
@@ -558,9 +540,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("meldet einen unbekannten Twitch-Namen klar und legt kein Mitglied an", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }));
 
@@ -575,9 +555,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("sucht bekannte Twitch-Nutzer mit dem gespeicherten Bot-Token", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       data: [{ id: "300", login: "neue-person", display_name: "Neue Person" }],
@@ -598,9 +576,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("verbietet einem Bediener die Twitch-Nutzersuche ohne Helix-Aufruf", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await setupChannel(database, "bediener");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members/search?login=neue-person"),
@@ -612,9 +588,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("liefert bei einer Helix-Zeitüberschreitung alle Namen als nicht auflösbar", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
     await insertBotIdentity(database);
     vi.mocked(fetch).mockImplementationOnce((_input, init) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => { reject(new DOMException("Aborted", "AbortError")); }, { once: true });
@@ -633,9 +607,7 @@ describe("Mitgliederverwaltung", () => {
   }, 10_000);
 
   it("weist eine schreibende Mitgliederroute ohne CSRF-Token ab", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await setupChannel(database);
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "bediener" }, false),
