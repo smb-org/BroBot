@@ -202,6 +202,11 @@ const databaseRacingAroundMemberRead = (
   } as unknown as D1Database;
 };
 
+const revokeSessionImmediately = (database: TestD1Database, userId: string): void => {
+  database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ?")
+    .bind("2026-09-18T00:30:00.000Z", `session-${userId}`).runSync();
+};
+
 const databaseRacingAfterMemberRead = (database: TestD1Database, race: () => void): D1Database =>
   databaseRacingAroundMemberRead(database, race, "after");
 
@@ -605,6 +610,117 @@ describe("Mitgliederverwaltung", () => {
       expect.objectContaining({ userId: "user-1", login: null, displayName: null }),
     ]);
   }, 10_000);
+
+  it("lässt einen Verwalter keinen Broadcaster anlegen", async () => {
+    // Sonst macht der Verwalter sein Zweitkonto zum Broadcaster und entfernt
+    // danach den ursprünglichen — der Schutz des letzten Broadcasters greift
+    // dann nicht, weil zwischenzeitlich zwei existieren.
+    await setupChannel(database, "verwalter");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "broadcaster" }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(database.prepare(
+      "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first()).resolves.toBeNull();
+    await expect(auditCount(database)).resolves.toBe(0);
+  });
+
+  it("lässt einen Verwalter niemanden zum Broadcaster befördern", async () => {
+    await setupChannel(database, "verwalter");
+    await insertMember(database, "kanal-a", "user-2", "bediener");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "broadcaster" }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(database.prepare(
+      "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "bediener" });
+    await expect(auditCount(database)).resolves.toBe(0);
+  });
+
+  it("lässt einen Broadcaster einen weiteren Broadcaster anlegen", async () => {
+    // Gegenprobe: Die Regel darf den erlaubten Fall nicht mitsperren.
+    await setupChannel(database, "broadcaster");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "broadcaster" }),
+      environment,
+    );
+
+    expect(response.status).toBe(201);
+    await expect(database.prepare(
+      "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "broadcaster" });
+  });
+
+  it("legt kein Mitglied an, wenn die Session nach dem Guard widerrufen wird", async () => {
+    // Der Guard prüft die Session, danach wartet der Handler auf den Body.
+    // Ein Client kann ihn offen lassen, bis seine Session widerrufen ist.
+    // Die Mutation muss das bemerken, nicht nur der Guard.
+    await setupChannel(database, "verwalter");
+    const racingDatabase = databaseRacingBeforeMemberRead(database, () => {
+      revokeSessionImmediately(database, "user-1");
+    });
+    environment = { ...environment, DB: racingDatabase };
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "verwalter" }),
+      environment,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(database.prepare(
+      "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first()).resolves.toBeNull();
+    await expect(auditCount(database)).resolves.toBe(0);
+  });
+
+  it("ändert keine Rolle, wenn die Session nach dem Guard widerrufen wird", async () => {
+    await setupChannel(database, "verwalter");
+    await insertMember(database, "kanal-a", "user-2", "bediener");
+    const racingDatabase = databaseRacingAfterMemberRead(database, () => {
+      revokeSessionImmediately(database, "user-1");
+    });
+    environment = { ...environment, DB: racingDatabase };
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter" }),
+      environment,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(database.prepare(
+      "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "bediener" });
+    await expect(auditCount(database)).resolves.toBe(0);
+  });
+
+  it("entfernt kein Mitglied, wenn die Session nach dem Guard widerrufen wird", async () => {
+    await setupChannel(database, "verwalter");
+    await insertMember(database, "kanal-a", "user-2", "bediener");
+    const racingDatabase = databaseRacingAfterMemberRead(database, () => {
+      revokeSessionImmediately(database, "user-1");
+    });
+    environment = { ...environment, DB: racingDatabase };
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "DELETE"),
+      environment,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(database.prepare(
+      "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ user_id: "user-2" });
+    await expect(auditCount(database)).resolves.toBe(0);
+  });
 
   it("weist eine schreibende Mitgliederroute ohne CSRF-Token ab", async () => {
     await setupChannel(database);

@@ -35,7 +35,30 @@ export interface OAuthStart {
   url: string;
   state: string;
   transactionId: string;
+  /** Gehoert in ein kurzlebiges Cookie; siehe OAUTH_STATE_COOKIE_NAME. */
+  stateNonce: string;
 }
+
+/**
+ * Der signierte `state` allein schuetzt nur gegen Wiederholung, nicht gegen
+ * Unterschieben: Ein Angreifer kann seinen eigenen Login starten, die noch
+ * unverbrauchte Callback-URL abfangen und das Opfer darauf schicken — das Opfer
+ * ist danach als Angreifer angemeldet. Laut Spezifikation leistet der `state`
+ * seinen CSRF-Schutz nur mit Bindung an den Browser.
+ *
+ * Deshalb traegt der `state` einen Nonce, dessen Gegenstueck nur im Browser des
+ * Startenden liegt. Der Callback verlangt beides.
+ */
+export const OAUTH_STATE_COOKIE_NAME = "__Host-brobot_oauth_state";
+export const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
+
+export const serializeOAuthStateCookie = (
+  value: string,
+  maxAge: number = OAUTH_STATE_MAX_AGE_SECONDS,
+): string =>
+  `${OAUTH_STATE_COOKIE_NAME}=${value}; Max-Age=${String(maxAge)}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+
+export const clearOAuthStateCookie = (): string => serializeOAuthStateCookie("", 0);
 
 export interface TwitchTokenResponse {
   accessToken: string;
@@ -69,12 +92,30 @@ const redirectUri = (origin: string): string => `${origin.replace(/\/+$/, "")}/a
 
 const stateExpiresAt = (now: string): string => new Date(Date.parse(now) + 10 * 60 * 1000).toISOString();
 
-const isOAuthState = (value: unknown): value is OAuthState => {
+interface SignedOAuthState extends OAuthState {
+  nonce: string;
+}
+
+const isSignedOAuthState = (value: unknown): value is SignedOAuthState => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const state = value as Record<string, unknown>;
   return typeof state.transactionId === "string" && state.transactionId.length > 0 &&
     (state.purpose === "login" || state.purpose === "bot") &&
-    typeof state.expiresAt === "string" && Number.isFinite(Date.parse(state.expiresAt));
+    typeof state.expiresAt === "string" && Number.isFinite(Date.parse(state.expiresAt)) &&
+    typeof state.nonce === "string" && state.nonce.length > 0;
+};
+
+/**
+ * Vergleich in konstanter Zeit, damit der Nonce nicht ueber die Laufzeit
+ * erraten werden kann.
+ */
+const equalsConstantTime = (left: string, right: string): boolean => {
+  if (left.length !== right.length) return false;
+  let diff = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    diff |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return diff === 0;
 };
 
 export const startOAuthAuthorization = async (
@@ -84,9 +125,10 @@ export const startOAuthAuthorization = async (
   now: string,
 ): Promise<OAuthStart> => {
   const transactionId = randomToken(24);
+  const stateNonce = randomToken(24);
   const expiresAt = stateExpiresAt(now);
   const state = await signJson(
-    { transactionId, purpose, expiresAt },
+    { transactionId, purpose, expiresAt, nonce: stateNonce },
     parseKeyRing(environment.SESSION_COOKIE_KEYS),
   );
 
@@ -103,19 +145,25 @@ export const startOAuthAuthorization = async (
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", (purpose === "login" ? LOGIN_SCOPES : BOT_SCOPES).join(" "));
   url.searchParams.set("state", state);
-  return { url: url.toString(), state, transactionId };
+  return { url: url.toString(), state, transactionId, stateNonce };
 };
 
+/**
+ * `cookieNonce` stammt aus OAUTH_STATE_COOKIE_NAME. Fehlt er oder passt er
+ * nicht, stammt der Aufruf nicht aus dem Browser, der den Login gestartet hat.
+ */
 export const verifyOAuthState = async (
   serialized: string,
   cookieKeysSerialized: string,
   now: string,
+  cookieNonce: string | null,
 ): Promise<OAuthState | null> => {
-  const state = await verifyJson<OAuthState>(serialized, parseKeyRing(cookieKeysSerialized));
-  const expiresAtMs = isOAuthState(state) ? Date.parse(state.expiresAt) : Number.NaN;
+  const state = await verifyJson<SignedOAuthState>(serialized, parseKeyRing(cookieKeysSerialized));
+  const expiresAtMs = isSignedOAuthState(state) ? Date.parse(state.expiresAt) : Number.NaN;
   const nowMs = Date.parse(now);
-  if (!isOAuthState(state) || !Number.isFinite(expiresAtMs) || !Number.isFinite(nowMs) || expiresAtMs <= nowMs) return null;
-  return state;
+  if (!isSignedOAuthState(state) || !Number.isFinite(expiresAtMs) || !Number.isFinite(nowMs) || expiresAtMs <= nowMs) return null;
+  if (cookieNonce === null || !equalsConstantTime(state.nonce, cookieNonce)) return null;
+  return { transactionId: state.transactionId, purpose: state.purpose, expiresAt: state.expiresAt };
 };
 
 interface TwitchTokenApiResponse {
