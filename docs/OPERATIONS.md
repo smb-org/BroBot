@@ -59,7 +59,9 @@ curl -sS -X POST https://<öffentlicher-origin>/api/channels/<channelId>/overlay
 ```
 
 Die Antwort enthält eine `tokenId`, die vollständige `overlayUrl` und
-`"expiresAt": null`. Die `overlayUrl` genau einmal kopieren und in OBS
+`"expiresAt": null`. In der ausgelieferten Umgebung zeigt die `overlayUrl` auf
+den kanonischen Pfad `/overlay#token=...`; `/overlay.html` ist dort nur der
+weiterleitende Alias. Die `overlayUrl` genau einmal kopieren und in OBS
 einsetzen; der Klartext-Token wird nicht erneut angezeigt oder gespeichert.
 Für eine zeitlich begrenzte Freigabe kann statt `{}` ein zukünftiger Zeitpunkt
 angegeben werden:
@@ -181,7 +183,11 @@ pnpm install
 pnpm run dev
 ```
 
-Das Dashboard ist unter `http://localhost:5173/` und das Overlay unter `http://localhost:5173/overlay.html` erreichbar. Lokale Cloudflare-Bindings werden durch Vite/Wrangler simuliert. Die Beispielwerte sind absichtlich keine produktiven Secrets.
+Das Dashboard ist unter `http://localhost:5173/` und das Overlay lokal unter
+`http://localhost:5173/overlay.html` erreichbar. In der ausgelieferten Umgebung
+ist `/overlay` der kanonische Pfad; `/overlay.html` ist dort nur der
+weiterleitende Alias. Lokale Cloudflare-Bindings werden durch Vite/Wrangler
+simuliert. Die Beispielwerte sind absichtlich keine produktiven Secrets.
 
 ## Prüfung und Deployment
 

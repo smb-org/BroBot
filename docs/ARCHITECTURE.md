@@ -59,13 +59,17 @@ Abwehr.
 ### OBS-Overlay-Nachweis
 
 Der Overlay-Zugang wird als langer, zufälliger Token in einer URL mit
-Fragment ausgegeben: `/overlay.html#token=...`. Das Fragment wird vom Browser
-weder beim HTTP-Request an den Worker gesendet noch in den `Referer`-Header
-übernommen. Deshalb gelangt der Token nicht über den initialen Seitenrequest
-oder an verlinkte Ziele. Die Overlay-Seite liest ihn lokal und verwendet ihn nur als
-`Authorization: Bearer`-Header für `GET /api/overlay/status`; ein OAuth- oder
-Twitch-Token steht nie in der Overlay-URL. Dieser Header ist ein Secret und
-darf ebenfalls nicht protokolliert werden.
+Fragment ausgegeben. In der ausgelieferten Umgebung ist der kanonische Pfad
+`/overlay#token=...`; lokal unter Vite bleibt der HTML-Einstieg
+`/overlay.html#token=...`. Die Ausgabe-URL verwendet `/overlay`, damit
+Cloudflare Assets nicht den weiterleitenden Alias `/overlay.html` verwenden. Das
+Fragment wird vom Browser weder beim HTTP-Request an den Worker gesendet noch
+in den `Referer`-Header übernommen. Deshalb gelangt der Token nicht über den
+initialen Seitenrequest oder an verlinkte Ziele. Die Overlay-Seite liest ihn
+lokal und verwendet ihn nur als `Authorization: Bearer`-Header für
+`GET /api/overlay/status`; ein OAuth- oder Twitch-Token steht nie in der
+Overlay-URL. Dieser Header ist ein Secret und darf ebenfalls nicht
+protokolliert werden.
 
 Diese Wahl schützt nicht vor Zugriff auf die OBS-Konfiguration: OBS speichert
 die vollständige Browserquellen-URL einschließlich Fragment im Klartext in

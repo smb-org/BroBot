@@ -85,7 +85,7 @@ export const issueOverlayToken = async (
     lastUsedAt: null,
   });
 
-  const overlayUrl = new URL("/overlay.html", input.publicOrigin);
+  const overlayUrl = new URL("/overlay", input.publicOrigin);
   overlayUrl.hash = new URLSearchParams({ token }).toString();
   return { tokenId, overlayUrl: overlayUrl.toString(), expiresAt };
 };

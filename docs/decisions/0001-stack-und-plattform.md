@@ -298,12 +298,14 @@ body,
 Die bevorzugte Einbindung ist eine direkte Browserquelle:
 
 ```text
-https://bot.example.de/overlay.html#token=...
+https://bot.example.de/overlay#token=...
 ```
 
 Die Beispiel-URL wurde mit #20 präzisiert: Das technische Overlay-Token liegt
 im Fragment der festen Overlay-Datei, nicht in einem veralteten Kanalpfad mit
-Query-Schlüssel.
+Query-Schlüssel. Mit der Pfadkorrektur vom 2026-09-18 verwendet die
+ausgelieferte URL nun `/overlay` statt des zuvor dokumentierten
+`/overlay.html`; lokal unter Vite bleibt `/overlay.html` der HTML-Einstieg.
 
 Wichtige Eigenschaften:
 
@@ -322,14 +324,15 @@ Eine Einbindung per iframe ist grundsätzlich möglich:
 
 ```html
 <iframe
-  src="https://bot.example.de/overlay.html#token=..."
+  src="https://bot.example.de/overlay#token=..."
   style="position:absolute;width:100%;height:100%;border:0">
 </iframe>
 ```
 
 Auch das iframe-Beispiel ist mit #20 auf die tatsächliche Fragment-Form
-präzisiert; der Klartext-Token wird weiterhin nur einmal aus der Ausgabe-Route
-übernommen.
+präzisiert. Mit der Pfadkorrektur vom 2026-09-18 wurde der ausgelieferte Pfad
+von `/overlay.html` auf `/overlay` korrigiert; der Klartext-Token wird weiterhin
+nur einmal aus der Ausgabe-Route übernommen.
 
 Die direkte OBS-Browserquelle ist dennoch zu bevorzugen. Bei StreamElements können iframe-Sandboxing, Content-Security-Policy und Audio-Autoplay zusätzliche Fehlerquellen erzeugen.
 
@@ -534,10 +537,13 @@ Das Dashboard darf eine Moderator- oder Editor-Rolle nicht lediglich aus dem Fro
 ### Zugriffsebenen
 
 ```text
-/overlay.html#token=... → langes, widerrufbares Overlay-Token im Fragment
+/overlay#token=... → langes, widerrufbares Overlay-Token im Fragment
 /dashboard              → Twitch OAuth und Rollenprüfung
 /api/twitch/eventsub    → Twitch-HMAC-Signaturprüfung
 ```
+
+Die Zugriffsebenen-Zeile wurde mit der Pfadkorrektur vom 2026-09-18 von
+`/overlay.html` auf den kanonischen Auslieferungspfad `/overlay` aktualisiert.
 
 ### Sicherheitsanforderungen
 

@@ -27,6 +27,7 @@ test("Dashboard und Overlay laden als getrennte Oberflächen", async ({ page }) 
       body: JSON.stringify({ version: "e2e-version" }),
     });
   });
+  // Playwright runs against the local Vite server, whose HTML entry is overlay.html.
   await overlayPage.goto("/overlay.html#token=e2e-token");
   await expect(overlayPage.getByText("Version e2e-version")).toBeVisible();
   await expect(overlayPage.locator("html")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
