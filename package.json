@@ -24,9 +24,12 @@
     "test:e2e": "playwright test",
     "types:worker": "cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler types",
     "types:check": "cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler types --check",
+    "check-health": "node scripts/check-health.mjs",
     "check": "pnpm run config:verify && pnpm run types:check && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run test:worker && pnpm run test:e2e && pnpm run build",
-    "deploy:staging": "node --env-file=.env.staging scripts/verify-deployment-config.mjs validate-env staging .env.staging && pnpm run check && pnpm run build:staging && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env staging --secrets-file .env.staging",
-    "deploy:production": "node --env-file=.env.production scripts/verify-deployment-config.mjs validate-env production .env.production && pnpm run check && pnpm run build:production && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env production --secrets-file .env.production"
+    "deploy:staging:local-with-secrets": "node --env-file=.env.staging scripts/verify-deployment-config.mjs validate-env staging .env.staging && pnpm run check && pnpm run build:staging && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env staging --secrets-file .env.staging",
+    "deploy:staging:ci-code-only": "pnpm run build:staging && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env staging",
+    "deploy:production:local-with-secrets": "node --env-file=.env.production scripts/verify-deployment-config.mjs validate-env production .env.production && pnpm run check && pnpm run build:production && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env production --secrets-file .env.production",
+    "deploy:production:ci-code-only": "pnpm run build:production && cross-env WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --env production"
   },
   "dependencies": {
     "hono": "^4.13.1",
