@@ -67,13 +67,20 @@ const MemberTable = ({
   return (
     <div className="member-table-wrap">
       <table className="member-table">
-        <thead><tr><th scope="col">Name</th><th scope="col">Rolle</th><th scope="col">Beigetreten</th>{canManageMembers ? <th scope="col"><span className="sr-only">Aktionen</span></th> : null}</tr></thead>
+        <thead><tr><th scope="col">Name</th><th scope="col">Rolle</th><th scope="col" aria-sort="descending">Zugriff seit</th>{canManageMembers ? <th scope="col"><span className="sr-only">Aktionen</span></th> : null}</tr></thead>
         <tbody>
           {members.map((member) => (
             <tr key={member.userId}>
               <th scope="row">
                 <span>{memberLabel(member)}</span>
-                {member.displayName !== null && member.login !== null ? <span className="member-login">@{member.login}</span> : null}
+                {member.displayName !== null && member.login !== null ? (
+                  <a
+                    className="member-login member-profile-link"
+                    href={`https://twitch.tv/${member.login}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >twitch.tv/{member.login}</a>
+                ) : null}
                 {member.displayName === null && member.login === null ? <span className="member-login">Twitch-ID {member.userId}</span> : null}
               </th>
               <td>
