@@ -96,10 +96,13 @@ jobs:
           fi
           echo "current=true" >> "$GITHUB_OUTPUT"
 
+      # Ohne `ref`: Bei workflow_dispatch checkt die Action ohnehin den
+      # ausgelösten Stand aus, und der Job ist auf refs/heads/main begrenzt.
+      # Ein explizites `ref` wäre reine Symmetrie zum Staging-Job und ließe
+      # zugleich offen, ob hier fremder Code landen kann — er kann es nicht,
+      # weil workflow_dispatch sich nicht aus einem Fork auslösen lässt.
       - if: steps.freshness.outputs.current == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.sha }}
       - if: steps.freshness.outputs.current == 'true'
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - if: steps.freshness.outputs.current == 'true'
