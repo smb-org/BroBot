@@ -12,6 +12,7 @@ import {
   getSystemOverviewForUser,
   listChannelsForUser,
 } from "./repository";
+import { memberRouter } from "./member-routes";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -29,6 +30,8 @@ const parseAuditLimit = (value: string | undefined): number | null => {
 };
 
 export const panelRouter = new Hono<PanelEnvironment>();
+
+panelRouter.route("/", memberRouter);
 
 panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) => {
   const session = context.get("session");

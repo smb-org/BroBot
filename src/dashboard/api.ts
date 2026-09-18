@@ -2,7 +2,11 @@ import type {
   PanelAuditResponse,
   PanelChannelOverview,
   PanelChannelsResponse,
+  PanelChannelRole,
+  PanelMember,
+  PanelMembersResponse,
   PanelSystemResponse,
+  PanelTwitchUser,
 } from "../panel-contract";
 
 export class PanelApiError extends Error {
@@ -63,6 +67,9 @@ const requestOptions = (signal: AbortSignal | undefined): RequestInit | undefine
 const channelPath = (channelId: string, suffix: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/${suffix}`;
 
+const memberPath = (channelId: string, userId?: string): string =>
+  `${channelPath(channelId, "members")}${userId === undefined ? "" : `/${encodeURIComponent(userId)}`}`;
+
 export const fetchChannels = (signal?: AbortSignal): Promise<PanelChannelsResponse> =>
   requestJson<PanelChannelsResponse>("/api/channels", requestOptions(signal));
 
@@ -95,6 +102,63 @@ export const fetchAuditLog = (
     requestOptions(signal),
   );
 };
+
+export const fetchMembers = (
+  channelId: string,
+  cursor: string | null = null,
+  signal?: AbortSignal,
+): Promise<PanelMembersResponse> => requestJson<PanelMembersResponse>(
+  `${memberPath(channelId)}${cursor === null ? "" : `?${new URLSearchParams({ cursor }).toString()}`}`,
+  requestOptions(signal),
+);
+
+export const searchTwitchUser = async (
+  channelId: string,
+  login: string,
+  signal?: AbortSignal,
+): Promise<{ user: PanelTwitchUser }> => {
+  const params = new URLSearchParams({ login });
+  return requestJson<{ user: PanelTwitchUser }>(
+    `${memberPath(channelId)}/search?${params.toString()}`,
+    requestOptions(signal),
+  );
+};
+
+const requestMemberMutation = <T>(
+  path: string,
+  method: "POST" | "PATCH" | "DELETE",
+  body?: Record<string, string>,
+): Promise<T> => requestJson<{ token: string }>("/api/csrf").then(({ token }) => requestJson<T>(path, {
+  method,
+  headers: {
+    ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    "X-CSRF-Token": token,
+  },
+  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+}));
+
+export const addChannelMember = (
+  channelId: string,
+  userId: string,
+  role: PanelChannelRole,
+): Promise<{ member: PanelMember }> => requestMemberMutation(
+  memberPath(channelId),
+  "POST",
+  { userId, role },
+);
+
+export const updateChannelMemberRole = (
+  channelId: string,
+  userId: string,
+  role: PanelChannelRole,
+): Promise<{ member: PanelMember }> => requestMemberMutation(
+  memberPath(channelId, userId),
+  "PATCH",
+  { role },
+);
+
+export const removeChannelMember = (channelId: string, userId: string): Promise<undefined> =>
+  requestMemberMutation<undefined>(memberPath(channelId, userId), "DELETE");
 
 export const logout = async (): Promise<void> => {
   const csrf = await requestJson<{ token: string }>("/api/csrf");
