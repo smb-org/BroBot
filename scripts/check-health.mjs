@@ -1,15 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { experimental_readRawConfig } from "wrangler";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const httpStatusMarker = "\n__BROBOT_HTTP_STATUS__";
 
-export const parseWranglerJsonc = (source) =>
-  JSON.parse(source.replace(/^\s*\/\/.*$/gm, ""));
-
-export const resolveDeploymentOriginFromConfig = (config, environment) => {
+const resolveDeploymentOriginFromConfig = (config, environment) => {
   const pattern = config.env?.[environment]?.routes?.[0]?.pattern;
   if (typeof pattern !== "string" || pattern.length === 0) {
     throw new Error(`Keine Route für ${environment} in wrangler.jsonc gefunden.`);
@@ -24,8 +22,20 @@ export const resolveDeploymentOrigin = async (
   environment,
   configPath = path.join(projectRoot, "wrangler.jsonc"),
 ) => {
-  const source = await readFile(configPath, "utf8");
-  return resolveDeploymentOriginFromConfig(parseWranglerJsonc(source), environment);
+  const resolvedConfigPath = path.resolve(configPath);
+  let rawConfig;
+  try {
+    ({ rawConfig } = experimental_readRawConfig({ config: resolvedConfigPath }));
+  } catch (error) {
+    const configLabel = path.relative(projectRoot, resolvedConfigPath) || resolvedConfigPath;
+    const reason = error instanceof Error ? error.message : "unbekannter Fehler";
+    throw new Error(
+      `Konfiguration ${configLabel} konnte nicht gelesen/geparst werden: ${reason}`,
+      { cause: error },
+    );
+  }
+
+  return resolveDeploymentOriginFromConfig(rawConfig, environment);
 };
 
 const checkHealth = async (environment) => {
@@ -97,7 +107,7 @@ const main = async () => {
       process.exitCode = 2;
       return;
     }
-    console.log(await resolveDeploymentOrigin(environment));
+    console.log(await resolveDeploymentOrigin(environment, process.argv[4]));
     return;
   }
 
