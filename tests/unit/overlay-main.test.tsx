@@ -11,7 +11,7 @@ const versionResponse = (version: string): Response => new Response(
 const invalidResponse = (): Response => new Response("", { status: 401 });
 
 const setFragment = (token: string): void => {
-  window.history.replaceState(null, "", `/overlay.html#token=${token}`);
+  window.history.replaceState(null, "", `/overlay#token=${token}`);
 };
 
 describe("Overlay-Statusansicht", () => {

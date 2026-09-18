@@ -194,7 +194,7 @@ describe("Overlay-Routen", () => {
     expect(response.status).toBe(403);
   });
 
-  it("gibt eine Fragment-URL ohne Ablauf aus und liefert die Deployment-Version aus dem Status", async () => {
+  it("gibt eine Fragment-URL auf dem kanonischen Auslieferungspfad aus und liefert die Deployment-Version aus dem Status", async () => {
     await insertMember(database);
     const response = await authRouter.fetch(new Request(issuePath, {
       method: "POST",
@@ -209,7 +209,7 @@ describe("Overlay-Routen", () => {
     expect(body.tokenId).toBeTruthy();
     expect(body).not.toHaveProperty("token");
     expect(body.expiresAt).toBeNull();
-    expect(overlayUrl.pathname).toBe("/overlay.html");
+    expect(overlayUrl.pathname).toBe("/overlay");
     expect(overlayUrl.search).toBe("");
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
