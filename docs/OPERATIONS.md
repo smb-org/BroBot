@@ -218,10 +218,18 @@ Für den CI-Deploy werden in GitHub nur folgende Werte hinterlegt:
 - Repository-Secret `CLOUDFLARE_API_TOKEN` mit einem auf diesen Account
   beschränkten API-Token.
 
-Der Token braucht nur die Account-Berechtigung **Workers Scripts: Edit** für
-Worker-Deployments. Er braucht für den CI-Deploy keine D1-, KV-, R2- oder
-DNS-Berechtigung; Datenbankmigrationen und Anwendungs-Secrets werden nicht von
-der CI-Strecke verändert. In GitHub unter **Settings → Environments** die
+Der Token braucht auf **Kontoebene**: **Workers Scripts: Edit**,
+**Account Settings: Read** und **D1: Edit** (letzteres für die automatische
+Staging-Migration). Dazu eine zweite Richtlinie auf **Zonenebene** für die
+Domain mit **Workers Routes: Edit** und **Zone: Read**, weil die Umgebungen
+über Custom Domains laufen.
+
+Die Trennung ist wesentlich: Workers Scripts und D1 sind Konto-Berechtigungen.
+Hängt man sie an eine Domain-Richtlinie, sind sie wirkungslos, und der Deploy
+scheitert mit `No access to the specified service`, obwohl der Haken gesetzt
+aussieht. Weitere Berechtigungen (KV, R2, Pages, Container) braucht die
+CI-Strecke nicht und sollte sie nicht haben. Anwendungs-Secrets werden von der
+CI-Strecke nicht verändert. In GitHub unter **Settings → Environments** die
 Umgebung `production` anlegen und dort unter **Required reviewers** die
 Freigabepflicht konfigurieren. Der Production-Job ist ausschließlich über
 `workflow_dispatch` von `main` startbar und wartet vor dem Deploy auf diese
@@ -274,20 +282,42 @@ anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
 Session-, OAuth- und Token-Tabellen, `0002` die feste Rollenmenge sowie das
 Audit-Log, `0003` die Overlay-Token-Tabelle, `0004` die kanalbezogene Sperre
 und `0005` deren Besitzerbindung für manuelle Moderatorstatus-Prüfungen
-anlegen. Die GitHub-Workflows
-wenden niemals Migrationen automatisch an. Bei jedem Release gilt: Wenn der
-Code eine noch nicht angewandte Migration voraussetzt, muss sie vor dem Deploy
-von Hand in der jeweiligen Zielumgebung laufen:
+anlegen.
+
+**Staging migriert automatisch.** Der Deploy-Workflow wendet ausstehende
+Migrationen vor dem Code-Deploy an. Schlägt das fehl, bricht der Job ab und
+der bisherige Worker läuft unverändert gegen das bisherige Schema weiter.
+
+**Production migriert von Hand.** Das ist Absicht: D1 kann DDL nicht
+zurückrollen, eine in der Mitte abgebrochene Migration hinterlässt dort einen
+Zwischenzustand, den niemand angesehen hat. Eine vergessene Migration fängt
+stattdessen der Healthcheck ab — er prüft den Schema-Sentinel und lässt den
+Deploy scheitern, statt ihn grün zu melden.
+
+Migration vor dem Deploy, nie danach: Der neue Code erwartet das neue Schema.
 
 ```bash
-pnpm exec wrangler d1 migrations apply brobot-local
-pnpm exec wrangler d1 migrations apply brobot-staging --remote --env staging
-pnpm exec wrangler d1 migrations apply brobot-production --remote --env production
+pnpm exec wrangler d1 migrations apply DB
+pnpm exec wrangler d1 migrations apply DB --env staging --remote
+pnpm exec wrangler d1 migrations apply DB --env production --remote
 ```
 
-Bei späteren Releases gilt dieselbe Reihenfolge: Migration anwenden, danach
-den Worker deployen. Die Befehle verändern ausschließlich die angegebene D1-
-Datenbank; die Betreiberdateien mit Secrets werden dabei nicht gelesen.
+Das Argument ist der **Bindungsname** `DB`, nicht der Datenbankname: Wrangler
+löst die Datenbank über die Bindung der jeweiligen Umgebung auf und kennt
+`brobot-staging` als Argument nicht. Die Befehle verändern ausschließlich die
+angegebene D1-Datenbank; die Betreiberdateien mit Secrets werden dabei nicht
+gelesen.
+
+**Wenn ein Schema von Hand eingespielt wurde**, ohne `migrations apply`, bleibt
+die Buchführungstabelle `d1_migrations` leer. Der Healthcheck meldet dann ein
+fehlendes Schema, obwohl alle Tabellen stehen, und jeder spätere
+`migrations apply` scheitert mit `table … already exists`. In diesem Fall die
+bereits angewandten Dateinamen in der Reihenfolge ihrer Nummern nachtragen:
+
+```bash
+pnpm exec wrangler d1 execute DB --env staging --remote \
+  --command "INSERT INTO d1_migrations (name, applied_at) VALUES ('0000_init.sql', CURRENT_TIMESTAMP), ...;"
+```
 
 Staging und Production werden im Normalfall durch GitHub deployed: Staging nach
 einem erfolgreichen `quality`-Job bei einem Push auf `main`, Production nur
