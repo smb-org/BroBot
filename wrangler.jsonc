@@ -30,7 +30,7 @@
   "vars": {
     "APP_ENV": "local",
     "TIMEZONE": "Europe/Berlin",
-    "TWITCH_BOT_LOGIN": "brobot"
+    "TWITCH_BOT_LOGIN": "kompetenzbrobot"
   },
   "secrets": {
     "required": [
@@ -78,7 +78,7 @@
       "vars": {
         "APP_ENV": "staging",
         "TIMEZONE": "Europe/Berlin",
-        "TWITCH_BOT_LOGIN": "brobot"
+        "TWITCH_BOT_LOGIN": "kompetenzbrobot"
       },
       "secrets": {
         "required": [
@@ -126,7 +126,7 @@
       "vars": {
         "APP_ENV": "production",
         "TIMEZONE": "Europe/Berlin",
-        "TWITCH_BOT_LOGIN": "brobot"
+        "TWITCH_BOT_LOGIN": "kompetenzbrobot"
       },
       "secrets": {
         "required": [
