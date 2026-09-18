@@ -128,6 +128,15 @@ interface ChannelIdRow {
   channel_id: string;
 }
 
+interface BotChannelStatusCheckLockRow {
+  channel_id: string;
+  locked_until: string;
+}
+
+interface BotChannelStatusCheckedAtRow {
+  checked_at: string;
+}
+
 interface ChannelMemberRow {
   channel_id: string;
   user_id: string;
@@ -773,6 +782,83 @@ export const listChannelIds = async (db: D1Database): Promise<string[]> => {
   return result.results.map((row) => row.channel_id);
 };
 
+export const tryReserveBotChannelStatusCheck = async (
+  db: D1Database,
+  channelId: string,
+  lockedUntil: string,
+  now: string,
+  checkedSince: string,
+): Promise<boolean> => {
+  const row = await db.prepare(
+    `INSERT INTO bot_channel_status_check_locks (channel_id, locked_until)
+     SELECT ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM bot_channel_status
+         WHERE channel_id = ?
+           AND julianday(checked_at) > julianday(?)
+      )
+     ON CONFLICT(channel_id) DO UPDATE SET
+       locked_until = excluded.locked_until
+     WHERE julianday(bot_channel_status_check_locks.locked_until) <= julianday(?)
+       AND NOT EXISTS (
+         SELECT 1 FROM bot_channel_status
+          WHERE channel_id = ?
+            AND julianday(checked_at) > julianday(?)
+       )
+     RETURNING channel_id`,
+  ).bind(channelId, lockedUntil, channelId, checkedSince, now, channelId, checkedSince)
+    .first<{ channel_id: string }>();
+  return row !== null;
+};
+
+export const getBotChannelStatusCheckLock = async (
+  db: D1Database,
+  channelId: string,
+): Promise<string | null> => {
+  const row = await db.prepare(
+    `SELECT channel_id, locked_until
+       FROM bot_channel_status_check_locks
+      WHERE channel_id = ?`,
+  ).bind(channelId).first<BotChannelStatusCheckLockRow>();
+  return row?.locked_until ?? null;
+};
+
+export const getBotChannelStatusCheckedAt = async (
+  db: D1Database,
+  channelId: string,
+): Promise<string | null> => {
+  const row = await db.prepare(
+    `SELECT checked_at
+       FROM bot_channel_status
+      WHERE channel_id = ?`,
+  ).bind(channelId).first<BotChannelStatusCheckedAtRow>();
+  return row?.checked_at ?? null;
+};
+
+export const releaseBotChannelStatusCheck = async (
+  db: D1Database,
+  channelId: string,
+): Promise<void> => {
+  await db.prepare(
+    "DELETE FROM bot_channel_status_check_locks WHERE channel_id = ?",
+  ).bind(channelId).run();
+};
+
+const prepareBotChannelStatusMutation = (
+  db: D1Database,
+  channelId: string,
+  isModerator: boolean,
+  checkedAt: string,
+  reason: string | null,
+): D1PreparedStatement => db.prepare(
+  `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+   VALUES (?, ?, ?, ?)
+   ON CONFLICT(channel_id) DO UPDATE SET
+     is_moderator = excluded.is_moderator,
+     checked_at = excluded.checked_at,
+     reason = excluded.reason`,
+).bind(channelId, isModerator ? 1 : 0, checkedAt, reason);
+
 export const setBotChannelStatus = async (
   db: D1Database,
   channelId: string,
@@ -780,14 +866,25 @@ export const setBotChannelStatus = async (
   checkedAt: string,
   reason: string | null,
 ): Promise<void> => {
-  await db.prepare(
-    `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(channel_id) DO UPDATE SET
-       is_moderator = excluded.is_moderator,
-       checked_at = excluded.checked_at,
-       reason = excluded.reason`,
-  ).bind(channelId, isModerator ? 1 : 0, checkedAt, reason).run();
+  await prepareBotChannelStatusMutation(db, channelId, isModerator, checkedAt, reason).run();
+};
+
+export const setBotChannelStatusAndLock = async (
+  db: D1Database,
+  channelId: string,
+  isModerator: boolean,
+  checkedAt: string,
+  reason: string | null,
+  lockedUntil: string,
+): Promise<void> => {
+  await db.batch([
+    prepareBotChannelStatusMutation(db, channelId, isModerator, checkedAt, reason),
+    db.prepare(
+      `UPDATE bot_channel_status_check_locks
+          SET locked_until = ?
+        WHERE channel_id = ?`,
+    ).bind(lockedUntil, channelId),
+  ]);
 };
 
 export const consumeOAuthTransaction = async (

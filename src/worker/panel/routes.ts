@@ -1,10 +1,23 @@
 import { Hono } from "hono";
 
 import {
+  decryptStoredToken,
+  fetchModeratedChannelStatus,
+  TwitchApiError,
+} from "../bot-maintenance";
+import {
   requireChannelAuthorization,
   requireSessionAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
+import {
+  getBotChannelStatusCheckLock,
+  getBotChannelStatusCheckedAt,
+  getBotIdentity,
+  releaseBotChannelStatusCheck,
+  setBotChannelStatusAndLock,
+  tryReserveBotChannelStatusCheck,
+} from "../auth/repository";
 import {
   decodeAuditLogCursor,
   getAuditLogForChannel,
@@ -21,12 +34,28 @@ interface PanelEnvironment {
 
 const DEFAULT_AUDIT_LIMIT = 50;
 const MAX_AUDIT_LIMIT = 100;
+const MODERATOR_STATUS_CHECK_COOLDOWN_MS = 5 * 60 * 1000;
 
 const parseAuditLimit = (value: string | undefined): number | null => {
   if (value === undefined) return DEFAULT_AUDIT_LIMIT;
   if (!/^\d+$/.test(value)) return null;
   const limit = Number(value);
   return Number.isSafeInteger(limit) && limit > 0 && limit <= MAX_AUDIT_LIMIT ? limit : null;
+};
+
+const nowIso = (): string => new Date().toISOString();
+
+const laterIso = (now: string, milliseconds: number): string =>
+  new Date(Date.parse(now) + milliseconds).toISOString();
+
+const canCheckModeratorStatus = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
+  role !== "bediener";
+
+const readBotCredentials = async (environment: Env): Promise<{ userId: string; accessToken: string } | null> => {
+  const identity = await getBotIdentity(environment.DB);
+  if (identity === null) return null;
+  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, environment.SESSION_ENCRYPTION_KEYS);
+  return accessToken === null ? null : { userId: identity.userId, accessToken };
 };
 
 export const panelRouter = new Hono<PanelEnvironment>();
@@ -48,6 +77,78 @@ panelRouter.get(
     return overview === null
       ? context.text("Kanal nicht gefunden.", 404)
       : context.json(overview);
+  },
+);
+
+panelRouter.post(
+  "/api/channels/:channelId/moderator-status",
+  requireChannelAuthorization(),
+  async (context) => {
+    if (!canCheckModeratorStatus(context.get("channelRole"))) {
+      return context.text("Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.", 403);
+    }
+
+    const channelId = context.req.param("channelId");
+    const checkedAt = nowIso();
+    const checkedSince = laterIso(checkedAt, -MODERATOR_STATUS_CHECK_COOLDOWN_MS);
+    const nextAllowedAt = laterIso(checkedAt, MODERATOR_STATUS_CHECK_COOLDOWN_MS);
+    const reserved = await tryReserveBotChannelStatusCheck(
+      context.env.DB,
+      channelId,
+      nextAllowedAt,
+      checkedAt,
+      checkedSince,
+    );
+    if (!reserved) {
+      const lockedUntil = await getBotChannelStatusCheckLock(context.env.DB, channelId);
+      const lastCheckedAt = await getBotChannelStatusCheckedAt(context.env.DB, channelId);
+      const statusRetryAt = lastCheckedAt === null
+        ? null
+        : laterIso(lastCheckedAt, MODERATOR_STATUS_CHECK_COOLDOWN_MS);
+      const retryAt = lockedUntil ?? statusRetryAt ?? nextAllowedAt;
+      return context.json({
+        error: "Der Moderatorstatus wurde für diesen Kanal kürzlich geprüft.",
+        nextAllowedAt: retryAt,
+      }, 429);
+    }
+
+    let statusFetched = false;
+    try {
+      const credentials = await readBotCredentials(context.env);
+      if (credentials === null) {
+        throw new Error("Bot-Token fehlt oder konnte nicht gelesen werden.");
+      }
+      const isModerator = await fetchModeratedChannelStatus(
+        fetch,
+        context.env.TWITCH_CLIENT_ID,
+        credentials.userId,
+        credentials.accessToken,
+        channelId,
+      );
+      statusFetched = true;
+      await setBotChannelStatusAndLock(
+        context.env.DB,
+        channelId,
+        isModerator,
+        checkedAt,
+        null,
+        nextAllowedAt,
+      );
+      return context.json({
+        moderator: { isModerator, checkedAt, reason: null },
+        nextAllowedAt,
+      });
+    } catch (error: unknown) {
+      if (!statusFetched) {
+        try {
+          await releaseBotChannelStatusCheck(context.env.DB, channelId);
+        } catch {
+          // Die Twitch-Ursache ist für den Nutzer wichtiger als ein fehlgeschlagenes Aufräumen.
+        }
+      }
+      const message = error instanceof Error ? error.message : "Moderatorstatus konnte nicht gelesen werden.";
+      return context.json({ error: message }, error instanceof TwitchApiError ? 502 : 503);
+    }
   },
 );
 

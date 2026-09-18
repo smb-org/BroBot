@@ -119,6 +119,56 @@ export const validateBotToken = async (
   return { userId: body.user_id, login: body.login, expiresIn: body.expires_in };
 };
 
+interface ModeratedChannelsPage {
+  channelIds: string[];
+  nextCursor: string | null;
+}
+
+const fetchModeratedChannelsPage = async (
+  fetcher: typeof fetch,
+  clientId: string,
+  userId: string,
+  accessToken: string,
+  cursor: string | null,
+  broadcasterId?: string,
+): Promise<ModeratedChannelsPage> => {
+  const url = new URL("https://api.twitch.tv/helix/moderation/channels");
+  url.searchParams.set("user_id", userId);
+  url.searchParams.set("first", "100");
+  if (cursor !== null) url.searchParams.set("after", cursor);
+  if (broadcasterId !== undefined) url.searchParams.set("broadcaster_id", broadcasterId);
+  const response = await fetcher(url.toString(), {
+    headers: {
+      "Client-ID": clientId,
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  const body = await responseJson(response);
+  if (!response.ok || !Array.isArray(body.data)) {
+    throw new TwitchApiError(
+      typeof body.message === "string" && body.message.length > 0
+        ? body.message
+        : "Moderatorstatus konnte nicht gelesen werden.",
+      response.status,
+      typeof body.error === "string" ? body.error : null,
+    );
+  }
+  const data: unknown[] = body.data.map((entry: unknown): unknown => entry);
+  const pagination = body.pagination;
+  const nextCursor = pagination !== null && typeof pagination === "object" &&
+    "cursor" in pagination && typeof pagination.cursor === "string" && pagination.cursor.length > 0
+    ? pagination.cursor
+    : null;
+  const channelIds: string[] = data.flatMap((entry: unknown) => {
+    if (entry !== null && typeof entry === "object" &&
+        "broadcaster_id" in entry && typeof entry.broadcaster_id === "string") {
+      return [entry.broadcaster_id];
+    }
+    return [];
+  });
+  return { channelIds, nextCursor };
+};
+
 export const fetchModeratedChannels = async (
   fetcher: typeof fetch,
   clientId: string,
@@ -127,42 +177,34 @@ export const fetchModeratedChannels = async (
 ): Promise<string[]> => {
   const seenCursors = new Set<string>();
   const fetchPage = async (cursor: string | null): Promise<string[]> => {
-    const url = new URL("https://api.twitch.tv/helix/moderation/channels");
-    url.searchParams.set("user_id", userId);
-    url.searchParams.set("first", "100");
-    if (cursor !== null) url.searchParams.set("after", cursor);
-    const response = await fetcher(url.toString(), {
-      headers: {
-        "Client-ID": clientId,
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-    const body = await responseJson(response);
-    if (!response.ok || !Array.isArray(body.data)) {
-      throw new TwitchApiError("Moderatorstatus konnte nicht gelesen werden.", response.status);
-    }
-    const data: unknown[] = body.data.map((entry: unknown): unknown => entry);
-    const pagination = body.pagination;
-    const nextCursor = pagination !== null && typeof pagination === "object" &&
-      "cursor" in pagination && typeof pagination.cursor === "string" && pagination.cursor.length > 0
-      ? pagination.cursor
-      : null;
-    const channelIds: string[] = data.flatMap((entry: unknown) => {
-      if (entry !== null && typeof entry === "object" &&
-          "broadcaster_id" in entry && typeof entry.broadcaster_id === "string") {
-        return [entry.broadcaster_id];
-      }
-      return [];
-    });
-    if (nextCursor === null) return channelIds;
-    if (seenCursors.has(nextCursor)) {
+    const page = await fetchModeratedChannelsPage(fetcher, clientId, userId, accessToken, cursor);
+    if (page.nextCursor === null) return page.channelIds;
+    if (seenCursors.has(page.nextCursor)) {
       throw new TwitchApiError("Twitch liefert einen wiederholten Pagination-Cursor.", 502);
     }
-    seenCursors.add(nextCursor);
-    return channelIds.concat(await fetchPage(nextCursor));
+    seenCursors.add(page.nextCursor);
+    return page.channelIds.concat(await fetchPage(page.nextCursor));
   };
 
   return fetchPage(null);
+};
+
+export const fetchModeratedChannelStatus = async (
+  fetcher: typeof fetch,
+  clientId: string,
+  userId: string,
+  accessToken: string,
+  channelId: string,
+): Promise<boolean> => {
+  const page = await fetchModeratedChannelsPage(
+    fetcher,
+    clientId,
+    userId,
+    accessToken,
+    null,
+    channelId,
+  );
+  return page.channelIds.includes(channelId);
 };
 
 export const decryptStoredToken = async (ciphertext: string, keys: string): Promise<string | null> => {

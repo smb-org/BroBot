@@ -41,8 +41,9 @@ zeigt nach einem erfolgreichen HTTP-Statusabruf die Version aus
 
 ### Migration und Token ausgeben
 
-Vor dem ersten Rollout die D1-Migration `0003_overlay_tokens.sql` in jeder
-Zielumgebung anwenden. Der Pepper bleibt ein Secret und wird nicht in die
+Vor dem ersten Rollout die D1-Migrationen `0003_overlay_tokens.sql` und
+`0004_moderator_status_check_lock.sql` in jeder Zielumgebung anwenden. Der
+Pepper bleibt ein Secret und wird nicht in die
 Browserquelle oder in die URL geschrieben.
 
 Die Ausgabe erfolgt mit einer angemeldeten Panel-Session. Zuerst über
@@ -201,7 +202,8 @@ pnpm run check
 Vor dem ersten Rollout dieser Version die D1-Migrationen in jeder Zielumgebung
 anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
 Session-, OAuth- und Token-Tabellen, `0002` die feste Rollenmenge sowie das
-Audit-Log und `0003` die Overlay-Token-Tabelle anlegen:
+Audit-Log, `0003` die Overlay-Token-Tabelle und `0004` die kanalbezogene
+Sperre für manuelle Moderatorstatus-Prüfungen anlegen:
 
 ```bash
 pnpm exec wrangler d1 migrations apply brobot-local

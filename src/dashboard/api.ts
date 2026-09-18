@@ -5,6 +5,7 @@ import type {
   PanelChannelRole,
   PanelMember,
   PanelMembersResponse,
+  PanelModeratorStatus,
   PanelSystemResponse,
   PanelTwitchUser,
 } from "../panel-contract";
@@ -13,6 +14,7 @@ export class PanelApiError extends Error {
   public constructor(
     public readonly status: number,
     message: string,
+    public readonly details: unknown = null,
   ) {
     super(message);
     this.name = "PanelApiError";
@@ -54,8 +56,20 @@ export const requestJson = async <T>(input: string, init?: RequestInit): Promise
   const url = resolveRequestUrl(input);
   const response = await fetch(url, { ...init, credentials: "same-origin" });
   if (!response.ok) {
-    const message = (await response.text()) || "Die Panel-Anfrage ist fehlgeschlagen.";
-    throw new PanelApiError(response.status, message);
+    const responseText = await response.text();
+    let message = responseText || "Die Panel-Anfrage ist fehlgeschlagen.";
+    let details: unknown = null;
+    try {
+      const parsed: unknown = JSON.parse(responseText);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        details = parsed;
+        const error = (parsed as Record<string, unknown>).error;
+        if (typeof error === "string" && error.length > 0) message = error;
+      }
+    } catch {
+      // Fehlerantworten dürfen auch reiner Text sein.
+    }
+    throw new PanelApiError(response.status, message, details);
   }
   if (response.status === 204) return undefined as T;
   return response.json();
@@ -124,7 +138,7 @@ export const searchTwitchUser = async (
   );
 };
 
-const requestMemberMutation = <T>(
+const requestMutation = <T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
   body?: Record<string, string>,
@@ -141,7 +155,7 @@ export const addChannelMember = (
   channelId: string,
   userId: string,
   role: PanelChannelRole,
-): Promise<{ member: PanelMember }> => requestMemberMutation(
+): Promise<{ member: PanelMember }> => requestMutation(
   memberPath(channelId),
   "POST",
   { userId, role },
@@ -151,14 +165,21 @@ export const updateChannelMemberRole = (
   channelId: string,
   userId: string,
   role: PanelChannelRole,
-): Promise<{ member: PanelMember }> => requestMemberMutation(
+): Promise<{ member: PanelMember }> => requestMutation(
   memberPath(channelId, userId),
   "PATCH",
   { role },
 );
 
 export const removeChannelMember = (channelId: string, userId: string): Promise<undefined> =>
-  requestMemberMutation<undefined>(memberPath(channelId, userId), "DELETE");
+  requestMutation<undefined>(memberPath(channelId, userId), "DELETE");
+
+export const refreshModeratorStatus = (
+  channelId: string,
+): Promise<{ moderator: PanelModeratorStatus; nextAllowedAt: string }> => requestMutation(
+  channelPath(channelId, "moderator-status"),
+  "POST",
+);
 
 export const logout = async (): Promise<void> => {
   const csrf = await requestJson<{ token: string }>("/api/csrf");

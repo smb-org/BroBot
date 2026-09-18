@@ -20,6 +20,7 @@ import {
   fetchSystemOverview,
   logout,
   PanelApiError,
+  refreshModeratorStatus,
 } from "./api";
 import { ModulePanelMount } from "./module-panels";
 import { MembersPage } from "./members";
@@ -31,6 +32,18 @@ interface LoadState<T> {
   data: T | null;
   error: string | null;
 }
+
+interface ModeratorCheckState {
+  status: "idle" | "loading" | "error";
+  error: string | null;
+  nextAllowedAt: string | null;
+}
+
+const idleModeratorCheck = (): ModeratorCheckState => ({
+  status: "idle",
+  error: null,
+  nextAllowedAt: null,
+});
 
 const idleState = <T,>(): LoadState<T> => ({ status: "idle", data: null, error: null });
 const loadingState = <T,>(): LoadState<T> => ({ status: "loading", data: null, error: null });
@@ -100,6 +113,26 @@ const errorMessage = (error: unknown): string => {
   return "Die Daten konnten nicht geladen werden.";
 };
 
+const nextAllowedAtFromError = (error: unknown): string | null => {
+  if (!(error instanceof PanelApiError) || error.details === null || typeof error.details !== "object" || Array.isArray(error.details)) return null;
+  const nextAllowedAt = (error.details as Record<string, unknown>).nextAllowedAt;
+  return typeof nextAllowedAt === "string" ? nextAllowedAt : null;
+};
+
+const moderatorLastError = (moderator: PanelModeratorStatus): PanelLastError | null =>
+  moderator.reason === null
+    ? null
+    : { source: "moderator", reason: moderator.reason, at: moderator.checkedAt };
+
+const mergeModeratorStatus = <T extends { moderator: PanelModeratorStatus | null; lastError: PanelLastError | null }>(
+  current: T,
+  moderator: PanelModeratorStatus,
+): T => ({
+  ...current,
+  moderator,
+  lastError: current.lastError?.source === "moderator" ? moderatorLastError(moderator) : current.lastError,
+});
+
 interface LinkProperties {
   route: DashboardRoute;
   current: DashboardRoute;
@@ -167,7 +200,7 @@ const ChannelStateCard = ({ channel }: { channel: PanelChannelState }): ReactEle
   </article>
 );
 
-const StatusCard = ({ title, tone, value, detail, badgeLabel }: { title: string; tone: StatusBadgeProperties["tone"]; value: string; detail?: string; badgeLabel?: string }): ReactElement => (
+const StatusCard = ({ title, tone, value, detail, badgeLabel, footer }: { title: string; tone: StatusBadgeProperties["tone"]; value: string; detail?: ReactElement | string; badgeLabel?: string; footer?: ReactElement | undefined }): ReactElement => (
   <article className="status-card" aria-label={title} data-status={tone}>
     <div className="status-card__heading">
       <span className="eyebrow">{title}</span>
@@ -175,6 +208,7 @@ const StatusCard = ({ title, tone, value, detail, badgeLabel }: { title: string;
     </div>
     <strong>{value}</strong>
     {detail === undefined ? null : <p>{detail}</p>}
+    {footer}
   </article>
 );
 
@@ -253,10 +287,33 @@ const OverviewPage = ({ channels, onNavigate }: { channels: PanelChannelState[];
   </>
 );
 
-const ModeratorCard = ({ moderator }: { moderator: PanelModeratorStatus | null }): ReactElement => {
-  if (moderator === null) return <StatusCard title="Moderatorstatus" tone="neutral" value="Nicht geprüft" detail="Für diesen Kanal liegt noch keine Prüfung vor." />;
-  if (!moderator.isModerator) return <StatusCard title="Moderatorstatus" tone="error" value="Moderatorrolle fehlt" detail={moderator.reason ?? "Ohne diese Rolle scheitern mehrere Bot-Funktionen."} />;
-  return <StatusCard title="Moderatorstatus" tone="healthy" value="Moderator" detail={`Geprüft: ${formatTimestamp(moderator.checkedAt)}`} />;
+interface ModeratorCardProperties {
+  moderator: PanelModeratorStatus | null;
+  canCheck: boolean;
+  checking: boolean;
+  checkError: string | null;
+  nextAllowedAt: string | null;
+  onCheck: () => void;
+}
+
+const ModeratorCard = ({ moderator, canCheck, checking, checkError, nextAllowedAt, onCheck }: ModeratorCardProperties): ReactElement => {
+  const tone = moderator === null ? "neutral" : moderator.isModerator ? "healthy" : "error";
+  const value = moderator === null ? "Nicht geprüft" : moderator.isModerator ? "Moderator" : "Moderatorrolle fehlt";
+  const detail = moderator === null
+    ? "Für diesen Kanal liegt noch keine Prüfung vor."
+    : moderator.reason ?? "Ohne diese Rolle scheitern mehrere Bot-Funktionen.";
+  const checkTime = moderator === null ? null : `Letzte Prüfung: ${formatTimestamp(moderator.checkedAt)}`;
+  const footer = canCheck ? (
+    <div className="moderator-check-action">
+      <button className="button button--secondary" type="button" onClick={onCheck} disabled={checking} aria-busy={checking}>
+        {checking ? "Prüfung läuft …" : "Moderatorstatus prüfen"}
+      </button>
+      {checkTime === null ? null : <p className="muted">{checkTime}</p>}
+      {nextAllowedAt === null ? null : <p className="muted">Nächste Prüfung ab {formatTimestamp(nextAllowedAt)}.</p>}
+      {checkError === null ? null : <p className="form-error" role="alert">{checkError}</p>}
+    </div>
+  ) : checkTime === null ? undefined : <p className="muted moderator-check-time">{checkTime}</p>;
+  return <StatusCard title="Moderatorstatus" tone={tone} value={value} detail={detail} footer={footer} />;
 };
 
 const BotCard = ({ bot }: { bot: PanelBotStatus | null }): ReactElement => {
@@ -284,7 +341,13 @@ const ErrorCard = ({ error }: { error: PanelLastError | null }): ReactElement =>
     ? <StatusCard title="Letzter Fehler" tone="neutral" value="Keine gespeicherte Ursache" detail="Es gibt keinen Fehlergrund in den gelesenen Zustandsdaten." />
     : <StatusCard title="Letzter Fehler" tone="error" value={error.reason} detail={`${error.source} · ${formatTimestamp(error.at)}`} />;
 
-const ChannelOverviewPage = ({ overview }: { overview: PanelChannelOverview }): ReactElement => (
+interface ChannelOverviewPageProperties {
+  overview: PanelChannelOverview;
+  moderatorCheck: ModeratorCheckState;
+  onCheckModeratorStatus: () => void;
+}
+
+const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus }: ChannelOverviewPageProperties): ReactElement => (
   <>
     <header className="page-heading">
       <div><span className="eyebrow">Kanalübersicht · {overview.role}</span><h1>{overview.displayName}</h1></div>
@@ -292,7 +355,14 @@ const ChannelOverviewPage = ({ overview }: { overview: PanelChannelOverview }): 
     </header>
     <div className="status-grid">
       <BroadcasterConnectionCard status={overview.broadcasterConnection} />
-      <ModeratorCard moderator={overview.moderator} />
+      <ModeratorCard
+        moderator={overview.moderator}
+        canCheck={overview.role !== "bediener"}
+        checking={moderatorCheck.status === "loading"}
+        checkError={moderatorCheck.error}
+        nextAllowedAt={moderatorCheck.nextAllowedAt}
+        onCheck={onCheckModeratorStatus}
+      />
       <BotCard bot={overview.bot} />
       <TokenCard tokens={overview.tokens} />
       <ErrorCard error={overview.lastError} />
@@ -321,6 +391,7 @@ export const DashboardApp = (): ReactElement => {
   const [route, navigate] = useDashboardRoute();
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
   const [overview, setOverview] = useState<LoadState<PanelChannelOverview>>(() => idleState());
+  const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(() => idleModeratorCheck());
   const [system, setSystem] = useState<LoadState<PanelSystemResponse>>(() => idleState());
   const [members, setMembers] = useState<LoadState<PanelMembersResponse>>(() => idleState());
   const [audit, setAudit] = useState<LoadState<PanelAuditResponse>>(() => idleState());
@@ -340,6 +411,7 @@ export const DashboardApp = (): ReactElement => {
     membersPageController.current = null;
     setChannels({ status: "success", data: [], error: null });
     setOverview(idleState());
+    setModeratorCheck(idleModeratorCheck());
     setSystem(idleState());
     setMembers(idleState());
     setAudit(idleState());
@@ -381,6 +453,7 @@ export const DashboardApp = (): ReactElement => {
     membersPageController.current = null;
     setLoadingNextMembersPage(false);
     setOverview(loadingState());
+    setModeratorCheck(idleModeratorCheck());
     setSystem(idleState());
     setAudit(idleState());
     setSystemChannelId(null);
@@ -448,6 +521,34 @@ export const DashboardApp = (): ReactElement => {
     void load();
     return cleanup;
   }, [route]);
+
+  const handleModeratorStatusCheck = async (): Promise<void> => {
+    if (route.kind !== "channel" || route.section !== "overview") return;
+    const channelId = route.channelId;
+    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "overview" });
+    setModeratorCheck({ status: "loading", error: null, nextAllowedAt: null });
+    try {
+      const response = await refreshModeratorStatus(channelId);
+      if (window.location.pathname !== routePath) return;
+      setOverview((current) => {
+        if (current.data === null || current.data.channelId !== channelId) return current;
+        return {
+          status: "success",
+          data: mergeModeratorStatus(current.data, response.moderator),
+          error: null,
+        };
+      });
+      setChannels((current) => current.data === null ? current : {
+        ...current,
+        data: current.data.map((channel) => channel.channelId !== channelId ? channel : mergeModeratorStatus(channel, response.moderator)),
+      });
+      setModeratorCheck({ status: "idle", error: null, nextAllowedAt: response.nextAllowedAt });
+    } catch (error: unknown) {
+      if (window.location.pathname !== routePath) return;
+      setModeratorCheck({ status: "error", error: errorMessage(error), nextAllowedAt: nextAllowedAtFromError(error) });
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    }
+  };
 
   const reloadMembers = async (): Promise<void> => {
     if (route.kind !== "channel" || route.section !== "members") return;
@@ -570,7 +671,7 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "channel" && selectedChannel === null && channels.status === "success" ? <ErrorPanel message="Dieser Kanal ist für dein Konto nicht freigegeben." /> : null}
         {route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">Kanalzustand wird geladen …</p> : null}
         {route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {route.kind === "channel" && route.section === "overview" && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} /> : null}
+        {route.kind === "channel" && route.section === "overview" && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} /> : null}
         {route.kind === "channel" && route.section === "members" && members.status === "loading" ? <p className="loading-line">Mitglieder werden geladen …</p> : null}
         {route.kind === "channel" && route.section === "members" && members.error !== null ? <ErrorPanel message={members.error} /> : null}
         {route.kind === "channel" && route.section === "members" && members.data !== null && selectedChannel !== null ? <MembersPage channelId={route.channelId} ownRole={selectedChannel.role} members={members.data.members} nextCursor={members.data.nextCursor} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
