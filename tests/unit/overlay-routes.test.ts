@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { authRouter } from "../../src/worker/auth/routes";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { issueOverlayToken, revokeOverlayToken } from "../../src/worker/auth/overlay-token-service";
+import {
+  issueOverlayToken,
+  revokeOverlayToken,
+  type IssueOverlayTokenInput,
+} from "../../src/worker/auth/overlay-token-service";
 import { TestD1Database } from "./test-d1";
 
 const key = (byte: number): string =>
@@ -53,6 +57,17 @@ const insertMember = async (database: TestD1Database, channelId = "kanal-a"): Pr
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
      VALUES (?, 'user-1', 'bediener', ?, ?)`,
   ).bind(channelId, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+};
+
+const TEST_ACTOR = { userId: "user-1", sessionId: "session-1" };
+
+const issueTestToken = async (
+  database: TestD1Database,
+  input: Omit<IssueOverlayTokenInput, "actor">,
+) => {
+  const issued = await issueOverlayToken(database as unknown as D1Database, { ...input, actor: TEST_ACTOR });
+  if (issued === null) throw new Error("Overlay-Token-Ausgabe im Test fehlgeschlagen.");
+  return issued;
 };
 
 const sessionHeaders = async (
@@ -241,7 +256,7 @@ describe("Overlay-Routen", () => {
 
   it("weist einen abgelaufenen Token auf Routenebene ab", async () => {
     await insertMember(database);
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: environment.OVERLAY_TOKEN_PEPPER,
       publicOrigin: environment.PUBLIC_ORIGIN,
@@ -259,7 +274,7 @@ describe("Overlay-Routen", () => {
 
   it("weist einen widerrufenen Token auf Routenebene ab", async () => {
     await insertMember(database);
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: environment.OVERLAY_TOKEN_PEPPER,
       publicOrigin: environment.PUBLIC_ORIGIN,
@@ -268,6 +283,7 @@ describe("Overlay-Routen", () => {
     });
     await revokeOverlayToken(database as unknown as D1Database, {
       channelId: "kanal-a",
+      actor: TEST_ACTOR,
       tokenId: issued.tokenId,
       reason: "Quelle entfernt",
       revokedAt: "2026-09-18T00:01:00.000Z",
@@ -280,7 +296,7 @@ describe("Overlay-Routen", () => {
 
   it("weist einen Token nach dem Löschen seines Kanals auf Routenebene ab", async () => {
     await insertMember(database);
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: environment.OVERLAY_TOKEN_PEPPER,
       publicOrigin: environment.PUBLIC_ORIGIN,
@@ -299,7 +315,7 @@ describe("Overlay-Routen", () => {
     ["konkurrierenden", "concurrent" as const],
   ])("liefert den Status trotz %s last_used_at-Update weiter", async (_description, behavior) => {
     await insertMember(database);
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: environment.OVERLAY_TOKEN_PEPPER,
       publicOrigin: environment.PUBLIC_ORIGIN,
@@ -318,7 +334,7 @@ describe("Overlay-Routen", () => {
     await insertMember(database);
     await insertChannel(database, "kanal-b");
     await insertMember(database, "kanal-b");
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: environment.OVERLAY_TOKEN_PEPPER,
       publicOrigin: environment.PUBLIC_ORIGIN,
