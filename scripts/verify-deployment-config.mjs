@@ -14,6 +14,11 @@ const deploymentBindings = [
   "OVERLAY_TOKEN_PEPPER",
 ];
 const deploymentBindingSet = new Set(deploymentBindings);
+const keyRingSecretNames = new Set([
+  "TWITCH_EVENTSUB_SECRET",
+  "SESSION_COOKIE_KEYS",
+  "SESSION_ENCRYPTION_KEYS",
+]);
 const placeholderPattern = /replace-with|example\.invalid/i;
 const environmentNames = ["staging", "production"];
 const expectedWorkerNames = {
@@ -143,10 +148,49 @@ const checkExampleFile = async (fileName, required, failures) => {
     const values = parseEnv(await readFile(path.join(projectRoot, fileName), "utf8"));
     const missing = required.filter((name) => values[name] === undefined);
     if (missing.length > 0) failures.push(`${fileName}: Beispielwerte fehlen: ${missing.join(", ")}`);
+    for (const name of keyRingSecretNames) {
+      if (values[name] !== undefined && !isKeyRingShape(values[name])) {
+        failures.push(`${fileName}: ${name} hat nicht das active/retired-Format.`);
+      }
+    }
   } catch (error) {
     failures.push(
       `${fileName}: ${error instanceof Error ? error.message : "konnte nicht gelesen werden"}`,
     );
+  }
+};
+
+const isKeyRingShape = (value) => {
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    if (parsed.active === null || typeof parsed.active !== "object" || Array.isArray(parsed.active)) return false;
+    if (typeof parsed.active.id !== "string" || parsed.active.id.length === 0) return false;
+    if (typeof parsed.active.key !== "string" || parsed.active.key.length === 0) return false;
+    if (parsed.retired !== undefined && !Array.isArray(parsed.retired)) return false;
+    const retired = parsed.retired ?? [];
+    if (retired.some((entry) =>
+      entry === null || typeof entry !== "object" || Array.isArray(entry) ||
+      typeof entry.id !== "string" || entry.id.length === 0 ||
+      typeof entry.key !== "string" || entry.key.length === 0)) return false;
+    const ids = [parsed.active.id, ...retired.map((entry) => entry.id)];
+    if (new Set(ids).size !== ids.length) return false;
+
+    const isPlaceholder = (key) => placeholderPattern.test(key);
+    const is32ByteBase64url = (key) => {
+      try {
+        if (!/^[A-Za-z0-9_-]+$/.test(key) || key.length % 4 === 1) return false;
+        const normalized = key.replaceAll("-", "+").replaceAll("_", "/")
+          .padEnd(Math.ceil(key.length / 4) * 4, "=");
+        return Buffer.from(normalized, "base64").byteLength === 32;
+      } catch {
+        return false;
+      }
+    };
+    const keys = [parsed.active.key, ...retired.map((entry) => entry.key)];
+    return keys.every((key) => isPlaceholder(key) || is32ByteBase64url(key));
+  } catch {
+    return false;
   }
 };
 
@@ -161,6 +205,13 @@ const validateDeploymentValues = (environment, values, required) => {
   });
   if (placeholders.length > 0) {
     failures.push(`Platzhalterwerte sind nicht erlaubt: ${placeholders.join(", ")}`);
+  }
+
+  const malformedKeyRings = [...keyRingSecretNames].filter((name) =>
+    values[name] !== undefined && !isKeyRingShape(values[name]),
+  );
+  if (malformedKeyRings.length > 0) {
+    failures.push(`Ungültiges active/retired-Format: ${malformedKeyRings.join(", ")}`);
   }
 
   const unexpected = Object.keys(values).filter((name) => !deploymentBindingSet.has(name));

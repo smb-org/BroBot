@@ -18,9 +18,20 @@
    openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
    ```
 
-   Für `SESSION_COOKIE_KEYS`, `SESSION_ENCRYPTION_KEYS` und `OVERLAY_TOKEN_PEPPER` getrennte Werte verwenden. Zusätzlich `TWITCH_EVENTSUB_SECRET` und die übrigen Werte als echte Betreiber-Secrets festlegen.
+   Für `SESSION_COOKIE_KEYS` und `SESSION_ENCRYPTION_KEYS` jeweils einen
+   eigenen aktiven Schlüsselring mit optionalen `retired`-Einträgen verwenden.
+   `TWITCH_EVENTSUB_SECRET` hat dasselbe Format; sein aktiver Eintrag signiert
+   neue Abonnements, ausgemusterte Einträge werden während der Rotation noch
+   gelesen. Für `OVERLAY_TOKEN_PEPPER` einen einzelnen, getrennten Wert und
+   für die übrigen Variablen echte Betreiber-Secrets festlegen. Die
+   Beispieldateien zeigen die genaue JSON-Struktur.
 4. Für lokal `.dev.vars.example` nach `.dev.vars` kopieren und die Platzhalter ersetzen. Für Staging und Production `.env.staging` beziehungsweise `.env.production` aus dem sicheren Betreiber-Backup bereitstellen.
-5. Einen neuen Kanal gibt der Betreiber frei, indem er ihn in `channels` anlegt. Anschließend verbindet der Broadcaster den Kanal per OAuth.
+5. Einen neuen Kanal gibt der Betreiber frei, indem er ihn in `channels` anlegt
+   und den Broadcaster in `channel_members` einträgt. Der Bot wird anschließend
+   als reine Twitch-Aktion gemoddet. Der Betreiber autorisiert den Bot einmal
+   über `GET /auth/bot/login`; diese Autorisierung wird nicht je Kanal kopiert.
+   Eine Broadcaster-Autorisierung entsteht erst mit einem Modul, das sie
+   benötigt.
 
 Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` dokumentiert. Die aktuelle Wrangler-Konfiguration akzeptiert dieses Feld und nutzt es auch für die Typgenerierung; Secret-Werte werden ausschließlich über Secret-Bindings beziehungsweise lokale Env-Dateien bereitgestellt.
 
@@ -32,6 +43,7 @@ Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` doku
 |---|---|
 | `APP_ENV` | `local`, `staging` oder `production`; unterscheidet Umgebungsverhalten und wird vom Deploy-Preflight geprüft |
 | `TIMEZONE` | IANA-Zeitzone, zum Beispiel `Europe/Berlin` |
+| `TWITCH_BOT_LOGIN` | Öffentlicher Twitch-Login des einzigen Bot-Accounts; der Bot-Callback akzeptiert keine andere Identität |
 
 **Secrets** (nur als Namen unter `secrets.required` in `wrangler.jsonc`; Werte kommen aus `.dev.vars` beziehungsweise `.env.staging`/`.env.production`):
 
@@ -39,13 +51,22 @@ Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` doku
 |---|---|---|
 | `TWITCH_CLIENT_ID` | Client-ID der Twitch-Anwendung | Zeichenkette aus der Developer Console |
 | `TWITCH_CLIENT_SECRET` | Client-Secret derselben Anwendung; trägt den OAuth-Austausch | Zeichenkette aus der Developer Console |
-| `TWITCH_EVENTSUB_SECRET` | gemeinsames Geheimnis für die HMAC-Signaturprüfung eingehender EventSub-Webhooks | frei gewählte Zufallszeichenkette, mindestens 10 Zeichen |
+| `TWITCH_EVENTSUB_SECRET` | Schlüsselring für die HMAC-Signaturprüfung eingehender EventSub-Webhooks | JSON `{"active":{"id":"...","key":"..."},"retired":[...]}` |
 | `PUBLIC_ORIGIN` | öffentliche Origin der Umgebung; bestimmt OAuth-Redirect und Overlay-URLs | absolute URL ohne Schrägstrich am Ende |
-| `SESSION_COOKIE_KEYS` | Schlüsselsatz für die Signatur der Session-Cookies | JSON `{"active":{"id":"...","key":"..."}}`, Schlüssel 32 Byte base64url |
+| `SESSION_COOKIE_KEYS` | Schlüsselsatz für die Signatur der Session-Cookies | JSON `{"active":{"id":"...","key":"..."},"retired":[...]}`, Schlüssel 32 Byte base64url |
 | `SESSION_ENCRYPTION_KEYS` | Schlüsselsatz für die Verschlüsselung der Session-Inhalte | wie oben, eigener Wert |
 | `OVERLAY_TOKEN_PEPPER` | Pepper für die Hashes widerrufbarer Overlay-Tokens | 32 Byte base64url |
 
-Die drei Schlüsselwerte (`SESSION_COOKIE_KEYS`, `SESSION_ENCRYPTION_KEYS`, `OVERLAY_TOKEN_PEPPER`) werden mit dem im Erstaufsetzen dokumentierten `openssl`-Befehl erzeugt und sind je Umgebung und je Zweck unterschiedlich — niemals denselben Wert doppelt verwenden.
+Die vier Schlüsselwerte (`TWITCH_EVENTSUB_SECRET`, `SESSION_COOKIE_KEYS`,
+`SESSION_ENCRYPTION_KEYS` und `OVERLAY_TOKEN_PEPPER`) werden mit dem im
+Erstaufsetzen dokumentierten `openssl`-Befehl erzeugt und sind je Umgebung und
+je Zweck unterschiedlich — niemals denselben Wert doppelt verwenden.
+
+Bei `SESSION_COOKIE_KEYS`, `SESSION_ENCRYPTION_KEYS` und
+`TWITCH_EVENTSUB_SECRET` signiert beziehungsweise verschlüsselt nur
+`active` neu. Ein Eintrag unter `retired` bleibt so lange erhalten, bis keine
+alten Cookies oder EventSub-Abonnements mehr existieren. Die Rotation wird
+danach durch Entfernen des alten Eintrags abgeschlossen.
 
 **Bindings** (keine Umgebungsvariablen, sondern Cloudflare-Ressourcen aus `wrangler.jsonc`):
 
@@ -77,6 +98,20 @@ pnpm install --frozen-lockfile
 pnpm run check
 ```
 
+Vor dem ersten Rollout dieser Version die D1-Migration in jeder Zielumgebung
+anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
+Session-, OAuth- und Token-Tabellen anlegt:
+
+```bash
+pnpm exec wrangler d1 migrations apply brobot-local
+pnpm exec wrangler d1 migrations apply brobot-staging --remote --env staging
+pnpm exec wrangler d1 migrations apply brobot-production --remote --env production
+```
+
+Bei späteren Releases gilt dieselbe Reihenfolge: Migration anwenden, danach
+den Worker deployen. Die Befehle verändern ausschließlich die angegebene D1-
+Datenbank; die Betreiberdateien mit Secrets werden dabei nicht gelesen.
+
 Staging und Production werden lokal mit den jeweiligen Betreiberdateien ausgerollt:
 
 ```bash
@@ -93,6 +128,40 @@ curl -i https://<öffentlicher-origin>/healthz
 ```
 
 `200` bedeutet, dass die erwarteten lokalen Bindings vorhanden sind. Bei `503` enthält die Antwort ausschließlich die Namen fehlender Bindings, niemals deren Werte.
+
+## Twitch-Login und Bot-Verbindung
+
+`GET /auth/login` startet den Panel-Login mit dem Scope
+`user:read:moderated_channels`. Twitch leitet immer auf
+`PUBLIC_ORIGIN/auth/twitch/callback` zurück. Die Session ist ein verschlüsseltes
+und signiertes `HttpOnly`-Cookie; ihre D1-Zeile bleibt beim Logout als
+widerrufen nachvollziehbar. `GET /auth/logout` widerruft die Zeile und löscht
+das Cookie. Access- und Refresh-Token dieses Logins liegen verschlüsselt in
+`twitch_login_identity`, nicht in der Session. Der stündliche Lauf validiert
+und erneuert sie; bei einem Widerruf werden die zugehörigen Sessions
+serverseitig widerrufen.
+
+Die Betreiberaufgabe `GET /auth/bot/login` verwendet denselben Callback, legt
+aber keine Session an. Sie schreibt die globale Ein-Zeilen-Identität in
+`bot_identity`. Access- und Refresh-Token liegen dort nur verschlüsselt. Eine
+Zeile in `twitch_connections` wird für diesen globalen Bot nicht angelegt.
+
+Der Scheduled-Handler läuft in jeder Umgebung stündlich. Er validiert den
+Bot-Token über Twitch, erneuert Token mit weniger als einer Stunde Restlaufzeit
+und ersetzt Access- und Refresh-Token in einem D1-Schreibvorgang. Danach prüft
+er den Bot über Get Moderated Channels für alle Zeilen in `channels` und hält
+den Status in `bot_channel_status` fest. Abgelaufene OAuth-Transaktionen
+werden im selben Lauf entfernt.
+
+Bei `invalid_grant` oder einer widerrufenen Autorisierung wird der globale
+Status mit Ursache `revoked` gespeichert. Der Scheduled-Handler versucht einen
+solchen Zustand nicht endlos erneut; der Betreiber startet zur erneuten
+Autorisierung wieder `/auth/bot/login`.
+
+Die Scope-Entscheidung in `docs/decisions/0002-twitch-scopes-und-token-handling.md`
+führt `user:read:moderated_channels` bewusst sowohl für Login-Tokens als auch
+für den Bot-Token auf. Der stündliche Lauf nutzt diesen Bot-Scope für Get
+Moderated Channels und speichert den Moderatorstatus je freigegebenem Kanal.
 
 ## Secret-Rotation
 
