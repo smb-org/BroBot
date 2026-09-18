@@ -34,7 +34,8 @@ Voneinander unabhängige Delegationen in einer Nachricht gemeinsam starten, stat
 
 - **Ein Agent beansprucht das Issue, bevor er mit der Arbeit beginnt** — durch Zuweisung an das Konto, unter dem er arbeitet. Erst zuweisen, dann arbeiten. Sonst arbeiten zwei Sitzungen unbemerkt am selben Issue.
 - Vor dem Beanspruchen prüft er, ob das Issue bereits jemandem zugewiesen ist. An fremd zugewiesenen Issues wird nicht gearbeitet; wenn etwas festhängt, erst im Issue nachfragen.
-- Agenten dürfen Issues anlegen und kommentieren, aber **nicht schließen**. Das passiert über `Closes #N` beim Merge.
+- Ein Agent schließt ein Issue, dessen Ergebnis **kein** Merge ist — insbesondere einen Spike, sobald die Entscheidung als Kommentar festgehalten und, wo nötig, unter `docs/decisions/` dokumentiert ist.
+- Ein Issue, das **Code** erledigt, wird nicht von Hand geschlossen. Das passiert über `Closes #N` beim Merge, damit die Verknüpfung zwischen Issue und Commit erhalten bleibt.
 - Wird die Arbeit abgebrochen oder liegen gelassen, gibt der Agent die Zuweisung zurück, statt das Issue zu blockieren.
 - Vor dem Anlegen eines Issues wird geprüft, ob es das Thema schon gibt — Duplikate kosten mehr als die Suche.
 - Die Regel zum öffentlichen Repo aus [CONTRIBUTING.md](./CONTRIBUTING.md) gilt für Agenten unverändert: keine internen Einschätzungen in Issue-Texte übernehmen, auch nicht aus `docs/input/`.
