@@ -19,6 +19,7 @@ import {
   upsertLoginIdentity,
   upsertBotIdentity,
 } from "../../src/worker/auth/repository";
+import { TestD1Database } from "./test-d1";
 
 const fakeDatabase = (firstResult: unknown = null, allResult: unknown = { results: [{ channel_id: "channel-1" }] }) => {
   const statement = {
@@ -183,6 +184,29 @@ describe("Auth-D1-Repository", () => {
     await expect(consumeOAuthTransaction(database, "transaction-1", "2026-09-18T00:01:01.000Z"))
       .resolves.toBeNull();
     expect(read()?.used_at).toBe("2026-09-18T00:01:00.000Z");
+  });
+
+  it("verbraucht keine OAuth-Transaktion mit nicht parsebarem Ablaufwert", async () => {
+    const database = new TestD1Database();
+    try {
+      await database.prepare(
+        `INSERT INTO oauth_transactions (transaction_id, purpose, expires_at, created_at)
+         VALUES (?, ?, ?, ?)`,
+      ).bind(
+        "transaction-ungültig",
+        "login",
+        "kein-datum",
+        "2026-09-18T00:00:00.000Z",
+      ).run();
+
+      await expect(consumeOAuthTransaction(
+        database as unknown as D1Database,
+        "transaction-ungültig",
+        "2026-09-18T00:01:00.000Z",
+      )).resolves.toBeNull();
+    } finally {
+      database.close();
+    }
   });
 
   it("hinterlegt die Ursache eines fehlgeschlagenen OAuth-Rücklaufs", async () => {

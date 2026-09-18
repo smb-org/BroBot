@@ -74,7 +74,7 @@ const isOAuthState = (value: unknown): value is OAuthState => {
   const state = value as Record<string, unknown>;
   return typeof state.transactionId === "string" && state.transactionId.length > 0 &&
     (state.purpose === "login" || state.purpose === "bot") &&
-    typeof state.expiresAt === "string" && !Number.isNaN(Date.parse(state.expiresAt));
+    typeof state.expiresAt === "string" && Number.isFinite(Date.parse(state.expiresAt));
 };
 
 export const startOAuthAuthorization = async (
@@ -112,7 +112,9 @@ export const verifyOAuthState = async (
   now: string,
 ): Promise<OAuthState | null> => {
   const state = await verifyJson<OAuthState>(serialized, parseKeyRing(cookieKeysSerialized));
-  if (!isOAuthState(state) || Date.parse(state.expiresAt) <= Date.parse(now)) return null;
+  const expiresAtMs = isOAuthState(state) ? Date.parse(state.expiresAt) : Number.NaN;
+  const nowMs = Date.parse(now);
+  if (!isOAuthState(state) || !Number.isFinite(expiresAtMs) || !Number.isFinite(nowMs) || expiresAtMs <= nowMs) return null;
   return state;
 };
 

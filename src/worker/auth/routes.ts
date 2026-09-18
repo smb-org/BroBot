@@ -6,7 +6,6 @@ import {
   failOAuthTransaction,
   getBotIdentity,
   getLoginIdentity,
-  getSession,
   getSessionWithLoginIdentity,
   revokeSession,
   setBotIdentityStatus,
@@ -22,6 +21,11 @@ import {
   verifyOAuthState,
 } from "./oauth";
 import { encryptJson, parseKeyRing } from "./crypto";
+import {
+  createCsrfToken,
+  serializeCsrfCookie,
+  verifyCsrfRequest,
+} from "./csrf";
 import {
   SESSION_COOKIE_MAX_AGE_SECONDS,
   SESSION_COOKIE_NAME,
@@ -50,6 +54,14 @@ const oauthError = (
 ): Response => context.text(message, status);
 
 export const authRouter = new Hono<{ Bindings: Env }>();
+
+authRouter.get("/api/csrf", async (context) => {
+  const session = await getSessionFromRequest(context.req.raw, context.env);
+  if (session === null) return context.text("Session fehlt.", 401);
+  const token = await createCsrfToken(session.sessionId, context.env.SESSION_COOKIE_KEYS, nowIso());
+  context.header("Set-Cookie", serializeCsrfCookie(token));
+  return context.json({ token });
+});
 
 authRouter.get("/auth/login", async (context) => {
   const started = await startOAuthAuthorization(context.env.DB, context.env, "login", nowIso());
@@ -166,23 +178,21 @@ authRouter.get("/auth/twitch/callback", async (context) => {
   }
 });
 
-authRouter.get("/auth/logout", async (context) => {
-  const serialized = readCookieValue(context.req.header("Cookie") ?? null, SESSION_COOKIE_NAME);
-  if (serialized !== null) {
-    const now = nowIso();
-    const session = await readSessionCookie(
-      serialized,
-      context.env.SESSION_COOKIE_KEYS,
-      context.env.SESSION_ENCRYPTION_KEYS,
-    );
-    if (session !== null) {
-      const stored = await getSession(context.env.DB, session.sessionId);
-      if (stored !== null && stored.revokedAt === null) {
-        await revokeSession(context.env.DB, session.sessionId, now, "logout");
-      }
-    }
+authRouter.post("/auth/logout", async (context) => {
+  const session = await getSessionFromRequest(context.req.raw, context.env);
+  if (session === null) return context.text("Session fehlt.", 401);
+  if (!await verifyCsrfRequest(
+    context.req.raw,
+    session.sessionId,
+    context.env.SESSION_COOKIE_KEYS,
+    nowIso(),
+  )) {
+    return context.text("CSRF-Token fehlt oder ist ungültig.", 403);
   }
+  const now = nowIso();
+  await revokeSession(context.env.DB, session.sessionId, now, "logout");
   context.header("Set-Cookie", clearSessionCookie());
+  context.header("Set-Cookie", serializeCsrfCookie("", 0), { append: true });
   return context.body(null, 204);
 });
 
@@ -199,6 +209,7 @@ export const getSessionFromRequest = async (
   );
   if (session === null) return null;
   const stored = await getSessionWithLoginIdentity(env.DB, session.sessionId);
-  if (stored === null || stored.revokedAt !== null || Date.parse(stored.expiresAt) <= Date.now()) return null;
+  const expiresAt = stored === null ? Number.NaN : Date.parse(stored.expiresAt);
+  if (stored === null || stored.revokedAt !== null || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
   return stored;
 };
