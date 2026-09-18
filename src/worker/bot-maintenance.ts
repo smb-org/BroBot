@@ -8,6 +8,7 @@ import {
   rotateBotTokens,
 } from "./auth/repository";
 import { decryptJson, encryptJson, parseKeyRing } from "./auth/crypto";
+import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 
 export interface TwitchClientEnvironment {
   TWITCH_CLIENT_ID: string;
@@ -57,7 +58,7 @@ export const shouldRefreshBotToken = (expiresAt: string, now: string): boolean =
   const expiresAtMs = Date.parse(expiresAt);
   const nowMs = Date.parse(now);
   return !Number.isFinite(expiresAtMs) || !Number.isFinite(nowMs) ||
-    expiresAtMs <= nowMs + 60 * 60 * 1000;
+    expiresAtMs <= nowMs + BOT_TOKEN_REFRESH_THRESHOLD_MS;
 };
 
 export const refreshBotToken = async (

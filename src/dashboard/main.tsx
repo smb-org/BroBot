@@ -13,6 +13,10 @@ import type {
   PanelTokenStatus,
 } from "../panel-contract";
 import {
+  BOT_MAINTENANCE_INTERVAL_MS,
+  BOT_MAINTENANCE_STALE_AFTER_MS,
+} from "../maintenance-policy";
+import {
   fetchAuditLog,
   fetchChannelOverview,
   fetchChannels,
@@ -65,7 +69,27 @@ type TokenView = {
   label: string;
 };
 
-const tokenView = (tokens: PanelTokenStatus): TokenView => {
+/**
+ * Ein Token, das turnusmäßig bald abläuft, ist kein Problem — der Cron erneuert
+ * es beim nächsten Lauf. Ein Problem ist erst, wenn die Erneuerung ausbleibt.
+ *
+ * Deshalb genügt die Restlaufzeit als Schwelle nicht: Bei vierstündigen Twitch-
+ * Tokens und stündlichem Cron liegt jedes Token regelmäßig bis zu einer Stunde
+ * im Erneuerungsfenster, ohne dass etwas kaputt wäre. Überfällig ist es erst,
+ * wenn seit dem Zeitpunkt, ab dem der Cron hätte erneuern müssen, bereits ein
+ * Wartungslauf stattgefunden hat und das Token trotzdem noch im Fenster steht.
+ */
+const renewalOverdue = (
+  expiresAt: number,
+  lastMaintenanceAt: number,
+  now: number,
+): boolean => expiresAt <= now + BOT_MAINTENANCE_INTERVAL_MS &&
+  lastMaintenanceAt >= expiresAt - BOT_MAINTENANCE_INTERVAL_MS;
+
+const tokenView = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): TokenView => {
+  if (bot?.status === "error" || bot?.status === "revoked") {
+    return { tone: "error", label: statusLabel(bot.status) };
+  }
   if (tokens.loginStatus === "error" || tokens.loginStatus === "revoked") {
     return { tone: "error", label: statusLabel(tokens.loginStatus) };
   }
@@ -75,8 +99,14 @@ const tokenView = (tokens: PanelTokenStatus): TokenView => {
   const loginExpiresAt = parseDate(tokens.loginExpiresAt);
   if (botExpiresAt === null || loginExpiresAt === null) return { tone: "neutral", label: "Nicht geprüft" };
   if (botExpiresAt <= now || loginExpiresAt <= now) return { tone: "error", label: "Abgelaufen" };
-  if (botExpiresAt <= now + 24 * 60 * 60 * 1000 || loginExpiresAt <= now + 24 * 60 * 60 * 1000) {
-    return { tone: "warning", label: "Läuft bald ab" };
+  if (bot?.status !== "connected") return { tone: "neutral", label: "Nicht geprüft" };
+  const lastMaintenanceAt = parseDate(bot.updatedAt);
+  if (lastMaintenanceAt === null || lastMaintenanceAt <= now - BOT_MAINTENANCE_STALE_AFTER_MS) {
+    return { tone: "warning", label: "Wartung überfällig" };
+  }
+  if (renewalOverdue(botExpiresAt, lastMaintenanceAt, now) ||
+      renewalOverdue(loginExpiresAt, lastMaintenanceAt, now)) {
+    return { tone: "warning", label: "Erneuerung überfällig" };
   }
   return { tone: "healthy", label: "Gültig" };
 };
@@ -85,7 +115,7 @@ const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "err
   if (channel.moderator?.isModerator === false) return "error";
   if (channel.bot?.status === "error" || channel.bot?.status === "revoked") return "error";
   if (channel.tokens.loginStatus === "error" || channel.tokens.loginStatus === "revoked") return "error";
-  const tokenStatus = tokenView(channel.tokens);
+  const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (tokenStatus.tone === "error") return "error";
   if (tokenStatus.tone !== "healthy") return "warning";
   if (channel.bot?.status !== "connected" || channel.moderator?.isModerator !== true ||
@@ -98,7 +128,7 @@ const statusText = (channel: PanelChannelState): string => {
   if (channel.moderator?.isModerator === false) return "Moderatorrolle fehlt";
   if (channel.bot?.status === "error") return "Bot-Fehler";
   if (channel.bot?.status === "revoked") return "Bot-Token widerrufen";
-  const tokenStatus = tokenView(channel.tokens);
+  const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (tokenStatus.tone !== "healthy") return tokenStatus.label;
   if (channelStatus(channel) === "healthy") return "Gesund";
   return "Zustand unvollständig";
@@ -177,8 +207,8 @@ const formatTimestamp = (value: string): string => {
   }).format(date);
 };
 
-const tokenSummary = (tokens: PanelTokenStatus): string => {
-  return tokenView(tokens).label;
+const tokenSummary = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): string => {
+  return tokenView(tokens, bot).label;
 };
 
 const ChannelStateCard = ({ channel }: { channel: PanelChannelState }): ReactElement => (
@@ -195,7 +225,7 @@ const ChannelStateCard = ({ channel }: { channel: PanelChannelState }): ReactEle
       <div><dt>Broadcaster-OAuth</dt><dd><StatusBadge tone={channel.broadcasterConnection === "connected" ? "healthy" : "neutral"}>{broadcasterConnectionLabel(channel.broadcasterConnection)}</StatusBadge></dd></div>
       <div><dt>Bot-Account</dt><dd>{channel.bot === null ? "Nicht eingerichtet" : statusLabel(channel.bot.status)}</dd></div>
       <div><dt>Moderatorstatus</dt><dd>{channel.moderator === null ? "Nicht geprüft" : channel.moderator.isModerator ? "Moderator" : "Fehlt"}</dd></div>
-      <div><dt>Token</dt><dd>{tokenSummary(channel.tokens)}</dd></div>
+      <div><dt>Token</dt><dd>{tokenSummary(channel.tokens, channel.bot)}</dd></div>
     </dl>
   </article>
 );
@@ -322,8 +352,8 @@ const BotCard = ({ bot }: { bot: PanelBotStatus | null }): ReactElement => {
   return <StatusCard title="Bot-Account" tone={tone} value={statusLabel(bot.status)} detail={bot.reason ?? `Zuletzt aktualisiert: ${formatTimestamp(bot.updatedAt)}`} />;
 };
 
-const TokenCard = ({ tokens }: { tokens: PanelTokenStatus }): ReactElement => (
-  <StatusCard title="Token-Zustand" tone={tokenView(tokens).tone} value={tokenSummary(tokens)} detail={tokens.loginReason ?? "Ablaufzeiten werden aus der Datenbank gelesen."} />
+const TokenCard = ({ tokens, bot }: { tokens: PanelTokenStatus; bot: PanelBotStatus | null }): ReactElement => (
+  <StatusCard title="Token-Zustand" tone={tokenView(tokens, bot).tone} value={tokenSummary(tokens, bot)} detail={tokens.loginReason ?? "Ablaufzeiten werden aus der Datenbank gelesen."} />
 );
 
 const BroadcasterConnectionCard = ({ status }: { status: PanelChannelState["broadcasterConnection"] }): ReactElement => (
@@ -364,7 +394,7 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus 
         onCheck={onCheckModeratorStatus}
       />
       <BotCard bot={overview.bot} />
-      <TokenCard tokens={overview.tokens} />
+      <TokenCard tokens={overview.tokens} bot={overview.bot} />
       <ErrorCard error={overview.lastError} />
     </div>
     <section className="content-section"><div className="section-heading"><div><span className="eyebrow">Aktivierung</span><h2>Aktive Module</h2></div><span className="muted">{String(overview.activeModules.length)}</span></div><ModulePanelMount activeModules={overview.activeModules} /></section>
@@ -374,7 +404,7 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus 
 const SystemPage = ({ system, auditState, onNextPage, loadingNextPage }: { system: PanelSystemResponse; auditState: LoadState<PanelAuditResponse>; onNextPage: () => void; loadingNextPage: boolean }): ReactElement => (
   <>
     <header className="page-heading"><div><span className="eyebrow">Betrieb</span><h1>System</h1></div><p>Token-Zustand und gespeicherte Audit-Einträge.</p></header>
-    <div className="status-grid status-grid--system"><BroadcasterConnectionCard status={system.broadcasterConnection} /><BotCard bot={system.bot} /><TokenCard tokens={system.tokens} /></div>
+    <div className="status-grid status-grid--system"><BroadcasterConnectionCard status={system.broadcasterConnection} /><BotCard bot={system.bot} /><TokenCard tokens={system.tokens} bot={system.bot} /></div>
     <section className="content-section"><div className="section-heading"><div><span className="eyebrow">Nachvollziehbarkeit</span><h2>Audit-Log</h2></div>{auditState.data === null ? null : <span className="muted">{String(auditState.data.entries.length)} Einträge</span>}</div>
       {auditState.status === "loading" ? <p className="loading-line">Audit-Log wird geladen …</p> : null}
       {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
