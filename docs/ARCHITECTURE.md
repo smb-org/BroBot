@@ -107,9 +107,11 @@ Diese Entscheidungen halten den ersten Betrieb klein und bewahren trotzdem die n
 
 `channelId` ist überall der Mandantenschlüssel: Jede persistierende Tabelle führt `channel_id`, und für jeden Kanal gibt es ein eigenes Durable Object. Der Bot läuft gleichzeitig in mehreren Kanälen.
 
-Die Autorisierung ist ausdrücklich: Nur eine Zeile mit Rolle in `channel_members` berechtigt zur Bedienung. Eine Twitch-Moderatorrolle berechtigt nicht; sie dient beim Einrichten lediglich dazu, eine Vorschlagsliste vorzubelegen, standardmäßig ohne Zugriff. Auch Twitch-Nutzer ohne Rolle im Kanal sind berechtigbar, dann mit ausdrücklicher Sicherheitsabfrage.
+Die Autorisierung ist ausdrücklich: Nur eine Zeile mit Rolle in `channel_members` berechtigt zur Bedienung. Eine Twitch-Moderatorrolle berechtigt nicht. Auch Twitch-Nutzer ohne Rolle im Kanal sind berechtigbar, dann mit ausdrücklicher Sicherheitsabfrage. Moderatoren werden über das Abzeichen in gelesenen Chatnachrichten erkannt und als Vorschlag angeboten; eine Abfrage der Moderatorenliste bei Twitch findet nicht statt, weil sie ein Broadcaster-Token verlangen würde (Begründung in Entscheidung 0002, Abschnitt 6).
 
-Ein Kanal erscheint in der Auswahl eines Nutzers nur, wenn alle drei Bedingungen erfüllt sind: Es gibt eine Zugriffszeile in `channel_members`, der Kanal ist per OAuth verbunden und der Kanal ist in `channels` freigegeben.
+Ein Kanal erscheint in der Auswahl eines Nutzers, wenn **zwei** Bedingungen erfüllt sind: Es gibt eine Zugriffszeile in `channel_members`, und der Kanal ist in `channels` freigegeben.
+
+Eine Broadcaster-OAuth-Verbindung ist **keine** Bedingung. Sie ist seit Entscheidung 0002 ein optionaler Schalter je Kanal und wird nur von den Modulen #8, #21 und #22 gebraucht; ein Kanal ist betriebsbereit, sobald der Bot dort gemoddet ist. Hier stand ursprünglich eine dritte Bedingung „der Kanal ist per OAuth verbunden" — sie stammt aus der Zeit vor dieser Entscheidung und hätte betriebsbereite Kanäle aus der Auswahl fallen lassen.
 
 Eine offene Selbstanmeldung ist bewusst nicht vorgesehen. Sie ließe sich ohne Datenmodelländerung ergänzen, bräuchte dann aber Quoten, Missbrauchsschutz sowie Datenexport und -löschung je Mandant.
 

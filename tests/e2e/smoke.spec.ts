@@ -1,8 +1,16 @@
 import { expect, test } from "@playwright/test";
 
 test("Dashboard und Overlay laden als getrennte Oberflächen", async ({ page }) => {
+  await page.route("**/api/channels", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ channels: [] }),
+    });
+  });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "BroBot Dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Übersicht" })).toBeVisible();
+  await expect(page.getByText("Noch kein Kanal freigegeben")).toBeVisible();
 
   const overlayPage = await page.context().newPage();
   await overlayPage.route("**/api/overlay/status", async (route) => {

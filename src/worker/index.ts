@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import { authRouter } from "./auth/routes";
 import { getHealthStatus } from "./config";
+import { panelRouter } from "./panel/routes";
 import { scheduled } from "./scheduled";
 
 export { ChannelObject } from "./durable/ChannelObject";
@@ -9,6 +10,7 @@ export { ChannelObject } from "./durable/ChannelObject";
 const app = new Hono<{ Bindings: Env }>();
 
 app.route("/", authRouter);
+app.route("/", panelRouter);
 
 app.get("/healthz", (context) => {
   const health = getHealthStatus(context.env);
