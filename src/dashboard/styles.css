@@ -22,15 +22,6 @@
   font-display: swap;
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-@font-face {
-  font-family: "IBM Plex Mono";
-  src: url("./fonts/plexmono-500-latin.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
 :root {
   /* Ein Grundton, kein Verlauf. Dunkel, weil das Panel nachts neben OBS steht. */
   --grund: #0a0c10;
@@ -42,10 +33,9 @@
 
   --text: #e6e9ef;
   --text-2: #98a0ae;
-  --text-3: #6b7383;
+  --text-3: #7d8595;
 
   /* Die einzigen Farben im System. Alle drei bedeuten Zustand. */
-  --ok: #5fb87a;
   --warn: #d9a441;
   --fehler: #e2564d;
   --warn-grund: rgba(217, 164, 65, .09);
@@ -87,7 +77,6 @@ h1, h2, h3, p { margin-top: 0; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 .mono,
-time,
 .zahl { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 
 .sr-only {
@@ -124,7 +113,7 @@ select:hover { border-color: var(--linie-hell); }
 .primary-nav { display: grid; gap: 1px; }
 .nav-link {
   display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
-  min-height: 34px; padding: 6px var(--s3);
+  min-height: 40px; padding: 8px var(--s3);
   border-left: 2px solid transparent; border-radius: var(--r-control);
   color: var(--text-2); font-size: 13.5px; font-weight: 500; text-decoration: none;
   transition: background .15s ease, color .15s ease;
@@ -158,7 +147,8 @@ select:hover { border-color: var(--linie-hell); }
 }
 h1 { margin-bottom: 0; font-size: 20px; font-weight: 600; letter-spacing: -.015em; line-height: 1.25; }
 .page-heading > p { max-width: 46ch; margin: 0; color: var(--text-2); font-size: 13px; }
-.page-heading__actions { margin-left: auto; display: flex; gap: var(--s2); }
+.page-heading__actions { margin-left: auto; display: grid; gap: var(--s1); justify-items: end; }
+.page-heading__actions p { margin: 0; }
 
 h2 { margin-bottom: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
 h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
@@ -262,7 +252,9 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .member-table tbody tr:hover { background: var(--erhoben); }
 .member-table tbody th { font-weight: 600; }
 .member-login { display: block; margin-top: 1px; color: var(--text-3); font-size: 12px; font-weight: 400; }
-.member-table select { width: auto; min-height: 34px; }
+/* In der Tabellenzeile zaehlt Dichte; 34px liegt ueber der AA-Mindestgroesse. */
+.member-table select,
+.member-table .button { width: auto; min-height: 34px; padding: 6px var(--s3); }
 .member-table td:last-child { text-align: right; }
 
 /* ── Bedienelemente ──────────────────────────────────────
@@ -271,7 +263,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 
 .button {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 34px; padding: 7px var(--s3);
+  min-height: 44px; padding: 10px var(--s4);
   border: 1px solid var(--linie-stark); border-radius: var(--r-control);
   color: var(--text); background: #161b23;
   font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer;
@@ -281,22 +273,24 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .button:active { background: #141922; }
 .button:disabled { cursor: not-allowed; opacity: .5; }
 .button--primary,
+.page-heading__actions .button,
 .member-search-result .button,
 .auth-card .button {
   color: var(--grund); background: var(--text); border-color: var(--text); font-weight: 600;
 }
 .button--primary:hover,
+.page-heading__actions .button:hover,
 .member-search-result .button:hover,
 .auth-card .button:hover { background: #fff; border-color: #fff; }
 .button--secondary { margin-top: var(--s4); }
 .button--quiet {
   width: auto; border-color: transparent; background: none;
-  color: var(--text-3); font-size: 12.5px;
+  color: var(--text-2); font-size: 12.5px;
 }
 .button--quiet:hover {
   color: var(--fehler); border-color: rgba(226, 86, 77, .45); background: var(--fehler-grund);
 }
-.button--quiet:disabled:hover { color: var(--text-3); border-color: transparent; background: none; }
+.button--quiet:disabled:hover { color: var(--text-2); border-color: transparent; background: none; }
 
 .moderator-check-action { display: grid; gap: var(--s1); justify-items: end; }
 .moderator-check-time { font-size: 11.5px; }
@@ -309,7 +303,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .member-search-row { display: flex; gap: var(--s2); }
 .member-search-row input,
 .member-search-result select {
-  min-width: 0; min-height: 34px;
+  min-width: 0; min-height: 44px;
   border: 1px solid var(--linie-stark); border-radius: var(--r-control);
   padding: 7px var(--s3); color: var(--text); background: #0c0f15;
 }
@@ -380,13 +374,17 @@ pre {
     padding: var(--s3) var(--s4); overflow-x: auto;
     border-right: 0; border-bottom: 1px solid var(--linie);
   }
-  .sidebar__footer, .channel-picker { display: none; }
+  .sidebar__footer { flex-direction: row; align-items: center; gap: var(--s3); margin-top: 0; margin-left: auto; }
+  .sidebar__footer { display: flex; }
+  .channel-picker { flex: none; }
+  .channel-picker label { display: none; }
+  .channel-picker select { width: auto; max-width: 9rem; }
   .primary-nav { grid-auto-flow: column; gap: var(--s1); }
   .nav-link { border-left: 0; border-bottom: 2px solid transparent; border-radius: 0; white-space: nowrap; }
   .nav-link--active { border-left: 0; border-bottom-color: var(--text); }
   .main-content { padding: var(--s4) var(--s4) var(--s10); }
   .page-heading { margin-bottom: var(--s5); }
-  .page-heading__actions { margin-left: 0; width: 100%; }
+  .page-heading__actions { margin-left: 0; width: 100%; justify-items: stretch; }
   .status-card { grid-template-columns: 3px 1fr; }
   .status-card__action { grid-column: 2; grid-row: 2; padding-top: 0; }
   .member-search-row, .member-search-result { flex-direction: column; align-items: stretch; }

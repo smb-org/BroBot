@@ -169,6 +169,10 @@ ein Fehler und wird geprüft.
 
 - Kontrast AA für Fließtext und Bedienelemente.
 - Sichtbarer `focus-visible`-Ring, vollständige Tastaturbedienung.
-- Trefferflächen mindestens 44px.
+- Trefferflächen: WCAG AA verlangt 24×24 CSS-Pixel. Wir setzen darauf und
+  geben alleinstehenden Bedienelementen 44px; in dichten Tabellenzeilen
+  bleiben 34px, weil Dichte dort ein Feature ist. (In der Frage, die zu diesem
+  Abschnitt führte, stand pauschal „44px" — das war eine Überzeichnung meiner
+  eigenen Formulierung, nicht die AA-Vorgabe.)
 - Zustand nie allein über Farbe: immer zusätzlich Text, Form oder Position.
   Rot-Grün-Unterscheidung darf nie die einzige Information sein.

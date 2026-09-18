@@ -29,7 +29,6 @@ export const ModulePanelMount = ({ activeModules }: ModulePanelMountProperties):
   if (registeredPanels.length === 0) {
     return (
       <section className="module-empty" aria-label="Module">
-        <span className="eyebrow">Module</span>
         <p>{activeModules.length === 0 ? "Keine Module aktiv." : "Für die aktiven Module gibt es noch keine Panel-Ansicht."}</p>
       </section>
     );

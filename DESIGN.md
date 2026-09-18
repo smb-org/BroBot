@@ -27,7 +27,6 @@ bedeuten Zustand:
 
 | Rolle | Wert | Bedeutung |
 |---|---|---|
-| `--ok` | `#5fb87a` | in Ordnung, wird nur in Ausnahmen gezeigt |
 | `--warn` | `#d9a441` | Warnung |
 | `--fehler` | `#e2564d` | Fehler |
 
@@ -36,7 +35,7 @@ Textmarke. Farbe informiert nie allein — das ist Zusicherung, nicht Geschmack.
 
 Neutralwerte: `--grund #0a0c10` (ein Ton, kein Verlauf, kein Halo),
 `--rail #0d1016`, `--erhoben #0e1218`, Linien `#1b1f27` / `#272c36` / `#414a5a`,
-Text `#e6e9ef` / `#98a0ae` / `#6b7383`.
+Text `#e6e9ef` / `#98a0ae` / `#7d8595`.
 
 Dunkel, weil das Panel nachts neben OBS steht — nicht, weil Werkzeuge dunkel
 sind.
@@ -78,9 +77,13 @@ klickt.
 ## Zugänglichkeit
 
 WCAG AA ist verbindliche Untergrenze, kein Polierschritt. Sichtbarer
-`focus-visible`-Ring, Trefferflächen mindestens 34px hoch bei Listen und 44px
-bei alleinstehenden Zielen, vollständige Tastaturbedienung, Zustand nie allein
-über Farbe. Browser-Oberflächen — Auswahl, Bildlaufleiste, Platzhalter,
+`focus-visible`-Ring, vollständige Tastaturbedienung, Zustand nie allein über
+Farbe. Trefferflächen: 44px für alleinstehende Bedienelemente, 34px in dichten
+Tabellenzeilen — beides über der AA-Mindestgröße von 24×24.
+
+Text: `--text-2` trägt 7,4:1 auf dem Grundton, `--text-3` 5,3:1. Beide über
+4,5:1, auch auf `--rail` und `--erhoben`. Die zerstörende Aktion steht auf
+`--text-2`, nicht auf dem leiseren Ton. Browser-Oberflächen — Auswahl, Bildlaufleiste, Platzhalter,
 Fokusring — sind aus der Palette gesetzt, nicht dem Standard überlassen.
 
 ## Bewegung

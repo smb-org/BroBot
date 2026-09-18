@@ -187,7 +187,7 @@ export const MembersPage = ({
         <span className="muted zahl">{String(members.length)}</span>
       </header>
       {canManageMembers ? (
-        <section className="content-section member-add-panel" aria-label="Mitglied hinzufügen">
+        <section className="content-section" aria-label="Mitglied hinzufügen">
           <div className="section-heading"><h2>Zugriff vergeben</h2></div>
           <form className="member-search-form" onSubmit={(event) => { void handleSearch(event); }}>
             <label htmlFor="member-search">Twitch-Name</label>
