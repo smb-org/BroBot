@@ -3,7 +3,27 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// @ts-expect-error Das ausführbare Healthcheck-Skript stellt Test-Hooks als ESM-Exports bereit.
+import { checkHealth, resolveDeploymentOriginFromConfig } from "../../scripts/check-health.mjs";
+
+type DeploymentConfig = { env?: Record<string, { routes?: Array<{ pattern?: string }> }> };
+type HealthcheckOptions = {
+  fetchImplementation?: typeof fetch;
+  waitImplementation?: (milliseconds: number) => Promise<void>;
+};
+type CheckHealth = (
+  environment: string,
+  configPath?: string,
+  originOverride?: string,
+  options?: HealthcheckOptions,
+) => Promise<void>;
+type ResolveDeploymentOriginFromConfig = (config: DeploymentConfig, environment: string) => string;
+
+const checkHealthTyped = checkHealth as unknown as CheckHealth;
+const resolveDeploymentOriginFromConfigTyped =
+  resolveDeploymentOriginFromConfig as unknown as ResolveDeploymentOriginFromConfig;
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 
@@ -38,6 +58,21 @@ const withTemporaryConfig = (source: string, callback: (configPath: string) => v
     rmSync(directory, { recursive: true, force: true });
   }
 };
+
+const configForRoute = (pattern: string) => ({
+  env: {
+    staging: {
+      routes: [{ pattern }],
+    },
+  },
+});
+
+const rejectedRoutes = [
+  { pattern: "http://insecure.example", reason: "https" },
+  { pattern: "https://user:pass@secure.example", reason: "Benutzername und Passwort" },
+  { pattern: "https://secure.example/worker", reason: "Pfad" },
+  { pattern: "https://secure.example?version=1", reason: "Query" },
+] as const;
 
 describe("Deployment-Healthcheck", () => {
   it("löst die Staging-Origin aus wrangler.jsonc auf", () => {
@@ -80,11 +115,28 @@ describe("Deployment-Healthcheck", () => {
   });
 
   it("scheitert klar, wenn alle Healthcheck-Versuche fehlschlagen", () => {
-    const result = runHealth("http://127.0.0.1:1");
+    const result = runHealth("https://127.0.0.1:1");
 
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toContain(
       "Healthcheck nach 6 Versuchen fehlgeschlagen",
     );
   });
+
+  it.each(rejectedRoutes)(
+    "weist eine Route mit $reason ab, bevor fetch aufgerufen wird",
+    async ({ pattern, reason }) => {
+      expect(() => resolveDeploymentOriginFromConfigTyped(configForRoute(pattern), "staging"))
+        .toThrow(`Konfiguration wrangler.jsonc`);
+
+      const fetcher = vi.fn() as unknown as typeof fetch;
+      const healthcheck = checkHealthTyped("staging", undefined, pattern, {
+        fetchImplementation: fetcher,
+        waitImplementation: async () => {},
+      });
+      await expect(healthcheck).rejects.toThrow(`Konfiguration wrangler.jsonc`);
+      await expect(healthcheck).rejects.toThrow(reason);
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
 });
