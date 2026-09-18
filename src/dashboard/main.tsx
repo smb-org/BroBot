@@ -7,6 +7,7 @@ import type {
   PanelChannelOverview,
   PanelChannelState,
   PanelLastError,
+  PanelMembersResponse,
   PanelModeratorStatus,
   PanelSystemResponse,
   PanelTokenStatus,
@@ -15,11 +16,13 @@ import {
   fetchAuditLog,
   fetchChannelOverview,
   fetchChannels,
+  fetchMembers,
   fetchSystemOverview,
   logout,
   PanelApiError,
 } from "./api";
 import { ModulePanelMount } from "./module-panels";
+import { MembersPage } from "./members";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import "./styles.css";
 
@@ -205,6 +208,7 @@ const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarP
           <>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "overview" }} current={route} onNavigate={onNavigate}>Kanal</RouteLink>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "system" }} current={route} onNavigate={onNavigate}>System</RouteLink>
+            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "members" }} current={route} onNavigate={onNavigate}>Mitglieder</RouteLink>
           </>
         ) : null}
       </nav>
@@ -318,20 +322,26 @@ export const DashboardApp = (): ReactElement => {
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
   const [overview, setOverview] = useState<LoadState<PanelChannelOverview>>(() => idleState());
   const [system, setSystem] = useState<LoadState<PanelSystemResponse>>(() => idleState());
+  const [members, setMembers] = useState<LoadState<PanelMembersResponse>>(() => idleState());
   const [audit, setAudit] = useState<LoadState<PanelAuditResponse>>(() => idleState());
   const [systemChannelId, setSystemChannelId] = useState<string | null>(null);
   const [auditChannelId, setAuditChannelId] = useState<string | null>(null);
   const [loadingNextAuditPage, setLoadingNextAuditPage] = useState(false);
   const auditPageController = useRef<AbortController | null>(null);
+  const [loadingNextMembersPage, setLoadingNextMembersPage] = useState(false);
+  const membersPageController = useRef<AbortController | null>(null);
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
   const clearProtectedState = (): void => {
     auditPageController.current?.abort();
     auditPageController.current = null;
+    membersPageController.current?.abort();
+    membersPageController.current = null;
     setChannels({ status: "success", data: [], error: null });
     setOverview(idleState());
     setSystem(idleState());
+    setMembers(idleState());
     setAudit(idleState());
     setSystemChannelId(null);
     setAuditChannelId(null);
@@ -367,6 +377,9 @@ export const DashboardApp = (): ReactElement => {
     auditPageController.current?.abort();
     auditPageController.current = null;
     setLoadingNextAuditPage(false);
+    membersPageController.current?.abort();
+    membersPageController.current = null;
+    setLoadingNextMembersPage(false);
     setOverview(loadingState());
     setSystem(idleState());
     setAudit(idleState());
@@ -377,6 +390,9 @@ export const DashboardApp = (): ReactElement => {
       controller.abort();
       auditPageController.current?.abort();
       auditPageController.current = null;
+      membersPageController.current?.abort();
+      membersPageController.current = null;
+      setLoadingNextMembersPage(false);
     };
     if (route.kind !== "channel") return cleanup;
 
@@ -388,6 +404,19 @@ export const DashboardApp = (): ReactElement => {
         } catch (error) {
           if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
             setOverview({ status: "error", data: null, error: errorMessage(error) });
+            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+          }
+        }
+        return;
+      }
+      if (route.section === "members") {
+        setMembers(loadingState());
+        try {
+          const response = await fetchMembers(route.channelId, null, controller.signal);
+          if (!cancelled && !controller.signal.aborted) setMembers({ status: "success", data: response, error: null });
+        } catch (error) {
+          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+            setMembers({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
           }
         }
@@ -419,6 +448,60 @@ export const DashboardApp = (): ReactElement => {
     void load();
     return cleanup;
   }, [route]);
+
+  const reloadMembers = async (): Promise<void> => {
+    if (route.kind !== "channel" || route.section !== "members") return;
+    const channelId = route.channelId;
+    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "members" });
+    membersPageController.current?.abort();
+    const controller = new AbortController();
+    membersPageController.current = controller;
+    setMembers(loadingState());
+    try {
+      const response = await fetchMembers(channelId, null, controller.signal);
+      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      setMembers({ status: "success", data: response, error: null });
+    } catch (error) {
+      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      setMembers({ status: "error", data: null, error: errorMessage(error) });
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    } finally {
+      if (membersPageController.current === controller) membersPageController.current = null;
+    }
+  };
+
+  const loadNextMembersPage = async (): Promise<void> => {
+    if (route.kind !== "channel" || route.section !== "members" || loadingNextMembersPage ||
+        members.data?.nextCursor === null || members.data?.nextCursor === undefined) return;
+    const channelId = route.channelId;
+    const cursor = members.data.nextCursor;
+    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "members" });
+    membersPageController.current?.abort();
+    const controller = new AbortController();
+    membersPageController.current = controller;
+    setLoadingNextMembersPage(true);
+    try {
+      const nextPage = await fetchMembers(channelId, cursor, controller.signal);
+      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      setMembers((current) => {
+        if (current.data === null || current.data.nextCursor !== cursor) return current;
+        return {
+          status: "success",
+          data: { members: [...current.data.members, ...nextPage.members], nextCursor: nextPage.nextCursor },
+          error: null,
+        };
+      });
+    } catch (error) {
+      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      setMembers((current) => ({ ...current, status: "error", error: errorMessage(error) }));
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    } finally {
+      if (membersPageController.current === controller) {
+        membersPageController.current = null;
+        setLoadingNextMembersPage(false);
+      }
+    }
+  };
 
   const selectedChannel = useMemo(() => {
     if (route.kind !== "channel" || channels.data === null) return null;
@@ -488,6 +571,9 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">Kanalzustand wird geladen …</p> : null}
         {route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
         {route.kind === "channel" && route.section === "overview" && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} /> : null}
+        {route.kind === "channel" && route.section === "members" && members.status === "loading" ? <p className="loading-line">Mitglieder werden geladen …</p> : null}
+        {route.kind === "channel" && route.section === "members" && members.error !== null ? <ErrorPanel message={members.error} /> : null}
+        {route.kind === "channel" && route.section === "members" && members.data !== null && selectedChannel !== null ? <MembersPage channelId={route.channelId} ownRole={selectedChannel.role} members={members.data.members} nextCursor={members.data.nextCursor} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {route.kind === "channel" && route.section === "system" && system.status === "loading" ? <p className="loading-line">Systemzustand wird geladen …</p> : null}
         {route.kind === "channel" && route.section === "system" && system.error !== null ? <ErrorPanel message={system.error} /> : null}
         {route.kind === "channel" && route.section === "system" && system.data !== null && systemChannelId === route.channelId ? <SystemPage system={system.data} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}

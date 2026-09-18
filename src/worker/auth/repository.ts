@@ -64,6 +64,16 @@ export interface ChannelMemberRecord {
   updatedAt: string;
 }
 
+export interface ChannelMemberCursor {
+  createdAt: string;
+  userId: string;
+}
+
+export interface ChannelMemberPage {
+  members: ChannelMemberRecord[];
+  nextCursor: string | null;
+}
+
 interface SessionRow {
   session_id: string;
   user_id: string;
@@ -181,6 +191,79 @@ const auditId = (): string => crypto.randomUUID();
 
 const memberJson = (member: ChannelMemberRecord | null): string => JSON.stringify(member);
 
+const actorExistsPredicate = `
+        AND EXISTS (
+          SELECT 1 FROM channel_members AS actor
+           WHERE actor.channel_id = ?
+             AND actor.user_id = ?
+             AND actor.role IN ('broadcaster', 'verwalter')
+        )`;
+
+const soleBroadcasterPredicate = `
+          AND (
+            SELECT COUNT(*)
+              FROM channel_members
+             WHERE channel_id = ? AND role = 'broadcaster'
+          ) <= 1`;
+
+const lastBroadcasterGuard = `
+        AND NOT (
+          role = 'broadcaster'
+          ${soleBroadcasterPredicate}
+        )`;
+
+const lastBroadcasterRoleChangeGuard = `
+        AND NOT (
+          role = 'broadcaster'
+          AND ? <> 'broadcaster'
+          ${soleBroadcasterPredicate}
+        )`;
+
+const prepareMemberAudit = (
+  db: D1Database,
+  actorUserId: string,
+  changedAt: string,
+  channelId: string,
+  action: string,
+  before: ChannelMemberRecord | null,
+  after: ChannelMemberRecord | null,
+): D1PreparedStatement => db.prepare(
+  `INSERT INTO audit_log
+    (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+   SELECT ?, ?, ?, ?, ?, ?, ?
+    WHERE changes() > 0`,
+).bind(
+  auditId(),
+  actorUserId,
+  changedAt,
+  channelId,
+  action,
+  memberJson(before),
+  memberJson(after),
+);
+
+const encodeChannelMemberCursor = (cursor: ChannelMemberCursor): string => {
+  const serialized = JSON.stringify(cursor);
+  const encoded = btoa(serialized);
+  return encoded.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+};
+
+export const decodeChannelMemberCursor = (serialized: string): ChannelMemberCursor | null => {
+  try {
+    const normalized = serialized.replaceAll("-", "+").replaceAll("_", "/")
+      .padEnd(Math.ceil(serialized.length / 4) * 4, "=");
+    const value: unknown = JSON.parse(atob(normalized));
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const cursor = value as Record<string, unknown>;
+    return typeof cursor.createdAt === "string" && cursor.createdAt.length > 0 &&
+      typeof cursor.userId === "string" && cursor.userId.length > 0
+      ? { createdAt: cursor.createdAt, userId: cursor.userId }
+      : null;
+  } catch {
+    return null;
+  }
+};
+
 const getChannelMember = async (
   db: D1Database,
   channelId: string,
@@ -194,66 +277,140 @@ const getChannelMember = async (
   return row === null ? null : mapChannelMember(row);
 };
 
-export const upsertChannelMemberWithAudit = async (
+export const getChannelMemberForChannel = async (
+  db: D1Database,
+  channelId: string,
+  userId: string,
+): Promise<ChannelMemberRecord | null> => getChannelMember(db, channelId, userId);
+
+export const listChannelMembers = async (
+  db: D1Database,
+  channelId: string,
+  limit: number,
+  cursor: ChannelMemberCursor | null,
+): Promise<ChannelMemberPage> => {
+  const query = cursor === null
+    ? `SELECT channel_id, user_id, role, created_at, updated_at
+         FROM channel_members
+        WHERE channel_id = ?
+        ORDER BY created_at, user_id
+        LIMIT ?`
+    : `SELECT channel_id, user_id, role, created_at, updated_at
+         FROM channel_members
+        WHERE channel_id = ?
+          AND (created_at > ? OR (created_at = ? AND user_id > ?))
+        ORDER BY created_at, user_id
+        LIMIT ?`;
+  const values = cursor === null
+    ? [channelId, limit + 1]
+    : [channelId, cursor.createdAt, cursor.createdAt, cursor.userId, limit + 1];
+  const result = await db.prepare(query).bind(...values).all<ChannelMemberRow>();
+  const hasNextPage = result.results.length > limit;
+  const rows = result.results.slice(0, limit);
+  const members = rows.map(mapChannelMember);
+  const last = rows.at(-1);
+  return {
+    members,
+    nextCursor: hasNextPage && last !== undefined
+      ? encodeChannelMemberCursor({ createdAt: last.created_at, userId: last.user_id })
+      : null,
+  };
+};
+
+export const countBroadcasterMembers = async (
+  db: D1Database,
+  channelId: string,
+): Promise<number> => {
+  const row = await db.prepare(
+    `SELECT COUNT(*) AS count
+       FROM channel_members
+      WHERE channel_id = ? AND role = 'broadcaster'`,
+  ).bind(channelId).first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
+export const createChannelMemberWithAudit = async (
   db: D1Database,
   actorUserId: string,
   member: ChannelMemberRecord,
   action: string,
   changedAt: string,
-): Promise<void> => {
-  const before = await getChannelMember(db, member.channelId, member.userId);
-  const after: ChannelMemberRecord = {
-    ...member,
-    createdAt: before?.createdAt ?? member.createdAt,
-  };
-  const mutation = before === null
-    ? db.prepare(
-      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?
-        WHERE NOT EXISTS (
-          SELECT 1 FROM channel_members
-           WHERE channel_id = ? AND user_id = ?
-        )`,
-    ).bind(
-      after.channelId,
-      after.userId,
-      after.role,
-      after.createdAt,
-      after.updatedAt,
-      after.channelId,
-      after.userId,
-    )
-    : db.prepare(
-      `UPDATE channel_members
-          SET role = ?, updated_at = ?
-        WHERE channel_id = ? AND user_id = ?
-          AND role = ?
-          AND created_at = ?
-          AND updated_at = ?`,
-    ).bind(
-      after.role,
-      after.updatedAt,
-      after.channelId,
-      after.userId,
-      before.role,
-      before.createdAt,
-      before.updatedAt,
-    );
-  const audit = db.prepare(
-    `INSERT INTO audit_log
-      (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
-     SELECT ?, ?, ?, ?, ?, ?, ?
-      WHERE changes() > 0`,
+): Promise<boolean> => {
+  const mutation = db.prepare(
+    `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
+     SELECT ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM channel_members
+         WHERE channel_id = ? AND user_id = ?
+      )
+      ${actorExistsPredicate}`,
   ).bind(
-    auditId(),
+    member.channelId,
+    member.userId,
+    member.role,
+    member.createdAt,
+    member.updatedAt,
+    member.channelId,
+    member.userId,
+    member.channelId,
+    actorUserId,
+  );
+  const audit = prepareMemberAudit(
+    db,
+    actorUserId,
+    changedAt,
+    member.channelId,
+    action,
+    null,
+    member,
+  );
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export const updateChannelMemberWithAudit = async (
+  db: D1Database,
+  actorUserId: string,
+  member: ChannelMemberRecord,
+  action: string,
+  changedAt: string,
+): Promise<boolean> => {
+  const before = await getChannelMember(db, member.channelId, member.userId);
+  if (before === null) return false;
+  const after: ChannelMemberRecord = { ...member, createdAt: before.createdAt };
+  const mutation = db.prepare(
+    `UPDATE channel_members
+        SET role = ?, updated_at = ?
+      WHERE channel_id = ? AND user_id = ?
+        AND role = ?
+        AND created_at = ?
+        AND updated_at = ?
+      ${actorExistsPredicate}
+      ${lastBroadcasterRoleChangeGuard}`,
+  ).bind(
+    after.role,
+    after.updatedAt,
+    after.channelId,
+    after.userId,
+    before.role,
+    before.createdAt,
+    before.updatedAt,
+    after.channelId,
+    actorUserId,
+    after.role,
+    after.channelId,
+  );
+  const audit = prepareMemberAudit(
+    db,
     actorUserId,
     changedAt,
     after.channelId,
     action,
-    memberJson(before),
-    memberJson(after),
+    before,
+    after,
   );
-  await db.batch([mutation, audit]);
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
 export const deleteChannelMemberWithAudit = async (
@@ -263,37 +420,38 @@ export const deleteChannelMemberWithAudit = async (
   userId: string,
   action: string,
   changedAt: string,
-): Promise<void> => {
+): Promise<boolean> => {
   const before = await getChannelMember(db, channelId, userId);
-  if (before === null) return;
+  if (before === null) return false;
   const mutation = db.prepare(
     `DELETE FROM channel_members
       WHERE channel_id = ? AND user_id = ?
         AND role = ?
         AND created_at = ?
-        AND updated_at = ?`,
+        AND updated_at = ?
+      ${actorExistsPredicate}
+      ${lastBroadcasterGuard}`,
   ).bind(
     channelId,
     userId,
     before.role,
     before.createdAt,
     before.updatedAt,
+    channelId,
+    actorUserId,
+    channelId,
   );
-  const audit = db.prepare(
-    `INSERT INTO audit_log
-      (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
-     SELECT ?, ?, ?, ?, ?, ?, ?
-      WHERE changes() > 0`,
-  ).bind(
-    auditId(),
+  const audit = prepareMemberAudit(
+    db,
     actorUserId,
     changedAt,
     channelId,
     action,
-    memberJson(before),
-    memberJson(null),
+    before,
+    null,
   );
-  await db.batch([mutation, audit]);
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
 export const createSession = async (db: D1Database, session: NewSessionRecord): Promise<void> => {

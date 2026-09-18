@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  addChannelMember,
   fetchAuditLog,
   fetchChannelOverview,
+  fetchMembers,
+  removeChannelMember,
+  searchTwitchUser,
+  updateChannelMemberRole,
   PanelApiError,
   requestJson,
 } from "../../src/dashboard/api";
 
-const jsonResponse = (body: unknown): Response => new Response(JSON.stringify(body), {
-  status: 200,
+const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
+  status,
   headers: { "Content-Type": "application/json" },
 });
 
@@ -66,6 +71,80 @@ describe("Dashboard-API-Requestgrenze", () => {
         window.location.origin,
       ),
       { credentials: "same-origin" },
+    );
+  });
+
+  it("lädt Mitglieder und sucht einen Twitch-Nutzer kanalgebunden", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ members: [] }))
+      .mockResolvedValueOnce(jsonResponse({ user: { userId: "123", login: "neue-person", displayName: "Neue Person" } }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await fetchMembers("kanal-a");
+    await searchTwitchUser("kanal-a", "neue-person");
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      new URL("/api/channels/kanal-a/members", window.location.origin),
+      { credentials: "same-origin" },
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      new URL("/api/channels/kanal-a/members/search?login=neue-person", window.location.origin),
+      { credentials: "same-origin" },
+    );
+  });
+
+  it("überträgt Mitglieder-Cursor und Abbruchsignal", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse({ members: [], nextCursor: null }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await fetchMembers("kanal-a", "cursor /?#&", controller.signal);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("/api/channels/kanal-a/members?cursor=cursor+%2F%3F%23%26", window.location.origin),
+      { credentials: "same-origin", signal: controller.signal },
+    );
+  });
+
+  it("holt vor jeder Mitgliederänderung CSRF und sendet die passende Mutation", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ token: "csrf-token" }))
+      .mockResolvedValueOnce(jsonResponse({ member: { userId: "123", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" } }, 201))
+      .mockResolvedValueOnce(jsonResponse({ token: "csrf-token-2" }))
+      .mockResolvedValueOnce(jsonResponse({ member: { userId: "123", role: "verwalter", joinedAt: "2026-09-18T00:00:00.000Z" } }))
+      .mockResolvedValueOnce(jsonResponse({ token: "csrf-token-3" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await addChannelMember("kanal-a", "123", "bediener");
+    await updateChannelMemberRole("kanal-a", "123", "verwalter");
+    await removeChannelMember("kanal-a", "123");
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      new URL("/api/channels/kanal-a/members", window.location.origin),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "csrf-token" },
+      }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      4,
+      new URL("/api/channels/kanal-a/members/123", window.location.origin),
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "csrf-token-2" },
+      }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      6,
+      new URL("/api/channels/kanal-a/members/123", window.location.origin),
+      expect.objectContaining({
+        method: "DELETE",
+        headers: { "X-CSRF-Token": "csrf-token-3" },
+      }),
     );
   });
 });

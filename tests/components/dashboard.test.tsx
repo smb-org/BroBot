@@ -79,6 +79,160 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
+  it("erkennt die kanalgebundene Mitgliederroute", () => {
+    expect(parseDashboardRoute("/channels/kanal-a/members")).toEqual({
+      kind: "channel",
+      channelId: "kanal-a",
+      section: "members",
+    });
+  });
+
+  it("zeigt Mitgliedschaften und die Verwaltungsaktion nur für verwaltende Rollen", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const members = {
+      members: [
+        { userId: "100", login: "streamer", displayName: "Streamerin", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" },
+        { userId: "200", login: null, displayName: null, role: "bediener", joinedAt: "2026-09-18T12:00:00.000Z" },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/members")) return jsonResponse(members);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Mitglieder", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("Streamerin")).toBeInTheDocument();
+    expect(screen.getByText("@streamer")).toBeInTheDocument();
+    expect(screen.queryByText("100")).not.toBeInTheDocument();
+    expect(screen.getByText("Nicht auflösbar")).toBeInTheDocument();
+    expect(screen.getByText("Twitch-ID 200")).toBeInTheDocument();
+    expect(screen.getByText(/17\.09\.2026/), "Beitrittszeitpunkt wird angezeigt").toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Suchen" })).toBeInTheDocument();
+
+    const operatorChannel = { ...channel, role: "bediener" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel] });
+      if (path.endsWith("/members")) return jsonResponse(members);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+    cleanup();
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    expect(screen.queryByRole("button", { name: "Zugriff freigeben" })).not.toBeInTheDocument();
+  });
+
+  it("fragt beim Hinzufügen ausdrücklich nach dem tatsächlichen Zugriffsumfang", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels/kanal-a/members") return jsonResponse({ members: [] });
+      if (path === "/api/channels/kanal-a/members/search") return jsonResponse({ user: { userId: "300", login: "neue-person", displayName: "Neue Person" } });
+      if (path === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const confirmMock = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirmMock);
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
+    fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
+    await screen.findByText("Neue Person");
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("keinerlei Beziehung zum Kanal"));
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("Mitgliederliste"));
+  });
+
+  it("verwirft einen verspäteten Mitglieder-Reload nach einer Mutation beim Kanalwechsel", async () => {
+    const alpha = healthyChannel("kanal-a", "Alpha");
+    const beta = healthyChannel("kanal-b", "Beta");
+    let resolveAlphaReload: ((response: Response) => void) | undefined;
+    const alphaReload = new Promise<Response>((resolve) => {
+      resolveAlphaReload = resolve;
+    });
+    const alphaMember = { userId: "alpha-user", login: "alpha-user", displayName: "Alpha-Mitglied", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const betaMember = { userId: "beta-user", login: "beta-user", displayName: "Beta-Mitglied", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    let memberRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta] }));
+      if (url.pathname === "/api/channels/kanal-a/members") {
+        memberRequestCount += 1;
+        if (memberRequestCount === 1) return Promise.resolve(jsonResponse({ members: [alphaMember], nextCursor: null }));
+        return alphaReload;
+      }
+      if (url.pathname === "/api/channels/kanal-b/members") return Promise.resolve(jsonResponse({ members: [betaMember], nextCursor: null }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/members/alpha-user") return Promise.resolve(jsonResponse({ member: { ...alphaMember, role: "verwalter" } }));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByText("Alpha-Mitglied");
+    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Alpha-Mitglied" }), { target: { value: "verwalter" } });
+    await waitFor(() => expect(resolveAlphaReload).toBeTypeOf("function"));
+
+    act(() => {
+      window.history.pushState({}, "", "/channels/kanal-b/members");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(await screen.findByText("Beta-Mitglied")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveAlphaReload?.(jsonResponse({
+        members: [{ ...alphaMember, displayName: "Verspätetes Alpha-Mitglied" }],
+        nextCursor: null,
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Beta-Mitglied")).toBeInTheDocument();
+    expect(screen.queryByText("Verspätetes Alpha-Mitglied")).not.toBeInTheDocument();
+  });
+
+  it("lädt die nächste Mitglieder-Seite mit dem gelieferten Cursor nach", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels/kanal-a/members" && url.search === "") {
+        return Promise.resolve(jsonResponse({ members: [{ userId: "user-1", login: "erste", displayName: "Erste Person", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: "cursor-1" }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/members" && url.search === "?cursor=cursor-1") {
+        return Promise.resolve(jsonResponse({ members: [{ userId: "user-2", login: "zweite", displayName: "Zweite Person", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByText("Erste Person");
+    fireEvent.click(screen.getByRole("button", { name: "Weitere Mitglieder laden" }));
+
+    expect(await screen.findByText("Zweite Person")).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("/api/channels/kanal-a/members?cursor=cursor-1", window.location.origin),
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(fetcher.mock.calls.at(-1)?.[1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("zeigt bei leerer Modulregistry eine sinnvolle leere Modulfläche", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 export type DashboardRoute =
   | { kind: "overview" }
-  | { kind: "channel"; channelId: string; section: "overview" | "system" };
+  | { kind: "channel"; channelId: string; section: "overview" | "system" | "members" };
 
 const decodeSegment = (value: string): string | null => {
   try {
@@ -17,20 +17,22 @@ export const parseDashboardRoute = (pathname: string): DashboardRoute => {
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) return { kind: "overview" };
   if (segments[0] !== "channels" || (segments.length !== 2 && segments.length !== 3) ||
-      (segments.length === 3 && segments[2] !== "system")) return { kind: "overview" };
+      (segments.length === 3 && segments[2] !== "system" && segments[2] !== "members")) return { kind: "overview" };
   const channelId = decodeSegment(segments[1] ?? "");
   if (channelId === null) return { kind: "overview" };
   return {
     kind: "channel",
     channelId,
-    section: segments[2] === "system" ? "system" : "overview",
+    section: segments[2] === "system" ? "system" : segments[2] === "members" ? "members" : "overview",
   };
 };
 
 export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "overview") return "/";
   const base = `/channels/${encodeURIComponent(route.channelId)}`;
-  return route.section === "system" ? `${base}/system` : base;
+  if (route.section === "system") return `${base}/system`;
+  if (route.section === "members") return `${base}/members`;
+  return base;
 };
 
 export const navigateToDashboardRoute = (route: DashboardRoute): void => {

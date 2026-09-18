@@ -54,6 +54,25 @@ export interface PanelChannelsResponse {
   channels: PanelChannelState[];
 }
 
+export interface PanelMember {
+  userId: string;
+  login: string | null;
+  displayName: string | null;
+  role: PanelChannelRole;
+  joinedAt: string;
+}
+
+export interface PanelMembersResponse {
+  members: PanelMember[];
+  nextCursor: string | null;
+}
+
+export interface PanelTwitchUser {
+  userId: string;
+  login: string;
+  displayName: string;
+}
+
 export interface PanelSystemResponse {
   broadcasterConnection: PanelBroadcasterConnectionStatus;
   bot: PanelBotStatus | null;

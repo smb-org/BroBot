@@ -7,8 +7,9 @@ import {
   type ChannelMemberRole,
 } from "../../src/worker/auth/authorization";
 import {
+  createChannelMemberWithAudit,
   deleteChannelMemberWithAudit,
-  upsertChannelMemberWithAudit,
+  updateChannelMemberWithAudit,
 } from "../../src/worker/auth/repository";
 import type { SessionRecord } from "../../src/worker/auth/repository";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
@@ -79,6 +80,17 @@ const readAudit = async (database: TestD1Database) => database.prepare(
   before_json: string;
   after_json: string;
 }>();
+
+const databaseRacingBeforeBatch = (
+  database: TestD1Database,
+  race: () => void,
+): D1Database => ({
+  prepare: database.prepare.bind(database),
+  batch: async (statements: TestPreparedStatement[]) => {
+    race();
+    return database.batch(statements);
+  },
+} as unknown as D1Database);
 
 describe("kanalgebundene Autorisierung", () => {
   let database: TestD1Database;
@@ -254,8 +266,9 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("schreibt Änderung und Audit-Eintrag gemeinsam", async () => {
     await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
 
-    await upsertChannelMemberWithAudit(
+    await createChannelMemberWithAudit(
       database as unknown as D1Database,
       "actor-1",
       {
@@ -290,9 +303,10 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("auditiert eine Rollenänderung mit dem tatsächlichen Vorher-Zustand", async () => {
     await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
 
-    await upsertChannelMemberWithAudit(
+    await updateChannelMemberWithAudit(
       database as unknown as D1Database,
       "actor-1",
       {
@@ -320,6 +334,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("schreibt bei einer konkurrierenden Änderung keinen veralteten Audit-Vorzustand", async () => {
     await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
@@ -338,7 +353,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
     } as unknown as D1Database;
 
-    await upsertChannelMemberWithAudit(
+    await updateChannelMemberWithAudit(
       racingDatabase,
       "actor-1",
       {
@@ -356,8 +371,9 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("schreibt nach einer konkurrierenden Löschung beim Upsert keinen veralteten Audit-Eintrag", async () => {
+  it("legt bei einer konkurrierenden Löschung durch PATCH kein Mitglied neu an", async () => {
     await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
@@ -369,7 +385,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
     } as unknown as D1Database;
 
-    await upsertChannelMemberWithAudit(
+    await updateChannelMemberWithAudit(
       racingDatabase,
       "actor-1",
       {
@@ -387,10 +403,167 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
+  it("verweigert INSERT, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
+    await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    const racingDatabase = databaseRacingBeforeBatch(database, () => {
+      database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+        .bind("kanal-a", "actor-1").runSync();
+    });
+
+    await expect(createChannelMemberWithAudit(
+      racingDatabase,
+      "actor-1",
+      {
+        channelId: "kanal-a",
+        userId: "user-1",
+        role: "bediener",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T00:01:00.000Z",
+      },
+      "mitglied.hinzugefügt",
+      "2026-09-18T00:01:00.000Z",
+    )).resolves.toBe(false);
+
+    await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
+    await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
+  });
+
+  it("verweigert UPDATE, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
+    await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "user-1", "bediener");
+    const racingDatabase = databaseRacingBeforeBatch(database, () => {
+      database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+        .bind("kanal-a", "actor-1").runSync();
+    });
+
+    await expect(updateChannelMemberWithAudit(
+      racingDatabase,
+      "actor-1",
+      {
+        channelId: "kanal-a",
+        userId: "user-1",
+        role: "verwalter",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T00:01:00.000Z",
+      },
+      "mitglied.rolle_geändert",
+      "2026-09-18T00:01:00.000Z",
+    )).resolves.toBe(false);
+
+    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
+    await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
+  });
+
+  it("verweigert DELETE, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
+    await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "user-1", "bediener");
+    const racingDatabase = databaseRacingBeforeBatch(database, () => {
+      database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+        .bind("kanal-a", "actor-1").runSync();
+    });
+
+    await expect(deleteChannelMemberWithAudit(
+      racingDatabase,
+      "actor-1",
+      "kanal-a",
+      "user-1",
+      "mitglied.entfernt",
+      "2026-09-18T00:01:00.000Z",
+    )).resolves.toBe(false);
+
+    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
+    await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
+  });
+
+  it("schützt zwei gleichzeitige Löschungen bei genau zwei Broadcastern atomar", async () => {
+    await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "broadcaster-1", "broadcaster");
+    await seedMember(database, "kanal-a", "broadcaster-2", "broadcaster");
+    const racingDatabase = databaseRacingBeforeBatch(database, () => {
+      database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+        .bind("kanal-a", "broadcaster-2").runSync();
+    });
+
+    await expect(deleteChannelMemberWithAudit(
+      racingDatabase,
+      "actor-1",
+      "kanal-a",
+      "broadcaster-1",
+      "mitglied.entfernt",
+      "2026-09-18T00:01:00.000Z",
+    )).resolves.toBe(false);
+
+    await expect(readMember(database, "kanal-a", "broadcaster-1")).resolves.toMatchObject({ role: "broadcaster" });
+    await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
+  });
+
+  it("schützt zwei gleichzeitige Herabstufungen bei genau zwei Broadcastern atomar", async () => {
+    await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "broadcaster-1", "broadcaster");
+    await seedMember(database, "kanal-a", "broadcaster-2", "broadcaster");
+    const racingDatabase = databaseRacingBeforeBatch(database, () => {
+      database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+        .bind("kanal-a", "broadcaster-2").runSync();
+    });
+
+    await expect(updateChannelMemberWithAudit(
+      racingDatabase,
+      "actor-1",
+      {
+        channelId: "kanal-a",
+        userId: "broadcaster-1",
+        role: "verwalter",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T00:01:00.000Z",
+      },
+      "mitglied.rolle_geändert",
+      "2026-09-18T00:01:00.000Z",
+    )).resolves.toBe(false);
+
+    await expect(readMember(database, "kanal-a", "broadcaster-1")).resolves.toMatchObject({ role: "broadcaster" });
+    await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
+  });
+
+  it("verwandelt einen zweiten Create nicht in ein UPDATE", async () => {
+    await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    const member = {
+      channelId: "kanal-a",
+      userId: "user-1",
+      role: "bediener" as const,
+      createdAt: "2026-09-18T00:00:00.000Z",
+      updatedAt: "2026-09-18T00:01:00.000Z",
+    };
+
+    await expect(createChannelMemberWithAudit(
+      database as unknown as D1Database,
+      "actor-1",
+      member,
+      "mitglied.hinzugefügt",
+      "2026-09-18T00:01:00.000Z",
+    )).resolves.toBe(true);
+    await expect(createChannelMemberWithAudit(
+      database as unknown as D1Database,
+      "actor-1",
+      { ...member, role: "verwalter" },
+      "mitglied.hinzugefügt",
+      "2026-09-18T00:02:00.000Z",
+    )).resolves.toBe(false);
+
+    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
+    await expect(readAudit(database)).resolves.toMatchObject({ results: [expect.objectContaining({ action: "mitglied.hinzugefügt" })] });
+  });
+
   it("hinterlässt bei einer fehlgeschlagenen Änderung keinen Audit-Eintrag", async () => {
     await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
 
-    await expect(upsertChannelMemberWithAudit(
+    await expect(createChannelMemberWithAudit(
       database as unknown as D1Database,
       "actor-1",
       {
@@ -441,6 +614,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("auditiert das Entfernen mit Vorher- und Nachher-Zustand", async () => {
     await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
 
     await deleteChannelMemberWithAudit(
@@ -465,6 +639,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("schreibt nach einer konkurrierenden Löschung keinen Audit-Eintrag", async () => {
     await seedChannel(database, "kanal-a");
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
     await seedMember(database, "kanal-a", "user-1", "bediener");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
