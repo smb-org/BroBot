@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
+import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { TestD1Database } from "./test-d1";
@@ -98,6 +100,40 @@ const insertBroadcasterConnection = async (
   ).run();
 };
 
+const insertBotIdentity = async (database: TestD1Database): Promise<void> => {
+  const ciphertext = await encryptJson(
+    { token: "bot-access-token" },
+    parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS),
+  );
+  await database.prepare(
+    `INSERT INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, created_at, updated_at)
+     VALUES (1, ?, ?, '[]', ?, ?, ?, ?, ?)`,
+  ).bind(
+    "bot-user",
+    "brobot",
+    ciphertext,
+    "refresh-ciphertext",
+    "2099-09-19T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+  ).run();
+};
+
+const insertBotChannelStatus = async (
+  database: TestD1Database,
+  channelId: string,
+  isModerator: boolean,
+  checkedAt: string,
+  reason: string | null,
+): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+     VALUES (?, ?, ?, ?)`,
+  ).bind(channelId, isModerator ? 1 : 0, checkedAt, reason).run();
+};
+
 const insertSessionCookie = async (userId: string): Promise<string> => createSessionCookie(
   { sessionId: `session-${userId}` },
   environmentKeys.SESSION_COOKIE_KEYS,
@@ -112,10 +148,25 @@ const makeEnvironment = (database: TestD1Database): Env => ({
 const makeRequest = async (
   userId: string | null,
   path: string,
+  method = "GET",
+  withCsrf = true,
 ): Promise<Request> => {
   const headers = new Headers();
-  if (userId !== null) headers.set("Cookie", `__Host-brobot_session=${await insertSessionCookie(userId)}`);
-  return new Request(`https://brobot.example${path}`, { headers });
+  if (userId !== null) {
+    const sessionCookie = await insertSessionCookie(userId);
+    if (method === "GET" || !withCsrf) {
+      headers.set("Cookie", `__Host-brobot_session=${sessionCookie}`);
+    } else {
+      const csrfToken = await createCsrfToken(
+        `session-${userId}`,
+        environmentKeys.SESSION_COOKIE_KEYS,
+        "2026-09-18T04:00:00.000Z",
+      );
+      headers.set("Cookie", `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrfToken}`);
+      headers.set("X-CSRF-Token", csrfToken);
+    }
+  }
+  return new Request(`https://brobot.example${path}`, { method, headers });
 };
 
 describe("Panel-Leseendpunkte", () => {
@@ -129,6 +180,8 @@ describe("Panel-Leseendpunkte", () => {
 
   afterEach(() => {
     database.close();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("weist eine kanalgebundene Les Anfrage ohne Session ab", async () => {
@@ -353,5 +406,191 @@ describe("Panel-Leseendpunkte", () => {
     expect(secondResponse.status).toBe(200);
     expect(second.entries).toEqual([{ auditId: "audit-2", actorUserId: "user-1", createdAt: "2026-09-18T02:00:00.000Z", action: "alt", before: "{}", after: "{}" }]);
     expect(second.nextCursor).toBeNull();
+  });
+});
+
+describe("manuelle Moderatorstatus-Prüfung", () => {
+  let database: TestD1Database;
+  let environment: Env;
+
+  beforeEach(async () => {
+    database = new TestD1Database();
+    environment = makeEnvironment(database);
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertBotIdentity(database);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-18T04:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    database.close();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("weist einen Bediener im Worker ab", async () => {
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("weist ein gültiges Mitglied eines fremden Kanals ab", async () => {
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-b/moderator-status", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("weist eine Mutation ohne CSRF-Token vor der Twitch-Abfrage ab", async () => {
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST", false),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("aktualisiert bei Erfolg nur den aufgerufenen Kanal und startet keine Wartung", async () => {
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertBotChannelStatus(database, "kanal-a", false, "2026-09-18T03:00:00.000Z", "moderator_entfernt");
+    await insertBotChannelStatus(database, "kanal-b", false, "2026-09-18T03:00:00.000Z", "moderator_entfernt");
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ data: [{ broadcaster_id: "kanal-a" }] }),
+      { status: 200 },
+    ));
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+    const body = await response.json<{ moderator: { isModerator: boolean; checkedAt: string; reason: string | null } }>();
+    const kanalA = await database.prepare(
+      "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = ?",
+    ).bind("kanal-a").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
+    const kanalB = await database.prepare(
+      "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = ?",
+    ).bind("kanal-b").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
+
+    expect(response.status).toBe(200);
+    expect(body.moderator).toEqual({ isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null });
+    expect(kanalA).toEqual({ is_moderator: 1, checked_at: "2026-09-18T04:00:00.000Z", reason: null });
+    expect(kanalB).toEqual({ is_moderator: 0, checked_at: "2026-09-18T03:00:00.000Z", reason: "moderator_entfernt" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "https://api.twitch.tv/helix/moderation/channels?user_id=bot-user&first=100&broadcaster_id=kanal-a",
+    );
+    expect(fetcher.mock.calls.some((call) => String(call[0]).includes("oauth2/token"))).toBe(false);
+    expect(fetcher.mock.calls.some((call) => String(call[0]).includes("channel-b"))).toBe(false);
+  });
+
+  it("weist eine Prüfung innerhalb des Cooldowns ab und nennt den frühesten Zeitpunkt", async () => {
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ data: [{ broadcaster_id: "kanal-a" }] }),
+      { status: 200 },
+    ));
+    vi.stubGlobal("fetch", fetcher);
+
+    await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+    const body = await response.json<{ error: string; nextAllowedAt: string }>();
+
+    expect(response.status).toBe(429);
+    expect(body.error).toContain("kürzlich");
+    expect(body.nextAllowedAt).toBe("2026-09-18T04:05:00.000Z");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("blockiert einen parallelen Auslöser desselben Kanals atomar", async () => {
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    let releaseTwitch!: (response: Response) => void;
+    const twitchResponse = new Promise<Response>((resolve) => { releaseTwitch = (response) => { resolve(response); }; });
+    const fetcher = vi.fn().mockReturnValue(twitchResponse);
+    vi.stubGlobal("fetch", fetcher);
+
+    const firstRequest = panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
+    const secondResponse = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+    releaseTwitch(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    const firstResponse = await firstRequest;
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(429);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("berücksichtigt auch eine frische Prüfung aus dem Wartungslauf", async () => {
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertBotChannelStatus(database, "kanal-a", true, "2026-09-18T03:57:00.000Z", null);
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+    const body = await response.json<{ nextAllowedAt: string }>();
+
+    expect(response.status).toBe(429);
+    expect(body.nextAllowedAt).toBe("2026-09-18T04:02:00.000Z");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("lässt den bisherigen Wert bei einem Twitch-Fehler unverändert und gibt die Ursache zurück", async () => {
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertBotChannelStatus(database, "kanal-a", true, "2026-09-18T03:00:00.000Z", null);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Twitch ist vorübergehend nicht erreichbar." }),
+      { status: 503 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+    const body = await response.json<{ error: string }>();
+    const status = await database.prepare(
+      "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = ?",
+    ).bind("kanal-a").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
+
+    expect(response.status).toBe(502);
+    expect(body.error).toBe("Twitch ist vorübergehend nicht erreichbar.");
+    expect(status).toEqual({ is_moderator: 1, checked_at: "2026-09-18T03:00:00.000Z", reason: null });
+    expect(await database.prepare("SELECT * FROM bot_channel_status_check_locks WHERE channel_id = ?").bind("kanal-a").first()).toBeNull();
   });
 });

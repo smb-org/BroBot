@@ -50,6 +50,8 @@ h2 { margin-bottom: 0; color: #f5f7fb; font-size: 1.1rem; letter-spacing: -.02em
 .status-card { min-height: 10.5rem; padding: 1.2rem; }
 .status-card strong { display: block; margin-top: 2rem; color: #f9fbff; font-size: 1.2rem; }
 .status-card p { margin: .5rem 0 0; color: #8e99a9; font-size: .83rem; }
+.moderator-check-action { display: grid; gap: .35rem; margin-top: 1rem; }
+.moderator-check-action .button { margin-top: 0; }
 .content-section { margin-top: 1rem; padding: 1.35rem; }
 .section-heading { align-items: end; margin-bottom: 1.25rem; }
 .section-heading h2 { margin-top: .35rem; }

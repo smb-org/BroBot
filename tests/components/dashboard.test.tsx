@@ -296,6 +296,97 @@ describe("Dashboard-Grundgerüst", () => {
     expect(warning.closest("[data-status]")).toHaveAttribute("data-status", "error");
   });
 
+  it("zeigt die letzte Moderatorprüfung und die Aktion nur für berechtigte Rollen", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      role: "verwalter",
+      moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const moderatorCard = await screen.findByRole("article", { name: "Moderatorstatus" });
+    expect(within(moderatorCard).getByText(/Letzte Prüfung:/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Moderatorstatus prüfen" })).toBeInTheDocument();
+
+    cleanup();
+    const operatorChannel = { ...channel, role: "bediener" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...operatorChannel, activeModules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+    render(<DashboardApp />);
+
+    await screen.findByRole("article", { name: "Moderatorstatus" });
+    expect(screen.queryByRole("button", { name: "Moderatorstatus prüfen" })).not.toBeInTheDocument();
+  });
+
+  it("zeigt während und nach der manuellen Prüfung eine Rückmeldung", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      role: "broadcaster",
+      moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
+    };
+    let resolveCheck!: (response: Response) => void;
+    const check = new Promise<Response>((resolve) => { resolveCheck = resolve; });
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/moderator-status") return check;
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+    const button = await screen.findByRole("button", { name: "Moderatorstatus prüfen" });
+    fireEvent.click(button);
+
+    expect(await screen.findByRole("button", { name: "Prüfung läuft …" })).toBeDisabled();
+    resolveCheck(jsonResponse({
+      moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
+      nextAllowedAt: "2026-09-18T04:05:00.000Z",
+    }));
+
+    await waitFor(() => expect(screen.getByText("Moderator", { selector: "strong" })).toBeInTheDocument());
+    expect(screen.getByText(/Letzte Prüfung:/)).toBeInTheDocument();
+  });
+
+  it("zeigt Twitch-Fehler an und behält den bisherigen Moderatorstand", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      moderator: { isModerator: true, checkedAt: "2026-09-18T02:00:00.000Z", reason: null },
+    };
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({ error: "Twitch ist vorübergehend nicht erreichbar." }, 502));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
+
+    expect(await screen.findByText("Twitch ist vorübergehend nicht erreichbar.", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByText("Moderator", { selector: "strong" })).toBeInTheDocument();
+  });
+
   it("zeigt fehlende Token-Ablaufdaten nicht als gültig oder gesund", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),

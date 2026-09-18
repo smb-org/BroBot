@@ -6,6 +6,7 @@ import {
   fetchChannelOverview,
   fetchMembers,
   removeChannelMember,
+  refreshModeratorStatus,
   searchTwitchUser,
   updateChannelMemberRole,
   PanelApiError,
@@ -144,6 +145,27 @@ describe("Dashboard-API-Requestgrenze", () => {
       expect.objectContaining({
         method: "DELETE",
         headers: { "X-CSRF-Token": "csrf-token-3" },
+      }),
+    );
+  });
+
+  it("holt vor der Moderatorstatus-Prüfung CSRF und sendet nur den Zielkanal", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ token: "csrf-token" }))
+      .mockResolvedValueOnce(jsonResponse({
+        moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
+        nextAllowedAt: "2026-09-18T04:05:00.000Z",
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await refreshModeratorStatus("kanal/sonder?#");
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      new URL("/api/channels/kanal%2Fsonder%3F%23/moderator-status", window.location.origin),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "X-CSRF-Token": "csrf-token" },
       }),
     );
   });
