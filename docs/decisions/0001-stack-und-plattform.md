@@ -135,7 +135,7 @@ Hono ist ein leichtgewichtiges Webframework, das sehr gut zur Workers-Runtime pa
 /api/integrations/streamelements
 /api/channels/:channelId/commands
 /api/channels/:channelId/settings
-/api/channels/:channelId/overlay-token
+/api/channels/:channelId/overlay-tokens  (präzisiert mit #20 — Ausgabe-Route)
 /api/channels/:channelId/test-event
 /realtime/:channelId
 ```
@@ -298,8 +298,12 @@ body,
 Die bevorzugte Einbindung ist eine direkte Browserquelle:
 
 ```text
-https://bot.example.de/overlay/beispielkanal?key=...
+https://bot.example.de/overlay.html#token=...
 ```
+
+Die Beispiel-URL wurde mit #20 präzisiert: Das technische Overlay-Token liegt
+im Fragment der festen Overlay-Datei, nicht in einem veralteten Kanalpfad mit
+Query-Schlüssel.
 
 Wichtige Eigenschaften:
 
@@ -318,10 +322,14 @@ Eine Einbindung per iframe ist grundsätzlich möglich:
 
 ```html
 <iframe
-  src="https://bot.example.de/overlay/beispielkanal?key=..."
+  src="https://bot.example.de/overlay.html#token=..."
   style="position:absolute;width:100%;height:100%;border:0">
 </iframe>
 ```
+
+Auch das iframe-Beispiel ist mit #20 auf die tatsächliche Fragment-Form
+präzisiert; der Klartext-Token wird weiterhin nur einmal aus der Ausgabe-Route
+übernommen.
 
 Die direkte OBS-Browserquelle ist dennoch zu bevorzugen. Bei StreamElements können iframe-Sandboxing, Content-Security-Policy und Audio-Autoplay zusätzliche Fehlerquellen erzeugen.
 
@@ -526,7 +534,7 @@ Das Dashboard darf eine Moderator- oder Editor-Rolle nicht lediglich aus dem Fro
 ### Zugriffsebenen
 
 ```text
-/overlay/:channel       → langes, widerrufbares Overlay-Token
+/overlay.html#token=... → langes, widerrufbares Overlay-Token im Fragment
 /dashboard              → Twitch OAuth und Rollenprüfung
 /api/twitch/eventsub    → Twitch-HMAC-Signaturprüfung
 ```
@@ -537,7 +545,11 @@ Das Dashboard darf eine Moderator- oder Editor-Rolle nicht lediglich aus dem Fro
 - Event-ID zur Deduplizierung speichern
 - OAuth- und Refresh-Tokens verschlüsseln
 - Tokens niemals in Local Storage ablegen
-- Tokens niemals in Overlay-URLs übertragen
+- OAuth- und Twitch-Tokens niemals in Overlay-URLs übertragen; der
+  technische Overlay-Zugang wird als eigener Token im URL-Fragment geführt
+  (präzisiert mit #20 — ursprünglich stand hier pauschal „Tokens niemals in
+  Overlay-URLs", gemeint waren OAuth- und Twitch-Tokens. Begründung der
+  Fragment-Wahl in `docs/ARCHITECTURE.md`)
 - Sessions als Secure-, HttpOnly- und SameSite-Cookies
 - CSRF-Schutz für schreibende Dashboard-Aktionen
 - Rate Limits pro Kanal, Benutzer und Command

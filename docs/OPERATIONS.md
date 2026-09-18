@@ -33,6 +33,100 @@
    Eine Broadcaster-Autorisierung entsteht erst mit einem Modul, das sie
    benötigt.
 
+## Overlay-Nachweis in OBS
+
+Das Overlay ist eine technische Deployment-Anzeige, kein fachliches Modul. Es
+zeigt nach einem erfolgreichen HTTP-Statusabruf die Version aus
+`CF_VERSION_METADATA`.
+
+### Migration und Token ausgeben
+
+Vor dem ersten Rollout die D1-Migration `0003_overlay_tokens.sql` in jeder
+Zielumgebung anwenden. Der Pepper bleibt ein Secret und wird nicht in die
+Browserquelle oder in die URL geschrieben.
+
+Die Ausgabe erfolgt mit einer angemeldeten Panel-Session. Zuerst über
+`GET /api/csrf` ein CSRF-Token beziehen; es muss im
+`__Host-brobot_csrf`-Cookie und im Header `X-CSRF-Token` zurückgesendet werden.
+Danach ohne Ablaufzeit ausgeben:
+
+```bash
+curl -sS -X POST https://<öffentlicher-origin>/api/channels/<channelId>/overlay-tokens \
+  -H 'Cookie: __Host-brobot_session=<session-cookie>; __Host-brobot_csrf=<csrf-token>' \
+  -H 'X-CSRF-Token: <csrf-token>' \
+  -H 'Content-Type: application/json' \
+  --data '{}'
+```
+
+Die Antwort enthält eine `tokenId`, die vollständige `overlayUrl` und
+`"expiresAt": null`. Die `overlayUrl` genau einmal kopieren und in OBS
+einsetzen; der Klartext-Token wird nicht erneut angezeigt oder gespeichert.
+Für eine zeitlich begrenzte Freigabe kann statt `{}` ein zukünftiger Zeitpunkt
+angegeben werden:
+
+```json
+{ "expiresAt": "2030-01-15T12:00:00.000Z" }
+```
+
+Die URL enthält den Token im Fragment (`#token=...`), nicht in einer Query.
+Browser senden das Fragment nicht an den Worker. OBS speichert die komplette
+URL einschließlich Fragment jedoch in der Szenensammlung im Klartext; diese
+Szenensammlung ist deshalb wie ein Secret zu schützen. Twitch- oder
+OAuth-Tokens gehören niemals in diese URL.
+
+### Browserquelle einrichten
+
+1. In OBS eine **Browserquelle** anlegen und die ausgegebene `overlayUrl`
+   eintragen.
+2. Als Startgröße sind ungefähr **420 × 72 Pixel** sinnvoll. Die Quelle kann
+   später kleiner oder größer gezogen werden; der Inhalt bleibt ohne eigene
+   Hintergrundfläche.
+3. In den Browserquellen-Einstellungen den Haken für **transparenten
+   Hintergrund** setzen beziehungsweise die Hintergrundfarbe auf **transparent**
+   stellen, falls die OBS-Version diese Option so bezeichnet. Kein eigenes CSS
+   mit einer Hintergrundfarbe ergänzen.
+4. Die Quelle bei Bedarf aktualisieren oder die Szene neu laden. Eine
+   erfolgreiche Quelle zeigt klein `Version <Deployment-ID>`.
+
+### Token widerrufen
+
+Mit der `tokenId` aus der Ausgabe widerruft der Betreiber genau diesen Zugang.
+Der Widerrufsgrund wird gespeichert:
+
+```bash
+curl -sS -X POST https://<öffentlicher-origin>/api/channels/<channelId>/overlay-tokens/<tokenId>/revoke \
+  -H 'Cookie: __Host-brobot_session=<session-cookie>; __Host-brobot_csrf=<csrf-token>' \
+  -H 'X-CSRF-Token: <csrf-token>' \
+  -H 'Content-Type: application/json' \
+  --data '{"reason":"OBS-Szenensammlung ersetzt"}'
+```
+
+Der Standardtoken läuft nicht ab. Das Betriebsmittel für eine nicht mehr
+gewünschte Quelle ist der einzelne Widerruf; ein optionaler Ablauf ist nur für
+bewusst befristete Freigaben vorgesehen. `last_used_at` wird höchstens einmal
+je fünf Minuten aktualisiert und eignet sich damit als grobes Lebenszeichen,
+ohne jeden Statusabruf als D1-Schreibvorgang zu speichern.
+
+### Schwarze oder leere Quelle diagnostizieren
+
+- Prüfen, ob die Browserquelle exakt die ausgegebene URL inklusive `#token=...`
+  verwendet. Den Token nicht in eine Query verschieben und nicht durch einen
+  Twitch- oder OAuth-Token ersetzen.
+- Die Quelle aktualisieren beziehungsweise die Option zum Neuladen beim
+  Szenenwechsel einmal aktivieren. Bei einem widerrufenen, optional
+  abgelaufenen oder anderweitig ungültigen Token bleibt die Fläche vollständig
+  leer; das Fehlen der Versionsanzeige ist das Signal.
+- Prüfen, ob der Worker erreichbar ist und `/api/overlay/status` mit dem
+  gültigen Token den Status `200` liefert. Für diesen Test den Token nicht in
+  Logs, Tickets oder Screenshots kopieren.
+- Eine eigene OBS-CSS-Regel mit schwarzem `body`-Hintergrund entfernen. Die
+  Seite setzt `html`, `body`, `#root` und die gerenderte Fläche selbst auf
+  transparent.
+- Wenn die Version fehlt, zuerst Deployment und D1-Migration prüfen. Ohne
+  `0003_overlay_tokens.sql` kann der Worker keine Overlay-Zugänge validieren;
+  ohne gültige `CF_VERSION_METADATA`-Bindung kann keine aktuelle
+  Deployment-ID angezeigt werden.
+
 Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` dokumentiert. Die aktuelle Wrangler-Konfiguration akzeptiert dieses Feld und nutzt es auch für die Typgenerierung; Secret-Werte werden ausschließlich über Secret-Bindings beziehungsweise lokale Env-Dateien bereitgestellt.
 
 ## Umgebungsvariablen und Bindings
@@ -77,7 +171,7 @@ danach durch Entfernen des alten Eintrags abgeschlossen.
 | `ASSETS` | statische Dashboard- und Overlay-Dateien aus `dist/client` |
 | `CF_VERSION_METADATA` | Versionsmetadaten des Deployments |
 
-`/healthz` prüft eine im Worker hinterlegte Liste (`REQUIRED_SECRET_NAMES`) und meldet einen Namen als fehlend, wenn der zugehörige Wert leer ist oder noch einen Platzhalter (`replace-with`, `example.invalid`) enthält — niemals den Wert selbst. `pnpm run config:verify` stellt sicher, dass diese Liste im Worker, `secrets.required` in `wrangler.jsonc` (alle Umgebungen) und das Verify-Script selbst übereinstimmen; weichen sie voneinander ab, schlägt die Prüfung fehl.
+`/healthz` prüft eine im Worker hinterlegte Liste (`REQUIRED_SECRET_NAMES`) und meldet einen Namen als fehlend, wenn der zugehörige Wert leer ist, noch einen Platzhalter (`replace-with`, `example.invalid`) enthält oder ein bekanntes Format verletzt — niemals den Wert selbst. `pnpm run config:verify` stellt sicher, dass diese Liste im Worker, `secrets.required` in `wrangler.jsonc` (alle Umgebungen) und das Verify-Script selbst übereinstimmen; weichen sie voneinander ab, schlägt die Prüfung fehl.
 
 ## Lokale Entwicklung
 
@@ -100,8 +194,8 @@ pnpm run check
 
 Vor dem ersten Rollout dieser Version die D1-Migrationen in jeder Zielumgebung
 anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
-Session-, OAuth- und Token-Tabellen und `0002` die feste Rollenmenge sowie das
-Audit-Log anlegen:
+Session-, OAuth- und Token-Tabellen, `0002` die feste Rollenmenge sowie das
+Audit-Log und `0003` die Overlay-Token-Tabelle anlegen:
 
 ```bash
 pnpm exec wrangler d1 migrations apply brobot-local
