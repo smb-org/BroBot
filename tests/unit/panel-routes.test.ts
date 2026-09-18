@@ -593,4 +593,23 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(status).toEqual({ is_moderator: 1, checked_at: "2026-09-18T03:00:00.000Z", reason: null });
     expect(await database.prepare("SELECT * FROM bot_channel_status_check_locks WHERE channel_id = ?").bind("kanal-a").first()).toBeNull();
   });
+
+  it("beendet eine hängende Twitch-Prüfung nach dem Zeitlimit und räumt nur ihre Sperre auf", async () => {
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    const fetcher = vi.fn().mockReturnValue(new Promise<Response>(() => undefined));
+    vi.stubGlobal("fetch", fetcher);
+
+    const responsePromise = panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
+      environment,
+    );
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const response = await responsePromise;
+    const body = await response.json<{ error: string }>();
+
+    expect(response.status).toBe(504);
+    expect(body.error).toContain("Zeitlimit");
+    expect(await database.prepare("SELECT * FROM bot_channel_status_check_locks WHERE channel_id = ?").bind("kanal-a").first()).toBeNull();
+  });
 });

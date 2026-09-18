@@ -19,7 +19,7 @@
 
 | | Wer autorisiert | Wie oft | Ein Scope mehr kostet |
 |---|---|---|---|
-| **Login** | jeder Panel-Nutzer | bei jedem Login | nichts — der nächste Login holt ihn |
+| **Login** | jeder Panel-Nutzer | beim Login; danach nur bei aktiver Session | nichts — der nächste Login holt ihn |
 | **Bot** | der Bot-Account | **einmal insgesamt**, nicht pro Kanal | eine einzige Neu-Autorisierung |
 | **Broadcaster** | jeder Broadcaster | **einmal pro Kanal** | jeder Broadcaster erneut durch den Zustimmungsdialog |
 
@@ -147,7 +147,7 @@ Diese Bindung ist kein Zusatz, sondern Voraussetzung: Ein signierter `state` all
 
 - Der Worker ist ein **Confidential Client** — das Client-Secret liegt in einem Worker-Secret und erreicht keinen Browser. Dadurch laufen Refresh-Tokens nicht nach 30 Tagen ab, anders als bei einem Public Client.
 - **Refresh-Tokens rotieren:** Jeder Refresh gibt einen neuen aus. Der alte wird im selben Schreibvorgang ersetzt, sonst entsteht bei einem Fehlschlag eine Verbindung ohne gültigen Refresh-Token.
-- Twitch verlangt, Tokens **beim Start und danach stündlich** über `/oauth2/validate` zu prüfen. Daraus folgt ein **Cron-Trigger** in `wrangler.jsonc`, den es heute noch nicht gibt. Derselbe Lauf erneuert Tokens, die in weniger als einer Stunde ablaufen, und prüft den Moderatorstatus des Bots.
+- Twitch verlangt, Tokens **beim Start und danach stündlich** über `/oauth2/validate` zu prüfen. Für Login-Identitäten gilt das nur, solange mindestens eine nicht widerrufene und noch nicht abgelaufene `auth_sessions`-Zeile existiert; Identitäten ohne aktive Session werden nicht künstlich am Leben gehalten. Der Cron begrenzt die Login-Prüfungen auf vier gleichzeitige Aufrufe. Derselbe Lauf erneuert Tokens, die in weniger als einer Stunde ablaufen, und prüft den Moderatorstatus des Bots.
 - Ein erneuter Login wird nur nötig, wenn der Nutzer die App entzieht, sein Passwort ändert oder **wir einen neuen Scope brauchen**. Nur der dritte Fall ist vermeidbar — deshalb die Disziplin in Abschnitt 3.
 - **Bei Widerruf kein Endlos-Retry.** Die Verbindung wird als getrennt markiert, die Ursache festgehalten, und das Panel zeigt den Zustand mit einem Weg zur erneuten Verbindung.
 

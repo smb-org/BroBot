@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { getTokenEncryptionKeys } from "../../src/worker/auth/crypto";
+
 // Regressionsschutz: REQUIRED_SECRET_NAMES (src/worker/index.ts),
 // secrets.required (wrangler.jsonc) und deploymentBindings
 // (scripts/verify-deployment-config.mjs) müssen übereinstimmen. Ruft direkt
@@ -30,8 +32,39 @@ describe("Secret-Namen-Drift", () => {
       `TWITCH_EVENTSUB_SECRET='${keyRing}'`,
       "PUBLIC_ORIGIN=https://brobot.example",
       `SESSION_COOKIE_KEYS='${keyRing}'`,
-      `SESSION_ENCRYPTION_KEYS='${keyRing}'`,
+      `TOKEN_ENCRYPTION_KEYS='${keyRing}'`,
       `OVERLAY_TOKEN_PEPPER=${malformedPepper}`,
+      "",
+    ].join("\n"));
+
+    try {
+      const result = spawnSync(
+        "node",
+        ["scripts/verify-deployment-config.mjs", "validate-env", "staging", environmentFile],
+        { cwd: path.resolve(import.meta.dirname, "../.."), encoding: "utf8" },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain("OVERLAY_TOKEN_PEPPER");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("weist einen als Schlüsselring missbrauchten Overlay-Pepper ab", () => {
+    const key = Buffer.alloc(32, 1).toString("base64url");
+    const keyRing = JSON.stringify({ active: { id: "pepper-v2", key }, retired: [] });
+    const tokenKeyRing = JSON.stringify({ active: { id: "token-v1", key }, retired: [] });
+    const directory = mkdtempSync(path.join(os.tmpdir(), "brobot-config-pepper-ring-"));
+    const environmentFile = path.join(directory, "staging.env");
+    writeFileSync(environmentFile, [
+      "TWITCH_CLIENT_ID=client-id",
+      "TWITCH_CLIENT_SECRET=client-secret",
+      `TWITCH_EVENTSUB_SECRET='${tokenKeyRing}'`,
+      "PUBLIC_ORIGIN=https://brobot.example",
+      `SESSION_COOKIE_KEYS='${tokenKeyRing}'`,
+      `TOKEN_ENCRYPTION_KEYS='${tokenKeyRing}'`,
+      `OVERLAY_TOKEN_PEPPER='${keyRing}'`,
       "",
     ].join("\n"));
 
@@ -60,7 +93,7 @@ describe("Secret-Namen-Drift", () => {
       `TWITCH_EVENTSUB_SECRET='${keyRing}'`,
       "PUBLIC_ORIGIN=not-a-url",
       `SESSION_COOKIE_KEYS='${keyRing}'`,
-      `SESSION_ENCRYPTION_KEYS='${keyRing}'`,
+      `TOKEN_ENCRYPTION_KEYS='${keyRing}'`,
       `OVERLAY_TOKEN_PEPPER=${key}`,
       "",
     ].join("\n"));
@@ -74,6 +107,48 @@ describe("Secret-Namen-Drift", () => {
 
       expect(result.status).not.toBe(0);
       expect(`${result.stdout}\n${result.stderr}`).toContain("PUBLIC_ORIGIN");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("akzeptiert den alten Token-Schlüssel während der Übergangsphase", () => {
+    const keyRing = JSON.stringify({
+      active: { id: "legacy", key: Buffer.alloc(32, 1).toString("base64url") },
+      retired: [],
+    });
+
+    expect(getTokenEncryptionKeys({ SESSION_ENCRYPTION_KEYS: keyRing })).toBe(keyRing);
+    expect(getTokenEncryptionKeys({
+      TOKEN_ENCRYPTION_KEYS: "neu",
+      SESSION_ENCRYPTION_KEYS: keyRing,
+    })).toBe("neu");
+  });
+
+  it("akzeptiert den alten Token-Schlüsselnamen auch im Deployment-Preflight", () => {
+    const key = Buffer.alloc(32, 1).toString("base64url");
+    const keyRing = JSON.stringify({ active: { id: "test-key", key }, retired: [] });
+    const directory = mkdtempSync(path.join(os.tmpdir(), "brobot-config-legacy-key-"));
+    const environmentFile = path.join(directory, "staging.env");
+    writeFileSync(environmentFile, [
+      "TWITCH_CLIENT_ID=client-id",
+      "TWITCH_CLIENT_SECRET=client-secret",
+      `TWITCH_EVENTSUB_SECRET='${keyRing}'`,
+      "PUBLIC_ORIGIN=https://brobot.example",
+      `SESSION_COOKIE_KEYS='${keyRing}'`,
+      `SESSION_ENCRYPTION_KEYS='${keyRing}'`,
+      `OVERLAY_TOKEN_PEPPER=${key}`,
+      "",
+    ].join("\n"));
+
+    try {
+      const result = spawnSync(
+        "node",
+        ["scripts/verify-deployment-config.mjs", "validate-env", "staging", environmentFile],
+        { cwd: path.resolve(import.meta.dirname, "../.."), encoding: "utf8" },
+      );
+
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

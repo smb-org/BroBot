@@ -4,6 +4,7 @@ import {
   readCookieValue,
   readSessionCookie,
 } from "./session";
+import { getTokenEncryptionKeys } from "./crypto";
 
 export const getSessionFromRequest = async (
   request: Request,
@@ -14,7 +15,7 @@ export const getSessionFromRequest = async (
   const session = await readSessionCookie(
     serialized,
     env.SESSION_COOKIE_KEYS,
-    env.SESSION_ENCRYPTION_KEYS,
+    getTokenEncryptionKeys(env),
   );
   if (session === null) return null;
   const stored = await getSessionWithLoginIdentity(env.DB, session.sessionId);

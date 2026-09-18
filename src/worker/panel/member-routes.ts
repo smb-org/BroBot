@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import { decryptJson, parseKeyRing } from "../auth/crypto";
+import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "../auth/crypto";
 import {
   countBroadcasterMembers,
   createChannelMemberWithAudit,
@@ -103,7 +103,7 @@ const readStoredBotAccessToken = async (environment: Env): Promise<string | null
   if (identity === null) return null;
   const value = await decryptJson<{ token?: unknown }>(
     identity.accessTokenCiphertext,
-    parseKeyRing(environment.SESSION_ENCRYPTION_KEYS),
+    parseKeyRing(getTokenEncryptionKeys(environment)),
   );
   return value !== null && typeof value.token === "string" && value.token.length > 0
     ? value.token

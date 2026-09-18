@@ -7,7 +7,7 @@ import {
   setBotIdentityStatusIfCurrent,
   rotateBotTokens,
 } from "./auth/repository";
-import { decryptJson, encryptJson, parseKeyRing } from "./auth/crypto";
+import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 
 export interface TwitchClientEnvironment {
@@ -39,6 +39,36 @@ export class TwitchApiError extends Error {
     this.code = code;
   }
 }
+
+export const MODERATOR_STATUS_REQUEST_TIMEOUT_MS = 5_000;
+
+const fetchWithTimeout = async (
+  fetcher: typeof fetch,
+  input: RequestInfo | URL,
+  init: RequestInit,
+): Promise<Response> => {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new TwitchApiError("Die Twitch-Abfrage hat das Zeitlimit überschritten.", 504, "timeout"));
+    }, MODERATOR_STATUS_REQUEST_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([
+      fetcher(input, { ...init, signal: controller.signal }),
+      timeout,
+    ]);
+  } catch (error: unknown) {
+    if (controller.signal.aborted) {
+      throw new TwitchApiError("Die Twitch-Abfrage hat das Zeitlimit überschritten.", 504, "timeout");
+    }
+    throw error;
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+};
 
 const isFinitePositiveNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -138,7 +168,7 @@ const fetchModeratedChannelsPage = async (
   url.searchParams.set("first", "100");
   if (cursor !== null) url.searchParams.set("after", cursor);
   if (broadcasterId !== undefined) url.searchParams.set("broadcaster_id", broadcasterId);
-  const response = await fetcher(url.toString(), {
+  const response = await fetchWithTimeout(fetcher, url.toString(), {
     headers: {
       "Client-ID": clientId,
       Authorization: `Bearer ${accessToken}`,
@@ -266,8 +296,9 @@ export const maintainBotIdentity = async (
   const identity = await getBotIdentity(env.DB);
   if (identity === null) return;
 
-  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, env.SESSION_ENCRYPTION_KEYS);
-  const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, env.SESSION_ENCRYPTION_KEYS);
+  const encryptionKeys = getTokenEncryptionKeys(env);
+  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
+  const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys);
   if (accessToken === null || refreshToken === null) {
     await setBotIdentityStatusIfCurrent(
       env.DB,
@@ -311,11 +342,11 @@ export const maintainBotIdentity = async (
       const expiresAt = new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString();
       const accessTokenCiphertext = await encryptJson(
         { token: refreshed.accessToken },
-        parseKeyRing(env.SESSION_ENCRYPTION_KEYS),
+        parseKeyRing(encryptionKeys),
       );
       const refreshTokenCiphertext = await encryptJson(
         { token: refreshed.refreshToken },
-        parseKeyRing(env.SESSION_ENCRYPTION_KEYS),
+        parseKeyRing(encryptionKeys),
       );
       const replaced = await rotateBotTokensWithRetry(
         env.DB,

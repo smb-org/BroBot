@@ -39,7 +39,7 @@
       "TWITCH_EVENTSUB_SECRET",
       "PUBLIC_ORIGIN",
       "SESSION_COOKIE_KEYS",
-      "SESSION_ENCRYPTION_KEYS",
+      "TOKEN_ENCRYPTION_KEYS",
       "OVERLAY_TOKEN_PEPPER"
     ]
   },
@@ -87,7 +87,7 @@
           "TWITCH_EVENTSUB_SECRET",
           "PUBLIC_ORIGIN",
           "SESSION_COOKIE_KEYS",
-          "SESSION_ENCRYPTION_KEYS",
+          "TOKEN_ENCRYPTION_KEYS",
           "OVERLAY_TOKEN_PEPPER"
         ]
       },
@@ -135,7 +135,7 @@
           "TWITCH_EVENTSUB_SECRET",
           "PUBLIC_ORIGIN",
           "SESSION_COOKIE_KEYS",
-          "SESSION_ENCRYPTION_KEYS",
+          "TOKEN_ENCRYPTION_KEYS",
           "OVERLAY_TOKEN_PEPPER"
         ]
       },

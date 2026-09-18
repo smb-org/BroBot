@@ -12,14 +12,21 @@ import {
   listLoginIdentities,
   listChannelIds,
   revokeSession,
+  revokeLoginIdentityAndSessionsForUser,
   purgeExpiredOAuthTransactions,
   rotateBotTokens,
+  rotateLoginTokensForUser,
   setBotChannelStatus,
+  setBotIdentityStatusIfCurrent,
   setBotIdentityStatus,
+  getBotChannelStatusCheckLock,
+  releaseBotChannelStatusCheck,
+  tryReserveBotChannelStatusCheck,
   upsertLoginIdentity,
   upsertBotIdentity,
+  upsertBotIdentityAndStatus,
 } from "../../src/worker/auth/repository";
-import { TestD1Database } from "./test-d1";
+import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const fakeDatabase = (firstResult: unknown = null, allResult: unknown = { results: [{ channel_id: "channel-1" }] }) => {
   const statement = {
@@ -83,6 +90,9 @@ const statefulOAuthDatabase = () => {
       };
       return statement as unknown as D1PreparedStatement;
     },
+    batch(statements: D1PreparedStatement[]) {
+      return Promise.all(statements.map((statement) => statement.run()));
+    },
   };
   return { database: database as unknown as D1Database, read: () => row };
 };
@@ -124,6 +134,9 @@ const statefulBotTokenDatabase = () => {
         },
       };
       return statement as unknown as D1PreparedStatement;
+    },
+    batch(statements: D1PreparedStatement[]) {
+      return Promise.all(statements.map((statement) => statement.run()));
     },
   };
   return { database: database as unknown as D1Database, read: () => row };
@@ -452,5 +465,229 @@ describe("Auth-D1-Repository", () => {
     )).resolves.toBe(true);
     expect(read().access_token_ciphertext).toBe("access-ciphertext-neu");
     expect(read().refresh_token_ciphertext).toBe("refresh-ciphertext-neu");
+  });
+
+  it("stellt nach einem verspäteten invalid_grant den erfolgreich gespeicherten Botstand wieder her", async () => {
+    const database = new TestD1Database();
+    try {
+      await database.prepare(
+        `INSERT INTO bot_identity
+          (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+           expires_at, created_at, updated_at)
+         VALUES (1, 'bot-user', 'brobot', '[]', 'access-alt', 'refresh-alt', ?, ?, ?)`,
+      ).bind(
+        "2026-09-18T01:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+      ).run();
+      await database.prepare(
+        `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+         VALUES (1, 'connected', NULL, ?)`,
+      ).bind("2026-09-18T00:00:00.000Z").run();
+
+      await expect(setBotIdentityStatusIfCurrent(
+        database as unknown as D1Database,
+        "revoked",
+        "authorization_revoked",
+        "2026-09-18T00:00:01.000Z",
+        "access-alt",
+        "refresh-alt",
+      )).resolves.toBe(true);
+      await expect(rotateBotTokens(
+        database as unknown as D1Database,
+        "access-alt",
+        "refresh-alt",
+        "access-neu",
+        "refresh-neu",
+        "2026-09-18T02:00:00.000Z",
+        "2026-09-18T00:00:02.000Z",
+      )).resolves.toBe(true);
+
+      await expect(database.prepare(
+        "SELECT status, reason FROM bot_identity_status WHERE id = 1",
+      ).first()).resolves.toEqual({ status: "connected", reason: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("stellt nach einem verspäteten invalid_grant den Loginstand und aktive Sessions wieder her", async () => {
+    const database = new TestD1Database();
+    try {
+      await database.prepare(
+        `INSERT INTO twitch_login_identity
+          (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+           expires_at, status, reason, created_at, updated_at)
+         VALUES ('user-1', 'tester', '[]', 'access-alt', 'refresh-alt', ?, 'connected', NULL, ?, ?)`,
+      ).bind(
+        "2026-09-18T01:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+      ).run();
+      await database.prepare(
+        `INSERT INTO auth_sessions
+          (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES ('session-1', 'user-1', 'tester', ?, ?, ?)`,
+      ).bind(
+        "2026-09-19T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+      ).run();
+
+      await expect(revokeLoginIdentityAndSessionsForUser(
+        database as unknown as D1Database,
+        "user-1",
+        "access-alt",
+        "refresh-alt",
+        "authorization_revoked",
+        "2026-09-18T00:00:01.000Z",
+      )).resolves.toBe(true);
+      await expect(rotateLoginTokensForUser(
+        database as unknown as D1Database,
+        "user-1",
+        "access-alt",
+        "refresh-alt",
+        "access-neu",
+        "refresh-neu",
+        "2026-09-18T02:00:00.000Z",
+        "2026-09-18T00:00:02.000Z",
+        "2026-09-18T00:00:00.000Z",
+      )).resolves.toBe(true);
+
+      await expect(database.prepare(
+        "SELECT status, reason, access_token_ciphertext FROM twitch_login_identity WHERE user_id = 'user-1'",
+      ).first()).resolves.toEqual({ status: "connected", reason: null, access_token_ciphertext: "access-neu" });
+      await expect(database.prepare(
+        "SELECT revoked_at, revocation_reason FROM auth_sessions WHERE session_id = 'session-1'",
+      ).first()).resolves.toEqual({ revoked_at: null, revocation_reason: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("überschreibt einen frischeren Moderatorstatus nicht durch ein verspätetes Ergebnis", async () => {
+    const database = new TestD1Database();
+    try {
+      await database.prepare(
+        `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+         VALUES ('kanal-a', 'kanal-a', 'Kanal A', ?, ?)`,
+      ).bind("2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+      await setBotChannelStatus(
+        database as unknown as D1Database,
+        "kanal-a",
+        true,
+        "2026-09-18T04:00:00.000Z",
+        null,
+      );
+      await setBotChannelStatus(
+        database as unknown as D1Database,
+        "kanal-a",
+        false,
+        "2026-09-18T03:00:00.000Z",
+        "moderator_entfernt",
+      );
+
+      await expect(database.prepare(
+        "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ is_moderator: 1, checked_at: "2026-09-18T04:00:00.000Z", reason: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("gibt eine Sperre nur mit ihrem Besitzer frei", async () => {
+    const database = new TestD1Database();
+    try {
+      await database.prepare(
+        `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+         VALUES ('kanal-a', 'kanal-a', 'Kanal A', ?, ?)`,
+      ).bind("2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+      const firstOwner = await tryReserveBotChannelStatusCheck(
+        database as unknown as D1Database,
+        "kanal-a",
+        "2026-09-18T04:05:00.000Z",
+        "2026-09-18T04:00:00.000Z",
+        "2026-09-17T23:55:00.000Z",
+      );
+      const secondOwner = await tryReserveBotChannelStatusCheck(
+        database as unknown as D1Database,
+        "kanal-a",
+        "2026-09-18T04:11:00.000Z",
+        "2026-09-18T04:06:00.000Z",
+        "2026-09-18T04:01:00.000Z",
+      );
+
+      expect(firstOwner).not.toBeNull();
+      expect(secondOwner).not.toBeNull();
+      await releaseBotChannelStatusCheck(database as unknown as D1Database, "kanal-a", firstOwner ?? "");
+      await expect(getBotChannelStatusCheckLock(database as unknown as D1Database, "kanal-a"))
+        .resolves.toBe("2026-09-18T04:11:00.000Z");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("führt Identität und Botstatus in einer atomaren Batch-Operation aus", async () => {
+    const database = new TestD1Database();
+    try {
+      await database.prepare(
+        `INSERT INTO bot_identity
+          (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+           expires_at, created_at, updated_at)
+         VALUES (1, 'bot-user', 'brobot', '[]', 'alt-access', 'alt-refresh', ?, ?, ?)`,
+      ).bind(
+        "2026-09-19T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+      ).run();
+      await database.prepare(
+        `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+         VALUES (1, 'revoked', 'authorization_revoked', ?)`,
+      ).bind("2026-09-18T00:00:00.000Z").run();
+
+      const failingDatabase = {
+        prepare: database.prepare.bind(database),
+        batch: (statements: TestPreparedStatement[]) => {
+          const snapshot = database.sqlite.prepare(
+            "SELECT access_token_ciphertext, refresh_token_ciphertext FROM bot_identity WHERE id = 1",
+          ).get();
+          try {
+            statements[0]?.runSync();
+            throw new Error("Status-Write fehlgeschlagen");
+          } catch (error) {
+            database.prepare(
+              `UPDATE bot_identity
+                  SET access_token_ciphertext = ?, refresh_token_ciphertext = ?
+                WHERE id = 1`,
+            ).bind(
+              (snapshot as { access_token_ciphertext: string }).access_token_ciphertext,
+              (snapshot as { refresh_token_ciphertext: string }).refresh_token_ciphertext,
+            ).runSync();
+            throw error;
+          }
+        },
+      } as unknown as D1Database;
+
+      await expect(upsertBotIdentityAndStatus(failingDatabase, {
+        id: 1,
+        userId: "bot-user",
+        login: "brobot",
+        scopesJson: "[]",
+        accessTokenCiphertext: "neu-access",
+        refreshTokenCiphertext: "neu-refresh",
+        expiresAt: "2026-09-20T00:00:00.000Z",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T01:00:00.000Z",
+      }, "connected", null, "2026-09-18T01:00:00.000Z")).rejects.toThrow("Status-Write fehlgeschlagen");
+
+      await expect(database.prepare(
+        "SELECT access_token_ciphertext, refresh_token_ciphertext FROM bot_identity WHERE id = 1",
+      ).first()).resolves.toEqual({ access_token_ciphertext: "alt-access", refresh_token_ciphertext: "alt-refresh" });
+      await expect(database.prepare(
+        "SELECT status, reason FROM bot_identity_status WHERE id = 1",
+      ).first()).resolves.toEqual({ status: "revoked", reason: "authorization_revoked" });
+    } finally {
+      database.close();
+    }
   });
 });

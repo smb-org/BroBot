@@ -12,9 +12,8 @@ import {
   getBotIdentity,
   getLoginIdentity,
   revokeSession,
-  setBotIdentityStatus,
   upsertLoginIdentity,
-  upsertBotIdentity,
+  upsertBotIdentityAndStatus,
 } from "./repository";
 import {
   exchangeAuthorizationCode,
@@ -26,7 +25,7 @@ import {
   startOAuthAuthorization,
   verifyOAuthState,
 } from "./oauth";
-import { encryptJson, parseKeyRing } from "./crypto";
+import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./crypto";
 import {
   CSRF_COOKIE_NAME,
   createCsrfToken,
@@ -289,40 +288,41 @@ authRouter.get("/auth/twitch/callback", async (context) => {
           403,
         );
       }
-      await upsertBotIdentity(context.env.DB, {
+      const encryptionKeys = getTokenEncryptionKeys(context.env);
+      await upsertBotIdentityAndStatus(context.env.DB, {
         id: 1,
         userId: identity.userId,
         login: identity.login,
         scopesJson: JSON.stringify(tokens.scopes),
         accessTokenCiphertext: await encryptJson(
           { token: tokens.accessToken },
-          parseKeyRing(context.env.SESSION_ENCRYPTION_KEYS),
+          parseKeyRing(encryptionKeys),
         ),
         refreshTokenCiphertext: await encryptJson(
           { token: tokens.refreshToken },
-          parseKeyRing(context.env.SESSION_ENCRYPTION_KEYS),
+          parseKeyRing(encryptionKeys),
         ),
         expiresAt: new Date(Date.parse(now) + tokens.expiresIn * 1000).toISOString(),
         createdAt: current?.createdAt ?? now,
         updatedAt: now,
-      });
-      await setBotIdentityStatus(context.env.DB, "connected", null, now);
+      }, "connected", null, now);
       return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);
     }
 
     const expiresAt = new Date(Date.parse(now) + tokens.expiresIn * 1000).toISOString();
     const current = await getLoginIdentity(context.env.DB, identity.userId);
+    const encryptionKeys = getTokenEncryptionKeys(context.env);
     await upsertLoginIdentity(context.env.DB, {
       userId: identity.userId,
       login: identity.login,
       scopesJson: JSON.stringify(tokens.scopes),
       accessTokenCiphertext: await encryptJson(
         { token: tokens.accessToken },
-        parseKeyRing(context.env.SESSION_ENCRYPTION_KEYS),
+        parseKeyRing(encryptionKeys),
       ),
       refreshTokenCiphertext: await encryptJson(
         { token: tokens.refreshToken },
-        parseKeyRing(context.env.SESSION_ENCRYPTION_KEYS),
+        parseKeyRing(encryptionKeys),
       ),
       expiresAt,
       status: "connected",
@@ -344,7 +344,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     const cookie = await createSessionCookie(
       { sessionId },
       context.env.SESSION_COOKIE_KEYS,
-      context.env.SESSION_ENCRYPTION_KEYS,
+      encryptionKeys,
     );
     context.header("Set-Cookie", serializeSessionCookie(cookie));
     return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);

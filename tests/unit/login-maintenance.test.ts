@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { setLoginIdentityStatus } from "../../src/worker/auth/repository";
 import { maintainLoginIdentities } from "../../src/worker/login-maintenance";
+import { TestD1Database } from "./test-d1";
 
 const keyRingSerialized = JSON.stringify({
   active: {
@@ -17,6 +18,7 @@ const makeEnvironment = async (
   options: {
     failTokenWriteOnce?: boolean;
     failTokenWriteAfterCommitOnce?: boolean;
+    beforeTokenWrite?: () => Promise<void>;
     onSuccessfulTokenWrite?: () => void;
   } = {},
 ) => {
@@ -53,21 +55,26 @@ const makeEnvironment = async (
       }),
       all: vi.fn().mockImplementation(() =>
         sql.includes("FROM twitch_login_identity") ? { results: [row] } : { results: [] }),
-      run: vi.fn().mockImplementation(() => {
+      run: vi.fn().mockImplementation(async () => {
         if (sql.includes("UPDATE twitch_login_identity") && sql.includes("SET access_token_ciphertext")) {
           tokenWriteAttempts += 1;
           if (options.failTokenWriteOnce && tokenWriteAttempts === 1) throw new Error("D1 write failed");
-          const [access, refresh, expires, updated, userId, expectedAccess, expectedRefresh] = values;
+          if (options.beforeTokenWrite && tokenWriteAttempts === 1) await options.beforeTokenWrite();
+          const [access, refresh, expires, recoveryCutoff, , updated, userId, expectedAccess, expectedRefresh] = values;
           if (row.user_id !== userId ||
               row.access_token_ciphertext !== expectedAccess ||
               row.refresh_token_ciphertext !== expectedRefresh) {
             return { success: true, meta: { changes: 0 } };
           }
+          const wasRevokedAfterStart = row.status !== "revoked" ||
+            row.updated_at <= String(recoveryCutoff);
           row = {
             ...row,
             access_token_ciphertext: String(access),
             refresh_token_ciphertext: String(refresh),
             expires_at: String(expires),
+            status: wasRevokedAfterStart ? "connected" : row.status,
+            reason: wasRevokedAfterStart ? null : row.reason,
             updated_at: String(updated),
           };
           options.onSuccessfulTokenWrite?.();
@@ -112,7 +119,22 @@ const makeEnvironment = async (
             updated_at: String(values[2]),
           };
         }
-        if (sql.includes("UPDATE auth_sessions")) {
+        if (sql.includes("UPDATE auth_sessions") && sql.includes("SET revoked_at = NULL")) {
+          const [updatedAt, userId, expectedRevokedAfter, expectedRevokedBefore, identityUserId, expectedAccess, expectedRefresh] = values;
+          const revokedAt = sessions[0]?.revoked_at;
+          if (row.user_id !== identityUserId ||
+              revokedAt === null || revokedAt === undefined ||
+              revokedAt <= String(expectedRevokedAfter) ||
+              revokedAt > String(expectedRevokedBefore) ||
+              row.access_token_ciphertext !== expectedAccess ||
+              row.refresh_token_ciphertext !== expectedRefresh) {
+            return { success: true, meta: { changes: 0 } };
+          }
+          sessions = sessions.map((session) => session.user_id === userId
+            ? { ...session, revoked_at: null, revocation_reason: null, updated_at: String(updatedAt) }
+            : session);
+        }
+        if (sql.includes("UPDATE auth_sessions") && sql.includes("SET revoked_at = ?,")) {
           const [revokedAt, reason, , userId, identityUserId, expectedAccess, expectedRefresh] = values;
           if (row.status !== "revoked" || row.user_id !== identityUserId ||
               row.access_token_ciphertext !== expectedAccess ||
@@ -390,6 +412,45 @@ describe("Login-Token-Wartung", () => {
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
+  it("setzt den Loginstand nach einem vor dem Speichern eintreffenden invalid_grant nicht dauerhaft auf revoked", async () => {
+    let releaseTokenWrite!: () => void;
+    let markTokenWriteStarted!: () => void;
+    const tokenWriteStarted = new Promise<void>((resolve) => { markTokenWriteStarted = resolve; });
+    const tokenWrite = new Promise<void>((resolve) => { releaseTokenWrite = resolve; });
+    const { environment, read, readSessions, getInitialAccessTokenCiphertext } = await makeEnvironment(
+      "2026-09-18T00:59:59.000Z",
+      {
+        beforeTokenWrite: async () => {
+          markTokenWriteStarted();
+          await tokenWrite;
+        },
+      },
+    );
+    let refreshCalls = 0;
+    const fetcher = vi.fn().mockImplementation((url: string) => {
+      if (url === "https://id.twitch.tv/oauth2/validate") {
+        return Promise.resolve(new Response(JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 3599 }), { status: 200 }));
+      }
+      refreshCalls += 1;
+      if (refreshCalls === 1) {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const successfulRun = maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
+    await tokenWriteStarted;
+    await maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
+    releaseTokenWrite();
+    await successfulRun;
+
+    expect(refreshCalls).toBe(2);
+    expect(read().access_token_ciphertext).not.toBe(getInitialAccessTokenCiphertext());
+    expect(read().status).toBe("connected");
+    expect(readSessions()[0]?.revoked_at).toBeNull();
+  });
+
   it("setzt revoked nicht durch eine bereits laufende erfolgreiche Rotation wieder auf connected", async () => {
     const { environment, read, readSessions } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     let releaseRefresh!: (response: Response) => void;
@@ -418,5 +479,127 @@ describe("Login-Token-Wartung", () => {
 
     expect(read().status).toBe("revoked");
     expect(readSessions()[0]?.revoked_at).toBeNull();
+  });
+
+  it("wartet nur Login-Identitäten mit mindestens einer aktiven Session", async () => {
+    const database = new TestD1Database();
+    try {
+      const addIdentity = async (userId: string, status: "connected" | "revoked", withSession: boolean) => {
+        const keys = parseKeyRing(keyRingSerialized);
+        const access = await encryptJson({ token: `access-${userId}` }, keys);
+        const refresh = await encryptJson({ token: `refresh-${userId}` }, keys);
+        await database.prepare(
+          `INSERT INTO twitch_login_identity
+            (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+             expires_at, status, reason, created_at, updated_at)
+           VALUES (?, ?, '[]', ?, ?, ?, ?, NULL, ?, ?)`,
+        ).bind(
+          userId,
+          userId,
+          access,
+          refresh,
+          "2026-09-19T00:00:00.000Z",
+          status,
+          "2026-09-18T00:00:00.000Z",
+          "2026-09-18T00:00:00.000Z",
+        ).run();
+        if (withSession) {
+          await database.prepare(
+            `INSERT INTO auth_sessions
+              (session_id, user_id, login, expires_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            `session-${userId}`,
+            userId,
+            userId,
+            "2026-09-19T00:00:00.000Z",
+            "2026-09-18T00:00:00.000Z",
+            "2026-09-18T00:00:00.000Z",
+          ).run();
+        }
+      };
+
+      await addIdentity("aktiv", "connected", true);
+      await addIdentity("ohne-session", "connected", false);
+      await addIdentity("widerrufen", "revoked", true);
+      const fetcher = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ user_id: "aktiv", login: "aktiv", expires_in: 7200 }),
+        { status: 200 },
+      ));
+      vi.stubGlobal("fetch", fetcher);
+
+      await maintainLoginIdentities({
+        DB: database as unknown as D1Database,
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        SESSION_ENCRYPTION_KEYS: keyRingSerialized,
+      } as unknown as Env, "2026-09-18T00:00:00.000Z");
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("begrenzt parallele Login-Wartung auf vier aktive Identitäten", async () => {
+    const database = new TestD1Database();
+    try {
+      const keys = parseKeyRing(keyRingSerialized);
+      for (let index = 0; index < 6; index += 1) {
+        const userId = `aktiv-${String(index)}`;
+        const access = await encryptJson({ token: `access-${userId}` }, keys);
+        const refresh = await encryptJson({ token: `refresh-${userId}` }, keys);
+        await database.prepare(
+          `INSERT INTO twitch_login_identity
+            (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+             expires_at, status, reason, created_at, updated_at)
+           VALUES (?, ?, '[]', ?, ?, ?, 'connected', NULL, ?, ?)`,
+        ).bind(
+          userId,
+          userId,
+          access,
+          refresh,
+          "2026-09-19T00:00:00.000Z",
+          "2026-09-18T00:00:00.000Z",
+          "2026-09-18T00:00:00.000Z",
+        ).run();
+        await database.prepare(
+          `INSERT INTO auth_sessions
+            (session_id, user_id, login, expires_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          `session-${userId}`,
+          userId,
+          userId,
+          "2026-09-19T00:00:00.000Z",
+          "2026-09-18T00:00:00.000Z",
+          "2026-09-18T00:00:00.000Z",
+        ).run();
+      }
+
+      let active = 0;
+      let maximum = 0;
+      const fetcher = vi.fn().mockImplementation(async () => {
+        active += 1;
+        maximum = Math.max(maximum, active);
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return new Response(JSON.stringify({ user_id: "aktiv", login: "aktiv", expires_in: 7200 }), { status: 200 });
+      });
+      vi.stubGlobal("fetch", fetcher);
+
+      await maintainLoginIdentities({
+        DB: database as unknown as D1Database,
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        SESSION_ENCRYPTION_KEYS: keyRingSerialized,
+      } as unknown as Env, "2026-09-18T00:00:00.000Z");
+
+      expect(fetcher).toHaveBeenCalledTimes(6);
+      expect(maximum).toBeLessThanOrEqual(4);
+      expect(maximum).toBeGreaterThan(1);
+    } finally {
+      database.close();
+    }
   });
 });
