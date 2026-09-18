@@ -5,6 +5,57 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+const moduleIsolationPatterns = [
+  {
+    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
+    message: "Module dürfen kein anderes Modul importieren.",
+  },
+  {
+    regex: "^(?:src/)?modules/",
+    message: "Module dürfen kein anderes Modul importieren.",
+  },
+];
+
+const overlayBoundaryPatterns = [
+  {
+    regex: "(^|/)worker(/|$)",
+    message: "Overlay-Ansichten dürfen nichts aus src/worker importieren.",
+  },
+  {
+    regex: "(^|/)(service|repository|adapters)(?:\\.[^/]+)?(?:/|$)",
+    message: "Overlay-Ansichten dürfen keine Service-, Repository- oder Adapterdateien importieren.",
+  },
+  {
+    regex: "^zod$",
+    message: "Overlay-Ansichten dürfen Zod nicht importieren.",
+  },
+];
+
+const overlayRestrictedImportPatterns = [
+  ...moduleIsolationPatterns,
+  ...overlayBoundaryPatterns,
+];
+
+const panelBoundaryPatterns = [
+  {
+    regex: "(^|/)worker(/|$)",
+    message: "Panel-Ansichten dürfen nichts aus src/worker importieren.",
+  },
+  {
+    regex: "(^|/)(repository|adapters)(?:\\.[^/]+)?(?:/|$)",
+    message: "Panel-Ansichten dürfen keine Repository- oder Adapterdateien importieren.",
+  },
+  {
+    regex: "(^|/)overlay(/|$)",
+    message: "Panel-Ansichten dürfen keine Overlay-Ansichten importieren.",
+  },
+];
+
+const panelRestrictedImportPatterns = [
+  ...moduleIsolationPatterns,
+  ...panelBoundaryPatterns,
+];
+
 export default defineConfig(
   globalIgnores([
     ".wrangler/**",
@@ -42,59 +93,6 @@ export default defineConfig(
     },
   },
   {
-    // Das Overlay bleibt eine minimale Darstellung: Es darf keine Worker-,
-    // Persistenz- oder Serviceschicht und kein Zod in sein Bundle ziehen.
-    files: ["src/overlay/**/*.{ts,tsx}", "src/modules/*/overlay/**/*.{ts,tsx}"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              regex: "(^|/)worker(/|$)",
-              message: "Overlay-Ansichten dürfen nichts aus src/worker importieren.",
-            },
-            {
-              regex: "(^|/)(service|repository|adapters)(/|$)",
-              message: "Overlay-Ansichten dürfen keine Service-, Repository- oder Adapterdateien importieren.",
-            },
-            {
-              regex: "^zod$",
-              message: "Overlay-Ansichten dürfen Zod nicht importieren.",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    // Das Panel ist die primäre Bedienoberfläche: Es darf für Formulare Zod
-    // und für auszulösende Anwendungsfälle den Service verwenden. Repository-
-    // und Adapterzugriff bleiben trotzdem hinter dem Service verborgen.
-    files: ["src/dashboard/**/*.{ts,tsx}", "src/modules/*/panel/**/*.{ts,tsx}"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              regex: "(^|/)worker(/|$)",
-              message: "Panel-Ansichten dürfen nichts aus src/worker importieren.",
-            },
-            {
-              regex: "(^|/)(repository|adapters)(/|$)",
-              message: "Panel-Ansichten dürfen keine Repository- oder Adapterdateien importieren.",
-            },
-            {
-              regex: "(^|/)overlay(/|$)",
-              message: "Panel-Ansichten dürfen keine Overlay-Ansichten importieren.",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
     // Ein Modul bleibt ein isolierter Feature-Slice: Der Regex blockiert
     // relative Imports zu Geschwister-Modulen und explizite Rücksprünge nach
     // src/modules. Gemeinsame Verträge gehören in src/modules/contract.ts.
@@ -102,18 +100,48 @@ export default defineConfig(
     rules: {
       "no-restricted-imports": [
         "error",
-        {
-          patterns: [
-            {
-              regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:contract|contracts|domain|service|repository|adapters|overlay|panel)(?:/|$))[^/]+(?:/|$))",
-              message: "Module dürfen kein anderes Modul importieren.",
-            },
-            {
-              regex: "^(?:src/)?modules/",
-              message: "Module dürfen kein anderes Modul importieren.",
-            },
-          ],
-        },
+        { patterns: moduleIsolationPatterns },
+      ],
+    },
+  },
+  {
+    // Das Overlay bleibt eine minimale Darstellung: Es darf keine Worker-,
+    // Persistenz- oder Serviceschicht und kein Zod in sein Bundle ziehen.
+    files: ["src/overlay/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: overlayBoundaryPatterns },
+      ],
+    },
+  },
+  {
+    files: ["src/modules/*/overlay/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: overlayRestrictedImportPatterns },
+      ],
+    },
+  },
+  {
+    // Das Panel ist die primäre Bedienoberfläche: Es darf für Formulare Zod
+    // und für auszulösende Anwendungsfälle den Service verwenden. Repository-
+    // und Adapterzugriff bleiben trotzdem hinter dem Service verborgen.
+    files: ["src/dashboard/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: panelBoundaryPatterns },
+      ],
+    },
+  },
+  {
+    files: ["src/modules/*/panel/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: panelRestrictedImportPatterns },
       ],
     },
   },

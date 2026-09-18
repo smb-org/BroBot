@@ -1,6 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readWranglerConfig } from "./read-wrangler-config.mjs";
+
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const maxAttempts = 6;
 const requestTimeoutMs = 30_000;
@@ -74,8 +76,7 @@ export const resolveDeploymentOrigin = async (
   const resolvedConfigPath = path.resolve(configPath);
   let rawConfig;
   try {
-    const { experimental_readRawConfig } = await import("wrangler");
-    ({ rawConfig } = experimental_readRawConfig({ config: resolvedConfigPath }));
+    rawConfig = await readWranglerConfig(resolvedConfigPath);
   } catch (error) {
     const configLabel = path.relative(projectRoot, resolvedConfigPath) || resolvedConfigPath;
     const reason = error instanceof Error ? error.message : "unbekannter Fehler";

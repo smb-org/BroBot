@@ -12,8 +12,8 @@ const app = new Hono<{ Bindings: Env }>();
 app.route("/", authRouter);
 app.route("/", panelRouter);
 
-app.get("/healthz", (context) => {
-  const health = getHealthStatus(context.env);
+app.get("/healthz", async (context) => {
+  const health = await getHealthStatus(context.env);
   return context.json(
     {
       status: health.status,
