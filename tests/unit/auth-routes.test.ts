@@ -5,6 +5,15 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { TestD1Database } from "./test-d1";
 
+/**
+ * Ein CSRF-Token fuer den Jetzt-Zeitpunkt. Ein festes Datum waere eine
+ * Zeitbombe: Die geprueften Routen verwenden die echte Uhr, also liefe das
+ * Token sieben Tage spaeter ab und der Test wuerde rot, ohne dass jemand
+ * etwas geaendert haette. Den Ablauf selbst prueft csrf.test.ts mit
+ * ausdruecklich uebergebenen Zeitpunkten.
+ */
+const frischerZeitpunkt = (): string => new Date().toISOString();
+
 const key = (byte: number): string =>
   btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
     .replaceAll("+", "-")
@@ -301,7 +310,7 @@ describe("Auth-Routen", () => {
     const csrfToken = await createCsrfToken(
       "session-1",
       environment.SESSION_COOKIE_KEYS,
-      "2026-09-18T00:00:00.000Z",
+      frischerZeitpunkt(),
     );
 
     const response = await authRouter.fetch(
@@ -390,7 +399,7 @@ describe("Auth-Routen", () => {
     const csrfToken = await createCsrfToken(
       "session-1",
       environment.SESSION_COOKIE_KEYS,
-      "2026-09-18T00:00:00.000Z",
+      frischerZeitpunkt(),
     );
     const request = new Request("https://brobot.example/auth/logout", {
       method: "POST",
