@@ -6,14 +6,14 @@ export const REQUIRED_SECRET_NAMES = [
   "TWITCH_EVENTSUB_SECRET",
   "PUBLIC_ORIGIN",
   "SESSION_COOKIE_KEYS",
-  "SESSION_ENCRYPTION_KEYS",
+  "TOKEN_ENCRYPTION_KEYS",
   "OVERLAY_TOKEN_PEPPER",
 ] as const;
 
 // Wrangler führt die angewandten Dateinamen in d1_migrations. Dadurch muss
 // nicht die komplette Tabelle-zu-Migration-Liste dupliziert werden; nur der
 // aktuelle Release-Sentinel ändert sich, wenn eine neue Migration hinzukommt.
-export const LATEST_SCHEMA_MIGRATION = "0004_moderator_status_check_lock.sql";
+export const LATEST_SCHEMA_MIGRATION = "0005_moderator_status_check_owner.sql";
 export const LATEST_SCHEMA_TABLE = "bot_channel_status_check_locks";
 
 const REQUIRED_BINDING_NAMES = ["DB", "CHANNEL", "ASSETS", "CF_VERSION_METADATA"] as const;
@@ -21,9 +21,17 @@ const REQUIRED_BINDING_NAMES = ["DB", "CHANNEL", "ASSETS", "CF_VERSION_METADATA"
 const KEY_RING_SECRET_NAMES = new Set([
   "TWITCH_EVENTSUB_SECRET",
   "SESSION_COOKIE_KEYS",
-  "SESSION_ENCRYPTION_KEYS",
+  "TOKEN_ENCRYPTION_KEYS",
 ]);
 const PLACEHOLDER_PATTERN = /replace-with|example\.invalid/i;
+
+const secretValue = (env: Env, name: string): unknown => {
+  const value: unknown = Reflect.get(env, name);
+  if (name === "TOKEN_ENCRYPTION_KEYS" && (value === undefined || value === null || value === "")) {
+    return Reflect.get(env, "SESSION_ENCRYPTION_KEYS");
+  }
+  return value;
+};
 
 const isAbsoluteOrigin = (value: string): boolean => {
   try {
@@ -47,7 +55,7 @@ export const getMissingBindings = (env: Env): string[] => [
     return value === undefined || value === null;
   }),
   ...REQUIRED_SECRET_NAMES.filter((name) => {
-    const value = Reflect.get(env, name);
+    const value = secretValue(env, name);
     if (typeof value !== "string" || value.length === 0 || PLACEHOLDER_PATTERN.test(value)) return true;
     if (name === "PUBLIC_ORIGIN") return !isAbsoluteOrigin(value);
     if (name === "OVERLAY_TOKEN_PEPPER") return !isBase64url32Byte(value);

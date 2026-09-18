@@ -18,7 +18,7 @@
    openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
    ```
 
-   Für `SESSION_COOKIE_KEYS` und `SESSION_ENCRYPTION_KEYS` jeweils einen
+   Für `SESSION_COOKIE_KEYS` und `TOKEN_ENCRYPTION_KEYS` jeweils einen
    eigenen aktiven Schlüsselring mit optionalen `retired`-Einträgen verwenden.
    `TWITCH_EVENTSUB_SECRET` hat dasselbe Format; sein aktiver Eintrag signiert
    neue Abonnements, ausgemusterte Einträge werden während der Rotation noch
@@ -41,8 +41,9 @@ zeigt nach einem erfolgreichen HTTP-Statusabruf die Version aus
 
 ### Migration und Token ausgeben
 
-Vor dem ersten Rollout die D1-Migrationen `0003_overlay_tokens.sql` und
-`0004_moderator_status_check_lock.sql` in jeder Zielumgebung anwenden. Der
+Vor dem ersten Rollout die D1-Migrationen `0003_overlay_tokens.sql`,
+`0004_moderator_status_check_lock.sql` und
+`0005_moderator_status_check_owner.sql` in jeder Zielumgebung anwenden. Der
 Pepper bleibt ein Secret und wird nicht in die
 Browserquelle oder in die URL geschrieben.
 
@@ -151,19 +152,34 @@ Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` doku
 | `TWITCH_EVENTSUB_SECRET` | Schlüsselring für die HMAC-Signaturprüfung eingehender EventSub-Webhooks | JSON `{"active":{"id":"...","key":"..."},"retired":[...]}` |
 | `PUBLIC_ORIGIN` | öffentliche Origin der Umgebung; bestimmt OAuth-Redirect und Overlay-URLs | absolute URL ohne Schrägstrich am Ende |
 | `SESSION_COOKIE_KEYS` | Schlüsselsatz für die Signatur der Session-Cookies | JSON `{"active":{"id":"...","key":"..."},"retired":[...]}`, Schlüssel 32 Byte base64url |
-| `SESSION_ENCRYPTION_KEYS` | Schlüsselsatz für die Verschlüsselung der Session-Inhalte | wie oben, eigener Wert |
+| `TOKEN_ENCRYPTION_KEYS` | Schlüsselsatz für verschlüsselte Twitch-Login- und Bot-Tokens | JSON `{"active":{"id":"...","key":"..."},"retired":[...]}`, Schlüssel 32 Byte base64url |
 | `OVERLAY_TOKEN_PEPPER` | Pepper für die Hashes widerrufbarer Overlay-Tokens | 32 Byte base64url |
 
 Die vier Schlüsselwerte (`TWITCH_EVENTSUB_SECRET`, `SESSION_COOKIE_KEYS`,
-`SESSION_ENCRYPTION_KEYS` und `OVERLAY_TOKEN_PEPPER`) werden mit dem im
+`TOKEN_ENCRYPTION_KEYS` und `OVERLAY_TOKEN_PEPPER`) werden mit dem im
 Erstaufsetzen dokumentierten `openssl`-Befehl erzeugt und sind je Umgebung und
 je Zweck unterschiedlich — niemals denselben Wert doppelt verwenden.
 
-Bei `SESSION_COOKIE_KEYS`, `SESSION_ENCRYPTION_KEYS` und
-`TWITCH_EVENTSUB_SECRET` signiert beziehungsweise verschlüsselt nur
-`active` neu. Ein Eintrag unter `retired` bleibt so lange erhalten, bis keine
-alten Cookies oder EventSub-Abonnements mehr existieren. Die Rotation wird
-danach durch Entfernen des alten Eintrags abgeschlossen.
+Bei `SESSION_COOKIE_KEYS` und `TWITCH_EVENTSUB_SECRET` signiert nur `active`
+neu. Ein Eintrag unter `retired` bleibt so lange erhalten, bis keine alten
+Cookies beziehungsweise EventSub-Abonnements mehr existieren.
+
+Bei `TOKEN_ENCRYPTION_KEYS` verschlüsselt `active` neue Twitch-Tokens. Ein
+`retired`-Eintrag bleibt erhalten, bis die Prüfung auf verbleibende
+Ciphertexte mit seiner `keyId` keinen Treffer mehr liefert. Die Prüfung muss
+beide Tokenbestände umfassen: `bot_identity` sowie
+`twitch_login_identity`, jeweils für Access- und Refresh-Ciphertext. Erst
+wenn diese Bestandsprüfung null Treffer ergibt, darf der alte Eintrag aus dem
+Ring entfernt werden. Ein fehlgeschlagener Refresh kann einen alten
+Ciphertext länger als die normale Übergangszeit erhalten; sieben Tage sind
+deshalb keine ausreichende Freigabe allein aufgrund des Alters.
+
+Der Worker bevorzugt `TOKEN_ENCRYPTION_KEYS`. Während der Übergangsphase
+akzeptiert er ersatzweise noch `SESSION_ENCRYPTION_KEYS`, damit ein
+schrittweises Secret-Rollout keine Entschlüsselungslücke erzeugt. Dieser
+Fallback ist ausdrücklich vorübergehend und wird in einem eigenen späteren
+Schritt entfernt; erst danach darf der alte Secret-Name aus dem
+Betreiberbestand verschwinden.
 
 ### Cloudflare-Secrets, CI und GitHub
 
@@ -180,7 +196,7 @@ for environment in staging production; do
     TWITCH_EVENTSUB_SECRET \
     PUBLIC_ORIGIN \
     SESSION_COOKIE_KEYS \
-    SESSION_ENCRYPTION_KEYS \
+    TOKEN_ENCRYPTION_KEYS \
     OVERLAY_TOKEN_PEPPER; do
     pnpm exec wrangler secret put "$name" --env "$environment"
   done
@@ -189,8 +205,9 @@ done
 
 Für eine Rotation genügt derselbe Befehl für das betroffene Secret. Bei einem
 Schlüsselring den neuen Schlüssel als `active` setzen und den bisherigen
-Schlüssel zunächst unter `retired` behalten; erst nach Ablauf der Übergangszeit
-den alten Eintrag entfernen. Der CI-Deploy überträgt ausschließlich den Code:
+Schlüssel zunächst unter `retired` behalten. Bei `TOKEN_ENCRYPTION_KEYS` vor
+dem Entfernen die oben beschriebene Ciphertext-Bestandsprüfung ausführen; erst
+bei null Treffern darf der alte Eintrag entfernt werden. Der CI-Deploy überträgt ausschließlich den Code:
 Er verwendet weder `--secrets-file` noch `wrangler secret put` und benötigt
 keine `.env.staging`- oder `.env.production`-Datei. `/healthz` schlägt nach dem
 Deploy fehl, wenn ein erwartetes Secret oder Binding in Cloudflare fehlt.
@@ -255,8 +272,9 @@ pnpm run check
 Vor dem ersten Rollout dieser Version die D1-Migrationen in jeder Zielumgebung
 anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
 Session-, OAuth- und Token-Tabellen, `0002` die feste Rollenmenge sowie das
-Audit-Log, `0003` die Overlay-Token-Tabelle und `0004` die kanalbezogene
-Sperre für manuelle Moderatorstatus-Prüfungen anlegen. Die GitHub-Workflows
+Audit-Log, `0003` die Overlay-Token-Tabelle, `0004` die kanalbezogene Sperre
+und `0005` deren Besitzerbindung für manuelle Moderatorstatus-Prüfungen
+anlegen. Die GitHub-Workflows
 wenden niemals Migrationen automatisch an. Bei jedem Release gilt: Wenn der
 Code eine noch nicht angewandte Migration voraussetzt, muss sie vor dem Deploy
 von Hand in der jeweiligen Zielumgebung laufen:
@@ -316,8 +334,12 @@ die Cookies; der Request benötigt das Token aus `GET /api/csrf` zusätzlich als
 `X-CSRF-Token` und im `__Host-brobot_csrf`-Cookie. Access- und Refresh-Token dieses
 Logins liegen verschlüsselt in
 `twitch_login_identity`, nicht in der Session. Der stündliche Lauf validiert
-und erneuert sie; bei einem Widerruf werden die zugehörigen Sessions
-serverseitig widerrufen.
+und erneuert sie nur für Identitäten mit mindestens einer aktiven Session:
+`auth_sessions.user_id` muss passen, `revoked_at` muss `NULL` sein und
+`expires_at` in der Zukunft liegen. Die Prüfung läuft mit höchstens vier
+gleichzeitigen Twitch-Aufrufen. Bei einem Widerruf werden die zugehörigen
+Sessions serverseitig widerrufen; Identitäten ohne aktive Session werden
+nicht künstlich am Leben gehalten.
 
 Die Betreiberaufgabe `GET /auth/bot/login` verwendet denselben Callback, legt
 aber keine Session an. Sie schreibt die globale Ein-Zeilen-Identität in
@@ -344,11 +366,28 @@ Moderated Channels und speichert den Moderatorstatus je freigegebenem Kanal.
 ## Secret-Rotation
 
 Eine Rotation erfolgt grundsätzlich mit `wrangler secret put` direkt in der
-betroffenen Cloudflare-Umgebung. Cookie-, Verschlüsselungs- und Overlay-
-Schlüssel getrennt erzeugen und den bisherigen Wert wie oben beschrieben als
-`retired` behalten. Der bisherige Wert darf weder in Logs noch in Tickets oder
-Git landen. Der lokale Deploy mit `--secrets-file` ist nur der dokumentierte
-Notfall- und Erstsetzungsweg.
+betroffenen Cloudflare-Umgebung. Cookie- und Token-Schlüssel getrennt erzeugen
+und den bisherigen Token-Schlüssel wie oben beschrieben als `retired` behalten.
+Vor dem Entfernen des alten Token-Schlüssels die verbleibenden Ciphertexte
+prüfen. Der bisherige Wert darf weder in Logs noch in Tickets oder Git landen.
+Der lokale Deploy mit `--secrets-file` ist nur der dokumentierte Notfall- und
+Erstsetzungsweg.
+
+`OVERLAY_TOKEN_PEPPER` ist kein Schlüsselring und hat keine `retired`-Einträge.
+Der Pepper kann aus den bestehenden HMAC-Hashes nicht zurückgerechnet werden;
+ein Austausch macht deshalb alle bisher ausgegebenen Overlay-Zugänge
+ungültig. Die Rotation ist vollständig als Neuausgabe auszuführen:
+
+1. Einen neuen Pepper erzeugen und als Secret setzen.
+2. Für jeden freigegebenen Kanal alle benötigten Overlay-Zugänge neu ausgeben
+   und die alten Zugänge widerrufen beziehungsweise als unbrauchbar behandeln.
+3. Jede OBS-Browserquelle mit der neuen `overlayUrl` neu einrichten. Jede
+   Quelle muss tatsächlich neu eingerichtet werden; ein bloßes Neuladen der
+   alten URL reicht nicht.
+4. Alle Quellen prüfen, bevor die Rotation als abgeschlossen gilt.
+
+Eine Pepper-Rotation darf daher nicht nach der Token-Schlüsselring-Anleitung
+mit einem ausgemusterten Eintrag durchgeführt werden.
 
 `.env.staging` und `.env.production` sind ignoriert und werden aus dem Betreiber-Backup bereitgestellt. Ihre Inhalte gehören niemals in Terminalausgaben, Tickets, Pull Requests oder das Repository. Gleiches gilt für `.dev.vars`.
 

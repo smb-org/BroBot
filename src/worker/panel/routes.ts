@@ -5,6 +5,7 @@ import {
   fetchModeratedChannelStatus,
   TwitchApiError,
 } from "../bot-maintenance";
+import { getTokenEncryptionKeys } from "../auth/crypto";
 import {
   requireChannelAuthorization,
   requireSessionAuthorization,
@@ -54,7 +55,7 @@ const canCheckModeratorStatus = (role: ChannelAuthorizationVariables["channelRol
 const readBotCredentials = async (environment: Env): Promise<{ userId: string; accessToken: string } | null> => {
   const identity = await getBotIdentity(environment.DB);
   if (identity === null) return null;
-  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, environment.SESSION_ENCRYPTION_KEYS);
+  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(environment));
   return accessToken === null ? null : { userId: identity.userId, accessToken };
 };
 
@@ -92,14 +93,14 @@ panelRouter.post(
     const checkedAt = nowIso();
     const checkedSince = laterIso(checkedAt, -MODERATOR_STATUS_CHECK_COOLDOWN_MS);
     const nextAllowedAt = laterIso(checkedAt, MODERATOR_STATUS_CHECK_COOLDOWN_MS);
-    const reserved = await tryReserveBotChannelStatusCheck(
+    const ownerId = await tryReserveBotChannelStatusCheck(
       context.env.DB,
       channelId,
       nextAllowedAt,
       checkedAt,
       checkedSince,
     );
-    if (!reserved) {
+    if (ownerId === null) {
       const lockedUntil = await getBotChannelStatusCheckLock(context.env.DB, channelId);
       const lastCheckedAt = await getBotChannelStatusCheckedAt(context.env.DB, channelId);
       const statusRetryAt = lastCheckedAt === null
@@ -129,6 +130,7 @@ panelRouter.post(
       await setBotChannelStatusAndLock(
         context.env.DB,
         channelId,
+        ownerId,
         isModerator,
         checkedAt,
         null,
@@ -141,13 +143,16 @@ panelRouter.post(
     } catch (error: unknown) {
       if (!statusFetched) {
         try {
-          await releaseBotChannelStatusCheck(context.env.DB, channelId);
+          await releaseBotChannelStatusCheck(context.env.DB, channelId, ownerId);
         } catch {
           // Die Twitch-Ursache ist für den Nutzer wichtiger als ein fehlgeschlagenes Aufräumen.
         }
       }
       const message = error instanceof Error ? error.message : "Moderatorstatus konnte nicht gelesen werden.";
-      return context.json({ error: message }, error instanceof TwitchApiError ? 502 : 503);
+      const status = error instanceof TwitchApiError && error.status === 504 ? 504
+        : error instanceof TwitchApiError ? 502
+        : 503;
+      return context.json({ error: message }, status);
     }
   },
 );

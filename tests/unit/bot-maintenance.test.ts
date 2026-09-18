@@ -29,6 +29,7 @@ const makeMaintenanceEnvironment = async (
   options: {
     failTokenWriteOnce?: boolean;
     failTokenWriteAfterCommitOnce?: boolean;
+    beforeTokenWrite?: () => Promise<void>;
     onSuccessfulTokenWrite?: () => void;
   } = {},
 ) => {
@@ -73,10 +74,11 @@ const makeMaintenanceEnvironment = async (
         created_at: "2026-09-17T00:00:00.000Z",
       } : null),
       all: vi.fn().mockResolvedValue({ results: [{ channel_id: "channel-1" }] }),
-      run: vi.fn().mockImplementation(() => {
+      run: vi.fn().mockImplementation(async () => {
         if (sql.includes("UPDATE bot_identity") && sql.includes("SET access_token_ciphertext")) {
           tokenWriteAttempts += 1;
           if (options.failTokenWriteOnce && tokenWriteAttempts === 1) throw new Error("D1 write failed");
+          if (options.beforeTokenWrite && tokenWriteAttempts === 1) await options.beforeTokenWrite();
           const [access, refresh, expires, updated, expectedAccess, expectedRefresh] = values;
           if (identity.access_token_ciphertext !== expectedAccess ||
               identity.refresh_token_ciphertext !== expectedRefresh) {
@@ -93,6 +95,14 @@ const makeMaintenanceEnvironment = async (
           if (options.failTokenWriteAfterCommitOnce && tokenWriteAttempts === 1) {
             throw new Error("D1 response lost after commit");
           }
+          return { success: true, meta: { changes: 1 } };
+        }
+        if (sql.includes("UPDATE bot_identity_status") && sql.includes("SET status = 'connected'")) {
+          identityStatus = {
+            status: "connected",
+            reason: null,
+            updated_at: String(values[0]),
+          };
           return { success: true, meta: { changes: 1 } };
         }
         if (sql.includes("UPDATE bot_identity_status") && sql.includes("access_token_ciphertext")) {
@@ -121,7 +131,12 @@ const makeMaintenanceEnvironment = async (
     };
     return statement;
   });
-  const database = { prepare } as unknown as D1Database;
+  const batch = vi.fn(async (statements: D1PreparedStatement[]) => {
+    const results = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
+  });
+  const database = { prepare, batch } as unknown as D1Database;
   return {
     environment: { ...environment, DB: database } as unknown as Env,
     prepare,
@@ -417,6 +432,48 @@ describe("Bot-Wartung", () => {
 
     expect(refreshCalls).toBe(2);
     expect(read().access_token_ciphertext).not.toBe(getInitialAccessTokenCiphertext());
+    expect(readStatus().status).toBe("connected");
+    expect(readStatus().reason).toBeNull();
+  });
+
+  it("setzt den Bot nach einem vor dem Speichern eintreffenden invalid_grant nicht dauerhaft auf revoked", async () => {
+    let releaseTokenWrite!: () => void;
+    let markTokenWriteStarted!: () => void;
+    const tokenWriteStarted = new Promise<void>((resolve) => { markTokenWriteStarted = resolve; });
+    const tokenWrite = new Promise<void>((resolve) => { releaseTokenWrite = resolve; });
+    const { environment: env, read, readStatus } = await makeMaintenanceEnvironment(
+      "2026-09-18T00:59:59.000Z",
+      "connected",
+      {
+        beforeTokenWrite: async () => {
+          markTokenWriteStarted();
+          await tokenWrite;
+        },
+      },
+    );
+    let refreshCalls = 0;
+    const fetcher = vi.fn().mockImplementation((url: string) => {
+      if (url === "https://id.twitch.tv/oauth2/validate") {
+        return Promise.resolve(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }));
+      }
+      if (url.startsWith("https://api.twitch.tv/helix/moderation/channels")) {
+        return Promise.resolve(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      }
+      refreshCalls += 1;
+      if (refreshCalls === 1) {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+    });
+
+    const successfulRun = maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
+    await tokenWriteStarted;
+    await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
+    releaseTokenWrite();
+    await successfulRun;
+
+    expect(refreshCalls).toBe(2);
+    expect(read().access_token_ciphertext).not.toBe("access-alt");
     expect(readStatus().status).toBe("connected");
     expect(readStatus().reason).toBeNull();
   });

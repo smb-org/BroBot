@@ -4,7 +4,7 @@ import {
   rotateLoginTokensForUser,
   setLoginIdentityStatusIfCurrent,
 } from "./auth/repository";
-import { encryptJson, parseKeyRing } from "./auth/crypto";
+import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import {
   decryptStoredToken,
   refreshBotToken,
@@ -38,6 +38,7 @@ const rotateLoginTokensWithRetry = async (
   refreshTokenCiphertext: string,
   expiresAt: string,
   updatedAt: string,
+  expectedUpdatedAt: string,
 ): Promise<boolean> => {
   try {
     return await rotateLoginTokensForUser(
@@ -49,6 +50,7 @@ const rotateLoginTokensWithRetry = async (
       refreshTokenCiphertext,
       expiresAt,
       updatedAt,
+      expectedUpdatedAt,
     );
   } catch (firstError: unknown) {
     try {
@@ -61,6 +63,7 @@ const rotateLoginTokensWithRetry = async (
         refreshTokenCiphertext,
         expiresAt,
         updatedAt,
+        expectedUpdatedAt,
       );
     } catch {
       throw firstError;
@@ -75,8 +78,9 @@ const refreshFailureReason = (error: unknown): string =>
   error instanceof TwitchApiError && error.code !== null ? error.code : "refresh_failed";
 
 const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<typeof listLoginIdentities>>[number], now: string): Promise<void> => {
-  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, env.SESSION_ENCRYPTION_KEYS);
-  const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, env.SESSION_ENCRYPTION_KEYS);
+  const encryptionKeys = getTokenEncryptionKeys(env);
+  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
+  const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys);
   if (accessToken === null || refreshToken === null) {
     await setLoginIdentityStatusIfCurrent(
       env.DB,
@@ -118,11 +122,11 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
       const refreshed = await refreshBotToken(fetch, env, refreshToken);
       const accessTokenCiphertext = await encryptJson(
         { token: refreshed.accessToken },
-        parseKeyRing(env.SESSION_ENCRYPTION_KEYS),
+        parseKeyRing(encryptionKeys),
       );
       const refreshTokenCiphertext = await encryptJson(
         { token: refreshed.refreshToken },
-        parseKeyRing(env.SESSION_ENCRYPTION_KEYS),
+        parseKeyRing(encryptionKeys),
       );
       const replaced = await rotateLoginTokensWithRetry(
         env.DB,
@@ -133,6 +137,7 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
         refreshTokenCiphertext,
         new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString(),
         now,
+        identity.updatedAt,
       );
       if (!replaced) return;
       statusExpectedAccessTokenCiphertext = accessTokenCiphertext;
@@ -167,6 +172,20 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
 };
 
 export const maintainLoginIdentities = async (env: Env, now: string): Promise<void> => {
-  const identities = await listLoginIdentities(env.DB);
-  await Promise.all(identities.map((identity) => maintainLoginIdentity(env, identity, now)));
+  const identities = await listLoginIdentities(env.DB, now);
+  const concurrency = 4;
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < identities.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const listedIdentity = identities[index];
+      if (listedIdentity === undefined) return;
+      await maintainLoginIdentity(env, listedIdentity, now);
+    }
+  };
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, identities.length) },
+    () => worker(),
+  ));
 };

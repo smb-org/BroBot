@@ -54,6 +54,9 @@ const makeEnvironment = (
         lastSql = sql;
         return statement;
       }),
+      batch: vi.fn(async (statements: D1PreparedStatement[]) => Promise.all(
+        statements.map((batchStatement) => batchStatement.run()),
+      )),
     } as unknown as D1Database,
     TWITCH_CLIENT_ID: "client-id",
     TWITCH_CLIENT_SECRET: "client-secret",
@@ -63,7 +66,7 @@ const makeEnvironment = (
     SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
     SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
     OVERLAY_TOKEN_PEPPER: key(4),
-  } as unknown as Env;
+  } as unknown as Env & { SESSION_ENCRYPTION_KEYS: string };
   return { environment, statement };
 };
 

@@ -12,14 +12,20 @@ const deploymentBindings = [
   "TWITCH_EVENTSUB_SECRET",
   "PUBLIC_ORIGIN",
   "SESSION_COOKIE_KEYS",
-  "SESSION_ENCRYPTION_KEYS",
+  "TOKEN_ENCRYPTION_KEYS",
   "OVERLAY_TOKEN_PEPPER",
 ];
-const deploymentBindingSet = new Set(deploymentBindings);
+const compatibilitySecretAliases = {
+  TOKEN_ENCRYPTION_KEYS: ["SESSION_ENCRYPTION_KEYS"],
+};
+const acceptedSecretNameSet = new Set([
+  ...deploymentBindings,
+  ...Object.values(compatibilitySecretAliases).flat(),
+]);
 const keyRingSecretNames = new Set([
   "TWITCH_EVENTSUB_SECRET",
   "SESSION_COOKIE_KEYS",
-  "SESSION_ENCRYPTION_KEYS",
+  "TOKEN_ENCRYPTION_KEYS",
 ]);
 const placeholderPattern = /replace-with|example\.invalid/i;
 const environmentNames = ["staging", "production"];
@@ -76,6 +82,17 @@ const rawRequiredSecretsFor = (config, environment) => {
     ? config.secrets?.required
     : config.env?.[environment]?.secrets?.required;
   return Array.isArray(required) ? required : null;
+};
+
+const secretNamesFor = (name) => [name, ...(compatibilitySecretAliases[name] ?? [])];
+
+const configuredSecretValue = (values, name) => {
+  for (const candidate of secretNamesFor(name)) {
+    if (typeof values[candidate] === "string" && values[candidate].trim() !== "") {
+      return values[candidate];
+    }
+  }
+  return undefined;
 };
 
 const checkSecretListDrift = async (config, failures) => {
@@ -142,7 +159,7 @@ const checkEnvironmentShape = (config, environment, failures) => {
   }
 
   const leakedBindings = Object.keys(section.vars ?? {})
-    .filter((name) => deploymentBindingSet.has(name));
+    .filter((name) => acceptedSecretNameSet.has(name));
   if (leakedBindings.length > 0) {
     failures.push(
       `${environment}: Secrets sind als Klartext-vars gebaut: ${leakedBindings.join(", ")}`,
@@ -159,10 +176,11 @@ const checkEnvironmentShape = (config, environment, failures) => {
 const checkExampleFile = async (fileName, required, failures) => {
   try {
     const values = parseEnv(await readFile(path.join(projectRoot, fileName), "utf8"));
-    const missing = required.filter((name) => values[name] === undefined);
+    const missing = required.filter((name) => configuredSecretValue(values, name) === undefined);
     if (missing.length > 0) failures.push(`${fileName}: Beispielwerte fehlen: ${missing.join(", ")}`);
     for (const name of keyRingSecretNames) {
-      if (values[name] !== undefined && !isKeyRingShape(values[name])) {
+      const value = configuredSecretValue(values, name);
+      if (value !== undefined && !isKeyRingShape(value)) {
         failures.push(`${fileName}: ${name} hat nicht das active/retired-Format.`);
       }
     }
@@ -213,10 +231,10 @@ const isKeyRingShape = (value) => {
 
 const validateDeploymentValues = (environment, values, required) => {
   const failures = [];
-  const missing = required.filter((name) => (values[name] ?? "").trim() === "");
+  const missing = required.filter((name) => configuredSecretValue(values, name) === undefined);
   if (missing.length > 0) failures.push(`Werte fehlen: ${missing.join(", ")}`);
 
-  const placeholders = required.filter((name) => {
+  const placeholders = required.flatMap((name) => secretNamesFor(name)).filter((name) => {
     const value = values[name];
     return value !== undefined && placeholderPattern.test(value);
   });
@@ -229,9 +247,10 @@ const validateDeploymentValues = (environment, values, required) => {
     failures.push("Ungültige absolute Origin: PUBLIC_ORIGIN");
   }
 
-  const malformedKeyRings = [...keyRingSecretNames].filter((name) =>
-    values[name] !== undefined && !isKeyRingShape(values[name]),
-  );
+  const malformedKeyRings = [...keyRingSecretNames].filter((name) => {
+    const value = configuredSecretValue(values, name);
+    return value !== undefined && !isKeyRingShape(value);
+  });
   if (malformedKeyRings.length > 0) {
     failures.push(`Ungültiges active/retired-Format: ${malformedKeyRings.join(", ")}`);
   }
@@ -241,7 +260,7 @@ const validateDeploymentValues = (environment, values, required) => {
     failures.push("Ungültiges 32-Byte-base64url-Format: OVERLAY_TOKEN_PEPPER");
   }
 
-  const unexpected = Object.keys(values).filter((name) => !deploymentBindingSet.has(name));
+  const unexpected = Object.keys(values).filter((name) => !acceptedSecretNameSet.has(name));
   if (unexpected.length > 0) failures.push(`Unerwartete Werte: ${unexpected.join(", ")}`);
 
   if (failures.length > 0) {

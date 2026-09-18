@@ -584,15 +584,24 @@ export const getBotIdentity = async (db: D1Database): Promise<BotIdentityRecord 
   return row === null ? null : mapBotIdentity(row);
 };
 
-export const listLoginIdentities = async (db: D1Database): Promise<LoginIdentityRecord[]> => {
+export const listLoginIdentities = async (
+  db: D1Database,
+  now: string = new Date().toISOString(),
+): Promise<LoginIdentityRecord[]> => {
   const result = await db.prepare(
     `SELECT user_id, login, scopes_json, access_token_ciphertext,
             refresh_token_ciphertext, expires_at, status, reason,
             created_at, updated_at
        FROM twitch_login_identity
       WHERE status <> 'revoked'
+        AND EXISTS (
+          SELECT 1 FROM auth_sessions
+           WHERE auth_sessions.user_id = twitch_login_identity.user_id
+             AND auth_sessions.revoked_at IS NULL
+             AND auth_sessions.expires_at > ?
+        )
       ORDER BY user_id`,
-  ).all<LoginIdentityRow>();
+  ).bind(now).all<LoginIdentityRow>();
   return result.results.map(mapLoginIdentity);
 };
 
@@ -760,6 +769,48 @@ export const upsertBotIdentity = async (
   ).run();
 };
 
+export const upsertBotIdentityAndStatus = async (
+  db: D1Database,
+  identity: BotIdentityRecord,
+  status: BotIdentityStatus,
+  reason: string | null,
+  updatedAt: string,
+): Promise<void> => {
+  const identityMutation = db.prepare(
+    `INSERT INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext,
+       refresh_token_ciphertext, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       user_id = excluded.user_id,
+       login = excluded.login,
+       scopes_json = excluded.scopes_json,
+       access_token_ciphertext = excluded.access_token_ciphertext,
+       refresh_token_ciphertext = excluded.refresh_token_ciphertext,
+       expires_at = excluded.expires_at,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    identity.id,
+    identity.userId,
+    identity.login,
+    identity.scopesJson,
+    identity.accessTokenCiphertext,
+    identity.refreshTokenCiphertext,
+    identity.expiresAt,
+    identity.createdAt,
+    identity.updatedAt,
+  );
+  const statusMutation = db.prepare(
+    `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       status = excluded.status,
+       reason = excluded.reason,
+       updated_at = excluded.updated_at`,
+  ).bind(1, status, reason, updatedAt);
+  await db.batch([identityMutation, statusMutation]);
+};
+
 export const getBotIdentityStatus = async (
   db: D1Database,
 ): Promise<BotIdentityStatusRecord | null> => {
@@ -829,27 +880,30 @@ export const tryReserveBotChannelStatusCheck = async (
   lockedUntil: string,
   now: string,
   checkedSince: string,
-): Promise<boolean> => {
+): Promise<string | null> => {
+  const ownerId = crypto.randomUUID();
   const row = await db.prepare(
-    `INSERT INTO bot_channel_status_check_locks (channel_id, locked_until)
-     SELECT ?, ?
+    `INSERT INTO bot_channel_status_check_locks (channel_id, owner_id, locked_until)
+     SELECT ?, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM bot_channel_status
          WHERE channel_id = ?
            AND julianday(checked_at) > julianday(?)
       )
      ON CONFLICT(channel_id) DO UPDATE SET
+       owner_id = excluded.owner_id,
        locked_until = excluded.locked_until
      WHERE julianday(bot_channel_status_check_locks.locked_until) <= julianday(?)
+       AND bot_channel_status_check_locks.owner_id <> excluded.owner_id
        AND NOT EXISTS (
          SELECT 1 FROM bot_channel_status
           WHERE channel_id = ?
             AND julianday(checked_at) > julianday(?)
        )
-     RETURNING channel_id`,
-  ).bind(channelId, lockedUntil, channelId, checkedSince, now, channelId, checkedSince)
-    .first<{ channel_id: string }>();
-  return row !== null;
+     RETURNING owner_id`,
+  ).bind(channelId, ownerId, lockedUntil, channelId, checkedSince, now, channelId, checkedSince)
+    .first<{ owner_id: string }>();
+  return row?.owner_id ?? null;
 };
 
 export const getBotChannelStatusCheckLock = async (
@@ -879,10 +933,11 @@ export const getBotChannelStatusCheckedAt = async (
 export const releaseBotChannelStatusCheck = async (
   db: D1Database,
   channelId: string,
+  ownerId: string,
 ): Promise<void> => {
   await db.prepare(
-    "DELETE FROM bot_channel_status_check_locks WHERE channel_id = ?",
-  ).bind(channelId).run();
+    "DELETE FROM bot_channel_status_check_locks WHERE channel_id = ? AND owner_id = ?",
+  ).bind(channelId, ownerId).run();
 };
 
 const prepareBotChannelStatusMutation = (
@@ -897,7 +952,8 @@ const prepareBotChannelStatusMutation = (
    ON CONFLICT(channel_id) DO UPDATE SET
      is_moderator = excluded.is_moderator,
      checked_at = excluded.checked_at,
-     reason = excluded.reason`,
+     reason = excluded.reason
+   WHERE julianday(bot_channel_status.checked_at) < julianday(excluded.checked_at)`,
 ).bind(channelId, isModerator ? 1 : 0, checkedAt, reason);
 
 export const setBotChannelStatus = async (
@@ -913,6 +969,7 @@ export const setBotChannelStatus = async (
 export const setBotChannelStatusAndLock = async (
   db: D1Database,
   channelId: string,
+  ownerId: string,
   isModerator: boolean,
   checkedAt: string,
   reason: string | null,
@@ -923,8 +980,22 @@ export const setBotChannelStatusAndLock = async (
     db.prepare(
       `UPDATE bot_channel_status_check_locks
           SET locked_until = ?
-        WHERE channel_id = ?`,
-    ).bind(lockedUntil, channelId),
+        WHERE channel_id = ?
+          AND owner_id = ?
+          AND EXISTS (
+            SELECT 1 FROM bot_channel_status
+             WHERE channel_id = ? AND checked_at = ?
+          )`,
+    ).bind(lockedUntil, channelId, ownerId, channelId, checkedAt),
+    db.prepare(
+      `DELETE FROM bot_channel_status_check_locks
+        WHERE channel_id = ?
+          AND owner_id = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM bot_channel_status
+             WHERE channel_id = ? AND checked_at = ?
+          )`,
+    ).bind(channelId, ownerId, channelId, checkedAt),
   ]);
 };
 
@@ -979,7 +1050,7 @@ export const rotateBotTokens = async (
   expiresAt: string,
   updatedAt: string,
 ): Promise<boolean> => {
-  const result = await db.prepare(
+  const tokenRotation = db.prepare(
     `UPDATE bot_identity
         SET access_token_ciphertext = ?,
             refresh_token_ciphertext = ?,
@@ -995,8 +1066,23 @@ export const rotateBotTokens = async (
     updatedAt,
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
-  ).run();
-  return result.meta.changes > 0;
+  );
+  const statusRecovery = db.prepare(
+    `UPDATE bot_identity_status
+        SET status = 'connected', reason = NULL, updated_at = ?
+      WHERE id = 1
+        AND status = 'revoked'
+        AND reason = 'authorization_revoked'
+        AND julianday(updated_at) <= julianday(?)
+        AND EXISTS (
+          SELECT 1 FROM bot_identity
+           WHERE id = 1
+             AND access_token_ciphertext = ?
+             AND refresh_token_ciphertext = ?
+        )`,
+  ).bind(updatedAt, updatedAt, accessTokenCiphertext, refreshTokenCiphertext);
+  const results = await db.batch([tokenRotation, statusRecovery]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
 export const rotateLoginTokensForUser = async (
@@ -1008,12 +1094,23 @@ export const rotateLoginTokensForUser = async (
   refreshTokenCiphertext: string,
   expiresAt: string,
   updatedAt: string,
+  expectedUpdatedAt: string,
 ): Promise<boolean> => {
-  const result = await db.prepare(
+  const tokenRotation = db.prepare(
     `UPDATE twitch_login_identity
       SET access_token_ciphertext = ?,
             refresh_token_ciphertext = ?,
             expires_at = ?,
+            status = CASE
+              WHEN status <> 'revoked' OR julianday(updated_at) <= julianday(?)
+                THEN 'connected'
+              ELSE status
+            END,
+            reason = CASE
+              WHEN status <> 'revoked' OR julianday(updated_at) <= julianday(?)
+                THEN NULL
+              ELSE reason
+            END,
             updated_at = ?
       WHERE user_id = ?
         AND access_token_ciphertext = ?
@@ -1023,11 +1120,37 @@ export const rotateLoginTokensForUser = async (
     refreshTokenCiphertext,
     expiresAt,
     updatedAt,
+    updatedAt,
+    updatedAt,
     userId,
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
-  ).run();
-  return result.meta.changes > 0;
+  );
+  const sessionRecovery = db.prepare(
+    `UPDATE auth_sessions
+        SET revoked_at = NULL, revocation_reason = NULL, updated_at = ?
+      WHERE user_id = ?
+        AND revoked_at IS NOT NULL
+        AND revocation_reason = 'authorization_revoked'
+        AND julianday(revoked_at) > julianday(?)
+        AND julianday(revoked_at) <= julianday(?)
+        AND EXISTS (
+          SELECT 1 FROM twitch_login_identity
+           WHERE user_id = ?
+             AND access_token_ciphertext = ?
+             AND refresh_token_ciphertext = ?
+        )`,
+  ).bind(
+    updatedAt,
+    userId,
+    expectedUpdatedAt,
+    updatedAt,
+    userId,
+    accessTokenCiphertext,
+    refreshTokenCiphertext,
+  );
+  const results = await db.batch([tokenRotation, sessionRecovery]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
 export const revokeSessionsForUser = async (

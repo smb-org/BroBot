@@ -8,6 +8,27 @@ export interface KeyRing {
   retired: KeyEntry[];
 }
 
+export interface TokenEncryptionEnvironment {
+  TOKEN_ENCRYPTION_KEYS?: string;
+  SESSION_ENCRYPTION_KEYS?: string;
+}
+
+/**
+ * Liest während der Übergangsphase den neuen Namen bevorzugt und akzeptiert
+ * danach noch den alten Namen. Der Fallback wird später in einem eigenen
+ * Schritt entfernt, damit kein Deployment ohne Entschlüsselungsschlüssel
+ * entsteht.
+ */
+export const getTokenEncryptionKeys = (environment: TokenEncryptionEnvironment): string => {
+  if (typeof environment.TOKEN_ENCRYPTION_KEYS === "string" && environment.TOKEN_ENCRYPTION_KEYS.length > 0) {
+    return environment.TOKEN_ENCRYPTION_KEYS;
+  }
+  if (typeof environment.SESSION_ENCRYPTION_KEYS === "string" && environment.SESSION_ENCRYPTION_KEYS.length > 0) {
+    return environment.SESSION_ENCRYPTION_KEYS;
+  }
+  throw new Error("TOKEN_ENCRYPTION_KEYS fehlt.");
+};
+
 interface EncryptionEnvelope {
   keyId: string;
   iv: string;

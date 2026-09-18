@@ -77,7 +77,7 @@ const sessionHeaders = async (
   const sessionCookie = await createSessionCookie(
     { sessionId: "session-1" },
     environment.SESSION_COOKIE_KEYS,
-    environment.SESSION_ENCRYPTION_KEYS,
+    environment.SESSION_ENCRYPTION_KEYS ?? "",
   );
   const csrfToken = await createCsrfToken(
     "session-1",
