@@ -36,6 +36,21 @@
 
 Vor dem Push muss `pnpm run check` lokal grün durchlaufen. CI prüft zusätzlich dieselbe Installations- und Browser-Teststrecke.
 
+**Diese Regeln werden erzwungen, nicht nur vereinbart.** `main` ist geschützt:
+
+- Änderungen nur über Pull Request; Direkt-Commits werden abgelehnt
+- Die Prüfung `quality` muss grün sein — sie fährt dieselbe Strecke wie `pnpm run check`
+- Der Zweig muss auf dem aktuellen Stand von `main` sein, damit zwei parallele Zweige einander nicht stillschweigend brechen
+- Offene Kommentare am Pull Request blockieren den Merge
+- Force-Push und Löschen von `main` sind gesperrt
+- Der Schutz gilt **auch für Administratoren**
+
+Freigaben sind bewusst **nicht** erforderlich: Einen eigenen Pull Request kann man bei GitHub nicht selbst freigeben, und bei der derzeitigen Besetzung würde das jede Arbeit blockieren. Die verbindliche Hürde ist die grüne CI.
+
+**SonarCloud ist absichtlich keine Pflichtprüfung.** Es läuft mit und ist sichtbar, scheitert in diesem Projekt aber regelmäßig an der Duplikationsschwelle — Ursache sind fast immer Tests, die ihren Aufbau bewusst wiederholen. Zusammengefasste Tests sind an dieser Stelle schlechtere Tests. Sicherheitsbefunde von SonarCloud werden ernst genommen und behoben; die Duplikationsschwelle allein blockiert nichts.
+
+Muss der Schutz im Notfall umgangen werden, geschieht das über die Repository-Einstellungen unter Branches — als bewusste Entscheidung, nicht nebenbei.
+
 ## Ordner- und Namenskonventionen
 
 - Single-Package: keine `apps/`- oder `packages/`-Monorepo-Struktur ergänzen.
