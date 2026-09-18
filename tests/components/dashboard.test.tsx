@@ -10,19 +10,21 @@ const moderator = {
   reason: null,
 };
 
+const relativeIso = (milliseconds: number): string => new Date(Date.now() + milliseconds).toISOString();
+
 const healthyChannel = (channelId: string, displayName: string) => ({
   channelId,
   login: channelId,
   displayName,
   role: "verwalter",
   broadcasterConnection: "connected",
-  bot: { status: "connected", reason: null, updatedAt: "2026-09-18T01:00:00.000Z" },
+  bot: { status: "connected", reason: null, updatedAt: relativeIso(0) },
   moderator,
   tokens: {
-    botExpiresAt: "2099-09-19T00:00:00.000Z",
+    botExpiresAt: relativeIso(3 * 60 * 60 * 1000),
     loginStatus: "connected",
     loginReason: null,
-    loginExpiresAt: "2099-09-19T00:00:00.000Z",
+    loginExpiresAt: relativeIso(3 * 60 * 60 * 1000),
   },
   lastError: null,
 });
@@ -34,9 +36,9 @@ const overview = (channel: ReturnType<typeof healthyChannel>) => ({
 
 const system = {
   broadcasterConnection: "connected",
-  bot: { status: "connected", reason: null, updatedAt: "2026-09-18T01:00:00.000Z" },
+  bot: { status: "connected", reason: null, updatedAt: relativeIso(0) },
   tokens: {
-    botExpiresAt: "2099-09-19T00:00:00.000Z",
+    botExpiresAt: relativeIso(3 * 60 * 60 * 1000),
     loginStatus: "connected",
     loginReason: null,
     loginExpiresAt: "2099-09-19T00:00:00.000Z",
@@ -413,6 +415,117 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(tokenCard).queryByText("Gültig")).not.toBeInTheDocument();
     expect(within(tokenCard).queryByText("Gesund")).not.toBeInTheDocument();
     expect(tokenCard.querySelector('[data-status="healthy"]')).toBeNull();
+  });
+
+  it("zeigt einen funktionierenden Kanal mit drei Stunden Restlaufzeit als gesund", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/");
+
+    render(<DashboardApp />);
+
+    const channelHeading = await screen.findByRole("heading", { name: "Alpha", level: 2 });
+    const channelCard = channelHeading.closest("article");
+    expect(channelCard).not.toBeNull();
+    expect(channelCard).toHaveAttribute("data-status", "healthy");
+    expect(within(channelCard as HTMLElement).getByText("Gesund", { selector: "span" })).toBeInTheDocument();
+    expect(within(channelCard as HTMLElement).queryByText("Warnung")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
+    const tokenCard = await screen.findByRole("article", { name: "Token-Zustand" });
+    expect(tokenCard).toHaveAttribute("data-status", "healthy");
+    expect(within(tokenCard).getByText("Gültig", { selector: "strong" })).toBeInTheDocument();
+    expect(within(tokenCard).queryByText("Warnung")).not.toBeInTheDocument();
+  });
+
+  it("bleibt gesund, solange der Ablauf nur turnusmäßig näherrückt", async () => {
+    // Bei vierstündigen Twitch-Tokens und stündlichem Cron steht jedes Token
+    // regelmäßig bis zu einer Stunde im Erneuerungsfenster. Das ist der
+    // Normalfall und darf nicht warnen — sonst warnt die Anzeige alle vier
+    // Stunden knapp eine Stunde lang und verliert ihre Aussagekraft.
+    const basis = healthyChannel("kanal-a", "Alpha");
+    const channel = {
+      ...basis,
+      // Der letzte Lauf liegt VOR dem Zeitpunkt, ab dem erneuert werden muss.
+      bot: { ...basis.bot, updatedAt: relativeIso(-45 * 60 * 1000) },
+      tokens: {
+        ...basis.tokens,
+        botExpiresAt: relativeIso(30 * 60 * 1000),
+        loginExpiresAt: relativeIso(30 * 60 * 1000),
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/");
+
+    render(<DashboardApp />);
+
+    const channelHeading = await screen.findByRole("heading", { name: "Alpha", level: 2 });
+    const channelCard = channelHeading.closest("article");
+    expect(channelCard).not.toBeNull();
+    expect(channelCard).toHaveAttribute("data-status", "healthy");
+    expect(within(channelCard as HTMLElement).queryByText("Erneuerung überfällig")).not.toBeInTheDocument();
+  });
+
+  it("warnt, wenn ein Wartungslauf das fällige Token nicht erneuert hat", async () => {
+    // Gleiche Restlaufzeit wie oben — aber der Cron ist seitdem gelaufen und
+    // hat nichts erneuert. Das ist der Fall, der tatsächlich kaputt ist.
+    const basis = healthyChannel("kanal-a", "Alpha");
+    const channel = {
+      ...basis,
+      bot: { ...basis.bot, updatedAt: relativeIso(-5 * 60 * 1000) },
+      tokens: {
+        ...basis.tokens,
+        botExpiresAt: relativeIso(30 * 60 * 1000),
+        loginExpiresAt: relativeIso(30 * 60 * 1000),
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/");
+
+    render(<DashboardApp />);
+
+    const channelHeading = await screen.findByRole("heading", { name: "Alpha", level: 2 });
+    const channelCard = channelHeading.closest("article");
+    expect(channelCard).not.toBeNull();
+    expect(channelCard).toHaveAttribute("data-status", "warning");
+    expect(within(channelCard as HTMLElement).getByText("Erneuerung überfällig", { selector: "span" })).toBeInTheDocument();
+  });
+
+  it("warnt bei einem seit mehr als einem Wartungsintervall veralteten Lauf", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      bot: { status: "connected", reason: null, updatedAt: relativeIso(-(60 * 60 * 1000 + 1)) },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/");
+
+    render(<DashboardApp />);
+
+    const channelHeading = await screen.findByRole("heading", { name: "Alpha", level: 2 });
+    const channelCard = channelHeading.closest("article");
+    expect(channelCard).not.toBeNull();
+    expect(channelCard).toHaveAttribute("data-status", "warning");
+    expect(within(channelCard as HTMLElement).getByText("Wartung überfällig", { selector: "span" })).toBeInTheDocument();
   });
 
   it("verwirft beim Kanalwechsel den alten Datenstand vor der neuen Antwort", async () => {
