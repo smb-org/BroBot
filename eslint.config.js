@@ -85,6 +85,10 @@ export default defineConfig(
               regex: "(^|/)(repository|adapters)(/|$)",
               message: "Panel-Ansichten dürfen keine Repository- oder Adapterdateien importieren.",
             },
+            {
+              regex: "(^|/)overlay(/|$)",
+              message: "Panel-Ansichten dürfen keine Overlay-Ansichten importieren.",
+            },
           ],
         },
       ],

@@ -10,9 +10,18 @@ export interface ChannelAuthorizationVariables {
   channelRole: ChannelMemberRole;
 }
 
+export interface SessionAuthorizationVariables {
+  session: SessionRecord;
+}
+
 interface ChannelAuthorizationEnvironment {
   Bindings: Env;
   Variables: ChannelAuthorizationVariables;
+}
+
+interface SessionAuthorizationEnvironment {
+  Bindings: Env;
+  Variables: SessionAuthorizationVariables;
 }
 
 const csrfExemptMethods = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -42,6 +51,15 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
 
     context.set("session", session);
     context.set("channelRole", role);
+    await next();
+  },
+);
+
+export const requireSessionAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
+  async (context, next) => {
+    const session = await getSessionFromRequest(context.req.raw, context.env);
+    if (session === null) return context.text("Session fehlt.", 401);
+    context.set("session", session);
     await next();
   },
 );

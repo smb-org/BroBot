@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import { parseKeyRing } from "./auth/crypto";
 import { authRouter } from "./auth/routes";
+import { panelRouter } from "./panel/routes";
 import { scheduled } from "./scheduled";
 
 export { ChannelObject } from "./durable/ChannelObject";
@@ -38,6 +39,7 @@ const getMissingBindings = (env: Env): string[] =>
 const app = new Hono<{ Bindings: Env }>();
 
 app.route("/", authRouter);
+app.route("/", panelRouter);
 
 app.get("/healthz", (context) => {
   const missingBindings = getMissingBindings(context.env);
