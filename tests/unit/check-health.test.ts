@@ -18,6 +18,16 @@ const runOrigin = (environment: string, configPath?: string) => spawnSync(
   { cwd: projectRoot, encoding: "utf8" },
 );
 
+const runHealth = (origin: string) => spawnSync(
+  "node",
+  ["scripts/check-health.mjs", "--origin", origin],
+  {
+    cwd: projectRoot,
+    encoding: "utf8",
+    env: { ...process.env, CHECK_HEALTH_RETRY_DELAY_MS: "0" },
+  },
+);
+
 const withTemporaryConfig = (source: string, callback: (configPath: string) => void) => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "brobot-health-"));
   const configPath = path.join(directory, "wrangler.jsonc");
@@ -67,5 +77,14 @@ describe("Deployment-Healthcheck", () => {
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout.trim()).toBe("https://trailing.example");
     });
+  });
+
+  it("scheitert klar, wenn alle Healthcheck-Versuche fehlschlagen", () => {
+    const result = runHealth("http://127.0.0.1:1");
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain(
+      "Healthcheck nach 6 Versuchen fehlgeschlagen",
+    );
   });
 });

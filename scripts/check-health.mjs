@@ -1,11 +1,17 @@
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { experimental_readRawConfig } from "wrangler";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
-const httpStatusMarker = "\n__BROBOT_HTTP_STATUS__";
+const maxAttempts = 6;
+const requestTimeoutMs = 30_000;
+const defaultRetryDelayMs = 2_000;
+
+const retryDelayMs = (() => {
+  const configured = Number(process.env.CHECK_HEALTH_RETRY_DELAY_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : defaultRetryDelayMs;
+})();
 
 const resolveDeploymentOriginFromConfig = (config, environment) => {
   const pattern = config.env?.[environment]?.routes?.[0]?.pattern;
@@ -38,63 +44,58 @@ export const resolveDeploymentOrigin = async (
   return resolveDeploymentOriginFromConfig(rawConfig, environment);
 };
 
-const checkHealth = async (environment) => {
-  const origin = await resolveDeploymentOrigin(environment);
-  const result = spawnSync("curl", [
-    "--silent",
-    "--show-error",
-    "--location",
-    "--max-time",
-    "30",
-    "--retry",
-    "5",
-    "--retry-delay",
-    "2",
-    "--retry-all-errors",
-    "--write-out",
-    `${httpStatusMarker}%{http_code}`,
-    `${origin}/healthz`,
-  ], { encoding: "utf8" });
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-  if (result.error !== undefined) throw result.error;
+const errorMessage = (error) => error instanceof Error ? error.message : String(error);
 
-  const output = result.stdout ?? "";
-  const markerIndex = output.lastIndexOf(httpStatusMarker);
-  if (markerIndex === -1) {
-    throw new Error(`curl lieferte keinen HTTP-Status für ${origin}/healthz.`);
+const fetchHealth = async (origin, environment) => {
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(`${origin}/healthz`, {
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+      const body = await response.text();
+
+      if (response.status !== 200) {
+        throw new Error(`/healthz für ${environment} antwortete mit HTTP ${response.status}: ${body}`);
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(body);
+      } catch (error) {
+        throw new Error(
+          `/healthz für ${environment} lieferte kein JSON: ${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+
+      if (
+        payload.status !== "ok" ||
+        !Array.isArray(payload.missingBindings) ||
+        payload.missingBindings.length !== 0
+      ) {
+        throw new Error(`/healthz meldet fehlende Bindings: ${JSON.stringify(payload)}`);
+      }
+
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) await wait(retryDelayMs);
+    }
   }
 
-  const body = output.slice(0, markerIndex);
-  const status = output.slice(markerIndex + httpStatusMarker.length).trim();
-  if (result.status !== 0) {
-    throw new Error(
-      `curl für ${origin}/healthz schlug fehl (Exit ${result.status}): ` +
-      (result.stderr ?? "").trim(),
-    );
-  }
-  if (status !== "200") {
-    throw new Error(`/healthz für ${environment} antwortete mit HTTP ${status}: ${body}`);
-  }
+  throw new Error(
+    `Healthcheck nach ${maxAttempts} Versuchen fehlgeschlagen: ${errorMessage(lastError)}`,
+    { cause: lastError },
+  );
+};
 
-  let payload;
-  try {
-    payload = JSON.parse(body);
-  } catch (error) {
-    throw new Error(
-      `/healthz für ${environment} lieferte kein JSON: ` +
-      (error instanceof Error ? error.message : "unbekannter Fehler"),
-      { cause: error },
-    );
-  }
-
-  if (
-    payload.status !== "ok" ||
-    !Array.isArray(payload.missingBindings) ||
-    payload.missingBindings.length !== 0
-  ) {
-    throw new Error(`/healthz meldet fehlende Bindings: ${JSON.stringify(payload)}`);
-  }
-
+const checkHealth = async (environment, configPath, originOverride) => {
+  const origin = originOverride ?? await resolveDeploymentOrigin(environment, configPath);
+  await fetchHealth(origin, environment);
   console.log(`/healthz ${environment}: ok (${origin})`);
 };
 
@@ -111,6 +112,17 @@ const main = async () => {
     return;
   }
 
+  if (command === "--origin") {
+    const origin = process.argv[3];
+    if (origin === undefined) {
+      console.error("Aufruf: check-health.mjs --origin <origin>");
+      process.exitCode = 2;
+      return;
+    }
+    await checkHealth("direkte Origin", undefined, origin);
+    return;
+  }
+
   const environment = command;
   if (environment === undefined) {
     console.error("Aufruf: check-health.mjs <staging|production>");
@@ -118,7 +130,7 @@ const main = async () => {
     return;
   }
 
-  await checkHealth(environment);
+  await checkHealth(environment, process.argv[3]);
 };
 
 const isMain = process.argv[1] !== undefined &&
