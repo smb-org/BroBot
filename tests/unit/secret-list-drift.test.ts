@@ -48,4 +48,34 @@ describe("Secret-Namen-Drift", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("weist im Preflight eine nicht absolute PUBLIC_ORIGIN ab", () => {
+    const key = Buffer.alloc(32, 1).toString("base64url");
+    const keyRing = JSON.stringify({ active: { id: "test-key", key }, retired: [] });
+    const directory = mkdtempSync(path.join(os.tmpdir(), "brobot-config-origin-"));
+    const environmentFile = path.join(directory, "staging.env");
+    writeFileSync(environmentFile, [
+      "TWITCH_CLIENT_ID=client-id",
+      "TWITCH_CLIENT_SECRET=client-secret",
+      `TWITCH_EVENTSUB_SECRET='${keyRing}'`,
+      "PUBLIC_ORIGIN=not-a-url",
+      `SESSION_COOKIE_KEYS='${keyRing}'`,
+      `SESSION_ENCRYPTION_KEYS='${keyRing}'`,
+      `OVERLAY_TOKEN_PEPPER=${key}`,
+      "",
+    ].join("\n"));
+
+    try {
+      const result = spawnSync(
+        "node",
+        ["scripts/verify-deployment-config.mjs", "validate-env", "staging", environmentFile],
+        { cwd: path.resolve(import.meta.dirname, "../.."), encoding: "utf8" },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain("PUBLIC_ORIGIN");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
