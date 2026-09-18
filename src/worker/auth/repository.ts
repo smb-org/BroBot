@@ -56,6 +56,16 @@ export interface BotIdentityStatusRecord {
   updatedAt: string;
 }
 
+/**
+ * Der Akteur einer Mutation. Die sessionId gehoert dazu, weil die Mutation
+ * selbst pruefen muss, ob die Session noch lebt — die Rolle allein genuegt
+ * nicht.
+ */
+export interface ActorContext {
+  userId: string;
+  sessionId: string;
+}
+
 export interface ChannelMemberRecord {
   channelId: string;
   userId: string;
@@ -200,13 +210,47 @@ const auditId = (): string => crypto.randomUUID();
 
 const memberJson = (member: ChannelMemberRecord | null): string => JSON.stringify(member);
 
-const actorExistsPredicate = `
+/**
+ * Der Handler prueft die Berechtigung, bevor er den Request-Body liest. Zwischen
+ * Guard und Mutation liegt aber ein beliebig langes Fenster: Ein Client kann den
+ * Body offen lassen, bis seine Session widerrufen wurde, und ihn erst danach
+ * schliessen. Deshalb wiederholt jede Mutation die vollstaendige Pruefung im
+ * selben D1-Batch — nicht nur die Kanalrolle, sondern auch die Session selbst.
+ *
+ * Bindereihenfolge: sessionId, actorUserId, now, channelId.
+ */
+export const actorGuard = (allowedRoles: string): string => `
         AND EXISTS (
-          SELECT 1 FROM channel_members AS actor
-           WHERE actor.channel_id = ?
-             AND actor.user_id = ?
-             AND actor.role IN ('broadcaster', 'verwalter')
+          SELECT 1
+            FROM auth_sessions AS actor_session
+            JOIN twitch_login_identity AS actor_identity
+              ON actor_identity.user_id = actor_session.user_id
+            JOIN channel_members AS actor
+              ON actor.user_id = actor_session.user_id
+           WHERE actor_session.session_id = ?
+             AND actor_session.user_id = ?
+             AND actor_session.revoked_at IS NULL
+             AND actor_session.expires_at > ?
+             AND actor_identity.status <> 'revoked'
+             AND actor.channel_id = ?
+             AND actor.role IN (${allowedRoles})
         )`;
+
+/**
+ * Wer die Rolle `broadcaster` vergibt, kann den bisherigen Broadcaster
+ * anschliessend entfernen — der Schutz des letzten Broadcasters greift dann
+ * nicht mehr, weil zwischenzeitlich zwei existieren. Deshalb darf nur ein
+ * Broadcaster diese Rolle vergeben. Die Regel steht hier und nicht nur im
+ * Handler, damit sie auch dann gilt, wenn sich die Rolle zwischen Guard und
+ * Mutation aendert.
+ */
+export const ANY_MEMBER_ROLES = "'broadcaster', 'verwalter', 'bediener'";
+
+const requiredActorRoles = (targetRole: ChannelMemberRecord["role"]): string =>
+  targetRole === "broadcaster" ? "'broadcaster'" : "'broadcaster', 'verwalter'";
+
+export const bindActorGuard = (actor: ActorContext, channelId: string, now: string) =>
+  [actor.sessionId, actor.userId, now, channelId] as const;
 
 const soleBroadcasterPredicate = `
           AND (
@@ -340,7 +384,7 @@ export const countBroadcasterMembers = async (
 
 export const createChannelMemberWithAudit = async (
   db: D1Database,
-  actorUserId: string,
+  actor: ActorContext,
   member: ChannelMemberRecord,
   action: string,
   changedAt: string,
@@ -352,7 +396,7 @@ export const createChannelMemberWithAudit = async (
         SELECT 1 FROM channel_members
          WHERE channel_id = ? AND user_id = ?
       )
-      ${actorExistsPredicate}`,
+      ${actorGuard(requiredActorRoles(member.role))}`,
   ).bind(
     member.channelId,
     member.userId,
@@ -361,12 +405,11 @@ export const createChannelMemberWithAudit = async (
     member.updatedAt,
     member.channelId,
     member.userId,
-    member.channelId,
-    actorUserId,
+    ...bindActorGuard(actor, member.channelId, changedAt),
   );
   const audit = prepareMemberAudit(
     db,
-    actorUserId,
+    actor.userId,
     changedAt,
     member.channelId,
     action,
@@ -379,7 +422,7 @@ export const createChannelMemberWithAudit = async (
 
 export const updateChannelMemberWithAudit = async (
   db: D1Database,
-  actorUserId: string,
+  actor: ActorContext,
   member: ChannelMemberRecord,
   action: string,
   changedAt: string,
@@ -394,7 +437,7 @@ export const updateChannelMemberWithAudit = async (
         AND role = ?
         AND created_at = ?
         AND updated_at = ?
-      ${actorExistsPredicate}
+      ${actorGuard(requiredActorRoles(after.role))}
       ${lastBroadcasterRoleChangeGuard}`,
   ).bind(
     after.role,
@@ -404,14 +447,13 @@ export const updateChannelMemberWithAudit = async (
     before.role,
     before.createdAt,
     before.updatedAt,
-    after.channelId,
-    actorUserId,
+    ...bindActorGuard(actor, after.channelId, changedAt),
     after.role,
     after.channelId,
   );
   const audit = prepareMemberAudit(
     db,
-    actorUserId,
+    actor.userId,
     changedAt,
     after.channelId,
     action,
@@ -424,7 +466,7 @@ export const updateChannelMemberWithAudit = async (
 
 export const deleteChannelMemberWithAudit = async (
   db: D1Database,
-  actorUserId: string,
+  actor: ActorContext,
   channelId: string,
   userId: string,
   action: string,
@@ -438,7 +480,7 @@ export const deleteChannelMemberWithAudit = async (
         AND role = ?
         AND created_at = ?
         AND updated_at = ?
-      ${actorExistsPredicate}
+      ${actorGuard("'broadcaster', 'verwalter'")}
       ${lastBroadcasterGuard}`,
   ).bind(
     channelId,
@@ -446,13 +488,12 @@ export const deleteChannelMemberWithAudit = async (
     before.role,
     before.createdAt,
     before.updatedAt,
-    channelId,
-    actorUserId,
+    ...bindActorGuard(actor, channelId, changedAt),
     channelId,
   );
   const audit = prepareMemberAudit(
     db,
-    actorUserId,
+    actor.userId,
     changedAt,
     channelId,
     action,

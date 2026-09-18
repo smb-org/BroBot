@@ -645,7 +645,12 @@ export const DashboardApp = (): ReactElement => {
       await logout();
       clearProtectedState();
     } catch (error) {
-      if (error instanceof PanelApiError && (error.status === 401 || error.status === 403)) {
+      // 401 heisst: die Session ist tatsaechlich weg, der geschuetzte Zustand
+      // darf geraeumt werden. 403 heisst nur, dass das CSRF-Token nicht passte —
+      // der Worker hat dann nichts widerrufen. Wer hier raeumt, meldet eine
+      // Abmeldung, die gar nicht stattgefunden hat; nach einem Neuladen ist der
+      // Nutzer wieder angemeldet.
+      if (error instanceof PanelApiError && error.status === 401) {
         clearProtectedState();
         return;
       }

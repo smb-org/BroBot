@@ -4,6 +4,8 @@ import {
   authenticateOverlayToken,
   issueOverlayToken,
   revokeOverlayToken,
+  type IssueOverlayTokenInput,
+  type IssuedOverlayToken,
 } from "../../src/worker/auth/overlay-token-service";
 import { hashOverlayToken } from "../../src/worker/auth/crypto";
 import { TestD1Database } from "./test-d1";
@@ -25,6 +27,46 @@ const insertChannel = async (database: TestD1Database, channelId: string): Promi
     "2026-09-18T00:00:00.000Z",
     "2026-09-18T00:00:00.000Z",
   ).run();
+};
+
+/** Der Akteur, unter dem die Tests Token ausgeben; passt zu insertActor. */
+const TEST_ACTOR = { userId: "user-1", sessionId: "session-user-1" };
+
+const insertActor = async (database: TestD1Database, channelId: string): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO twitch_login_identity
+      (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, status, reason, created_at, updated_at)
+     VALUES (?, ?, '[]', 'access', 'refresh', ?, 'connected', NULL, ?, ?)`,
+  ).bind(TEST_ACTOR.userId, TEST_ACTOR.userId, "2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+  await database.prepare(
+    `INSERT INTO auth_sessions (session_id, user_id, login, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    TEST_ACTOR.sessionId,
+    TEST_ACTOR.userId,
+    TEST_ACTOR.userId,
+    "2099-09-19T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+  ).run();
+  await database.prepare(
+    `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
+     VALUES (?, ?, 'broadcaster', ?, ?)`,
+  ).bind(channelId, TEST_ACTOR.userId, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+};
+
+/** Gibt ein Token aus und schlaegt fehl, wenn die Ausgabe verweigert wurde. */
+const issueTestToken = async (
+  database: TestD1Database,
+  input: Omit<IssueOverlayTokenInput, "actor">,
+): Promise<IssuedOverlayToken> => {
+  const issued = await issueOverlayToken(
+    database as unknown as D1Database,
+    { ...input, actor: TEST_ACTOR },
+  );
+  if (issued === null) throw new Error("Overlay-Token wurde unerwartet nicht ausgegeben.");
+  return issued;
 };
 
 const tokenFromUrl = (overlayUrl: string): string => {
@@ -60,6 +102,7 @@ describe("Overlay-Token-Service", () => {
   beforeEach(async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
+    await insertActor(database, "kanal-a");
   });
 
   afterEach(() => {
@@ -76,7 +119,7 @@ describe("Overlay-Token-Service", () => {
   });
 
   it("gibt einen langen Token ohne Ablauf aus und akzeptiert ihn nur mit demselben Pepper", async () => {
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -111,7 +154,7 @@ describe("Overlay-Token-Service", () => {
   });
 
   it("weist einen Token nach dem Widerruf ab", async () => {
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -121,6 +164,7 @@ describe("Overlay-Token-Service", () => {
     const token = tokenFromUrl(issued.overlayUrl);
 
     await expect(revokeOverlayToken(database as unknown as D1Database, {
+      actor: TEST_ACTOR,
       channelId: "kanal-a",
       tokenId: issued.tokenId,
       reason: "Quelle entfernt",
@@ -147,7 +191,7 @@ describe("Overlay-Token-Service", () => {
   });
 
   it("weist einen Token nach dem Löschen seines Kanals ab", async () => {
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -165,7 +209,7 @@ describe("Overlay-Token-Service", () => {
   });
 
   it("schreibt last_used_at höchstens alle fünf Minuten", async () => {
-    const issued = await issueOverlayToken(database as unknown as D1Database, {
+    const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -193,5 +237,65 @@ describe("Overlay-Token-Service", () => {
     expect(first?.lastUsedAt).toBe("2026-09-18T00:00:00.000Z");
     expect(second?.lastUsedAt).toBe(first?.lastUsedAt);
     expect(third?.lastUsedAt).toBe("2026-09-18T00:06:00.000Z");
+  });
+
+  it("gibt kein Token aus, wenn die Mitgliedschaft zwischen Guard und Mutation entzogen wird", async () => {
+    // Zwischen dem Guard und der Ausgabe liegt request.text(). Ein Client kann
+    // den Body offen lassen, bis ihm der Zugriff entzogen wurde. Nachgestellt
+    // wurde eine Ausgabe nach entzogener Mitgliedschaft — Token unbefristet.
+    await database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+      .bind("kanal-a", TEST_ACTOR.userId).run();
+
+    await expect(issueOverlayToken(database as unknown as D1Database, {
+      channelId: "kanal-a",
+      actor: TEST_ACTOR,
+      pepper: pepper(4),
+      publicOrigin: "https://brobot.example",
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    })).resolves.toBeNull();
+
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_tokens")
+      .first<{ count: number }>()).resolves.toEqual({ count: 0 });
+  });
+
+  it("gibt kein Token aus, wenn die Session widerrufen ist", async () => {
+    await database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ?")
+      .bind("2026-09-18T00:30:00.000Z", TEST_ACTOR.sessionId).run();
+
+    await expect(issueOverlayToken(database as unknown as D1Database, {
+      channelId: "kanal-a",
+      actor: TEST_ACTOR,
+      pepper: pepper(4),
+      publicOrigin: "https://brobot.example",
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    })).resolves.toBeNull();
+
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_tokens")
+      .first<{ count: number }>()).resolves.toEqual({ count: 0 });
+  });
+
+  it("widerruft kein Token, wenn die Session widerrufen ist", async () => {
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a",
+      pepper: pepper(4),
+      publicOrigin: "https://brobot.example",
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    await database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ?")
+      .bind("2026-09-18T00:30:00.000Z", TEST_ACTOR.sessionId).run();
+
+    await expect(revokeOverlayToken(database as unknown as D1Database, {
+      actor: TEST_ACTOR,
+      channelId: "kanal-a",
+      tokenId: issued.tokenId,
+      reason: "Test",
+      revokedAt: "2026-09-18T01:00:00.000Z",
+    })).resolves.toBe(false);
+
+    await expect(database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
+      .bind(issued.tokenId).first()).resolves.toEqual({ revoked_at: null });
   });
 });

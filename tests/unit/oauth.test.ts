@@ -53,7 +53,7 @@ describe("Twitch-OAuth", () => {
   it("akzeptiert keinen manipulierten State", async () => {
     const { database } = fakeDatabase();
     const started = await startOAuthAuthorization(database, environment, "login", "2026-09-18T00:00:00.000Z");
-    const parsed = await verifyOAuthState(`${started.state}x`, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:00:00.000Z");
+    const parsed = await verifyOAuthState(`${started.state}x`, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:00:00.000Z", started.stateNonce);
 
     expect(parsed).toBeNull();
   });
@@ -61,7 +61,7 @@ describe("Twitch-OAuth", () => {
   it("liest einen signierten State ohne zusätzliche Verifier-Daten", async () => {
     const { database } = fakeDatabase();
     const started = await startOAuthAuthorization(database, environment, "bot", "2026-09-18T00:00:00.000Z");
-    const state = await verifyOAuthState(started.state, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:00:00.000Z");
+    const state = await verifyOAuthState(started.state, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:00:00.000Z", started.stateNonce);
 
     expect(state?.purpose).toBe("bot");
     expect(state?.transactionId).toBe(started.transactionId);
@@ -101,7 +101,7 @@ describe("Twitch-OAuth", () => {
   it("verifiziert ablaufende States nicht", async () => {
     const { database } = fakeDatabase();
     const started = await startOAuthAuthorization(database, environment, "login", "2026-09-18T00:00:00.000Z");
-    const state = await verifyOAuthState(started.state, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:11:00.000Z");
+    const state = await verifyOAuthState(started.state, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:11:00.000Z", started.stateNonce);
 
     expect(state).toBeNull();
   });

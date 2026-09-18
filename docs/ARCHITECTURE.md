@@ -105,6 +105,22 @@ Bild oder einer im Overlay-Bundle fest eingetragenen Versionszeichenkette.
    einem D1-Batch ausgeführt; ohne erfolgreiche Änderung gibt es keinen Audit-
    Eintrag.
 
+7. **Die Session ist Teil der Mutation, nicht nur des Guards.** Zwischen dem
+   Guard und der Mutation liegt das Lesen des Request-Bodys — ein Fenster, das
+   ein Client beliebig lange offen halten kann. Deshalb prüft jede schreibende
+   Mutation im selben Batch erneut, ob die Session des Akteurs existiert, nicht
+   widerrufen und nicht abgelaufen ist, ob die Login-Identität lebt und ob die
+   Kanalrolle noch trägt. Das gilt auch für die Ausgabe und den Widerruf von
+   Overlay-Token. Eine Prüfung nur im Guard lässt eine widerrufene Session
+   dauerhaft Rechte vergeben.
+
+8. **Nur ein `broadcaster` vergibt die Rolle `broadcaster`.** Ein Verwalter
+   könnte sonst ein Zweitkonto zum Broadcaster machen und danach den
+   ursprünglichen Broadcaster entfernen; der Schutz des letzten Broadcasters
+   greift dann nicht, weil zwischenzeitlich zwei existieren. Die Regel steht in
+   der SQL-Mutation, nicht nur im Handler. Was ein Verwalter darüber hinaus
+   nicht darf, ist noch offen und gehört zu #17.
+
 Diese Entscheidungen halten den ersten Betrieb klein und bewahren trotzdem die notwendige Trennung zwischen Kanal, Benutzer, Twitch-Verbindung und Modulaktivierung.
 
 ## Mandantenmodell
