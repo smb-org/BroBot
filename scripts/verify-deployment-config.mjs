@@ -3,6 +3,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseEnv } from "node:util";
 
+import { readWranglerConfig } from "./read-wrangler-config.mjs";
+
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const deploymentBindings = [
   "TWITCH_CLIENT_ID",
@@ -27,13 +29,24 @@ const expectedWorkerNames = {
   production: "brobot",
 };
 
+const isAbsoluteOrigin = (value) => {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.origin === value &&
+      url.username === "" &&
+      url.password === "" &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+};
+
 const readSourceConfig = async () => {
-  const source = await readFile(path.join(projectRoot, "wrangler.jsonc"), "utf8");
-  // Bewusst nur ganzzeilige `//`-Kommentare: ein Kommentar hinter einem Wert
-  // überlebt das Strippen nicht und lässt JSON.parse scheitern. Deshalb
-  // stehen Kommentare in wrangler.jsonc immer auf eigener Zeile. Wird das zu
-  // eng, kommt ein echter JSONC-Parser statt dieser Zeile.
-  return JSON.parse(source.replace(/^\s*\/\/.*$/gm, ""));
+  return readWranglerConfig(path.join(projectRoot, "wrangler.jsonc"));
 };
 
 const requiredSecretsFor = (config, environment) => {
@@ -209,6 +222,11 @@ const validateDeploymentValues = (environment, values, required) => {
   });
   if (placeholders.length > 0) {
     failures.push(`Platzhalterwerte sind nicht erlaubt: ${placeholders.join(", ")}`);
+  }
+
+  const origin = values.PUBLIC_ORIGIN;
+  if (origin !== undefined && !placeholderPattern.test(origin) && !isAbsoluteOrigin(origin)) {
+    failures.push("Ungültige absolute Origin: PUBLIC_ORIGIN");
   }
 
   const malformedKeyRings = [...keyRingSecretNames].filter((name) =>

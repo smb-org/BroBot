@@ -219,7 +219,15 @@ Freigabe.
 | `ASSETS` | statische Dashboard- und Overlay-Dateien aus `dist/client` |
 | `CF_VERSION_METADATA` | Versionsmetadaten des Deployments |
 
-`/healthz` prüft eine im Worker hinterlegte Liste (`REQUIRED_SECRET_NAMES`) und meldet einen Namen als fehlend, wenn der zugehörige Wert leer ist, noch einen Platzhalter (`replace-with`, `example.invalid`) enthält oder ein bekanntes Format verletzt — niemals den Wert selbst. `pnpm run config:verify` stellt sicher, dass diese Liste im Worker, `secrets.required` in `wrangler.jsonc` (alle Umgebungen) und das Verify-Script selbst übereinstimmen; weichen sie voneinander ab, schlägt die Prüfung fehl.
+`/healthz` prüft die sieben Secret-Namen aus der im Worker hinterlegten Liste
+(`REQUIRED_SECRET_NAMES`), die Ressourcen-Bindings `DB`, `CHANNEL`, `ASSETS` und
+`CF_VERSION_METADATA`, `PUBLIC_ORIGIN` als absolute Origin sowie die jüngste
+D1-Migration samt ihrem Schema-Sentinel. Bei Fehlern meldet die Antwort nur
+Namen wie `PUBLIC_ORIGIN`, `DB` oder `DB_SCHEMA`, niemals Secret-Werte. Die
+Prüfung liest das Schema mit einem einzelnen Metadaten-Read und schreibt nichts.
+`pnpm run config:verify` stellt sicher, dass die Secret-Liste im Worker,
+`secrets.required` in `wrangler.jsonc` (alle Umgebungen) und das Verify-Script
+selbst übereinstimmen; weichen sie voneinander ab, schlägt die Prüfung fehl.
 
 ## Lokale Entwicklung
 
@@ -278,7 +286,7 @@ pnpm run deploy:production:local-with-secrets
 ```
 
 Diese beiden Skripte prüfen vor dem Deploy Umgebung, Worker-Namen, `APP_ENV`,
-Secret-Namen und Platzhalter und übergeben ausnahmsweise mit
+Secret-Namen, die absolute Origin und Platzhalter und übergeben ausnahmsweise mit
 `--secrets-file` alle sieben Werte. Die `.env`-Dateien bleiben außerhalb des
 Repositories. Die CI-Skripte heißen ausdrücklich
 `deploy:staging:ci-code-only` und `deploy:production:ci-code-only`; sie
@@ -291,7 +299,11 @@ Nach einem Deploy prüfen:
 curl -i https://<öffentlicher-origin>/healthz
 ```
 
-`200` bedeutet, dass die erwarteten lokalen Bindings vorhanden sind. Bei `503` enthält die Antwort ausschließlich die Namen fehlender Bindings, niemals deren Werte.
+`200` bedeutet, dass die erwarteten Secrets und Ressourcen-Bindings vorhanden,
+die Origin gültig und das Schema der jüngsten Migration verfügbar ist. Bei
+`503` enthält die Antwort ausschließlich Fehlernamen wie `DB`, `CHANNEL`,
+`ASSETS`, `CF_VERSION_METADATA`, `PUBLIC_ORIGIN`, `DB_SCHEMA` oder einen der
+betroffenen Secret-Namen, niemals Werte.
 
 ## Twitch-Login und Bot-Verbindung
 
