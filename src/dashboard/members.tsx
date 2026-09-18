@@ -13,7 +13,11 @@ import {
 interface MembersPageProperties {
   channelId: string;
   ownRole: PanelChannelRole;
+  /** Eigene Twitch-User-ID, um den eigenen Eintrag zu erkennen. */
+  eigeneUserId: string;
   members: PanelMember[];
+  /** Broadcaster im gesamten Kanal, nicht auf dieser Seite. */
+  broadcasterCount: number;
   nextCursor: string | null;
   loading: boolean;
   loadingNextPage: boolean;
@@ -41,11 +45,45 @@ const errorMessage = (error: unknown): string => {
 
 const canManage = (role: PanelChannelRole): boolean => role !== "bediener";
 
+/**
+ * Was der Worker ablehnen würde, bietet die Oberfläche nicht als Möglichkeit
+ * an. Ein Knopf, der garantiert scheitert, sieht aus wie eine Option — man
+ * muss ihn drücken, um zu erfahren, dass es keine ist.
+ *
+ * Gesperrt wird mit Begründung statt versteckt: Ein verschwundener Knopf wirft
+ * die Frage auf, ob etwas kaputt ist; ein gesperrter mit Grund beantwortet sie.
+ *
+ * Die Prüfung im Worker bleibt davon unberührt. Das hier ist Komfort, keine
+ * Sicherheitsgrenze.
+ */
+const letzterBroadcaster = (member: PanelMember, broadcasterCount: number): boolean =>
+  member.role === "broadcaster" && broadcasterCount <= 1;
+
+const entzugGesperrt = (member: PanelMember, broadcasterCount: number): string | null =>
+  letzterBroadcaster(member, broadcasterCount)
+    ? "Der letzte Broadcaster dieses Kanals kann nicht entfernt werden."
+    : null;
+
+/**
+ * Rollenwerte, die für diesen Eintrag tatsächlich durchgehen. Die eigene Rolle
+ * lässt sich nicht erhöhen, und der letzte Broadcaster nicht herabstufen.
+ */
+const waehlbareRollen = (
+  member: PanelMember,
+  eigeneUserId: string,
+  broadcasterCount: number,
+): readonly PanelChannelRole[] => {
+  if (letzterBroadcaster(member, broadcasterCount)) return [member.role];
+  if (member.userId !== eigeneUserId) return manageableRoles;
+  const rang: Record<PanelChannelRole, number> = { bediener: 0, verwalter: 1, broadcaster: 2 };
+  return manageableRoles.filter((rolle) => rang[rolle] <= rang[member.role]);
+};
+
 const memberLabel = (member: PanelMember): string =>
   member.displayName ?? (member.login === null ? "Nicht auflösbar" : `@${member.login}`);
 
-const roleOptions = (): ReactElement[] =>
-  manageableRoles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>);
+const roleOptions = (rollen: readonly PanelChannelRole[] = manageableRoles): ReactElement[] =>
+  rollen.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>);
 
 const accessConfirmation = (role: PanelChannelRole): string =>
   `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${roleLabel(role)}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt. Zugriff freigeben?`;
@@ -53,12 +91,16 @@ const accessConfirmation = (role: PanelChannelRole): string =>
 const MemberTable = ({
   members,
   canManageMembers,
+  broadcasterCount,
+  eigeneUserId,
   onRoleChange,
   onRemove,
   busyUserId,
 }: {
   members: PanelMember[];
   canManageMembers: boolean;
+  broadcasterCount: number;
+  eigeneUserId: string;
   onRoleChange: (userId: string, role: PanelChannelRole) => void;
   onRemove: (member: PanelMember) => void;
   busyUserId: string | null;
@@ -88,15 +130,30 @@ const MemberTable = ({
                   <select
                     aria-label={`Rolle für ${memberLabel(member)}`}
                     value={member.role}
-                    disabled={busyUserId === member.userId}
+                    disabled={busyUserId === member.userId || letzterBroadcaster(member, broadcasterCount)}
+                    title={entzugGesperrt(member, broadcasterCount) ?? undefined}
                     onChange={(event) => onRoleChange(member.userId, event.target.value as PanelChannelRole)}
                   >
-                    {roleOptions()}
+                    {roleOptions(waehlbareRollen(member, eigeneUserId, broadcasterCount))}
                   </select>
                 ) : roleLabel(member.role)}
               </td>
               <td className="zahl">{formatJoinDate(member.joinedAt)}</td>
-              {canManageMembers ? <td><button className="button button--quiet" type="button" aria-label={`Zugriff für ${memberLabel(member)} entziehen`} disabled={busyUserId === member.userId} onClick={() => onRemove(member)}>Entziehen</button></td> : null}
+              {canManageMembers ? (
+                <td>
+                  <button
+                    className="button button--quiet"
+                    type="button"
+                    aria-label={`Zugriff für ${memberLabel(member)} entziehen`}
+                    disabled={busyUserId === member.userId || entzugGesperrt(member, broadcasterCount) !== null}
+                    title={entzugGesperrt(member, broadcasterCount) ?? undefined}
+                    onClick={() => onRemove(member)}
+                  >Entziehen</button>
+                  {entzugGesperrt(member, broadcasterCount) === null
+                    ? null
+                    : <span className="sperrgrund">Letzter Broadcaster</span>}
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>
@@ -108,7 +165,9 @@ const MemberTable = ({
 export const MembersPage = ({
   channelId,
   ownRole,
+  eigeneUserId,
   members,
+  broadcasterCount,
   nextCursor,
   loading,
   loadingNextPage,
@@ -173,7 +232,11 @@ export const MembersPage = ({
   };
 
   const handleRemove = async (member: PanelMember): Promise<void> => {
-    if (!window.confirm(`Zugriff für ${memberLabel(member)} wirklich entziehen? Die Person verliert den Zugang zu diesem Kanal und allen kanalbezogenen Panel-Daten und -Funktionen.`)) return;
+    const selbst = member.userId === eigeneUserId;
+    const frage = selbst
+      ? `Deinen eigenen Zugang zu diesem Kanal wirklich entziehen? Du sperrst dich damit selbst aus und kommst nur über eine andere berechtigte Person zurück.`
+      : `Zugriff für ${memberLabel(member)} wirklich entziehen? Die Person verliert den Zugang zu diesem Kanal und allen kanalbezogenen Panel-Daten und -Funktionen.`;
+    if (!window.confirm(frage)) return;
     setBusyUserId(member.userId);
     setActionError(null);
     try {
@@ -216,7 +279,7 @@ export const MembersPage = ({
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
         {loading || error !== null ? null : <>
-          <MemberTable members={members} canManageMembers={canManageMembers} onRoleChange={(userId, role) => { void handleRoleChange(userId, role); }} onRemove={(member) => { void handleRemove(member); }} busyUserId={busyUserId} />
+          <MemberTable members={members} canManageMembers={canManageMembers} broadcasterCount={broadcasterCount} eigeneUserId={eigeneUserId} onRoleChange={(userId, role) => { void handleRoleChange(userId, role); }} onRemove={(member) => { void handleRemove(member); }} busyUserId={busyUserId} />
           {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loadingNextPage}>{loadingNextPage ? "Weitere Mitglieder werden geladen …" : "Weitere Mitglieder laden"}</button>}
         </>}
       </section>

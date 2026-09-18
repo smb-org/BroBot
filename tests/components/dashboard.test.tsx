@@ -89,6 +89,98 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
+  it("stellt den letzten Broadcaster nicht als entziehbar dar", async () => {
+    // Der Worker würde beides ablehnen. Ein Knopf, der garantiert scheitert,
+    // sieht aus wie eine Möglichkeit — man muss ihn drücken, um zu erfahren,
+    // dass es keine ist. Gesperrt mit Grund statt versteckt: ein verschwundener
+    // Knopf wirft die Frage auf, ob etwas kaputt ist.
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const members = {
+      members: [{ userId: "100", login: "esembe", displayName: "esembe", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" }],
+      nextCursor: null,
+      broadcasterCount: 1,
+      viewerUserId: "100",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/members")) return jsonResponse(members);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+
+    expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
+    expect(screen.getByText("Letzter Broadcaster")).toBeInTheDocument();
+
+    // Das Auswahlfeld bietet keinen Wert an, der abgelehnt würde.
+    const rolle = screen.getByRole("combobox", { name: "Rolle für esembe" });
+    expect(rolle).toBeDisabled();
+    expect(within(rolle).getAllByRole("option").map((o) => o.textContent)).toEqual(["Broadcaster"]);
+  });
+
+  it("lässt den Entzug zu, sobald ein zweiter Broadcaster bleibt", async () => {
+    // Gegenprobe: Die Sperre darf den erlaubten Fall nicht mitsperren.
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const members = {
+      members: [
+        { userId: "100", login: "esembe", displayName: "esembe", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" },
+        { userId: "200", login: "zweit", displayName: "Zweit", role: "broadcaster", joinedAt: "2026-09-18T12:00:00.000Z" },
+      ],
+      nextCursor: null,
+      broadcasterCount: 2,
+      viewerUserId: "100",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/members")) return jsonResponse(members);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+
+    expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeEnabled();
+    expect(screen.queryByText("Letzter Broadcaster")).not.toBeInTheDocument();
+  });
+
+  it("warnt beim Entzug des eigenen Zugangs ausdrücklich vor der Aussperrung", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const members = {
+      members: [
+        { userId: "100", login: "esembe", displayName: "esembe", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" },
+        { userId: "200", login: "zweit", displayName: "Zweit", role: "broadcaster", joinedAt: "2026-09-18T12:00:00.000Z" },
+      ],
+      nextCursor: null,
+      broadcasterCount: 2,
+      viewerUserId: "100",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/members")) return jsonResponse(members);
+      return jsonResponse({}, 404);
+    }));
+    const frage = vi.fn((meldung: string) => { void meldung; return false; });
+    vi.stubGlobal("confirm", frage);
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff für esembe entziehen" }));
+
+    expect(frage).toHaveBeenCalledOnce();
+    expect(frage.mock.calls.at(0)?.[0] ?? "").toContain("selbst aus");
+
+    // Fremder Eintrag: dieselbe Aktion, andere Frage.
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff für Zweit entziehen" }));
+    expect(frage.mock.calls.at(1)?.[0] ?? "").not.toContain("selbst aus");
+  });
+
   it("zeigt Mitgliedschaften und die Verwaltungsaktion nur für verwaltende Rollen", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const members = {

@@ -289,6 +289,8 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .member-table select,
 .member-table .button { width: auto; min-height: 34px; padding: 6px var(--s3); }
 .member-table td:last-child { text-align: right; }
+/* Der Grund steht an der gesperrten Aktion, nicht als Meldung darueber. */
+.sperrgrund { display: block; margin-top: 2px; color: var(--text-4); font-size: 11px; }
 
 /* ── Bedienelemente ──────────────────────────────────────
    Genau eine helle Aktion pro Bereich. Zerstoerendes ist still, bis man

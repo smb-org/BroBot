@@ -65,6 +65,18 @@ export interface PanelMember {
 export interface PanelMembersResponse {
   members: PanelMember[];
   nextCursor: string | null;
+  /**
+   * Broadcaster im gesamten Kanal, nicht auf dieser Seite. Die Oberfläche
+   * braucht die Zahl, um den letzten Broadcaster zu erkennen, und darf sie
+   * bei seitenweiser Liste nicht selbst ermitteln.
+   */
+  broadcasterCount: number;
+  /**
+   * Twitch-User-ID der abrufenden Person. Die Oberfläche muss den eigenen
+   * Eintrag erkennen, um Selbstentzug und Selbstherabstufung richtig
+   * darzustellen; sie kennt ihn sonst nirgends.
+   */
+  viewerUserId: string;
 }
 
 export interface PanelTwitchUser {

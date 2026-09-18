@@ -722,6 +722,39 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
+  it("liefert Broadcaster-Zahl und eigene User-ID mit der Mitgliederliste", async () => {
+    // Beides braucht die Oberfläche, um den letzten Broadcaster und den eigenen
+    // Eintrag zu erkennen. Bei seitenweiser Liste darf sie es nicht selbst
+    // zählen: die Zahl gilt für den Kanal, nicht für die Seite.
+    await setupChannel(database, "broadcaster");
+    await insertMember(database, "kanal-a", "user-2", "verwalter");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members"),
+      environment,
+    );
+    const body = await response.json<{ broadcasterCount: number; viewerUserId: string }>();
+
+    expect(response.status).toBe(200);
+    expect(body.broadcasterCount).toBe(1);
+    expect(body.viewerUserId).toBe("user-1");
+  });
+
+  it("zählt Broadcaster über den ganzen Kanal, nicht über die abgerufene Seite", async () => {
+    await setupChannel(database, "broadcaster");
+    await insertMember(database, "kanal-a", "user-2", "broadcaster");
+    await insertMember(database, "kanal-a", "user-3", "bediener");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members?limit=1"),
+      environment,
+    );
+    const body = await response.json<{ members: unknown[]; broadcasterCount: number }>();
+
+    expect(body.members).toHaveLength(1);
+    expect(body.broadcasterCount).toBe(2);
+  });
+
   it("weist eine schreibende Mitgliederroute ohne CSRF-Token ab", async () => {
     await setupChannel(database);
 
