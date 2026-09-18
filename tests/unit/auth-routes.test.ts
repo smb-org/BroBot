@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { authRouter, getSessionFromRequest } from "../../src/worker/auth/routes";
+import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { TestD1Database } from "./test-d1";
 
 const key = (byte: number): string =>
   btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
@@ -28,67 +30,6 @@ const makeEnvironment = (firstResult: unknown = null) => {
     OVERLAY_TOKEN_PEPPER: key(4),
   } as unknown as Env;
   return { environment, statement };
-};
-
-const makeSessionEnvironment = () => {
-  let session: Record<string, string | null> | null = null;
-  let identity = {
-    user_id: "user-1",
-    login: "tester",
-    scopes_json: "[]",
-    access_token_ciphertext: "access-ciphertext",
-    refresh_token_ciphertext: "refresh-ciphertext",
-    expires_at: "2099-09-19T00:00:00.000Z",
-    status: "connected",
-    reason: null as string | null,
-    created_at: "2099-09-18T00:00:00.000Z",
-    updated_at: "2099-09-18T00:00:00.000Z",
-  };
-  const prepare = vi.fn((sql: string) => ({
-    bind: vi.fn().mockReturnThis(),
-    first: vi.fn().mockImplementation(() => {
-      if (sql.includes("FROM auth_sessions") && sql.includes("JOIN twitch_login_identity")) {
-        return session !== null && identity.status !== "revoked" ? session : null;
-      }
-      if (sql.includes("FROM auth_sessions")) return session;
-      if (sql.includes("FROM twitch_login_identity")) return identity;
-      return null;
-    }),
-    run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
-    all: vi.fn().mockResolvedValue({ results: [] }),
-  }));
-  const environment = {
-    DB: { prepare } as unknown as D1Database,
-    TWITCH_CLIENT_ID: "client-id",
-    TWITCH_CLIENT_SECRET: "client-secret",
-    TWITCH_BOT_LOGIN: "brobot",
-    TWITCH_EVENTSUB_SECRET: JSON.stringify({ active: { id: "eventsub-v1", key: key(3) }, retired: [] }),
-    PUBLIC_ORIGIN: "https://brobot.example",
-    SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
-    SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
-    OVERLAY_TOKEN_PEPPER: key(4),
-  } as unknown as Env;
-  return {
-    environment,
-    revokeIdentityThenCreateSession: () => {
-      identity = {
-        ...identity,
-        status: "revoked",
-        reason: "authorization_revoked",
-        updated_at: "2099-09-18T00:00:01.000Z",
-      };
-      session = {
-        session_id: "session-1",
-        user_id: "user-1",
-        login: "tester",
-        expires_at: "2099-09-19T00:00:00.000Z",
-        created_at: "2099-09-18T00:00:02.000Z",
-        updated_at: "2099-09-18T00:00:02.000Z",
-        revoked_at: null,
-        revocation_reason: null,
-      };
-    },
-  };
 };
 
 const fetchWith = (...responses: Response[]) => {
@@ -139,7 +80,7 @@ describe("Auth-Routen", () => {
     const cookie = response.headers.get("set-cookie") ?? "";
 
     expect(response.status).toBe(302);
-    expect(cookie).toContain("brobot_session=");
+    expect(cookie).toContain("__Host-brobot_session=");
     expect(cookie).toContain("HttpOnly; Secure; SameSite=Lax");
     expect(cookie).not.toContain("access");
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("user-1") && args.includes("tester"))).toBe(true);
@@ -197,7 +138,7 @@ describe("Auth-Routen", () => {
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("bot-user") && args.includes("BROBOT"))).toBe(true);
   });
 
-  it("beendet eine Session serverseitig und löscht das Cookie", async () => {
+  it("stellt einer gültigen Session ein gebundenes CSRF-Token aus", async () => {
     const { environment } = makeEnvironment({
       session_id: "session-1",
       user_id: "user-1",
@@ -208,15 +149,174 @@ describe("Auth-Routen", () => {
       revoked_at: null,
       revocation_reason: null,
     });
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-1" },
+      environment.SESSION_COOKIE_KEYS,
+      environment.SESSION_ENCRYPTION_KEYS,
+    );
+
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/api/csrf", {
+        headers: { Cookie: `__Host-brobot_session=${sessionCookie}` },
+      }),
+      environment,
+    );
+
+    const body = await response.json<{ token: string }>();
+    expect(response.status).toBe(200);
+    expect(body.token).toBeTruthy();
+    expect(response.headers.get("set-cookie")).toContain("__Host-brobot_csrf=");
+    expect(response.headers.get("set-cookie")).not.toContain("HttpOnly");
+  });
+
+  it("weist einen schreibenden Logout ohne CSRF-Token zurück", async () => {
+    const { environment } = makeEnvironment({
+      session_id: "session-1",
+      user_id: "user-1",
+      login: "tester",
+      expires_at: "2099-09-19T00:00:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+      updated_at: "2099-09-18T00:00:00.000Z",
+      revoked_at: null,
+      revocation_reason: null,
+    });
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-1" },
+      environment.SESSION_COOKIE_KEYS,
+      environment.SESSION_ENCRYPTION_KEYS,
+    );
+
     const response = await authRouter.fetch(
       new Request("https://brobot.example/auth/logout", {
-        headers: { Cookie: "brobot_session=invalid" },
+        method: "POST",
+        headers: { Cookie: `__Host-brobot_session=${sessionCookie}` },
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("beendet eine Session serverseitig und löscht das Cookie mit CSRF-Token", async () => {
+    const { environment } = makeEnvironment({
+      session_id: "session-1",
+      user_id: "user-1",
+      login: "tester",
+      expires_at: "2099-09-19T00:00:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+      updated_at: "2099-09-18T00:00:00.000Z",
+      revoked_at: null,
+      revocation_reason: null,
+    });
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-1" },
+      environment.SESSION_COOKIE_KEYS,
+      environment.SESSION_ENCRYPTION_KEYS,
+    );
+    const csrfToken = await createCsrfToken(
+      "session-1",
+      environment.SESSION_COOKIE_KEYS,
+      "2026-09-18T00:00:00.000Z",
+    );
+
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/logout", {
+        method: "POST",
+        headers: {
+          Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrfToken}`,
+          "X-CSRF-Token": csrfToken,
+        },
       }),
       environment,
     );
 
     expect(response.status).toBe(204);
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it.each([
+    ["nicht parsebarer", "kein-datum"],
+    ["tatsächlich abgelaufener", "2000-01-01T00:00:00.000Z"],
+  ])("verwirft eine %s Session-Ablaufzeit aus der Datenbank", async (_description, expiresAt) => {
+    const { environment } = makeEnvironment({
+      session_id: "session-1",
+      user_id: "user-1",
+      login: "tester",
+      expires_at: expiresAt,
+      created_at: "2026-09-18T00:00:00.000Z",
+      updated_at: "2026-09-18T00:00:00.000Z",
+      revoked_at: null,
+      revocation_reason: null,
+    });
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-1" },
+      environment.SESSION_COOKIE_KEYS,
+      environment.SESSION_ENCRYPTION_KEYS,
+    );
+
+    await expect(getSessionFromRequest(
+      new Request("https://brobot.example/", {
+        headers: { Cookie: `__Host-brobot_session=${sessionCookie}` },
+      }),
+      environment,
+    )).resolves.toBeNull();
+  });
+
+  it("akzeptiert den CSRF-Token nach dem Logout nicht erneut", async () => {
+    const { environment, statement } = makeEnvironment({
+      session_id: "session-1",
+      user_id: "user-1",
+      login: "tester",
+      expires_at: "2099-09-19T00:00:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+      updated_at: "2099-09-18T00:00:00.000Z",
+      revoked_at: null,
+      revocation_reason: null,
+    });
+    let revoked = false;
+    statement.run.mockImplementation(() => {
+      revoked = true;
+      return { success: true, meta: { changes: 1 } };
+    });
+    statement.first.mockImplementation(() => revoked ? {
+      session_id: "session-1",
+      user_id: "user-1",
+      login: "tester",
+      expires_at: "2099-09-19T00:00:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+      updated_at: "2099-09-18T00:00:00.000Z",
+      revoked_at: "2026-09-18T00:00:00.000Z",
+      revocation_reason: "logout",
+    } : {
+      session_id: "session-1",
+      user_id: "user-1",
+      login: "tester",
+      expires_at: "2099-09-19T00:00:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+      updated_at: "2099-09-18T00:00:00.000Z",
+      revoked_at: null,
+      revocation_reason: null,
+    });
+    const sessionCookie = await createSessionCookie(
+      { sessionId: "session-1" },
+      environment.SESSION_COOKIE_KEYS,
+      environment.SESSION_ENCRYPTION_KEYS,
+    );
+    const csrfToken = await createCsrfToken(
+      "session-1",
+      environment.SESSION_COOKIE_KEYS,
+      "2026-09-18T00:00:00.000Z",
+    );
+    const request = new Request("https://brobot.example/auth/logout", {
+      method: "POST",
+      headers: {
+        Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrfToken}`,
+        "X-CSRF-Token": csrfToken,
+      },
+    });
+
+    await expect(authRouter.fetch(request, environment)).resolves.toHaveProperty("status", 204);
+    await expect(authRouter.fetch(request, environment)).resolves.toHaveProperty("status", 401);
   });
 
   it("liefert die Identität aus der D1-Session und nicht aus dem Cookie", async () => {
@@ -242,24 +342,56 @@ describe("Auth-Routen", () => {
     );
 
     await expect(getSessionFromRequest(
-      new Request("https://brobot.example/", { headers: { Cookie: `brobot_session=${cookie}` } }),
+      new Request("https://brobot.example/", { headers: { Cookie: `__Host-brobot_session=${cookie}` } }),
       environment,
     )).resolves.toMatchObject({ userId: "db-user", login: "db-login" });
   });
 
-  it("akzeptiert keine Session mehr, wenn die zugehörige Login-Identität widerrufen ist", async () => {
-    const { environment, revokeIdentityThenCreateSession } = makeSessionEnvironment();
-    revokeIdentityThenCreateSession();
-    const cookie = await createSessionCookie(
-      { sessionId: "session-1" },
-      environment.SESSION_COOKIE_KEYS,
-      environment.SESSION_ENCRYPTION_KEYS,
-    );
+  it("akzeptiert keine Session mit widerrufener Login-Identität über den echten SQLite-Join", async () => {
+    const database = new TestD1Database();
+    try {
+      await database.prepare(
+        `INSERT INTO twitch_login_identity
+          (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+           expires_at, status, reason, created_at, updated_at)
+         VALUES (?, ?, '[]', 'access', 'refresh', ?, 'revoked', ?, ?, ?)`,
+      ).bind(
+        "user-1",
+        "tester",
+        "2099-09-19T00:00:00.000Z",
+        "authorization_revoked",
+        "2026-09-18T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+      ).run();
+      await database.prepare(
+        `INSERT INTO auth_sessions
+          (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        "session-1",
+        "user-1",
+        "tester",
+        "2099-09-19T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+      ).run();
+      const { environment } = makeEnvironment();
+      environment.DB = database as unknown as D1Database;
+      const cookie = await createSessionCookie(
+        { sessionId: "session-1" },
+        environment.SESSION_COOKIE_KEYS,
+        environment.SESSION_ENCRYPTION_KEYS,
+      );
 
-    await expect(getSessionFromRequest(
-      new Request("https://brobot.example/", { headers: { Cookie: `brobot_session=${cookie}` } }),
-      environment,
-    )).resolves.toBeNull();
+      await expect(getSessionFromRequest(
+        new Request("https://brobot.example/", {
+          headers: { Cookie: `__Host-brobot_session=${cookie}` },
+        }),
+        environment,
+      )).resolves.toBeNull();
+    } finally {
+      database.close();
+    }
   });
 
   it("meldet einen abgelehnten Code-Tausch ohne Tokeninhalte", async () => {

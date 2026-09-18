@@ -53,8 +53,12 @@ const responseJson = async (response: Response): Promise<Record<string, unknown>
   }
 };
 
-export const shouldRefreshBotToken = (expiresAt: string, now: string): boolean =>
-  Date.parse(expiresAt) <= Date.parse(now) + 60 * 60 * 1000;
+export const shouldRefreshBotToken = (expiresAt: string, now: string): boolean => {
+  const expiresAtMs = Date.parse(expiresAt);
+  const nowMs = Date.parse(now);
+  return !Number.isFinite(expiresAtMs) || !Number.isFinite(nowMs) ||
+    expiresAtMs <= nowMs + 60 * 60 * 1000;
+};
 
 export const refreshBotToken = async (
   fetcher: typeof fetch,

@@ -56,6 +56,14 @@ export interface BotIdentityStatusRecord {
   updatedAt: string;
 }
 
+export interface ChannelMemberRecord {
+  channelId: string;
+  userId: string;
+  role: "broadcaster" | "verwalter" | "bediener";
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface SessionRow {
   session_id: string;
   user_id: string;
@@ -110,6 +118,14 @@ interface ChannelIdRow {
   channel_id: string;
 }
 
+interface ChannelMemberRow {
+  channel_id: string;
+  user_id: string;
+  role: ChannelMemberRecord["role"];
+  created_at: string;
+  updated_at: string;
+}
+
 const mapSession = (row: SessionRow): SessionRecord => ({
   sessionId: row.session_id,
   userId: row.user_id,
@@ -152,6 +168,133 @@ const mapLoginIdentity = (row: LoginIdentityRow): LoginIdentityRecord => ({
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
+
+const mapChannelMember = (row: ChannelMemberRow): ChannelMemberRecord => ({
+  channelId: row.channel_id,
+  userId: row.user_id,
+  role: row.role,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const auditId = (): string => crypto.randomUUID();
+
+const memberJson = (member: ChannelMemberRecord | null): string => JSON.stringify(member);
+
+const getChannelMember = async (
+  db: D1Database,
+  channelId: string,
+  userId: string,
+): Promise<ChannelMemberRecord | null> => {
+  const row = await db.prepare(
+    `SELECT channel_id, user_id, role, created_at, updated_at
+       FROM channel_members
+      WHERE channel_id = ? AND user_id = ?`,
+  ).bind(channelId, userId).first<ChannelMemberRow>();
+  return row === null ? null : mapChannelMember(row);
+};
+
+export const upsertChannelMemberWithAudit = async (
+  db: D1Database,
+  actorUserId: string,
+  member: ChannelMemberRecord,
+  action: string,
+  changedAt: string,
+): Promise<void> => {
+  const before = await getChannelMember(db, member.channelId, member.userId);
+  const after: ChannelMemberRecord = {
+    ...member,
+    createdAt: before?.createdAt ?? member.createdAt,
+  };
+  const mutation = before === null
+    ? db.prepare(
+      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM channel_members
+           WHERE channel_id = ? AND user_id = ?
+        )`,
+    ).bind(
+      after.channelId,
+      after.userId,
+      after.role,
+      after.createdAt,
+      after.updatedAt,
+      after.channelId,
+      after.userId,
+    )
+    : db.prepare(
+      `UPDATE channel_members
+          SET role = ?, updated_at = ?
+        WHERE channel_id = ? AND user_id = ?
+          AND role = ?
+          AND created_at = ?
+          AND updated_at = ?`,
+    ).bind(
+      after.role,
+      after.updatedAt,
+      after.channelId,
+      after.userId,
+      before.role,
+      before.createdAt,
+      before.updatedAt,
+    );
+  const audit = db.prepare(
+    `INSERT INTO audit_log
+      (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+     SELECT ?, ?, ?, ?, ?, ?, ?
+      WHERE changes() > 0`,
+  ).bind(
+    auditId(),
+    actorUserId,
+    changedAt,
+    after.channelId,
+    action,
+    memberJson(before),
+    memberJson(after),
+  );
+  await db.batch([mutation, audit]);
+};
+
+export const deleteChannelMemberWithAudit = async (
+  db: D1Database,
+  actorUserId: string,
+  channelId: string,
+  userId: string,
+  action: string,
+  changedAt: string,
+): Promise<void> => {
+  const before = await getChannelMember(db, channelId, userId);
+  if (before === null) return;
+  const mutation = db.prepare(
+    `DELETE FROM channel_members
+      WHERE channel_id = ? AND user_id = ?
+        AND role = ?
+        AND created_at = ?
+        AND updated_at = ?`,
+  ).bind(
+    channelId,
+    userId,
+    before.role,
+    before.createdAt,
+    before.updatedAt,
+  );
+  const audit = db.prepare(
+    `INSERT INTO audit_log
+      (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+     SELECT ?, ?, ?, ?, ?, ?, ?
+      WHERE changes() > 0`,
+  ).bind(
+    auditId(),
+    actorUserId,
+    changedAt,
+    channelId,
+    action,
+    memberJson(before),
+    memberJson(null),
+  );
+  await db.batch([mutation, audit]);
+};
 
 export const createSession = async (db: D1Database, session: NewSessionRecord): Promise<void> => {
   await db.prepare(
@@ -499,7 +642,7 @@ export const consumeOAuthTransaction = async (
         SET used_at = ?
       WHERE transaction_id = ?
         AND used_at IS NULL
-        AND expires_at > ?
+        AND julianday(expires_at) > julianday(?)
       RETURNING transaction_id, purpose, expires_at, created_at`,
   ).bind(consumedAt, transactionId, consumedAt).first<OAuthTransactionRow>();
   return row === null ? null : mapOAuthTransaction(row);
@@ -522,7 +665,12 @@ export const purgeExpiredOAuthTransactions = async (
   now: string,
 ): Promise<void> => {
   await db.prepare(
-    "DELETE FROM oauth_transactions WHERE expires_at <= ? OR (used_at IS NOT NULL AND used_at <= ?)",
+    `DELETE FROM oauth_transactions
+      WHERE julianday(expires_at) IS NULL
+         OR julianday(expires_at) <= julianday(?)
+         OR (used_at IS NOT NULL AND (
+           julianday(used_at) IS NULL OR julianday(used_at) <= julianday(?)
+         ))`,
   ).bind(now, now).run();
 };
 

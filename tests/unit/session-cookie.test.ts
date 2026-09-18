@@ -55,7 +55,7 @@ describe("Session-Cookie", () => {
     const serialized = serializeSessionCookie("signed-value", 604800);
 
     expect(serialized).toBe(
-      "brobot_session=signed-value; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax",
+      "__Host-brobot_session=signed-value; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax",
     );
   });
 });

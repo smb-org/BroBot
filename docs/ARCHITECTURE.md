@@ -38,6 +38,24 @@ Das Admin- und Mod-Panel ist die primäre Bedienoberfläche. Sein Grundgerüst g
 
 Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach.
 
+### Kanalgebundene API und Schreibschutz
+
+Kanalgebundene API-Routen hängen verbindlich unter
+`/api/channels/:channelId/...`. `channelId` kommt aus dem Routenparameter und
+ist der Mandantenschlüssel; die Autorisierung prüft genau diesen Kanal in
+`channels` und die Mitgliedschaft desselben Session-Benutzers in
+`channel_members`. Eine Request-Rolle wird nicht übernommen, und eine
+Twitch-Moderatorrolle ersetzt keine Mitgliedschaft. Schreibende Routen
+verwenden den gemeinsamen Guard aus `src/worker/auth/guards.ts`, der die
+Datenbankrolle in den Hono-Kontext legt.
+
+Für schreibende Browser-Anfragen gibt `/api/csrf` ein signiertes
+Double-Submit-Token aus. Das Token ist mit dem vorhandenen
+`SESSION_COOKIE_KEYS`-Schlüsselring an die Session gebunden und muss sowohl im
+nicht-HttpOnly-Cookie als auch im `X-CSRF-Token`-Header zurückkommen; dadurch
+bleibt der Worker zustandslos und `SameSite=Lax` ist nicht die alleinige
+Abwehr.
+
 ## Verbindliche Architekturentscheidungen
 
 1. **Kein `BROADCASTER_ID`-Secret.** Der Kanal kommt aus Route und Session; die Freigabe erfolgt über eine Zeile in `channels`, nicht über einen Konfigurationswert. So wird ein Kanal nicht durch einen geheimen Konfigurationswert mit der Identität des Benutzers verwechselt.
@@ -45,6 +63,12 @@ Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas
 3. **`twitch_connections` ist eine eigene Tabelle.** Eine Broadcaster-Verbindung gehört zu Kanal und Zweck (`broadcaster`) und speichert Scopes sowie Ablauf. Der `bot`-Wert bleibt im Check-Ausdruck für einen späteren kanalbezogenen Bot erhalten, wird aber in #18 nicht verwendet: Der laufende Bot autorisiert sich einmal global in `bot_identity`, weil ein rotierendes Refresh-Token nicht je Kanal dupliziert werden darf.
 4. **Login-Tokens und Sessions bleiben getrennt.** `twitch_login_identity` hält die verschlüsselten Login- und Refresh-Tokens je Twitch-User; `auth_sessions` hält nur die kurzlebige, serverseitig widerrufbare Sitzung. Kein Token gelangt in Cookie oder Browser-Speicher.
 5. **`channel_members` existiert ab Tag 1.** Autorisierung fragt immer, ob ein User in genau diesem Kanal zugelassen ist. Eine globale Rolle außerhalb des Kanalmandanten gibt es nicht.
+
+6. **Administrative Mitgliedsänderungen werden atomar auditiert.** Die
+   Migration `0002_autorisierung.sql` begrenzt die Rollen per SQLite-`CHECK`.
+   Eine Änderung an `channel_members` und ihr Eintrag in `audit_log` werden in
+   einem D1-Batch ausgeführt; ohne erfolgreiche Änderung gibt es keinen Audit-
+   Eintrag.
 
 Diese Entscheidungen halten den ersten Betrieb klein und bewahren trotzdem die notwendige Trennung zwischen Kanal, Benutzer, Twitch-Verbindung und Modulaktivierung.
 

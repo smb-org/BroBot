@@ -98,9 +98,10 @@ pnpm install --frozen-lockfile
 pnpm run check
 ```
 
-Vor dem ersten Rollout dieser Version die D1-Migration in jeder Zielumgebung
+Vor dem ersten Rollout dieser Version die D1-Migrationen in jeder Zielumgebung
 anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
-Session-, OAuth- und Token-Tabellen anlegt:
+Session-, OAuth- und Token-Tabellen und `0002` die feste Rollenmenge sowie das
+Audit-Log anlegen:
 
 ```bash
 pnpm exec wrangler d1 migrations apply brobot-local
@@ -135,8 +136,10 @@ curl -i https://<öffentlicher-origin>/healthz
 `user:read:moderated_channels`. Twitch leitet immer auf
 `PUBLIC_ORIGIN/auth/twitch/callback` zurück. Die Session ist ein verschlüsseltes
 und signiertes `HttpOnly`-Cookie; ihre D1-Zeile bleibt beim Logout als
-widerrufen nachvollziehbar. `GET /auth/logout` widerruft die Zeile und löscht
-das Cookie. Access- und Refresh-Token dieses Logins liegen verschlüsselt in
+widerrufen nachvollziehbar. `POST /auth/logout` widerruft die Zeile und löscht
+die Cookies; der Request benötigt das Token aus `GET /api/csrf` zusätzlich als
+`X-CSRF-Token` und im `__Host-brobot_csrf`-Cookie. Access- und Refresh-Token dieses
+Logins liegen verschlüsselt in
 `twitch_login_identity`, nicht in der Session. Der stündliche Lauf validiert
 und erneuert sie; bei einem Widerruf werden die zugehörigen Sessions
 serverseitig widerrufen.

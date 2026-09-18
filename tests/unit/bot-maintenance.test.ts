@@ -139,6 +139,10 @@ const requestedUrls = (fetcher: ReturnType<typeof vi.fn>): string[] =>
   fetcher.mock.calls.map((call: unknown[]) => String(call[0]));
 
 describe("Bot-Wartung", () => {
+  it("behandelt einen nicht parsebaren Datenbank-Ablaufwert als ablaufnah", () => {
+    expect(shouldRefreshBotToken("kein-datum", "2026-09-18T00:00:00.000Z")).toBe(true);
+  });
+
   it("erneuert nur Tokens, die in weniger als einer Stunde ablaufen", () => {
     expect(shouldRefreshBotToken("2026-09-18T00:59:59.000Z", "2026-09-18T00:00:00.000Z")).toBe(true);
     expect(shouldRefreshBotToken("2026-09-18T01:00:01.000Z", "2026-09-18T00:00:00.000Z")).toBe(false);

@@ -1,6 +1,6 @@
 import { decryptJson, encryptJson, parseKeyRing, signJson, verifyJson } from "./crypto";
 
-export const SESSION_COOKIE_NAME = "brobot_session";
+export const SESSION_COOKIE_NAME = "__Host-brobot_session";
 export const SESSION_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
 export interface SessionCookiePayload {
