@@ -57,6 +57,32 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   headers: { "Content-Type": "application/json" },
 });
 
+/**
+ * Stellt Kanal- und Mitgliederantworten und öffnet die Mitgliederseite. Die
+ * drei Zugriffstests unterscheiden sich nur in den Mitgliedsdaten; alles
+ * andere ist Gerüst.
+ */
+const zeigeMitglieder = async (mitglieder: {
+  members: unknown[];
+  broadcasterCount: number;
+  viewerUserId: string;
+}): Promise<void> => {
+  const channel = healthyChannel("kanal-a", "Alpha");
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+    const path = requestUrl(input).pathname;
+    if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+    if (path.endsWith("/members")) return jsonResponse({ ...mitglieder, nextCursor: null });
+    return jsonResponse({}, 404);
+  }));
+  window.history.replaceState({}, "", "/channels/kanal-a/members");
+  render(<DashboardApp />);
+  await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+};
+
+const broadcaster = (userId: string, login: string, displayName: string) => ({
+  userId, login, displayName, role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z",
+});
+
 const requestUrl = (input: RequestInfo | URL): URL => {
   if (input instanceof Request) return new URL(input.url);
   if (input instanceof URL) return input;
@@ -94,23 +120,11 @@ describe("Dashboard-Grundgerüst", () => {
     // sieht aus wie eine Möglichkeit — man muss ihn drücken, um zu erfahren,
     // dass es keine ist. Gesperrt mit Grund statt versteckt: ein verschwundener
     // Knopf wirft die Frage auf, ob etwas kaputt ist.
-    const channel = healthyChannel("kanal-a", "Alpha");
-    const members = {
-      members: [{ userId: "100", login: "esembe", displayName: "esembe", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" }],
-      nextCursor: null,
+    await zeigeMitglieder({
+      members: [broadcaster("100", "esembe", "esembe")],
       broadcasterCount: 1,
       viewerUserId: "100",
-    };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path.endsWith("/members")) return jsonResponse(members);
-      return jsonResponse({}, 404);
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a/members");
-
-    render(<DashboardApp />);
-    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    });
 
     expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
     expect(screen.getByText("Letzter Broadcaster")).toBeInTheDocument();
@@ -123,54 +137,24 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("lässt den Entzug zu, sobald ein zweiter Broadcaster bleibt", async () => {
     // Gegenprobe: Die Sperre darf den erlaubten Fall nicht mitsperren.
-    const channel = healthyChannel("kanal-a", "Alpha");
-    const members = {
-      members: [
-        { userId: "100", login: "esembe", displayName: "esembe", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" },
-        { userId: "200", login: "zweit", displayName: "Zweit", role: "broadcaster", joinedAt: "2026-09-18T12:00:00.000Z" },
-      ],
-      nextCursor: null,
+    await zeigeMitglieder({
+      members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
-    };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path.endsWith("/members")) return jsonResponse(members);
-      return jsonResponse({}, 404);
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a/members");
-
-    render(<DashboardApp />);
-    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    });
 
     expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeEnabled();
     expect(screen.queryByText("Letzter Broadcaster")).not.toBeInTheDocument();
   });
 
   it("warnt beim Entzug des eigenen Zugangs ausdrücklich vor der Aussperrung", async () => {
-    const channel = healthyChannel("kanal-a", "Alpha");
-    const members = {
-      members: [
-        { userId: "100", login: "esembe", displayName: "esembe", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" },
-        { userId: "200", login: "zweit", displayName: "Zweit", role: "broadcaster", joinedAt: "2026-09-18T12:00:00.000Z" },
-      ],
-      nextCursor: null,
+    const frage = vi.fn((meldung: string) => { void meldung; return false; });
+    await zeigeMitglieder({
+      members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
-    };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path.endsWith("/members")) return jsonResponse(members);
-      return jsonResponse({}, 404);
-    }));
-    const frage = vi.fn((meldung: string) => { void meldung; return false; });
+    });
     vi.stubGlobal("confirm", frage);
-    window.history.replaceState({}, "", "/channels/kanal-a/members");
-
-    render(<DashboardApp />);
-    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
     fireEvent.click(screen.getByRole("button", { name: "Zugriff für esembe entziehen" }));
 
     expect(frage).toHaveBeenCalledOnce();
