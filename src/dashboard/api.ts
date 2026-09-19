@@ -7,6 +7,8 @@ import type {
   PanelMember,
   PanelMembersResponse,
   PanelModeratorStatus,
+  PanelModuleState,
+  PanelModulesResponse,
   PanelSystemResponse,
   PanelTwitchUser,
 } from "../panel-contract";
@@ -85,6 +87,9 @@ const channelPath = (channelId: string, suffix: string): string =>
 const memberPath = (channelId: string, userId?: string): string =>
   `${channelPath(channelId, "members")}${userId === undefined ? "" : `/${encodeURIComponent(userId)}`}`;
 
+const modulePath = (channelId: string, moduleId?: string): string =>
+  `${channelPath(channelId, "modules")}${moduleId === undefined ? "" : `/${encodeURIComponent(moduleId)}`}`;
+
 export const fetchChannels = (signal?: AbortSignal): Promise<PanelChannelsResponse> =>
   requestJson<PanelChannelsResponse>("/api/channels", requestOptions(signal));
 
@@ -141,6 +146,14 @@ export const fetchMembers = (
   requestOptions(signal),
 );
 
+export const fetchModules = (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<PanelModulesResponse> => requestJson<PanelModulesResponse>(
+  modulePath(channelId),
+  requestOptions(signal),
+);
+
 export const searchTwitchUser = async (
   channelId: string,
   login: string,
@@ -156,7 +169,7 @@ export const searchTwitchUser = async (
 const requestMutation = <T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
-  body?: Record<string, string>,
+  body?: Record<string, string | boolean>,
 ): Promise<T> => requestJson<{ token: string }>("/api/csrf").then(({ token }) => requestJson<T>(path, {
   method,
   headers: {
@@ -188,6 +201,16 @@ export const updateChannelMemberRole = (
 
 export const removeChannelMember = (channelId: string, userId: string): Promise<undefined> =>
   requestMutation<undefined>(memberPath(channelId, userId), "DELETE");
+
+export const setChannelModuleEnabled = (
+  channelId: string,
+  moduleId: string,
+  enabled: boolean,
+): Promise<{ module: PanelModuleState }> => requestMutation(
+  modulePath(channelId, moduleId),
+  "PATCH",
+  { enabled },
+);
 
 export const refreshModeratorStatus = (
   channelId: string,
