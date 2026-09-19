@@ -21,6 +21,9 @@ const healthyChannel = (channelId: string, displayName: string) => ({
   channelBotConsent: "granted",
   bot: { status: "connected", reason: null, updatedAt: relativeIso(0) },
   moderator,
+  // Ohne Chat-Abo empfaengt der Kanal keine Ereignisse; ein gesunder Kanal
+  // hat deshalb eines. Fehlt es, ist das eine Warnung, kein Normalzustand.
+  chatSubscription: { status: "enabled", subscriptionId: "abo-1", reason: null, updatedAt: relativeIso(0) },
   tokens: {
     botExpiresAt: relativeIso(3 * 60 * 60 * 1000),
     loginStatus: "connected",

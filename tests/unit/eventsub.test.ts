@@ -11,7 +11,7 @@ import {
   parseEventSubTimestamp,
 } from "../../src/worker/eventsub";
 import { scheduled } from "../../src/worker/scheduled";
-import { insertChannel } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const key = (byte: number): string => Buffer.from(new Uint8Array(32).fill(byte)).toString("base64url");
@@ -322,6 +322,7 @@ describe("EventSub-Eingang", () => {
 
   it("speichert einen Widerruf kanalgebunden für das spätere Panel", async () => {
     await insertChannel(database, "channel-42");
+    await insertLoginIdentityAndSession(database, "channel-42", ["channel:bot"]);
     const body = JSON.stringify({
       subscription: {
         id: "subscription-1",
@@ -346,6 +347,19 @@ describe("EventSub-Eingang", () => {
       status: "revoked",
       reason: "authorization_revoked",
     });
+    await expect(database.prepare(
+      `SELECT channel_id, subscription_type, subscription_id, status, reason
+         FROM eventsub_subscriptions`,
+    ).first()).resolves.toEqual({
+      channel_id: "channel-42",
+      subscription_type: "channel.chat.message",
+      subscription_id: "subscription-1",
+      status: "revoked",
+      reason: "authorization_revoked",
+    });
+    await expect(database.prepare(
+      "SELECT status, reason FROM twitch_login_identity WHERE user_id = 'channel-42'",
+    ).first()).resolves.toEqual({ status: "revoked", reason: "authorization_revoked" });
   });
 
   it("bewahrt einen Widerruf für einen unbekannten Kanal sichtbar auf", async () => {

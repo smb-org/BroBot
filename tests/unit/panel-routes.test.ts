@@ -288,6 +288,40 @@ describe("Panel-Leseendpunkte", () => {
     expect((await after.json<{ channelBotConsent: string }>()).channelBotConsent).toBe("granted");
   });
 
+  it("zeigt ein fehlgeschlagenes Chat-Abo im Kanalzustand", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+       VALUES (?, 'channel.chat.message', ?, NULL, 'error', ?, ?)`,
+    ).bind(
+      "kanal-a",
+      "subscription-1",
+      "rate_limited",
+      "2026-09-18T04:00:00.000Z",
+    ).run();
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+    const body = await response.json<{
+      chatSubscription: { status: string; subscriptionId: string | null; reason: string | null } | null;
+      lastError: { source: string; reason: string } | null;
+    }>();
+
+    expect(response.status).toBe(200);
+    expect(body.chatSubscription).toEqual({
+      status: "error",
+      subscriptionId: "subscription-1",
+      reason: "rate_limited",
+      updatedAt: "2026-09-18T04:00:00.000Z",
+    });
+    expect(body.lastError).toEqual({ source: "eventsub", reason: "rate_limited", at: "2026-09-18T04:00:00.000Z" });
+  });
+
   it("liefert den tatsächlichen Kanalzustand, aktive Module und gespeicherte Ursachen", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");

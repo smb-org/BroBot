@@ -7,6 +7,13 @@ import {
   type EventSubRevocationRecord,
 } from "./auth/repository";
 
+export {
+  fetchEventSubSubscriptions,
+  listDesiredEventSubTargets,
+  maintainEventSubSubscriptions,
+  reconcileEventSubSubscriptions,
+} from "./eventsub-subscriptions";
+
 export const EVENTSUB_REPLAY_WINDOW_MS = 10 * 60 * 1000;
 // Twitch-Nutzkörper sind klein; 64 KiB lässt viel Reserve für Metadaten und
 // verhindert trotzdem, dass der unauthentifizierte Eingang beliebig wächst.
