@@ -67,6 +67,17 @@ Das ist die stärkste Schutzwirkung, die überhaupt erreichbar ist, und sie kost
 
 **Folge:** Diese Daten bleiben personenbezogen. Sie sind pseudonymisiert, nicht anonymisiert — solange der Schlüssel existiert, ist der Bezug wiederherstellbar. Daraus folgen zwingend Löschfristen und ein Weg für Betroffenenanfragen.
 
+### Ausnahme: Ereignisprotokoll
+
+Das Ereignisprotokoll speichert `actor_user_id` für höchstens **14 Tage roh**.
+Das ist eine bewusste Ausnahme zu diesem Modell: Beim Anzeigen löst der Host
+die ID über Twitch Helix in Login und Anzeigenamen auf, genau wie bei der
+Mitgliederliste. Ein Hash wäre dafür nicht nutzbar. Die ID bleibt der einzige
+gespeicherte Personenbezug; Namen werden nicht zusätzlich in D1 abgelegt. Fällt
+die Helix-Auflösung aus, zeigt das Panel die gespeicherte ID. Die kurze Frist
+begrenzt den personenbezogenen Bestand. Die Zeilen sind außerdem betriebliche
+Entscheidungsbegründungen und kein kanalweiter Aktivitätszähler.
+
 ---
 
 ## 4. Rotation — was wirklich passiert
@@ -91,6 +102,7 @@ Beim flüchtigen Raum stellt sich die Frage nicht: Dort ist jeder Vorgang sein e
 | Stimmen eines Votings | mit dem Schließen, spätestens **24 Stunden** nach Ende | Der Zweck endet mit der Auswertung |
 | Gleitendes Fenster der Themen-Erkennung | mit dem Fensterablauf, spätestens **am Streamende** | #12 sieht ohnehin Verfall am Streamende vor |
 | Kanalweite Aktivitätszähler je Person | **180 Tage** rollierend | Wiederkehrende Zuschauer zu erkennen braucht Monate, nicht Jahre |
+| Modul-Ereignisse mit roher `actor_user_id` | **14 Tage** | Betriebliche Fehlersuche; die Ausnahme bleibt wegen der kurzen Frist begrenzt |
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |
 | Aggregate ohne Personenbezug | unbegrenzt | siehe Abschnitt 6 |
 

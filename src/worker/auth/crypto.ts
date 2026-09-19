@@ -121,6 +121,18 @@ const importAesKey = async (entry: KeyEntry): Promise<CryptoKey> =>
 const importHmacKey = async (entry: KeyEntry): Promise<CryptoKey> =>
   crypto.subtle.importKey("raw", toArrayBuffer(decodeBase64url(entry.key)), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 
+// Twitch verwendet transport.secret als ASCII-Schlüssel. Dieser EventSub-HMAC
+// darf deshalb nicht denselben Base64url-Decoder wie Verschlüsselung nutzen.
+const importEventSubHmacKey = async (entry: KeyEntry): Promise<CryptoKey> =>
+  crypto.subtle.importKey("raw", toArrayBuffer(encoder.encode(entry.key)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+
+export const hmacSha256 = async (value: string | Uint8Array, entry: KeyEntry): Promise<Uint8Array> =>
+  new Uint8Array(await crypto.subtle.sign(
+    "HMAC",
+    await importEventSubHmacKey(entry),
+    toArrayBuffer(typeof value === "string" ? encoder.encode(value) : value),
+  ));
+
 export const hashOverlayToken = async (token: string, pepper: string): Promise<string> => {
   const pepperBytes = decodeBase64url(pepper);
   if (pepperBytes.byteLength !== 32) throw new Error("Overlay-Pepper muss 32 Byte lang sein.");

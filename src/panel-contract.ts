@@ -50,6 +50,16 @@ export interface PanelChannelOverview extends PanelChannelState {
   activeModules: PanelActiveModule[];
 }
 
+export interface PanelModuleState {
+  id: string;
+  enabled: boolean;
+  settings: string;
+}
+
+export interface PanelModulesResponse {
+  modules: PanelModuleState[];
+}
+
 export interface PanelChannelsResponse {
   channels: PanelChannelState[];
 }
@@ -102,5 +112,21 @@ export interface PanelAuditEntry {
 
 export interface PanelAuditResponse {
   entries: PanelAuditEntry[];
+  nextCursor: string | null;
+}
+
+export interface PanelEventEntry {
+  eventId: string;
+  createdAt: string;
+  moduleId: string;
+  code: string;
+  detail: string;
+  actorUserId: string | null;
+  actorLogin: string | null;
+  actorDisplayName: string | null;
+}
+
+export interface PanelEventsResponse {
+  entries: PanelEventEntry[];
   nextCursor: string | null;
 }

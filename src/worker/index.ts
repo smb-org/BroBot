@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import { authRouter } from "./auth/routes";
 import { getHealthStatus } from "./config";
+import { eventSubRouter } from "./eventsub";
 import { panelRouter } from "./panel/routes";
 import { scheduled } from "./scheduled";
 
@@ -11,6 +12,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.route("/", authRouter);
 app.route("/", panelRouter);
+app.route("/", eventSubRouter);
 
 app.get("/healthz", async (context) => {
   const health = await getHealthStatus(context.env);

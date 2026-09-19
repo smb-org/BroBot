@@ -28,11 +28,13 @@ describe("Schema-Sentinel-Drift", () => {
     expect(LATEST_SCHEMA_MIGRATION).toBe(files.at(-1));
   });
 
-  it("nennt eine Tabelle, die genau diese Migration anlegt", () => {
+  it("nennt eine Tabelle, die genau diese Migration anlegt oder erweitert", () => {
     const source = readFileSync(path.join(migrationsDirectory, LATEST_SCHEMA_MIGRATION), "utf8");
     const created = [...source.matchAll(/CREATE TABLE(?:\s+IF NOT EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
       .map((match) => match[1]);
+    const altered = [...source.matchAll(/ALTER TABLE\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
+      .map((match) => match[1]);
 
-    expect(created).toContain(LATEST_SCHEMA_TABLE);
+    expect([...created, ...altered]).toContain(LATEST_SCHEMA_TABLE);
   });
 });

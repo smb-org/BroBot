@@ -30,16 +30,47 @@ Das spätere Mounting verwendet die Registry und hängt Modulrouten kanalbezogen
 
 ## Aktivierung und Bundles
 
-Ein Modul wird pro Kanal durch eine Zeile in `channel_modules` aktiviert:
-
-```sql
-INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-VALUES ('<channelId>', '<id>', 1, '{}');
-```
-
-Das erfordert keinen Deploy. `settings` ist JSON und bleibt dem Modul-Contract untergeordnet.
+Ein Modul wird pro Kanal über das Panel aktiviert, nicht per Hand-SQL: Ein Broadcaster
+oder Verwalter des Kanals ruft `GET /api/channels/:channelId/modules` auf, um die
+Registry mit dem gespeicherten Zustand jedes Moduls zu sehen, und schaltet es über
+`PATCH /api/channels/:channelId/modules/:moduleId` mit `{ "enabled": true }` ein oder
+aus. Ein `bediener` darf die Liste lesen, aber nicht schreiben. Beim Einschalten
+schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; eine
+eigene Route zum Bearbeiten von Einstellungen gibt es bewusst nicht — dafür ist
+`module.panel` aus dem Contract vorgesehen, sobald ein Modul eigene Einstellungen
+braucht. Das erfordert keinen Deploy.
 
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben.
+
+## Aktionen und Begründungen melden
+
+Ein Modul beschreibt gewünschte Aktionen in der geordneten Liste `actions`.
+Chat und Overlay sind semantisch getrennte Varianten; die Reihenfolge bleibt
+erhalten und neue Aktionsarten können später additiv ergänzt werden. Das Modul
+führt die Aktionen nicht selbst aus.
+
+Zusätzlich meldet ein Modul eine fachliche Entscheidung über das Feld
+`diagnostics`. Das gilt auch dann, wenn es keine Aktion erzeugt. So kann der
+Host erklären, warum eine Aktion bewusst unterblieben ist.
+
+```ts
+return {
+  actions: [{ kind: "chat", text: "Danke für den Raid!" }],
+  diagnostics: [{
+    code: "shoutout.unterdrueckt",
+    detail: { grund: "raid_erkannt", zuschauer: 8, schwelle: 10 },
+  }],
+};
+```
+
+`code` ist eine stabile, maschinenlesbare Kennung. `detail` enthält nur die
+kleinen Werte, die den Grund erklären, und wird vom Host als JSON gespeichert.
+Das Modul schreibt weder selbst in `event_log` noch verwendet es eine
+Logging-API. Das Modul begründet Nicht-Handeln. Der Host kennt Kanal, Modul,
+`triggerId`, auslösenden Nutzer und Zeitpunkt und protokolliert Handeln und
+dessen Ausgang mit host-erzeugten Diagnosen wie `chat.gesendet` oder
+`shoutout.fehlgeschlagen` samt Ursache. Dieselbe Schreibfunktion übernimmt
+auch die Begrenzung und Löschung der Zeilen; ein Executor existiert noch nicht.
 
 ## Grenzen
 

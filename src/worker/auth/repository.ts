@@ -56,6 +56,23 @@ export interface BotIdentityStatusRecord {
   updatedAt: string;
 }
 
+export interface AppAccessTokenRecord {
+  accessTokenCiphertext: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventSubRevocationRecord {
+  subscriptionId: string;
+  channelId: string;
+  subscriptionType: string;
+  status: string;
+  reason: string | null;
+  revokedAt: string;
+  updatedAt: string;
+}
+
 /**
  * Der Akteur einer Mutation. Die sessionId gehoert dazu, weil die Mutation
  * selbst pruefen muss, ob die Session noch lebt — die Rolle allein genuegt
@@ -82,6 +99,20 @@ export interface ChannelMemberCursor {
 export interface ChannelMemberPage {
   members: ChannelMemberRecord[];
   nextCursor: string | null;
+}
+
+export interface ChannelModuleRecord {
+  channelId: string;
+  moduleId: string;
+  enabled: boolean;
+  settings: string;
+}
+
+interface ChannelModuleRow {
+  channel_id: string;
+  module_id: string;
+  enabled: number;
+  settings: string;
 }
 
 interface SessionRow {
@@ -134,8 +165,25 @@ interface BotIdentityStatusRow {
   updated_at: string;
 }
 
+interface AppAccessTokenRow {
+  access_token_ciphertext: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface ChannelIdRow {
   channel_id: string;
+}
+
+interface EventSubRevocationRow {
+  subscription_id: string;
+  channel_id: string;
+  subscription_type: string;
+  status: string;
+  reason: string | null;
+  revoked_at: string;
+  updated_at: string;
 }
 
 interface BotChannelStatusCheckLockRow {
@@ -198,11 +246,35 @@ const mapLoginIdentity = (row: LoginIdentityRow): LoginIdentityRecord => ({
   updatedAt: row.updated_at,
 });
 
+const mapChannelModule = (row: ChannelModuleRow): ChannelModuleRecord => ({
+  channelId: row.channel_id,
+  moduleId: row.module_id,
+  enabled: row.enabled === 1,
+  settings: row.settings,
+});
+
 const mapChannelMember = (row: ChannelMemberRow): ChannelMemberRecord => ({
   channelId: row.channel_id,
   userId: row.user_id,
   role: row.role,
   createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const mapAppAccessToken = (row: AppAccessTokenRow): AppAccessTokenRecord => ({
+  accessTokenCiphertext: row.access_token_ciphertext,
+  expiresAt: row.expires_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const mapEventSubRevocation = (row: EventSubRevocationRow): EventSubRevocationRecord => ({
+  subscriptionId: row.subscription_id,
+  channelId: row.channel_id,
+  subscriptionType: row.subscription_type,
+  status: row.status,
+  reason: row.reason,
+  revokedAt: row.revoked_at,
   updatedAt: row.updated_at,
 });
 
@@ -504,6 +576,130 @@ export const deleteChannelMemberWithAudit = async (
   return (results[0]?.meta.changes ?? 0) > 0;
 };
 
+const moduleJson = (module: ChannelModuleRecord | null): string => JSON.stringify(module);
+
+const prepareModuleAudit = (
+  db: D1Database,
+  actorUserId: string,
+  changedAt: string,
+  channelId: string,
+  action: string,
+  before: ChannelModuleRecord | null,
+  after: ChannelModuleRecord | null,
+): D1PreparedStatement => db.prepare(
+  `INSERT INTO audit_log
+    (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+   SELECT ?, ?, ?, ?, ?, ?, ?
+    WHERE changes() > 0`,
+).bind(
+  auditId(),
+  actorUserId,
+  changedAt,
+  channelId,
+  action,
+  moduleJson(before),
+  moduleJson(after),
+);
+
+const getChannelModule = async (
+  db: D1Database,
+  channelId: string,
+  moduleId: string,
+): Promise<ChannelModuleRecord | null> => {
+  const row = await db.prepare(
+    `SELECT channel_id, module_id, enabled, settings
+       FROM channel_modules
+      WHERE channel_id = ? AND module_id = ?`,
+  ).bind(channelId, moduleId).first<ChannelModuleRow>();
+  return row === null ? null : mapChannelModule(row);
+};
+
+export const getChannelModuleForChannel = async (
+  db: D1Database,
+  channelId: string,
+  moduleId: string,
+): Promise<ChannelModuleRecord | null> => getChannelModule(db, channelId, moduleId);
+
+export const listChannelModulesForChannel = async (
+  db: D1Database,
+  channelId: string,
+): Promise<ChannelModuleRecord[]> => {
+  const result = await db.prepare(
+    `SELECT channel_id, module_id, enabled, settings
+       FROM channel_modules
+      WHERE channel_id = ?`,
+  ).bind(channelId).all<ChannelModuleRow>();
+  return result.results.map(mapChannelModule);
+};
+
+/**
+ * Dieselbe Rollenschwelle wie bei Mitgliederaenderungen: Nur Broadcaster und
+ * Verwalter duerfen Module schalten, durchgesetzt im actorGuard der Mutation
+ * selbst, nicht nur im Handler.
+ */
+export const createChannelModuleWithAudit = async (
+  db: D1Database,
+  actor: ActorContext,
+  module: ChannelModuleRecord,
+  action: string,
+  changedAt: string,
+): Promise<boolean> => {
+  const mutation = db.prepare(
+    `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+     SELECT ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM channel_modules
+         WHERE channel_id = ? AND module_id = ?
+      )
+      ${actorGuard("'broadcaster', 'verwalter'")}`,
+  ).bind(
+    module.channelId,
+    module.moduleId,
+    module.enabled ? 1 : 0,
+    module.settings,
+    module.channelId,
+    module.moduleId,
+    ...bindActorGuard(actor, module.channelId, changedAt),
+  );
+  const audit = prepareModuleAudit(db, actor.userId, changedAt, module.channelId, action, null, module);
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export const updateChannelModuleWithAudit = async (
+  db: D1Database,
+  actor: ActorContext,
+  channelId: string,
+  moduleId: string,
+  enabled: boolean,
+  settings: string,
+  action: string,
+  changedAt: string,
+): Promise<boolean> => {
+  const before = await getChannelModule(db, channelId, moduleId);
+  if (before === null) return false;
+  const after: ChannelModuleRecord = { channelId, moduleId, enabled, settings };
+  const mutation = db.prepare(
+    `UPDATE channel_modules
+        SET enabled = ?, settings = ?
+      WHERE channel_id = ? AND module_id = ?
+        AND enabled = ?
+        AND settings = ?
+      ${actorGuard("'broadcaster', 'verwalter'")}`,
+  ).bind(
+    after.enabled ? 1 : 0,
+    after.settings,
+    after.channelId,
+    after.moduleId,
+    before.enabled ? 1 : 0,
+    before.settings,
+    ...bindActorGuard(actor, after.channelId, changedAt),
+  );
+  const audit = prepareModuleAudit(db, actor.userId, changedAt, channelId, action, before, after);
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
+};
+
 export const createSession = async (db: D1Database, session: NewSessionRecord): Promise<void> => {
   await db.prepare(
     `INSERT INTO auth_sessions
@@ -582,6 +778,146 @@ export const getBotIdentity = async (db: D1Database): Promise<BotIdentityRecord 
       WHERE id = 1`,
   ).first<BotIdentityRow>();
   return row === null ? null : mapBotIdentity(row);
+};
+
+export const getAppAccessToken = async (
+  db: D1Database,
+): Promise<AppAccessTokenRecord | null> => {
+  const row = await db.prepare(
+    `SELECT access_token_ciphertext, expires_at, created_at, updated_at
+       FROM twitch_app_access_token
+      WHERE id = 1`,
+  ).first<AppAccessTokenRow>();
+  return row === null ? null : mapAppAccessToken(row);
+};
+
+/**
+ * Ersetzt den globalen App-Token nur, wenn der gelesene Ciphertext noch
+ * aktuell ist. Ein fehlender Datensatz darf genau einmal angelegt werden.
+ */
+export const rotateAppAccessToken = async (
+  db: D1Database,
+  expectedAccessTokenCiphertext: string | null,
+  accessTokenCiphertext: string,
+  expiresAt: string,
+  createdAt: string,
+  updatedAt: string,
+): Promise<boolean> => {
+  const mutation = expectedAccessTokenCiphertext === null
+    ? db.prepare(
+      `INSERT INTO twitch_app_access_token
+        (id, access_token_ciphertext, expires_at, created_at, updated_at)
+       SELECT 1, ?, ?, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM twitch_app_access_token WHERE id = 1
+        )`,
+    ).bind(accessTokenCiphertext, expiresAt, createdAt, updatedAt)
+    : db.prepare(
+      `UPDATE twitch_app_access_token
+          SET access_token_ciphertext = ?, expires_at = ?, updated_at = ?
+        WHERE id = 1 AND access_token_ciphertext = ?`,
+    ).bind(accessTokenCiphertext, expiresAt, updatedAt, expectedAccessTokenCiphertext);
+  const result = await mutation.run();
+  return result.meta.changes > 0;
+};
+
+/** Dedupliziert EventSub-Nachrichten atomar über Twitchs Message-ID. */
+export const rememberEventSubMessage = async (
+  db: D1Database,
+  messageId: string,
+  receivedAt: string,
+): Promise<boolean> => {
+  const result = await db.prepare(
+    `INSERT OR IGNORE INTO eventsub_messages (message_id, received_at)
+     VALUES (?, ?)`,
+  ).bind(messageId, receivedAt).run();
+  return result.meta.changes > 0;
+};
+
+export const purgeOldEventSubMessages = async (
+  db: D1Database,
+  cutoff: string,
+): Promise<void> => {
+  await db.prepare(
+    `DELETE FROM eventsub_messages
+      WHERE julianday(received_at) < julianday(?)`,
+  ).bind(cutoff).run();
+};
+
+export const recordEventSubRevocation = async (
+  db: D1Database,
+  revocation: EventSubRevocationRecord,
+): Promise<void> => {
+  await db.prepare(
+    `INSERT INTO eventsub_revocations
+      (subscription_id, channel_id, subscription_type, status, reason, revoked_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(subscription_id) DO UPDATE SET
+       channel_id = excluded.channel_id,
+       subscription_type = excluded.subscription_type,
+       status = excluded.status,
+       reason = excluded.reason,
+       revoked_at = excluded.revoked_at,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    revocation.subscriptionId,
+    revocation.channelId,
+    revocation.subscriptionType,
+    revocation.status,
+    revocation.reason,
+    revocation.revokedAt,
+    revocation.updatedAt,
+  ).run();
+};
+
+/** Speichert Message-ID und Widerruf in derselben D1-Transaktion. */
+export const rememberEventSubMessageAndRevocation = async (
+  db: D1Database,
+  messageId: string,
+  receivedAt: string,
+  revocation: EventSubRevocationRecord,
+): Promise<boolean> => {
+  const message = db.prepare(
+    `INSERT OR IGNORE INTO eventsub_messages (message_id, received_at)
+     VALUES (?, ?)`,
+  ).bind(messageId, receivedAt);
+  const storedRevocation = db.prepare(
+    `INSERT INTO eventsub_revocations
+      (subscription_id, channel_id, subscription_type, status, reason, revoked_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?
+      WHERE changes() = 1
+     ON CONFLICT(subscription_id) DO UPDATE SET
+       channel_id = excluded.channel_id,
+       subscription_type = excluded.subscription_type,
+       status = excluded.status,
+       reason = excluded.reason,
+       revoked_at = excluded.revoked_at,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    revocation.subscriptionId,
+    revocation.channelId,
+    revocation.subscriptionType,
+    revocation.status,
+    revocation.reason,
+    revocation.revokedAt,
+    revocation.updatedAt,
+  );
+  const results = await db.batch([message, storedRevocation]);
+  return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export const listEventSubRevocations = async (
+  db: D1Database,
+  channelId: string,
+): Promise<EventSubRevocationRecord[]> => {
+  const result = await db.prepare(
+    `SELECT subscription_id, channel_id, subscription_type, status, reason,
+            revoked_at, updated_at
+       FROM eventsub_revocations
+      WHERE channel_id = ?
+      ORDER BY revoked_at DESC, subscription_id DESC`,
+  ).bind(channelId).all<EventSubRevocationRow>();
+  return result.results.map(mapEventSubRevocation);
 };
 
 export const listLoginIdentities = async (

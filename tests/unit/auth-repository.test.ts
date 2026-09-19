@@ -8,6 +8,7 @@ import {
   deleteChannelMemberWithAudit,
   failOAuthTransaction,
   getBotIdentity,
+  getAppAccessToken,
   getLoginIdentity,
   getBotIdentityStatus,
   getSession,
@@ -16,6 +17,7 @@ import {
   revokeSession,
   revokeLoginIdentityAndSessionsForUser,
   purgeExpiredOAuthTransactions,
+  rotateAppAccessToken,
   rotateBotTokens,
   rotateLoginTokensForUser,
   setBotChannelStatus,
@@ -30,6 +32,7 @@ import {
   upsertBotIdentityAndStatus,
 } from "../../src/worker/auth/repository";
 import type { ActorContext, ChannelMemberRecord } from "../../src/worker/auth/repository";
+import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const fakeDatabase = (firstResult: unknown = null, allResult: unknown = { results: [{ channel_id: "channel-1" }] }) => {
@@ -652,6 +655,74 @@ describe("Auth-D1-Repository", () => {
     const { database } = fakeDatabase();
 
     await expect(listChannelIds(database)).resolves.toEqual(["channel-1"]);
+  });
+
+  it("legt den globalen App-Token per CAS nur einmal an", async () => {
+    const database = new TestD1Database();
+    const db = database as unknown as D1Database;
+
+    try {
+      await expect(rotateAppAccessToken(
+        db,
+        null,
+        "cipher-first",
+        "2026-09-19T12:00:00.000Z",
+        "2026-09-19T10:00:00.000Z",
+        "2026-09-19T10:00:00.000Z",
+      )).resolves.toBe(true);
+      await expect(rotateAppAccessToken(
+        db,
+        null,
+        "cipher-second",
+        "2026-09-19T13:00:00.000Z",
+        "2026-09-19T11:00:00.000Z",
+        "2026-09-19T11:00:00.000Z",
+      )).resolves.toBe(false);
+      await expect(getAppAccessToken(db)).resolves.toMatchObject({
+        accessTokenCiphertext: "cipher-first",
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("aktualisiert den App-Token nur mit dem erwarteten Ciphertext", async () => {
+    const database = new TestD1Database();
+    const db = database as unknown as D1Database;
+
+    try {
+      await insertAppAccessToken(
+        database,
+        "cipher-old",
+        "2026-09-19T10:00:00.000Z",
+        "2026-09-18T10:00:00.000Z",
+        "2026-09-18T10:00:00.000Z",
+      );
+      await expect(rotateAppAccessToken(
+        db,
+        "cipher-stale",
+        "cipher-ignored",
+        "2026-09-19T12:00:00.000Z",
+        "2026-09-18T10:00:00.000Z",
+        "2026-09-19T11:00:00.000Z",
+      )).resolves.toBe(false);
+      await expect(getAppAccessToken(db)).resolves.toMatchObject({
+        accessTokenCiphertext: "cipher-old",
+      });
+      await expect(rotateAppAccessToken(
+        db,
+        "cipher-old",
+        "cipher-new",
+        "2026-09-19T12:00:00.000Z",
+        "2026-09-18T10:00:00.000Z",
+        "2026-09-19T11:00:00.000Z",
+      )).resolves.toBe(true);
+      await expect(getAppAccessToken(db)).resolves.toMatchObject({
+        accessTokenCiphertext: "cipher-new",
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it("räumt abgelaufene OAuth-Transaktionen auf", async () => {

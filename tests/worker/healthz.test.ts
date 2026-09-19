@@ -18,7 +18,13 @@ const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
 const applyMigrations = async (): Promise<void> => {
   const database = (env as unknown as { DB: D1Database }).DB;
   for (const path of Object.keys(migrationSources).sort()) {
+    // Zeilenkommentare zuerst entfernen: Ein Semikolon in einem Kommentar
+    // würde die Zerlegung sonst mitten im Satz auftrennen, und D1 bekäme ein
+    // Fragment ohne Anweisung ("SQL code did not contain a statement").
     const statements = (migrationSources[path] ?? "")
+      .split(/\r?\n/)
+      .map((zeile) => zeile.replace(/^\s*--.*$/, ""))
+      .join("\n")
       .split(";")
       .map((statement) => statement.trim())
       .filter((statement) => statement.length > 0);
