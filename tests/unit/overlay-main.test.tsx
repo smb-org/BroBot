@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OverlayStatusView } from "../../src/overlay/status";
 
 const versionResponse = (version: string): Response => new Response(
-  JSON.stringify({ version }),
+  JSON.stringify({ version, language: "de" }),
   { status: 200, headers: { "Content-Type": "application/json" } },
 );
 

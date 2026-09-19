@@ -1,4 +1,5 @@
 import type { PanelChannelRole } from "../panel-contract";
+import { dashboardGemeinsameTexte } from "./locale";
 
 /**
  * Rollen werden im Datenmodell klein geschrieben. In der Oberflaeche steht der
@@ -6,7 +7,5 @@ import type { PanelChannelRole } from "../panel-contract";
  * Mitgliederliste nicht auseinanderlaufen.
  */
 export const roleLabel = (role: PanelChannelRole): string => {
-  if (role === "broadcaster") return "Broadcaster";
-  if (role === "verwalter") return "Verwalter";
-  return "Bediener";
+  return dashboardGemeinsameTexte().rollen[role];
 };

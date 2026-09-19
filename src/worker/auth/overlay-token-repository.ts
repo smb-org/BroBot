@@ -3,6 +3,7 @@ import {
   bindActorGuard,
   type ActorContext,
 } from "./repository";
+import type { ModuleLanguage } from "../../modules/contract";
 
 const overlayTokenRoles = "'broadcaster', 'verwalter'";
 
@@ -17,7 +18,9 @@ export interface NewOverlayTokenRecord {
   lastUsedAt: string | null;
 }
 
-export type OverlayTokenRecord = NewOverlayTokenRecord;
+export interface OverlayTokenRecord extends NewOverlayTokenRecord {
+  language: ModuleLanguage;
+}
 
 interface OverlayTokenRow {
   token_id: string;
@@ -28,6 +31,7 @@ interface OverlayTokenRow {
   revoked_at: string | null;
   revocation_reason: string | null;
   last_used_at: string | null;
+  language: ModuleLanguage;
 }
 
 const mapOverlayToken = (row: OverlayTokenRow): OverlayTokenRecord => ({
@@ -39,6 +43,7 @@ const mapOverlayToken = (row: OverlayTokenRow): OverlayTokenRecord => ({
   revokedAt: row.revoked_at,
   revocationReason: row.revocation_reason,
   lastUsedAt: row.last_used_at,
+  language: row.language,
 });
 
 const overlayTokenSelectColumns = `
@@ -49,7 +54,8 @@ const overlayTokenSelectColumns = `
   token.created_at AS created_at,
   token.revoked_at AS revoked_at,
   token.revocation_reason AS revocation_reason,
-  token.last_used_at AS last_used_at`;
+  token.last_used_at AS last_used_at,
+  channel.language AS language`;
 
 const overlayTokenReturningColumns = `
   token_id, channel_id, token_hash, expires_at, created_at,
@@ -116,8 +122,8 @@ export const touchOverlayToken = async (
   tokenId: string,
   lastUsedAt: string,
   cutoff: string,
-): Promise<OverlayTokenRecord | null> => {
-  const row = await db.prepare(
+): Promise<boolean> => {
+  const result = await db.prepare(
     `UPDATE overlay_tokens
         SET last_used_at = ?
       WHERE token_id = ?
@@ -128,8 +134,8 @@ export const touchOverlayToken = async (
           OR julianday(last_used_at) <= julianday(?)
         )
       RETURNING ${overlayTokenReturningColumns}`,
-  ).bind(lastUsedAt, tokenId, cutoff).first<OverlayTokenRow>();
-  return row === null ? null : mapOverlayToken(row);
+  ).bind(lastUsedAt, tokenId, cutoff).first<NewOverlayTokenRecord>();
+  return result !== null;
 };
 
 export const revokeOverlayToken = async (

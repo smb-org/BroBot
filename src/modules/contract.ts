@@ -67,6 +67,8 @@ export interface ModuleExecutionContext {
 /** Gemeinsame Props für lazy geladene Panel-Ansichten. */
 export interface ModulePanelProperties {
   channelId: string;
+  /** Die vom Host aufgelöste Panel-Sprache; optional für alte Module. */
+  language?: ModuleLanguage;
 }
 
 export type ModuleLanguage = "de" | "en";

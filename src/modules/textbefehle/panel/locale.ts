@@ -1,4 +1,4 @@
-import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
+import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
 
 interface TextbefehleTexte {
   titel: string;
@@ -15,7 +15,7 @@ interface TextbefehleTexte {
   nameHinweis: string;
 }
 
-const texte: Record<DashboardLanguage, TextbefehleTexte> = {
+const texte: LocaleCatalog<TextbefehleTexte> = {
   de: {
     titel: "Textbefehle",
     anlegen: "Befehl anlegen",
@@ -46,4 +46,4 @@ const texte: Record<DashboardLanguage, TextbefehleTexte> = {
   },
 };
 
-export const textbefehleTexte = (): TextbefehleTexte => texte[dashboardLanguage()];
+export const textbefehleTexte = (language: DashboardLanguage = dashboardLanguage()): TextbefehleTexte => texte[language];
