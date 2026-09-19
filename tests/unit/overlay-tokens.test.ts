@@ -177,6 +177,34 @@ describe("Overlay-Token-Service", () => {
     })).resolves.toBeNull();
   });
 
+  it("verweigert dem Bediener Ausgabe und Widerruf im Mutations-Guard", async () => {
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a",
+      pepper: pepper(4),
+      publicOrigin: "https://brobot.example",
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = ? AND user_id = ?")
+      .bind("kanal-a", TEST_ACTOR.userId).run();
+
+    await expect(issueOverlayToken(database as unknown as D1Database, {
+      channelId: "kanal-a",
+      actor: TEST_ACTOR,
+      pepper: pepper(4),
+      publicOrigin: "https://brobot.example",
+      expiresAt: null,
+      createdAt: "2026-09-18T00:01:00.000Z",
+    })).resolves.toBeNull();
+    await expect(revokeOverlayToken(database as unknown as D1Database, {
+      actor: TEST_ACTOR,
+      channelId: "kanal-a",
+      tokenId: issued.tokenId,
+      reason: "Quelle entfernt",
+      revokedAt: "2026-09-18T00:01:00.000Z",
+    })).resolves.toBe(false);
+  });
+
   it("weist einen Token ohne freigegebenen Kanal ab", async () => {
     const token = "nicht-freigegeben-token";
     database.sqlite.exec("PRAGMA foreign_keys = OFF");

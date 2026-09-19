@@ -2,6 +2,11 @@ import { useState, type ReactElement } from "react";
 
 import type { PanelChannelRole, PanelModuleState } from "../panel-contract";
 import { PanelApiError, setChannelModuleEnabled } from "./api";
+import { formatZahl } from "./locale";
+
+const texte = {
+  verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Module ändern.",
+};
 
 interface ModulesPageProperties {
   channelId: string;
@@ -52,7 +57,7 @@ export const ModulesPage = ({
     <>
       <header className="page-heading">
         <h1>Module</h1>
-        <span className="muted zahl">{String(modules.length)}</span>
+        <span className="muted zahl">{formatZahl(modules.length)}</span>
       </header>
       <section className="content-section" aria-label="Modulliste">
         <div className="section-heading"><h2>Verfügbare Module</h2></div>
@@ -76,10 +81,12 @@ export const ModulesPage = ({
                           aria-label={`${module.id} ${module.enabled ? "deaktivieren" : "aktivieren"}`}
                           checked={module.enabled}
                           disabled={!manageable || busyModuleId === module.id}
+                          title={!manageable ? texte.verwaltungGesperrt : undefined}
                           onChange={() => { void handleToggle(module); }}
                         />
                         {module.enabled ? "Aktiv" : "Inaktiv"}
                       </label>
+                      {!manageable ? <span className="sperrgrund">{texte.verwaltungGesperrt}</span> : null}
                     </td>
                   </tr>
                 ))}
