@@ -2,12 +2,16 @@ import { Hono } from "hono";
 
 import { hmacSha256, parseKeyRing } from "./auth/crypto";
 import {
-  recordEventSubRevocation,
+  rememberEventSubMessageAndRevocation,
   rememberEventSubMessage,
   type EventSubRevocationRecord,
 } from "./auth/repository";
 
 export const EVENTSUB_REPLAY_WINDOW_MS = 10 * 60 * 1000;
+// Twitch-Nutzkörper sind klein; 64 KiB lässt viel Reserve für Metadaten und
+// verhindert trotzdem, dass der unauthentifizierte Eingang beliebig wächst.
+export const EVENTSUB_MAX_BODY_BYTES = 64 * 1024;
+export const EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MS = 30 * 1000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -39,7 +43,7 @@ export const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean 
 export const verifyEventSubSignature = async (
   messageId: string,
   timestamp: string,
-  rawBody: string,
+  rawBody: Uint8Array,
   signature: string,
   serializedSecret: string,
 ): Promise<boolean> => {
@@ -48,7 +52,10 @@ export const verifyEventSubSignature = async (
   const signatureValue = encodedSignature ?? "";
   const validFormat = algorithm === "sha256" && /^[0-9a-f]{64}$/i.test(signatureValue);
   const expected = decodeHex(signatureValue);
-  const payload = `${messageId}${timestamp}${rawBody}`;
+  const prefix = new TextEncoder().encode(`${messageId}${timestamp}`);
+  const payload = new Uint8Array(prefix.byteLength + rawBody.byteLength);
+  payload.set(prefix);
+  payload.set(rawBody, prefix.byteLength);
   let matched = false;
   for (const entry of [ring.active, ...ring.retired]) {
     const digest = await hmacSha256(payload, entry);
@@ -71,7 +78,8 @@ export const parseEventSubTimestamp = (value: string): number | null => {
 
 export const isEventSubTimestampFresh = (timestamp: string, nowMs: number): boolean => {
   const timestampMs = parseEventSubTimestamp(timestamp);
-  return timestampMs !== null && nowMs - timestampMs <= EVENTSUB_REPLAY_WINDOW_MS;
+  return timestampMs !== null &&
+    Math.abs(nowMs - timestampMs) <= EVENTSUB_REPLAY_WINDOW_MS + EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MS;
 };
 
 const response = (body: BodyInit | null, status: number, contentType?: string): Response => {
@@ -79,18 +87,45 @@ const response = (body: BodyInit | null, status: number, contentType?: string): 
   return new Response(body, { status, headers: { "Content-Type": contentType } });
 };
 
-const defer = async (
-  context: { executionCtx: { waitUntil: (promise: Promise<unknown>) => void } },
-  work: Promise<void>,
-): Promise<void> => {
-  try {
-    context.executionCtx.waitUntil(work);
-  } catch {
-    // Hono-Unit-Tests haben keinen ExecutionContext; dort muss die Arbeit
-    // synchron abgeschlossen werden, damit der Testzustand sichtbar bleibt.
-    await work;
+const readEventSubBody = async (request: Request): Promise<Uint8Array | null> => {
+  const contentLength = request.headers.get("Content-Length");
+  if (contentLength !== null) {
+    const parsedLength = Number(contentLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0 || parsedLength > EVENTSUB_MAX_BODY_BYTES) {
+      return null;
+    }
   }
+
+  if (request.body === null) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const value = chunk.value;
+      totalLength += value.byteLength;
+      if (totalLength > EVENTSUB_MAX_BODY_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  }
+
+  const body = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 };
+
+const decodeEventSubBody = (body: Uint8Array): string => new TextDecoder().decode(body);
 
 const subscriptionRecord = (
   body: Record<string, unknown>,
@@ -123,7 +158,8 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   if (messageId === undefined || messageId.length === 0 ||
       timestamp === undefined || signature === undefined) return response("Ungültige EventSub-Kopfzeilen.", 401);
 
-  const rawBody = await context.req.text();
+  const rawBody = await readEventSubBody(context.req.raw);
+  if (rawBody === null) return response("EventSub-Nutzkörper ist zu groß.", 413);
   const timestampMs = parseEventSubTimestamp(timestamp);
   if (timestampMs === null || !isEventSubTimestampFresh(timestamp, Date.now())) {
     return response("EventSub-Zeitstempel ist abgelaufen.", 403);
@@ -143,8 +179,9 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   if (!validSignature) return response("Ungültige EventSub-Signatur.", 403);
 
   let body: unknown;
+  const decodedBody = decodeEventSubBody(rawBody);
   try {
-    body = JSON.parse(rawBody) as unknown;
+    body = JSON.parse(decodedBody) as unknown;
   } catch {
     return response("Ungültiger EventSub-Nutzkörper.", 400);
   }
@@ -165,11 +202,16 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   const revocation = messageType === "revocation" ? subscriptionRecord(body, now) : null;
   if (messageType === "revocation" && revocation === null) return response("Ungültiger Widerruf.", 400);
 
+  if (revocation !== null) {
+    const isNew = await rememberEventSubMessageAndRevocation(context.env.DB, messageId, now, revocation);
+    if (!isNew) return response(null, 204);
+    return response(null, 204);
+  }
+
   const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
   if (!isNew) return response(null, 204);
 
-  if (revocation !== null) {
-    await defer(context, recordEventSubRevocation(context.env.DB, revocation));
-  }
+  // Notifications werden bis Issue #62 absichtlich nur quittiert; dieser
+  // Eingang ist noch kein fachlicher Erfolg und wird nicht weitergeleitet.
   return response(null, 204);
 });

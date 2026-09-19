@@ -706,10 +706,7 @@ export const recordEventSubRevocation = async (
   await db.prepare(
     `INSERT INTO eventsub_revocations
       (subscription_id, channel_id, subscription_type, status, reason, revoked_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?
-      WHERE EXISTS (
-        SELECT 1 FROM channels WHERE channel_id = ?
-      )
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(subscription_id) DO UPDATE SET
        channel_id = excluded.channel_id,
        subscription_type = excluded.subscription_type,
@@ -725,8 +722,43 @@ export const recordEventSubRevocation = async (
     revocation.reason,
     revocation.revokedAt,
     revocation.updatedAt,
-    revocation.channelId,
   ).run();
+};
+
+/** Speichert Message-ID und Widerruf in derselben D1-Transaktion. */
+export const rememberEventSubMessageAndRevocation = async (
+  db: D1Database,
+  messageId: string,
+  receivedAt: string,
+  revocation: EventSubRevocationRecord,
+): Promise<boolean> => {
+  const message = db.prepare(
+    `INSERT OR IGNORE INTO eventsub_messages (message_id, received_at)
+     VALUES (?, ?)`,
+  ).bind(messageId, receivedAt);
+  const storedRevocation = db.prepare(
+    `INSERT INTO eventsub_revocations
+      (subscription_id, channel_id, subscription_type, status, reason, revoked_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?
+      WHERE changes() = 1
+     ON CONFLICT(subscription_id) DO UPDATE SET
+       channel_id = excluded.channel_id,
+       subscription_type = excluded.subscription_type,
+       status = excluded.status,
+       reason = excluded.reason,
+       revoked_at = excluded.revoked_at,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    revocation.subscriptionId,
+    revocation.channelId,
+    revocation.subscriptionType,
+    revocation.status,
+    revocation.reason,
+    revocation.revokedAt,
+    revocation.updatedAt,
+  );
+  const results = await db.batch([message, storedRevocation]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
 export const listEventSubRevocations = async (

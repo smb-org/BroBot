@@ -156,9 +156,5 @@ export const maintainAppAccessToken = async (
   now: string,
   fetcher: typeof fetch = fetch,
 ): Promise<void> => {
-  // Alte lokale Test- und Übergangsumgebungen kennen den neuen Secret-Namen
-  // noch nicht. Der Healthcheck lehnt sie ohnehin ab; der Cron darf daneben
-  // weiterhin die bereits vorhandene Token-Wartung ausführen.
-  if (typeof env.TOKEN_ENCRYPTION_KEYS !== "string" || env.TOKEN_ENCRYPTION_KEYS.length === 0) return;
   await getAppAccessToken(env, now, fetcher);
 };

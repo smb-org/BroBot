@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getAppAccessToken, shouldRefreshAppAccessToken } from "../../src/worker/app-token";
+import { getAppAccessToken, maintainAppAccessToken, shouldRefreshAppAccessToken } from "../../src/worker/app-token";
 import { decryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { TestD1Database } from "./test-d1";
 
@@ -54,6 +54,21 @@ describe("App-Access-Token", () => {
       row.access_token_ciphertext,
       parseKeyRing(encryptionKeys),
     )).resolves.toEqual({ token: "app-access" });
+  });
+
+  it("wartet den App-Token auch mit dem alten Übergangs-Secret-Namen", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ access_token: "legacy-app-access", expires_in: 7200 }),
+      { status: 200 },
+    ));
+    const env = {
+      ...environment(),
+      TOKEN_ENCRYPTION_KEYS: undefined,
+      SESSION_ENCRYPTION_KEYS: encryptionKeys,
+    } as unknown as Env;
+
+    await expect(maintainAppAccessToken(env, "2026-09-19T10:00:00.000Z", fetcher)).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("verwendet den Cache und erneuert erst im Vorlauf vor Ablauf", async () => {
