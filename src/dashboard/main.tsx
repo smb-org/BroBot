@@ -124,11 +124,14 @@ const channelBotConsentMissing = (channel: PanelChannelState): boolean =>
 
 const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "error" => {
   if (channel.moderator?.isModerator === false) return "error";
+  if (channel.chatSubscription?.status === "error" || channel.chatSubscription?.status === "revoked") return "error";
   if (channel.bot?.status === "error" || channel.bot?.status === "revoked") return "error";
   if (channel.tokens.loginStatus === "error" || channel.tokens.loginStatus === "revoked") return "error";
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (tokenStatus.tone === "error") return "error";
   if (channelBotConsentMissing(channel)) return "warning";
+  if (channel.chatSubscription == null) return "warning";
+  if (channel.chatSubscription.status === "missing") return "warning";
   if (tokenStatus.tone !== "healthy") return "warning";
   if (channel.bot?.status !== "connected" || channel.moderator?.isModerator !== true ||
       channel.tokens.loginStatus !== "connected" || channel.tokens.botExpiresAt === null ||
@@ -138,10 +141,14 @@ const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "err
 
 const statusText = (channel: PanelChannelState): string => {
   if (channel.moderator?.isModerator === false) return "Moderatorrolle fehlt";
+  if (channel.chatSubscription?.status === "error") return "Chat-Abo-Fehler";
+  if (channel.chatSubscription?.status === "revoked") return "Chat-Abo widerrufen";
   if (channel.bot?.status === "error") return "Bot-Fehler";
   if (channel.bot?.status === "revoked") return "Bot-Token widerrufen";
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (channelBotConsentMissing(channel) && tokenStatus.tone === "healthy") return "Broadcaster-Zustimmung fehlt";
+  if (channel.chatSubscription == null && !channelBotConsentMissing(channel)) return "Chat-Abo fehlt";
+  if (channel.chatSubscription?.status === "missing") return "Chat-Abo fehlt";
   if (tokenStatus.tone !== "healthy") return tokenStatus.label;
   if (channelStatus(channel) === "healthy") return "Gesund";
   return "Zustand unvollständig";
@@ -246,6 +253,7 @@ const ChannelStateCard = ({ channel }: { channel: PanelChannelState }): ReactEle
       <div><dt>Chat-Zustimmung</dt><dd>{channelBotConsentMissing(channel) ? "Broadcaster-Zustimmung fehlt" : "Vorhanden"}</dd></div>
       <div><dt>Bot-Account</dt><dd>{channel.bot === null ? "Nicht eingerichtet" : statusLabel(channel.bot.status)}</dd></div>
       <div><dt>Moderatorstatus</dt><dd>{channel.moderator === null ? "Nicht geprüft" : channel.moderator.isModerator ? "Moderator" : "Fehlt"}</dd></div>
+      <div><dt>Chat-Abo</dt><dd>{channel.chatSubscription == null ? channelBotConsentMissing(channel) ? "Nicht erforderlich" : "Fehlt" : channel.chatSubscription.status === "enabled" ? "Aktiv" : channel.chatSubscription.status === "missing" ? "Fehlt" : channel.chatSubscription.status === "revoked" ? "Widerrufen" : "Fehler"}</dd></div>
       <div><dt>Token</dt><dd>{tokenSummary(channel.tokens, channel.bot)}</dd></div>
     </dl>
   </article>
@@ -446,6 +454,13 @@ const ChannelBotConsentCard = ({ status }: { status: PanelChannelState["channelB
   />
 );
 
+const ChatSubscriptionCard = ({ status, expected = false }: { status: PanelChannelState["chatSubscription"] | undefined; expected?: boolean }): ReactElement => {
+  const current = status ?? null;
+  const tone = current === null ? expected ? "warning" : "neutral" : current.status === "enabled" ? "healthy" : current.status === "missing" ? "warning" : "error";
+  const value = current === null ? expected ? "Fehlt" : "Nicht geprüft" : current.status === "enabled" ? "Aktiv" : current.status === "missing" ? "Fehlt" : current.status === "revoked" ? "Widerrufen" : "Fehler";
+  return <StatusCard title="Chat-Abo" tone={tone} value={value} detail={current?.reason ?? undefined} />;
+};
+
 /**
  * Rang der Dringlichkeit. Fehler zuerst, dann Warnung; gesunde Zeilen
  * erscheinen auf der Blickflaeche gar nicht.
@@ -492,6 +507,11 @@ const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModer
       key: "channel-bot-consent",
       tone: overview.channelBotConsent === "missing" ? "warning" : "healthy",
       node: <ChannelBotConsentCard status={overview.channelBotConsent} />,
+    },
+    {
+      key: "chat-subscription",
+      tone: overview.chatSubscription == null ? overview.channelBotConsent === "granted" ? "warning" : "healthy" : overview.chatSubscription.status === "enabled" ? "healthy" : overview.chatSubscription.status === "missing" ? "warning" : "error",
+      node: <ChatSubscriptionCard status={overview.chatSubscription} expected={overview.channelBotConsent === "granted"} />,
     },
     {
       key: "moderator",
@@ -548,7 +568,7 @@ const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModer
 const SystemPage = ({ system, auditState, onNextPage, loadingNextPage }: { system: PanelSystemResponse; auditState: LoadState<PanelAuditResponse>; onNextPage: () => void; loadingNextPage: boolean }): ReactElement => (
   <>
     <header className="page-heading"><h1>System</h1></header>
-    <div className="status-grid"><BroadcasterConnectionCard status={system.broadcasterConnection} /><BotCard bot={system.bot} /><TokenCard tokens={system.tokens} bot={system.bot} /></div>
+    <div className="status-grid"><BroadcasterConnectionCard status={system.broadcasterConnection} /><ChatSubscriptionCard status={system.chatSubscription} /><BotCard bot={system.bot} /><TokenCard tokens={system.tokens} bot={system.bot} /></div>
     <section className="content-section"><div className="section-heading"><h2>Audit-Log</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{String(auditState.data.entries.length)}</span> Einträge</span>}</div>
       {auditState.status === "loading" ? <p className="loading-line">Audit-Log wird geladen …</p> : null}
       {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}

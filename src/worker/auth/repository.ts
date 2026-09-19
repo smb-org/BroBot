@@ -73,6 +73,18 @@ export interface EventSubRevocationRecord {
   updatedAt: string;
 }
 
+export type EventSubSubscriptionStatus = "enabled" | "missing" | "error" | "revoked";
+
+export interface EventSubSubscriptionRecord {
+  channelId: string;
+  subscriptionType: string;
+  subscriptionId: string | null;
+  secretId: string | null;
+  status: EventSubSubscriptionStatus;
+  reason: string | null;
+  updatedAt: string;
+}
+
 /**
  * Der Akteur einer Mutation. Die sessionId gehoert dazu, weil die Mutation
  * selbst pruefen muss, ob die Session noch lebt — die Rolle allein genuegt
@@ -186,6 +198,16 @@ interface EventSubRevocationRow {
   updated_at: string;
 }
 
+interface EventSubSubscriptionRow {
+  channel_id: string;
+  subscription_type: string;
+  subscription_id: string | null;
+  secret_id: string | null;
+  status: EventSubSubscriptionStatus;
+  reason: string | null;
+  updated_at: string;
+}
+
 interface BotChannelStatusCheckLockRow {
   channel_id: string;
   locked_until: string;
@@ -278,6 +300,16 @@ const mapEventSubRevocation = (row: EventSubRevocationRow): EventSubRevocationRe
   updatedAt: row.updated_at,
 });
 
+const mapEventSubSubscription = (row: EventSubSubscriptionRow): EventSubSubscriptionRecord => ({
+  channelId: row.channel_id,
+  subscriptionType: row.subscription_type,
+  subscriptionId: row.subscription_id,
+  secretId: row.secret_id,
+  status: row.status,
+  reason: row.reason,
+  updatedAt: row.updated_at,
+});
+
 const auditId = (): string => crypto.randomUUID();
 
 const memberJson = (member: ChannelMemberRecord | null): string => JSON.stringify(member);
@@ -317,6 +349,20 @@ export const actorGuard = (allowedRoles: string): string => `
  * Mutation aendert.
  */
 export const ANY_MEMBER_ROLES = "'broadcaster', 'verwalter', 'bediener'";
+
+/** Gemeinsame SQL-Prüfung der Broadcaster-Zustimmung für channel:bot. */
+export const channelBotConsentCondition = (channelAlias: string): string => `
+        EXISTS (
+          SELECT 1
+            FROM twitch_login_identity AS broadcaster_identity
+           WHERE broadcaster_identity.user_id = ${channelAlias}.channel_id
+             AND broadcaster_identity.status = 'connected'
+             AND EXISTS (
+               SELECT 1
+                 FROM json_each(broadcaster_identity.scopes_json) AS granted_scope
+                WHERE granted_scope.value = 'channel:bot'
+             )
+        )`;
 
 const requiredActorRoles = (targetRole: ChannelMemberRecord["role"]): string =>
   targetRole === "broadcaster" ? "'broadcaster'" : "'broadcaster', 'verwalter'";
@@ -868,6 +914,32 @@ export const recordEventSubRevocation = async (
     revocation.revokedAt,
     revocation.updatedAt,
   ).run();
+  if (revocation.reason === "authorization_revoked") {
+    await db.prepare(
+      `UPDATE twitch_login_identity
+          SET status = 'revoked', reason = ?, updated_at = ?
+        WHERE user_id = ? AND status <> 'revoked'`,
+    ).bind(revocation.reason, revocation.updatedAt, revocation.channelId).run();
+  }
+  await db.prepare(
+    `INSERT INTO eventsub_subscriptions
+      (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+     SELECT ?, ?, ?, NULL, 'revoked', ?, ?
+      WHERE EXISTS (SELECT 1 FROM channels WHERE channel_id = ?)
+     ON CONFLICT(channel_id, subscription_type) DO UPDATE SET
+       subscription_id = excluded.subscription_id,
+       secret_id = NULL,
+       status = excluded.status,
+       reason = excluded.reason,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    revocation.channelId,
+    revocation.subscriptionType,
+    revocation.subscriptionId,
+    revocation.reason,
+    revocation.updatedAt,
+    revocation.channelId,
+  ).run();
 };
 
 /** Speichert Message-ID und Widerruf in derselben D1-Transaktion. */
@@ -902,8 +974,78 @@ export const rememberEventSubMessageAndRevocation = async (
     revocation.revokedAt,
     revocation.updatedAt,
   );
-  const results = await db.batch([message, storedRevocation]);
+  const storedState = db.prepare(
+    `INSERT INTO eventsub_subscriptions
+      (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+     SELECT ?, ?, ?, NULL, 'revoked', ?, ?
+      WHERE changes() = 1
+        AND EXISTS (SELECT 1 FROM channels WHERE channel_id = ?)
+     ON CONFLICT(channel_id, subscription_type) DO UPDATE SET
+       subscription_id = excluded.subscription_id,
+       secret_id = NULL,
+       status = excluded.status,
+       reason = excluded.reason,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    revocation.channelId,
+    revocation.subscriptionType,
+    revocation.subscriptionId,
+    revocation.reason,
+    revocation.updatedAt,
+    revocation.channelId,
+  );
+  const revokedIdentity = db.prepare(
+    `UPDATE twitch_login_identity
+        SET status = 'revoked', reason = ?, updated_at = ?
+      WHERE user_id = ? AND status <> 'revoked'`,
+  ).bind(revocation.reason, revocation.updatedAt, revocation.channelId);
+  const results = await db.batch(revocation.reason === "authorization_revoked"
+    ? [message, storedRevocation, storedState, revokedIdentity]
+    : [message, storedRevocation, storedState]);
   return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export const upsertEventSubSubscription = async (
+  db: D1Database,
+  subscription: EventSubSubscriptionRecord,
+): Promise<void> => {
+  await db.prepare(
+    `INSERT INTO eventsub_subscriptions
+      (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(channel_id, subscription_type) DO UPDATE SET
+       subscription_id = excluded.subscription_id,
+       secret_id = excluded.secret_id,
+       status = excluded.status,
+       reason = excluded.reason,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    subscription.channelId,
+    subscription.subscriptionType,
+    subscription.subscriptionId,
+    subscription.secretId,
+    subscription.status,
+    subscription.reason,
+    subscription.updatedAt,
+  ).run();
+};
+
+export const listEventSubSubscriptions = async (
+  db: D1Database,
+  channelId?: string,
+): Promise<EventSubSubscriptionRecord[]> => {
+  const query = channelId === undefined
+    ? `SELECT channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at
+         FROM eventsub_subscriptions
+        ORDER BY channel_id, subscription_type`
+    : `SELECT channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at
+         FROM eventsub_subscriptions
+        WHERE channel_id = ?
+        ORDER BY subscription_type`;
+  const result = channelId === undefined
+    ? await db.prepare(query).all<EventSubSubscriptionRow>()
+    : await db.prepare(query).bind(channelId).all<EventSubSubscriptionRow>();
+  return result.results.map(mapEventSubSubscription);
 };
 
 export const listEventSubRevocations = async (
