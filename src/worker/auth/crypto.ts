@@ -121,6 +121,13 @@ const importAesKey = async (entry: KeyEntry): Promise<CryptoKey> =>
 const importHmacKey = async (entry: KeyEntry): Promise<CryptoKey> =>
   crypto.subtle.importKey("raw", toArrayBuffer(decodeBase64url(entry.key)), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 
+export const hmacSha256 = async (value: string, entry: KeyEntry): Promise<Uint8Array> =>
+  new Uint8Array(await crypto.subtle.sign(
+    "HMAC",
+    await importHmacKey(entry),
+    toArrayBuffer(encoder.encode(value)),
+  ));
+
 export const hashOverlayToken = async (token: string, pepper: string): Promise<string> => {
   const pepperBytes = decodeBase64url(pepper);
   if (pepperBytes.byteLength !== 32) throw new Error("Overlay-Pepper muss 32 Byte lang sein.");
