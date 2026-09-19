@@ -107,13 +107,13 @@ export const authenticateOverlayToken = async (
   const nowTimestamp = Date.parse(input.now);
   if (!Number.isFinite(nowTimestamp)) throw new Error("Nutzungszeitpunkt ist ungültig.");
   const cutoff = new Date(nowTimestamp - LAST_USED_INTERVAL_MS).toISOString();
-  let touched: OverlayTokenRecord | null;
+  let touched: boolean;
   try {
     touched = await touchOverlayToken(db, record.tokenId, input.now, cutoff);
   } catch {
     return record;
   }
-  if (touched !== null) return touched;
+  if (touched) return { ...record, lastUsedAt: input.now };
   return getUsableOverlayToken(db, tokenHash, input.now);
 };
 

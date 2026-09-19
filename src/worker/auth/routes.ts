@@ -221,7 +221,7 @@ authRouter.get("/api/overlay/status", async (context) => {
   if (record === null) return context.json({ error: "Overlay-Zugang ungültig." }, 401);
 
   context.header("Cache-Control", "no-store");
-  return context.json({ version: context.env.CF_VERSION_METADATA.id });
+  return context.json({ version: context.env.CF_VERSION_METADATA.id, language: record.language });
 });
 
 authRouter.get("/auth/login", async (context) => {

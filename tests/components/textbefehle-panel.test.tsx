@@ -44,4 +44,15 @@ describe("Textbefehle-Panel-Ansicht", () => {
     fireEvent.click(screen.getByRole("button", { name: "Befehl !hallo speichern" }));
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
   });
+
+  it("folgt mit dem Panel der Browsersprache", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ befehle: [] })));
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    expect(await screen.findByRole("heading", { name: "Text commands" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add command" })).toBeInTheDocument();
+  });
 });

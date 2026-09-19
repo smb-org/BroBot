@@ -1,8 +1,19 @@
 import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
+import type { ModuleLanguage } from "../modules/contract";
 
 interface OverlayStatus {
   version: string;
+  language: ModuleLanguage;
 }
+
+interface OverlayTexte {
+  version: string;
+}
+
+const texte: Record<ModuleLanguage, OverlayTexte> = {
+  de: { version: "Version" },
+  en: { version: "Version" },
+};
 
 const POLL_INTERVAL_MS = 60_000;
 const MAX_FAILURE_COUNT = 4;
@@ -29,6 +40,8 @@ const readTokenFromFragment = (): string | null => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const isModuleLanguage = (value: unknown): value is ModuleLanguage => value === "de" || value === "en";
+
 const requestOverlayStatus = async (
   token: string,
   signal: AbortSignal,
@@ -41,7 +54,9 @@ const requestOverlayStatus = async (
   const payload = JSON.parse(await response.text()) as unknown;
   if (!isRecord(payload)) return null;
   const version = payload.version;
-  return typeof version === "string" && version.length > 0 ? { version } : null;
+  return typeof version === "string" && version.length > 0 && isModuleLanguage(payload.language)
+    ? { version, language: payload.language }
+    : null;
 };
 
 const delayFor = (failureCount: number): number =>
@@ -78,6 +93,7 @@ export const OverlayStatusView = (): ReactElement | null => {
       try {
         const nextStatus = await requestOverlayStatus(token, controller.signal);
         if (currentRequest !== requestNumber) return;
+        if (nextStatus !== null) document.documentElement.lang = nextStatus.language;
         setStatus(nextStatus);
         if (nextStatus === null) {
           failureCount = Math.min(failureCount + 1, MAX_FAILURE_COUNT);
@@ -113,5 +129,5 @@ export const OverlayStatusView = (): ReactElement | null => {
     };
   }, []);
 
-  return status === null ? null : <span style={labelStyle}>Version {status.version}</span>;
+  return status === null ? null : <span style={labelStyle}>{texte[status.language].version} {status.version}</span>;
 };

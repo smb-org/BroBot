@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
+import type { DashboardLanguage } from "../../../dashboard/locale";
 import type { Textbefehl } from "../contracts";
 import { loescheTextbefehl, ladeTextbefehle, legeTextbefehlAn, speichereTextbefehl } from "./service";
 import { textbefehleTexte } from "./locale";
 
 interface TextbefehlZeileProperties {
   channelId: string;
+  language?: DashboardLanguage | undefined;
   initial: Textbefehl;
   onChanged: () => Promise<void>;
 }
 
-const TextbefehlZeile = ({ channelId, initial, onChanged }: TextbefehlZeileProperties): ReactElement => {
-  const labels = textbefehleTexte();
+const TextbefehlZeile = ({ channelId, language, initial, onChanged }: TextbefehlZeileProperties): ReactElement => {
+  const labels = textbefehleTexte(language);
   const [text, setText] = useState(initial.text);
   const [cooldownSekunden, setCooldownSekunden] = useState(initial.cooldownSekunden);
   const [busy, setBusy] = useState(false);
@@ -67,8 +69,8 @@ const TextbefehlZeile = ({ channelId, initial, onChanged }: TextbefehlZeilePrope
   );
 };
 
-export const TextbefehlePanel = ({ channelId }: { channelId: string }): ReactElement => {
-  const labels = textbefehleTexte();
+export const TextbefehlePanel = ({ channelId, language }: { channelId: string; language?: DashboardLanguage }): ReactElement => {
+  const labels = textbefehleTexte(language);
   const [befehle, setBefehle] = useState<Textbefehl[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +142,7 @@ export const TextbefehlePanel = ({ channelId }: { channelId: string }): ReactEle
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}
       {!loading && error === null && befehle.length === 0 ? <p className="muted">{labels.leer}</p> : null}
       {befehle.map((befehl) => (
-        <TextbefehlZeile key={befehl.name} channelId={channelId} initial={befehl} onChanged={load} />
+        <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} onChanged={load} />
       ))}
     </section>
   );

@@ -254,8 +254,25 @@ describe("Overlay-Routen", () => {
     const status = await authRouter.fetch(new Request("https://brobot.example/api/overlay/status", {
       headers: { Authorization: `Bearer ${token ?? ""}` },
     }), environment);
-    await expect(status.json()).resolves.toEqual({ version: "version-2026-09-18" });
+    await expect(status.json()).resolves.toEqual({ version: "version-2026-09-18", language: "de" });
     expect(status.status).toBe(200);
+  });
+
+  it("liefert die am Kanal gespeicherte Sprache im Overlay-Status", async () => {
+    await insertMember(database);
+    await database.prepare("UPDATE channels SET language = ? WHERE channel_id = ?")
+      .bind("en", "kanal-a").run();
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a",
+      pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN,
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    });
+
+    const response = await statusForToken(tokenFromIssuedUrl(issued.overlayUrl), environment);
+
+    await expect(response.json()).resolves.toMatchObject({ language: "en" });
   });
 
   it("akzeptiert einen optionalen zukünftigen Ablauf und weist einen vergangenen ab", async () => {
@@ -350,7 +367,7 @@ describe("Overlay-Routen", () => {
     const response = await statusForToken(tokenFromIssuedUrl(issued.overlayUrl), environment);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ version: "version-2026-09-18" });
+    await expect(response.json()).resolves.toEqual({ version: "version-2026-09-18", language: "de" });
   });
 
   it("widerruft genau den Token des angegebenen Kanals", async () => {

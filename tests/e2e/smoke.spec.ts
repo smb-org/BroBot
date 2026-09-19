@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+test.use({ locale: "de-DE" });
+
 test("Dashboard und Overlay laden als getrennte Oberflächen", async ({ page }) => {
   await page.route("**/api/channels", async (route) => {
     await route.fulfill({
@@ -24,7 +26,7 @@ test("Dashboard und Overlay laden als getrennte Oberflächen", async ({ page }) 
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ version: "e2e-version" }),
+      body: JSON.stringify({ version: "e2e-version", language: "de" }),
     });
   });
   // Playwright runs against the local Vite server, whose HTML entry is overlay.html.
