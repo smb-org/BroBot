@@ -582,9 +582,8 @@ Das Ergebnis beschreibt nur gewünschte Aktionen:
 
 ```ts
 {
-  chatMessages: [],
-  overlayEvents: [],
-  stateChanges: []
+  actions: [],
+  diagnostics: []
 }
 ```
 

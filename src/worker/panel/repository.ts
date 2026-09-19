@@ -11,6 +11,8 @@ import type {
   PanelModeratorStatus,
   PanelSystemResponse,
   PanelTokenStatus,
+  PanelEventEntry,
+  PanelEventsResponse,
 } from "../../panel-contract";
 
 interface ChannelStateRow {
@@ -46,18 +48,27 @@ interface AuditLogRow {
   after_json: string;
 }
 
-export interface AuditLogCursor {
-  createdAt: string;
-  auditId: string;
+interface EventLogRow {
+  event_id: string;
+  created_at: string;
+  module_id: string;
+  code: string;
+  detail_json: string;
+  actor_user_id: string | null;
 }
 
-const encodeCursor = (cursor: AuditLogCursor): string => {
+export interface LogCursor {
+  createdAt: string;
+  id: string;
+}
+
+const encodeCursor = (cursor: LogCursor): string => {
   const serialized = JSON.stringify(cursor);
   const encoded = btoa(serialized);
   return encoded.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 };
 
-export const decodeAuditLogCursor = (serialized: string): AuditLogCursor | null => {
+export const decodeLogCursor = (serialized: string): LogCursor | null => {
   try {
     const normalized = serialized.replaceAll("-", "+").replaceAll("_", "/")
       .padEnd(Math.ceil(serialized.length / 4) * 4, "=");
@@ -65,8 +76,8 @@ export const decodeAuditLogCursor = (serialized: string): AuditLogCursor | null 
     if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
     const cursor = value as Record<string, unknown>;
     return typeof cursor.createdAt === "string" && cursor.createdAt.length > 0 &&
-      typeof cursor.auditId === "string" && cursor.auditId.length > 0
-      ? { createdAt: cursor.createdAt, auditId: cursor.auditId }
+      typeof cursor.id === "string" && cursor.id.length > 0
+      ? { createdAt: cursor.createdAt, id: cursor.id }
       : null;
   } catch {
     return null;
@@ -206,7 +217,7 @@ export const getAuditLogForChannel = async (
   db: D1Database,
   channelId: string,
   limit: number,
-  cursor: AuditLogCursor | null,
+  cursor: LogCursor | null,
 ): Promise<PanelAuditResponse> => {
   const query = cursor === null
     ? `SELECT audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json
@@ -222,7 +233,7 @@ export const getAuditLogForChannel = async (
         LIMIT ?`;
   const values = cursor === null
     ? [channelId, limit + 1]
-    : [channelId, cursor.createdAt, cursor.createdAt, cursor.auditId, limit + 1];
+    : [channelId, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
   const result = await db.prepare(query).bind(...values).all<AuditLogRow>();
   const hasNextPage = result.results.length > limit;
   const rows = result.results.slice(0, limit);
@@ -238,7 +249,50 @@ export const getAuditLogForChannel = async (
   return {
     entries,
     nextCursor: hasNextPage && last !== undefined
-      ? encodeCursor({ createdAt: last.created_at, auditId: last.audit_id })
+      ? encodeCursor({ createdAt: last.created_at, id: last.audit_id })
+      : null,
+  };
+};
+
+export const getEventLogForChannel = async (
+  db: D1Database,
+  channelId: string,
+  limit: number,
+  cursor: LogCursor | null,
+): Promise<PanelEventsResponse> => {
+  const query = cursor === null
+    ? `SELECT event_id, created_at, module_id, code, detail_json, actor_user_id
+         FROM event_log
+        WHERE channel_id = ?
+        ORDER BY created_at DESC, event_id DESC
+        LIMIT ?`
+    : `SELECT event_id, created_at, module_id, code, detail_json, actor_user_id
+         FROM event_log
+        WHERE channel_id = ?
+          AND (created_at < ? OR (created_at = ? AND event_id < ?))
+        ORDER BY created_at DESC, event_id DESC
+        LIMIT ?`;
+  const values = cursor === null
+    ? [channelId, limit + 1]
+    : [channelId, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
+  const result = await db.prepare(query).bind(...values).all<EventLogRow>();
+  const hasNextPage = result.results.length > limit;
+  const rows = result.results.slice(0, limit);
+  const entries: PanelEventEntry[] = rows.map((row) => ({
+    eventId: row.event_id,
+    createdAt: row.created_at,
+    moduleId: row.module_id,
+    code: row.code,
+    detail: row.detail_json,
+    actorUserId: row.actor_user_id,
+    actorLogin: null,
+    actorDisplayName: null,
+  }));
+  const last = rows.at(-1);
+  return {
+    entries,
+    nextCursor: hasNextPage && last !== undefined
+      ? encodeCursor({ createdAt: last.created_at, id: last.event_id })
       : null,
   };
 };

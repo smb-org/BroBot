@@ -41,6 +41,36 @@ Das erfordert keinen Deploy. `settings` ist JSON und bleibt dem Modul-Contract u
 
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben.
 
+## Aktionen und Begründungen melden
+
+Ein Modul beschreibt gewünschte Aktionen in der geordneten Liste `actions`.
+Chat und Overlay sind semantisch getrennte Varianten; die Reihenfolge bleibt
+erhalten und neue Aktionsarten können später additiv ergänzt werden. Das Modul
+führt die Aktionen nicht selbst aus.
+
+Zusätzlich meldet ein Modul eine fachliche Entscheidung über das Feld
+`diagnostics`. Das gilt auch dann, wenn es keine Aktion erzeugt. So kann der
+Host erklären, warum eine Aktion bewusst unterblieben ist.
+
+```ts
+return {
+  actions: [{ kind: "chat", text: "Danke für den Raid!" }],
+  diagnostics: [{
+    code: "shoutout.unterdrueckt",
+    detail: { grund: "raid_erkannt", zuschauer: 8, schwelle: 10 },
+  }],
+};
+```
+
+`code` ist eine stabile, maschinenlesbare Kennung. `detail` enthält nur die
+kleinen Werte, die den Grund erklären, und wird vom Host als JSON gespeichert.
+Das Modul schreibt weder selbst in `event_log` noch verwendet es eine
+Logging-API. Das Modul begründet Nicht-Handeln. Der Host kennt Kanal, Modul,
+`triggerId`, auslösenden Nutzer und Zeitpunkt und protokolliert Handeln und
+dessen Ausgang mit host-erzeugten Diagnosen wie `chat.gesendet` oder
+`shoutout.fehlgeschlagen` samt Ursache. Dieselbe Schreibfunktion übernimmt
+auch die Begrenzung und Löschung der Zeilen; ein Executor existiert noch nicht.
+
 ## Grenzen
 
 Module importieren einander nicht. Dadurch bleiben Settings, Domainregeln, Persistenz und UI eines Slices unabhängig austauschbar. Gemeinsame, modulübergreifende Verträge gehören in `src/modules/contract.ts`; fachliche Regeln gehören nicht in diesen Host-Contract. Der Worker kennt nur Host, Registry und die von der Registry bereitgestellten Schnittstellen.

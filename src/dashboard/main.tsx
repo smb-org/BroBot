@@ -6,6 +6,7 @@ import type {
   PanelBotStatus,
   PanelChannelOverview,
   PanelChannelState,
+  PanelEventsResponse,
   PanelLastError,
   PanelMembersResponse,
   PanelModeratorStatus,
@@ -20,6 +21,7 @@ import {
   fetchAuditLog,
   fetchChannelOverview,
   fetchChannels,
+  fetchEvents,
   fetchMembers,
   fetchSystemOverview,
   logout,
@@ -284,6 +286,7 @@ const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarP
             </RouteLink>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "system" }} current={route} onNavigate={onNavigate}>System</RouteLink>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "members" }} current={route} onNavigate={onNavigate}>Mitglieder</RouteLink>
+            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "events" }} current={route} onNavigate={onNavigate}>Ereignisse</RouteLink>
           </>
         ) : null}
       </nav>
@@ -513,6 +516,26 @@ const SystemPage = ({ system, auditState, onNextPage, loadingNextPage }: { syste
   </>
 );
 
+const EventsPage = ({ eventsState, onNextPage, loadingNextPage }: { eventsState: LoadState<PanelEventsResponse>; onNextPage: () => void; loadingNextPage: boolean }): ReactElement => (
+  <>
+    <header className="page-heading"><h1>Ereignisse</h1></header>
+    <section className="content-section"><div className="section-heading"><h2>Ereignisprotokoll</h2>{eventsState.data === null ? null : <span className="muted"><span className="zahl">{String(eventsState.data.entries.length)}</span> Einträge</span>}</div>
+      {eventsState.status === "loading" ? <p className="loading-line">Ereignisse werden geladen …</p> : null}
+      {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
+      {eventsState.data !== null && eventsState.data.entries.length === 0 ? <p className="muted">Noch keine Ereignisse protokolliert.</p> : null}
+      {eventsState.data !== null && eventsState.data.entries.length > 0 ? <>
+        <div className="event-list">{eventsState.data.entries.map((entry) => {
+          const actor = entry.actorDisplayName ?? (entry.actorLogin == null
+            ? entry.actorUserId ?? "Automatisch"
+            : `@${entry.actorLogin}`);
+          return <article className="event-entry" key={entry.eventId}><div className="event-entry__heading"><strong className="mono">{entry.code}</strong><span><span className="mono">{entry.moduleId}</span> · <span className="mono">{formatTimestamp(entry.createdAt)}</span> · <span className="mono">{actor}</span></span></div><details><summary>Detail</summary><pre>{entry.detail}</pre></details></article>;
+        })}</div>
+        {eventsState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? "Ältere Ereignisse werden geladen …" : "Ältere Ereignisse laden"}</button>}
+      </> : null}
+    </section>
+  </>
+);
+
 export const DashboardApp = (): ReactElement => {
   const [route, navigate] = useDashboardRoute();
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
@@ -521,10 +544,14 @@ export const DashboardApp = (): ReactElement => {
   const [system, setSystem] = useState<LoadState<PanelSystemResponse>>(() => idleState());
   const [members, setMembers] = useState<LoadState<PanelMembersResponse>>(() => idleState());
   const [audit, setAudit] = useState<LoadState<PanelAuditResponse>>(() => idleState());
+  const [events, setEvents] = useState<LoadState<PanelEventsResponse>>(() => idleState());
   const [systemChannelId, setSystemChannelId] = useState<string | null>(null);
   const [auditChannelId, setAuditChannelId] = useState<string | null>(null);
+  const [eventsChannelId, setEventsChannelId] = useState<string | null>(null);
   const [loadingNextAuditPage, setLoadingNextAuditPage] = useState(false);
   const auditPageController = useRef<AbortController | null>(null);
+  const [loadingNextEventsPage, setLoadingNextEventsPage] = useState(false);
+  const eventsPageController = useRef<AbortController | null>(null);
   const [loadingNextMembersPage, setLoadingNextMembersPage] = useState(false);
   const membersPageController = useRef<AbortController | null>(null);
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
@@ -533,6 +560,8 @@ export const DashboardApp = (): ReactElement => {
   const clearProtectedState = (): void => {
     auditPageController.current?.abort();
     auditPageController.current = null;
+    eventsPageController.current?.abort();
+    eventsPageController.current = null;
     membersPageController.current?.abort();
     membersPageController.current = null;
     setChannels({ status: "success", data: [], error: null });
@@ -541,9 +570,12 @@ export const DashboardApp = (): ReactElement => {
     setSystem(idleState());
     setMembers(idleState());
     setAudit(idleState());
+    setEvents(idleState());
     setSystemChannelId(null);
     setAuditChannelId(null);
+    setEventsChannelId(null);
     setLoadingNextAuditPage(false);
+    setLoadingNextEventsPage(false);
     setAuthenticationRequired(true);
     navigate({ kind: "overview" });
   };
@@ -575,6 +607,9 @@ export const DashboardApp = (): ReactElement => {
     auditPageController.current?.abort();
     auditPageController.current = null;
     setLoadingNextAuditPage(false);
+    eventsPageController.current?.abort();
+    eventsPageController.current = null;
+    setLoadingNextEventsPage(false);
     membersPageController.current?.abort();
     membersPageController.current = null;
     setLoadingNextMembersPage(false);
@@ -582,13 +617,17 @@ export const DashboardApp = (): ReactElement => {
     setModeratorCheck(idleModeratorCheck());
     setSystem(idleState());
     setAudit(idleState());
+    setEvents(idleState());
     setSystemChannelId(null);
     setAuditChannelId(null);
+    setEventsChannelId(null);
     const cleanup = (): void => {
       cancelled = true;
       controller.abort();
       auditPageController.current?.abort();
       auditPageController.current = null;
+      eventsPageController.current?.abort();
+      eventsPageController.current = null;
       membersPageController.current?.abort();
       membersPageController.current = null;
       setLoadingNextMembersPage(false);
@@ -616,6 +655,22 @@ export const DashboardApp = (): ReactElement => {
         } catch (error) {
           if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
             setMembers({ status: "error", data: null, error: errorMessage(error) });
+            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+          }
+        }
+        return;
+      }
+      if (route.section === "events") {
+        setEvents(loadingState());
+        try {
+          const response = await fetchEvents(route.channelId, null, controller.signal);
+          if (!cancelled && !controller.signal.aborted) {
+            setEvents({ status: "success", data: response, error: null });
+            setEventsChannelId(route.channelId);
+          }
+        } catch (error) {
+          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+            setEvents({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
           }
         }
@@ -794,6 +849,38 @@ export const DashboardApp = (): ReactElement => {
     }
   };
 
+  const loadNextEventsPage = async (): Promise<void> => {
+    if (route.kind !== "channel" || route.section !== "events" || loadingNextEventsPage ||
+        events.data?.nextCursor === null || events.data?.nextCursor === undefined) return;
+    const channelId = route.channelId;
+    const cursor = events.data.nextCursor;
+    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "events" });
+    const controller = new AbortController();
+    eventsPageController.current = controller;
+    setLoadingNextEventsPage(true);
+    try {
+      const nextPage = await fetchEvents(channelId, cursor, controller.signal);
+      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      setEvents((current) => {
+        if (current.data === null || current.data.nextCursor !== cursor) return current;
+        return {
+          status: "success",
+          data: { entries: [...current.data.entries, ...nextPage.entries], nextCursor: nextPage.nextCursor },
+          error: null,
+        };
+      });
+    } catch (error) {
+      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      setEvents((current) => ({ ...current, status: "error", error: errorMessage(error) }));
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    } finally {
+      if (eventsPageController.current === controller) {
+        eventsPageController.current = null;
+        setLoadingNextEventsPage(false);
+      }
+    }
+  };
+
   if (authenticationRequired) {
     return <main className="auth-screen"><div className="auth-card"><h1>Anmeldung erforderlich</h1><p>Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.</p><a className="button" href="/auth/login">Mit Twitch anmelden</a></div></main>;
   }
@@ -815,6 +902,9 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "channel" && route.section === "system" && system.status === "loading" ? <p className="loading-line">Systemzustand wird geladen …</p> : null}
         {route.kind === "channel" && route.section === "system" && system.error !== null ? <ErrorPanel message={system.error} /> : null}
         {route.kind === "channel" && route.section === "system" && system.data !== null && systemChannelId === route.channelId ? <SystemPage system={system.data} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
+        {route.kind === "channel" && route.section === "events" && events.status === "loading" ? <p className="loading-line">Ereignisse werden geladen …</p> : null}
+        {route.kind === "channel" && route.section === "events" && events.error !== null ? <ErrorPanel message={events.error} /> : null}
+        {route.kind === "channel" && route.section === "events" && events.data !== null && eventsChannelId === route.channelId ? <EventsPage eventsState={events} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
       </main>
     </div>
   );

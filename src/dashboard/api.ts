@@ -3,6 +3,7 @@ import type {
   PanelChannelOverview,
   PanelChannelsResponse,
   PanelChannelRole,
+  PanelEventsResponse,
   PanelMember,
   PanelMembersResponse,
   PanelModeratorStatus,
@@ -113,6 +114,20 @@ export const fetchAuditLog = (
   const query = params.toString();
   return requestJson<PanelAuditResponse>(
     `${channelPath(channelId, "audit-log")}${query.length > 0 ? `?${query}` : ""}`,
+    requestOptions(signal),
+  );
+};
+
+export const fetchEvents = (
+  channelId: string,
+  cursor: string | null = null,
+  signal?: AbortSignal,
+): Promise<PanelEventsResponse> => {
+  const params = new URLSearchParams();
+  if (cursor !== null) params.set("cursor", cursor);
+  const query = params.toString();
+  return requestJson<PanelEventsResponse>(
+    `${channelPath(channelId, "events")}${query.length > 0 ? `?${query}` : ""}`,
     requestOptions(signal),
   );
 };

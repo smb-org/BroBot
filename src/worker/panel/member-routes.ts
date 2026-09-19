@@ -27,7 +27,7 @@ interface JsonRecord {
   [key: string]: unknown;
 }
 
-interface TwitchUser {
+export interface TwitchUser {
   userId: string;
   login: string;
   displayName: string;
@@ -159,7 +159,7 @@ const fetchTwitchUserByLogin = async (
   return { userId: first.id, login: first.login, displayName: first.display_name };
 };
 
-const fetchTwitchUsersById = async (
+export const fetchTwitchUsersById = async (
   fetcher: typeof fetch,
   environment: Env,
   userIds: string[],

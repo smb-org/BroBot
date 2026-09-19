@@ -20,13 +20,14 @@ import {
   tryReserveBotChannelStatusCheck,
 } from "../auth/repository";
 import {
-  decodeAuditLogCursor,
+  decodeLogCursor,
   getAuditLogForChannel,
   getChannelOverviewForUser,
+  getEventLogForChannel,
   getSystemOverviewForUser,
   listChannelsForUser,
 } from "./repository";
-import { memberRouter } from "./member-routes";
+import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -178,8 +179,35 @@ panelRouter.get(
     const limit = parseAuditLimit(context.req.query("limit"));
     if (limit === null) return context.text("Audit-Begrenzung ist ungültig.", 400);
     const serializedCursor = context.req.query("cursor");
-    const cursor = serializedCursor === undefined ? null : decodeAuditLogCursor(serializedCursor);
+    const cursor = serializedCursor === undefined ? null : decodeLogCursor(serializedCursor);
     if (serializedCursor !== undefined && cursor === null) return context.text("Audit-Cursor ist ungültig.", 400);
     return context.json(await getAuditLogForChannel(context.env.DB, channelId, limit, cursor));
+  },
+);
+
+panelRouter.get(
+  "/api/channels/:channelId/events",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    const limit = parseAuditLimit(context.req.query("limit"));
+    if (limit === null) return context.text("Ereignis-Begrenzung ist ungültig.", 400);
+    const serializedCursor = context.req.query("cursor");
+    const cursor = serializedCursor === undefined ? null : decodeLogCursor(serializedCursor);
+    if (serializedCursor !== undefined && cursor === null) return context.text("Ereignis-Cursor ist ungültig.", 400);
+    const events = await getEventLogForChannel(context.env.DB, channelId, limit, cursor);
+    const actorIds = events.entries.flatMap((entry) => entry.actorUserId === null ? [] : [entry.actorUserId]);
+    const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
+    return context.json({
+      ...events,
+      entries: events.entries.map((entry) => {
+        const actor = entry.actorUserId === null ? undefined : actors.get(entry.actorUserId);
+        return {
+          ...entry,
+          actorLogin: actor?.login ?? null,
+          actorDisplayName: actor?.displayName ?? null,
+        };
+      }),
+    });
   },
 );
