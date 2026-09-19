@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 
 import {
   decryptStoredToken,
@@ -26,6 +26,7 @@ import {
   getEventLogForChannel,
   getSystemOverviewForUser,
   listChannelsForUser,
+  type LogCursor,
 } from "./repository";
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 
@@ -43,6 +44,27 @@ const parseAuditLimit = (value: string | undefined): number | null => {
   if (!/^\d+$/.test(value)) return null;
   const limit = Number(value);
   return Number.isSafeInteger(limit) && limit > 0 && limit <= MAX_AUDIT_LIMIT ? limit : null;
+};
+
+interface LogQuery {
+  limit: number;
+  cursor: LogCursor | null;
+}
+
+// Teilt sich nur die Parse-/Fehlermechanik zwischen Audit- und Ereignisprotokoll.
+// Beide Protokolle haben absichtlich unterschiedliche Leseberechtigungen und
+// Aufbewahrungsfristen (siehe docs/decisions/0004-ereignisprotokoll.md) — das bleibt
+// pro Route stehen, dieser Helfer fasst sie inhaltlich nicht zusammen.
+const parseLogQuery = (
+  context: Context<PanelEnvironment>,
+  fehlertexte: { limit: string; cursor: string },
+): LogQuery | Response => {
+  const limit = parseAuditLimit(context.req.query("limit"));
+  if (limit === null) return context.text(fehlertexte.limit, 400);
+  const serializedCursor = context.req.query("cursor");
+  const cursor = serializedCursor === undefined ? null : decodeLogCursor(serializedCursor);
+  if (serializedCursor !== undefined && cursor === null) return context.text(fehlertexte.cursor, 400);
+  return { limit, cursor };
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -176,12 +198,12 @@ panelRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
-    const limit = parseAuditLimit(context.req.query("limit"));
-    if (limit === null) return context.text("Audit-Begrenzung ist ungültig.", 400);
-    const serializedCursor = context.req.query("cursor");
-    const cursor = serializedCursor === undefined ? null : decodeLogCursor(serializedCursor);
-    if (serializedCursor !== undefined && cursor === null) return context.text("Audit-Cursor ist ungültig.", 400);
-    return context.json(await getAuditLogForChannel(context.env.DB, channelId, limit, cursor));
+    const parsed = parseLogQuery(context, {
+      limit: "Audit-Begrenzung ist ungültig.",
+      cursor: "Audit-Cursor ist ungültig.",
+    });
+    if (parsed instanceof Response) return parsed;
+    return context.json(await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor));
   },
 );
 
@@ -190,12 +212,12 @@ panelRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
-    const limit = parseAuditLimit(context.req.query("limit"));
-    if (limit === null) return context.text("Ereignis-Begrenzung ist ungültig.", 400);
-    const serializedCursor = context.req.query("cursor");
-    const cursor = serializedCursor === undefined ? null : decodeLogCursor(serializedCursor);
-    if (serializedCursor !== undefined && cursor === null) return context.text("Ereignis-Cursor ist ungültig.", 400);
-    const events = await getEventLogForChannel(context.env.DB, channelId, limit, cursor);
+    const parsed = parseLogQuery(context, {
+      limit: "Ereignis-Begrenzung ist ungültig.",
+      cursor: "Ereignis-Cursor ist ungültig.",
+    });
+    if (parsed instanceof Response) return parsed;
+    const events = await getEventLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor);
     const actorIds = events.entries.flatMap((entry) => entry.actorUserId === null ? [] : [entry.actorUserId]);
     const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
     return context.json({
