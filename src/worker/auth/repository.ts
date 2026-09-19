@@ -56,6 +56,23 @@ export interface BotIdentityStatusRecord {
   updatedAt: string;
 }
 
+export interface AppAccessTokenRecord {
+  accessTokenCiphertext: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventSubRevocationRecord {
+  subscriptionId: string;
+  channelId: string;
+  subscriptionType: string;
+  status: string;
+  reason: string | null;
+  revokedAt: string;
+  updatedAt: string;
+}
+
 /**
  * Der Akteur einer Mutation. Die sessionId gehoert dazu, weil die Mutation
  * selbst pruefen muss, ob die Session noch lebt — die Rolle allein genuegt
@@ -148,8 +165,25 @@ interface BotIdentityStatusRow {
   updated_at: string;
 }
 
+interface AppAccessTokenRow {
+  access_token_ciphertext: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface ChannelIdRow {
   channel_id: string;
+}
+
+interface EventSubRevocationRow {
+  subscription_id: string;
+  channel_id: string;
+  subscription_type: string;
+  status: string;
+  reason: string | null;
+  revoked_at: string;
+  updated_at: string;
 }
 
 interface BotChannelStatusCheckLockRow {
@@ -224,6 +258,23 @@ const mapChannelMember = (row: ChannelMemberRow): ChannelMemberRecord => ({
   userId: row.user_id,
   role: row.role,
   createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const mapAppAccessToken = (row: AppAccessTokenRow): AppAccessTokenRecord => ({
+  accessTokenCiphertext: row.access_token_ciphertext,
+  expiresAt: row.expires_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const mapEventSubRevocation = (row: EventSubRevocationRow): EventSubRevocationRecord => ({
+  subscriptionId: row.subscription_id,
+  channelId: row.channel_id,
+  subscriptionType: row.subscription_type,
+  status: row.status,
+  reason: row.reason,
+  revokedAt: row.revoked_at,
   updatedAt: row.updated_at,
 });
 
@@ -727,6 +778,146 @@ export const getBotIdentity = async (db: D1Database): Promise<BotIdentityRecord 
       WHERE id = 1`,
   ).first<BotIdentityRow>();
   return row === null ? null : mapBotIdentity(row);
+};
+
+export const getAppAccessToken = async (
+  db: D1Database,
+): Promise<AppAccessTokenRecord | null> => {
+  const row = await db.prepare(
+    `SELECT access_token_ciphertext, expires_at, created_at, updated_at
+       FROM twitch_app_access_token
+      WHERE id = 1`,
+  ).first<AppAccessTokenRow>();
+  return row === null ? null : mapAppAccessToken(row);
+};
+
+/**
+ * Ersetzt den globalen App-Token nur, wenn der gelesene Ciphertext noch
+ * aktuell ist. Ein fehlender Datensatz darf genau einmal angelegt werden.
+ */
+export const rotateAppAccessToken = async (
+  db: D1Database,
+  expectedAccessTokenCiphertext: string | null,
+  accessTokenCiphertext: string,
+  expiresAt: string,
+  createdAt: string,
+  updatedAt: string,
+): Promise<boolean> => {
+  const mutation = expectedAccessTokenCiphertext === null
+    ? db.prepare(
+      `INSERT INTO twitch_app_access_token
+        (id, access_token_ciphertext, expires_at, created_at, updated_at)
+       SELECT 1, ?, ?, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM twitch_app_access_token WHERE id = 1
+        )`,
+    ).bind(accessTokenCiphertext, expiresAt, createdAt, updatedAt)
+    : db.prepare(
+      `UPDATE twitch_app_access_token
+          SET access_token_ciphertext = ?, expires_at = ?, updated_at = ?
+        WHERE id = 1 AND access_token_ciphertext = ?`,
+    ).bind(accessTokenCiphertext, expiresAt, updatedAt, expectedAccessTokenCiphertext);
+  const result = await mutation.run();
+  return result.meta.changes > 0;
+};
+
+/** Dedupliziert EventSub-Nachrichten atomar über Twitchs Message-ID. */
+export const rememberEventSubMessage = async (
+  db: D1Database,
+  messageId: string,
+  receivedAt: string,
+): Promise<boolean> => {
+  const result = await db.prepare(
+    `INSERT OR IGNORE INTO eventsub_messages (message_id, received_at)
+     VALUES (?, ?)`,
+  ).bind(messageId, receivedAt).run();
+  return result.meta.changes > 0;
+};
+
+export const purgeOldEventSubMessages = async (
+  db: D1Database,
+  cutoff: string,
+): Promise<void> => {
+  await db.prepare(
+    `DELETE FROM eventsub_messages
+      WHERE julianday(received_at) < julianday(?)`,
+  ).bind(cutoff).run();
+};
+
+export const recordEventSubRevocation = async (
+  db: D1Database,
+  revocation: EventSubRevocationRecord,
+): Promise<void> => {
+  await db.prepare(
+    `INSERT INTO eventsub_revocations
+      (subscription_id, channel_id, subscription_type, status, reason, revoked_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(subscription_id) DO UPDATE SET
+       channel_id = excluded.channel_id,
+       subscription_type = excluded.subscription_type,
+       status = excluded.status,
+       reason = excluded.reason,
+       revoked_at = excluded.revoked_at,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    revocation.subscriptionId,
+    revocation.channelId,
+    revocation.subscriptionType,
+    revocation.status,
+    revocation.reason,
+    revocation.revokedAt,
+    revocation.updatedAt,
+  ).run();
+};
+
+/** Speichert Message-ID und Widerruf in derselben D1-Transaktion. */
+export const rememberEventSubMessageAndRevocation = async (
+  db: D1Database,
+  messageId: string,
+  receivedAt: string,
+  revocation: EventSubRevocationRecord,
+): Promise<boolean> => {
+  const message = db.prepare(
+    `INSERT OR IGNORE INTO eventsub_messages (message_id, received_at)
+     VALUES (?, ?)`,
+  ).bind(messageId, receivedAt);
+  const storedRevocation = db.prepare(
+    `INSERT INTO eventsub_revocations
+      (subscription_id, channel_id, subscription_type, status, reason, revoked_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?
+      WHERE changes() = 1
+     ON CONFLICT(subscription_id) DO UPDATE SET
+       channel_id = excluded.channel_id,
+       subscription_type = excluded.subscription_type,
+       status = excluded.status,
+       reason = excluded.reason,
+       revoked_at = excluded.revoked_at,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    revocation.subscriptionId,
+    revocation.channelId,
+    revocation.subscriptionType,
+    revocation.status,
+    revocation.reason,
+    revocation.revokedAt,
+    revocation.updatedAt,
+  );
+  const results = await db.batch([message, storedRevocation]);
+  return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export const listEventSubRevocations = async (
+  db: D1Database,
+  channelId: string,
+): Promise<EventSubRevocationRecord[]> => {
+  const result = await db.prepare(
+    `SELECT subscription_id, channel_id, subscription_type, status, reason,
+            revoked_at, updated_at
+       FROM eventsub_revocations
+      WHERE channel_id = ?
+      ORDER BY revoked_at DESC, subscription_id DESC`,
+  ).bind(channelId).all<EventSubRevocationRow>();
+  return result.results.map(mapEventSubRevocation);
 };
 
 export const listLoginIdentities = async (

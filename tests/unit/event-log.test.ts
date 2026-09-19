@@ -49,6 +49,7 @@ const insertBotIdentity = async (database: TestD1Database): Promise<void> => {
 const makeEnvironment = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
+  TWITCH_CLIENT_SECRET: "client-secret",
   ...environmentKeys,
 } as Env);
 
@@ -200,6 +201,10 @@ describe("Ereignisprotokoll", () => {
     await insertEvent(database, "zu-alt", "kanal-a", "2026-09-04T11:59:59.000Z");
     await insertEvent(database, "grenze", "kanal-a", "2026-09-04T12:00:00.000Z");
     await insertEvent(database, "jung", "kanal-a", "2026-09-10T12:00:00.000Z");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ access_token: "scheduled-token", expires_in: 7200 }),
+      { status: 200 },
+    )));
 
     await scheduled(
       {} as ScheduledController,
