@@ -3,6 +3,7 @@ import { maintainBotIdentity } from "./bot-maintenance";
 import { purgeOldEventLogEntries } from "./event-log";
 import { maintainLoginIdentities } from "./login-maintenance";
 import { purgeOldEventSubMessages } from "./auth/repository";
+import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   _controller,
@@ -17,6 +18,7 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
     maintainLoginIdentities(env, now),
     maintainBotIdentity(env, now),
     maintainAppAccessToken(env, now),
+    maintainEventSubSubscriptions(env, now),
   ]).then(() => undefined);
   executionContext.waitUntil(work);
   await work;

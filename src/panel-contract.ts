@@ -4,6 +4,7 @@ export type PanelBotStatusName = "connected" | "revoked" | "error";
 export type PanelLoginStatusName = "connected" | "revoked" | "error";
 export type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
 export type PanelChannelBotConsentStatus = "granted" | "missing";
+export type PanelChatSubscriptionStatus = "enabled" | "missing" | "error" | "revoked";
 
 export interface PanelBotStatus {
   status: PanelBotStatusName;
@@ -17,6 +18,13 @@ export interface PanelModeratorStatus {
   reason: string | null;
 }
 
+export interface PanelChatSubscription {
+  status: PanelChatSubscriptionStatus;
+  subscriptionId: string | null;
+  reason: string | null;
+  updatedAt: string;
+}
+
 export interface PanelTokenStatus {
   botExpiresAt: string | null;
   loginStatus: PanelLoginStatusName | null;
@@ -25,7 +33,7 @@ export interface PanelTokenStatus {
 }
 
 export interface PanelLastError {
-  source: "moderator" | "bot" | "login";
+  source: "moderator" | "bot" | "login" | "eventsub";
   reason: string;
   at: string;
 }
@@ -39,6 +47,7 @@ export interface PanelChannelState {
   channelBotConsent: PanelChannelBotConsentStatus;
   bot: PanelBotStatus | null;
   moderator: PanelModeratorStatus | null;
+  chatSubscription: PanelChatSubscription | null;
   tokens: PanelTokenStatus;
   lastError: PanelLastError | null;
 }
@@ -100,6 +109,7 @@ export interface PanelTwitchUser {
 export interface PanelSystemResponse {
   broadcasterConnection: PanelBroadcasterConnectionStatus;
   bot: PanelBotStatus | null;
+  chatSubscription: PanelChatSubscription | null;
   tokens: PanelTokenStatus;
 }
 

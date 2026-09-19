@@ -14,6 +14,7 @@ import type {
   PanelEventEntry,
   PanelEventsResponse,
 } from "../../panel-contract";
+import { channelBotConsentCondition } from "../auth/repository";
 
 interface ChannelStateRow {
   channel_id: string;
@@ -33,6 +34,10 @@ interface ChannelStateRow {
   moderator_is_moderator: number | null;
   moderator_checked_at: string | null;
   moderator_reason: string | null;
+  eventsub_status: "enabled" | "missing" | "error" | "revoked" | null;
+  eventsub_subscription_id: string | null;
+  eventsub_reason: string | null;
+  eventsub_updated_at: string | null;
 }
 
 interface ActiveModuleRow {
@@ -88,17 +93,7 @@ export const decodeLogCursor = (serialized: string): LogCursor | null => {
 const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, member.role,
            CASE WHEN connection.connection_id IS NULL THEN 0 ELSE 1 END AS broadcaster_connection,
-           CASE WHEN EXISTS (
-            SELECT 1
-               FROM twitch_login_identity AS broadcaster_identity
-              WHERE broadcaster_identity.user_id = channel.channel_id
-                AND broadcaster_identity.status = 'connected'
-                AND EXISTS (
-                  SELECT 1
-                    FROM json_each(broadcaster_identity.scopes_json) AS granted_scope
-                   WHERE granted_scope.value = 'channel:bot'
-                )
-           ) THEN 1 ELSE 0 END AS channel_bot_consent,
+           CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent,
            bot_status.status AS bot_status, bot_status.reason AS bot_reason,
            bot_status.updated_at AS bot_updated_at,
            bot_identity.expires_at AS bot_expires_at,
@@ -107,7 +102,11 @@ const channelStateQuery = `
            login_identity.updated_at AS login_updated_at,
            moderator.is_moderator AS moderator_is_moderator,
            moderator.checked_at AS moderator_checked_at,
-           moderator.reason AS moderator_reason
+           moderator.reason AS moderator_reason,
+           eventsub.status AS eventsub_status,
+           eventsub.subscription_id AS eventsub_subscription_id,
+           eventsub.reason AS eventsub_reason,
+           eventsub.updated_at AS eventsub_updated_at
       FROM channels AS channel
       JOIN channel_members AS member ON member.channel_id = channel.channel_id
       LEFT JOIN twitch_connections AS connection
@@ -117,6 +116,9 @@ const channelStateQuery = `
       LEFT JOIN bot_identity ON bot_identity.id = 1
       LEFT JOIN twitch_login_identity AS login_identity ON login_identity.user_id = ?
       LEFT JOIN bot_channel_status AS moderator ON moderator.channel_id = channel.channel_id
+      LEFT JOIN eventsub_subscriptions AS eventsub
+        ON eventsub.channel_id = channel.channel_id
+       AND eventsub.subscription_type = 'channel.chat.message'
      WHERE member.user_id = ?`;
 
 const mapBotStatus = (row: ChannelStateRow): PanelBotStatus | null =>
@@ -131,6 +133,16 @@ const mapModerator = (row: ChannelStateRow): PanelModeratorStatus | null =>
       isModerator: row.moderator_is_moderator === 1,
       checkedAt: row.moderator_checked_at,
       reason: row.moderator_reason,
+    };
+
+const mapEventSub = (row: ChannelStateRow): PanelChannelState["chatSubscription"] =>
+  row.eventsub_status === null || row.eventsub_updated_at === null
+    ? null
+    : {
+      status: row.eventsub_status,
+      subscriptionId: row.eventsub_subscription_id,
+      reason: row.eventsub_reason,
+      updatedAt: row.eventsub_updated_at,
     };
 
 const mapTokens = (row: ChannelStateRow): PanelTokenStatus => ({
@@ -151,6 +163,10 @@ const mapLastError = (row: ChannelStateRow): PanelLastError | null => {
   if (row.login_reason !== null && row.login_updated_at !== null) {
     candidates.push({ source: "login", reason: row.login_reason, at: row.login_updated_at });
   }
+  if (row.eventsub_reason !== null && row.eventsub_updated_at !== null &&
+      (row.eventsub_status === "error" || row.eventsub_status === "revoked")) {
+    candidates.push({ source: "eventsub", reason: row.eventsub_reason, at: row.eventsub_updated_at });
+  }
   candidates.sort((left, right) => right.at.localeCompare(left.at));
   return candidates[0] ?? null;
 };
@@ -164,6 +180,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   channelBotConsent: row.channel_bot_consent === 1 ? "granted" : "missing",
   bot: mapBotStatus(row),
   moderator: mapModerator(row),
+  chatSubscription: mapEventSub(row),
   tokens: mapTokens(row),
   lastError: mapLastError(row),
 });
@@ -222,6 +239,7 @@ export const getSystemOverviewForUser = async (
   return {
     broadcasterConnection: row.broadcaster_connection === 1 ? "connected" : "not_connected",
     bot: mapBotStatus(row),
+    chatSubscription: mapEventSub(row),
     tokens: mapTokens(row),
   };
 };
