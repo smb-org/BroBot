@@ -740,22 +740,9 @@ export const DashboardApp = (): ReactElement => {
     const expectedOverviewPath = dashboardRoutePath(route);
 
     const load = async (): Promise<void> => {
-      if (route.kind === "module") {
-        try {
-          const response = await fetchChannelOverview(route.channelId, controller.signal);
-          if (!cancelled) {
-            setOverview({ status: "success", data: response, error: null, loadedAt: Date.now() });
-            setOverviewRoutePath(expectedOverviewPath);
-          }
-        } catch (error) {
-          if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
-            setOverview({ status: "error", data: null, error: errorMessage(error) });
-            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        }
-        return;
-      }
-      if (route.section === "overview") {
+      // Die Modulseite zeigt denselben Kanalkopf wie die Uebersicht und
+      // braucht deshalb dieselben Daten.
+      if (route.kind === "module" || route.section === "overview") {
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
           if (!cancelled) {
