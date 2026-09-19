@@ -90,3 +90,9 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   if (!changed) return context.text("Modul wurde inzwischen geändert.", 409);
   return context.json({ module: moduleState(moduleId, enabled, settings) });
 });
+
+for (const module of MODULES) {
+  if (module.routes !== undefined) {
+    moduleRouter.route(`/api/channels/:channelId/modules/${module.id}`, module.routes);
+  }
+}

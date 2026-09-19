@@ -34,6 +34,7 @@ import { ModulePanelMount } from "./module-panels";
 import { MembersPage } from "./members";
 import { ModulesPage } from "./modules";
 import { roleLabel } from "./labels";
+import { formatDashboardDate } from "./locale";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import "./styles.css";
 
@@ -229,11 +230,10 @@ const NavDot = ({ tone }: { tone: "healthy" | "warning" | "error" }): ReactEleme
   );
 
 const formatTimestamp = (value: string): string => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("de-DE", {
+  return formatDashboardDate(value, {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(date);
+  });
 };
 
 const tokenSummary = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): string => {
@@ -560,7 +560,7 @@ const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModer
           {eintraege.map((eintrag) => <Fragment key={eintrag.key}>{eintrag.node}</Fragment>)}
         </div>
       )}
-      <section className="content-section"><div className="section-heading"><h2>Aktive Module</h2><span className="muted zahl">{String(overview.activeModules.length)}</span></div><ModulePanelMount activeModules={overview.activeModules} /></section>
+      <section className="content-section"><div className="section-heading"><h2>Aktive Module</h2><span className="muted zahl">{String(overview.activeModules.length)}</span></div><ModulePanelMount channelId={overview.channelId} activeModules={overview.activeModules} /></section>
     </>
   );
 };

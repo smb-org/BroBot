@@ -13,7 +13,7 @@ describe("Modul-Panel-Lader", () => {
   afterEach(() => cleanup());
 
   it("ruft den Lazy-Loader eines nicht aktiven Moduls nicht auf", () => {
-    render(<ModulePanelMount activeModules={[]} />);
+    render(<ModulePanelMount channelId="kanal-a" activeModules={[]} />);
 
     expect(screen.getByText("Keine Module aktiv.")).toBeInTheDocument();
     expect(inactiveLoader).not.toHaveBeenCalled();

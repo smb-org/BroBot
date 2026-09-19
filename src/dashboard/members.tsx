@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } f
 
 import type { PanelChannelRole, PanelMember, PanelTwitchUser } from "../panel-contract";
 import { roleLabel } from "./labels";
+import { formatDashboardDate } from "./locale";
 import {
   addChannelMember,
   PanelApiError,
@@ -31,10 +32,7 @@ const manageableRoles: readonly PanelChannelRole[] = ["broadcaster", "verwalter"
 
 /** Der Beitritt liegt Tage bis Jahre zurueck; die Uhrzeit traegt dort nichts bei. */
 const formatJoinDate = (value: string): string => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(date);
+  return formatDashboardDate(value, { dateStyle: "medium" });
 };
 
 const errorMessage = (error: unknown): string => {

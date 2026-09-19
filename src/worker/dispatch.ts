@@ -1,8 +1,9 @@
-import type { BotModule, ModuleAction, ModuleDiagnostic, ModuleEvent, ModuleResult } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleActor, ModuleDiagnostic, ModuleEvent, ModuleResult } from "../modules/contract";
 import { MODULES } from "../modules/registry";
-import { listChannelModulesForChannel } from "./auth/repository";
+import { getChannelMemberForChannel, listChannelModulesForChannel } from "./auth/repository";
 import { sendChatMessage } from "./chat";
 import { writeModuleDiagnostics } from "./event-log";
+import { authorizeModuleMutation } from "./module-authorization";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -16,6 +17,21 @@ const HOST_MODULE_ID = "host";
 
 const fehlermeldung = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const textwert = (value: unknown): string | null =>
+  typeof value === "string" && value.length > 0 ? value : null;
+
+const akteurFuerEreignis = async (
+  db: D1Database,
+  channelId: string,
+  payload: Readonly<Record<string, unknown>>,
+): Promise<ModuleActor | null> => {
+  const userId = textwert(payload.chatter_user_id);
+  if (userId === null) return null;
+  const login = textwert(payload.chatter_user_login) ?? textwert(payload.chatter_user_name) ?? userId;
+  const member = await getChannelMemberForChannel(db, channelId, userId);
+  return { userId, login, role: member?.role ?? null };
+};
 
 /**
  * Ermittelt die Module, die dieses Ereignis in diesem Kanal sehen dürfen:
@@ -102,6 +118,7 @@ export const dispatchEventSubNotification = async (
 ): Promise<void> => {
   const aktivierungen = await listChannelModulesForChannel(environment.DB, event.channelId);
   const { treffer, unbekannt } = selectModulesForEvent(aktivierungen, event.subscriptionType, registry);
+  const actor = await akteurFuerEreignis(environment.DB, event.channelId, event.payload);
 
   for (const moduleId of unbekannt) {
     await writeModuleDiagnostics(
@@ -128,8 +145,14 @@ export const dispatchEventSubNotification = async (
         payload: event.payload,
         settings: gepruefteEinstellungen,
         receivedAt: event.receivedAt,
+        actor,
       };
-      ergebnis = module.handleEvent === undefined ? null : await module.handleEvent(moduleEvent);
+      ergebnis = module.handleEvent === undefined
+        ? null
+        : await module.handleEvent(moduleEvent, {
+          DB: environment.DB,
+          authorizeMutation: authorizeModuleMutation,
+        });
     } catch (error: unknown) {
       // Ein geworfenes Modul reißt weder den Worker noch die übrigen Module
       // mit. Der Fehler wird sichtbar, nicht verschluckt.
@@ -150,7 +173,7 @@ export const dispatchEventSubNotification = async (
       event.channelId,
       module.id,
       event.triggerId,
-      null,
+      actor?.userId ?? null,
       diagnostics,
       event.receivedAt,
     );

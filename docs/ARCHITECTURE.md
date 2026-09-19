@@ -20,13 +20,27 @@ Channel Durable Object (SQLite + WebSocket-Hibernation)
 OBS-/StreamElements-Overlay
 ```
 
-Der spätere Ereignisfluss ist: EventSub → Worker → fachliches Modul → Channel Durable Object → Overlay. Ein Durable Object wird deterministisch aus dem `channelId`-Namen angesprochen. Der Worker bleibt das Gateway für HTTP und die Module; der DO hält den kanalbezogenen Echtzeitraum.
+Der Ereignisfluss für Chatmodule ist: EventSub → Worker → Akteurauflösung aus
+`channel_members` → fachliches Modul → Host-Executor → Twitch-Chat. Ein
+Durable Object wird deterministisch aus dem `channelId`-Namen angesprochen und
+bleibt für die spätere Echtzeitstrecke zuständig. Der Worker bleibt das Gateway
+für HTTP und die Module.
 
 ## Modulsystem
 
-Ein Modul ist ein Feature-Slice unter `src/modules/<id>/` mit `contracts/`, `domain/`, `service.ts`, `repository.ts`, `adapters/`, `overlay/` und `panel/`. Sein `BotModule`-Contract beschreibt aktuell Settings, EventSub-Typen, Routen sowie ein lazy Overlay und eine optionale lazy Panel-Ansicht. Command-Verarbeitung und Modulmigrationen werden erst ergänzt, sobald das erste Modul sie benötigt; bis dahin sind sie ausdrücklich kein Bestandteil des Contracts.
+Ein Modul ist ein Feature-Slice unter `src/modules/<id>` mit `contracts/`,
+`domain/`, `service.ts`, `repository.ts`, `adapters/`, `overlay/` und
+`panel/`. Das erste konkrete Modul ist `src/modules/textbefehle/`. Es
+ergänzt den Contract um den vom Host aufgelösten `ModuleEvent.actor`, den
+`ModuleExecutionContext` für den eigenen D1-Adapter und typisierte Props für
+seine lazy Panel-Ansicht. Die Migration liegt als
+`migrations/0010_modul_textbefehle.sql` in der zentralen D1-Kette.
 
-`src/modules/registry.ts` ist die einzige Stelle, die alle Module kennt. Später mountet der Worker die registrierten Router kanalbezogen unter `/api/channels/:channelId/modules/<id>`. Ein Modul wird aktiviert, indem in `channel_modules` eine Zeile für den jeweiligen `channel_id` und `module_id` mit `enabled = 1` steht. Dafür ist kein Deploy erforderlich.
+`src/modules/registry.ts` ist die einzige Stelle, die alle Module kennt. Der
+Worker mountet registrierte Router kanalbezogen unter
+`/api/channels/:channelId/modules/<id>`. Ein Modul wird aktiviert, indem in
+`channel_modules` eine Zeile für den jeweiligen `channel_id` und `module_id`
+mit `enabled = 1` steht. Dafür ist kein Deploy erforderlich.
 
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 
@@ -36,7 +50,11 @@ ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service
 
 Das Admin- und Mod-Panel ist die primäre Bedienoberfläche. Sein Grundgerüst gehört dem Host; die konkrete Ansicht kommt pro Modul optional über den `BotModule`-Contract hinzu. Overlay- und Panel-Ansichten werden lazy geladen, damit ein deaktiviertes Modul in keinem der beiden Bundles Gewicht trägt.
 
-Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach.
+Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach. Das Textbefehle-Panel lädt und mutiert seine Liste über `/api/channels/:channelId/modules/textbefehle/befehle`; die Ansicht bleibt lazy und führt keinen Worker-, Repository- oder Adaptercode aus.
+
+Sichtbare Panel-Texte eines Moduls stehen gesammelt in dessen Panel-Locale.
+Die gemeinsame Sprachauflösung und Datumsformatierung liegt in
+`src/dashboard/locale.ts`; neue Ansichten verdrahten kein neues `de-DE`.
 
 ### Kanalgebundene API und Schreibschutz
 

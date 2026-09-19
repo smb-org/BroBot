@@ -307,7 +307,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("100")).not.toBeInTheDocument();
     expect(screen.getByText("Nicht auflösbar")).toBeInTheDocument();
     expect(screen.getByText("Twitch-ID 200")).toBeInTheDocument();
-    expect(screen.getByText(/17\.09\.2026/), "Beitrittszeitpunkt wird angezeigt").toBeInTheDocument();
+    expect(screen.getByText(/17\.09\.2026|Sep 17, 2026/), "Beitrittszeitpunkt wird angezeigt").toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Suchen" })).toBeInTheDocument();
 
     const operatorChannel = { ...channel, role: "bediener" };
