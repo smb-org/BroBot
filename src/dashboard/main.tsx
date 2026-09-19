@@ -29,12 +29,13 @@ import {
   logout,
   PanelApiError,
   refreshModeratorStatus,
+  setChannelModuleEnabled,
 } from "./api";
-import { ModuleNavigation, ModulePage } from "./module-panels";
+import { ModuleNavigation, ModulePage, ModuleWorkspace } from "./module-panels";
 import { MembersPage } from "./members";
-import { ModulesPage } from "./modules";
 import { roleLabel } from "./labels";
 import { dashboardLanguage, dashboardTexte, formatZeitpunkt, formatZahl } from "./locale";
+import { moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import "./styles.css";
 
@@ -287,49 +288,80 @@ interface SidebarProperties {
   loggingOut: boolean;
 }
 
-const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarProperties): ReactElement => {
+const NavigationIcon = ({ kind }: { kind: string }): ReactElement => (
+  <svg className="rail-link__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    {kind === "overview" ? <><rect x="5" y="5" width="5" height="5" rx="1" /><rect x="14" y="5" width="5" height="5" rx="1" /><rect x="5" y="14" width="5" height="5" rx="1" /><rect x="14" y="14" width="5" height="5" rx="1" /></> : kind === "channel" ? <><path d="M5 7.5h14M5 12h14M5 16.5h9" /><circle cx="18" cy="16.5" r="1" /></> : kind === "system" ? <><circle cx="12" cy="12" r="7" /><path d="M12 8v4l2.5 2" /></> : kind === "members" ? <><circle cx="10" cy="9" r="3" /><path d="M4.5 18c.8-3 2.6-4.5 5.5-4.5s4.7 1.5 5.5 4.5M17 8.5a2.5 2.5 0 0 1 0 5" /></> : kind === "modules" ? <><rect x="5" y="5" width="6" height="6" rx="1" /><rect x="13" y="5" width="6" height="6" rx="1" /><rect x="5" y="13" width="6" height="6" rx="1" /><rect x="13" y="13" width="6" height="6" rx="1" /></> : <><path d="M6 5h12v14H6z" /><path d="M9 9h6M9 13h6M9 17h4" /></>}
+  </svg>
+);
+
+const Sidebar = ({ route, channels, onNavigate }: SidebarProperties): ReactElement => {
   const texte = dashboardTexte();
   const isChannelRoute = route.kind === "channel" || route.kind === "module";
-  const selectedChannelId = isChannelRoute ? route.channelId : "";
   const activeChannel = isChannelRoute
     ? channels.find((channel) => channel.channelId === route.channelId)
     : undefined;
   return (
     <aside className="sidebar">
-      <div className="brand-mark"><span className="brand-mark__dot" />BroBot</div>
       <nav className="primary-nav" aria-label={texte.navigation.hauptnavigation}>
-        <RouteLink route={{ kind: "overview" }} current={route} onNavigate={onNavigate}>{texte.navigation.uebersicht}</RouteLink>
+        <RouteLink route={{ kind: "overview" }} current={route} onNavigate={onNavigate}>
+          <span className="rail-link__content"><NavigationIcon kind="overview" /><span>{texte.navigation.uebersicht}</span></span>
+        </RouteLink>
         {isChannelRoute ? (
           <>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "overview" }} current={route} onNavigate={onNavigate}>
-              {texte.navigation.kanal}
+              <span className="rail-link__content"><NavigationIcon kind="channel" /><span>{texte.navigation.kanal}</span></span>
               {activeChannel === undefined ? null : <NavDot tone={channelStatus(activeChannel)} />}
             </RouteLink>
-            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "system" }} current={route} onNavigate={onNavigate}>{texte.navigation.system}</RouteLink>
-            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "members" }} current={route} onNavigate={onNavigate}>{texte.navigation.mitglieder}</RouteLink>
-            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "modules" }} current={route} onNavigate={onNavigate}>{texte.navigation.module}</RouteLink>
-            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "events" }} current={route} onNavigate={onNavigate}>{texte.navigation.ereignisse}</RouteLink>
+            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "system" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon kind="system" /><span>{texte.navigation.system}</span></span></RouteLink>
+            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "members" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon kind="members" /><span>{texte.navigation.mitglieder}</span></span></RouteLink>
+            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "modules" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon kind="modules" /><span>{texte.navigation.module}</span></span></RouteLink>
+            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "events" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon kind="events" /><span>{texte.navigation.ereignisse}</span></span></RouteLink>
           </>
         ) : null}
       </nav>
-      {channels.length > 1 ? (
-        <label className="channel-picker">
-          <span>{texte.navigation.kanal}</span>
-          <select
-            aria-label={texte.navigation.kanalAuswaehlen}
-            value={selectedChannelId}
-            onChange={(event) => onNavigate({ kind: "channel", channelId: event.target.value, section: "overview" })}
-          >
-            <option value="" disabled>{texte.navigation.bitteWaehlen}</option>
-            {channels.map((channel) => <option key={channel.channelId} value={channel.channelId}>{channel.displayName}</option>)}
-          </select>
-        </label>
-      ) : null}
-      <div className="sidebar__footer">
-        <a className="login-link" href="/auth/login">{channels.length === 0 ? texte.navigation.twitchAnmelden : texte.navigation.twitchKonto}</a>
-        {channels.length > 0 ? <button className="button button--quiet" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texte.navigation.abmeldungLaeuft : texte.navigation.abmelden}</button> : null}
-      </div>
     </aside>
+  );
+};
+
+interface PanelTopbarProperties {
+  route: DashboardRoute;
+  channels: PanelChannelState[];
+  activeChannel: PanelChannelState | undefined;
+  loadedAt: number | undefined;
+  headerModule: { id: string; enabled: boolean } | undefined;
+  headerModuleBusy: boolean;
+  onToggleHeaderModule: () => void;
+  onNavigate: (route: DashboardRoute) => void;
+  onLogout: () => void;
+  loggingOut: boolean;
+}
+
+const PanelTopbar = ({ route, channels, activeChannel, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: PanelTopbarProperties): ReactElement => {
+  const texte = dashboardTexte();
+  const channelRoute = route.kind === "channel" || route.kind === "module" ? route.channelId : "";
+  const tone = activeChannel === undefined ? "neutral" : channelStatus(activeChannel);
+  const connectionLabel = activeChannel === undefined
+    ? texte.kopf.keineVerbindung
+    : tone === "healthy" ? texte.kopf.verbindungLaeuft : statusText(activeChannel);
+  const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
+  const headerSwitch = headerModuleLabel === null ? null : <span className="topbar__module-switch-wrap"><button className="switch topbar__module-switch" type="button" role="switch" aria-label={headerModuleLabel} aria-checked={headerModule?.enabled} aria-busy={headerModuleBusy} disabled={activeChannel?.role === "bediener" || headerModuleBusy} title={activeChannel?.role === "bediener" ? texte.module.verwaltungGesperrt : undefined} onClick={onToggleHeaderModule}><span className="topbar__module-switch-label">{headerModuleLabel}</span><span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span></button>{activeChannel?.role === "bediener" ? <span className="sperrgrund">{texte.module.verwaltungGesperrt}</span> : null}</span>;
+  const connectionLed = <span className="led" data-status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : tone === "error" ? "red" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionLabel}</span></span>;
+  return (
+    <header className={`topbar${headerModuleLabel === null ? "" : " topbar--module-detail"}`}>
+      <a className="brand-mark" href="/" onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" />BroBot</a>
+      {channels.length > 0 ? <label className="topbar__channel">
+        <span className="sr-only">{texte.navigation.kanalAuswaehlen}</span>
+        <select aria-label={texte.navigation.kanalAuswaehlen} value={channelRoute} onChange={(event) => onNavigate({ kind: "channel", channelId: event.target.value, section: "overview" })}>
+          <option value="" disabled>{texte.navigation.bitteWaehlen}</option>
+          {channels.map((channel) => <option key={channel.channelId} value={channel.channelId}>{channel.displayName}</option>)}
+        </select>
+        {activeChannel === undefined ? null : <span className="topbar__channel-id mono">{activeChannel.channelId}</span>}
+      </label> : null}
+      <span className="topbar__connection">{connectionLed}</span>
+      {loadedAt === undefined ? null : <Datenalter seit={loadedAt} />}
+      {headerSwitch}
+      <button className="button button--quiet topbar__logout" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texte.navigation.abmeldungLaeuft : texte.navigation.abmelden}</button>
+    </header>
   );
 };
 
@@ -395,7 +427,7 @@ const Datenalter = ({ seit }: { seit: number }): ReactElement => {
     const id = setInterval(() => { setJetzt(Date.now()); }, 1000);
     return () => { clearInterval(id); };
   }, []);
-  return <span className="datenalter mono">{dashboardTexte().zeit.aktualisiert(relativeZeit(seit, jetzt))}</span>;
+  return <span className="datenalter">{dashboardTexte().zeit.aktualisiert(relativeZeit(seit, jetzt))}</span>;
 };
 
 const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, checkedAt, dringend, onCheck }: {
@@ -656,6 +688,7 @@ export const DashboardApp = (): ReactElement => {
   const membersPageController = useRef<AbortController | null>(null);
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [headerModuleBusy, setHeaderModuleBusy] = useState(false);
 
   const clearProtectedState = (): void => {
     auditPageController.current?.abort();
@@ -743,6 +776,7 @@ export const DashboardApp = (): ReactElement => {
       // Die Modulseite zeigt denselben Kanalkopf wie die Uebersicht und
       // braucht deshalb dieselben Daten.
       if (route.kind === "module" || route.section === "overview") {
+        if (route.kind === "module") setModules(loadingState());
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
           if (!cancelled) {
@@ -753,6 +787,17 @@ export const DashboardApp = (): ReactElement => {
           if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
             setOverview({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+          }
+        }
+        if (route.kind === "module") {
+          try {
+            const response = await fetchModules(route.channelId, controller.signal);
+            if (!cancelled && !controller.signal.aborted) setModules({ status: "success", data: response, error: null, loadedAt: Date.now() });
+          } catch (error) {
+            if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+              setModules({ status: "error", data: null, error: errorMessage(error) });
+              if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+            }
           }
         }
         return;
@@ -774,7 +819,7 @@ export const DashboardApp = (): ReactElement => {
         setModules(loadingState());
         try {
           const response = await fetchModules(route.channelId, controller.signal);
-          if (!cancelled && !controller.signal.aborted) setModules({ status: "success", data: response, error: null });
+          if (!cancelled && !controller.signal.aborted) setModules({ status: "success", data: response, error: null, loadedAt: Date.now() });
         } catch (error) {
           if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
             setModules({ status: "error", data: null, error: errorMessage(error) });
@@ -889,18 +934,38 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const reloadModules = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "modules") return;
+    if (route.kind !== "module" && (route.kind !== "channel" || route.section !== "modules")) return;
     const channelId = route.channelId;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "modules" });
-    setModules(loadingState());
+    const routePath = dashboardRoutePath(route);
+    setModules((current) => current.loadedAt === undefined
+      ? loadingState<PanelModulesResponse>()
+      : { ...loadingState<PanelModulesResponse>(), loadedAt: current.loadedAt });
     try {
       const response = await fetchModules(channelId);
       if (window.location.pathname !== routePath) return;
-      setModules({ status: "success", data: response, error: null });
+      setModules({ status: "success", data: response, error: null, loadedAt: Date.now() });
     } catch (error) {
       if (window.location.pathname !== routePath) return;
-      setModules({ status: "error", data: null, error: errorMessage(error) });
+      setModules((current) => current.loadedAt === undefined
+        ? { status: "error", data: null, error: errorMessage(error) }
+        : { status: "error", data: null, error: errorMessage(error), loadedAt: current.loadedAt });
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    }
+  };
+
+  const toggleHeaderModule = async (): Promise<void> => {
+    if (route.kind !== "module" || modules.data === null) return;
+    const targetModuleId = route.moduleId;
+    const state = modules.data.modules.find((module) => module.id === targetModuleId);
+    if (state === undefined || selectedChannel?.role === "bediener" || headerModuleBusy) return;
+    setHeaderModuleBusy(true);
+    try {
+      await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);
+      await reloadModules();
+    } catch (error) {
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    } finally {
+      setHeaderModuleBusy(false);
     }
   };
 
@@ -1040,8 +1105,10 @@ export const DashboardApp = (): ReactElement => {
 
   return (
     <div className="app-shell">
-      <Sidebar route={route} channels={channels.data ?? []} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
-      <main className="main-content">
+      <PanelTopbar route={route} channels={channels.data ?? []} activeChannel={selectedChannel ?? undefined} loadedAt={route.kind === "channel" && route.section === "modules" ? modules.loadedAt : overview.loadedAt} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
+      <div className="app-body">
+        <Sidebar route={route} channels={channels.data ?? []} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
+        <main className="main-content">
         {channels.status === "loading" ? <p className="loading-line">{dashboardTexte().anmeldung.kanalzugriffPruefen}</p> : null}
         {channels.error !== null ? <ErrorPanel message={channels.error} /> : null}
         {route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} onNavigate={navigate} /> : null}
@@ -1052,15 +1119,16 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "channel" && route.section === "members" && members.status === "loading" ? <p className="loading-line">{dashboardTexte().anmeldung.mitgliederLaden}</p> : null}
         {route.kind === "channel" && route.section === "members" && members.error !== null ? <ErrorPanel message={members.error} /> : null}
         {route.kind === "channel" && route.section === "members" && members.data !== null && selectedChannel !== null ? <MembersPage channelId={route.channelId} ownRole={selectedChannel.role} eigeneUserId={members.data.viewerUserId} members={members.data.members} broadcasterCount={members.data.broadcasterCount} nextCursor={members.data.nextCursor} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
-        {route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModulesPage channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onReload={reloadModules} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
+        {route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} /> : null}
         {route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexte().overview.zustandLaden}</p> : null}
         {route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} activeModules={overview.data.activeModules} /> : null}
+        {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? overview.data.activeModules.map((module) => ({ id: module.moduleId, enabled: true, settings: module.settings }))} activeModules={overview.data.activeModules} loading={modules.status === "loading"} error={modules.error} busy={headerModuleBusy} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} /> : null}
         {route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {route.kind === "channel" && route.section === "events" && events.status === "loading" ? <p className="loading-line">{dashboardTexte().ereignisse.laden}</p> : null}
         {route.kind === "channel" && route.section === "events" && events.error !== null ? <ErrorPanel message={events.error} /> : null}
         {route.kind === "channel" && route.section === "events" && events.data !== null && eventsChannelId === route.channelId ? <EventsPage eventsState={events} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
-      </main>
+        </main>
+      </div>
     </div>
   );
 };

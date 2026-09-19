@@ -124,15 +124,19 @@ kostet im Overlay-Bundle null Bytes.
   Oberflächentext.
 - Keine Attribution-Zeilen und keine Sitzungs-URLs in Code, Commits oder Doku.
 - Es existiert kein Logo, keine Wortmarke und keine festgelegte Farbe.
-- **Stehende Vorgabe: konventionelle Gestaltung.** Der Betreiber hat bei der
-  Richtungswahl ausdrücklich den Kategoriestandard gewählt statt einer eigenen
-  visuellen Welt. Das Panel soll neben Stripe, Cloudflare und Sentry stehen
-  können: vertraute Anordnung, konventionelle Navigation, keine Metapher — und
-  deren handwerkliches Niveau als Messlatte, nicht als allgemeine Vorstellung
-  von „sauber". Künftige Oberflächen folgen dieser Vorgabe ohne erneute Frage.
-- Zwei Festlegungen gelten trotz Kategoriestandard weiter: **keine gestapelten
-  Karten** als Seitengliederung, und **ein gesunder Zustand erzeugt kein
-  Signal**. Beides wurde am Vorgängerentwurf ausdrücklich bemängelt.
+- **Stehende Vorgabe: eigene visuelle Welt — das Stream Deck.** Am
+  19. September 2026 hat der Betreiber den Kategoriestandard (Stripe,
+  Cloudflare, Sentry) ausdrücklich abgewählt: Das Panel war ihm zu asketisch.
+  Gewählt wurde eine eigene Welt aus der Streamer-Praxis — Module als
+  beleuchtete Tasten, Eigenschaften im Inspektor daneben. Verbindlich ist
+  der Richtungsvertrag im Surface-Brief; `DESIGN.md` wird aus der gebauten
+  Welt heraus neu geschrieben.
+- Zwei frühere Festlegungen sind damit aufgehoben: **Ein gesunder Zustand
+  darf ein Signal tragen** — grüne LED plus Wort, überall wo Zustand steht,
+  nie Farbe allein. Und **Tasten sind erlaubt**, weil sie Objekte sind, nicht
+  Container: Eine Taste trägt Symbol, Name und LED, nie einen Absatz oder
+  ein verschachteltes Layout. Genau diese Grenze hält das Raster davon ab,
+  zum Kartenstapel zu werden, der am Vorgängerentwurf bemängelt wurde.
 
 ## Evidence on Hand
 

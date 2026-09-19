@@ -135,6 +135,14 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
+  it("behält unbekannte Modul-IDs als Modulroute für die Detailseite", () => {
+    expect(parseDashboardRoute("/channels/kanal-a/modules/unbekannt")).toEqual({
+      kind: "module",
+      channelId: "kanal-a",
+      moduleId: "unbekannt",
+    });
+  });
+
   it("verwirft eine ungültig codierte Modulroute", () => {
     expect(parseDashboardRoute("/channels/kanal-a/modules/%ZZ")).toEqual({ kind: "overview" });
   });
@@ -379,19 +387,20 @@ describe("Dashboard-Grundgerüst", () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "raid", enabled: false, settings: "{}" }] });
+      if (path.endsWith("/overview")) return jsonResponse(overview(channel));
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "textbefehle", enabled: false, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/modules");
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
 
     render(<DashboardApp />);
 
-    await screen.findByRole("heading", { name: "Module", level: 1 });
-    const schalter = await screen.findByRole("checkbox", { name: "raid aktivieren" });
+    await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
     const grund = "Nur Broadcaster und Verwalter dürfen Module ändern.";
-    expect(schalter).toBeDisabled();
-    expect(schalter).toHaveAttribute("title", grund);
-    expect(screen.getByText(grund)).toBeInTheDocument();
+    const schalter = await screen.findAllByRole("switch", { name: /Textbefehle/i });
+    expect(schalter).toHaveLength(2);
+    schalter.forEach((element) => { expect(element).toBeDisabled(); });
+    expect(screen.getAllByText(grund)).toHaveLength(2);
   });
 
   it("zeigt Systemzustand, bevor das Audit-Log eintrifft", async () => {
@@ -624,7 +633,29 @@ describe("Dashboard-Grundgerüst", () => {
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Befehl anlegen" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Module" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getAllByRole("link", { name: "Module" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
+  });
+
+  it("zeigt im Kopf Anzeigename, Twitch-ID und den beschrifteten Modulschalter", async () => {
+    const channel = { ...healthyChannel("26876135", "Esembe"), login: "esembe" };
+    const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels/26876135/overview") return jsonResponse(aktivesModul);
+      if (path === "/api/channels/26876135/modules") return jsonResponse({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/26876135/modules/textbefehle");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Esembe" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Esembe · esembe" })).not.toBeInTheDocument();
+    expect(screen.getByText("26876135")).toBeInTheDocument();
+    const headerSwitch = await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
+    expect(headerSwitch).toHaveTextContent("Textbefehle · Läuft");
   });
 
   it("mountet beim Wechsel zur Modulroute nicht den alten Übersichtsstand", async () => {
@@ -728,8 +759,9 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
 
-    const warning = await screen.findByText("Moderatorrolle fehlt");
-    expect(warning.closest("[data-status]")).toHaveAttribute("data-status", "error");
+    const moderatorCard = await screen.findByRole("article", { name: "Moderatorstatus" });
+    expect(moderatorCard).toHaveAttribute("data-status", "error");
+    expect(moderatorCard).toHaveTextContent("Moderatorrolle fehlt");
   });
 
   it("zeigt fehlende Broadcaster-Zustimmung als Warnung und nur dem Broadcaster den Weg zur Nachforderung", async () => {

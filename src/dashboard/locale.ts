@@ -41,6 +41,15 @@ export const dashboardLanguage = (): DashboardLanguage => browserModuleLanguage(
 export const dashboardGemeinsameTexte = (): DashboardCommonTexte => gemeinsameTexte[dashboardLanguage()];
 
 export interface DashboardTexte {
+  kopf: {
+    verbindungLaeuft: string;
+    verbindungWartet: string;
+    verbindungGestort: string;
+    kanalIdentitaet: string;
+    keineVerbindung: string;
+    schalterAn: string;
+    schalterAus: string;
+  };
   status: {
     verbunden: string;
     widerrufen: string;
@@ -186,6 +195,15 @@ export interface DashboardTexte {
 
 const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
   de: {
+    kopf: {
+      verbindungLaeuft: "Läuft",
+      verbindungWartet: "Wartet",
+      verbindungGestort: "Gestört",
+      kanalIdentitaet: "Kanal",
+      keineVerbindung: "Keine Verbindung",
+      schalterAn: "An",
+      schalterAus: "Aus",
+    },
     status: {
       verbunden: "Verbunden", widerrufen: "Widerrufen", fehler: "Fehler",
       loginIdentitaetFehlt: "Login-Identität fehlt", nichtGeprueft: "Nicht geprüft", abgelaufen: "Abgelaufen",
@@ -266,6 +284,15 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     },
   },
   en: {
+    kopf: {
+      verbindungLaeuft: "Running",
+      verbindungWartet: "Waiting",
+      verbindungGestort: "Interrupted",
+      kanalIdentitaet: "Channel",
+      keineVerbindung: "No connection",
+      schalterAn: "On",
+      schalterAus: "Off",
+    },
     status: {
       verbunden: "Connected", widerrufen: "Revoked", fehler: "Error", loginIdentitaetFehlt: "Login identity missing",
       nichtGeprueft: "Not checked", abgelaufen: "Expired", wartungUeberfaellig: "Maintenance overdue",
