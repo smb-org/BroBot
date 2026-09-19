@@ -46,10 +46,10 @@ const HELIX_TIMEOUT_MS = 5_000;
 
 const nowIso = (): string => new Date().toISOString();
 
-const isJsonRecord = (value: unknown): value is JsonRecord =>
+export const isJsonRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const readJsonBody = async (request: Request): Promise<JsonRecord | null> => {
+export const readJsonBody = async (request: Request): Promise<JsonRecord | null> => {
   try {
     const value: unknown = await request.json();
     return isJsonRecord(value) ? value : null;
@@ -93,7 +93,7 @@ const mayAssignRole = (
 const assignDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
   context.text("Nur ein Broadcaster darf die Rolle Broadcaster vergeben.", 403);
 
-const actorOf = (context: { get: (key: "session") => { userId: string; sessionId: string } }) => ({
+export const actorOf = (context: { get: (key: "session") => { userId: string; sessionId: string } }) => ({
   userId: context.get("session").userId,
   sessionId: context.get("session").sessionId,
 });
