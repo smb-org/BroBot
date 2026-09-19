@@ -119,16 +119,20 @@ const tokenView = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): TokenV
   return { tone: "healthy", label: "Gültig" };
 };
 
+const channelBotConsentMissing = (channel: PanelChannelState): boolean =>
+  channel.channelBotConsent === "missing";
+
 const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "error" => {
   if (channel.moderator?.isModerator === false) return "error";
   if (channel.bot?.status === "error" || channel.bot?.status === "revoked") return "error";
   if (channel.tokens.loginStatus === "error" || channel.tokens.loginStatus === "revoked") return "error";
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (tokenStatus.tone === "error") return "error";
+  if (channelBotConsentMissing(channel)) return "warning";
   if (tokenStatus.tone !== "healthy") return "warning";
   if (channel.bot?.status !== "connected" || channel.moderator?.isModerator !== true ||
       channel.tokens.loginStatus !== "connected" || channel.tokens.botExpiresAt === null ||
-      channel.tokens.loginExpiresAt === null) return "warning";
+      channel.tokens.loginExpiresAt === null || channelBotConsentMissing(channel)) return "warning";
   return "healthy";
 };
 
@@ -137,6 +141,7 @@ const statusText = (channel: PanelChannelState): string => {
   if (channel.bot?.status === "error") return "Bot-Fehler";
   if (channel.bot?.status === "revoked") return "Bot-Token widerrufen";
   const tokenStatus = tokenView(channel.tokens, channel.bot);
+  if (channelBotConsentMissing(channel) && tokenStatus.tone === "healthy") return "Broadcaster-Zustimmung fehlt";
   if (tokenStatus.tone !== "healthy") return tokenStatus.label;
   if (channelStatus(channel) === "healthy") return "Gesund";
   return "Zustand unvollständig";
@@ -238,6 +243,7 @@ const ChannelStateCard = ({ channel }: { channel: PanelChannelState }): ReactEle
     <dl className="compact-list">
       <div><dt>Deine Rolle</dt><dd>{roleLabel(channel.role)}</dd></div>
       <div><dt>Broadcaster-OAuth</dt><dd>{broadcasterConnectionLabel(channel.broadcasterConnection)}</dd></div>
+      <div><dt>Chat-Zustimmung</dt><dd>{channelBotConsentMissing(channel) ? "Broadcaster-Zustimmung fehlt" : "Vorhanden"}</dd></div>
       <div><dt>Bot-Account</dt><dd>{channel.bot === null ? "Nicht eingerichtet" : statusLabel(channel.bot.status)}</dd></div>
       <div><dt>Moderatorstatus</dt><dd>{channel.moderator === null ? "Nicht geprüft" : channel.moderator.isModerator ? "Moderator" : "Fehlt"}</dd></div>
       <div><dt>Token</dt><dd>{tokenSummary(channel.tokens, channel.bot)}</dd></div>
@@ -396,6 +402,22 @@ const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, c
   );
 };
 
+const ChannelBotConsentAction = ({ channelId, needed, canRequest }: {
+  channelId: string;
+  needed: boolean;
+  canRequest: boolean;
+}): ReactElement | null => {
+  if (!needed) return null;
+  if (!canRequest) return <p className="muted moderator-check-time">Der Broadcaster muss Twitch erneut autorisieren.</p>;
+  return (
+    <div className="page-heading__actions">
+      <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/channel-bot`}>
+        Broadcaster-Zustimmung anfordern
+      </a>
+    </div>
+  );
+};
+
 const BotCard = ({ bot }: { bot: PanelBotStatus | null }): ReactElement => {
   if (bot === null) return <StatusCard title="Bot-Account" tone="neutral" value="Nicht eingerichtet" detail="Es gibt noch keinen gespeicherten Botstatus." />;
   const tone = bot.status === "connected" ? "healthy" : "error";
@@ -412,6 +434,15 @@ const BroadcasterConnectionCard = ({ status }: { status: PanelChannelState["broa
     tone={status === "connected" ? "healthy" : "neutral"}
     value={broadcasterConnectionLabel(status)}
     detail={status === "connected" ? "Für optionale Broadcaster-Module verbunden." : "Optional; für den normalen Bot-Betrieb nicht erforderlich."}
+  />
+);
+
+const ChannelBotConsentCard = ({ status }: { status: PanelChannelState["channelBotConsent"] }): ReactElement => (
+  <StatusCard
+    title="Chat-Zustimmung"
+    tone={status === "missing" ? "warning" : "healthy"}
+    value={status === "missing" ? "Broadcaster-Zustimmung fehlt" : "Vorhanden"}
+    detail={status === "missing" ? "channel:bot wird vom Broadcaster benötigt." : undefined}
   />
 );
 
@@ -458,6 +489,11 @@ const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModer
       node: <BroadcasterConnectionCard status={overview.broadcasterConnection} />,
     },
     {
+      key: "channel-bot-consent",
+      tone: overview.channelBotConsent === "missing" ? "warning" : "healthy",
+      node: <ChannelBotConsentCard status={overview.channelBotConsent} />,
+    },
+    {
       key: "moderator",
       tone: overview.moderator === null ? "neutral" : overview.moderator.isModerator ? "healthy" : "error",
       node: <ModeratorCard moderator={overview.moderator} />,
@@ -492,6 +528,11 @@ const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModer
           checkedAt={overview.moderator?.checkedAt ?? null}
           dringend={overview.moderator === null || !overview.moderator.isModerator}
           onCheck={onCheckModeratorStatus}
+        />
+        <ChannelBotConsentAction
+          channelId={overview.channelId}
+          needed={overview.channelBotConsent === "missing"}
+          canRequest={overview.role === "broadcaster"}
         />
       </header>
       {eintraege.length === 0 ? null : (

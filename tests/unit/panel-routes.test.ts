@@ -240,6 +240,54 @@ describe("Panel-Leseendpunkte", () => {
     ]);
   });
 
+  it("prüft channel:bot bei der Broadcaster-Identität jedes Kanals", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertChannel(database, "kanal-b", "Beta");
+    await insertLoginIdentityAndSession(database, "user-1", ["channel:bot"]);
+    await insertLoginIdentityAndSession(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-b", ["channel:bot"]);
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+    await insertMember(database, "kanal-b", "user-1", "verwalter");
+    await insertMember(database, "kanal-b", "kanal-b", "broadcaster");
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels"),
+      environment,
+    );
+    const body = await response.json<{ channels: Array<{ channelId: string; channelBotConsent: string }> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.channels).toEqual([
+      expect.objectContaining({ channelId: "kanal-a", channelBotConsent: "missing" }),
+      expect.objectContaining({ channelId: "kanal-b", channelBotConsent: "granted" }),
+    ]);
+  });
+
+  it("aktualisiert die Zustimmung nach einer erneuten Broadcaster-Anmeldung", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertLoginIdentityAndSession(database, "kanal-a");
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+
+    const before = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+    expect((await before.json<{ channelBotConsent: string }>()).channelBotConsent).toBe("missing");
+
+    await database.prepare(
+      "UPDATE twitch_login_identity SET scopes_json = ? WHERE user_id = ?",
+    ).bind(JSON.stringify(["channel:bot"]), "kanal-a").run();
+
+    const after = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+    expect((await after.json<{ channelBotConsent: string }>()).channelBotConsent).toBe("granted");
+  });
+
   it("liefert den tatsächlichen Kanalzustand, aktive Module und gespeicherte Ursachen", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");

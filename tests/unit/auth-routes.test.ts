@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { authRouter, getSessionFromRequest } from "../../src/worker/auth/routes";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 /**
@@ -168,6 +169,8 @@ describe("Auth-Routen", () => {
     expect(cookie).toContain("HttpOnly; Secure; SameSite=Lax");
     expect(cookie).not.toContain("access");
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("user-1") && args.includes("tester"))).toBe(true);
+    expect(statement.bind.mock.calls.some((args: unknown[]) =>
+      args[0] === "user-1" && args[2] === JSON.stringify(["user:read:moderated_channels"]))).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
@@ -578,6 +581,46 @@ describe("Auth-Routen", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("lässt einen Verwalter die channel:bot-Zustimmung nicht für den Broadcaster starten", async () => {
+    const { environment } = makeEnvironment(
+      { role: "verwalter" },
+      sessionRowFor("verwalter"),
+    );
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/channels/kanal-a/channel-bot", {
+        headers: { Cookie: await sessionCookieHeaderFor("verwalter") },
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("startet die channel:bot-Nachforderung für den Broadcaster des Kanals", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "kanal-a");
+      await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+      const { environment } = makeEnvironment();
+      environment.DB = database as unknown as D1Database;
+
+      const response = await authRouter.fetch(
+        new Request("https://brobot.example/auth/channels/kanal-a/channel-bot", {
+          headers: { Cookie: await sessionCookieHeaderFor("kanal-a") },
+        }),
+        environment,
+      );
+
+      expect(response.status).toBe(302);
+      expect(new URL(response.headers.get("location") ?? "https://invalid").searchParams.get("scope"))
+        .toContain("channel:bot");
+    } finally {
+      database.close();
+    }
   });
 
   it("übernimmt keine Bot-Identität mit abweichender Twitch-User-ID", async () => {

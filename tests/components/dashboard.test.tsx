@@ -18,6 +18,7 @@ const healthyChannel = (channelId: string, displayName: string) => ({
   displayName,
   role: "verwalter",
   broadcasterConnection: "connected",
+  channelBotConsent: "granted",
   bot: { status: "connected", reason: null, updatedAt: relativeIso(0) },
   moderator,
   tokens: {
@@ -476,6 +477,38 @@ describe("Dashboard-Grundgerüst", () => {
 
     const warning = await screen.findByText("Moderatorrolle fehlt");
     expect(warning.closest("[data-status]")).toHaveAttribute("data-status", "error");
+  });
+
+  it("zeigt fehlende Broadcaster-Zustimmung als Warnung und nur dem Broadcaster den Weg zur Nachforderung", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      channelBotConsent: "missing",
+      lastError: null,
+    };
+    const zeigeKanal = (angezeigterKanal: typeof channel): void => {
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [angezeigterKanal] });
+        if (path.endsWith("/overview")) return jsonResponse({ ...angezeigterKanal, activeModules: [] });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a");
+      render(<DashboardApp />);
+    };
+
+    zeigeKanal(channel);
+
+    expect((await screen.findAllByText("Broadcaster-Zustimmung fehlt")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Der Broadcaster muss Twitch erneut autorisieren.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Broadcaster-Zustimmung anfordern" })).not.toBeInTheDocument();
+
+    cleanup();
+    const broadcasterChannel = { ...channel, role: "broadcaster" };
+    zeigeKanal(broadcasterChannel);
+
+    const action = await screen.findByRole("link", { name: "Broadcaster-Zustimmung anfordern" });
+    expect(action).toHaveAttribute("href", "/auth/channels/kanal-a/channel-bot");
+    expect(screen.getByRole("article", { name: "Chat-Zustimmung" })).toHaveAttribute("data-status", "warning");
   });
 
   it("zeigt die letzte Moderatorprüfung und die Aktion nur für berechtigte Rollen", async () => {

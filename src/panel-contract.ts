@@ -3,6 +3,7 @@ export type PanelChannelRole = "broadcaster" | "verwalter" | "bediener";
 export type PanelBotStatusName = "connected" | "revoked" | "error";
 export type PanelLoginStatusName = "connected" | "revoked" | "error";
 export type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
+export type PanelChannelBotConsentStatus = "granted" | "missing";
 
 export interface PanelBotStatus {
   status: PanelBotStatusName;
@@ -35,6 +36,7 @@ export interface PanelChannelState {
   displayName: string;
   role: PanelChannelRole;
   broadcasterConnection: PanelBroadcasterConnectionStatus;
+  channelBotConsent: PanelChannelBotConsentStatus;
   bot: PanelBotStatus | null;
   moderator: PanelModeratorStatus | null;
   tokens: PanelTokenStatus;

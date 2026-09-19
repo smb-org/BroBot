@@ -21,6 +21,7 @@ interface ChannelStateRow {
   display_name: string;
   role: PanelChannelRole;
   broadcaster_connection: number;
+  channel_bot_consent: number;
   bot_status: PanelBotStatus["status"] | null;
   bot_reason: string | null;
   bot_updated_at: string | null;
@@ -87,6 +88,17 @@ export const decodeLogCursor = (serialized: string): LogCursor | null => {
 const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, member.role,
            CASE WHEN connection.connection_id IS NULL THEN 0 ELSE 1 END AS broadcaster_connection,
+           CASE WHEN EXISTS (
+            SELECT 1
+               FROM twitch_login_identity AS broadcaster_identity
+              WHERE broadcaster_identity.user_id = channel.channel_id
+                AND broadcaster_identity.status = 'connected'
+                AND EXISTS (
+                  SELECT 1
+                    FROM json_each(broadcaster_identity.scopes_json) AS granted_scope
+                   WHERE granted_scope.value = 'channel:bot'
+                )
+           ) THEN 1 ELSE 0 END AS channel_bot_consent,
            bot_status.status AS bot_status, bot_status.reason AS bot_reason,
            bot_status.updated_at AS bot_updated_at,
            bot_identity.expires_at AS bot_expires_at,
@@ -149,6 +161,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   displayName: row.display_name,
   role: row.role,
   broadcasterConnection: row.broadcaster_connection === 1 ? "connected" : "not_connected",
+  channelBotConsent: row.channel_bot_consent === 1 ? "granted" : "missing",
   bot: mapBotStatus(row),
   moderator: mapModerator(row),
   tokens: mapTokens(row),
