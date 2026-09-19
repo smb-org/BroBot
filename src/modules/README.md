@@ -19,6 +19,10 @@ src/modules/<id>/
 
 `overlay/` enthält ausschließlich die möglichst kleine Overlay-Ansicht. Dort darf kein Worker-, Service-, Repository- oder Adaptercode und kein Zod importiert werden. `panel/` enthält Formulare und Bedienung; dort sind Zod für Formularvalidierung und Zugriffe auf `service.ts` für das Auslösen von Anwendungsfällen erlaubt. Worker-, Repository- und Adaptercode bleibt auch dort verboten. Das wird durch ESLint geprüft.
 
+Eine Panel-Ansicht rendert keine eigene Überschrift mit dem Modulnamen. Der
+Host trägt Name, Kennung und Kurzbeschreibung im Eigenschaften-Inspektor; die
+Ansicht beginnt direkt mit ihrem fachlichen Inhalt.
+
 ## Registrierung
 
 1. Das Modulverzeichnis mit der Pflichtstruktur anlegen.

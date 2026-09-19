@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-20T00:00:00Z",
+  "title": "Design System: BroBot Panel",
+  "extensions": {
+    "colorMeta": {
+      "grund": { "role": "neutral", "displayName": "Grund (Mattschwarz)", "canonical": "oklch(17% 0.004 60)", "tonalRamp": ["oklch(15% 0.004 60)", "oklch(22% 0.004 60)", "oklch(32% 0.004 60)", "oklch(45% 0.004 60)", "oklch(58% 0.004 60)", "oklch(72% 0.004 60)", "oklch(85% 0.004 60)", "oklch(95% 0.004 60)"] },
+      "taste": { "role": "neutral", "displayName": "Taste (erhoben)", "canonical": "oklch(21% 0.005 60)", "tonalRamp": ["oklch(15% 0.005 60)", "oklch(21% 0.005 60)", "oklch(32% 0.005 60)", "oklch(45% 0.005 60)", "oklch(58% 0.005 60)", "oklch(72% 0.005 60)", "oklch(85% 0.005 60)", "oklch(95% 0.005 60)"] },
+      "rinne": { "role": "neutral", "displayName": "Rinne (Vertiefung)", "canonical": "oklch(14% 0.003 60)" },
+      "text": { "role": "neutral", "displayName": "Text (Stufe 1)", "canonical": "oklch(95% 0.006 70)" },
+      "text-2": { "role": "neutral", "displayName": "Text 2 — 8,27:1 auf Grund", "canonical": "oklch(74% 0.012 70)" },
+      "text-3": { "role": "neutral", "displayName": "Text 3 — 5,08:1 auf Grund, 4,65:1 auf Taste", "canonical": "oklch(60% 0.012 70)" },
+      "text-4": { "role": "neutral", "displayName": "Text 4 — nur Trenner und Anzeigen", "canonical": "oklch(45% 0.010 70)" },
+      "marke": { "role": "primary", "displayName": "Marke (Ort des Bedieners)", "canonical": "oklch(62% 0.12 255)", "tonalRamp": ["oklch(15% 0.06 255)", "oklch(25% 0.09 255)", "oklch(38% 0.12 255)", "oklch(50% 0.12 255)", "oklch(62% 0.12 255)", "oklch(74% 0.10 255)", "oklch(85% 0.07 255)", "oklch(95% 0.03 255)"] },
+      "marke-text": { "role": "primary", "displayName": "Marke-Text (lesbar auf Grund)", "canonical": "oklch(80% 0.09 255)" },
+      "tint-1": { "role": "primary", "displayName": "Tint 1 (Marke als Material)", "canonical": "oklch(25% 0.04 255)" },
+      "tint-2": { "role": "primary", "displayName": "Tint 2 (Marke als Material, tiefer)", "canonical": "oklch(22% 0.035 255)" },
+      "gruen": { "role": "secondary", "displayName": "Grün — läuft, nie ohne Wort", "canonical": "oklch(80% 0.20 155)", "tonalRamp": ["oklch(15% 0.06 155)", "oklch(28% 0.10 155)", "oklch(42% 0.14 155)", "oklch(56% 0.18 155)", "oklch(70% 0.20 155)", "oklch(80% 0.20 155)", "oklch(88% 0.14 155)", "oklch(95% 0.06 155)"] },
+      "warn": { "role": "secondary", "displayName": "Bernstein — unbekannt / nicht aktiv", "canonical": "oklch(75% 0.13 80)", "tonalRamp": ["oklch(15% 0.04 80)", "oklch(28% 0.07 80)", "oklch(42% 0.10 80)", "oklch(56% 0.12 80)", "oklch(68% 0.13 80)", "oklch(75% 0.13 80)", "oklch(86% 0.09 80)", "oklch(95% 0.04 80)"] },
+      "fehler": { "role": "secondary", "displayName": "Rot — Fehler, Löschen", "canonical": "oklch(62% 0.19 28)", "tonalRamp": ["oklch(15% 0.06 28)", "oklch(28% 0.10 28)", "oklch(42% 0.15 28)", "oklch(52% 0.18 28)", "oklch(62% 0.19 28)", "oklch(74% 0.14 28)", "oklch(86% 0.08 28)", "oklch(95% 0.03 28)"] }
+    },
+    "typographyMeta": {
+      "modultitel": { "displayName": "Modultitel", "purpose": "Größte Schrift im System; Modulkopf und Rasterüberschrift." },
+      "tastenname": { "displayName": "Tastenname", "purpose": "Name auf der Modultaste, eine Zeile mit Ellipse." },
+      "led-wort": { "displayName": "LED-Wort", "purpose": "Das Wort neben dem LED-Punkt, in Zustandsfarbe." },
+      "schienenetikett": { "displayName": "Schienenetikett", "purpose": "Wort unter dem Symbol in der 64er-Taste; Modul-ID." },
+      "spaltenkopf": { "displayName": "Spaltenkopf", "purpose": "Einziger Versalien-Einsatz; Tabellenköpfe auf Tint-2." },
+      "zahl": { "displayName": "Zahl (Plex Mono)", "purpose": "Twitch-ID, Sekunden, Zeitstempel, Befehlstoken. Nie für Namen." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "tastendruck", "value": "transform 120ms ease, border-color 120ms ease, background 160ms ease", "purpose": "Signatur: Taste sinkt auf scale(.97) und füllt sich mit 18 % Grün." },
+      { "name": "led", "value": "opacity 160ms, background-color 160ms", "purpose": "LED-Punkt und LED-Wort blenden um." },
+      { "name": "schalter", "value": "background 160ms ease, transform 160ms ease", "purpose": "Spur färbt sich grün, Knopf wandert 16 px." },
+      { "name": "knopf", "value": "background .15s ease, border-color .15s ease, color .15s ease", "purpose": "Hover-Zustand neutraler und primärer Knöpfe." },
+      { "name": "reduced-motion", "value": "transition-duration: .01ms", "purpose": "Alles fällt unter prefers-reduced-motion auf 0,01 ms." }
+    ],
+    "breakpoints": [
+      { "name": "schmal", "value": "768px", "purpose": "Kopfleiste zweizeilig, Schiene waagerecht, Raster zweispaltig." },
+      { "name": "eng", "value": "420px", "purpose": "Rasterlücke 8 px, Wortmarke 13 px." },
+      { "name": "container-befehlstabelle", "value": "640px", "purpose": "Container-Query: Spalte „zuletzt“ wandert in den Sub-Inspector." }
+    ],
+    "measures": [
+      { "name": "kopfleiste", "value": "56px" },
+      { "name": "schiene", "value": "80px" },
+      { "name": "schienentaste", "value": "64px" },
+      { "name": "modultaste", "value": "132px" },
+      { "name": "raster-luecke", "value": "12px" },
+      { "name": "detail-max", "value": "960px" },
+      { "name": "bedienelement", "value": "44px" },
+      { "name": "tabellenzeile", "value": "34px" },
+      { "name": "fokusring", "value": "2px solid var(--marke-text); outline-offset: 2px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Modultaste (läuft)",
+      "kind": "custom",
+      "refersTo": "modul-taste",
+      "description": "132×132-Objekt im Raster: Symbolkachel, Name, LED mit Wort. Tastendruck sinkt und leuchtet grün.",
+      "html": "<a class=\"ds-taste\" href=\"#\" data-enabled=\"true\" aria-label=\"Textbefehle · Läuft\"><span class=\"ds-taste__icon\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 7v10M8.5 10.5h7M8.5 13.5h5\"/></svg></span><strong>Textbefehle</strong><span class=\"ds-led\" data-status=\"green\"><span class=\"ds-led__dot\"></span><span>Läuft</span></span></a>",
+      "css": ".ds-taste{display:grid;grid-template-rows:1fr auto auto;align-items:center;justify-items:center;gap:9px;width:132px;height:132px;padding:14px 10px 12px;border:1px solid var(--linie,#312e2b);border-radius:12px;color:var(--text,#f2efeb);background:var(--erhoben,#1e1c1a);text-align:center;text-decoration:none;font-family:Archivo,ui-sans-serif,system-ui,sans-serif;transition:transform 120ms ease,border-color 120ms ease,background 160ms ease}.ds-taste:hover{border-color:var(--linie-hell,#68615a);background:#262321}.ds-taste:active{transform:scale(.97);border-color:rgba(61,220,132,.18);background:rgba(61,220,132,.18)}.ds-taste:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px}.ds-taste strong{max-width:100%;overflow:hidden;font-size:13px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.ds-taste__icon{display:grid;place-items:center;width:44px;height:44px;border-radius:12px;color:var(--text-2,#b3aca4);background:var(--rinne,#100f0e)}.ds-taste[data-enabled=true] .ds-taste__icon{color:var(--gruen,#3ddc84);background:rgba(61,220,132,.12)}.ds-taste[data-enabled=false]{color:var(--text-3,#8b857e)}.ds-taste__icon svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.ds-led{display:inline-flex;align-items:center;gap:7px;min-height:20px;color:var(--text-2,#b3aca4);font-size:12px;font-weight:600;white-space:nowrap}.ds-led__dot{width:8px;height:8px;border-radius:50%;background:var(--text-4,#615c56);transition:opacity 160ms,background-color 160ms}.ds-led[data-status=green]{color:var(--gruen,#3ddc84)}.ds-led[data-status=green] .ds-led__dot{background:var(--gruen,#3ddc84)}.ds-led[data-status=off]{color:var(--text-3,#8b857e)}.ds-led[data-status=off] .ds-led__dot{background:var(--rinne,#100f0e);border:1px solid var(--text-4,#615c56)}"
+    },
+    {
+      "name": "Modultaste (aus)",
+      "kind": "custom",
+      "refersTo": "modul-taste-aus",
+      "description": "Ausgeschaltet ist neutral: Text-3, Symbolkachel in der Rinne, gezeichnete LED. Kein Bernstein.",
+      "html": "<a class=\"ds-taste\" href=\"#\" data-enabled=\"false\" aria-label=\"Begrüßung · Aus\"><span class=\"ds-taste__icon\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\"><rect x=\"5\" y=\"5\" width=\"14\" height=\"14\" rx=\"2\"/><path d=\"M9 12h6M12 9v6\"/></svg></span><strong>Begrüßung</strong><span class=\"ds-led\" data-status=\"off\"><span class=\"ds-led__dot\"></span><span>Aus</span></span></a>",
+      "css": ".ds-taste{display:grid;grid-template-rows:1fr auto auto;align-items:center;justify-items:center;gap:9px;width:132px;height:132px;padding:14px 10px 12px;border:1px solid var(--linie,#312e2b);border-radius:12px;color:var(--text,#f2efeb);background:var(--erhoben,#1e1c1a);text-align:center;text-decoration:none;font-family:Archivo,ui-sans-serif,system-ui,sans-serif;transition:transform 120ms ease,border-color 120ms ease,background 160ms ease}.ds-taste:hover{border-color:var(--linie-hell,#68615a);background:#262321}.ds-taste:active{transform:scale(.97);border-color:rgba(61,220,132,.18);background:rgba(61,220,132,.18)}.ds-taste strong{max-width:100%;overflow:hidden;font-size:13px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.ds-taste__icon{display:grid;place-items:center;width:44px;height:44px;border-radius:12px;color:var(--text-2,#b3aca4);background:var(--rinne,#100f0e)}.ds-taste[data-enabled=false]{color:var(--text-3,#8b857e)}.ds-taste__icon svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.ds-led{display:inline-flex;align-items:center;gap:7px;min-height:20px;font-size:12px;font-weight:600;white-space:nowrap}.ds-led__dot{width:8px;height:8px;border-radius:50%}.ds-led[data-status=off]{color:var(--text-3,#8b857e)}.ds-led[data-status=off] .ds-led__dot{background:var(--rinne,#100f0e);border:1px solid var(--text-4,#615c56)}"
+    },
+    {
+      "name": "Schienentaste",
+      "kind": "nav",
+      "refersTo": "schienen-taste",
+      "description": "64×64 in der 80-px-Schiene: Symbol über Etikett. Aktiv Marke-Text auf Tint-2 mit Markenrand.",
+      "html": "<nav class=\"ds-rail\"><a class=\"ds-rail__link\" href=\"#\"><span class=\"ds-rail__content\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"5\" y=\"5\" width=\"5\" height=\"5\" rx=\"1\"/><rect x=\"14\" y=\"5\" width=\"5\" height=\"5\" rx=\"1\"/><rect x=\"5\" y=\"14\" width=\"5\" height=\"5\" rx=\"1\"/><rect x=\"14\" y=\"14\" width=\"5\" height=\"5\" rx=\"1\"/></svg><span>Übersicht</span></span></a><a class=\"ds-rail__link ds-rail__link--active\" href=\"#\" aria-current=\"page\"><span class=\"ds-rail__content\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"5\" y=\"5\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"13\" y=\"5\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"5\" y=\"13\" width=\"6\" height=\"6\" rx=\"1\"/><rect x=\"13\" y=\"13\" width=\"6\" height=\"6\" rx=\"1\"/></svg><span>Module</span></span></a></nav>",
+      "css": ".ds-rail{display:grid;gap:8px;width:80px;padding:12px 8px;justify-items:center;background:var(--rail,#181716);border-right:1px solid var(--linie,#312e2b);font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-rail__link{position:relative;display:grid;place-items:center;width:64px;height:64px;padding:7px 3px;border:1px solid transparent;border-radius:12px;color:var(--text-3,#8b857e);text-decoration:none;text-align:center;transition:background 120ms ease,color 120ms ease,border-color 120ms ease}.ds-rail__link:hover{color:var(--text,#f2efeb);background:#262321}.ds-rail__link--active{color:var(--marke-text,#9bc3ed);background:var(--tint-2,#14202e);border-color:var(--marke,#538dcc)}.ds-rail__link:active{transform:scale(.97);border-color:rgba(61,220,132,.18);background:rgba(61,220,132,.18)}.ds-rail__link:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px}.ds-rail__content{display:grid;grid-template-rows:20px 1fr;place-items:center;gap:4px;width:100%;font-size:11px;line-height:1.1}.ds-rail__content svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}"
+    },
+    {
+      "name": "Primärer Knopf",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Genau einer pro Bereich. Marke auf Marke-Auf, 44 px hoch.",
+      "html": "<button class=\"ds-btn ds-btn--primary\" type=\"button\">Anlegen</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border:1px solid var(--linie-stark,#403c38);border-radius:6px;color:var(--text,#f2efeb);background:var(--erhoben,#1e1c1a);font-family:Archivo,ui-sans-serif,system-ui,sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}.ds-btn--primary{color:var(--marke-auf,#0a0c10);background:var(--marke,#538dcc);border-color:var(--marke,#538dcc);font-weight:600}.ds-btn--primary:hover{background:var(--marke-hover,#659cd7);border-color:var(--marke-hover,#659cd7)}.ds-btn--primary:active{background:var(--marke-press,#4c80bc);border-color:var(--marke-press,#4c80bc)}.ds-btn:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px}.ds-btn:disabled{cursor:not-allowed;opacity:.5}"
+    },
+    {
+      "name": "Neutraler Knopf (gedeckt)",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Taste mit Haarlinie. Der Anlege-Knopf bleibt in dieser Form, bis das Formular gültig ist; der Grund steht daneben.",
+      "html": "<span class=\"ds-actions\"><button class=\"ds-btn\" type=\"submit\" disabled>Anlegen</button><span class=\"ds-hint\">Antwort fehlt</span></span>",
+      "css": ".ds-actions{display:flex;align-items:center;gap:8px;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border:1px solid var(--linie-stark,#403c38);border-radius:6px;color:var(--text,#f2efeb);background:var(--erhoben,#1e1c1a);font-size:13px;font-weight:500;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}.ds-btn:hover{border-color:var(--linie-hell,#68615a);background:#262321}.ds-btn:active{background:#1b1917}.ds-btn:disabled{cursor:not-allowed;opacity:.5}.ds-hint{color:var(--text-3,#8b857e);font-size:12px}"
+    },
+    {
+      "name": "Stiller Knopf (Löschen)",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Zerstörendes ist still, bis man hinzeigt: erst dann Rot auf Fehler-Grund.",
+      "html": "<button class=\"ds-btn-quiet\" type=\"button\">Löschen</button>",
+      "css": ".ds-btn-quiet{display:inline-flex;align-items:center;min-height:44px;padding:10px 16px;border:1px solid transparent;border-radius:6px;color:var(--text-2,#b3aca4);background:none;font-family:Archivo,ui-sans-serif,system-ui,sans-serif;font-size:12.5px;font-weight:500;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}.ds-btn-quiet:hover{color:var(--fehler,#e2564d);border-color:rgba(226,86,77,.45);background:rgba(226,86,77,.09)}.ds-btn-quiet:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px}"
+    },
+    {
+      "name": "Eingabefeld",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Feldname darüber (12 px, Text-2), Feld in der Rinne, 44 px hoch, Hinweis darunter.",
+      "html": "<label class=\"ds-field\">Abkühlzeit<input class=\"ds-input ds-input--zahl\" type=\"number\" min=\"0\" value=\"30\"><span class=\"ds-field__hint\">Sekunden zwischen zwei Antworten.</span></label>",
+      "css": ".ds-field{display:grid;gap:6px;max-width:40rem;color:var(--text-2,#b3aca4);font-family:Archivo,ui-sans-serif,system-ui,sans-serif;font-size:12px;font-weight:500}.ds-input{min-width:0;min-height:44px;border:1px solid var(--linie-stark,#403c38);border-radius:6px;padding:8px 10px;color:var(--text,#f2efeb);background:var(--rinne,#100f0e);font:inherit;font-size:13px}.ds-input--zahl{max-width:9rem;font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}.ds-input:hover{border-color:var(--linie-hell,#68615a)}.ds-input:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px}.ds-input:disabled{cursor:not-allowed;opacity:.55}.ds-input::placeholder{color:var(--text-3,#8b857e);opacity:1}.ds-field__hint{color:var(--text-3,#8b857e);font-size:12px;font-weight:400;line-height:1.45}"
+    },
+    {
+      "name": "Hauptschalter",
+      "kind": "custom",
+      "refersTo": "modulkopf-symbol",
+      "description": "44×44 Trefferfläche, Pille 36×20; an: Spur Grün, Knopf wandert 16 px in 160 ms.",
+      "html": "<button class=\"ds-switch\" type=\"button\" role=\"switch\" aria-checked=\"true\" aria-label=\"Textbefehle einschalten\"><span class=\"ds-switch__track\" aria-hidden=\"true\"><span class=\"ds-switch__thumb\"></span></span></button>",
+      "css": ".ds-switch{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:6px;background:transparent;cursor:pointer}.ds-switch__track{display:block;width:36px;height:20px;padding:3px;border-radius:9999px;background:var(--text-4,#615c56);transition:background 160ms ease}.ds-switch__thumb{display:block;width:14px;height:14px;border-radius:50%;background:var(--text,#f2efeb);transition:transform 160ms ease}.ds-switch[aria-checked=true] .ds-switch__track{background:var(--gruen,#3ddc84)}.ds-switch[aria-checked=true] .ds-switch__thumb{transform:translateX(16px)}.ds-switch:disabled{cursor:not-allowed;opacity:.45}.ds-switch:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px}"
+    },
+    {
+      "name": "Tabelle mit Zeilenauswahl",
+      "kind": "custom",
+      "refersTo": "tabellenzeile",
+      "description": "34-px-Zeilen, Spaltenkopf in Versalien auf Tint-2, gewählte Zeile Tint-1 mit 2 px Markenkante. Befehlstoken und Zahlen in Mono.",
+      "html": "<table class=\"ds-table\"><thead><tr><th>Befehl</th><th>Antwort</th><th>Abkühlzeit</th></tr></thead><tbody><tr tabindex=\"0\" aria-selected=\"true\"><th scope=\"row\" class=\"ds-mono\">!discord</th><td class=\"ds-table__answer\">Komm auf unseren Discord: …</td><td class=\"ds-mono\">30</td></tr><tr tabindex=\"0\"><th scope=\"row\" class=\"ds-mono\">!uptime</th><td class=\"ds-table__answer\">Der Stream läuft seit …</td><td class=\"ds-mono\">10</td></tr></tbody></table>",
+      "css": ".ds-table{width:100%;border-collapse:collapse;table-layout:fixed;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-table th,.ds-table td{height:34px;min-width:0;padding:8px 10px;border-bottom:1px solid var(--linie,#312e2b);text-align:left;font-size:12px}.ds-table thead th{height:30px;color:var(--text-3,#8b857e);background:var(--tint-2,#14202e);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}.ds-table tbody tr{cursor:pointer}.ds-table tbody tr:hover{background:var(--erhoben,#1e1c1a)}.ds-table tbody tr:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:-2px}.ds-table tbody tr[aria-selected=true]{background:var(--tint-1,#172638)}.ds-table tbody tr[aria-selected=true]>*:first-child{box-shadow:inset 2px 0 0 var(--marke,#538dcc)}.ds-table tbody th{color:var(--marke-text,#9bc3ed);font-weight:600}.ds-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}.ds-table__answer{overflow:hidden;color:var(--text-2,#b3aca4);text-overflow:ellipsis;white-space:nowrap}"
+    },
+    {
+      "name": "Brotkrume",
+      "kind": "nav",
+      "refersTo": "schienen-taste-aktiv",
+      "description": "Führt von der Detailseite zurück; aktuelles Glied mit 20-px-Glyph in Marke-Text.",
+      "html": "<nav class=\"ds-crumb\" aria-label=\"Pfad\"><a class=\"ds-crumb__link\" href=\"#\">Module</a><span class=\"ds-crumb__sep\" aria-hidden=\"true\">/</span><span class=\"ds-crumb__current\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 7v10M8.5 10.5h7M8.5 13.5h5\"/></svg><span>Textbefehle</span></span></nav>",
+      "css": ".ds-crumb{display:inline-flex;align-items:center;gap:10px;color:var(--text-2,#b3aca4);font-family:Archivo,ui-sans-serif,system-ui,sans-serif;font-size:13px}.ds-crumb__link{display:inline-flex;align-items:center;min-height:44px;color:var(--marke-text,#9bc3ed);text-decoration:none}.ds-crumb__link:hover{color:var(--text,#f2efeb);text-decoration:underline;text-underline-offset:3px}.ds-crumb__link:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px;border-radius:6px}.ds-crumb__sep{color:var(--text-4,#615c56)}.ds-crumb__current{display:inline-flex;align-items:center;gap:7px;color:var(--marke-text,#9bc3ed);font-weight:600}.ds-crumb__current svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Das Stream Deck",
+    "overview": "Das Panel ist ein Gerät, kein Dokument. Module sind beleuchtete Tasten in einem Raster, nicht Zeilen in einer Tabelle und nicht Karten in einem Stapel. Eine Taste ist ein Objekt: Sie trägt genau ein Symbol, einen Namen und eine LED mit Wort — nie einen Absatz, nie ein verschachteltes Layout. Genau diese Grenze unterscheidet die Taste vom Container, der am Vorgängerentwurf bemängelt wurde. Das Gerät steht nachts auf dem zweiten Monitor neben OBS: Mattschwarz mit warmem Grau, ein Grundton ohne Verlauf, feste Pixelmaße statt fluider Skalen, weil Betriebsoberflächen bei gleichbleibender Auflösung gelesen werden.\n\nDer Blick aufs Raster sagt, was läuft: Grün leuchtet, Aus ist gezeichnet. Tastendruck ist die Signatur-Interaktion — die Taste sinkt (Skalierung 0,97, 120 ms), färbt sich grün getönt, die LED blendet in 160 ms um. Die Detailseite in der Mitte wird von der Brotkrume geführt, hat einen Modulkopf mit Symbol und Hauptschalter, und begrenzt ihren Inhalt auf 960 px. Die Schiene links bleibt in jeder Breite ein Band fester 64×64-Tasten.\n\nAbgelehnt wurde am 19. September 2026 der Kategoriestandard (Seitenleiste mit Titelzeile und Tabelle): zu asketisch. Die Welt darf souverän sein, ohne bunt zu werden — die einzigen Farben bedeuten Zustand oder markieren den Ort des Bedieners.",
+    "keyCharacteristics": [
+      "Mattschwarz (#141312) mit warmen Graustufen; vier Textstufen, kein Verlauf, kein Schatten.",
+      "Tasten sind Objekte mit 12 px Radius in dunklen Rinnen; Steuerelemente haben 6 px. Es gibt keinen dritten Radius.",
+      "Zustand spricht in Grün, Bernstein, Rot — immer als LED mit Wort, nie Farbe allein. Aus ist neutral gezeichnet.",
+      "Marke (Blau) markiert ausschließlich den Ort des Bedieners, nie Wichtigkeit.",
+      "Archivo für alles; IBM Plex Mono mit Tabellenziffern nur für Zahlen und Befehlstoken.",
+      "Eine Symbolfamilie: 24er-Viewbox, Strich 1,5, runde Enden, fill: none. Kein Emoji, keine zweite Familie.",
+      "Feste Maße: Kopfleiste 56 px, Schiene 80 px, Schienentaste 64×64, Modultaste 132×132, Bedienelement 44 px, Tabellenzeile 34 px."
+    ],
+    "rules": [
+      { "name": "Die Zwei-Rollen-Regel", "body": "Marke markiert den Ort des Bedieners (Auswahl, Fokus, primäre Aktion, Verknüpfung). Zustand spricht in Grün, Bernstein, Rot. Das System spricht nie in Markenfarbe, und Zustand nie in Marke — die Rollen kollidieren strukturell nicht, nicht nur farbmetrisch.", "section": "colors" },
+      { "name": "Die LED-mit-Wort-Regel", "body": "Wo Zustand steht, steht eine LED (8 px Punkt) und ein Wort: „Läuft“, „Aus“, „Verbunden“. Farbe allein informiert nie. Grün ohne Wort ist ein Fehler, kein Stil.", "section": "colors" },
+      { "name": "Die Aus-ist-neutral-Regel", "body": "Ein ausgeschaltetes Modul ist kein Problem. Es bekommt eine gezeichnete LED (Rinne mit Text-4-Rand), Text-3 und keine Farbe. Bernstein bedeutet ausschließlich „unbekannt“ oder „nicht aktiv, obwohl es sollte“.", "section": "colors" },
+      { "name": "Die Mono-für-Zahlen-Regel", "body": "Plex Mono ist die Schrift für Werte, die man abliest und vergleicht: Twitch-ID, Sekunden, Zeitstempel. Der Build dehnt sie auf den Befehlstoken (!name) aus, weil er ein wörtlich einzutippendes Zeichen ist. Für Namen, Beschreibungen und Etiketten ist Mono verboten.", "section": "typography" },
+      { "name": "Die Feste-Skala-Regel", "body": "Keine clamp(), keine Viewport-Einheiten in der Schrift. Schmale Fenster klappen das Gerüst um; die Schriftgrößen bleiben.", "section": "typography" },
+      { "name": "Die Trefferflächen-Regel", "body": "Alleinstehende Bedienelemente (Knopf, Feld, Select, Schalter, Brotkrumen-Link) sind mindestens 44 px hoch. In dichten Tabellenzeilen gelten 34 px, weil Dichte dort ein Feature ist. Beides liegt über der AA-Untergrenze von 24 px.", "section": "layout" },
+      { "name": "Die Keine-Schatten-Regel", "body": "Kein box-shadow als Tiefe, kein Verlauf, kein Schimmer. Die einzigen inset-Kanten sind die 2 px Markenkante der gewählten Tabellenzeile.", "section": "elevation" },
+      { "name": "Die Kein-Skelett-Regel", "body": "Veraltete Werte bleiben mit 55 % Deckkraft stehen; nichts schimmert. Bewegung im Augenwinkel sieht neben einem laufenden Stream wie eine Änderung aus.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do jede Zustandsanzeige als LED mit Wort bauen; Grün nur mit „Läuft“/„Verbunden“ daneben.",
+      "Do neue Module als Taste ins Raster stellen: Symbol aus der Familie, Name, LED. Nichts weiter auf der Taste.",
+      "Do genau zwei Radien verwenden: 12 px für Objekte, 6 px für Bedienelemente.",
+      "Do alleinstehende Bedienelemente 44 px hoch machen, Tabellenzeilen 34 px.",
+      "Do Werte in Plex Mono mit Tabellenziffern setzen (Twitch-ID, Sekunden, Zeit, Befehlstoken).",
+      "Do die Detailseite auf 960 px begrenzen und Bereiche mit Haarlinie plus Abstand trennen.",
+      "Do den Sperr- oder Fehlergrund an die Wirkung schreiben (Sperrgrund unter dem Schalter, Hinweis neben dem gedeckten Knopf).",
+      "Do veraltete Werte mit 55 % Deckkraft stehen lassen."
+    ],
+    "donts": [
+      "Don't ein ausgeschaltetes Modul bernstein färben. Aus ist neutral; Bernstein heißt unbekannt.",
+      "Don't Markenfarbe für Zustand oder Wichtigkeit verwenden, und Zustandsfarbe für Auswahl.",
+      "Don't Schatten, Verläufe oder Skelett-Schimmer einsetzen.",
+      "Don't einen dritten Radius, eine dritte Schrift oder eine zweite Symbolfamilie einführen; kein Emoji.",
+      "Don't eine Taste mit Absatz, Zähler oder verschachteltem Layout beladen — dann ist sie eine Karte.",
+      "Don't Schriftgrößen an den Viewport koppeln; schmal klappt das Gerüst um, nicht die Schrift.",
+      "Don't ein rechtes Dock bauen; der Inspector öffnet sich im Fluss unter der Tabelle."
+    ]
+  }
+}

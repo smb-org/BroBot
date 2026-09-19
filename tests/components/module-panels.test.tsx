@@ -10,10 +10,13 @@ vi.mock("../../src/modules/registry", () => ({
   ],
 }));
 
-import { ModuleNavigation, ModulePanelMount, ModulePage } from "../../src/dashboard/module-panels";
+import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
 
 describe("Modul-Panel-Lader", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("verweist aktive Module auf ihre eigene Unterseite", () => {
     const onNavigate = vi.fn();
@@ -33,15 +36,95 @@ describe("Modul-Panel-Lader", () => {
   });
 
   it("lädt das Panel erst auf der Modulunterseite lazy", async () => {
-    render(<ModulePage channelId="kanal-a" moduleId="aktiv" activeModules={[{ moduleId: "aktiv", settings: "{}" }]} />);
+    render(<ModulePage channelId="kanal-a" moduleId="aktiv" ownRole="verwalter" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "aktiv", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
 
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     expect(activeLoader).toHaveBeenCalledTimes(1);
   });
 
   it("zeigt für ein aktives Modul ohne Panel einen erklärten Zustand", () => {
-    render(<ModulePage channelId="kanal-a" moduleId="ohne-panel" activeModules={[{ moduleId: "ohne-panel", settings: "{}" }]} />);
+    render(<ModulePage channelId="kanal-a" moduleId="ohne-panel" ownRole="verwalter" modules={[{ id: "ohne-panel", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "ohne-panel", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
 
     expect(screen.getByText("Für dieses aktive Modul gibt es noch keine Panel-Ansicht.")).toBeInTheDocument();
+  });
+
+  it("navigiert beim Tippen auf eine Rastertaste, ohne beim Tippen zu schalten", () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const onNavigate = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    render(<ModuleWorkspace channelId="kanal-a" ownRole="verwalter" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} />);
+
+    const taste = screen.getByRole("link", { name: /aktiv.*Läuft/i });
+    fireEvent.click(taste);
+
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "aktiv" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("zeigt über der Modulüberschrift keinen Kicker", () => {
+    render(<ModuleWorkspace channelId="kanal-a" ownRole="verwalter" modules={[]} onNavigate={vi.fn()} />);
+
+    expect(screen.getByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText("Tastenraster")).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Eigenschaften-Inspektor" })).not.toBeInTheDocument();
+  });
+
+  it("zeigt dem Bediener den deaktivierten Detail-Schalter mit Grund an", () => {
+    render(<ModulePage
+      channelId="kanal-a"
+      moduleId="aktiv"
+      ownRole="bediener"
+      modules={[{ id: "aktiv", enabled: true, settings: "{}" }]}
+      activeModules={[{ moduleId: "aktiv", settings: "{}" }]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    const toggle = screen.getByRole("switch", { name: /aktiv/i });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.")).toBeInTheDocument();
+  });
+
+  it("zeigt Brotkrume und Modulsymbol auf der Detailseite", () => {
+    const onNavigate = vi.fn();
+    render(<ModulePage
+      channelId="kanal-a"
+      moduleId="aktiv"
+      ownRole="verwalter"
+      modules={[{ id: "aktiv", enabled: true, settings: "{}" }]}
+      activeModules={[{ moduleId: "aktiv", settings: "{}" }]}
+      onNavigate={onNavigate}
+      onToggle={vi.fn()}
+    />);
+
+    const breadcrumb = screen.getByRole("link", { name: "Module" });
+    expect(breadcrumb).toHaveAttribute("href", "/channels/kanal-a/modules");
+    fireEvent.click(breadcrumb);
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "channel", channelId: "kanal-a", section: "modules" });
+    expect(document.querySelectorAll(".module-glyph").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("zeigt unbekannte und deaktivierte Modul-IDs auf der Detailseite verständlich", () => {
+    const { rerender } = render(<ModulePage
+      channelId="kanal-a"
+      moduleId="aktiv"
+      ownRole="verwalter"
+      modules={[{ id: "aktiv", enabled: false, settings: "{}" }]}
+      activeModules={[]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+    expect(screen.getByText(/ist ausgeschaltet/i)).toBeInTheDocument();
+
+    rerender(<ModulePage
+      channelId="kanal-a"
+      moduleId="unbekannt"
+      ownRole="verwalter"
+      modules={[]}
+      activeModules={[]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+    expect(screen.getByText(/ist nicht bekannt/i)).toBeInTheDocument();
   });
 });
