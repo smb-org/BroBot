@@ -115,6 +115,107 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
+  it("erkennt die kanalgebundene Ereignisroute", () => {
+    expect(parseDashboardRoute("/channels/kanal-a/events")).toEqual({
+      kind: "channel",
+      channelId: "kanal-a",
+      section: "events",
+    });
+  });
+
+  it("zeigt Ereignisse mit Modul, Code, Detail und Akteur", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({
+        entries: [{
+          eventId: "event-1",
+          createdAt: "2026-09-18T04:00:00.000Z",
+          moduleId: "raid",
+          code: "shoutout.unterdrueckt",
+          detail: '{"grund":"raid_erkannt"}',
+          actorUserId: null,
+        }],
+        nextCursor: null,
+      });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("shoutout.unterdrueckt")).toBeInTheDocument();
+    expect(screen.getByText("raid")).toBeInTheDocument();
+    expect(screen.getByText("Automatisch")).toBeInTheDocument();
+    expect(screen.getByText('{"grund":"raid_erkannt"}')).toBeInTheDocument();
+  });
+
+  it("erreicht Ereignisse über die Navigation und lädt die nächste Seite", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const ersteSeite = {
+      entries: [{
+        eventId: "event-neu",
+        createdAt: "2026-09-18T04:00:00.000Z",
+        moduleId: "raid",
+        code: "neu",
+        detail: "{}",
+        actorUserId: null,
+      }],
+      nextCursor: "cursor-1",
+    };
+    const zweiteSeite = {
+      entries: [{
+        eventId: "event-alt",
+        createdAt: "2026-09-18T03:00:00.000Z",
+        moduleId: "raid",
+        code: "alt",
+        detail: "{}",
+        actorUserId: "user-1",
+        actorLogin: "alice",
+        actorDisplayName: "Alice",
+      }],
+      nextCursor: null,
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        return jsonResponse(url.searchParams.has("cursor") ? zweiteSeite : ersteSeite);
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const eventsLink = await screen.findByRole("link", { name: "Ereignisse" });
+    fireEvent.click(eventsLink);
+    expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("neu")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    expect(await screen.findByText("alt")).toBeInTheDocument();
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+  });
+
+  it("zeigt den Ereignis-Leerzustand als einzelnen Satz", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Noch keine Ereignisse protokolliert.")).toBeInTheDocument();
+  });
+
   it("stellt den letzten Broadcaster nicht als entziehbar dar", async () => {
     // Der Worker würde beides ablehnen. Ein Knopf, der garantiert scheitert,
     // sieht aus wie eine Möglichkeit — man muss ihn drücken, um zu erfahren,

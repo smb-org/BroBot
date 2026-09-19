@@ -11,7 +11,7 @@
    pnpm exec wrangler d1 create brobot-production
    ```
 
-   Die Ausgabe liefert je Datenbank eine `database_id`. Die drei deutlich als Platzhalter eingetragenen Null-UUIDs in `wrangler.jsonc` durch die jeweiligen IDs ersetzen. Danach die Migration mit Wrangler ausführen, sobald die Datenbank verfügbar ist.
+   Die Ausgabe liefert je Datenbank eine `database_id`. Die drei deutlich als Platzhalter eingetragenen Null-UUIDs in `wrangler.jsonc` durch die jeweiligen IDs ersetzen. Danach die Migrationen `0000_init.sql` bis `0007_ereignisprotokoll-trigger.sql` mit Wrangler ausführen, sobald die Datenbank verfügbar ist.
 3. Für Schlüssel jeweils erzeugen:
 
    ```bash
@@ -43,7 +43,9 @@ zeigt nach einem erfolgreichen HTTP-Statusabruf die Version aus
 
 Vor dem ersten Rollout die D1-Migrationen `0003_overlay_tokens.sql`,
 `0004_moderator_status_check_lock.sql` und
-`0005_moderator_status_check_owner.sql` in jeder Zielumgebung anwenden. Der
+`0005_moderator_status_check_owner.sql`,
+`0006_ereignisprotokoll.sql` und
+`0007_ereignisprotokoll-trigger.sql` in jeder Zielumgebung anwenden. Der
 Pepper bleibt ein Secret und wird nicht in die
 Browserquelle oder in die URL geschrieben.
 
@@ -282,7 +284,8 @@ anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
 Session-, OAuth- und Token-Tabellen, `0002` die feste Rollenmenge sowie das
 Audit-Log, `0003` die Overlay-Token-Tabelle, `0004` die kanalbezogene Sperre
 und `0005` deren Besitzerbindung für manuelle Moderatorstatus-Prüfungen
-anlegen.
+anlegen, `0006` das Ereignisprotokoll und `0007` die Korrelation über den
+Auslöser.
 
 **Staging migriert automatisch.** Der Deploy-Workflow wendet ausstehende
 Migrationen vor dem Code-Deploy an. Schlägt das fehl, bricht der Job ab und
@@ -381,7 +384,8 @@ Bot-Token über Twitch, erneuert Token mit weniger als einer Stunde Restlaufzeit
 und ersetzt Access- und Refresh-Token in einem D1-Schreibvorgang. Danach prüft
 er den Bot über Get Moderated Channels für alle Zeilen in `channels` und hält
 den Status in `bot_channel_status` fest. Abgelaufene OAuth-Transaktionen
-werden im selben Lauf entfernt.
+werden im selben Lauf entfernt. Außerdem räumt er `event_log` auf und löscht
+Ereignisse, die älter als 14 Tage sind.
 
 Bei `invalid_grant` oder einer widerrufenen Autorisierung wird der globale
 Status mit Ursache `revoked` gespeichert. Der Scheduled-Handler versucht einen
