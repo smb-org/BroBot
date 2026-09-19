@@ -1,7 +1,7 @@
 import { createOAuthTransaction } from "./repository";
 import { parseKeyRing, signJson, verifyJson } from "./crypto";
 
-export const LOGIN_SCOPES = ["user:read:moderated_channels"] as const;
+export const LOGIN_SCOPES = ["user:read:moderated_channels", "channel:bot"] as const;
 export const BOT_SCOPES = [
   "user:bot",
   "user:read:chat",

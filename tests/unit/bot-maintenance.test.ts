@@ -561,9 +561,20 @@ describe("Bot-Wartung", () => {
   it("führt den stündlichen Handler über waitUntil aus", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     const waitUntil = vi.fn();
-    vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 7200 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url === "https://id.twitch.tv/oauth2/token") {
+        return Promise.resolve(new Response(
+          JSON.stringify({ access_token: "app-access", expires_in: 7200 }),
+          { status: 200 },
+        ));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify(url.includes("/users")
+          ? { user_id: "bot-user", login: "brobot", expires_in: 7200 }
+          : { data: [{ broadcaster_id: "channel-1" }] }),
+        { status: 200 },
+      ));
+    }));
 
     await scheduled(
       {} as ScheduledController,
