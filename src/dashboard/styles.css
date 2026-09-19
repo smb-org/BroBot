@@ -378,6 +378,38 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .member-add-confirmation p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
 .member-confirmation-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
 
+/* Allgemeine Formularfelder.
+ *
+ * Bis hierher gab es Regeln nur fuer die Mitgliedersuche. Jede Modulansicht
+ * bekam deshalb den Browser-Standard: Beschriftungen klebten an den Feldern,
+ * Hinweistexte liefen in die naechste Beschriftung. Diese Regeln greifen
+ * ueberall, damit ein neues Modul nichts mitbringen muss, um anstaendig
+ * auszusehen. */
+.content-section label { display: grid; gap: var(--s1); max-width: 40rem; }
+.content-section label { color: var(--text-2); font-size: 12.5px; font-weight: 500; }
+/* Der Hinweis unter einem Feld erklaert die Regel, er benennt nichts. */
+.content-section label .muted { font-size: 12px; font-weight: 400; line-height: 1.45; }
+
+.content-section input:not([type="checkbox"]):not([type="radio"]),
+.content-section textarea,
+.content-section select {
+  min-width: 0; min-height: 44px;
+  border: 1px solid var(--linie-stark); border-radius: var(--r-control);
+  padding: 7px var(--s3); color: var(--text); background: #0c0f15;
+}
+.content-section textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
+.content-section input:not([type="checkbox"]):not([type="radio"]):hover,
+.content-section textarea:hover,
+.content-section select:hover { border-color: var(--linie-hell); }
+
+/* Zahleneingaben brauchen nicht die Breite eines Antworttextes. */
+.content-section input[type="number"] { max-width: 9rem; }
+
+/* Formulare stapeln ihre Felder; nebeneinander wird es auf schmalen
+ * Fenstern unlesbar, und die Felder haben sehr unterschiedliche Laengen. */
+form.content-section { display: grid; gap: var(--s4); }
+.form-actions { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+
 /* Der Grund steht an der Wirkung, nicht als Meldung an anderer Stelle. */
 .form-error {
   display: flex; align-items: baseline; gap: var(--s2);
