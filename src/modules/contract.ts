@@ -36,12 +36,38 @@ export interface ModuleResult {
   diagnostics: readonly ModuleDiagnostic[];
 }
 
+/**
+ * Was ein Modul über das auslösende Ereignis erfährt. Bewusst schmal: Der
+ * Kanal kommt aus dem geprüften Ereignis und nicht vom Modul, damit ein Modul
+ * nicht in einen fremden Kanal wirken kann. `triggerId` ist die Message-ID von
+ * Twitch und verbindet alle Zeilen im Ereignisprotokoll, die zu demselben
+ * Auslöser gehören.
+ */
+export interface ModuleEvent<Settings = unknown> {
+  channelId: string;
+  subscriptionType: string;
+  triggerId: string;
+  payload: Readonly<Record<string, unknown>>;
+  settings: Settings;
+  receivedAt: string;
+}
+
 export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
   eventSubTypes?: readonly string[];
   routes?: Hono;
+  /**
+   * Der fachliche Einstiegspunkt. Eine reine Funktion: Sie beschreibt, was
+   * geschehen soll, und führt nichts aus. Der Host führt die Aktionen aus und
+   * protokolliert ihren Ausgang; das Modul begründet mit `diagnostics`, warum
+   * es gehandelt oder eben nicht gehandelt hat (Entscheidung 0004).
+   *
+   * Wirft die Funktion, hält das weder den Worker noch die übrigen Module auf
+   * — der Fehler landet als Diagnose im Ereignisprotokoll.
+   */
+  handleEvent?: (event: ModuleEvent<z.output<SettingsSchema>>) => ModuleResult | Promise<ModuleResult>;
   // Modulmigrationen und weitere Aktionsarten treten dem Contract bei, sobald
   // das erste Modul sie benötigt. Die Command-Verarbeitung ist mit
   // ModuleResult angetreten.
