@@ -1,4 +1,4 @@
-import { useState, type ReactElement, type SyntheticEvent } from "react";
+import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } from "react";
 
 import type { PanelChannelRole, PanelMember, PanelTwitchUser } from "../panel-contract";
 import { roleLabel } from "./labels";
@@ -86,7 +86,15 @@ const roleOptions = (rollen: readonly PanelChannelRole[] = manageableRoles): Rea
   rollen.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>);
 
 const accessConfirmation = (role: PanelChannelRole): string =>
-  `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${roleLabel(role)}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt. Zugriff freigeben?`;
+  `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${roleLabel(role)}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt.`;
+
+const MemberAvatar = ({ src }: { src: string | null }): ReactElement => {
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  if (src === null || src.length === 0 || failedSource === src) {
+    return <span className="member-avatar-placeholder" aria-hidden="true" />;
+  }
+  return <img className="member-avatar" src={src} alt="" aria-hidden="true" onError={() => setFailedSource(src)} />;
+};
 
 const MemberTable = ({
   members,
@@ -114,16 +122,21 @@ const MemberTable = ({
           {members.map((member) => (
             <tr key={member.userId}>
               <th scope="row">
-                <span>{memberLabel(member)}</span>
-                {member.displayName !== null && member.login !== null ? (
-                  <a
-                    className="member-login member-profile-link"
-                    href={`https://twitch.tv/${member.login}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                  >twitch.tv/{member.login}</a>
-                ) : null}
-                {member.displayName === null && member.login === null ? <span className="member-login">Twitch-ID {member.userId}</span> : null}
+                <div className="member-avatar-row">
+                  <MemberAvatar src={member.profileImageUrl} />
+                  <div>
+                    <span>{memberLabel(member)}</span>
+                    {member.displayName !== null && member.login !== null ? (
+                      <a
+                        className="member-login member-profile-link"
+                        href={`https://twitch.tv/${member.login}`}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >twitch.tv/{member.login}</a>
+                    ) : null}
+                    {member.displayName === null && member.login === null ? <span className="member-login">Twitch-ID {member.userId}</span> : null}
+                  </div>
+                </div>
               </th>
               <td>
                 {canManageMembers ? (
@@ -183,13 +196,27 @@ export const MembersPage = ({
   const [newRole, setNewRole] = useState<PanelChannelRole>("bediener");
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmingAdd, setConfirmingAdd] = useState(false);
   const canManageMembers = canManage(ownRole);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  /**
+   * `role="alertdialog"` verlangt, dass der Fokus tatsächlich hinein wandert —
+   * sonst bemerkt weder Tastatur- noch Screenreader-Bedienung die wichtigste
+   * Sicherheitsabfrage des Formulars.
+   */
+  useEffect(() => {
+    if (confirmingAdd) confirmButtonRef.current?.focus();
+  }, [confirmingAdd]);
+
+  const cancelAdd = (): void => setConfirmingAdd(false);
 
   const handleSearch = async (event: SyntheticEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     setSearching(true);
     setSearchError(null);
     setFoundUser(null);
+    setConfirmingAdd(false);
     try {
       setFoundUser((await searchTwitchUser(channelId, login)).user);
     } catch (error: unknown) {
@@ -201,11 +228,12 @@ export const MembersPage = ({
   };
 
   const handleAdd = async (): Promise<void> => {
-    if (foundUser === null || !window.confirm(accessConfirmation(newRole))) return;
+    if (foundUser === null) return;
     setBusyUserId(foundUser.userId);
     setActionError(null);
     try {
       await addChannelMember(channelId, foundUser.userId, newRole);
+      setConfirmingAdd(false);
       setFoundUser(null);
       setLogin("");
       await onReload();
@@ -266,11 +294,46 @@ export const MembersPage = ({
           {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
           {foundUser === null ? null : (
             <div className="member-search-result">
-              <div><strong>{foundUser.displayName}</strong><span>@{foundUser.login} · Twitch-ID {foundUser.userId}</span></div>
+              <div className="member-avatar-row">
+                <MemberAvatar src={foundUser.profileImageUrl} />
+                <div>
+                  <strong>{foundUser.displayName}</strong>
+                  <span>@{foundUser.login} · Twitch-ID {foundUser.userId}</span>
+                  <a
+                    className="member-login member-profile-link"
+                    href={`https://twitch.tv/${foundUser.login}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >twitch.tv/{foundUser.login}</a>
+                </div>
+              </div>
               <label>Rolle<select aria-label="Rolle für neue Mitgliedschaft" value={newRole} onChange={(event) => setNewRole(event.target.value as PanelChannelRole)}>{roleOptions()}</select></label>
-              <button className="button" type="button" onClick={() => { void handleAdd(); }} disabled={busyUserId === foundUser.userId}>Zugriff freigeben</button>
+              <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={busyUserId === foundUser.userId}>Zugriff freigeben</button>
             </div>
           )}
+          {confirmingAdd && foundUser !== null ? (
+            <div
+              className="member-add-confirmation"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="member-add-confirmation-title"
+              aria-describedby="member-add-confirmation-description"
+              onKeyDown={(event) => { if (event.key === "Escape") cancelAdd(); }}
+            >
+              <div className="member-avatar-row">
+                <MemberAvatar src={foundUser.profileImageUrl} />
+                <div>
+                  <h3 id="member-add-confirmation-title">Zugriff für {foundUser.displayName} freigeben?</h3>
+                  <span>@{foundUser.login}</span>
+                </div>
+              </div>
+              <p id="member-add-confirmation-description">{accessConfirmation(newRole)}</p>
+              <div className="member-confirmation-actions">
+                <button ref={confirmButtonRef} className="button button--primary" type="button" onClick={() => { void handleAdd(); }} disabled={busyUserId === foundUser.userId}>Zugriff endgültig freigeben</button>
+                <button className="button button--quiet" type="button" onClick={cancelAdd} disabled={busyUserId === foundUser.userId}>Abbrechen</button>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
       <section className="content-section" aria-label="Mitgliederliste">

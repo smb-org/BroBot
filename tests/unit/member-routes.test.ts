@@ -262,8 +262,8 @@ describe("Mitgliederverwaltung", () => {
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       data: [
-        { id: "user-1", login: "streamer", display_name: "Streamerin" },
-        { id: "user-2", login: "helfer", display_name: "Helfer" },
+        { id: "user-1", login: "streamer", display_name: "Streamerin", profile_image_url: "https://cdn.example/streamer.png" },
+        { id: "user-2", login: "helfer", display_name: "Helfer", profile_image_url: "" },
       ],
     }), { status: 200 }));
 
@@ -275,9 +275,10 @@ describe("Mitgliederverwaltung", () => {
 
     expect(response.status).toBe(200);
     expect(body.members).toEqual([
-      { userId: "user-1", login: "streamer", displayName: "Streamerin", role: "broadcaster", joinedAt: "2026-09-18T00:00:00.000Z" },
-      { userId: "user-2", login: "helfer", displayName: "Helfer", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" },
+      { userId: "user-1", login: "streamer", displayName: "Streamerin", profileImageUrl: "https://cdn.example/streamer.png", role: "broadcaster", joinedAt: "2026-09-18T00:00:00.000Z" },
+      { userId: "user-2", login: "helfer", displayName: "Helfer", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" },
     ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
       "https://api.twitch.tv/helix/users?id=user-1&id=user-2",
       expect.objectContaining({ headers: { "Client-ID": "client-id", Authorization: "Bearer bot-access-token" } }),
@@ -309,8 +310,8 @@ describe("Mitgliederverwaltung", () => {
     );
 
     expect(body.members).toEqual([
-      expect.objectContaining({ userId: "user-1", login: "streamer", displayName: "Streamerin" }),
-      expect.objectContaining({ userId: "user-2", login: null, displayName: null }),
+      expect.objectContaining({ userId: "user-1", login: "streamer", displayName: "Streamerin", profileImageUrl: null }),
+      expect.objectContaining({ userId: "user-2", login: null, displayName: null, profileImageUrl: null }),
     ]);
     expect(removeResponse.status).toBe(204);
   });
@@ -563,21 +564,61 @@ describe("Mitgliederverwaltung", () => {
     await setupChannel(database);
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
-      data: [{ id: "300", login: "neue-person", display_name: "Neue Person" }],
+      data: [{ id: "300", login: "neue-person", display_name: "Neue Person", profile_image_url: "https://cdn.example/neue-person.png" }],
     }), { status: 200 }));
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members/search?login=neue-person"),
       environment,
     );
-    const body = await response.json<{ user: { userId: string; login: string; displayName: string } }>();
+    const body = await response.json<{ user: { userId: string; login: string; displayName: string; profileImageUrl: string | null } }>();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ user: { userId: "300", login: "neue-person", displayName: "Neue Person" } });
+    expect(body).toEqual({ user: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png" } });
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
       "https://api.twitch.tv/helix/users?login=neue-person",
       expect.objectContaining({ headers: { "Client-ID": "client-id", Authorization: "Bearer bot-access-token" } }),
     );
+  });
+
+  it("speichert die bei der Suche gelieferte Bild-URL nicht in channel_members", async () => {
+    await setupChannel(database);
+    await insertBotIdentity(database);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      data: [{ id: "300", login: "neue-person", display_name: "Neue Person", profile_image_url: "https://cdn.example/neue-person.png" }],
+    }), { status: 200 }));
+
+    const searchResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/search?login=neue-person"),
+      environment,
+    );
+    const searchedUser = await searchResponse.json<{ user: { userId: string } }>();
+    const addResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: searchedUser.user.userId, role: "bediener" }),
+      environment,
+    );
+
+    expect(addResponse.status).toBe(201);
+    const stored = await database.prepare(
+      "SELECT * FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "300").first<Record<string, unknown>>();
+    const createdAt = stored?.created_at;
+    const updatedAt = stored?.updated_at;
+    expect(stored).toEqual({
+      channel_id: "kanal-a",
+      user_id: "300",
+      role: "bediener",
+      created_at: createdAt,
+      updated_at: updatedAt,
+    });
+    expect(Object.keys(stored ?? {})).toEqual([
+      "channel_id",
+      "user_id",
+      "role",
+      "created_at",
+      "updated_at",
+    ]);
   });
 
   it("verbietet einem Bediener die Twitch-Nutzersuche ohne Helix-Aufruf", async () => {
