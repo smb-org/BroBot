@@ -7,7 +7,7 @@ import tseslint from "typescript-eslint";
 
 const moduleIsolationPatterns = [
   {
-    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
+    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+dashboard/locale(?:\\.[^/]+)?(?:/|$)|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
     message: "Module dürfen kein anderes Modul importieren.",
   },
   {

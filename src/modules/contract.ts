@@ -36,6 +36,58 @@ export interface ModuleResult {
   diagnostics: readonly ModuleDiagnostic[];
 }
 
+export type ModuleActor = {
+  userId: string;
+  login: string;
+  role: "broadcaster" | "verwalter" | "bediener" | null;
+};
+
+export interface ModuleMutationActor {
+  userId: string;
+  sessionId?: string;
+}
+
+export interface ModuleMutationAuthorization {
+  sql: string;
+  values: readonly (string | number | null)[];
+}
+
+export type AuthorizeModuleMutation = (
+  channelId: string,
+  actor: ModuleMutationActor,
+  now: string,
+) => ModuleMutationAuthorization;
+
+/** Infrastruktur, die der Host einem Modul für seinen eigenen Adapter gibt. */
+export interface ModuleExecutionContext {
+  DB: D1Database;
+  authorizeMutation: AuthorizeModuleMutation;
+}
+
+/** Gemeinsame Props für lazy geladene Panel-Ansichten. */
+export interface ModulePanelProperties {
+  channelId: string;
+}
+
+export type ModuleLanguage = "de" | "en";
+
+export const browserModuleLanguage = (): ModuleLanguage => {
+  const language = typeof navigator === "undefined" ? "de" : navigator.language;
+  return language.toLowerCase().startsWith("de") ? "de" : "en";
+};
+
+export interface ModuleRouteVariables {
+  session: { userId: string; sessionId: string };
+  channelRole: "broadcaster" | "verwalter" | "bediener";
+  actor: { userId: string; sessionId: string };
+  authorizeMutation: AuthorizeModuleMutation;
+}
+
+export interface ModuleRouteEnvironment {
+  Bindings: Env;
+  Variables: ModuleRouteVariables;
+}
+
 /**
  * Was ein Modul über das auslösende Ereignis erfährt. Bewusst schmal: Der
  * Kanal kommt aus dem geprüften Ereignis und nicht vom Modul, damit ein Modul
@@ -50,6 +102,8 @@ export interface ModuleEvent<Settings = unknown> {
   payload: Readonly<Record<string, unknown>>;
   settings: Settings;
   receivedAt: string;
+  /** Die Rolle stammt aus channel_members; `null` bedeutet kein Mitglied. */
+  actor: ModuleActor | null;
 }
 
 export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
@@ -57,7 +111,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
   eventSubTypes?: readonly string[];
-  routes?: Hono;
+  routes?: Hono<ModuleRouteEnvironment>;
   /**
    * Der fachliche Einstiegspunkt. Eine reine Funktion: Sie beschreibt, was
    * geschehen soll, und führt nichts aus. Der Host führt die Aktionen aus und
@@ -67,7 +121,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
    * Wirft die Funktion, hält das weder den Worker noch die übrigen Module auf
    * — der Fehler landet als Diagnose im Ereignisprotokoll.
    */
-  handleEvent?: (event: ModuleEvent<z.output<SettingsSchema>>) => ModuleResult | Promise<ModuleResult>;
+  handleEvent?: (
+    event: ModuleEvent<z.output<SettingsSchema>>,
+    context: ModuleExecutionContext,
+  ) => ModuleResult | Promise<ModuleResult>;
   // Modulmigrationen und weitere Aktionsarten treten dem Contract bei, sobald
   // das erste Modul sie benötigt. Die Command-Verarbeitung ist mit
   // ModuleResult angetreten.
@@ -82,5 +139,5 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
    * ebenso im Panel-Bundle null Bytes kosten. Nicht in einen direkten Import
    * umwandeln.
    */
-  panel?: () => Promise<{ default: ComponentType }>;
+  panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
 };

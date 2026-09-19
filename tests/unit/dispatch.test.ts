@@ -5,7 +5,7 @@ import type { BotModule, ModuleEvent, ModuleResult } from "../../src/modules/con
 import { dispatchEventSubNotification, selectModulesForEvent } from "../../src/worker/dispatch";
 import { upsertBotIdentity } from "../../src/worker/auth/repository";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { insertChannel } from "./fixtures";
+import { insertChannel, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const CHAT_TYP = "channel.chat.message";
@@ -97,7 +97,7 @@ const verteile = async (
     channelId,
     subscriptionType,
     triggerId: "ausloeser-1",
-    payload: { message: { text: "!hallo" } },
+    payload: { message: { text: "!hallo" }, chatter_user_id: "user-1", chatter_user_login: "alice" },
     receivedAt: JETZT,
   },
     fetcher,
@@ -250,6 +250,23 @@ describe("Verteilung und Ausführung", () => {
       }))], fetcher, "kanal-b");
 
       expect(koerperVon(fetcher).broadcaster_id).toBe("kanal-b");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("übergibt dem Modul den Akteur samt aufgelöster Kanalrolle", async () => {
+    const database = new TestD1Database();
+    try {
+      await mitBot(database);
+      await insertMember(database, "kanal-a", "user-1", "bediener");
+      let akteur: ModuleEvent["actor"] = null;
+      await verteile(database, [modulDoppel("modul-a", (event) => {
+        akteur = event.actor;
+        return { actions: [], diagnostics: [] };
+      })], gesendet());
+
+      expect(akteur).toEqual({ userId: "user-1", login: "alice", role: "bediener" });
     } finally {
       database.close();
     }

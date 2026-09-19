@@ -30,6 +30,9 @@ interface MembersPageProperties {
 
 const manageableRoles: readonly PanelChannelRole[] = ["broadcaster", "verwalter", "bediener"];
 
+/** Der Beitritt liegt Tage bis Jahre zurück; die Uhrzeit trägt dort nichts bei. */
+const formatJoinDate = (value: string): string => formatDatum(value);
+
 const texte = {
   verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.",
   zugriffVergeben: "Zugriff vergeben",
@@ -37,9 +40,6 @@ const texte = {
   suchen: "Suchen",
   sucheLaeuft: "Suche läuft …",
 };
-
-/** Der Beitritt liegt Tage bis Jahre zurueck; die Uhrzeit traegt dort nichts bei. */
-const formatJoinDate = (value: string): string => formatDatum(value);
 
 const errorMessage = (error: unknown): string => {
   if (error instanceof PanelApiError && error.status === 401) return "Deine Sitzung ist nicht mehr gültig.";

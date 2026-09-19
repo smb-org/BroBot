@@ -555,7 +555,7 @@ const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModer
           {eintraege.map((eintrag) => <Fragment key={eintrag.key}>{eintrag.node}</Fragment>)}
         </div>
       )}
-      <section className="content-section"><div className="section-heading"><h2>Aktive Module</h2><span className="muted zahl">{formatZahl(overview.activeModules.length)}</span></div><ModulePanelMount activeModules={overview.activeModules} /></section>
+      <section className="content-section"><div className="section-heading"><h2>Aktive Module</h2><span className="muted zahl">{formatZahl(overview.activeModules.length)}</span></div><ModulePanelMount channelId={overview.channelId} activeModules={overview.activeModules} /></section>
     </>
   );
 };

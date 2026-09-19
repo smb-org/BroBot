@@ -1,11 +1,12 @@
 import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
 
 import { MODULES } from "../modules/registry";
+import type { ModulePanelProperties } from "../modules/contract";
 import type { PanelActiveModule } from "../panel-contract";
 
-const lazyPanels = new Map<string, LazyExoticComponent<ComponentType>>();
+const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
 
-const getLazyPanel = (module: (typeof MODULES)[number]): LazyExoticComponent<ComponentType> | null => {
+const getLazyPanel = (module: (typeof MODULES)[number]): LazyExoticComponent<ComponentType<ModulePanelProperties>> | null => {
   if (module.panel === undefined) return null;
   const existing = lazyPanels.get(module.id);
   if (existing !== undefined) return existing;
@@ -15,10 +16,11 @@ const getLazyPanel = (module: (typeof MODULES)[number]): LazyExoticComponent<Com
 };
 
 interface ModulePanelMountProperties {
+  channelId: string;
   activeModules: PanelActiveModule[];
 }
 
-export const ModulePanelMount = ({ activeModules }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules }: ModulePanelMountProperties): ReactElement => {
   const registeredPanels = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -37,9 +39,8 @@ export const ModulePanelMount = ({ activeModules }: ModulePanelMountProperties):
   return (
     <section className="module-stack" aria-label="Modulansichten">
       <Suspense fallback={<p className="muted">Modulansichten werden geladen …</p>}>
-        {registeredPanels.map(({ id, Panel }) => <Panel key={id} />)}
+        {registeredPanels.map(({ id, Panel }) => <Panel key={id} channelId={channelId} />)}
       </Suspense>
     </section>
   );
 };
-

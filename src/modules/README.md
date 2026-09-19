@@ -26,7 +26,17 @@ src/modules/<id>/
 3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
 4. Prüfen: `pnpm run check`.
 
-Das spätere Mounting verwendet die Registry und hängt Modulrouten kanalbezogen unter `/api/channels/:channelId/modules/<id>` ein.
+Das erste Modul ist `src/modules/textbefehle/`. Es ist in der Registry als
+`textbefehle` eingetragen, abonniert `channel.chat.message` und besitzt die
+zentrale Migration `migrations/0010_modul_textbefehle.sql`. Die Tabelle
+`textbefehle_commands` ist kanalgebunden; der D1-Adapter dieses Moduls liest
+und schreibt ausschließlich diese Tabelle.
+
+Der Host mountet registrierte Modulrouten kanalbezogen unter
+`/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die
+CRUD-Routen unter `/befehle` bereit. Die Host-Middleware prüft Session,
+CSRF und Mitgliedschaft und gibt dem Modul anschließend nur den Akteur und
+eine SQL-gebundene Mutationsautorisierung weiter.
 
 ## Aktivierung und Bundles
 
@@ -42,25 +52,40 @@ braucht. Das erfordert keinen Deploy.
 
 ## Wie ein Modul zu seinem Ereignis kommt
 
-`handleEvent` ist der fachliche Einstiegspunkt und eine **reine Funktion**: Sie
-beschreibt in `ModuleResult.actions`, was geschehen soll, und führt nichts aus.
-Der Host führt die Aktionen aus und protokolliert ihren Ausgang; das Modul
-begründet mit `diagnostics`, warum es gehandelt oder eben nicht gehandelt hat
-(Entscheidung 0004).
+`handleEvent` ist der fachliche Einstiegspunkt. Es beschreibt weiterhin in
+`ModuleResult.actions`, was geschehen soll, und führt Chataktionen nicht selbst
+aus; der Host führt sie aus und protokolliert ihren Ausgang. Für Module mit
+eigenem Zustand erhält der Einstiegspunkt zusätzlich den
+`ModuleExecutionContext`: Er enthält den D1-Binding und eine vom Host erzeugte,
+kanalgebundene Mutationsautorisierung. Das Modul kapselt den Bindingzugriff in
+seinem Adapter und kennt weder `channel_members` noch die Sitzungsprüfung.
+Das Modul begründet Handeln oder Nicht-Handeln mit `diagnostics` (Entscheidung
+0004).
 
 Ein Ereignis erreicht ein Modul nur, wenn alle drei Bedingungen gelten: Das
 Modul ist in diesem Kanal aktiviert, es steht in `MODULES`, und der Abo-Typ
 steht in seinen `eventSubTypes`.
 
 Der Zielkanal kommt aus dem geprüften Ereignis und wird dem Modul in
-`ModuleEvent.channelId` mitgeteilt. Ein Modul kann keinen anderen Kanal
-angeben — die Mandantentrennung liegt beim Host, nicht bei der Sorgfalt des
-Modulautors.
+`ModuleEvent.channelId` mitgeteilt. Der Host löst außerdem den Akteur anhand
+von `channel_members` auf und übergibt `actor` mit User-ID, Login und Rolle.
+Eine Rolle `null` bedeutet, dass der Nutzer kein Mitglied dieses Kanals ist;
+`actor: null` bedeutet, dass das Ereignis keinen Nutzer enthält. Ein Modul
+kann keinen anderen Kanal angeben — die Mandantentrennung liegt beim Host.
 
 Wirft `handleEvent`, hält das weder den Worker noch die übrigen Module auf. Der
 Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 
-Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben.
+Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben. Panel-Ansichten erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
+
+Textbefehle verarbeiten `!befehl hinzufuegen <name> <text>`,
+`!befehl entfernen <name>` und `!befehle`. Die angelegten Befehle werden
+kanalbezogen als `!<name>` ausgelöst. `{user}` und `{channel}` werden erst bei
+der Ausgabe ersetzt. Die atomare `beanspruchen`-Mutation setzt
+`last_used_at`; scheitert sie wegen der Abkühlzeit, bleibt die Chataktion leer
+und das Modul meldet `textbefehle.abgekuehlt`. Ein unbekannter
+`!`-Befehl erzeugt keine Chataktion, aber die Diagnose
+`textbefehle.unbekannt`.
 
 ## Aktionen und Begründungen melden
 
