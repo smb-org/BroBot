@@ -1,5 +1,15 @@
 # Twitch-Bot mit Web-Overlay auf Cloudflare
 
+## Überholt durch den aktuellen Stand
+
+Dieser historische Entwurf ist für die folgenden Punkte nicht mehr maßgeblich:
+
+- Drizzle ORM, TanStack Router, TanStack Query, Tailwind und shadcn/ui werden nicht verwendet. Ersetzt sind sie durch direkte D1-SQL-Repositories, den eigenen Dashboard-Router und Fetch-Aufrufe sowie handgeschriebenes React-CSS.
+- Das geplante pnpm-Monorepo wurde nicht umgesetzt. Das Projekt ist ein einzelnes pnpm-Paket.
+- Die Begrenzung auf zunächst einen Twitch-Kanal gilt nicht mehr. Der aktuelle Mandantenschlüssel ist `channelId`; der Worker ist kanalgebunden mehrkanalfähig.
+
+Der übrige Text bleibt als historische Entscheidungsgrundlage erhalten.
+
 ## Architektur- und Stack-Entscheidung
 
 **Stand:** 15. September 2026  

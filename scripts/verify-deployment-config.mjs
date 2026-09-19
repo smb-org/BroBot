@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseEnv } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import { readWranglerConfig } from "./read-wrangler-config.mjs";
 
@@ -95,7 +96,7 @@ const configuredSecretValue = (values, name) => {
   return undefined;
 };
 
-const checkSecretListDrift = async (config, failures) => {
+export const checkSecretListDrift = async (config, failures) => {
   let workerSource;
   try {
     workerSource = await readFile(path.join(projectRoot, "src/worker/config.ts"), "utf8");
@@ -335,19 +336,24 @@ const validateSourceConfig = async () => {
   return true;
 };
 
-const command = process.argv[2];
-if (command === "validate-env") {
-  const environment = process.argv[3];
-  const relativeFile = process.argv[4];
-  if (!environmentNames.includes(environment ?? "") || relativeFile === undefined) {
-    console.error("Aufruf: verify-deployment-config.mjs validate-env <staging|production> <datei>");
+const isMain = process.argv[1] !== undefined &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMain) {
+  const command = process.argv[2];
+  if (command === "validate-env") {
+    const environment = process.argv[3];
+    const relativeFile = process.argv[4];
+    if (!environmentNames.includes(environment ?? "") || relativeFile === undefined) {
+      console.error("Aufruf: verify-deployment-config.mjs validate-env <staging|production> <datei>");
+      process.exitCode = 2;
+    } else if (!await validateEnvironmentFile(environment, relativeFile)) {
+      process.exitCode = 1;
+    }
+  } else if (command !== undefined) {
+    console.error(`Unbekannter Prüfmodus: ${command}`);
     process.exitCode = 2;
-  } else if (!await validateEnvironmentFile(environment, relativeFile)) {
+  } else if (!await validateSourceConfig()) {
     process.exitCode = 1;
   }
-} else if (command !== undefined) {
-  console.error(`Unbekannter Prüfmodus: ${command}`);
-  process.exitCode = 2;
-} else if (!await validateSourceConfig()) {
-  process.exitCode = 1;
 }

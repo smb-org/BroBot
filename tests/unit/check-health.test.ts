@@ -123,6 +123,22 @@ describe("Deployment-Healthcheck", () => {
     );
   });
 
+  it("weist ein krankes Payload trotz HTTP 200 zurück", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      status: "misconfigured",
+      missingBindings: ["DB_SCHEMA"],
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+
+    await expect(checkHealthTyped("staging", undefined, "https://brobot.example", {
+      fetchImplementation: fetcher,
+      waitImplementation: async () => {},
+    })).rejects.toThrow("Healthcheck nach 6 Versuchen fehlgeschlagen");
+    expect(fetcher).toHaveBeenCalledTimes(6);
+  });
+
   it.each(rejectedRoutes)(
     "weist eine Route mit $reason ab, bevor fetch aufgerufen wird",
     async ({ pattern, reason }) => {

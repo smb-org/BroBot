@@ -5,13 +5,46 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+// @ts-expect-error Das Konfigurationsskript stellt den Drift-Prüf-Hook als ESM-Export bereit.
+import { checkSecretListDrift } from "../../scripts/verify-deployment-config.mjs";
 import { getTokenEncryptionKeys } from "../../src/worker/auth/crypto";
+
+type CheckSecretListDrift = (config: object, failures: string[]) => Promise<void>;
+const checkSecretListDriftTyped = checkSecretListDrift as unknown as CheckSecretListDrift;
 
 // Regressionsschutz: REQUIRED_SECRET_NAMES (src/worker/index.ts),
 // secrets.required (wrangler.jsonc) und deploymentBindings
 // (scripts/verify-deployment-config.mjs) müssen übereinstimmen. Ruft direkt
 // das Verify-Script auf statt die Extraktion hier nachzubauen.
 describe("Secret-Namen-Drift", () => {
+  it("meldet eine Abweichung in einer Secret-Liste", async () => {
+    const required = [
+      "TWITCH_CLIENT_ID",
+      "TWITCH_CLIENT_SECRET",
+      "TWITCH_EVENTSUB_SECRET",
+      "PUBLIC_ORIGIN",
+      "SESSION_COOKIE_KEYS",
+      "TOKEN_ENCRYPTION_KEYS",
+      "OVERLAY_TOKEN_PEPPER",
+    ];
+    const config = {
+      secrets: { required: [...required] },
+      env: {
+        staging: { secrets: { required: [...required] } },
+        production: { secrets: { required: [...required] } },
+      },
+    };
+    config.env.production.secrets.required = config.env.production.secrets.required
+      .filter((name) => name !== "OVERLAY_TOKEN_PEPPER");
+    const failures: string[] = [];
+
+    await checkSecretListDriftTyped(config, failures);
+
+    expect(failures).toEqual(expect.arrayContaining([
+      expect.stringContaining("OVERLAY_TOKEN_PEPPER"),
+    ]));
+  });
+
   it("scheitert, wenn die drei Secret-Listen auseinanderlaufen", () => {
     const result = spawnSync("node", ["scripts/verify-deployment-config.mjs"], {
       cwd: path.resolve(import.meta.dirname, "../.."),

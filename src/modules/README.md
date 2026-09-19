@@ -26,7 +26,7 @@ src/modules/<id>/
 3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
 4. Prüfen: `pnpm run check`.
 
-Das spätere Mounting verwendet die Registry und hängt Modulrouten unter `/api/modules/<id>` ein.
+Das spätere Mounting verwendet die Registry und hängt Modulrouten kanalbezogen unter `/api/channels/:channelId/modules/<id>` ein.
 
 ## Aktivierung und Bundles
 

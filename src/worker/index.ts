@@ -25,7 +25,7 @@ app.get("/healthz", async (context) => {
   );
 });
 
-// TODO: Hier später die Routen aus src/modules/registry.ts unter /api/modules/<id> mounten.
+// TODO: Hier später die Routen aus src/modules/registry.ts unter /api/channels/:channelId/modules/<id> mounten.
 
 app.all("*", (context) => context.env.ASSETS.fetch(context.req.raw));
 

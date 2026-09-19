@@ -11,7 +11,7 @@
    pnpm exec wrangler d1 create brobot-production
    ```
 
-   Die Ausgabe liefert je Datenbank eine `database_id`. Die drei deutlich als Platzhalter eingetragenen Null-UUIDs in `wrangler.jsonc` durch die jeweiligen IDs ersetzen. Danach die Migrationen `0000_init.sql` bis `0008_eventsub_eingang.sql` mit Wrangler ausführen, sobald die Datenbank verfügbar ist.
+   Die D1-IDs sind in `wrangler.jsonc` bereits eingetragen; die früher dokumentierten Null-UUID-Platzhalter sind überholt. Für eine neu angelegte Umgebung die von Wrangler gelieferte `database_id` in der passenden Umgebung eintragen und vor der Migration prüfen. Danach die Migrationen von `0000_init.sql` bis zur jeweils letzten mit Wrangler ausführen, sobald die Datenbank verfügbar ist.
 3. Für Schlüssel jeweils erzeugen:
 
    ```bash

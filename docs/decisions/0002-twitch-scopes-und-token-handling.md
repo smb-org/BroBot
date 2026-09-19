@@ -200,7 +200,7 @@ Das HMAC-Secret wird beim Anlegen im `transport`-Objekt gesetzt, taucht in keine
 
 ### Kosten
 
-Ein Abonnement kostet nichts, wenn der betroffene Nutzer die Anwendung autorisiert hat. Da ein Kanal ohnehin über OAuth eingerichtet wird, liegen unsere Abos bei `cost: 0`. Eine feste Obergrenze je Client-ID ist nicht dokumentiert, nur `max_total_cost` — der Wert wird aus der Antwort gelesen, nicht fest verdrahtet. Harte Regel daneben: höchstens drei Abonnements mit derselben Kombination aus Typ und Bedingung.
+Ein Abonnement kostet nichts, wenn der betroffene Nutzer die Anwendung autorisiert hat. Die Broadcaster-OAuth-Verbindung ist bei uns jedoch optional: Nur Kanäle, die sie für ein autorisierungspflichtiges Modul herstellen, erfüllen diese Voraussetzung. Autorisierungsfreie Abos wie `channel.raid` und `stream.online` können auch ohne OAuth angelegt werden, zählen dann aber gegen das Kostenkontingent der Client-ID. Deshalb wird `cost: 0` nicht für jeden Kanal pauschal angenommen. Eine feste Obergrenze je Client-ID ist nicht dokumentiert, nur `max_total_cost` — der Wert wird aus der Antwort gelesen, nicht fest verdrahtet. Harte Regel daneben: höchstens drei Abonnements mit derselben Kombination aus Typ und Bedingung.
 
 ---
 
