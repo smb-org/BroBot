@@ -70,6 +70,7 @@ export interface PanelMember {
   userId: string;
   login: string | null;
   displayName: string | null;
+  profileImageUrl: string | null;
   role: PanelChannelRole;
   joinedAt: string;
 }
@@ -95,6 +96,7 @@ export interface PanelTwitchUser {
   userId: string;
   login: string;
   displayName: string;
+  profileImageUrl: string | null;
 }
 
 export interface PanelSystemResponse {

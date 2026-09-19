@@ -81,7 +81,7 @@ const zeigeMitglieder = async (mitglieder: {
 };
 
 const broadcaster = (userId: string, login: string, displayName: string) => ({
-  userId, login, displayName, role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z",
+  userId, login, displayName, profileImageUrl: null, role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z",
 });
 
 const requestUrl = (input: RequestInfo | URL): URL => {
@@ -271,8 +271,8 @@ describe("Dashboard-Grundgerüst", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const members = {
       members: [
-        { userId: "100", login: "streamer", displayName: "Streamerin", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" },
-        { userId: "200", login: null, displayName: null, role: "bediener", joinedAt: "2026-09-18T12:00:00.000Z" },
+        { userId: "100", login: "streamer", displayName: "Streamerin", profileImageUrl: "https://cdn.example/streamerin.png", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" },
+        { userId: "200", login: null, displayName: null, profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T12:00:00.000Z" },
       ],
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -289,6 +289,18 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("Streamerin")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "twitch.tv/streamer" }))
       .toHaveAttribute("href", "https://twitch.tv/streamer");
+    const avatarImage = document.querySelector("img.member-avatar");
+    expect(avatarImage).toHaveAttribute("src", "https://cdn.example/streamerin.png");
+    expect(document.querySelector(".member-avatar-placeholder")).toBeInTheDocument();
+
+    // Ein Bild, das nicht laedt, darf die Zeile nicht unbedienbar machen: der
+    // Platzhalter tritt an seine Stelle, der Profillink bleibt unveraendert da.
+    fireEvent.error(avatarImage as Element);
+    expect(document.querySelector("img.member-avatar")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".member-avatar-placeholder")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "twitch.tv/streamer" }))
+      .toHaveAttribute("href", "https://twitch.tv/streamer");
+
     expect(screen.queryByText("100")).not.toBeInTheDocument();
     expect(screen.getByText("Nicht auflösbar")).toBeInTheDocument();
     expect(screen.getByText("Twitch-ID 200")).toBeInTheDocument();
@@ -312,17 +324,21 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("fragt beim Hinzufügen ausdrücklich nach dem tatsächlichen Zugriffsumfang", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const fetcher = vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
+    let addRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const path = url.pathname;
+      if (path === "/api/channels/kanal-a/members" && init?.method === "POST") {
+        addRequestCount += 1;
+        return jsonResponse({ member: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png", role: "bediener", joinedAt: "2026-09-19T00:00:00.000Z" } }, 201);
+      }
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
       if (path === "/api/channels/kanal-a/members") return jsonResponse({ members: [] });
-      if (path === "/api/channels/kanal-a/members/search") return jsonResponse({ user: { userId: "300", login: "neue-person", displayName: "Neue Person" } });
+      if (path === "/api/channels/kanal-a/members/search") return jsonResponse({ user: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png" } });
       if (path === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetcher);
-    const confirmMock = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirmMock);
     window.history.replaceState({}, "", "/channels/kanal-a/members");
 
     render(<DashboardApp />);
@@ -332,8 +348,59 @@ describe("Dashboard-Grundgerüst", () => {
     await screen.findByText("Neue Person");
     fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
 
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("keinerlei Beziehung zum Kanal"));
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("Mitgliederliste"));
+    const profileLink = screen.getByRole("link", { name: "twitch.tv/neue-person" });
+    expect(profileLink).toHaveAttribute("target", "_blank");
+    expect(profileLink.getAttribute("rel")?.split(/\s+/)).toEqual(expect.arrayContaining(["noopener", "noreferrer"]));
+
+    const confirmation = screen.getByRole("alertdialog");
+    expect(confirmation).toHaveTextContent("Neue Person");
+    expect(confirmation).toHaveTextContent("keinerlei Beziehung zum Kanal");
+    expect(confirmation).toHaveTextContent("Mitgliederliste");
+    expect(confirmation.querySelector("img.member-avatar")).toHaveAttribute("src", "https://cdn.example/neue-person.png");
+    expect(addRequestCount).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff endgültig freigeben" }));
+    await waitFor(() => expect(addRequestCount).toBe(1));
+  });
+
+  it("bricht die Hinzufügen-Bestätigung ohne POST ab und lässt sie erneut öffnen", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let addRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/members" && init?.method === "POST") addRequestCount += 1;
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/members") return jsonResponse({ members: [] });
+      if (url.pathname === "/api/channels/kanal-a/members/search") return jsonResponse({ user: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: null } });
+      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
+    fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
+    await screen.findByText("Neue Person");
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.querySelector(".member-avatar-placeholder")).toBeInTheDocument();
+    // Wer nur Tastatur oder Screenreader nutzt, muss die wichtigste
+    // Sicherheitsabfrage des Formulars auch tatsächlich mitbekommen.
+    expect(screen.getByRole("button", { name: "Zugriff endgültig freigeben" })).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(addRequestCount).toBe(0);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    fireEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
+
+    expect(addRequestCount).toBe(0);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
   });
 
   it("verwirft einen verspäteten Mitglieder-Reload nach einer Mutation beim Kanalwechsel", async () => {
@@ -343,8 +410,8 @@ describe("Dashboard-Grundgerüst", () => {
     const alphaReload = new Promise<Response>((resolve) => {
       resolveAlphaReload = resolve;
     });
-    const alphaMember = { userId: "alpha-user", login: "alpha-user", displayName: "Alpha-Mitglied", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
-    const betaMember = { userId: "beta-user", login: "beta-user", displayName: "Beta-Mitglied", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const alphaMember = { userId: "alpha-user", login: "alpha-user", displayName: "Alpha-Mitglied", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const betaMember = { userId: "beta-user", login: "beta-user", displayName: "Beta-Mitglied", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
     let memberRequestCount = 0;
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
@@ -392,10 +459,10 @@ describe("Dashboard-Grundgerüst", () => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
       if (url.pathname === "/api/channels/kanal-a/members" && url.search === "") {
-        return Promise.resolve(jsonResponse({ members: [{ userId: "user-1", login: "erste", displayName: "Erste Person", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: "cursor-1" }));
+        return Promise.resolve(jsonResponse({ members: [{ userId: "user-1", login: "erste", displayName: "Erste Person", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: "cursor-1" }));
       }
       if (url.pathname === "/api/channels/kanal-a/members" && url.search === "?cursor=cursor-1") {
-        return Promise.resolve(jsonResponse({ members: [{ userId: "user-2", login: "zweite", displayName: "Zweite Person", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: null }));
+        return Promise.resolve(jsonResponse({ members: [{ userId: "user-2", login: "zweite", displayName: "Zweite Person", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: null }));
       }
       return Promise.resolve(jsonResponse({}, 404));
     });

@@ -31,6 +31,7 @@ export interface TwitchUser {
   userId: string;
   login: string;
   displayName: string;
+  profileImageUrl: string | null;
 }
 
 const roles: readonly ChannelMemberRole[] = ["broadcaster", "verwalter", "bediener"];
@@ -70,6 +71,7 @@ const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
   userId: member.userId,
   login: user?.login ?? null,
   displayName: user?.displayName ?? null,
+  profileImageUrl: user?.profileImageUrl ?? null,
   role: member.role,
   joinedAt: member.createdAt,
 });
@@ -119,6 +121,11 @@ const readResponseJson = async (response: Response): Promise<Record<string, unkn
   }
 };
 
+const readProfileImageUrl = (user: JsonRecord): string | null =>
+  typeof user.profile_image_url === "string" && user.profile_image_url.length > 0
+    ? user.profile_image_url
+    : null;
+
 const fetchWithTimeout = async (
   fetcher: typeof fetch,
   input: string,
@@ -156,7 +163,12 @@ const fetchTwitchUserByLogin = async (
   const first = (body.data as unknown[])[0];
   if (!isJsonRecord(first) || typeof first.id !== "string" || typeof first.login !== "string" ||
       typeof first.display_name !== "string") return null;
-  return { userId: first.id, login: first.login, displayName: first.display_name };
+  return {
+    userId: first.id,
+    login: first.login,
+    displayName: first.display_name,
+    profileImageUrl: readProfileImageUrl(first),
+  };
 };
 
 export const fetchTwitchUsersById = async (
@@ -189,6 +201,7 @@ export const fetchTwitchUsersById = async (
           userId: entry.id,
           login: entry.login,
           displayName: entry.display_name,
+          profileImageUrl: readProfileImageUrl(entry),
         });
       }
     }
