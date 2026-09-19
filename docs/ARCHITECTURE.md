@@ -127,6 +127,8 @@ Diese Entscheidungen halten den ersten Betrieb klein und bewahren trotzdem die n
 
 `channelId` ist überall der Mandantenschlüssel: Jede persistierende Tabelle führt `channel_id`, und für jeden Kanal gibt es ein eigenes Durable Object. Der Bot läuft gleichzeitig in mehreren Kanälen.
 
+`channel_id` **ist die Twitch-Nutzer-ID des Broadcasters**, nicht ein eigener Schlüssel. Das ist kein Zufall, sondern Voraussetzung: Der Moderatorabgleich liest die Werte direkt aus Twitchs `broadcaster_id` (`src/worker/bot-maintenance.ts`), EventSub-Abos werden über dieselbe ID gebunden, und die Identität des Broadcasters wird über `twitch_login_identity.user_id = channel_id` gefunden. Wer einen Kanal von Hand in `channels` einträgt, muss deshalb die Twitch-ID verwenden; ein frei gewählter Schlüssel bricht diese drei Stellen stillschweigend.
+
 Die Autorisierung ist ausdrücklich: Nur eine Zeile mit Rolle in `channel_members` berechtigt zur Bedienung. Eine Twitch-Moderatorrolle berechtigt nicht. Auch Twitch-Nutzer ohne Rolle im Kanal sind berechtigbar, dann mit ausdrücklicher Sicherheitsabfrage. Moderatoren werden über das Abzeichen in gelesenen Chatnachrichten erkannt und als Vorschlag angeboten; eine Abfrage der Moderatorenliste bei Twitch findet nicht statt, weil sie ein Broadcaster-Token verlangen würde (Begründung in Entscheidung 0002, Abschnitt 6).
 
 Ein Kanal erscheint in der Auswahl eines Nutzers, wenn **zwei** Bedingungen erfüllt sind: Es gibt eine Zugriffszeile in `channel_members`, und der Kanal ist in `channels` freigegeben.

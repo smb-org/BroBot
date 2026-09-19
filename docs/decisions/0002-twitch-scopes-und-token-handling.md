@@ -1,6 +1,6 @@
 # Twitch-Scopes und Token-Handling
 
-**Stand:** 17. September 2026
+**Stand:** 19. September 2026
 **Status:** entschieden, siehe [#2](https://github.com/smb-org/BroBot/issues/2)
 **Betrifft:** `twitch_connections`, den OAuth-Flow aus #18, jedes Modul, das Helix aufruft
 
@@ -35,9 +35,20 @@ Im laufenden Betrieb taucht der Broadcaster in keinem Ablauf auf. Er autorisiert
 
 ```
 user:read:moderated_channels     Kanal-Vorbelegung beim Anmelden
+channel:bot                       Voraussetzung für channel.chat.message
 ```
 
 `user:read:email` wird **nicht** angefragt. Get Users liefert die Identität ohne ihn; er schaltet nur ein Feld frei, das wir nicht brauchen.
+
+Gespeichert werden die Scopes aus `scope` der Twitch-Tokenantwort, nicht die
+angefragte Liste. Twitch darf einzelne Zustimmungen ablehnen. Die gespeicherte
+Liste ist deshalb die autoritative Grundlage für die kanalbezogene Prüfung:
+Für jeden Kanal wird die Identität des Broadcasters (nicht die des gerade
+angemeldeten Panel-Nutzers) auf `channel:bot` geprüft. Fehlt der Scope, zeigt
+das Panel einen Warnhinweis. Nur ein Mitglied mit der Rolle `broadcaster` darf
+die erneute Zustimmung starten; ein `verwalter` sieht den Handlungsbedarf,
+kann ihn aber nicht mit seiner eigenen Identität beheben. Nach erfolgreicher
+erneuter Anmeldung verschwindet der Hinweis beim nächsten Laden automatisch.
 
 ### Bot — hier großzügig
 
@@ -73,7 +84,10 @@ Mehr ist derzeit nicht vorgesehen. Jedes optionale Modul bringt seine Scopes sel
 
 **Bewusst gestrichen:** `bits:read`, `channel:read:subscriptions`, `channel:read:hype_train`. Sie standen in einem früheren Entwurf als „Timeline-Extras" — **kein Epic fordert sie**. #14 nennt aktive Zuschauer, Viewerzahl, Nachrichtenrate, Wortfrequenz-Baseline, Clips, Emote-Spitzen, Stream-Abbrüche und Bitrate. Nichts davon braucht diese Scopes. Subs, Gift-Subs und Raids erreichen den Bot ohnehin über `channel.chat.notification`, das am selben `user:read:chat` hängt.
 
-**Ebenfalls gestrichen:** `channel:bot`. Er würde dem Bot erlauben, ohne Mod-Rolle zu schreiben — aber ohne Mod-Rolle scheitern Shoutout, Announcement und Get Chatters ohnehin. Die Mod-Rolle ist Betriebsvoraussetzung, wie bei anderen Twitch-Bots auch; ein Bot, der nur noch reden kann, ist kein brauchbarer Zustand. Überwacht wird sie über Abschnitt 9.
+`channel:bot` gehört **nicht** zum Bot-Token. Twitch verlangt ihn bei
+`channel.chat.message` vom Broadcaster, wenn wir mit App-Token arbeiten; er
+liegt deshalb beim Login-Token des Broadcasters. Die Moderatorrolle des Bots
+bleibt davon unabhängig Betriebsvoraussetzung (siehe Abschnitt 9).
 
 **Bewusst nicht:** `channel:read:stream_key`, `channel:edit:commercial`, `channel:manage:raids`, `channel:manage:schedule`, `channel:manage:videos`, `channel:*:vips`, `channel:read:charity`, `channel:read:editors`, `channel:manage:extensions`, `channel:manage:moderators`, `channel:moderate`, Guest Star.
 

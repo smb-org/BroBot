@@ -223,6 +223,25 @@ authRouter.get("/auth/login", async (context) => {
 });
 
 /**
+ * Die fehlende channel:bot-Zustimmung kann nur die Broadcaster-Rolle des
+ * betroffenen Kanals nachfordern. Ein Verwalter darf den Zustand sehen, aber
+ * nicht versehentlich seine eigene Twitch-Identität an die Stelle des
+ * Broadcasters setzen.
+ */
+authRouter.get(
+  "/auth/channels/:channelId/channel-bot",
+  requireChannelAuthorization(),
+  async (context) => {
+    if (context.get("channelRole") !== "broadcaster") {
+      return context.text("Nur der Broadcaster darf diese Zustimmung nachfordern.", 403);
+    }
+    const started = await startOAuthAuthorization(context.env.DB, context.env, "login", nowIso());
+    context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
+    return context.redirect(started.url, 302);
+  },
+);
+
+/**
  * Verlangt eine Session: Ohne diese Pruefung kann jeder den Bot-Verbindungsfluss
  * starten und damit bestimmen, welches Twitch-Konto der Bot benutzt.
  */
