@@ -26,18 +26,19 @@ src/modules/<id>/
 3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
 4. Prüfen: `pnpm run check`.
 
-Das spätere Mounting verwendet die Registry und hängt Modulrouten unter `/api/modules/<id>` ein.
+Das spätere Mounting verwendet die Registry und hängt Modulrouten kanalbezogen unter `/api/channels/:channelId/modules/<id>` ein.
 
 ## Aktivierung und Bundles
 
-Ein Modul wird pro Kanal durch eine Zeile in `channel_modules` aktiviert:
-
-```sql
-INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-VALUES ('<channelId>', '<id>', 1, '{}');
-```
-
-Das erfordert keinen Deploy. `settings` ist JSON und bleibt dem Modul-Contract untergeordnet.
+Ein Modul wird pro Kanal über das Panel aktiviert, nicht per Hand-SQL: Ein Broadcaster
+oder Verwalter des Kanals ruft `GET /api/channels/:channelId/modules` auf, um die
+Registry mit dem gespeicherten Zustand jedes Moduls zu sehen, und schaltet es über
+`PATCH /api/channels/:channelId/modules/:moduleId` mit `{ "enabled": true }` ein oder
+aus. Ein `bediener` darf die Liste lesen, aber nicht schreiben. Beim Einschalten
+schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; eine
+eigene Route zum Bearbeiten von Einstellungen gibt es bewusst nicht — dafür ist
+`module.panel` aus dem Contract vorgesehen, sobald ein Modul eigene Einstellungen
+braucht. Das erfordert keinen Deploy.
 
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben.
 

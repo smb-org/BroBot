@@ -29,6 +29,7 @@ import {
   type LogCursor,
 } from "./repository";
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
+import { moduleRouter } from "./module-routes";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -85,6 +86,7 @@ const readBotCredentials = async (environment: Env): Promise<{ userId: string; a
 export const panelRouter = new Hono<PanelEnvironment>();
 
 panelRouter.route("/", memberRouter);
+panelRouter.route("/", moduleRouter);
 
 panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) => {
   const session = context.get("session");

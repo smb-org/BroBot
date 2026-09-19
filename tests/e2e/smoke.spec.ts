@@ -41,3 +41,18 @@ test("Dashboard und Overlay laden als getrennte Oberflächen", async ({ page }) 
   await expect(overlayPage.locator("body")).toHaveAttribute("data-same-document-marker", "preserved");
   await overlayPage.close();
 });
+
+test("der echte Worker schützt das Dashboard und zeigt die Anmeldung", async ({ page }) => {
+  // Ohne Session beendet der Worker die Route vor jedem D1-Zugriff mit 401;
+  // der Test hängt deshalb nicht vom Migrationsstand des E2E-Speichers ab.
+  const channelsResponsePromise = page.waitForResponse((response) => {
+    return new URL(response.url()).pathname === "/api/channels";
+  });
+
+  await page.goto("http://127.0.0.1:8787/");
+
+  const channelsResponse = await channelsResponsePromise;
+  expect(channelsResponse.status()).toBe(401);
+  await expect(page.getByRole("heading", { name: "Anmeldung erforderlich" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Mit Twitch anmelden" })).toBeVisible();
+});

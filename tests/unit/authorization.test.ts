@@ -1,18 +1,78 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   authorizeChannelAccess,
   type ChannelMemberRole,
 } from "../../src/worker/auth/authorization";
+import { createCsrfToken } from "../../src/worker/auth/csrf";
+import {
+  requireChannelAuthorization,
+  type ChannelAuthorizationVariables,
+} from "../../src/worker/auth/guards";
 import {
   createChannelMemberWithAudit,
   deleteChannelMemberWithAudit,
   updateChannelMemberWithAudit,
 } from "../../src/worker/auth/repository";
 import type { SessionRecord } from "../../src/worker/auth/repository";
+import { createSessionCookie } from "../../src/worker/auth/session";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
+
+const testKey = (byte: number): string => btoa(
+  String.fromCharCode(...new Uint8Array(32).fill(byte)),
+).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+
+const testKeyRing = (id: string, byte: number): string => JSON.stringify({
+  active: { id, key: testKey(byte) },
+  retired: [],
+});
+
+type AuthorizationEnvironment = Env & { DB: D1Database };
+type AuthorizationContext = {
+  Bindings: AuthorizationEnvironment;
+  Variables: ChannelAuthorizationVariables;
+};
+
+const authorizationApp = new Hono<AuthorizationContext>();
+authorizationApp.use(
+  "/api/channels/:channelId/request-body-role",
+  requireChannelAuthorization(),
+);
+authorizationApp.post(
+  "/api/channels/:channelId/request-body-role",
+  (context) => context.json({ role: context.get("channelRole") }),
+);
+
+const authorizationEnvironment = (database: TestD1Database): AuthorizationEnvironment => ({
+  DB: database as unknown as D1Database,
+  SESSION_COOKIE_KEYS: testKeyRing("cookie-v1", 1),
+  SESSION_ENCRYPTION_KEYS: testKeyRing("encryption-v1", 2),
+} as unknown as AuthorizationEnvironment);
+
+const requestWithBodyRole = async (environment: AuthorizationEnvironment): Promise<Request> => {
+  const sessionCookie = await createSessionCookie(
+    { sessionId: "session-user-1" },
+    environment.SESSION_COOKIE_KEYS,
+    environment.SESSION_ENCRYPTION_KEYS ?? "",
+  );
+  const csrfToken = await createCsrfToken(
+    "session-user-1",
+    environment.SESSION_COOKIE_KEYS,
+    new Date().toISOString(),
+  );
+  return new Request("https://brobot.example/api/channels/kanal-a/request-body-role", {
+    method: "POST",
+    headers: {
+      Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrfToken}`,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify({ role: "broadcaster" }),
+  });
+};
 
 const session = (userId: string): SessionRecord => ({
   sessionId: `session-${userId}`,
@@ -272,14 +332,15 @@ describe("kanalgebundene Autorisierung", () => {
   it("schließt einen Request-Body-Rollenwert aus der Autorisierungsentscheidung aus", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedSession(database, "user-1");
 
-    const requestBodyRole = "broadcaster";
-    await expect(authorizeChannelAccess(
-      database as unknown as D1Database,
-      session("user-1"),
-      "kanal-a",
-    )).resolves.toBe("bediener");
-    expect(requestBodyRole).not.toBe("bediener");
+    const response = await authorizationApp.fetch(
+      await requestWithBodyRole(authorizationEnvironment(database)),
+      authorizationEnvironment(database),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ role: "bediener" });
   });
 });
 
@@ -624,33 +685,45 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("rollt eine erfolgreiche Mitgliedsänderung zurück, wenn der Audit-Schritt scheitert", async () => {
     await seedChannel(database, "kanal-a");
-    const mutation = database.prepare(
-      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind(
-      "kanal-a",
-      "user-1",
-      "bediener",
-      "2026-09-18T00:00:00.000Z",
-      "2026-09-18T00:00:00.000Z",
-    );
-    const failingAudit = database.prepare(
+    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedSession(database, "actor-1");
+    await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      "audit-1",
+      "00000000-0000-4000-8000-000000000001",
       "actor-1",
-      "2026-09-18T00:01:00.000Z",
-      "nicht-vorhandener-kanal",
-      "mitglied.hinzugefügt",
+      "2026-09-18T00:00:00.000Z",
+      "kanal-a",
+      "bereits-vorhanden",
       "null",
       "{}",
-    );
+    ).run();
 
-    await expect(database.batch([mutation, failingAudit])).rejects.toThrow();
+    const randomUuid = vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001");
+    try {
+      await expect(createChannelMemberWithAudit(
+        database as unknown as D1Database,
+        actorContext("actor-1"),
+        {
+          channelId: "kanal-a",
+          userId: "user-1",
+          role: "bediener",
+          createdAt: "2026-09-18T00:01:00.000Z",
+          updatedAt: "2026-09-18T00:01:00.000Z",
+        },
+        "mitglied.hinzugefügt",
+        "2026-09-18T00:01:00.000Z",
+      )).rejects.toThrow();
+    } finally {
+      randomUuid.mockRestore();
+    }
+
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
-    await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
+    await expect(readAudit(database)).resolves.toMatchObject({
+      results: [{ action: "bereits-vorhanden" }],
+    });
   });
 
   it("auditiert das Entfernen mit Vorher- und Nachher-Zustand", async () => {

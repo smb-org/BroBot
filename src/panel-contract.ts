@@ -52,6 +52,16 @@ export interface PanelChannelOverview extends PanelChannelState {
   activeModules: PanelActiveModule[];
 }
 
+export interface PanelModuleState {
+  id: string;
+  enabled: boolean;
+  settings: string;
+}
+
+export interface PanelModulesResponse {
+  modules: PanelModuleState[];
+}
+
 export interface PanelChannelsResponse {
   channels: PanelChannelState[];
 }

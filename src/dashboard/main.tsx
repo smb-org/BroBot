@@ -10,6 +10,7 @@ import type {
   PanelLastError,
   PanelMembersResponse,
   PanelModeratorStatus,
+  PanelModulesResponse,
   PanelSystemResponse,
   PanelTokenStatus,
 } from "../panel-contract";
@@ -23,6 +24,7 @@ import {
   fetchChannels,
   fetchEvents,
   fetchMembers,
+  fetchModules,
   fetchSystemOverview,
   logout,
   PanelApiError,
@@ -30,6 +32,7 @@ import {
 } from "./api";
 import { ModulePanelMount } from "./module-panels";
 import { MembersPage } from "./members";
+import { ModulesPage } from "./modules";
 import { roleLabel } from "./labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import "./styles.css";
@@ -292,6 +295,7 @@ const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarP
             </RouteLink>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "system" }} current={route} onNavigate={onNavigate}>System</RouteLink>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "members" }} current={route} onNavigate={onNavigate}>Mitglieder</RouteLink>
+            <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "modules" }} current={route} onNavigate={onNavigate}>Module</RouteLink>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "events" }} current={route} onNavigate={onNavigate}>Ereignisse</RouteLink>
           </>
         ) : null}
@@ -584,6 +588,7 @@ export const DashboardApp = (): ReactElement => {
   const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(() => idleModeratorCheck());
   const [system, setSystem] = useState<LoadState<PanelSystemResponse>>(() => idleState());
   const [members, setMembers] = useState<LoadState<PanelMembersResponse>>(() => idleState());
+  const [modules, setModules] = useState<LoadState<PanelModulesResponse>>(() => idleState());
   const [audit, setAudit] = useState<LoadState<PanelAuditResponse>>(() => idleState());
   const [events, setEvents] = useState<LoadState<PanelEventsResponse>>(() => idleState());
   const [systemChannelId, setSystemChannelId] = useState<string | null>(null);
@@ -610,6 +615,7 @@ export const DashboardApp = (): ReactElement => {
     setModeratorCheck(idleModeratorCheck());
     setSystem(idleState());
     setMembers(idleState());
+    setModules(idleState());
     setAudit(idleState());
     setEvents(idleState());
     setSystemChannelId(null);
@@ -657,6 +663,7 @@ export const DashboardApp = (): ReactElement => {
     setOverview(loadingState());
     setModeratorCheck(idleModeratorCheck());
     setSystem(idleState());
+    setModules(idleState());
     setAudit(idleState());
     setEvents(idleState());
     setSystemChannelId(null);
@@ -696,6 +703,19 @@ export const DashboardApp = (): ReactElement => {
         } catch (error) {
           if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
             setMembers({ status: "error", data: null, error: errorMessage(error) });
+            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+          }
+        }
+        return;
+      }
+      if (route.section === "modules") {
+        setModules(loadingState());
+        try {
+          const response = await fetchModules(route.channelId, controller.signal);
+          if (!cancelled && !controller.signal.aborted) setModules({ status: "success", data: response, error: null });
+        } catch (error) {
+          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+            setModules({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
           }
         }
@@ -790,6 +810,22 @@ export const DashboardApp = (): ReactElement => {
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
       if (membersPageController.current === controller) membersPageController.current = null;
+    }
+  };
+
+  const reloadModules = async (): Promise<void> => {
+    if (route.kind !== "channel" || route.section !== "modules") return;
+    const channelId = route.channelId;
+    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "modules" });
+    setModules(loadingState());
+    try {
+      const response = await fetchModules(channelId);
+      if (window.location.pathname !== routePath) return;
+      setModules({ status: "success", data: response, error: null });
+    } catch (error) {
+      if (window.location.pathname !== routePath) return;
+      setModules({ status: "error", data: null, error: errorMessage(error) });
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     }
   };
 
@@ -940,6 +976,7 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "channel" && route.section === "members" && members.status === "loading" ? <p className="loading-line">Mitglieder werden geladen …</p> : null}
         {route.kind === "channel" && route.section === "members" && members.error !== null ? <ErrorPanel message={members.error} /> : null}
         {route.kind === "channel" && route.section === "members" && members.data !== null && selectedChannel !== null ? <MembersPage channelId={route.channelId} ownRole={selectedChannel.role} eigeneUserId={members.data.viewerUserId} members={members.data.members} broadcasterCount={members.data.broadcasterCount} nextCursor={members.data.nextCursor} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
+        {route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModulesPage channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onReload={reloadModules} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {route.kind === "channel" && route.section === "system" && system.status === "loading" ? <p className="loading-line">Systemzustand wird geladen …</p> : null}
         {route.kind === "channel" && route.section === "system" && system.error !== null ? <ErrorPanel message={system.error} /> : null}
         {route.kind === "channel" && route.section === "system" && system.data !== null && systemChannelId === route.channelId ? <SystemPage system={system.data} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
