@@ -24,9 +24,9 @@ Der spätere Ereignisfluss ist: EventSub → Worker → fachliches Modul → Cha
 
 ## Modulsystem
 
-Ein Modul ist ein Feature-Slice unter `src/modules/<id>/` mit `contracts/`, `domain/`, `service.ts`, `repository.ts`, `adapters/`, `overlay/` und `panel/`. Sein `BotModule`-Contract beschreibt Settings, Migrationen, EventSub-Typen, Commands, Routen sowie ein lazy Overlay und eine optionale lazy Panel-Ansicht.
+Ein Modul ist ein Feature-Slice unter `src/modules/<id>/` mit `contracts/`, `domain/`, `service.ts`, `repository.ts`, `adapters/`, `overlay/` und `panel/`. Sein `BotModule`-Contract beschreibt aktuell Settings, EventSub-Typen, Routen sowie ein lazy Overlay und eine optionale lazy Panel-Ansicht. Command-Verarbeitung und Modulmigrationen werden erst ergänzt, sobald das erste Modul sie benötigt; bis dahin sind sie ausdrücklich kein Bestandteil des Contracts.
 
-`src/modules/registry.ts` ist die einzige Stelle, die alle Module kennt. Später mountet der Worker die registrierten Router unter `/api/modules/<id>`. Ein Modul wird aktiviert, indem in `channel_modules` eine Zeile für den jeweiligen `channel_id` und `module_id` mit `enabled = 1` steht. Dafür ist kein Deploy erforderlich.
+`src/modules/registry.ts` ist die einzige Stelle, die alle Module kennt. Später mountet der Worker die registrierten Router kanalbezogen unter `/api/channels/:channelId/modules/<id>`. Ein Modul wird aktiviert, indem in `channel_modules` eine Zeile für den jeweiligen `channel_id` und `module_id` mit `enabled = 1` steht. Dafür ist kein Deploy erforderlich.
 
 Das Overlay und das Panel laden ihre Quellen über einen `import()`-Promise. Dadurch kann Vite beide Ansichten in eigene Chunks schneiden; ein deaktiviertes Modul kostet in keinem der beiden Bundles Bytes. Direkte Imports wären deshalb bewusst zu vermeidende Bundle-Kopplungen.
 

@@ -41,119 +41,9 @@ const fakeDatabase = (firstResult: unknown = null, allResult: unknown = { result
   };
 };
 
-const statefulOAuthDatabase = () => {
-  let row: {
-    transaction_id: string;
-    purpose: "login" | "bot";
-    expires_at: string;
-    created_at: string;
-    used_at: string | null;
-  } | null = null;
-  const database = {
-    prepare(sql: string) {
-      let values: unknown[] = [];
-      const statement = {
-        bind(...args: unknown[]) {
-          values = args;
-          return statement;
-        },
-        run() {
-          if (sql.includes("INSERT INTO oauth_transactions")) {
-            const [transactionId, purpose, expiresAt, createdAt] = values;
-            row = {
-              transaction_id: String(transactionId),
-              purpose: purpose as "login" | "bot",
-              expires_at: String(expiresAt),
-              created_at: String(createdAt),
-              used_at: null,
-            };
-          }
-          return Promise.resolve({ success: true, meta: { changes: 1 } });
-        },
-        first<T>() {
-          if (row === null) return Promise.resolve(null as T | null);
-          const [consumedAt, transactionId, now] = values;
-          if (sql.includes("UPDATE oauth_transactions") &&
-              row.transaction_id === transactionId &&
-              row.used_at === null &&
-              row.expires_at > String(now)) {
-            row.used_at = String(consumedAt);
-            return Promise.resolve({
-              transaction_id: row.transaction_id,
-              purpose: row.purpose,
-              expires_at: row.expires_at,
-              created_at: row.created_at,
-            } as T);
-          }
-          return Promise.resolve(null as T | null);
-        },
-      };
-      return statement as unknown as D1PreparedStatement;
-    },
-    batch(statements: D1PreparedStatement[]) {
-      return Promise.all(statements.map((statement) => statement.run()));
-    },
-  };
-  return { database: database as unknown as D1Database, read: () => row };
-};
-
-const statefulBotTokenDatabase = () => {
-  let row = {
-    updated_at: "2026-09-18T00:00:00.000Z",
-    access_token_ciphertext: "access-alt",
-    refresh_token_ciphertext: "refresh-alt",
-    expires_at: "2026-09-18T01:00:00.000Z",
-  };
-  const database = {
-    prepare(sql: string) {
-      let values: unknown[] = [];
-      const statement = {
-        bind(...args: unknown[]) {
-          values = args;
-          return statement;
-        },
-        run() {
-          if (!sql.includes("UPDATE bot_identity")) return Promise.resolve({ success: true, meta: { changes: 0 } });
-          const access = String(values[0]);
-          const refresh = String(values[1]);
-          const expiresAt = String(values[2]);
-          const updatedAt = String(values[3]);
-          const expectedAccess = String(values[4]);
-          const expectedRefresh = String(values[5]);
-          if (row.access_token_ciphertext !== expectedAccess ||
-              row.refresh_token_ciphertext !== expectedRefresh) {
-            return Promise.resolve({ success: true, meta: { changes: 0 } });
-          }
-          row = {
-            updated_at: updatedAt,
-            access_token_ciphertext: access,
-            refresh_token_ciphertext: refresh,
-            expires_at: expiresAt,
-          };
-          return Promise.resolve({ success: true, meta: { changes: 1 } });
-        },
-      };
-      return statement as unknown as D1PreparedStatement;
-    },
-    batch(statements: D1PreparedStatement[]) {
-      return Promise.all(statements.map((statement) => statement.run()));
-    },
-  };
-  return { database: database as unknown as D1Database, read: () => row };
-};
-
 describe("Auth-D1-Repository", () => {
   it("legt eine nachvollziehbare Session an und liest sie zurück", async () => {
-    const { database, statement } = fakeDatabase({
-      session_id: "session-1",
-      user_id: "user-1",
-      login: "tester",
-      expires_at: "2026-09-19T00:00:00.000Z",
-      created_at: "2026-09-18T00:00:00.000Z",
-      updated_at: "2026-09-18T00:00:00.000Z",
-      revoked_at: null,
-      revocation_reason: null,
-    });
+    const database = new TestD1Database();
     const record = {
       sessionId: "session-1",
       userId: "user-1",
@@ -165,38 +55,34 @@ describe("Auth-D1-Repository", () => {
       revocationReason: null,
     };
 
-    await createSession(database, record);
-    const session = await getSession(database, "session-1");
-
-    expect(session).toEqual(record);
-    expect(statement.bind).toHaveBeenCalledWith(
-      "session-1",
-      "user-1",
-      "tester",
-      "2026-09-19T00:00:00.000Z",
-      "2026-09-18T00:00:00.000Z",
-      "2026-09-18T00:00:00.000Z",
-    );
+    try {
+      await createSession(database as unknown as D1Database, record);
+      await expect(getSession(database as unknown as D1Database, "session-1")).resolves.toEqual(record);
+    } finally {
+      database.close();
+    }
   });
 
   it("verbraucht eine OAuth-Transaktion nur einmal anhand des gespeicherten Zustands", async () => {
-    const { database, read } = statefulOAuthDatabase();
-    await createOAuthTransaction(database, {
-      transactionId: "transaction-1",
-      purpose: "login",
-      expiresAt: "2026-09-18T00:05:00.000Z",
-      createdAt: "2026-09-18T00:00:00.000Z",
-    });
-    await expect(consumeOAuthTransaction(database, "transaction-1", "2026-09-18T00:01:00.000Z"))
-      .resolves.toEqual({
+    const database = new TestD1Database();
+    try {
+      const transaction = {
         transactionId: "transaction-1",
-        purpose: "login",
+        purpose: "login" as const,
         expiresAt: "2026-09-18T00:05:00.000Z",
         createdAt: "2026-09-18T00:00:00.000Z",
-      });
-    await expect(consumeOAuthTransaction(database, "transaction-1", "2026-09-18T00:01:01.000Z"))
-      .resolves.toBeNull();
-    expect(read()?.used_at).toBe("2026-09-18T00:01:00.000Z");
+      };
+      await createOAuthTransaction(database as unknown as D1Database, transaction);
+      await expect(consumeOAuthTransaction(database as unknown as D1Database, "transaction-1", "2026-09-18T00:01:00.000Z"))
+        .resolves.toEqual(transaction);
+      await expect(consumeOAuthTransaction(database as unknown as D1Database, "transaction-1", "2026-09-18T00:01:01.000Z"))
+        .resolves.toBeNull();
+      await expect(database.prepare(
+        "SELECT used_at FROM oauth_transactions WHERE transaction_id = ?",
+      ).bind("transaction-1").first()).resolves.toEqual({ used_at: "2026-09-18T00:01:00.000Z" });
+    } finally {
+      database.close();
+    }
   });
 
   it("verbraucht keine OAuth-Transaktion mit nicht parsebarem Ablaufwert", async () => {
@@ -223,42 +109,72 @@ describe("Auth-D1-Repository", () => {
   });
 
   it("hinterlegt die Ursache eines fehlgeschlagenen OAuth-Rücklaufs", async () => {
-    const { database, statement } = fakeDatabase();
+    const database = new TestD1Database();
+    try {
+      await createOAuthTransaction(database as unknown as D1Database, {
+        transactionId: "transaction-1",
+        purpose: "login",
+        expiresAt: "2026-09-18T00:05:00.000Z",
+        createdAt: "2026-09-18T00:00:00.000Z",
+      });
+      await consumeOAuthTransaction(database as unknown as D1Database, "transaction-1", "2026-09-18T00:01:00.000Z");
+      await failOAuthTransaction(database as unknown as D1Database, "transaction-1", "code_exchange_rejected");
 
-    await failOAuthTransaction(database, "transaction-1", "code_exchange_rejected");
-
-    expect(statement.bind).toHaveBeenCalledWith("code_exchange_rejected", "transaction-1");
+      await expect(database.prepare(
+        "SELECT failure_reason FROM oauth_transactions WHERE transaction_id = ?",
+      ).bind("transaction-1").first()).resolves.toEqual({ failure_reason: "code_exchange_rejected" });
+    } finally {
+      database.close();
+    }
   });
 
   it("speichert und widerruft eine Session nachvollziehbar", async () => {
-    const { database, statement } = fakeDatabase();
+    const database = new TestD1Database();
+    try {
+      const record = {
+        sessionId: "session-1",
+        userId: "user-1",
+        login: "tester",
+        expiresAt: "2026-09-19T00:00:00.000Z",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T00:00:00.000Z",
+      };
+      await createSession(database as unknown as D1Database, record);
+      await revokeSession(database as unknown as D1Database, "session-1", "2026-09-18T01:00:00.000Z", "logout");
 
-    await revokeSession(database, "session-1", "2026-09-18T01:00:00.000Z", "logout");
-
-    expect(statement.bind).toHaveBeenCalledWith(
-      "2026-09-18T01:00:00.000Z",
-      "logout",
-      "2026-09-18T01:00:00.000Z",
-      "session-1",
-    );
+      await expect(getSession(database as unknown as D1Database, "session-1")).resolves.toMatchObject({
+        ...record,
+        revokedAt: "2026-09-18T01:00:00.000Z",
+        revocationReason: "logout",
+        updatedAt: "2026-09-18T01:00:00.000Z",
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it("legt eine OAuth-Transaktion an", async () => {
-    const { database, statement } = fakeDatabase();
+    const database = new TestD1Database();
+    try {
+      await createOAuthTransaction(database as unknown as D1Database, {
+        transactionId: "transaction-1",
+        purpose: "bot",
+        expiresAt: "2026-09-18T00:05:00.000Z",
+        createdAt: "2026-09-18T00:00:00.000Z",
+      });
 
-    await createOAuthTransaction(database, {
-      transactionId: "transaction-1",
-      purpose: "bot",
-      expiresAt: "2026-09-18T00:05:00.000Z",
-      createdAt: "2026-09-18T00:00:00.000Z",
-    });
-
-    expect(statement.bind).toHaveBeenCalledWith(
-      "transaction-1",
-      "bot",
-      "2026-09-18T00:05:00.000Z",
-      "2026-09-18T00:00:00.000Z",
-    );
+      await expect(database.prepare(
+        "SELECT transaction_id, purpose, expires_at, created_at, used_at FROM oauth_transactions",
+      ).first()).resolves.toEqual({
+        transaction_id: "transaction-1",
+        purpose: "bot",
+        expires_at: "2026-09-18T00:05:00.000Z",
+        created_at: "2026-09-18T00:00:00.000Z",
+        used_at: null,
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it("liest die globale Bot-Identität aus der Ein-Zeilen-Tabelle", async () => {
@@ -288,29 +204,7 @@ describe("Auth-D1-Repository", () => {
   });
 
   it("speichert Login-Tokens getrennt von der Session und listet sie", async () => {
-    const { database, statement } = fakeDatabase({
-      user_id: "user-1",
-      login: "tester",
-      scopes_json: "[\"user:read:moderated_channels\"]",
-      access_token_ciphertext: "access-ciphertext",
-      refresh_token_ciphertext: "refresh-ciphertext",
-      expires_at: "2026-09-18T02:00:00.000Z",
-      status: "connected",
-      reason: null,
-      created_at: "2026-09-18T00:00:00.000Z",
-      updated_at: "2026-09-18T00:00:00.000Z",
-    }, { results: [{
-      user_id: "user-1",
-      login: "tester",
-      scopes_json: "[\"user:read:moderated_channels\"]",
-      access_token_ciphertext: "access-ciphertext",
-      refresh_token_ciphertext: "refresh-ciphertext",
-      expires_at: "2026-09-18T02:00:00.000Z",
-      status: "connected",
-      reason: null,
-      created_at: "2026-09-18T00:00:00.000Z",
-      updated_at: "2026-09-18T00:00:00.000Z",
-    }] });
+    const database = new TestD1Database();
     const identity = {
       userId: "user-1",
       login: "tester",
@@ -324,84 +218,95 @@ describe("Auth-D1-Repository", () => {
       updatedAt: "2026-09-18T00:00:00.000Z",
     };
 
-    await upsertLoginIdentity(database, identity);
-    await expect(getLoginIdentity(database, "user-1")).resolves.toEqual(identity);
-    await expect(listLoginIdentities(database)).resolves.toEqual([identity]);
-    expect(statement.bind).toHaveBeenCalledWith(
-      "user-1",
-      "tester",
-      "[\"user:read:moderated_channels\"]",
-      "access-ciphertext",
-      "refresh-ciphertext",
-      "2026-09-18T02:00:00.000Z",
-      "connected",
-      null,
-      "2026-09-18T00:00:00.000Z",
-      "2026-09-18T00:00:00.000Z",
-    );
+    try {
+      await createSession(database as unknown as D1Database, {
+        sessionId: "session-1",
+        userId: "user-1",
+        login: "tester",
+        expiresAt: "2099-09-19T00:00:00.000Z",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T00:00:00.000Z",
+      });
+      await upsertLoginIdentity(database as unknown as D1Database, identity);
+      await expect(getLoginIdentity(database as unknown as D1Database, "user-1")).resolves.toEqual(identity);
+      await expect(listLoginIdentities(database as unknown as D1Database, "2026-09-18T01:00:00.000Z"))
+        .resolves.toEqual([identity]);
+    } finally {
+      database.close();
+    }
   });
 
   it("aktualisiert die Bot-Identität über id = 1", async () => {
-    const { database, statement } = fakeDatabase();
+    const database = new TestD1Database();
+    try {
+      await upsertBotIdentity(database as unknown as D1Database, {
+        id: 1,
+        userId: "bot-user",
+        login: "brobot",
+        scopesJson: "[\"user:bot\"]",
+        accessTokenCiphertext: "access-ciphertext",
+        refreshTokenCiphertext: "refresh-ciphertext",
+        expiresAt: "2026-09-18T02:00:00.000Z",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T00:00:00.000Z",
+      });
 
-    await upsertBotIdentity(database, {
-      id: 1,
-      userId: "bot-user",
-      login: "brobot",
-      scopesJson: "[\"user:bot\"]",
-      accessTokenCiphertext: "access-ciphertext",
-      refreshTokenCiphertext: "refresh-ciphertext",
-      expiresAt: "2026-09-18T02:00:00.000Z",
-      createdAt: "2026-09-18T00:00:00.000Z",
-      updatedAt: "2026-09-18T00:00:00.000Z",
-    });
-
-    expect(statement.bind).toHaveBeenCalledWith(
-      1,
-      "bot-user",
-      "brobot",
-      "[\"user:bot\"]",
-      "access-ciphertext",
-      "refresh-ciphertext",
-      "2026-09-18T02:00:00.000Z",
-      "2026-09-18T00:00:00.000Z",
-      "2026-09-18T00:00:00.000Z",
-    );
+      await expect(getBotIdentity(database as unknown as D1Database)).resolves.toMatchObject({
+        userId: "bot-user",
+        accessTokenCiphertext: "access-ciphertext",
+        refreshTokenCiphertext: "refresh-ciphertext",
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it("merkt den globalen Verbindungsstatus mit Ursache", async () => {
-    const { database, statement } = fakeDatabase();
+    const database = new TestD1Database();
+    try {
+      await setBotIdentityStatus(database as unknown as D1Database, "revoked", "invalid_grant", "2026-09-18T03:00:00.000Z");
 
-    await setBotIdentityStatus(database, "revoked", "invalid_grant", "2026-09-18T03:00:00.000Z");
-
-    expect(statement.bind).toHaveBeenCalledWith(
-      1,
-      "revoked",
-      "invalid_grant",
-      "2026-09-18T03:00:00.000Z",
-    );
+      await expect(getBotIdentityStatus(database as unknown as D1Database)).resolves.toEqual({
+        status: "revoked",
+        reason: "invalid_grant",
+        updatedAt: "2026-09-18T03:00:00.000Z",
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it("liest und speichert den Moderatorstatus je Kanal", async () => {
-    const { database, statement } = fakeDatabase({
-      id: 1,
-      status: "connected",
-      reason: null,
-      updated_at: "2026-09-18T03:00:00.000Z",
-    });
+    const database = new TestD1Database();
+    try {
+      await database.prepare(
+        `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind(
+        "channel-1",
+        "channel-1",
+        "Kanal 1",
+        "2026-09-18T00:00:00.000Z",
+        "2026-09-18T00:00:00.000Z",
+      ).run();
+      await setBotIdentityStatus(database as unknown as D1Database, "connected", null, "2026-09-18T03:00:00.000Z");
+      await setBotChannelStatus(database as unknown as D1Database, "channel-1", true, "2026-09-18T03:00:00.000Z", null);
 
-    await expect(getBotIdentityStatus(database)).resolves.toEqual({
-      status: "connected",
-      reason: null,
-      updatedAt: "2026-09-18T03:00:00.000Z",
-    });
-    await setBotChannelStatus(database, "channel-1", true, "2026-09-18T03:00:00.000Z", null);
-    expect(statement.bind).toHaveBeenCalledWith(
-      "channel-1",
-      1,
-      "2026-09-18T03:00:00.000Z",
-      null,
-    );
+      await expect(getBotIdentityStatus(database as unknown as D1Database)).resolves.toEqual({
+        status: "connected",
+        reason: null,
+        updatedAt: "2026-09-18T03:00:00.000Z",
+      });
+      await expect(database.prepare(
+        "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = ?",
+      ).bind("channel-1").first()).resolves.toEqual({
+        is_moderator: 1,
+        checked_at: "2026-09-18T03:00:00.000Z",
+        reason: null,
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it("liefert die freigegebenen Kanal-IDs für den Moderatorabgleich", async () => {
@@ -411,14 +316,28 @@ describe("Auth-D1-Repository", () => {
   });
 
   it("räumt abgelaufene OAuth-Transaktionen auf", async () => {
-    const { database, statement } = fakeDatabase();
+    const database = new TestD1Database();
+    try {
+      const insert = database.prepare(
+        `INSERT INTO oauth_transactions
+          (transaction_id, purpose, expires_at, created_at, used_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      await insert.bind("abgelaufen", "login", "2026-09-18T00:30:00.000Z", "2026-09-18T00:00:00.000Z", null).run();
+      await insert.bind("aktiv", "login", "2026-09-18T02:00:00.000Z", "2026-09-18T00:00:00.000Z", null).run();
+      await insert.bind("verbraucht-alt", "bot", "2026-09-18T02:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:30:00.000Z").run();
+      await insert.bind("verbraucht-neu", "bot", "2026-09-18T02:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T01:00:01.000Z").run();
 
-    await purgeExpiredOAuthTransactions(database, "2026-09-18T01:00:00.000Z");
+      await purgeExpiredOAuthTransactions(database as unknown as D1Database, "2026-09-18T01:00:00.000Z");
 
-    expect(statement.bind).toHaveBeenCalledWith(
-      "2026-09-18T01:00:00.000Z",
-      "2026-09-18T01:00:00.000Z",
-    );
+      await expect(database.prepare(
+        "SELECT transaction_id FROM oauth_transactions ORDER BY transaction_id",
+      ).all()).resolves.toMatchObject({
+        results: [{ transaction_id: "aktiv" }, { transaction_id: "verbraucht-neu" }],
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it("ersetzt den Bot-Access-Token nur einmal mit dem echten SQLite-CAS", async () => {
@@ -465,23 +384,6 @@ describe("Auth-D1-Repository", () => {
     } finally {
       database.close();
     }
-  });
-
-  it("verwirft eine Rotation nicht wegen eines reinen Status-Updates", async () => {
-    const { database, read } = statefulBotTokenDatabase();
-    read().updated_at = "2026-09-18T00:00:01.000Z";
-
-    await expect(rotateBotTokens(
-      database,
-      "access-alt",
-      "refresh-alt",
-      "access-ciphertext-neu",
-      "refresh-ciphertext-neu",
-      "2026-09-18T02:00:00.000Z",
-      "2026-09-18T01:00:00.000Z",
-    )).resolves.toBe(true);
-    expect(read().access_token_ciphertext).toBe("access-ciphertext-neu");
-    expect(read().refresh_token_ciphertext).toBe("refresh-ciphertext-neu");
   });
 
   it("ändert den Botstatus bei einer zweiten Rotation mit veraltetem Access-Ciphertext nicht", async () => {

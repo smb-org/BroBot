@@ -4,6 +4,14 @@
 **Status:** entschieden, siehe [#1](https://github.com/smb-org/BroBot/issues/1)
 **Betrifft:** #10, #12, #14, #28, #30 — jedes Modul, das Nutzerdaten schreibt
 
+## Offene Entwurfsfragen
+
+Die Entscheidung ist an diesen Stellen noch nicht belastbar genug; sie werden ausdrücklich offen gehalten und hier nicht eigenmächtig gelöst:
+
+- **Flüchtiger Schlüssel neben den Daten:** Liegt der Schlüssel beim Vorgang und seinen Daten, enthält ein Datenbankabzug beides. Damit ist der Personenbezug in diesem Abzug wiederherstellbar.
+- **Frist am Streamende:** „Spätestens am Streamende“ lässt sich mit einem nur stündlich laufenden Cron nicht einhalten. Auslöser und Durchsetzung dieser Frist sind offen.
+- **Aussage bei laufendem Vorgang:** Solange ein Vorgang läuft, stimmt „zu dieser Person liegt nichts vor“ nicht. Die korrekte Auskunft und ihr Zeitpunkt sind offen.
+
 ---
 
 ## 1. Kurzfazit
@@ -24,6 +32,8 @@ Wirksam ist der Bezug nur, wenn in die Berechnung ein **Geheimnis** eingeht, das
 ```
 hash = HMAC-SHA-256(schlüssel, channelId ‖ userId)
 ```
+
+Die Verkettung ohne Trennzeichen ist mehrdeutig: `channelId` 12 mit `userId` 345 und `channelId` 123 mit `userId` 45 ergeben denselben Eingang. Die eindeutige Kodierung ist in dieser Entscheidung noch nicht festgelegt.
 
 Zwei Eigenschaften daran sind Absicht:
 
