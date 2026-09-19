@@ -41,6 +41,211 @@ const fakeDatabase = (firstResult: unknown = null, allResult: unknown = { result
   };
 };
 
+// Test-Fixtures: säen den Rohzustand direkt per SQL, weil die Rotations- und
+// CAS-Tests genau die Zeilen prüfen, die eine echte Vorbedingung erzeugen —
+// nicht das, was die Repository-Funktionen selbst schreiben würden. Nur
+// Belanglosigkeiten (User-/Login-Namen, leere Scopes) stecken als Vorgabe im
+// Helfer; Status, Ciphertexte und Zeitstempel kommen an jeder Aufrufstelle
+// explizit mit, weil sie den jeweiligen Test ausmachen.
+
+interface BotIdentitätFixture {
+  userId: string;
+  login: string;
+  scopesJson: string;
+  accessTokenCiphertext: string;
+  refreshTokenCiphertext: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const säeBotIdentität = async (
+  database: TestD1Database,
+  overrides: Partial<BotIdentitätFixture> = {},
+): Promise<void> => {
+  const identität: BotIdentitätFixture = {
+    userId: "bot-user",
+    login: "brobot",
+    scopesJson: "[]",
+    accessTokenCiphertext: "access-alt",
+    refreshTokenCiphertext: "refresh-alt",
+    expiresAt: "2026-09-18T01:00:00.000Z",
+    createdAt: "2026-09-18T00:00:00.000Z",
+    updatedAt: "2026-09-18T00:00:00.000Z",
+    ...overrides,
+  };
+  await database.prepare(
+    `INSERT INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, created_at, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    identität.userId,
+    identität.login,
+    identität.scopesJson,
+    identität.accessTokenCiphertext,
+    identität.refreshTokenCiphertext,
+    identität.expiresAt,
+    identität.createdAt,
+    identität.updatedAt,
+  ).run();
+};
+
+const säeBotIdentitätsstatus = async (
+  database: TestD1Database,
+  status: string,
+  reason: string | null,
+  updatedAt: string,
+): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+     VALUES (1, ?, ?, ?)`,
+  ).bind(status, reason, updatedAt).run();
+};
+
+interface LoginIdentitätFixture {
+  userId: string;
+  login: string;
+  scopesJson: string;
+  accessTokenCiphertext: string;
+  refreshTokenCiphertext: string;
+  expiresAt: string;
+  status: string;
+  reason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const säeLoginIdentität = async (
+  database: TestD1Database,
+  overrides: Partial<LoginIdentitätFixture> = {},
+): Promise<void> => {
+  const identität: LoginIdentitätFixture = {
+    userId: "user-1",
+    login: "tester",
+    scopesJson: "[]",
+    accessTokenCiphertext: "access-alt",
+    refreshTokenCiphertext: "refresh-alt",
+    expiresAt: "2026-09-19T00:00:00.000Z",
+    status: "connected",
+    reason: null,
+    createdAt: "2026-09-18T00:00:00.000Z",
+    updatedAt: "2026-09-18T00:00:00.000Z",
+    ...overrides,
+  };
+  await database.prepare(
+    `INSERT INTO twitch_login_identity
+      (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, status, reason, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    identität.userId,
+    identität.login,
+    identität.scopesJson,
+    identität.accessTokenCiphertext,
+    identität.refreshTokenCiphertext,
+    identität.expiresAt,
+    identität.status,
+    identität.reason,
+    identität.createdAt,
+    identität.updatedAt,
+  ).run();
+};
+
+interface SitzungFixture {
+  sessionId: string;
+  userId: string;
+  login: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
+  revocationReason: string | null;
+}
+
+const säeSitzung = async (
+  database: TestD1Database,
+  overrides: Partial<SitzungFixture> = {},
+): Promise<void> => {
+  const sitzung: SitzungFixture = {
+    sessionId: "session-1",
+    userId: "user-1",
+    login: "tester",
+    expiresAt: "2026-09-19T00:00:00.000Z",
+    createdAt: "2026-09-18T00:00:00.000Z",
+    updatedAt: "2026-09-18T00:00:00.000Z",
+    revokedAt: null,
+    revocationReason: null,
+    ...overrides,
+  };
+  await database.prepare(
+    `INSERT INTO auth_sessions
+      (session_id, user_id, login, expires_at, created_at, updated_at, revoked_at, revocation_reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    sitzung.sessionId,
+    sitzung.userId,
+    sitzung.login,
+    sitzung.expiresAt,
+    sitzung.createdAt,
+    sitzung.updatedAt,
+    sitzung.revokedAt,
+    sitzung.revocationReason,
+  ).run();
+};
+
+// Schmale Wrapper um die Rotationsaufrufe: benannte Felder statt langer
+// Positionsargumentlisten, damit an der Aufrufstelle erkennbar bleibt, welcher
+// Wert der erwartete (CAS-)Ist-Zustand und welcher der neue Soll-Zustand ist.
+
+interface RotiereBotTokensFelder {
+  expectedAccessTokenCiphertext: string;
+  expectedRefreshTokenCiphertext: string;
+  accessTokenCiphertext: string;
+  refreshTokenCiphertext: string;
+  expiresAt: string;
+  updatedAt: string;
+}
+
+const rotiereBotTokens = (
+  database: D1Database,
+  felder: RotiereBotTokensFelder,
+): Promise<boolean> => rotateBotTokens(
+  database,
+  felder.expectedAccessTokenCiphertext,
+  felder.expectedRefreshTokenCiphertext,
+  felder.accessTokenCiphertext,
+  felder.refreshTokenCiphertext,
+  felder.expiresAt,
+  felder.updatedAt,
+);
+
+interface RotiereLoginTokensFelder {
+  userId: string;
+  expectedAccessTokenCiphertext: string;
+  expectedRefreshTokenCiphertext: string;
+  accessTokenCiphertext: string;
+  refreshTokenCiphertext: string;
+  expiresAt: string;
+  updatedAt: string;
+  expectedUpdatedAt: string;
+}
+
+const rotiereLoginTokens = (
+  database: D1Database,
+  felder: RotiereLoginTokensFelder,
+): Promise<boolean> => rotateLoginTokensForUser(
+  database,
+  felder.userId,
+  felder.expectedAccessTokenCiphertext,
+  felder.expectedRefreshTokenCiphertext,
+  felder.accessTokenCiphertext,
+  felder.refreshTokenCiphertext,
+  felder.expiresAt,
+  felder.updatedAt,
+  felder.expectedUpdatedAt,
+);
+
 describe("Auth-D1-Repository", () => {
   it("legt eine nachvollziehbare Session an und liest sie zurück", async () => {
     const database = new TestD1Database();
@@ -343,35 +548,24 @@ describe("Auth-D1-Repository", () => {
   it("ersetzt den Bot-Access-Token nur einmal mit dem echten SQLite-CAS", async () => {
     const database = new TestD1Database();
     try {
-      await database.prepare(
-        `INSERT INTO bot_identity
-          (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-           expires_at, created_at, updated_at)
-         VALUES (1, 'bot-user', 'brobot', '[]', 'access-alt', 'refresh-alt', ?, ?, ?)`,
-      ).bind(
-        "2026-09-18T01:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
+      await säeBotIdentität(database);
 
-      await expect(rotateBotTokens(
-        database as unknown as D1Database,
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-neu",
-        "refresh-alt",
-        "2026-09-18T02:00:00.000Z",
-        "2026-09-18T01:00:00.000Z",
-      )).resolves.toBe(true);
-      await expect(rotateBotTokens(
-        database as unknown as D1Database,
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-second",
-        "refresh-alt",
-        "2026-09-18T03:00:00.000Z",
-        "2026-09-18T02:00:00.000Z",
-      )).resolves.toBe(false);
+      await expect(rotiereBotTokens(database as unknown as D1Database, {
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-neu",
+        refreshTokenCiphertext: "refresh-alt",
+        expiresAt: "2026-09-18T02:00:00.000Z",
+        updatedAt: "2026-09-18T01:00:00.000Z",
+      })).resolves.toBe(true);
+      await expect(rotiereBotTokens(database as unknown as D1Database, {
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-second",
+        refreshTokenCiphertext: "refresh-alt",
+        expiresAt: "2026-09-18T03:00:00.000Z",
+        updatedAt: "2026-09-18T02:00:00.000Z",
+      })).resolves.toBe(false);
 
       await expect(database.prepare(
         "SELECT access_token_ciphertext, refresh_token_ciphertext, expires_at, updated_at FROM bot_identity WHERE id = 1",
@@ -389,39 +583,25 @@ describe("Auth-D1-Repository", () => {
   it("ändert den Botstatus bei einer zweiten Rotation mit veraltetem Access-Ciphertext nicht", async () => {
     const database = new TestD1Database();
     try {
-      await database.prepare(
-        `INSERT INTO bot_identity
-          (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-           expires_at, created_at, updated_at)
-         VALUES (1, 'bot-user', 'brobot', '[]', 'access-alt', 'refresh-alt', ?, ?, ?)`,
-      ).bind(
-        "2026-09-18T01:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
-      await database.prepare(
-        `INSERT INTO bot_identity_status (id, status, reason, updated_at)
-         VALUES (1, 'revoked', 'authorization_revoked', ?)`,
-      ).bind("2026-09-18T02:00:00.000Z").run();
+      await säeBotIdentität(database);
+      await säeBotIdentitätsstatus(database, "revoked", "authorization_revoked", "2026-09-18T02:00:00.000Z");
 
-      await expect(rotateBotTokens(
-        database as unknown as D1Database,
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-neu",
-        "refresh-ciphertext-neu",
-        "2026-09-18T02:00:00.000Z",
-        "2026-09-18T01:00:00.000Z",
-      )).resolves.toBe(true);
-      await expect(rotateBotTokens(
-        database as unknown as D1Database,
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-second",
-        "refresh-ciphertext-neu",
-        "2026-09-18T03:00:00.000Z",
-        "2026-09-18T03:00:00.000Z",
-      )).resolves.toBe(false);
+      await expect(rotiereBotTokens(database as unknown as D1Database, {
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-neu",
+        refreshTokenCiphertext: "refresh-ciphertext-neu",
+        expiresAt: "2026-09-18T02:00:00.000Z",
+        updatedAt: "2026-09-18T01:00:00.000Z",
+      })).resolves.toBe(true);
+      await expect(rotiereBotTokens(database as unknown as D1Database, {
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-second",
+        refreshTokenCiphertext: "refresh-ciphertext-neu",
+        expiresAt: "2026-09-18T03:00:00.000Z",
+        updatedAt: "2026-09-18T03:00:00.000Z",
+      })).resolves.toBe(false);
 
       await expect(database.prepare(
         "SELECT access_token_ciphertext, refresh_token_ciphertext FROM bot_identity WHERE id = 1",
@@ -444,47 +624,23 @@ describe("Auth-D1-Repository", () => {
   it("widerruft keine aktive Session mit veraltetem Login-Access-Ciphertext", async () => {
     const database = new TestD1Database();
     try {
-      await database.prepare(
-        `INSERT INTO twitch_login_identity
-          (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-           expires_at, status, reason, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        "user-1",
-        "tester",
-        "[]",
-        "access-alt",
-        "refresh-alt",
-        "2026-09-19T00:00:00.000Z",
-        "revoked",
-        "authorization_revoked",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T02:00:00.000Z",
-      ).run();
-      await database.prepare(
-        `INSERT INTO auth_sessions
-          (session_id, user_id, login, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        "session-1",
-        "user-1",
-        "tester",
-        "2026-09-19T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
+      await säeLoginIdentität(database, {
+        status: "revoked",
+        reason: "authorization_revoked",
+        updatedAt: "2026-09-18T02:00:00.000Z",
+      });
+      await säeSitzung(database);
 
-      await expect(rotateLoginTokensForUser(
-        database as unknown as D1Database,
-        "user-1",
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-neu",
-        "refresh-alt",
-        "2026-09-20T00:00:00.000Z",
-        "2026-09-18T01:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      )).resolves.toBe(true);
+      await expect(rotiereLoginTokens(database as unknown as D1Database, {
+        userId: "user-1",
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-neu",
+        refreshTokenCiphertext: "refresh-alt",
+        expiresAt: "2026-09-20T00:00:00.000Z",
+        updatedAt: "2026-09-18T01:00:00.000Z",
+        expectedUpdatedAt: "2026-09-18T00:00:00.000Z",
+      })).resolves.toBe(true);
       await expect(revokeLoginIdentityAndSessionsForUser(
         database as unknown as D1Database,
         "user-1",
@@ -514,39 +670,28 @@ describe("Auth-D1-Repository", () => {
   it("speichert bei einer zweiten Login-Rotation keinen neuen Access-Ciphertext", async () => {
     const database = new TestD1Database();
     try {
-      await database.prepare(
-        `INSERT INTO twitch_login_identity
-          (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-           expires_at, status, reason, created_at, updated_at)
-         VALUES ('user-1', 'tester', '[]', 'access-alt', 'refresh-alt', ?, 'connected', NULL, ?, ?)`,
-      ).bind(
-        "2026-09-19T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
+      await säeLoginIdentität(database);
 
-      await expect(rotateLoginTokensForUser(
-        database as unknown as D1Database,
-        "user-1",
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-neu",
-        "refresh-alt",
-        "2026-09-20T00:00:00.000Z",
-        "2026-09-18T01:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      )).resolves.toBe(true);
-      await expect(rotateLoginTokensForUser(
-        database as unknown as D1Database,
-        "user-1",
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-second",
-        "refresh-alt",
-        "2026-09-21T00:00:00.000Z",
-        "2026-09-18T02:00:00.000Z",
-        "2026-09-18T01:00:00.000Z",
-      )).resolves.toBe(false);
+      await expect(rotiereLoginTokens(database as unknown as D1Database, {
+        userId: "user-1",
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-neu",
+        refreshTokenCiphertext: "refresh-alt",
+        expiresAt: "2026-09-20T00:00:00.000Z",
+        updatedAt: "2026-09-18T01:00:00.000Z",
+        expectedUpdatedAt: "2026-09-18T00:00:00.000Z",
+      })).resolves.toBe(true);
+      await expect(rotiereLoginTokens(database as unknown as D1Database, {
+        userId: "user-1",
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-second",
+        refreshTokenCiphertext: "refresh-alt",
+        expiresAt: "2026-09-21T00:00:00.000Z",
+        updatedAt: "2026-09-18T02:00:00.000Z",
+        expectedUpdatedAt: "2026-09-18T01:00:00.000Z",
+      })).resolves.toBe(false);
 
       await expect(database.prepare(
         "SELECT access_token_ciphertext, refresh_token_ciphertext, expires_at, updated_at FROM twitch_login_identity WHERE user_id = 'user-1'",
@@ -564,49 +709,33 @@ describe("Auth-D1-Repository", () => {
   it("stellt keine Session mit veraltetem Login-Access-Ciphertext wieder her", async () => {
     const database = new TestD1Database();
     try {
-      await database.prepare(
-        `INSERT INTO twitch_login_identity
-          (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-           expires_at, status, reason, created_at, updated_at)
-         VALUES ('user-1', 'tester', '[]', 'access-alt', 'refresh-alt', ?, 'connected', NULL, ?, ?)`,
-      ).bind(
-        "2026-09-19T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
-      await database.prepare(
-        `INSERT INTO auth_sessions
-          (session_id, user_id, login, expires_at, created_at, updated_at, revoked_at, revocation_reason)
-         VALUES ('session-1', 'user-1', 'tester', ?, ?, ?, ?, 'authorization_revoked')`,
-      ).bind(
-        "2026-09-19T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T02:00:00.000Z",
-        "2026-09-18T02:00:00.000Z",
-      ).run();
+      await säeLoginIdentität(database);
+      await säeSitzung(database, {
+        updatedAt: "2026-09-18T02:00:00.000Z",
+        revokedAt: "2026-09-18T02:00:00.000Z",
+        revocationReason: "authorization_revoked",
+      });
 
-      await expect(rotateLoginTokensForUser(
-        database as unknown as D1Database,
-        "user-1",
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-neu",
-        "refresh-ciphertext-neu",
-        "2026-09-20T00:00:00.000Z",
-        "2026-09-18T01:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      )).resolves.toBe(true);
-      await expect(rotateLoginTokensForUser(
-        database as unknown as D1Database,
-        "user-1",
-        "access-alt",
-        "refresh-alt",
-        "access-ciphertext-second",
-        "refresh-ciphertext-neu",
-        "2026-09-21T00:00:00.000Z",
-        "2026-09-18T03:00:00.000Z",
-        "2026-09-18T01:00:00.000Z",
-      )).resolves.toBe(false);
+      await expect(rotiereLoginTokens(database as unknown as D1Database, {
+        userId: "user-1",
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-neu",
+        refreshTokenCiphertext: "refresh-ciphertext-neu",
+        expiresAt: "2026-09-20T00:00:00.000Z",
+        updatedAt: "2026-09-18T01:00:00.000Z",
+        expectedUpdatedAt: "2026-09-18T00:00:00.000Z",
+      })).resolves.toBe(true);
+      await expect(rotiereLoginTokens(database as unknown as D1Database, {
+        userId: "user-1",
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-ciphertext-second",
+        refreshTokenCiphertext: "refresh-ciphertext-neu",
+        expiresAt: "2026-09-21T00:00:00.000Z",
+        updatedAt: "2026-09-18T03:00:00.000Z",
+        expectedUpdatedAt: "2026-09-18T01:00:00.000Z",
+      })).resolves.toBe(false);
 
       await expect(database.prepare(
         "SELECT access_token_ciphertext, refresh_token_ciphertext FROM twitch_login_identity WHERE user_id = 'user-1'",
@@ -628,20 +757,8 @@ describe("Auth-D1-Repository", () => {
   it("stellt nach einem verspäteten invalid_grant den erfolgreich gespeicherten Botstand wieder her", async () => {
     const database = new TestD1Database();
     try {
-      await database.prepare(
-        `INSERT INTO bot_identity
-          (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-           expires_at, created_at, updated_at)
-         VALUES (1, 'bot-user', 'brobot', '[]', 'access-alt', 'refresh-alt', ?, ?, ?)`,
-      ).bind(
-        "2026-09-18T01:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
-      await database.prepare(
-        `INSERT INTO bot_identity_status (id, status, reason, updated_at)
-         VALUES (1, 'connected', NULL, ?)`,
-      ).bind("2026-09-18T00:00:00.000Z").run();
+      await säeBotIdentität(database);
+      await säeBotIdentitätsstatus(database, "connected", null, "2026-09-18T00:00:00.000Z");
 
       await expect(setBotIdentityStatusIfCurrent(
         database as unknown as D1Database,
@@ -651,15 +768,14 @@ describe("Auth-D1-Repository", () => {
         "access-alt",
         "refresh-alt",
       )).resolves.toBe(true);
-      await expect(rotateBotTokens(
-        database as unknown as D1Database,
-        "access-alt",
-        "refresh-alt",
-        "access-neu",
-        "refresh-neu",
-        "2026-09-18T02:00:00.000Z",
-        "2026-09-18T00:00:02.000Z",
-      )).resolves.toBe(true);
+      await expect(rotiereBotTokens(database as unknown as D1Database, {
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-neu",
+        refreshTokenCiphertext: "refresh-neu",
+        expiresAt: "2026-09-18T02:00:00.000Z",
+        updatedAt: "2026-09-18T00:00:02.000Z",
+      })).resolves.toBe(true);
 
       await expect(database.prepare(
         "SELECT status, reason FROM bot_identity_status WHERE id = 1",
@@ -672,25 +788,8 @@ describe("Auth-D1-Repository", () => {
   it("stellt nach einem verspäteten invalid_grant den Loginstand und aktive Sessions wieder her", async () => {
     const database = new TestD1Database();
     try {
-      await database.prepare(
-        `INSERT INTO twitch_login_identity
-          (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-           expires_at, status, reason, created_at, updated_at)
-         VALUES ('user-1', 'tester', '[]', 'access-alt', 'refresh-alt', ?, 'connected', NULL, ?, ?)`,
-      ).bind(
-        "2026-09-18T01:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
-      await database.prepare(
-        `INSERT INTO auth_sessions
-          (session_id, user_id, login, expires_at, created_at, updated_at)
-         VALUES ('session-1', 'user-1', 'tester', ?, ?, ?)`,
-      ).bind(
-        "2026-09-19T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
+      await säeLoginIdentität(database, { expiresAt: "2026-09-18T01:00:00.000Z" });
+      await säeSitzung(database);
 
       await expect(revokeLoginIdentityAndSessionsForUser(
         database as unknown as D1Database,
@@ -700,17 +799,16 @@ describe("Auth-D1-Repository", () => {
         "authorization_revoked",
         "2026-09-18T00:00:01.000Z",
       )).resolves.toBe(true);
-      await expect(rotateLoginTokensForUser(
-        database as unknown as D1Database,
-        "user-1",
-        "access-alt",
-        "refresh-alt",
-        "access-neu",
-        "refresh-neu",
-        "2026-09-18T02:00:00.000Z",
-        "2026-09-18T00:00:02.000Z",
-        "2026-09-18T00:00:00.000Z",
-      )).resolves.toBe(true);
+      await expect(rotiereLoginTokens(database as unknown as D1Database, {
+        userId: "user-1",
+        expectedAccessTokenCiphertext: "access-alt",
+        expectedRefreshTokenCiphertext: "refresh-alt",
+        accessTokenCiphertext: "access-neu",
+        refreshTokenCiphertext: "refresh-neu",
+        expiresAt: "2026-09-18T02:00:00.000Z",
+        updatedAt: "2026-09-18T00:00:02.000Z",
+        expectedUpdatedAt: "2026-09-18T00:00:00.000Z",
+      })).resolves.toBe(true);
 
       await expect(database.prepare(
         "SELECT status, reason, access_token_ciphertext FROM twitch_login_identity WHERE user_id = 'user-1'",
@@ -788,20 +886,12 @@ describe("Auth-D1-Repository", () => {
   it("führt Identität und Botstatus in einer atomaren Batch-Operation aus", async () => {
     const database = new TestD1Database();
     try {
-      await database.prepare(
-        `INSERT INTO bot_identity
-          (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-           expires_at, created_at, updated_at)
-         VALUES (1, 'bot-user', 'brobot', '[]', 'alt-access', 'alt-refresh', ?, ?, ?)`,
-      ).bind(
-        "2026-09-19T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-        "2026-09-18T00:00:00.000Z",
-      ).run();
-      await database.prepare(
-        `INSERT INTO bot_identity_status (id, status, reason, updated_at)
-         VALUES (1, 'revoked', 'authorization_revoked', ?)`,
-      ).bind("2026-09-18T00:00:00.000Z").run();
+      await säeBotIdentität(database, {
+        accessTokenCiphertext: "alt-access",
+        refreshTokenCiphertext: "alt-refresh",
+        expiresAt: "2026-09-19T00:00:00.000Z",
+      });
+      await säeBotIdentitätsstatus(database, "revoked", "authorization_revoked", "2026-09-18T00:00:00.000Z");
 
       const failingDatabase = {
         prepare: database.prepare.bind(database),
