@@ -322,7 +322,80 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
-    expect(screen.queryByRole("button", { name: "Zugriff freigeben" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zugriff freigeben" })).toBeDisabled();
+  });
+
+  it("zeigt dem Bediener Mitgliederaktionen deaktiviert mit Begründung", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "bediener" };
+    const members = {
+      members: [{ userId: "200", login: "moderation", displayName: "Moderation", role: "bediener", joinedAt: "2026-09-18T12:00:00.000Z" }],
+      broadcasterCount: 1,
+      viewerUserId: "200",
+      nextCursor: null,
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/members")) return jsonResponse(members);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    const grund = "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.";
+    const suche = screen.getByRole("button", { name: "Suchen" });
+    expect(suche).toBeDisabled();
+    expect(suche).toHaveAttribute("title", grund);
+    const freigeben = screen.getByRole("button", { name: "Zugriff freigeben" });
+    expect(freigeben).toBeDisabled();
+    expect(freigeben).toHaveAttribute("title", grund);
+    expect(screen.getByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
+    const entziehen = screen.getByRole("button", { name: "Zugriff für Moderation entziehen" });
+    expect(entziehen).toBeDisabled();
+    expect(screen.getAllByText(grund).length).toBeGreaterThan(0);
+  });
+
+  it("zeigt dem Bediener die Modulaktivierung deaktiviert mit Begründung", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "bediener" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "raid", enabled: false, settings: "{}" }] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/modules");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Module", level: 1 });
+    const schalter = await screen.findByRole("checkbox", { name: "raid aktivieren" });
+    const grund = "Nur Broadcaster und Verwalter dürfen Module ändern.";
+    expect(schalter).toBeDisabled();
+    expect(schalter).toHaveAttribute("title", grund);
+    expect(screen.getByText(grund)).toBeInTheDocument();
+  });
+
+  it("zeigt Systemzustand, bevor das Audit-Log eintrifft", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let resolveAudit: ((response: Response) => void) | undefined;
+    const auditResponse = new Promise<Response>((resolve) => { resolveAudit = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname.endsWith("/system")) return Promise.resolve(jsonResponse(system));
+      if (url.pathname.endsWith("/audit-log")) return auditResponse;
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("article", { name: "Bot-Account" })).toBeInTheDocument();
+    expect(screen.getByText("Audit-Log wird geladen …")).toBeInTheDocument();
+    resolveAudit?.(jsonResponse(audit));
+    await waitFor(() => expect(screen.queryByText("Audit-Log wird geladen …")).not.toBeInTheDocument());
   });
 
   it("fragt beim Hinzufügen ausdrücklich nach dem tatsächlichen Zugriffsumfang", async () => {
