@@ -304,6 +304,30 @@ const leseKanalmitglied = async (
   };
 };
 
+/**
+ * Gemeinsamer Ablauf aller actorGuard-Verweigerungstests: Datenbank anlegen,
+ * Ausgangszustand säen, eine mutierende Repository-Funktion unter einem
+ * Akteur aufrufen, die Ablehnung prüfen und den unveränderten Endzustand
+ * nachweisen. Die eine Angriffsvariante, die den jeweiligen Test ausmacht —
+ * Rolle, Kanal, Zeitstempel, Ziel-Endzustand — steckt vollständig in `aufbau`,
+ * `mutation` und `pruefeEndzustand` an der jeweiligen Aufrufstelle.
+ */
+const erwarteAbgelehnteGuardMutation = async (
+  aufbau: (database: TestD1Database, jetzt: string) => Promise<void>,
+  mutation: (database: D1Database, jetzt: string) => Promise<boolean>,
+  pruefeEndzustand: (database: TestD1Database) => Promise<void>,
+): Promise<void> => {
+  const database = new TestD1Database();
+  const jetzt = frischerZeitpunkt();
+  try {
+    await aufbau(database, jetzt);
+    await expect(mutation(database as unknown as D1Database, jetzt)).resolves.toBe(false);
+    await pruefeEndzustand(database);
+  } finally {
+    database.close();
+  }
+};
+
 // Schmale Wrapper um die Rotationsaufrufe: benannte Felder statt langer
 // Positionsargumentlisten, damit an der Aufrufstelle erkennbar bleibt, welcher
 // Wert der erwartete (CAS-)Ist-Zustand und welcher der neue Soll-Zustand ist.
@@ -1049,257 +1073,231 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("verweigert INSERT, wenn die Session einem anderen Nutzer als dem Actor gehört", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
+  it("verweigert INSERT, wenn die Session einem anderen Nutzer als dem Actor gehört", () =>
+    erwarteAbgelehnteGuardMutation(
+      (database, jetzt) => saeeGuardAkteur(database, {
         actor: { userId: "user-b", sessionId: "session-b" },
         channelId: "kanal-a",
         role: "broadcaster",
         sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
-      });
-
-      await expect(createChannelMemberWithAudit(
-        database as unknown as D1Database,
+      }),
+      (database, jetzt) => createChannelMemberWithAudit(
+        database,
         { userId: "user-a", sessionId: "session-b" },
         mitgliedFuer("kanal-a", "target-user", "bediener"),
         "mitglied.hinzugefügt",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
+      },
+    ));
 
-  it("verweigert INSERT mit einer widerrufenen Session", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
+  it("verweigert INSERT mit einer widerrufenen Session", () =>
+    erwarteAbgelehnteGuardMutation(
+      (database, jetzt) => saeeGuardAkteur(database, {
         actor: { userId: "user-1", sessionId: "session-1" },
         channelId: "kanal-a",
         role: "broadcaster",
         sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
         revokedAt: zeitpunktMitAbstand(jetzt, -1_000),
-      });
-
-      await expect(createChannelMemberWithAudit(
-        database as unknown as D1Database,
+      }),
+      (database, jetzt) => createChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         mitgliedFuer("kanal-a", "target-user", "bediener"),
         "mitglied.hinzugefügt",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
+      },
+    ));
 
-  it("verweigert UPDATE mit einer widerrufenen Session", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
-        actor: { userId: "user-1", sessionId: "session-1" },
-        channelId: "kanal-a",
-        role: "verwalter",
-        sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
-        revokedAt: zeitpunktMitAbstand(jetzt, -1_000),
-      });
-      await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
-
-      await expect(updateChannelMemberWithAudit(
-        database as unknown as D1Database,
+  it("verweigert UPDATE mit einer widerrufenen Session", () =>
+    erwarteAbgelehnteGuardMutation(
+      async (database, jetzt) => {
+        await saeeGuardAkteur(database, {
+          actor: { userId: "user-1", sessionId: "session-1" },
+          channelId: "kanal-a",
+          role: "verwalter",
+          sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
+          revokedAt: zeitpunktMitAbstand(jetzt, -1_000),
+        });
+        await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
+      },
+      (database, jetzt) => updateChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         { ...mitgliedFuer("kanal-a", "target-user", "verwalter"), updatedAt: jetzt },
         "mitglied.rolle_geändert",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
+      },
+    ));
 
-  it("verweigert DELETE mit einer widerrufenen Session", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
-        actor: { userId: "user-1", sessionId: "session-1" },
-        channelId: "kanal-a",
-        role: "verwalter",
-        sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
-        revokedAt: zeitpunktMitAbstand(jetzt, -1_000),
-      });
-      await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
-
-      await expect(deleteChannelMemberWithAudit(
-        database as unknown as D1Database,
+  it("verweigert DELETE mit einer widerrufenen Session", () =>
+    erwarteAbgelehnteGuardMutation(
+      async (database, jetzt) => {
+        await saeeGuardAkteur(database, {
+          actor: { userId: "user-1", sessionId: "session-1" },
+          channelId: "kanal-a",
+          role: "verwalter",
+          sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
+          revokedAt: zeitpunktMitAbstand(jetzt, -1_000),
+        });
+        await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
+      },
+      (database, jetzt) => deleteChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         "kanal-a",
         "target-user",
         "mitglied.entfernt",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
+      },
+    ));
 
-  it("verweigert UPDATE mit einer abgelaufenen Session", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
-        actor: { userId: "user-1", sessionId: "session-1" },
-        channelId: "kanal-a",
-        role: "verwalter",
-        sessionExpiresAt: zeitpunktMitAbstand(jetzt, -1_000),
-      });
-      await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
-
-      await expect(updateChannelMemberWithAudit(
-        database as unknown as D1Database,
+  it("verweigert UPDATE mit einer abgelaufenen Session", () =>
+    erwarteAbgelehnteGuardMutation(
+      async (database, jetzt) => {
+        await saeeGuardAkteur(database, {
+          actor: { userId: "user-1", sessionId: "session-1" },
+          channelId: "kanal-a",
+          role: "verwalter",
+          sessionExpiresAt: zeitpunktMitAbstand(jetzt, -1_000),
+        });
+        await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
+      },
+      (database, jetzt) => updateChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         { ...mitgliedFuer("kanal-a", "target-user", "verwalter"), updatedAt: jetzt },
         "mitglied.rolle_geändert",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
+      },
+    ));
 
-  it("verweigert DELETE für eine widerrufene Twitch-Identität", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
-        actor: { userId: "user-1", sessionId: "session-1" },
-        channelId: "kanal-a",
-        role: "verwalter",
-        identityStatus: "revoked",
-        sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
-      });
-      await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
-
-      await expect(deleteChannelMemberWithAudit(
-        database as unknown as D1Database,
+  it("verweigert DELETE für eine widerrufene Twitch-Identität", () =>
+    erwarteAbgelehnteGuardMutation(
+      async (database, jetzt) => {
+        await saeeGuardAkteur(database, {
+          actor: { userId: "user-1", sessionId: "session-1" },
+          channelId: "kanal-a",
+          role: "verwalter",
+          identityStatus: "revoked",
+          sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
+        });
+        await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
+      },
+      (database, jetzt) => deleteChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         "kanal-a",
         "target-user",
         "mitglied.entfernt",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
+      },
+    ));
 
-  it("verweigert INSERT in einem anderen Kanal als dem des Actors", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
-        actor: { userId: "user-1", sessionId: "session-1" },
-        channelId: "kanal-a",
-        role: "broadcaster",
-        sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
-      });
-      await saeeKanal(database, "kanal-b");
-
-      await expect(createChannelMemberWithAudit(
-        database as unknown as D1Database,
+  it("verweigert INSERT in einem anderen Kanal als dem des Actors", () =>
+    erwarteAbgelehnteGuardMutation(
+      async (database, jetzt) => {
+        await saeeGuardAkteur(database, {
+          actor: { userId: "user-1", sessionId: "session-1" },
+          channelId: "kanal-a",
+          role: "broadcaster",
+          sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
+        });
+        await saeeKanal(database, "kanal-b");
+      },
+      (database, jetzt) => createChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         mitgliedFuer("kanal-b", "target-user", "bediener"),
         "mitglied.hinzugefügt",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-b", "target-user")).resolves.toBeNull();
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-b", "target-user")).resolves.toBeNull();
+      },
+    ));
 
-  it("verweigert INSERT für eine Rollenvergabe durch einen Verwalter", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
+  it("verweigert INSERT für eine Rollenvergabe durch einen Verwalter", () =>
+    erwarteAbgelehnteGuardMutation(
+      (database, jetzt) => saeeGuardAkteur(database, {
         actor: { userId: "user-1", sessionId: "session-1" },
         channelId: "kanal-a",
         role: "verwalter",
         sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
-      });
-
-      await expect(createChannelMemberWithAudit(
-        database as unknown as D1Database,
+      }),
+      (database, jetzt) => createChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         mitgliedFuer("kanal-a", "target-user", "broadcaster"),
         "mitglied.hinzugefügt",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
+      },
+    ));
 
-  it("verweigert UPDATE auf Broadcaster-Rolle durch einen Verwalter", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
-        actor: { userId: "user-1", sessionId: "session-1" },
-        channelId: "kanal-a",
-        role: "verwalter",
-        sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
-      });
-      await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
-
-      await expect(updateChannelMemberWithAudit(
-        database as unknown as D1Database,
+  it("verweigert UPDATE auf Broadcaster-Rolle durch einen Verwalter", () =>
+    erwarteAbgelehnteGuardMutation(
+      async (database, jetzt) => {
+        await saeeGuardAkteur(database, {
+          actor: { userId: "user-1", sessionId: "session-1" },
+          channelId: "kanal-a",
+          role: "verwalter",
+          sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
+        });
+        await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
+      },
+      (database, jetzt) => updateChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         { ...mitgliedFuer("kanal-a", "target-user", "broadcaster"), updatedAt: jetzt },
         "mitglied.rolle_geändert",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
+      },
+    ));
 
-  it("verweigert DELETE durch ein Mitglied ohne Verwalterrolle", async () => {
-    const database = new TestD1Database();
-    const jetzt = frischerZeitpunkt();
-    try {
-      await saeeGuardAkteur(database, {
-        actor: { userId: "user-1", sessionId: "session-1" },
-        channelId: "kanal-a",
-        role: "bediener",
-        sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
-      });
-      await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
-
-      await expect(deleteChannelMemberWithAudit(
-        database as unknown as D1Database,
+  it("verweigert DELETE durch ein Mitglied ohne Verwalterrolle", () =>
+    erwarteAbgelehnteGuardMutation(
+      async (database, jetzt) => {
+        await saeeGuardAkteur(database, {
+          actor: { userId: "user-1", sessionId: "session-1" },
+          channelId: "kanal-a",
+          role: "bediener",
+          sessionExpiresAt: zeitpunktMitAbstand(jetzt, 60_000),
+        });
+        await saeeKanalmitglied(database, mitgliedFuer("kanal-a", "target-user", "bediener"));
+      },
+      (database, jetzt) => deleteChannelMemberWithAudit(
+        database,
         { userId: "user-1", sessionId: "session-1" },
         "kanal-a",
         "target-user",
         "mitglied.entfernt",
         jetzt,
-      )).resolves.toBe(false);
-      await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
-    } finally {
-      database.close();
-    }
-  });
+      ),
+      async (database) => {
+        await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
+      },
+    ));
 });
