@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } f
 
 import type { PanelChannelRole, PanelMember, PanelTwitchUser } from "../panel-contract";
 import { roleLabel } from "./labels";
-import { formatDashboardDate } from "./locale";
+import { formatDatum } from "./locale";
 import {
   addChannelMember,
   PanelApiError,
@@ -30,9 +30,15 @@ interface MembersPageProperties {
 
 const manageableRoles: readonly PanelChannelRole[] = ["broadcaster", "verwalter", "bediener"];
 
-/** Der Beitritt liegt Tage bis Jahre zurueck; die Uhrzeit traegt dort nichts bei. */
-const formatJoinDate = (value: string): string => {
-  return formatDashboardDate(value, { dateStyle: "medium" });
+/** Der Beitritt liegt Tage bis Jahre zurück; die Uhrzeit trägt dort nichts bei. */
+const formatJoinDate = (value: string): string => formatDatum(value);
+
+const texte = {
+  verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.",
+  zugriffVergeben: "Zugriff vergeben",
+  twitchName: "Twitch-Name",
+  suchen: "Suchen",
+  sucheLaeuft: "Suche läuft …",
 };
 
 const errorMessage = (error: unknown): string => {
@@ -86,9 +92,14 @@ const roleOptions = (rollen: readonly PanelChannelRole[] = manageableRoles): Rea
 const accessConfirmation = (role: PanelChannelRole): string =>
   `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${roleLabel(role)}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt.`;
 
-const MemberAvatar = ({ src }: { src: string | null }): ReactElement => {
+/**
+ * `src` darf auch fehlen, nicht nur `null` sein: Während eines Deploys kann
+ * ein neues Panel-Bündel mit einem älteren Worker sprechen, der das Feld noch
+ * nicht liefert. Ein fehlendes Bild darf die Seite nicht abräumen.
+ */
+const MemberAvatar = ({ src }: { src: string | null | undefined }): ReactElement => {
   const [failedSource, setFailedSource] = useState<string | null>(null);
-  if (src === null || src.length === 0 || failedSource === src) {
+  if (src === null || src === undefined || src.length === 0 || failedSource === src) {
     return <span className="member-avatar-placeholder" aria-hidden="true" />;
   }
   return <img className="member-avatar" src={src} alt="" aria-hidden="true" onError={() => setFailedSource(src)} />;
@@ -112,10 +123,11 @@ const MemberTable = ({
   busyUserId: string | null;
 }): ReactElement => {
   if (members.length === 0) return <p className="muted">Für diesen Kanal ist noch niemand zusätzlich freigegeben.</p>;
+  const verwaltungGesperrt = canManageMembers ? null : texte.verwaltungGesperrt;
   return (
     <div className="member-table-wrap">
       <table className="member-table">
-        <thead><tr><th scope="col">Name</th><th scope="col">Rolle</th><th scope="col" aria-sort="descending">Zugriff seit</th>{canManageMembers ? <th scope="col"><span className="sr-only">Aktionen</span></th> : null}</tr></thead>
+        <thead><tr><th scope="col">Name</th><th scope="col">Rolle</th><th scope="col" aria-sort="descending">Zugriff seit</th><th scope="col"><span className="sr-only">Aktionen</span></th></tr></thead>
         <tbody>
           {members.map((member) => (
             <tr key={member.userId}>
@@ -137,34 +149,32 @@ const MemberTable = ({
                 </div>
               </th>
               <td>
-                {canManageMembers ? (
-                  <select
-                    aria-label={`Rolle für ${memberLabel(member)}`}
-                    value={member.role}
-                    disabled={busyUserId === member.userId || letzterBroadcaster(member, broadcasterCount)}
-                    title={entzugGesperrt(member, broadcasterCount) ?? undefined}
-                    onChange={(event) => onRoleChange(member.userId, event.target.value as PanelChannelRole)}
-                  >
-                    {roleOptions(waehlbareRollen(member, eigeneUserId, broadcasterCount))}
-                  </select>
-                ) : roleLabel(member.role)}
+                <select
+                  aria-label={`Rolle für ${memberLabel(member)}`}
+                  value={member.role}
+                  disabled={!canManageMembers || busyUserId === member.userId || letzterBroadcaster(member, broadcasterCount)}
+                  title={verwaltungGesperrt ?? entzugGesperrt(member, broadcasterCount) ?? undefined}
+                  onChange={(event) => onRoleChange(member.userId, event.target.value as PanelChannelRole)}
+                >
+                  {roleOptions(waehlbareRollen(member, eigeneUserId, broadcasterCount))}
+                </select>
               </td>
               <td className="zahl">{formatJoinDate(member.joinedAt)}</td>
-              {canManageMembers ? (
-                <td>
-                  <button
-                    className="button button--quiet"
-                    type="button"
-                    aria-label={`Zugriff für ${memberLabel(member)} entziehen`}
-                    disabled={busyUserId === member.userId || entzugGesperrt(member, broadcasterCount) !== null}
-                    title={entzugGesperrt(member, broadcasterCount) ?? undefined}
-                    onClick={() => onRemove(member)}
-                  >Entziehen</button>
-                  {entzugGesperrt(member, broadcasterCount) === null
+              <td>
+                <button
+                  className="button button--quiet"
+                  type="button"
+                  aria-label={`Zugriff für ${memberLabel(member)} entziehen`}
+                  disabled={!canManageMembers || busyUserId === member.userId || entzugGesperrt(member, broadcasterCount) !== null}
+                  title={verwaltungGesperrt ?? entzugGesperrt(member, broadcasterCount) ?? undefined}
+                  onClick={() => onRemove(member)}
+                >Entziehen</button>
+                {verwaltungGesperrt !== null
+                  ? <span className="sperrgrund">{verwaltungGesperrt}</span>
+                  : entzugGesperrt(member, broadcasterCount) === null
                     ? null
                     : <span className="sperrgrund">Letzter Broadcaster</span>}
-                </td>
-              ) : null}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -282,58 +292,58 @@ export const MembersPage = ({
         <h1>Mitglieder</h1>
         <span className="muted zahl">{String(members.length)}</span>
       </header>
-      {canManageMembers ? (
-        <section className="content-section" aria-label="Mitglied hinzufügen">
-          <div className="section-heading"><h2>Zugriff vergeben</h2></div>
-          <form className="member-search-form" onSubmit={(event) => { void handleSearch(event); }}>
-            <label htmlFor="member-search">Twitch-Name</label>
-            <div className="member-search-row"><input id="member-search" value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="off" /><button className="button" type="submit" disabled={searching || login.trim().length === 0}>{searching ? "Suche läuft …" : "Suchen"}</button></div>
-          </form>
-          {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
-          {foundUser === null ? null : (
-            <div className="member-search-result">
-              <div className="member-avatar-row">
-                <MemberAvatar src={foundUser.profileImageUrl} />
-                <div>
-                  <strong>{foundUser.displayName}</strong>
-                  <span>@{foundUser.login} · Twitch-ID {foundUser.userId}</span>
-                  <a
-                    className="member-login member-profile-link"
-                    href={`https://twitch.tv/${foundUser.login}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                  >twitch.tv/{foundUser.login}</a>
-                </div>
-              </div>
-              <label>Rolle<select aria-label="Rolle für neue Mitgliedschaft" value={newRole} onChange={(event) => setNewRole(event.target.value as PanelChannelRole)}>{roleOptions()}</select></label>
-              <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={busyUserId === foundUser.userId}>Zugriff freigeben</button>
-            </div>
-          )}
-          {confirmingAdd && foundUser !== null ? (
-            <div
-              className="member-add-confirmation"
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby="member-add-confirmation-title"
-              aria-describedby="member-add-confirmation-description"
-              onKeyDown={(event) => { if (event.key === "Escape") cancelAdd(); }}
-            >
-              <div className="member-avatar-row">
-                <MemberAvatar src={foundUser.profileImageUrl} />
-                <div>
-                  <h3 id="member-add-confirmation-title">Zugriff für {foundUser.displayName} freigeben?</h3>
-                  <span>@{foundUser.login}</span>
-                </div>
-              </div>
-              <p id="member-add-confirmation-description">{accessConfirmation(newRole)}</p>
-              <div className="member-confirmation-actions">
-                <button ref={confirmButtonRef} className="button button--primary" type="button" onClick={() => { void handleAdd(); }} disabled={busyUserId === foundUser.userId}>Zugriff endgültig freigeben</button>
-                <button className="button button--quiet" type="button" onClick={cancelAdd} disabled={busyUserId === foundUser.userId}>Abbrechen</button>
+      <section className="content-section" aria-label="Mitglied hinzufügen">
+        <div className="section-heading"><h2>{texte.zugriffVergeben}</h2></div>
+        {!canManageMembers ? <p className="sperrgrund">{texte.verwaltungGesperrt}</p> : null}
+        <form className="member-search-form" onSubmit={(event) => { void handleSearch(event); }}>
+          <label htmlFor="member-search">{texte.twitchName}</label>
+          <div className="member-search-row"><input id="member-search" value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="off" disabled={!canManageMembers} title={!canManageMembers ? texte.verwaltungGesperrt : undefined} /><button className="button" type="submit" disabled={!canManageMembers || searching || login.trim().length === 0} title={!canManageMembers ? texte.verwaltungGesperrt : undefined}>{searching ? texte.sucheLaeuft : texte.suchen}</button></div>
+        </form>
+        {!canManageMembers && foundUser === null ? <div><button className="button" type="button" disabled title={texte.verwaltungGesperrt}>Zugriff freigeben</button><span className="sperrgrund">{texte.verwaltungGesperrt}</span></div> : null}
+        {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
+        {foundUser === null ? null : (
+          <div className="member-search-result">
+            <div className="member-avatar-row">
+              <MemberAvatar src={foundUser.profileImageUrl} />
+              <div>
+                <strong>{foundUser.displayName}</strong>
+                <span>@{foundUser.login} · Twitch-ID {foundUser.userId}</span>
+                <a
+                  className="member-login member-profile-link"
+                  href={`https://twitch.tv/${foundUser.login}`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >twitch.tv/{foundUser.login}</a>
               </div>
             </div>
-          ) : null}
-        </section>
-      ) : null}
+            <label>Rolle<select aria-label="Rolle für neue Mitgliedschaft" value={newRole} onChange={(event) => setNewRole(event.target.value as PanelChannelRole)}>{roleOptions()}</select></label>
+            <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={busyUserId === foundUser.userId}>Zugriff freigeben</button>
+          </div>
+        )}
+        {confirmingAdd && foundUser !== null ? (
+          <div
+            className="member-add-confirmation"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="member-add-confirmation-title"
+            aria-describedby="member-add-confirmation-description"
+            onKeyDown={(event) => { if (event.key === "Escape") cancelAdd(); }}
+          >
+            <div className="member-avatar-row">
+              <MemberAvatar src={foundUser.profileImageUrl} />
+              <div>
+                <h3 id="member-add-confirmation-title">Zugriff für {foundUser.displayName} freigeben?</h3>
+                <span>@{foundUser.login}</span>
+              </div>
+            </div>
+            <p id="member-add-confirmation-description">{accessConfirmation(newRole)}</p>
+            <div className="member-confirmation-actions">
+              <button ref={confirmButtonRef} className="button button--primary" type="button" onClick={() => { void handleAdd(); }} disabled={busyUserId === foundUser.userId}>Zugriff endgültig freigeben</button>
+              <button className="button button--quiet" type="button" onClick={cancelAdd} disabled={busyUserId === foundUser.userId}>Abbrechen</button>
+            </div>
+          </div>
+        ) : null}
+      </section>
       <section className="content-section" aria-label="Mitgliederliste">
         <div className="section-heading"><h2>Freigegebene Mitglieder</h2></div>
         {loading ? <p className="loading-line">Mitglieder werden geladen …</p> : null}

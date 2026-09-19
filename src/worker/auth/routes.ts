@@ -49,6 +49,12 @@ import {
 
 const nowIso = (): string => new Date().toISOString();
 
+const canManageOverlayTokens = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
+  role === "broadcaster" || role === "verwalter";
+
+const overlayTokenManageDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
+  context.text("Nur Broadcaster und Verwalter dürfen Overlay-Token verwalten.", 403);
+
 const randomId = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(24));
   let binary = "";
@@ -153,6 +159,7 @@ authRouter.post(
   "/api/channels/:channelId/overlay-tokens",
   requireChannelAuthorization(),
   async (context) => {
+    if (!canManageOverlayTokens(context.get("channelRole"))) return overlayTokenManageDenied(context);
     const channelId = context.req.param("channelId");
 
     const now = nowIso();
@@ -180,6 +187,7 @@ authRouter.post(
   "/api/channels/:channelId/overlay-tokens/:tokenId/revoke",
   requireChannelAuthorization(),
   async (context) => {
+    if (!canManageOverlayTokens(context.get("channelRole"))) return overlayTokenManageDenied(context);
     const channelId = context.req.param("channelId");
     const tokenId = context.req.param("tokenId");
     const reason = await readRevocationReason(context.req.raw);

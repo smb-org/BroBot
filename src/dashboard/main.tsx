@@ -34,7 +34,7 @@ import { ModulePanelMount } from "./module-panels";
 import { MembersPage } from "./members";
 import { ModulesPage } from "./modules";
 import { roleLabel } from "./labels";
-import { formatDashboardDate } from "./locale";
+import { formatZeitpunkt, formatZahl } from "./locale";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import "./styles.css";
 
@@ -229,12 +229,7 @@ const NavDot = ({ tone }: { tone: "healthy" | "warning" | "error" }): ReactEleme
     <span className="nav-dot" data-status={tone} role="img" aria-label={tone === "error" ? "Fehler" : "Warnung"} />
   );
 
-const formatTimestamp = (value: string): string => {
-  return formatDashboardDate(value, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-};
+const formatTimestamp = (value: string): string => formatZeitpunkt(value);
 
 const tokenSummary = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): string => {
   return tokenView(tokens, bot).label;
@@ -333,7 +328,7 @@ const OverviewPage = ({ channels, onNavigate }: { channels: PanelChannelState[];
   <>
     <header className="page-heading">
       <h1>Übersicht</h1>
-      <p>{channels.length === 1 ? "Ein Kanal ist für dich freigegeben." : `${String(channels.length)} Kanäle sind für dich freigegeben.`}</p>
+      <p>{channels.length === 1 ? "Ein Kanal ist für dich freigegeben." : `${formatZahl(channels.length)} Kanäle sind für dich freigegeben.`}</p>
     </header>
     {channels.length === 0 ? (
       <section className="empty-panel"><h2>Noch kein Kanal freigegeben</h2><p>Für dieses Konto gibt es keine Mitgliedschaft in einem freigegebenen Kanal.</p></section>
@@ -560,16 +555,26 @@ const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModer
           {eintraege.map((eintrag) => <Fragment key={eintrag.key}>{eintrag.node}</Fragment>)}
         </div>
       )}
-      <section className="content-section"><div className="section-heading"><h2>Aktive Module</h2><span className="muted zahl">{String(overview.activeModules.length)}</span></div><ModulePanelMount channelId={overview.channelId} activeModules={overview.activeModules} /></section>
+      <section className="content-section"><div className="section-heading"><h2>Aktive Module</h2><span className="muted zahl">{formatZahl(overview.activeModules.length)}</span></div><ModulePanelMount channelId={overview.channelId} activeModules={overview.activeModules} /></section>
     </>
   );
 };
 
-const SystemPage = ({ system, auditState, onNextPage, loadingNextPage }: { system: PanelSystemResponse; auditState: LoadState<PanelAuditResponse>; onNextPage: () => void; loadingNextPage: boolean }): ReactElement => (
+interface SystemPageProperties {
+  system: PanelSystemResponse | null;
+  systemState: LoadState<PanelSystemResponse>;
+  auditState: LoadState<PanelAuditResponse>;
+  onNextPage: () => void;
+  loadingNextPage: boolean;
+}
+
+const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPage }: SystemPageProperties): ReactElement => (
   <>
     <header className="page-heading"><h1>System</h1></header>
-    <div className="status-grid"><BroadcasterConnectionCard status={system.broadcasterConnection} /><ChatSubscriptionCard status={system.chatSubscription} /><BotCard bot={system.bot} /><TokenCard tokens={system.tokens} bot={system.bot} /></div>
-    <section className="content-section"><div className="section-heading"><h2>Audit-Log</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{String(auditState.data.entries.length)}</span> Einträge</span>}</div>
+    {system === null && systemState.status === "loading" ? <p className="loading-line">Systemzustand wird geladen …</p> : null}
+    {systemState.error !== null ? <ErrorPanel message={systemState.error} /> : null}
+    {system === null ? null : <div className="status-grid"><BroadcasterConnectionCard status={system.broadcasterConnection} /><ChatSubscriptionCard status={system.chatSubscription} /><BotCard bot={system.bot} /><TokenCard tokens={system.tokens} bot={system.bot} /></div>}
+    <section className="content-section"><div className="section-heading"><h2>Audit-Log</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{formatZahl(auditState.data.entries.length)}</span> Einträge</span>}</div>
       {auditState.status === "loading" ? <p className="loading-line">Audit-Log wird geladen …</p> : null}
       {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
       {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="muted">Noch keine Audit-Einträge gespeichert.</p> : null}
@@ -584,7 +589,7 @@ const SystemPage = ({ system, auditState, onNextPage, loadingNextPage }: { syste
 const EventsPage = ({ eventsState, onNextPage, loadingNextPage }: { eventsState: LoadState<PanelEventsResponse>; onNextPage: () => void; loadingNextPage: boolean }): ReactElement => (
   <>
     <header className="page-heading"><h1>Ereignisse</h1></header>
-    <section className="content-section"><div className="section-heading"><h2>Ereignisprotokoll</h2>{eventsState.data === null ? null : <span className="muted"><span className="zahl">{String(eventsState.data.entries.length)}</span> Einträge</span>}</div>
+    <section className="content-section"><div className="section-heading"><h2>Ereignisprotokoll</h2>{eventsState.data === null ? null : <span className="muted"><span className="zahl">{formatZahl(eventsState.data.entries.length)}</span> Einträge</span>}</div>
       {eventsState.status === "loading" ? <p className="loading-line">Ereignisse werden geladen …</p> : null}
       {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
       {eventsState.data !== null && eventsState.data.entries.length === 0 ? <p className="muted">Noch keine Ereignisse protokolliert.</p> : null}
@@ -760,25 +765,38 @@ export const DashboardApp = (): ReactElement => {
       setOverview(idleState());
       setSystem(loadingState());
       setAudit(loadingState());
-      try {
-        const [systemResponse, auditResponse] = await Promise.all([
-          fetchSystemOverview(route.channelId, controller.signal),
-          fetchAuditLog(route.channelId, null, controller.signal),
-        ]);
-        if (!cancelled) {
-          setSystem({ status: "success", data: systemResponse, error: null });
-          setAudit({ status: "success", data: auditResponse, error: null });
-          setSystemChannelId(route.channelId);
-          setAuditChannelId(route.channelId);
+      setSystemChannelId(route.channelId);
+      setAuditChannelId(route.channelId);
+      const loadSystem = async (): Promise<void> => {
+        try {
+          const response = await fetchSystemOverview(route.channelId, controller.signal);
+          if (!cancelled && !controller.signal.aborted) {
+            setSystem({ status: "success", data: response, error: null });
+            setSystemChannelId(route.channelId);
+          }
+        } catch (error) {
+          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+            setSystem({ status: "error", data: null, error: errorMessage(error) });
+            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+          }
         }
-      } catch (error) {
-        if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
-          const message = errorMessage(error);
-          setSystem({ status: "error", data: null, error: message });
-          setAudit({ status: "error", data: null, error: message });
-          if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+      };
+      const loadAudit = async (): Promise<void> => {
+        try {
+          const response = await fetchAuditLog(route.channelId, null, controller.signal);
+          if (!cancelled && !controller.signal.aborted) {
+            setAudit({ status: "success", data: response, error: null });
+            setAuditChannelId(route.channelId);
+          }
+        } catch (error) {
+          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+            setAudit({ status: "error", data: null, error: errorMessage(error) });
+            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+          }
         }
-      }
+      };
+      void loadSystem();
+      void loadAudit();
     };
     void load();
     return cleanup;
@@ -997,9 +1015,7 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "channel" && route.section === "members" && members.error !== null ? <ErrorPanel message={members.error} /> : null}
         {route.kind === "channel" && route.section === "members" && members.data !== null && selectedChannel !== null ? <MembersPage channelId={route.channelId} ownRole={selectedChannel.role} eigeneUserId={members.data.viewerUserId} members={members.data.members} broadcasterCount={members.data.broadcasterCount} nextCursor={members.data.nextCursor} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModulesPage channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onReload={reloadModules} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
-        {route.kind === "channel" && route.section === "system" && system.status === "loading" ? <p className="loading-line">Systemzustand wird geladen …</p> : null}
-        {route.kind === "channel" && route.section === "system" && system.error !== null ? <ErrorPanel message={system.error} /> : null}
-        {route.kind === "channel" && route.section === "system" && system.data !== null && systemChannelId === route.channelId ? <SystemPage system={system.data} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
+        {route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {route.kind === "channel" && route.section === "events" && events.status === "loading" ? <p className="loading-line">Ereignisse werden geladen …</p> : null}
         {route.kind === "channel" && route.section === "events" && events.error !== null ? <ErrorPanel message={events.error} /> : null}
         {route.kind === "channel" && route.section === "events" && events.data !== null && eventsChannelId === route.channelId ? <EventsPage eventsState={events} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}

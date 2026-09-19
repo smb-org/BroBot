@@ -1,9 +1,10 @@
 import {
-  ANY_MEMBER_ROLES,
   actorGuard,
   bindActorGuard,
   type ActorContext,
 } from "./repository";
+
+const overlayTokenRoles = "'broadcaster', 'verwalter'";
 
 export interface NewOverlayTokenRecord {
   tokenId: string;
@@ -73,7 +74,7 @@ export const createOverlayToken = async (
        revoked_at, revocation_reason, last_used_at)
      SELECT ?, ?, ?, ?, ?, ?, ?, ?
       WHERE 1 = 1
-      ${actorGuard(ANY_MEMBER_ROLES)}`,
+      ${actorGuard(overlayTokenRoles)}`,
   ).bind(
     token.tokenId,
     token.channelId,
@@ -145,7 +146,7 @@ export const revokeOverlayToken = async (
       WHERE token_id = ?
         AND channel_id = ?
         AND revoked_at IS NULL
-      ${actorGuard(ANY_MEMBER_ROLES)}`,
+      ${actorGuard(overlayTokenRoles)}`,
   ).bind(
     revokedAt,
     reason,
