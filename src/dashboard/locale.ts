@@ -179,6 +179,8 @@ export interface DashboardTexte {
     keineAnsicht: string;
     ansichten: string;
     ansichtenLaden: string;
+    nichtAktiv: (name: string) => string;
+    unbekannt: (name: string) => string;
   };
 }
 
@@ -257,8 +259,10 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       registriert: "Für diesen Bot ist noch kein Modul registriert.", aktiv: "Aktiv", inaktiv: "Inaktiv",
       aktivieren: "aktivieren", deaktivieren: "deaktivieren", modulliste: "Modulliste",
       verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Module ändern.", keineAktiv: "Keine Module aktiv.",
-      keineAnsicht: "Für die aktiven Module gibt es noch keine Panel-Ansicht.", ansichten: "Modulansichten",
+      keineAnsicht: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", ansichten: "Modulansichten",
       ansichtenLaden: "Modulansichten werden geladen …",
+      nichtAktiv: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
+      unbekannt: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     },
   },
   en: {
@@ -326,7 +330,9 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       modul: "Module", verfuegbar: "Available modules", laden: "Loading modules …", registriert: "No module is registered for this bot yet.",
       aktiv: "Active", inaktiv: "Inactive", aktivieren: "enable", deaktivieren: "disable", modulliste: "Module list",
       verwaltungGesperrt: "Only broadcasters and managers may change modules.", keineAktiv: "No modules active.",
-      keineAnsicht: "The active modules do not have a panel view yet.", ansichten: "Module views", ansichtenLaden: "Loading module views …",
+      keineAnsicht: "This active module does not have a panel view yet.", ansichten: "Module views", ansichtenLaden: "Loading module views …",
+      nichtAktiv: (name) => `The module “${name}” is not active in this channel.`,
+      unbekannt: (name) => `The module “${name}” is unknown.`,
     },
   },
 };

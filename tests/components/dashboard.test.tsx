@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
-import { parseDashboardRoute } from "../../src/dashboard/router";
+import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
 
 const moderator = {
   isModerator: true,
@@ -125,6 +125,23 @@ describe("Dashboard-Grundgerüst", () => {
       channelId: "kanal-a",
       section: "events",
     });
+  });
+
+  it("erkennt die Unterseite eines kanalgebundenen Moduls", () => {
+    expect(parseDashboardRoute("/channels/kanal-a/modules/textbefehle")).toEqual({
+      kind: "module",
+      channelId: "kanal-a",
+      moduleId: "textbefehle",
+    });
+  });
+
+  it("verwirft eine ungültig codierte Modulroute", () => {
+    expect(parseDashboardRoute("/channels/kanal-a/modules/%ZZ")).toEqual({ kind: "overview" });
+  });
+
+  it("kodiert Kanal- und Modul-ID in der Modulroute", () => {
+    expect(dashboardRoutePath({ kind: "module", channelId: "kanal/a", moduleId: "text befehle" }))
+      .toBe("/channels/kanal%2Fa/modules/text%20befehle");
   });
 
   it("zeigt Ereignisse mit Modul, Code, Detail und Akteur", async () => {
@@ -572,6 +589,99 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByText("Keine Module aktiv.")).toBeInTheDocument();
+  });
+
+  it("verweist in der Kanalübersicht auf aktive Module statt ihre Formulare einzubetten", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(aktivesModul);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const link = await screen.findByRole("link", { name: "Textbefehle" });
+    expect(link).toHaveAttribute("href", "/channels/kanal-a/modules/textbefehle");
+    expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
+  });
+
+  it("erreicht ein aktives Modul über seine eigene Unterseite", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(aktivesModul);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Befehl anlegen" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Module" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("mountet beim Wechsel zur Modulroute nicht den alten Übersichtsstand", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    const deaktiviertesModul = overview(channel);
+    let overviewAufrufe = 0;
+    let loeseZweiteAntwortAuf!: (response: Response) => void;
+    const zweiteAntwort = new Promise<Response>((resolve) => { loeseZweiteAntwortAuf = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels/kanal-a/overview") {
+        overviewAufrufe += 1;
+        return overviewAufrufe === 1 ? jsonResponse(aktivesModul) : zweiteAntwort;
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+    const link = await screen.findByRole("link", { name: "Textbefehle" });
+    link.click();
+
+    expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
+    loeseZweiteAntwortAuf(jsonResponse(deaktiviertesModul));
+    expect(await screen.findByText("Das Modul „Textbefehle“ ist in diesem Kanal nicht aktiv.")).toBeInTheDocument();
+  });
+
+  it("meldet ein deaktiviertes Modul auf seiner Unterseite verständlich", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Das Modul „Textbefehle“ ist in diesem Kanal nicht aktiv.")).toBeInTheDocument();
+  });
+
+  it("meldet ein unbekanntes Modul auf seiner Unterseite verständlich", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/unbekannt");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Das Modul „unbekannt“ ist nicht bekannt.")).toBeInTheDocument();
   });
 
   it("zeigt einen Kanal ohne Broadcaster-OAuth neutral und erreicht dessen Overview und System", async () => {

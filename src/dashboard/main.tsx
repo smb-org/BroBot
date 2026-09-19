@@ -30,7 +30,7 @@ import {
   PanelApiError,
   refreshModeratorStatus,
 } from "./api";
-import { ModulePanelMount } from "./module-panels";
+import { ModuleNavigation, ModulePage } from "./module-panels";
 import { MembersPage } from "./members";
 import { ModulesPage } from "./modules";
 import { roleLabel } from "./labels";
@@ -195,10 +195,11 @@ interface LinkProperties {
 }
 
 const RouteLink = ({ route, current, children, onNavigate }: LinkProperties): ReactElement => {
-  const isCurrent = route.kind === current.kind && route.kind === "overview"
-    ? true
-    : route.kind === "channel" && current.kind === "channel" &&
-      route.channelId === current.channelId && route.section === current.section;
+  const isCurrent = (route.kind === "overview" && current.kind === "overview") ||
+    (route.kind === "channel" && current.kind === "channel" &&
+      route.channelId === current.channelId && route.section === current.section) ||
+    (route.kind === "channel" && current.kind === "module" &&
+      route.channelId === current.channelId && route.section === "modules");
   return (
     <a
       className={isCurrent ? "nav-link nav-link--active" : "nav-link"}
@@ -288,8 +289,9 @@ interface SidebarProperties {
 
 const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarProperties): ReactElement => {
   const texte = dashboardTexte();
-  const selectedChannelId = route.kind === "channel" ? route.channelId : "";
-  const activeChannel = route.kind === "channel"
+  const isChannelRoute = route.kind === "channel" || route.kind === "module";
+  const selectedChannelId = isChannelRoute ? route.channelId : "";
+  const activeChannel = isChannelRoute
     ? channels.find((channel) => channel.channelId === route.channelId)
     : undefined;
   return (
@@ -297,7 +299,7 @@ const Sidebar = ({ route, channels, onNavigate, onLogout, loggingOut }: SidebarP
       <div className="brand-mark"><span className="brand-mark__dot" />BroBot</div>
       <nav className="primary-nav" aria-label={texte.navigation.hauptnavigation}>
         <RouteLink route={{ kind: "overview" }} current={route} onNavigate={onNavigate}>{texte.navigation.uebersicht}</RouteLink>
-        {route.kind === "channel" ? (
+        {isChannelRoute ? (
           <>
             <RouteLink route={{ kind: "channel", channelId: route.channelId, section: "overview" }} current={route} onNavigate={onNavigate}>
               {texte.navigation.kanal}
@@ -501,9 +503,10 @@ interface ChannelOverviewPageProperties {
   geladenAm: number | undefined;
   moderatorCheck: ModeratorCheckState;
   onCheckModeratorStatus: () => void;
+  onNavigate: (route: DashboardRoute) => void;
 }
 
-const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModeratorStatus }: ChannelOverviewPageProperties): ReactElement => {
+const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModeratorStatus, onNavigate }: ChannelOverviewPageProperties): ReactElement => {
   // Die Kanaluebersicht ist die Blickflaeche. Was in Ordnung ist, erscheint hier
   // nicht; laeuft alles, beginnt der Inhalt sofort. Die Werte stehen weiterhin
   // vollstaendig auf der Systemseite.
@@ -570,7 +573,7 @@ const ChannelOverviewPage = ({ overview, geladenAm, moderatorCheck, onCheckModer
           {eintraege.map((eintrag) => <Fragment key={eintrag.key}>{eintrag.node}</Fragment>)}
         </div>
       )}
-      <section className="content-section"><div className="section-heading"><h2>{dashboardTexte().overview.aktiveModule}</h2><span className="muted zahl">{formatZahl(overview.activeModules.length)}</span></div><ModulePanelMount channelId={overview.channelId} activeModules={overview.activeModules} /></section>
+      <section className="content-section"><div className="section-heading"><h2>{dashboardTexte().overview.aktiveModule}</h2><span className="muted zahl">{formatZahl(overview.activeModules.length)}</span></div><ModuleNavigation channelId={overview.channelId} activeModules={overview.activeModules} onNavigate={onNavigate} /></section>
     </>
   );
 };
@@ -635,6 +638,7 @@ export const DashboardApp = (): ReactElement => {
   const [route, navigate] = useDashboardRoute();
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
   const [overview, setOverview] = useState<LoadState<PanelChannelOverview>>(() => idleState());
+  const [overviewRoutePath, setOverviewRoutePath] = useState<string | null>(null);
   const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(() => idleModeratorCheck());
   const [system, setSystem] = useState<LoadState<PanelSystemResponse>>(() => idleState());
   const [members, setMembers] = useState<LoadState<PanelMembersResponse>>(() => idleState());
@@ -662,6 +666,7 @@ export const DashboardApp = (): ReactElement => {
     membersPageController.current = null;
     setChannels({ status: "success", data: [], error: null });
     setOverview(idleState());
+    setOverviewRoutePath(null);
     setModeratorCheck(idleModeratorCheck());
     setSystem(idleState());
     setMembers(idleState());
@@ -711,6 +716,7 @@ export const DashboardApp = (): ReactElement => {
     membersPageController.current = null;
     setLoadingNextMembersPage(false);
     setOverview(loadingState());
+    setOverviewRoutePath(null);
     setModeratorCheck(idleModeratorCheck());
     setSystem(idleState());
     setModules(idleState());
@@ -730,13 +736,32 @@ export const DashboardApp = (): ReactElement => {
       membersPageController.current = null;
       setLoadingNextMembersPage(false);
     };
-    if (route.kind !== "channel") return cleanup;
+    if (route.kind !== "channel" && route.kind !== "module") return cleanup;
+    const expectedOverviewPath = dashboardRoutePath(route);
 
     const load = async (): Promise<void> => {
+      if (route.kind === "module") {
+        try {
+          const response = await fetchChannelOverview(route.channelId, controller.signal);
+          if (!cancelled) {
+            setOverview({ status: "success", data: response, error: null, loadedAt: Date.now() });
+            setOverviewRoutePath(expectedOverviewPath);
+          }
+        } catch (error) {
+          if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
+            setOverview({ status: "error", data: null, error: errorMessage(error) });
+            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+          }
+        }
+        return;
+      }
       if (route.section === "overview") {
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
-          if (!cancelled) setOverview({ status: "success", data: response, error: null, loadedAt: Date.now() });
+          if (!cancelled) {
+            setOverview({ status: "success", data: response, error: null, loadedAt: Date.now() });
+            setOverviewRoutePath(expectedOverviewPath);
+          }
         } catch (error) {
           if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
             setOverview({ status: "error", data: null, error: errorMessage(error) });
@@ -932,7 +957,7 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const selectedChannel = useMemo(() => {
-    if (route.kind !== "channel" || channels.data === null) return null;
+    if ((route.kind !== "channel" && route.kind !== "module") || channels.data === null) return null;
     return channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
   }, [channels.data, route]);
 
@@ -1033,14 +1058,17 @@ export const DashboardApp = (): ReactElement => {
         {channels.status === "loading" ? <p className="loading-line">{dashboardTexte().anmeldung.kanalzugriffPruefen}</p> : null}
         {channels.error !== null ? <ErrorPanel message={channels.error} /> : null}
         {route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} onNavigate={navigate} /> : null}
-        {route.kind === "channel" && selectedChannel === null && channels.status === "success" ? <ErrorPanel message={dashboardTexte().fehler.kanalNichtFreigegeben} /> : null}
+        {(route.kind === "channel" || route.kind === "module") && selectedChannel === null && channels.status === "success" ? <ErrorPanel message={dashboardTexte().fehler.kanalNichtFreigegeben} /> : null}
         {route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexte().overview.zustandLaden}</p> : null}
         {route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {route.kind === "channel" && route.section === "overview" && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} geladenAm={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} /> : null}
+        {route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} geladenAm={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} /> : null}
         {route.kind === "channel" && route.section === "members" && members.status === "loading" ? <p className="loading-line">{dashboardTexte().anmeldung.mitgliederLaden}</p> : null}
         {route.kind === "channel" && route.section === "members" && members.error !== null ? <ErrorPanel message={members.error} /> : null}
         {route.kind === "channel" && route.section === "members" && members.data !== null && selectedChannel !== null ? <MembersPage channelId={route.channelId} ownRole={selectedChannel.role} eigeneUserId={members.data.viewerUserId} members={members.data.members} broadcasterCount={members.data.broadcasterCount} nextCursor={members.data.nextCursor} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModulesPage channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onReload={reloadModules} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
+        {route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexte().overview.zustandLaden}</p> : null}
+        {route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
+        {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} activeModules={overview.data.activeModules} /> : null}
         {route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {route.kind === "channel" && route.section === "events" && events.status === "loading" ? <p className="loading-line">{dashboardTexte().ereignisse.laden}</p> : null}
         {route.kind === "channel" && route.section === "events" && events.error !== null ? <ErrorPanel message={events.error} /> : null}
