@@ -25,7 +25,9 @@ app.get("/healthz", async (context) => {
   );
 });
 
-// TODO: Hier später die Routen aus src/modules/registry.ts unter /api/channels/:channelId/modules/<id> mounten.
+// Ereignisse erreichen Module über den EventSub-Eingang und `dispatch.ts`.
+// TODO: Modulrouten aus src/modules/registry.ts unter
+// /api/channels/:channelId/modules/<id> mounten, sobald ein Modul welche hat.
 
 app.all("*", (context) => context.env.ASSETS.fetch(context.req.raw));
 

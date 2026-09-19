@@ -22,7 +22,7 @@ src/modules/<id>/
 ## Registrierung
 
 1. Das Modulverzeichnis mit der Pflichtstruktur anlegen.
-2. Einen `BotModule`-Wert mit `id`, Settings-Schema und Defaults definieren; optionale EventSub-Typen, Routen sowie ein lazy Overlay und/oder Panel nur bei Bedarf ergänzen.
+2. Einen `BotModule`-Wert mit `id`, Settings-Schema und Defaults definieren; optionale EventSub-Typen, `handleEvent`, Routen sowie ein lazy Overlay und/oder Panel nur bei Bedarf ergänzen.
 3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
 4. Prüfen: `pnpm run check`.
 
@@ -39,6 +39,26 @@ schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; 
 eigene Route zum Bearbeiten von Einstellungen gibt es bewusst nicht — dafür ist
 `module.panel` aus dem Contract vorgesehen, sobald ein Modul eigene Einstellungen
 braucht. Das erfordert keinen Deploy.
+
+## Wie ein Modul zu seinem Ereignis kommt
+
+`handleEvent` ist der fachliche Einstiegspunkt und eine **reine Funktion**: Sie
+beschreibt in `ModuleResult.actions`, was geschehen soll, und führt nichts aus.
+Der Host führt die Aktionen aus und protokolliert ihren Ausgang; das Modul
+begründet mit `diagnostics`, warum es gehandelt oder eben nicht gehandelt hat
+(Entscheidung 0004).
+
+Ein Ereignis erreicht ein Modul nur, wenn alle drei Bedingungen gelten: Das
+Modul ist in diesem Kanal aktiviert, es steht in `MODULES`, und der Abo-Typ
+steht in seinen `eventSubTypes`.
+
+Der Zielkanal kommt aus dem geprüften Ereignis und wird dem Modul in
+`ModuleEvent.channelId` mitgeteilt. Ein Modul kann keinen anderen Kanal
+angeben — die Mandantentrennung liegt beim Host, nicht bei der Sorgfalt des
+Modulautors.
+
+Wirft `handleEvent`, hält das weder den Worker noch die übrigen Module auf. Der
+Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben.
 

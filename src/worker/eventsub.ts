@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 
 import { hmacSha256, parseKeyRing } from "./auth/crypto";
+import { dispatchEventSubNotification } from "./dispatch";
 import {
   rememberEventSubMessageAndRevocation,
   rememberEventSubMessage,
@@ -156,6 +157,31 @@ const subscriptionRecord = (
   };
 };
 
+/**
+ * Liest Kanal und Abo-Typ aus der geprüften Benachrichtigung. Der Kanal kommt
+ * ausschließlich von hier und nie vom Modul — sonst könnte ein Modul in einen
+ * fremden Kanal wirken.
+ */
+const notificationZiel = (body: Record<string, unknown>): {
+  channelId: string;
+  subscriptionType: string;
+  payload: Readonly<Record<string, unknown>>;
+} | null => {
+  const subscription = body.subscription;
+  if (!isRecord(subscription)) return null;
+  const condition = subscription.condition;
+  if (!isRecord(condition)) return null;
+  const channelId = condition.broadcaster_user_id;
+  const subscriptionType = subscription.type;
+  if (typeof channelId !== "string" || channelId.length === 0) return null;
+  if (typeof subscriptionType !== "string" || subscriptionType.length === 0) return null;
+  return {
+    channelId,
+    subscriptionType,
+    payload: isRecord(body.event) ? body.event : {},
+  };
+};
+
 export const eventSubRouter = new Hono<{ Bindings: Env }>();
 
 eventSubRouter.post("/api/twitch/eventsub", async (context) => {
@@ -218,7 +244,18 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
   if (!isNew) return response(null, 204);
 
-  // Notifications werden bis Issue #62 absichtlich nur quittiert; dieser
-  // Eingang ist noch kein fachlicher Erfolg und wird nicht weitergeleitet.
+  const ziel = notificationZiel(body);
+  if (ziel === null) return response("Ungültige EventSub-Benachrichtigung.", 400);
+
+  // Bewusst abgewartet statt im Hintergrund: Ein Chat-Aufruf ist kurz, und so
+  // ist der Ausgang in Tests sichtbar. Sollte die Verteilung später länger
+  // dauern, gehört sie hinter die Antwort.
+  await dispatchEventSubNotification(context.env, {
+    channelId: ziel.channelId,
+    subscriptionType: ziel.subscriptionType,
+    triggerId: messageId,
+    payload: ziel.payload,
+    receivedAt: now,
+  });
   return response(null, 204);
 });
