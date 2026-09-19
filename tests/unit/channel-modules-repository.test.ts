@@ -32,6 +32,38 @@ const auditCount = async (database: TestD1Database): Promise<number> => {
   return row?.count ?? 0;
 };
 
+// Gemeinsamer Ablauf der Verweigerungs-Faelle: Mitgliedschaft mit einer Rolle
+// in einem Kanal anlegen, Aktivierung in einem (moeglicherweise anderen)
+// Zielkanal versuchen, Ablehnung und unveraenderten Endzustand pruefen.
+const expectDeniedCreate = async (
+  database: TestD1Database,
+  options: {
+    memberChannelId: string;
+    role: "broadcaster" | "verwalter" | "bediener";
+    targetChannelId: string;
+    extraChannelIds?: string[];
+  },
+): Promise<void> => {
+  await insertChannel(database, options.memberChannelId);
+  for (const extraChannelId of options.extraChannelIds ?? []) {
+    await insertChannel(database, extraChannelId);
+  }
+  await insertLoginIdentityAndSession(database, "user-1");
+  await insertMember(database, options.memberChannelId, "user-1", options.role);
+
+  const changed = await createChannelModuleWithAudit(
+    asD1(database),
+    actorFor("user-1"),
+    record(options.targetChannelId, "test-modul", true),
+    "modul.aktiviert",
+    NOW,
+  );
+
+  expect(changed).toBe(false);
+  await expect(getChannelModuleForChannel(asD1(database), options.targetChannelId, "test-modul")).resolves.toBeNull();
+  await expect(auditCount(database)).resolves.toBe(0);
+};
+
 describe("Modulaktivierung im Repository", () => {
   let database: TestD1Database;
 
@@ -58,40 +90,20 @@ describe("Modulaktivierung im Repository", () => {
   });
 
   it("verweigert die Aktivierung durch einen Bediener und legt keine Zeile an", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
-
-    const changed = await createChannelModuleWithAudit(
-      asD1(database),
-      actorFor("user-1"),
-      record("kanal-a", "test-modul", true),
-      "modul.aktiviert",
-      NOW,
-    );
-
-    expect(changed).toBe(false);
-    await expect(getChannelModuleForChannel(asD1(database), "kanal-a", "test-modul")).resolves.toBeNull();
-    await expect(auditCount(database)).resolves.toBe(0);
+    await expectDeniedCreate(database, {
+      memberChannelId: "kanal-a",
+      role: "bediener",
+      targetChannelId: "kanal-a",
+    });
   });
 
   it("verweigert die Aktivierung in einem fremden Kanal trotz gültiger Session", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertChannel(database, "kanal-b");
-    await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
-
-    const changed = await createChannelModuleWithAudit(
-      asD1(database),
-      actorFor("user-1"),
-      record("kanal-b", "test-modul", true),
-      "modul.aktiviert",
-      NOW,
-    );
-
-    expect(changed).toBe(false);
-    await expect(getChannelModuleForChannel(asD1(database), "kanal-b", "test-modul")).resolves.toBeNull();
-    await expect(auditCount(database)).resolves.toBe(0);
+    await expectDeniedCreate(database, {
+      memberChannelId: "kanal-a",
+      role: "broadcaster",
+      targetChannelId: "kanal-b",
+      extraChannelIds: ["kanal-b"],
+    });
   });
 
   it("deaktiviert ein bestehendes Modul für einen Verwalter mit genau einem weiteren Audit-Eintrag", async () => {

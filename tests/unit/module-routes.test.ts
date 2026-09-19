@@ -66,6 +66,36 @@ const auditCount = async (database: TestD1Database): Promise<number> => {
   return row?.count ?? 0;
 };
 
+// Gemeinsamer Ablauf der Verweigerungs-Faelle: Mitgliedschaft mit einer Rolle
+// in einem Kanal anlegen, PATCH auf einen (moeglicherweise anderen) Zielkanal
+// versuchen, erwarteten Fehlerstatus und unveraenderten Endzustand pruefen.
+const expectDeniedPatch = async (
+  database: TestD1Database,
+  environment: Env,
+  options: {
+    memberChannelId: string;
+    role: "broadcaster" | "verwalter" | "bediener";
+    targetChannelId: string;
+    extraChannelIds?: string[];
+    expectedStatus: number;
+  },
+): Promise<void> => {
+  await insertChannel(database, options.memberChannelId);
+  for (const extraChannelId of options.extraChannelIds ?? []) {
+    await insertChannel(database, extraChannelId);
+  }
+  await insertLoginIdentityAndSession(database, "user-1");
+  await insertMember(database, options.memberChannelId, "user-1", options.role);
+
+  const response = await panelRouter.fetch(
+    await requestFor("user-1", `/api/channels/${options.targetChannelId}/modules/test-modul`, "PATCH", { enabled: true }),
+    environment,
+  );
+
+  expect(response.status).toBe(options.expectedStatus);
+  await expect(auditCount(database)).resolves.toBe(0);
+};
+
 describe("Modulverwaltung im Panel", () => {
   let database: TestD1Database;
   let environment: Env;
@@ -119,17 +149,12 @@ describe("Modulverwaltung im Panel", () => {
   });
 
   it("verweigert einem Bediener das Aktivieren eines Moduls", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
-
-    const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
-      environment,
-    );
-
-    expect(response.status).toBe(403);
-    await expect(auditCount(database)).resolves.toBe(0);
+    await expectDeniedPatch(database, environment, {
+      memberChannelId: "kanal-a",
+      role: "bediener",
+      targetChannelId: "kanal-a",
+      expectedStatus: 403,
+    });
   });
 
   it("lehnt ein der Registry unbekanntes Modul ab", async () => {
@@ -147,18 +172,13 @@ describe("Modulverwaltung im Panel", () => {
   });
 
   it("verweigert die Aktivierung in einem fremden Kanal trotz gültiger Session", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertChannel(database, "kanal-b");
-    await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
-
-    const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-b/modules/test-modul", "PATCH", { enabled: true }),
-      environment,
-    );
-
-    expect(response.status).toBe(403);
-    await expect(auditCount(database)).resolves.toBe(0);
+    await expectDeniedPatch(database, environment, {
+      memberChannelId: "kanal-a",
+      role: "broadcaster",
+      targetChannelId: "kanal-b",
+      extraChannelIds: ["kanal-b"],
+      expectedStatus: 403,
+    });
   });
 
   it("behält beim Deaktivieren die zuvor geschriebenen Einstellungen", async () => {
