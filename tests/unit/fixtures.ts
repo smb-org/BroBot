@@ -47,6 +47,20 @@ export const insertLoginIdentityAndSession = async (
   ).run();
 };
 
+export const insertAppAccessToken = async (
+  database: TestD1Database,
+  accessTokenCiphertext: string,
+  expiresAt: string,
+  createdAt: string,
+  updatedAt: string,
+): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO twitch_app_access_token
+      (id, access_token_ciphertext, expires_at, created_at, updated_at)
+     VALUES (1, ?, ?, ?, ?)`,
+  ).bind(accessTokenCiphertext, expiresAt, createdAt, updatedAt).run();
+};
+
 export const insertMember = async (
   database: TestD1Database,
   channelId: string,
