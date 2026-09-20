@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import {
+  requireBetreiber,
   requireChannelAuthorization,
+  type BetreiberAuthorizationVariables,
   type ChannelAuthorizationVariables,
 } from "../../src/worker/auth/guards";
 import { createSessionCookie } from "../../src/worker/auth/session";
@@ -18,10 +20,12 @@ const key = (byte: number): string =>
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
   SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
+  BETREIBER_USER_IDS: "[]",
 };
 
 type GuardEnvironment = Env & { DB: D1Database };
-type GuardContext = { Bindings: GuardEnvironment; Variables: ChannelAuthorizationVariables };
+interface GuardVariables extends ChannelAuthorizationVariables, BetreiberAuthorizationVariables {}
+type GuardContext = { Bindings: GuardEnvironment; Variables: GuardVariables };
 
 const app = new Hono<GuardContext>();
 app.use("/api/channels/:channelId/write", requireChannelAuthorization());
@@ -31,6 +35,16 @@ app.post("/api/channels/:channelId/write", (context) =>
 app.all("/api/channels/:channelId/write", (context) =>
   context.json({ role: context.get("channelRole") }),
 );
+app.use("/api/betreiber/*", requireBetreiber());
+app.get("/api/betreiber/probe", (context) => {
+  const variables = context.var as unknown as Partial<GuardVariables>;
+  return context.json({
+    userId: variables.actor?.userId,
+    channelRole: variables.channelRole ?? null,
+    authorizeMutation: variables.authorizeMutation ?? null,
+    prepareModuleAudit: variables.prepareModuleAudit ?? null,
+  });
+});
 
 const insertChannel = async (database: TestD1Database, channelId: string): Promise<void> => {
   await database.prepare(
@@ -78,14 +92,16 @@ const makeRequest = async (
   withCsrf = true,
   channelId = "kanal-a",
   method = "POST",
+  userId = "user-1",
+  path = `/api/channels/${channelId}/write`,
 ): Promise<Request> => {
   const sessionCookie = await createSessionCookie(
-    { sessionId: "session-user-1" },
+    { sessionId: `session-${userId}` },
     environment.SESSION_COOKIE_KEYS,
     environment.SESSION_ENCRYPTION_KEYS ?? "",
   );
   const csrfToken = await createCsrfToken(
-    "session-user-1",
+    `session-${userId}`,
     environment.SESSION_COOKIE_KEYS,
     new Date().toISOString(),
   );
@@ -94,11 +110,12 @@ const makeRequest = async (
     "Content-Type": "application/json",
   });
   if (withCsrf) headers.set("X-CSRF-Token", csrfToken);
-  return new Request(`https://brobot.example/api/channels/${channelId}/write`, {
+  const init: RequestInit = {
     method,
     headers,
-    body: JSON.stringify(body),
-  });
+  };
+  if (method !== "GET" && method !== "HEAD") init.body = JSON.stringify(body);
+  return new Request(`https://brobot.example${path}`, init);
 };
 
 describe("kanalgebundener Routen-Guard", () => {
@@ -144,6 +161,48 @@ describe("kanalgebundener Routen-Guard", () => {
     headers.set("X-CSRF-Token", "manipuliert");
 
     const response = await app.fetch(new Request(request, { headers }), environment);
+
+    expect(response.status).toBe(403);
+  });
+
+  it("lässt einen Betreiber mit Sitzung durch und setzt nur Sitzung und Akteur", async () => {
+    await insertSession(database, "26876135");
+    environment.BETREIBER_USER_IDS = '["26876135"]';
+
+    const response = await app.fetch(
+      await makeRequest(environment, {}, true, "kanal-a", "GET", "26876135", "/api/betreiber/probe"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      userId: "26876135",
+      channelRole: null,
+      authorizeMutation: null,
+      prepareModuleAudit: null,
+    });
+  });
+
+  it("weist einen Nicht-Betreiber mit 403 und klarer Meldung ab", async () => {
+    environment.BETREIBER_USER_IDS = '["26876135"]';
+
+    const response = await app.fetch(
+      await makeRequest(environment, {}, true, "kanal-a", "GET", "user-1", "/api/betreiber/probe"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.text()).resolves.toBe("Kein Betreiberzugang.");
+  });
+
+  it("lässt einen Betreiber ohne Mitgliedszeile auf der Kanalroute nicht durch", async () => {
+    await insertSession(database, "26876135");
+    environment.BETREIBER_USER_IDS = '["26876135"]';
+
+    const response = await app.fetch(
+      await makeRequest(environment, {}, true, "kanal-a", "GET", "26876135"),
+      environment,
+    );
 
     expect(response.status).toBe(403);
   });

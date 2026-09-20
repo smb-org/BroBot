@@ -25,6 +25,12 @@ const ersetzteNamen = (): Set<string> => new Set(
  * fällt es nie auf, weil dort keine `.dev.vars` aus dem Beispiel entsteht.
  */
 describe("CI-Testkonfiguration", () => {
+  it("übernimmt das gültige leere Betreiber-Array unverändert", () => {
+    const wert = /^BETREIBER_USER_IDS=(.*)$/m.exec(beispiel)?.[1];
+
+    expect(wert).toBe("[]");
+  });
+
   it("ersetzt jeden Platzhalter aus .dev.vars.example", () => {
     const ersetzt = ersetzteNamen();
     const offen = beispielNamen().filter((name) => {

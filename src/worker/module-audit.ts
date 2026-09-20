@@ -2,6 +2,8 @@ import type { ModuleAuditEntry } from "../modules/contract";
 
 const auditId = (): string => crypto.randomUUID();
 
+export type AuditActorKind = "mitglied" | "betreiber";
+
 /**
  * Der zweite Teil wird mit der Fachmutation gebatcht. `changes()` verhindert,
  * dass ein abgelehnter oder ins Leere laufender Schreibversuch auditiert wird.
@@ -11,10 +13,11 @@ export const prepareModuleAudit = (
   actorUserId: string,
   changedAt: string,
   entry: ModuleAuditEntry,
+  actorKind: AuditActorKind = "mitglied",
 ): D1PreparedStatement => db.prepare(
   `INSERT INTO audit_log
-    (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json)
-   SELECT ?, ?, ?, ?, ?, ?, ?, ?
+    (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
+   SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
     WHERE changes() > 0`,
 ).bind(
   auditId(),
@@ -25,4 +28,5 @@ export const prepareModuleAudit = (
   entry.action,
   JSON.stringify(entry.before),
   JSON.stringify(entry.after),
+  actorKind,
 );

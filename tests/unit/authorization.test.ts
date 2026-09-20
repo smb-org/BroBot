@@ -13,6 +13,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../../src/worker/auth/guards";
 import {
+  actorGuard,
   createChannelMemberWithAudit,
   deleteChannelMemberWithAudit,
   updateChannelMemberWithAudit,
@@ -372,6 +373,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
       "mitglied.hinzugefügt",
       "2026-09-18T00:01:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
@@ -411,6 +413,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:03:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({
@@ -459,6 +462,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:03:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -492,6 +496,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:03:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -519,6 +524,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
       "mitglied.hinzugefügt",
       "2026-09-18T00:01:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -547,6 +553,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:01:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
@@ -570,6 +577,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       "user-1",
       "mitglied.entfernt",
       "2026-09-18T00:01:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
@@ -594,6 +602,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       "broadcaster-1",
       "mitglied.entfernt",
       "2026-09-18T00:01:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "broadcaster-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -623,6 +632,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:01:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "broadcaster-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -647,6 +657,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       member,
       "mitglied.hinzugefügt",
       "2026-09-18T00:01:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     )).resolves.toBe(true);
     await expect(createChannelMemberWithAudit(
       database as unknown as D1Database,
@@ -654,6 +665,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       { ...member, role: "verwalter" },
       "mitglied.hinzugefügt",
       "2026-09-18T00:02:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
@@ -677,6 +689,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       },
       "mitglied.geändert",
       "2026-09-18T00:01:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     )).rejects.toThrow();
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -715,6 +728,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
         },
         "mitglied.hinzugefügt",
         "2026-09-18T00:01:00.000Z",
+        actorGuard("'broadcaster', 'verwalter'"),
       )).rejects.toThrow();
     } finally {
       randomUuid.mockRestore();
@@ -739,6 +753,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       "user-1",
       "mitglied.entfernt",
       "2026-09-18T00:02:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -774,6 +789,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       "user-1",
       "mitglied.entfernt",
       "2026-09-18T00:02:00.000Z",
+      actorGuard("'broadcaster', 'verwalter'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();

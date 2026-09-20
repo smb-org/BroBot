@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "../auth/crypto";
 import {
   countBroadcasterMembers,
+  actorGuard,
   createChannelMemberWithAudit,
   decodeChannelMemberCursor,
   deleteChannelMemberWithAudit,
@@ -10,6 +11,7 @@ import {
   getChannelMemberForChannel,
   listChannelMembers,
   updateChannelMemberWithAudit,
+  requiredActorRoles,
   type ChannelMemberRecord,
 } from "../auth/repository";
 import {
@@ -308,6 +310,7 @@ memberRouter.post("/api/channels/:channelId/members", async (context) => {
     member,
     "mitglied.hinzugefügt",
     now,
+    actorGuard(requiredActorRoles(member.role)),
   );
   if (!changed) return context.text("Mitglied konnte nicht hinzugefügt werden.", 409);
   return context.json({ member: memberResponse(member) }, 201);
@@ -342,6 +345,7 @@ memberRouter.patch("/api/channels/:channelId/members/:userId", async (context) =
     member,
     "mitglied.rolle_geändert",
     now,
+    actorGuard(requiredActorRoles(member.role)),
   );
   if (!changed) return context.text("Mitglied wurde inzwischen geändert.", 409);
   return context.json({ member: memberResponse(member) });
@@ -366,6 +370,7 @@ memberRouter.delete("/api/channels/:channelId/members/:userId", async (context) 
     userId,
     "mitglied.entfernt",
     nowIso(),
+    actorGuard("'broadcaster', 'verwalter'"),
   );
   if (!changed) return context.text("Mitglied wurde inzwischen geändert.", 409);
   return context.body(null, 204);

@@ -492,7 +492,7 @@ describe("Panel-Leseendpunkte", () => {
     }>();
 
     expect(firstResponse.status).toBe(200);
-    expect(first.entries).toEqual([{ auditId: "audit-1", actorUserId: "user-1", createdAt: "2026-09-18T03:00:00.000Z", moduleId: null, action: "neu", before: "null", after: "{}" }]);
+    expect(first.entries).toEqual([{ auditId: "audit-1", actorUserId: "user-1", actorKind: "mitglied", createdAt: "2026-09-18T03:00:00.000Z", moduleId: null, action: "neu", before: "null", after: "{}" }]);
     expect(first.nextCursor).toEqual(expect.any(String));
 
     const secondResponse = await panelRouter.fetch(
@@ -502,7 +502,7 @@ describe("Panel-Leseendpunkte", () => {
     const second = await secondResponse.json<{ entries: Array<{ auditId: string; action: string }>; nextCursor: string | null }>();
 
     expect(secondResponse.status).toBe(200);
-    expect(second.entries).toEqual([{ auditId: "audit-2", actorUserId: "user-1", createdAt: "2026-09-18T02:00:00.000Z", moduleId: null, action: "alt", before: "{}", after: "{}" }]);
+    expect(second.entries).toEqual([{ auditId: "audit-2", actorUserId: "user-1", actorKind: "mitglied", createdAt: "2026-09-18T02:00:00.000Z", moduleId: null, action: "alt", before: "{}", after: "{}" }]);
     expect(second.nextCursor).toBeNull();
   });
 });

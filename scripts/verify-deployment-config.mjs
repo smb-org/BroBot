@@ -15,6 +15,7 @@ const deploymentBindings = [
   "SESSION_COOKIE_KEYS",
   "TOKEN_ENCRYPTION_KEYS",
   "OVERLAY_TOKEN_PEPPER",
+  "BETREIBER_USER_IDS",
 ];
 const compatibilitySecretAliases = {
   TOKEN_ENCRYPTION_KEYS: ["SESSION_ENCRYPTION_KEYS"],

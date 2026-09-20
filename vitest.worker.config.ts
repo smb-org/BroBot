@@ -24,6 +24,7 @@ export default defineConfig({
           SESSION_COOKIE_KEYS: testKeyRing("test-cookie", 1),
           SESSION_ENCRYPTION_KEYS: testKeyRing("test-encryption", 2),
           OVERLAY_TOKEN_PEPPER: testKey(4),
+          BETREIBER_USER_IDS: "[]",
         },
       },
     }),

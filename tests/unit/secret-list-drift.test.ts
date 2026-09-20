@@ -26,6 +26,7 @@ describe("Secret-Namen-Drift", () => {
       "SESSION_COOKIE_KEYS",
       "TOKEN_ENCRYPTION_KEYS",
       "OVERLAY_TOKEN_PEPPER",
+      "BETREIBER_USER_IDS",
     ];
     const config = {
       secrets: { required: [...required] },
@@ -171,6 +172,7 @@ describe("Secret-Namen-Drift", () => {
       `SESSION_COOKIE_KEYS='${keyRing}'`,
       `SESSION_ENCRYPTION_KEYS='${keyRing}'`,
       `OVERLAY_TOKEN_PEPPER=${key}`,
+      "BETREIBER_USER_IDS=[]",
       "",
     ].join("\n"));
 

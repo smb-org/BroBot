@@ -146,6 +146,7 @@ export interface PanelSystemResponse {
 export interface PanelAuditEntry {
   auditId: string;
   actorUserId: string;
+  actorKind: "mitglied" | "betreiber";
   createdAt: string;
   moduleId: string | null;
   action: string;
