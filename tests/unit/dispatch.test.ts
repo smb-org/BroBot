@@ -151,6 +151,7 @@ describe("Verteilung und Ausführung", () => {
       });
       const zeilen = await protokoll(database);
       expect(zeilen.map((zeile) => zeile.code)).toEqual(["modul.geantwortet", "host.chat.gesendet"]);
+      expect(JSON.parse(zeilen[1]?.detail_json ?? "{}" )).toEqual({ messageId: "nachricht-1", text: "hallo" });
     } finally {
       database.close();
     }
@@ -171,7 +172,7 @@ describe("Verteilung und Ausführung", () => {
 
       const zeilen = await protokoll(database);
       expect(zeilen.map((zeile) => zeile.code)).toEqual(["host.chat.fehlgeschlagen"]);
-      expect(JSON.parse(zeilen[0]?.detail_json ?? "{}")).toMatchObject({ grund: "automod_held" });
+      expect(JSON.parse(zeilen[0]?.detail_json ?? "{}")).toMatchObject({ grund: "automod_held", text: "hallo" });
     } finally {
       database.close();
     }

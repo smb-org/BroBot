@@ -56,6 +56,42 @@ describe("Textbefehle-Service", () => {
       text: "Hallo alice in kanal-a-login",
       replyToMessageId: "twitch-message-1",
     }]);
+    expect(result.diagnostics).toEqual([{
+      code: "textbefehle.ausgeloest",
+      detail: { name: "hallo", antwort: "Hallo alice in kanal-a-login" },
+    }]);
+  });
+
+  it("protokolliert Befehl, Argumente und aufgelöste Antwort", async () => {
+    const result = await verarbeiteTextbefehlNachricht(
+      eventFuer("!hallo erster   zweiter"),
+      repositoryFuer([befehl("hallo", "Antwort für {user}")]),
+    );
+
+    expect(result.diagnostics).toEqual([{
+      code: "textbefehle.ausgeloest",
+      detail: { name: "hallo", argumente: "erster   zweiter", antwort: "Antwort für alice" },
+    }]);
+  });
+
+  it("kürzt Argumente und Antwort sichtbar, lässt genau 200 Zeichen aber unverändert", async () => {
+    const exaktZweihundert = "x".repeat(200);
+    const zuLang = "y".repeat(201);
+    const exakt = await verarbeiteTextbefehlNachricht(
+      eventFuer(`!hallo ${exaktZweihundert}`),
+      repositoryFuer([befehl("hallo", exaktZweihundert)]),
+    );
+    const gekuerzt = await verarbeiteTextbefehlNachricht(
+      eventFuer(`!hallo ${zuLang}`),
+      repositoryFuer([befehl("hallo", zuLang)]),
+    );
+
+    expect(exakt.diagnostics[0]?.detail).toEqual({
+      name: "hallo", argumente: exaktZweihundert, antwort: exaktZweihundert,
+    });
+    expect(gekuerzt.diagnostics[0]?.detail).toEqual({
+      name: "hallo", argumente: `${"y".repeat(199)}…`, antwort: `${"y".repeat(199)}…`,
+    });
   });
 
   it("schweigt bei einem unbekannten Befehl und begründet das", async () => {

@@ -133,6 +133,7 @@ export interface PanelEventEntry {
   eventId: string;
   createdAt: string;
   moduleId: string;
+  triggerId: string;
   code: string;
   detail: string;
   actorUserId: string | null;

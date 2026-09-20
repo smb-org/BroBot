@@ -246,8 +246,9 @@ describe("Ereignisprotokoll", () => {
     expect(first.entries).toEqual([{
       eventId: "event-c",
       createdAt: "2026-09-18T04:00:00.000Z",
-      moduleId: "raid",
-      code: "test",
+        moduleId: "raid",
+        triggerId: "event-c",
+        code: "test",
       detail: "{}",
       actorUserId: "user-1",
       actorLogin: null,

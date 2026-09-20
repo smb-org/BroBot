@@ -58,6 +58,7 @@ interface EventLogRow {
   event_id: string;
   created_at: string;
   module_id: string;
+  trigger_id: string;
   code: string;
   detail_json: string;
   actor_user_id: string | null;
@@ -292,12 +293,12 @@ export const getEventLogForChannel = async (
   cursor: LogCursor | null,
 ): Promise<PanelEventsResponse> => {
   const query = cursor === null
-    ? `SELECT event_id, created_at, module_id, code, detail_json, actor_user_id
+    ? `SELECT event_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id
          FROM event_log
         WHERE channel_id = ?
         ORDER BY created_at DESC, event_id DESC
         LIMIT ?`
-    : `SELECT event_id, created_at, module_id, code, detail_json, actor_user_id
+    : `SELECT event_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id
          FROM event_log
         WHERE channel_id = ?
           AND (created_at < ? OR (created_at = ? AND event_id < ?))
@@ -313,6 +314,7 @@ export const getEventLogForChannel = async (
     eventId: row.event_id,
     createdAt: row.created_at,
     moduleId: row.module_id,
+    triggerId: row.trigger_id,
     code: row.code,
     detail: row.detail_json,
     actorUserId: row.actor_user_id,

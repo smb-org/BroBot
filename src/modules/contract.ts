@@ -2,6 +2,8 @@ import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
 
+export { kuerzeAuf200Zeichen } from "../text";
+
 /**
  * Eine Begründung für etwas, das ein Modul getan oder bewusst nicht getan hat.
  *

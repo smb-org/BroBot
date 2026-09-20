@@ -224,7 +224,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(unknownEventRow).not.toBeNull();
     fireEvent.keyDown(unknownEventRow as HTMLElement, { key: " " });
     expect(unknownEventRow).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Unbekannt")).toBeInTheDocument();
+    expect(screen.getAllByText("Unbekannt")).toHaveLength(2);
     expect(screen.getByText("kein-json")).toBeInTheDocument();
     fireEvent.keyDown(eventRow as HTMLElement, { key: "Enter" });
     expect(eventRow).toHaveAttribute("aria-selected", "true");
@@ -281,6 +281,97 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByText("alt")).toBeInTheDocument();
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
+  });
+
+  it("gruppiert denselben Auslöser, zeigt den stärksten Ton und den chronologischen Verlauf", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({
+        entries: [{
+          eventId: "event-command",
+          createdAt: "2026-09-18T04:00:00.000Z",
+          moduleId: "textbefehle",
+          triggerId: "trigger-1",
+          code: "textbefehle.ausgeloest",
+          detail: '{"name":"wiki","antwort":"Antwort"}',
+          actorUserId: "user-1",
+          actorLogin: "alice",
+          actorDisplayName: "Alice",
+        }, {
+          eventId: "event-sent",
+          createdAt: "2026-09-18T04:01:00.000Z",
+          moduleId: "textbefehle",
+          triggerId: "trigger-1",
+          code: "host.chat.gesendet",
+          detail: '{"text":"Antwort"}',
+          actorUserId: "user-1",
+          actorLogin: "alice",
+          actorDisplayName: "Alice",
+        }, {
+          eventId: "event-command-red",
+          createdAt: "2026-09-18T04:02:00.000Z",
+          moduleId: "textbefehle",
+          triggerId: "trigger-2",
+          code: "textbefehle.ausgeloest",
+          detail: '{"name":"fehlversuch","antwort":"Antwort"}',
+          actorUserId: "user-1",
+          actorLogin: "alice",
+          actorDisplayName: "Alice",
+        }, {
+          eventId: "event-red",
+          createdAt: "2026-09-18T04:03:00.000Z",
+          moduleId: "textbefehle",
+          triggerId: "trigger-2",
+          code: "host.chat.fehlgeschlagen",
+          detail: '{"text":"Antwort","grund":"rate_limited"}',
+          actorUserId: "user-1",
+          actorLogin: "alice",
+          actorDisplayName: "Alice",
+        }, {
+          eventId: "event-other",
+          createdAt: "2026-09-18T04:04:00.000Z",
+          moduleId: "raid",
+          triggerId: "trigger-3",
+          code: "shoutout.unterdrueckt",
+          detail: '{"grund":"raid_erkannt"}',
+          actorUserId: null,
+          actorLogin: null,
+          actorDisplayName: null,
+        }],
+        nextCursor: null,
+      });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Befehl !wiki ausgeführt")).toBeInTheDocument();
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
+    expect(screen.getByText("Shoutout unterdrückt")).toBeInTheDocument();
+    expect(screen.queryByText("Chat-Nachricht gesendet")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("row")).toHaveLength(4);
+
+    const groupRow = screen.getByText("Befehl !wiki ausgeführt").closest("tr");
+    expect(groupRow).not.toBeNull();
+    expect(groupRow).toHaveAttribute("aria-selected", "false");
+    fireEvent.keyDown(groupRow as HTMLElement, { key: "Enter" });
+
+    expect(groupRow).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("host.chat.gesendet")).toBeInTheDocument();
+    const history = screen.getByText("host.chat.gesendet").closest("li")?.parentElement;
+    if (history == null) throw new Error("Verlauf fehlt");
+    const historyText = history.textContent;
+    expect(historyText.indexOf("textbefehle.ausgeloest")).toBeLessThan(historyText.indexOf("host.chat.gesendet"));
+
+    const failedGroupRow = screen.getByText("Chat-Nachricht fehlgeschlagen").closest("tr");
+    expect(failedGroupRow).not.toBeNull();
+    fireEvent.click(failedGroupRow as HTMLElement);
+    expect(failedGroupRow).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("host.chat.fehlgeschlagen")).toBeInTheDocument();
+    expect(screen.getByText(/"grund": "rate_limited"/)).toBeInTheDocument();
   });
 
   it("zeigt den Ereignis-Leerzustand als einzelnen Satz", async () => {
