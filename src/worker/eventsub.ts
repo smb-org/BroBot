@@ -17,6 +17,14 @@ export {
 } from "./eventsub-subscriptions";
 
 export const EVENTSUB_REPLAY_WINDOW_MS = 10 * 60 * 1000;
+/** Retain twice the replay window: the second window is a clock-skew reserve. */
+export const EVENTSUB_REPLAY_RETENTION_FACTOR = 2;
+export const eventSubMessageCutoff = (
+  now: string,
+  replayWindowMs: number = EVENTSUB_REPLAY_WINDOW_MS,
+): string => new Date(
+  Date.parse(now) - replayWindowMs * EVENTSUB_REPLAY_RETENTION_FACTOR,
+).toISOString();
 // Twitch-Nutzkörper sind klein; 64 KiB lässt viel Reserve für Metadaten und
 // verhindert trotzdem, dass der unauthentifizierte Eingang beliebig wächst.
 export const EVENTSUB_MAX_BODY_BYTES = 64 * 1024;

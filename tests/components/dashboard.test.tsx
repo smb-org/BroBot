@@ -1362,6 +1362,47 @@ describe("Dashboard-Grundgerüst", () => {
     expect(moderatorCard).toHaveTextContent("Moderatorrolle fehlt");
   });
 
+  it("zeigt das betroffene Abo im letzten Fehler auf Deutsch und Englisch", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      lastError: {
+        source: "eventsub",
+        reason: "Forbidden",
+        message: "Keine Berechtigung.",
+        status: 403,
+        subscriptionType: "channel.moderate",
+        subscriptionVariant: "",
+        at: "2026-09-18T02:00:00.000Z",
+      },
+    };
+    const zeigeKanal = async (): Promise<void> => {
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+        if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a");
+      render(<DashboardApp />);
+      await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    };
+
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+    await zeigeKanal();
+    expect(screen.getByText(/Moderationsereignisse: Forbidden/)).toBeInTheDocument();
+    expect(screen.getByText(/Keine Berechtigung\./)).toBeInTheDocument();
+    expect(screen.getByText(/HTTP 403/)).toBeInTheDocument();
+
+    cleanup();
+    vi.unstubAllGlobals();
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    await zeigeKanal();
+    expect(screen.getByText(/Moderation events: Forbidden/)).toBeInTheDocument();
+    cleanup();
+    vi.unstubAllGlobals();
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+  });
+
   it("zeigt fehlende Broadcaster-Zustimmung als Warnung und nur dem Broadcaster den Weg zur Nachforderung", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),

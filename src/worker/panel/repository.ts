@@ -36,9 +36,17 @@ interface ChannelStateRow {
   moderator_reason: string | null;
   eventsub_status: "enabled" | "missing" | "error" | "revoked" | null;
   eventsub_subscription_id: string | null;
+  eventsub_subscription_type: string | null;
+  eventsub_variant: string | null;
   eventsub_reason: string | null;
+  eventsub_message: string | null;
+  eventsub_status_code: number | null;
   eventsub_updated_at: string | null;
+  eventsub_error_subscription_type: string | null;
+  eventsub_error_variant: string | null;
   eventsub_error_reason: string | null;
+  eventsub_error_message: string | null;
+  eventsub_error_status: number | null;
   eventsub_error_updated_at: string | null;
 }
 
@@ -108,14 +116,42 @@ const channelStateQuery = `
            moderator.reason AS moderator_reason,
            eventsub.status AS eventsub_status,
            eventsub.subscription_id AS eventsub_subscription_id,
+           eventsub.subscription_type AS eventsub_subscription_type,
+           eventsub.variant AS eventsub_variant,
            eventsub.reason AS eventsub_reason,
+           eventsub.error_message AS eventsub_message,
+           eventsub.error_status AS eventsub_status_code,
            eventsub.updated_at AS eventsub_updated_at,
+           (SELECT state.subscription_type
+              FROM eventsub_subscriptions AS state
+             WHERE state.channel_id = channel.channel_id
+               AND state.status IN ('error', 'revoked')
+             ORDER BY state.updated_at DESC
+             LIMIT 1) AS eventsub_error_subscription_type,
+           (SELECT state.variant
+              FROM eventsub_subscriptions AS state
+             WHERE state.channel_id = channel.channel_id
+               AND state.status IN ('error', 'revoked')
+             ORDER BY state.updated_at DESC
+             LIMIT 1) AS eventsub_error_variant,
            (SELECT state.reason
               FROM eventsub_subscriptions AS state
              WHERE state.channel_id = channel.channel_id
                AND state.status IN ('error', 'revoked')
              ORDER BY state.updated_at DESC
              LIMIT 1) AS eventsub_error_reason,
+           (SELECT state.error_message
+              FROM eventsub_subscriptions AS state
+             WHERE state.channel_id = channel.channel_id
+               AND state.status IN ('error', 'revoked')
+             ORDER BY state.updated_at DESC
+             LIMIT 1) AS eventsub_error_message,
+           (SELECT state.error_status
+              FROM eventsub_subscriptions AS state
+             WHERE state.channel_id = channel.channel_id
+               AND state.status IN ('error', 'revoked')
+             ORDER BY state.updated_at DESC
+             LIMIT 1) AS eventsub_error_status,
            (SELECT state.updated_at
               FROM eventsub_subscriptions AS state
              WHERE state.channel_id = channel.channel_id
@@ -181,10 +217,26 @@ const mapLastError = (row: ChannelStateRow): PanelLastError | null => {
   }
   if (row.eventsub_reason !== null && row.eventsub_updated_at !== null &&
       (row.eventsub_status === "error" || row.eventsub_status === "revoked")) {
-    candidates.push({ source: "eventsub", reason: row.eventsub_reason, at: row.eventsub_updated_at });
+    candidates.push({
+      source: "eventsub",
+      reason: row.eventsub_reason,
+      at: row.eventsub_updated_at,
+      message: row.eventsub_message,
+      status: row.eventsub_status_code,
+      subscriptionType: row.eventsub_subscription_type ?? undefined,
+      subscriptionVariant: row.eventsub_variant ?? undefined,
+    });
   }
   if (row.eventsub_error_reason !== null && row.eventsub_error_updated_at !== null) {
-    candidates.push({ source: "eventsub", reason: row.eventsub_error_reason, at: row.eventsub_error_updated_at });
+    candidates.push({
+      source: "eventsub",
+      reason: row.eventsub_error_reason,
+      at: row.eventsub_error_updated_at,
+      message: row.eventsub_error_message,
+      status: row.eventsub_error_status,
+      subscriptionType: row.eventsub_error_subscription_type ?? undefined,
+      subscriptionVariant: row.eventsub_error_variant ?? undefined,
+    });
   }
   candidates.sort((left, right) => right.at.localeCompare(left.at));
   return candidates[0] ?? null;

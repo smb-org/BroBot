@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { dashboardLanguage, ereignisText, ereignisTon } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
+import { eventSubName } from "../../src/dashboard/module-labels";
 
 const setBrowserLanguage = (language: string): void => {
   Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
@@ -58,5 +59,13 @@ describe("Dashboard-Locale", () => {
 
     setBrowserLanguage("en-US");
     expect(ereignisText("kanalereignisse.moderation.unbekannt", { aktion: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
+  });
+
+  it("benennt EventSub-Abos im Panel zweisprachig", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventSubName("channel.moderate")).toBe("Moderationsereignisse");
+
+    setBrowserLanguage("en-US");
+    expect(eventSubName("channel.moderate")).toBe("Moderation events");
   });
 });

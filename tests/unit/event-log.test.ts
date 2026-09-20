@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { writeModuleDiagnostics } from "../../src/worker/event-log";
+import { purgeOldEventLogEntries, writeModuleDiagnostics } from "../../src/worker/event-log";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { scheduled } from "../../src/worker/scheduled";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
@@ -216,6 +216,26 @@ describe("Ereignisprotokoll", () => {
       "SELECT event_id FROM event_log ORDER BY event_id",
     ).all<{ event_id: string }>();
     expect(rows.results.map((row) => row.event_id)).toEqual(["grenze", "jung"]);
+  });
+
+  it("verwendet für das Ereignis-Aufräumen den created_at-Index", async () => {
+    const preparedSql: string[] = [];
+    const tracedDatabase = {
+      prepare: (sql: string) => {
+        preparedSql.push(sql);
+        return database.prepare(sql);
+      },
+    } as unknown as D1Database;
+    await purgeOldEventLogEntries(tracedDatabase, "2026-09-18T12:00:00.000Z");
+    const deleteSql = preparedSql.find((sql) => sql.includes("DELETE FROM event_log"));
+    expect(deleteSql).toBeDefined();
+    const plan = database.sqlite.prepare(
+      `EXPLAIN QUERY PLAN ${deleteSql ?? ""}`,
+    ).all("2026-09-04T12:00:00.000Z") as Array<{ detail: string }>;
+    const details = plan.map((row) => row.detail).join(" ");
+
+    expect(details).toMatch(/USING (?:COVERING )?INDEX event_log_created_at_idx/);
+    expect(details).not.toContain("SCAN event_log");
   });
 
  it("lässt einen Bediener Ereignisse seitenweise lesen", async () => {

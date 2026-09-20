@@ -251,15 +251,42 @@ describe("EventSub-Abgleich", () => {
        VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
     ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
     await insertAppToken(database);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "missing_scope", message: "Scope fehlt" }), { status: 403 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: "missing_scope",
+        message: "Scope fehlt",
+        access_token: "access-token-geheim",
+        refresh_token: "refresh-token-geheim",
+        client_secret: "client-secret-geheim",
+        signature: "signature-geheim",
+        chat_message: "Chatnachricht-geheim",
+      }), { status: 403 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
 
     await expect(database.prepare(
-      "SELECT version, status, reason FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.moderate'",
-    ).first()).resolves.toEqual({ version: "2", status: "error", reason: "missing_scope" });
+      "SELECT version, status, reason, error_message, error_status FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.moderate'",
+    ).first()).resolves.toEqual({
+      version: "2",
+      status: "error",
+      reason: "missing_scope",
+      error_message: "Scope fehlt",
+      error_status: 403,
+    });
+    const written = errorLog.mock.calls.flat().join(" ");
+    expect(written).toContain("channel=kanal-a");
+    expect(written).toContain("subscription_type=channel.moderate");
+    expect(written).toContain("status=403");
+    expect(written).toContain("code=missing_scope");
+    expect(written).toContain("message=Scope fehlt");
+    expect(written).not.toContain("access-token-geheim");
+    expect(written).not.toContain("refresh-token-geheim");
+    expect(written).not.toContain("client-secret-geheim");
+    expect(written).not.toContain("signature-geheim");
+    expect(written).not.toContain("Chatnachricht-geheim");
+    errorLog.mockRestore();
   });
 
   it("erkennt ein bestehendes Shoutout-Abo mit Moderator-ID wieder und lässt es bei Folgeabgleichen unverändert", async () => {

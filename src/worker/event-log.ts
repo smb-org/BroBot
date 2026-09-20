@@ -53,6 +53,6 @@ export const purgeOldEventLogEntries = async (db: D1Database, now: string): Prom
   ).toISOString();
   await db.prepare(
     `DELETE FROM event_log
-      WHERE julianday(created_at) < julianday(?)`,
+      WHERE created_at < ?`,
   ).bind(cutoff).run();
 };

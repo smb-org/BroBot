@@ -294,12 +294,14 @@ describe("Panel-Leseendpunkte", () => {
     await insertMember(database, "kanal-a", "user-1", "bediener");
     await database.prepare(
       `INSERT INTO eventsub_subscriptions
-        (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
-       VALUES (?, 'channel.chat.message', ?, NULL, 'error', ?, ?)`,
+        (channel_id, subscription_type, subscription_id, secret_id, status, reason, error_message, error_status, updated_at)
+       VALUES (?, 'channel.chat.message', ?, NULL, 'error', ?, ?, ?, ?)`,
     ).bind(
       "kanal-a",
       "subscription-1",
       "rate_limited",
+      "Twitch ist überlastet.",
+      429,
       "2026-09-18T04:00:00.000Z",
     ).run();
 
@@ -309,7 +311,7 @@ describe("Panel-Leseendpunkte", () => {
     );
     const body = await response.json<{
       chatSubscription: { status: string; subscriptionId: string | null; reason: string | null } | null;
-      lastError: { source: string; reason: string } | null;
+      lastError: { source: string; reason: string; message: string | null; status: number | null; subscriptionType: string; subscriptionVariant: string } | null;
     }>();
 
     expect(response.status).toBe(200);
@@ -319,7 +321,15 @@ describe("Panel-Leseendpunkte", () => {
       reason: "rate_limited",
       updatedAt: "2026-09-18T04:00:00.000Z",
     });
-    expect(body.lastError).toEqual({ source: "eventsub", reason: "rate_limited", at: "2026-09-18T04:00:00.000Z" });
+    expect(body.lastError).toEqual({
+      source: "eventsub",
+      reason: "rate_limited",
+      message: "Twitch ist überlastet.",
+      status: 429,
+      subscriptionType: "channel.chat.message",
+      subscriptionVariant: "",
+      at: "2026-09-18T04:00:00.000Z",
+    });
   });
 
   it("zeigt auch die Ablehnung des Moderations-Abos als letzten Fehler", async () => {
@@ -328,11 +338,13 @@ describe("Panel-Leseendpunkte", () => {
     await insertMember(database, "kanal-a", "user-1", "bediener");
     await database.prepare(
       `INSERT INTO eventsub_subscriptions
-        (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
-       VALUES (?, 'channel.moderate', '', '2', NULL, NULL, 'error', ?, ?)`,
+        (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, error_message, error_status, updated_at)
+       VALUES (?, 'channel.moderate', '', '2', NULL, NULL, 'error', ?, ?, ?, ?)`,
     ).bind(
       "kanal-a",
       "missing_scope",
+      "Der Bot darf dieses Abo nicht anlegen.",
+      403,
       "2026-09-18T05:00:00.000Z",
     ).run();
 
@@ -340,10 +352,18 @@ describe("Panel-Leseendpunkte", () => {
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
       environment,
     );
-    const body = await response.json<{ lastError: { source: string; reason: string; at: string } | null }>();
+    const body = await response.json<{ lastError: { source: string; reason: string; message: string | null; status: number | null; subscriptionType: string; subscriptionVariant: string; at: string } | null }>();
 
     expect(response.status).toBe(200);
-    expect(body.lastError).toEqual({ source: "eventsub", reason: "missing_scope", at: "2026-09-18T05:00:00.000Z" });
+    expect(body.lastError).toEqual({
+      source: "eventsub",
+      reason: "missing_scope",
+      message: "Der Bot darf dieses Abo nicht anlegen.",
+      status: 403,
+      subscriptionType: "channel.moderate",
+      subscriptionVariant: "",
+      at: "2026-09-18T05:00:00.000Z",
+    });
   });
 
   it("liefert den tatsächlichen Kanalzustand, aktive Module und gespeicherte Ursachen", async () => {
