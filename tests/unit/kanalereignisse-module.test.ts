@@ -34,6 +34,9 @@ describe("Kanalereignisse-Modul", () => {
       event("channel.moderate", { action: "delete", delete: { user_name: "person", message_body: "text" } }),
       event("channel.moderate", { action: "warn", warn: { user_name: "person" } }),
       event("channel.moderate", { action: "shared_chat_ban" }),
+      event("automod.message.hold", { user_name: "person", category: "aggressive", message: { text: "text" } }),
+      event("channel.suspicious_user.message", { user_name: "person", low_trust_status: "restricted", message: { text: "text" } }),
+      event("channel.suspicious_user.update", { user_name: "person", low_trust_status: "restricted" }),
     ];
 
     for (const moduleEvent of events) {

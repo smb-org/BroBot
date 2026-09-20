@@ -17,6 +17,11 @@ const zahlWert = (value: unknown): number | null =>
 
 const feld = (payload: Readonly<Record<string, unknown>>, key: string): unknown => payload[key];
 
+const optionaleTextDetail = (
+  key: string,
+  value: string | null,
+): KanalereignisDetail => value === null ? {} : { [key]: value };
+
 const nestedFeld = (
   payload: Readonly<Record<string, unknown>>,
   noticeType: string,
@@ -197,6 +202,75 @@ const moderationDiagnose = (
   };
 };
 
+const messageText = (payload: Readonly<Record<string, unknown>>): string | null => {
+  const message = feld(payload, "message");
+  return isRecord(message) ? textWert(message.text) : textWert(message);
+};
+
+const dokumentierterWert = <T extends string>(value: unknown, values: readonly T[]): T | null => {
+  const text = stringWert(value);
+  return text !== null && values.includes(text as T) ? text as T : null;
+};
+
+const LOW_TRUST_STATUS = ["none", "active_monitoring", "restricted"] as const;
+const SUSPICIOUS_USER_TYPES = ["manually_added", "ban_evader", "banned_in_shared_channel"] as const;
+const BAN_EVASION_EVALUATIONS = ["unknown", "possible", "likely"] as const;
+
+const lowTrustStatus = (payload: Readonly<Record<string, unknown>>): string | null =>
+  dokumentierterWert(feld(payload, "low_trust_status"), LOW_TRUST_STATUS);
+
+const suspiciousUserTypes = (payload: Readonly<Record<string, unknown>>): string | null => {
+  const types = feld(payload, "types");
+  if (!Array.isArray(types)) return null;
+  const documentedTypes: string[] = [];
+  for (const type of types) {
+    const documentedType = dokumentierterWert(type, SUSPICIOUS_USER_TYPES);
+    if (documentedType !== null) documentedTypes.push(documentedType);
+  }
+  return documentedTypes.length === 0 ? null : kuerzeAuf200Zeichen(documentedTypes.join(", "));
+};
+
+const suspiciousEinstufung = (payload: Readonly<Record<string, unknown>>): string | null => {
+  const values = [
+    lowTrustStatus(payload),
+    suspiciousUserTypes(payload),
+    dokumentierterWert(feld(payload, "ban_evasion_evaluation"), BAN_EVASION_EVALUATIONS),
+  ].filter((value): value is string => value !== null);
+  return values.length === 0 ? null : kuerzeAuf200Zeichen(values.join(" / "));
+};
+
+const automodDiagnose = (payload: Readonly<Record<string, unknown>>): KanalereignisDiagnose => ({
+  code: "kanalereignisse.automod.halte",
+  detail: detail({
+    ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
+    ...optionaleTextDetail("grund", textWert(feld(payload, "category"))),
+    ...optionaleTextDetail("text", messageText(payload)),
+  }),
+});
+
+const suspiciousMessageDiagnose = (payload: Readonly<Record<string, unknown>>): KanalereignisDiagnose => ({
+  code: "kanalereignisse.verdacht.nachricht",
+  detail: detail({
+    ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
+    ...optionaleTextDetail("einstufung", suspiciousEinstufung(payload)),
+    ...optionaleTextDetail("text", messageText(payload)),
+  }),
+});
+
+const suspiciousUpdateDiagnose = (payload: Readonly<Record<string, unknown>>): KanalereignisDiagnose => {
+  const status = lowTrustStatus(payload);
+  return {
+    code: status === "none"
+      ? "kanalereignisse.verdacht.entwarnung"
+      : "kanalereignisse.verdacht.einstufung",
+    detail: detail({
+      ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
+      ...optionaleTextDetail("einstufung", status),
+      ...optionaleTextDetail("moderator", person(payload, "moderator")),
+    }),
+  };
+};
+
 /** Reine Abbildung des EventSub-Ereignisrumpfs auf Kanaldiagnosen. */
 export const diagnostiziereKanalereignis = (
   subscriptionType: string,
@@ -210,6 +284,9 @@ export const diagnostiziereKanalereignis = (
     return [shoutoutDiagnose(subscriptionType, payload)];
   }
   if (subscriptionType === "channel.chat.notification") return [chatNotificationDiagnose(payload)];
+  if (subscriptionType === "automod.message.hold") return [automodDiagnose(payload)];
+  if (subscriptionType === "channel.suspicious_user.message") return [suspiciousMessageDiagnose(payload)];
+  if (subscriptionType === "channel.suspicious_user.update") return [suspiciousUpdateDiagnose(payload)];
   if (subscriptionType === "channel.moderate") return [moderationDiagnose(payload, ereigniszeit)];
   return [];
 };

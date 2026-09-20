@@ -31,11 +31,19 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
         ["channel.shoutout.receive", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.chat.notification", { broadcaster_user_id: "kanal-a", user_id: "bot-1" }],
         ["channel.moderate", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
+        ["automod.message.hold", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
+        ["channel.suspicious_user.message", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
+        ["channel.suspicious_user.update", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
       ]);
 
     const moderation = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.moderate");
     expect(moderation?.version).toBe("2");
     expect(moderation?.variant).toBe("");
+    for (const subscriptionType of ["automod.message.hold", "channel.suspicious_user.message", "channel.suspicious_user.update"]) {
+      const definition = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((candidate) => candidate.subscriptionType === subscriptionType);
+      expect(definition?.version).toBe("1");
+      expect(definition?.variant).toBe("");
+    }
   });
 
   it("nimmt ausgeschaltete Kanalereignisse nicht in den Sollstand auf", async () => {
@@ -69,6 +77,36 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
         { channelId: "kanal-a", subscriptionType: "channel.raid", variant: "eingehend", version: "1" },
         { channelId: "kanal-a", subscriptionType: "channel.raid", variant: "ausgehend", version: "1" },
       ]);
+      expect(targets.filter((target) => target.subscriptionType !== "channel.raid")).toEqual([
+        { channelId: "kanal-a", subscriptionType: "channel.shoutout.create", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.shoutout.receive", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.chat.notification", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.moderate", variant: "", version: "2" },
+        { channelId: "kanal-a", subscriptionType: "automod.message.hold", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.message", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.update", variant: "", version: "1" },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("erzeugt für ein ausgeschaltetes Modul keine neuen Moderationsziele", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+         VALUES ('kanal-a', 'kanalereignisse', 0, '{}')`,
+      ).run();
+
+      const targets = await listDesiredEventSubTargets(database as unknown as D1Database, "kanal-a");
+      expect(targets.filter((target) => [
+        "automod.message.hold",
+        "channel.suspicious_user.message",
+        "channel.suspicious_user.update",
+      ].includes(target.subscriptionType))).toEqual([]);
     } finally {
       database.close();
     }

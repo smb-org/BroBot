@@ -64,8 +64,42 @@ describe("Dashboard-Locale", () => {
   it("benennt EventSub-Abos im Panel zweisprachig", () => {
     setBrowserLanguage("de-DE");
     expect(eventSubName("channel.moderate")).toBe("Moderationsereignisse");
+    expect(eventSubName("automod.message.hold")).toBe("AutoMod-Haltevorgänge");
+    expect(eventSubName("channel.suspicious_user.message")).toBe("Nachrichten auffälliger Nutzer");
+    expect(eventSubName("channel.suspicious_user.update")).toBe("Einstufungen auffälliger Nutzer");
 
     setBrowserLanguage("en-US");
     expect(eventSubName("channel.moderate")).toBe("Moderation events");
+    expect(eventSubName("automod.message.hold")).toBe("AutoMod holds");
+    expect(eventSubName("channel.suspicious_user.message")).toBe("Suspicious user messages");
+    expect(eventSubName("channel.suspicious_user.update")).toBe("Suspicious user classifications");
+  });
+
+  it("rendert AutoMod- und Verdachtsereignisse zweisprachig mit ihrem Bedeutungston", () => {
+    setBrowserLanguage("de-DE");
+    expect(ereignisText("kanalereignisse.automod.halte", {
+      person: "Alice", grund: "aggressive", text: "Nachricht",
+    })).toBe("AutoMod hielt die Nachricht von Alice wegen aggressive: Nachricht");
+    expect(ereignisText("kanalereignisse.verdacht.nachricht", {
+      person: "Alice", einstufung: "restricted / ban_evader / possible", text: "Nachricht",
+    })).toBe("Nachricht von auffälligem Nutzer Alice (restricted / ban_evader / possible): Nachricht");
+    expect(ereignisText("kanalereignisse.verdacht.einstufung", {
+      person: "Alice", einstufung: "restricted", moderator: "Mod",
+    })).toBe("Einstufung von Alice verschärft von Mod: restricted");
+    expect(ereignisText("kanalereignisse.verdacht.entwarnung", {
+      person: "Alice", einstufung: "none", moderator: "Mod",
+    })).toBe("Einstufung von Alice aufgehoben von Mod");
+    expect(ereignisTon["kanalereignisse.automod.halte"]).toBe("amber");
+    expect(ereignisTon["kanalereignisse.verdacht.nachricht"]).toBe("amber");
+    expect(ereignisTon["kanalereignisse.verdacht.einstufung"]).toBe("amber");
+    expect(ereignisTon["kanalereignisse.verdacht.entwarnung"]).toBe("green");
+
+    setBrowserLanguage("en-US");
+    expect(ereignisText("kanalereignisse.automod.halte", {
+      person: "Alice", grund: "aggressive", text: "Message",
+    })).toBe("AutoMod held a message from Alice for aggressive: Message");
+    expect(ereignisText("kanalereignisse.verdacht.entwarnung", {
+      person: "Alice", moderator: "Mod",
+    })).toBe("Classification for Alice cleared by Mod");
   });
 });
