@@ -240,6 +240,10 @@ export interface DashboardTexte {
     ansichtenLaden: string;
     nichtAktiv: (name: string) => string;
     unbekannt: (name: string) => string;
+    scopesFehlen: (name: string) => string;
+    scopeZustimmungAnfordern: string;
+    scopeZustimmungGesperrt: string;
+    scopeListe: string;
   };
 }
 
@@ -343,6 +347,10 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       keineAnsicht: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", ansichten: "Modulansichten",
       ansichtenLaden: "Modulansichten werden geladen …",
       nichtAktiv: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
+      scopesFehlen: (name) => `Das Modul „${name}“ ist deaktiviert, weil Broadcaster-Berechtigungen fehlen.`,
+      scopeZustimmungAnfordern: "Broadcaster-Berechtigungen erteilen",
+      scopeZustimmungGesperrt: "Nur der Broadcaster dieses Kanals darf diese Zustimmung erteilen.",
+      scopeListe: "Benötigte Broadcaster-Berechtigungen",
       unbekannt: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     },
   },
@@ -436,6 +444,10 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       keineAnsicht: "This active module does not have a panel view yet.", ansichten: "Module views", ansichtenLaden: "Loading module views …",
       nichtAktiv: (name) => `The module “${name}” is not active in this channel.`,
       unbekannt: (name) => `The module “${name}” is unknown.`,
+      scopesFehlen: (name) => `The module “${name}” is disabled because broadcaster permissions are missing.`,
+      scopeZustimmungAnfordern: "Grant broadcaster permissions",
+      scopeZustimmungGesperrt: "Only this channel’s broadcaster may grant this consent.",
+      scopeListe: "Required broadcaster permissions",
     },
   },
 };
@@ -469,6 +481,8 @@ export type EreignisCode =
   | "kanalereignisse.verdacht.einstufung"
   | "kanalereignisse.verdacht.entwarnung"
   | "shoutout.unterdrueckt"
+  | "werbung.ankuendigung"
+  | "werbung.uebersprungen"
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
   | "textbefehle.bereits_vorhanden"
@@ -549,6 +563,8 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "kanalereignisse.verdacht.einstufung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} verschärft${detailModerator(detail, "")}: ${detailEinstufung(detail, "unbekannt")}`,
     "kanalereignisse.verdacht.entwarnung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} aufgehoben${detailModerator(detail, "")}`,
     "shoutout.unterdrueckt": "Shoutout unterdrückt",
+    "werbung.ankuendigung": (detail) => `Werbepause ${detail.automatisch === true ? "automatisch" : "manuell"} gestartet: ${detailZahl(detail, "dauer", "unbekannte Dauer")} Sekunden`,
+    "werbung.uebersprungen": (detail) => `Werbepause übersprungen: ${detail.grund === "dauer_null" ? "Dauer ist null" : "Ereignisdaten sind ungültig"}`,
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
@@ -590,6 +606,8 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "kanalereignisse.verdacht.einstufung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} tightened${detailModeratorEn(detail, "")}: ${detailEinstufung(detail, "unknown")}`,
     "kanalereignisse.verdacht.entwarnung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} cleared${detailModeratorEn(detail, "")}`,
     "shoutout.unterdrueckt": "Shoutout suppressed",
+    "werbung.ankuendigung": (detail) => `Ad break ${detail.automatisch === true ? "automatically" : "manually"} started: ${detailZahl(detail, "dauer", "unknown duration")} seconds`,
+    "werbung.uebersprungen": (detail) => `Ad break skipped: ${detail.grund === "dauer_null" ? "duration is zero" : "event data is invalid"}`,
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
@@ -633,6 +651,8 @@ export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green" | "off"
   "kanalereignisse.verdacht.einstufung": "amber",
   "kanalereignisse.verdacht.entwarnung": "green",
   "shoutout.unterdrueckt": "amber",
+  "werbung.ankuendigung": "green",
+  "werbung.uebersprungen": "amber",
   "textbefehle.abgekuehlt": "amber",
   "textbefehle.ausgeloest": "green",
   "textbefehle.bereits_vorhanden": "amber",
