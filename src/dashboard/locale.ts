@@ -79,6 +79,7 @@ export interface DashboardTexte {
   };
   navigation: {
     hauptnavigation: string;
+    brotkrume: string;
     uebersicht: string;
     kanal: string;
     system: string;
@@ -86,7 +87,6 @@ export interface DashboardTexte {
     module: string;
     ereignisse: string;
     kanalAuswaehlen: string;
-    bitteWaehlen: string;
     twitchAnmelden: string;
     twitchKonto: string;
     abmeldungLaeuft: string;
@@ -246,9 +246,9 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       aktiv: "Aktiv", nichtErforderlich: "Nicht erforderlich", vorhanden: "Vorhanden",
     },
     navigation: {
-      hauptnavigation: "Hauptnavigation", uebersicht: "Übersicht", kanal: "Kanal", system: "System",
+      hauptnavigation: "Hauptnavigation", brotkrume: "Brotkrume", uebersicht: "Übersicht", kanal: "Kanal", system: "System",
       mitglieder: "Mitglieder", module: "Module", ereignisse: "Ereignisse", kanalAuswaehlen: "Kanal auswählen",
-      bitteWaehlen: "Bitte wählen", twitchAnmelden: "Mit Twitch anmelden", twitchKonto: "Twitch-Konto",
+      twitchAnmelden: "Mit Twitch anmelden", twitchKonto: "Twitch-Konto",
       abmeldungLaeuft: "Abmeldung …", abmelden: "Abmelden",
     },
     overview: {
@@ -342,9 +342,9 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       nichtErforderlich: "Not required", vorhanden: "Present",
     },
     navigation: {
-      hauptnavigation: "Main navigation", uebersicht: "Overview", kanal: "Channel", system: "System",
+      hauptnavigation: "Main navigation", brotkrume: "Breadcrumb", uebersicht: "Overview", kanal: "Channel", system: "System",
       mitglieder: "Members", module: "Modules", ereignisse: "Events", kanalAuswaehlen: "Select channel",
-      bitteWaehlen: "Choose", twitchAnmelden: "Sign in with Twitch", twitchKonto: "Twitch account",
+      twitchAnmelden: "Sign in with Twitch", twitchKonto: "Twitch account",
       abmeldungLaeuft: "Signing out …", abmelden: "Sign out",
     },
     overview: {

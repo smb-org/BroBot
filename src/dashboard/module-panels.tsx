@@ -62,6 +62,8 @@ const iconFor = (moduleId: string): ReactElement => (
   </svg>
 );
 
+export const ModuleIcon = ({ moduleId }: { moduleId: string }): ReactElement => iconFor(moduleId);
+
 export const Led = ({ status, label }: { status: LedStatus; label: string }): ReactElement => (
   <span className="led" data-status={status}>
     <span className="led__dot" aria-hidden="true" />
@@ -256,7 +258,7 @@ const ModuleListLink = ({ channelId, onNavigate }: { channelId: string; onNaviga
   const route: DashboardRoute = { kind: "channel", channelId, section: "modules" };
   return (
     <a
-      className="breadcrumb__link"
+      className="module-list-link"
       href={dashboardRoutePath(route)}
       onClick={(event) => {
         event.preventDefault();
@@ -304,16 +306,6 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
 
   return (
     <>
-      <header className="module-detail-breadcrumb">
-        <nav className="breadcrumb" aria-label={texte.navigation.module}>
-          <ModuleListLink channelId={channelId} onNavigate={onNavigate} />
-          <span className="breadcrumb__separator" aria-hidden="true">›</span>
-          <span className="breadcrumb__current" aria-current="page">
-            <span className="breadcrumb__icon">{iconFor(moduleId)}</span>
-            <span>{details.name}</span>
-          </span>
-        </nav>
-      </header>
       <section className="module-detail" aria-label={details.name}>
         <header className="module-detail__header">
           <div className="module-detail__icon" aria-hidden="true">{iconFor(moduleId)}</div>
