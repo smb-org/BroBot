@@ -11,6 +11,8 @@ import {
   failOAuthTransaction,
   getBotIdentity,
   getLoginIdentity,
+  hatVollzustimmungFürKanalId,
+  hatVollzustimmungFürKanalLogin,
   revokeSession,
   upsertLoginIdentity,
   upsertBotIdentityAndStatus,
@@ -49,7 +51,10 @@ import {
 import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { MODULES } from "../../modules/registry";
-import { listRequiredBroadcasterScopesForUserAndModule } from "../module-scopes";
+import {
+  listeAlleBroadcasterScopes,
+  listRequiredBroadcasterScopesForUserAndModule,
+} from "../module-scopes";
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -274,7 +279,17 @@ authRouter.get("/api/overlay/status", async (context) => {
 });
 
 authRouter.get("/auth/login", async (context) => {
-  const started = await startOAuthAuthorization(context.env.DB, context.env, "login", nowIso());
+  const kanalLogin = context.req.query("kanal");
+  const vollzustimmung = kanalLogin !== undefined && kanalLogin.length > 0 &&
+    await hatVollzustimmungFürKanalLogin(context.env.DB, kanalLogin);
+  const scopes = vollzustimmung ? listeAlleBroadcasterScopes() : [];
+  const started = await startOAuthAuthorization(
+    context.env.DB,
+    context.env,
+    "login",
+    nowIso(),
+    scopes,
+  );
   context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);
 });
@@ -424,6 +439,45 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         void maintenance;
       }
       return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);
+    }
+
+    const vollumfang = listeAlleBroadcasterScopes();
+    const istVollzustimmenderKanal = await hatVollzustimmungFürKanalId(
+      context.env.DB,
+      identity.userId,
+    );
+    const fehlen = vollumfang.some((scope) => !tokens.scopes.includes(scope));
+    if (istVollzustimmenderKanal && fehlen) {
+      if (state.vollzustimmungZweiterVersuch) {
+        await failOAuthTransaction(
+          context.env.DB,
+          state.transactionId,
+          "vollzustimmung_zweiter_versuch_unvollständig",
+        );
+        return oauthError(
+          context,
+          "Die vollständige Zustimmung für diesen Kanal wurde nicht erteilt.",
+          403,
+        );
+      }
+
+      await failOAuthTransaction(
+        context.env.DB,
+        state.transactionId,
+        "vollzustimmung_unvollständig",
+      );
+      const started = await startOAuthAuthorization(
+        context.env.DB,
+        context.env,
+        "login",
+        now,
+        vollumfang,
+        state.reconcileEventSub === true,
+        transaction.redirectPath ?? null,
+        true,
+      );
+      context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
+      return context.redirect(started.url, 302);
     }
 
     const expiresAt = new Date(Date.parse(now) + tokens.expiresIn * 1000).toISOString();

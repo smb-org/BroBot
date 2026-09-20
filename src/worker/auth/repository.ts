@@ -184,6 +184,10 @@ interface LoginIdentityRow {
   updated_at: string;
 }
 
+interface VollzustimmungsKanalZeile {
+  vorhanden: number;
+}
+
 interface BotIdentityStatusRow {
   id: 1;
   status: BotIdentityStatus;
@@ -1178,6 +1182,30 @@ export const getLoginIdentity = async (
       WHERE user_id = ?`,
   ).bind(userId).first<LoginIdentityRow>();
   return row === null ? null : mapLoginIdentity(row);
+};
+
+export const hatVollzustimmungFürKanalId = async (
+  db: D1Database,
+  kanalId: string,
+): Promise<boolean> => {
+  const zeile = await db.prepare(
+    `SELECT 1 AS vorhanden
+       FROM channels
+      WHERE channel_id = ? AND vollzustimmung = 1`,
+  ).bind(kanalId).first<VollzustimmungsKanalZeile>();
+  return zeile?.vorhanden === 1;
+};
+
+export const hatVollzustimmungFürKanalLogin = async (
+  db: D1Database,
+  kanalLogin: string,
+): Promise<boolean> => {
+  const zeile = await db.prepare(
+    `SELECT 1 AS vorhanden
+       FROM channels
+      WHERE login = ? COLLATE NOCASE AND vollzustimmung = 1`,
+  ).bind(kanalLogin).first<VollzustimmungsKanalZeile>();
+  return zeile?.vorhanden === 1;
 };
 
 export const upsertLoginIdentity = async (

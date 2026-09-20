@@ -45,6 +45,7 @@ export interface OAuthState {
   purpose: OAuthPurpose;
   expiresAt: string;
   reconcileEventSub?: boolean;
+  vollzustimmungZweiterVersuch?: boolean;
 }
 
 export interface OAuthStart {
@@ -119,7 +120,9 @@ const isSignedOAuthState = (value: unknown): value is SignedOAuthState => {
     (state.purpose === "login" || state.purpose === "bot") &&
     typeof state.expiresAt === "string" && Number.isFinite(Date.parse(state.expiresAt)) &&
     typeof state.nonce === "string" && state.nonce.length > 0 &&
-    (state.reconcileEventSub === undefined || typeof state.reconcileEventSub === "boolean");
+    (state.reconcileEventSub === undefined || typeof state.reconcileEventSub === "boolean") &&
+    (state.vollzustimmungZweiterVersuch === undefined ||
+      typeof state.vollzustimmungZweiterVersuch === "boolean");
 };
 
 /**
@@ -143,12 +146,20 @@ export const startOAuthAuthorization = async (
   additionalScopes: readonly string[] = [],
   reconcileEventSub = false,
   redirectPath: string | null = null,
+  vollzustimmungZweiterVersuch = false,
 ): Promise<OAuthStart> => {
   const transactionId = randomToken(24);
   const stateNonce = randomToken(24);
   const expiresAt = stateExpiresAt(now);
   const state = await signJson(
-    { transactionId, purpose, expiresAt, nonce: stateNonce, reconcileEventSub },
+    {
+      transactionId,
+      purpose,
+      expiresAt,
+      nonce: stateNonce,
+      reconcileEventSub,
+      vollzustimmungZweiterVersuch,
+    },
     parseKeyRing(environment.SESSION_COOKIE_KEYS),
   );
 
@@ -192,6 +203,7 @@ export const verifyOAuthState = async (
     purpose: state.purpose,
     expiresAt: state.expiresAt,
     reconcileEventSub: state.reconcileEventSub === true,
+    vollzustimmungZweiterVersuch: state.vollzustimmungZweiterVersuch === true,
   };
 };
 

@@ -1,5 +1,26 @@
 import { MODULES } from "../modules/registry";
 import type { BotModule } from "../modules/contract";
+import { LOGIN_SCOPES } from "./auth/oauth";
+
+/**
+ * Der Vollumfang stammt aus 0009 Abschnitt 7 und wird dort gepflegt. Die
+ * Liste bleibt vollständig, auch solange einzelne Scopes noch keinem Modul
+ * zugeordnet sind.
+ */
+export const VOLLUMFANG_BROADCASTER_SCOPES = [
+  "channel:read:ads",
+  "channel:manage:ads",
+  "channel:manage:polls",
+  "channel:manage:predictions",
+  "channel:read:redemptions",
+  "channel:manage:redemptions",
+  "channel:read:goals",
+  "channel:manage:broadcast",
+  "channel:read:vips",
+  "channel:manage:vips",
+  "channel:manage:raids",
+  "channel:manage:schedule",
+] as const;
 
 export interface ModuleBroadcasterScopeState {
   required: string[];
@@ -16,6 +37,13 @@ interface IdentityScopeRow {
 }
 
 const unique = (scopes: readonly string[]): string[] => [...new Set(scopes)];
+
+/** Ermittelt den abgeleiteten Vollumfang für markierte Kanäle. */
+export const listeAlleBroadcasterScopes = (): string[] => unique([
+  ...LOGIN_SCOPES,
+  ...MODULES.flatMap((module) => declaredScopes(module)),
+  ...VOLLUMFANG_BROADCASTER_SCOPES,
+]);
 
 const declaredScopes = (module: BotModule | undefined): string[] =>
   unique(module?.broadcasterScopes ?? []);

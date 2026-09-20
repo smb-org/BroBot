@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { werbungModul } from "../../src/modules/werbung";
-import { listRequiredBroadcasterScopesForUser, moduleBroadcasterScopeState } from "../../src/worker/module-scopes";
+import { LOGIN_SCOPES } from "../../src/worker/auth/oauth";
+import {
+  listeAlleBroadcasterScopes,
+  listRequiredBroadcasterScopesForUser,
+  moduleBroadcasterScopeState,
+  VOLLUMFANG_BROADCASTER_SCOPES,
+} from "../../src/worker/module-scopes";
 import { upsertLoginIdentity, setLoginIdentityStatus } from "../../src/worker/auth/repository";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -36,6 +42,14 @@ describe("Broadcaster-Scopes", () => {
 
     await expect(database.prepare("SELECT scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'").first())
       .resolves.toEqual({ scopes_json: '["channel:bot","channel:read:ads"]' });
+  });
+
+  it("leitet den vollständigen Broadcaster-Umfang aus Login, Modulen und Abschnitt 7 ab", () => {
+    database = new TestD1Database();
+    expect(new Set(listeAlleBroadcasterScopes())).toEqual(new Set([
+      ...LOGIN_SCOPES,
+      ...VOLLUMFANG_BROADCASTER_SCOPES,
+    ]));
   });
 
   it("leert die gespeicherten Scopes beim Widerruf", async () => {
