@@ -244,6 +244,8 @@ export interface DashboardTexte {
     scopeZustimmungAnfordern: string;
     scopeZustimmungGesperrt: string;
     scopeListe: string;
+    scopeFehlt: string;
+    scopeErteilt: string;
   };
 }
 
@@ -351,6 +353,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       scopeZustimmungAnfordern: "Broadcaster-Berechtigungen erteilen",
       scopeZustimmungGesperrt: "Nur der Broadcaster dieses Kanals darf diese Zustimmung erteilen.",
       scopeListe: "Benötigte Broadcaster-Berechtigungen",
+      scopeFehlt: "Fehlt",
+      scopeErteilt: "Erteilt",
       unbekannt: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     },
   },
@@ -448,6 +452,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       scopeZustimmungAnfordern: "Grant broadcaster permissions",
       scopeZustimmungGesperrt: "Only this channel’s broadcaster may grant this consent.",
       scopeListe: "Required broadcaster permissions",
+      scopeFehlt: "Missing",
+      scopeErteilt: "Granted",
     },
   },
 };

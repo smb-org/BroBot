@@ -82,4 +82,14 @@ export const listRequiredBroadcasterScopesForUser = async (
   return unique(rows.results.flatMap((row) => declaredScopes(modules.get(row.module_id))));
 };
 
+/** Ergänzt die bereits benötigten Scopes um das angeforderte Registry-Modul. */
+export const listRequiredBroadcasterScopesForUserAndModule = async (
+  db: D1Database,
+  userId: string,
+  module: BotModule,
+): Promise<string[]> => unique([
+  ...declaredScopes(module),
+  ...await listRequiredBroadcasterScopesForUser(db, userId),
+]);
+
 export const moduleScopeRequirement = (module: BotModule): string[] => declaredScopes(module);

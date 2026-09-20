@@ -48,7 +48,8 @@ import {
 } from "./overlay-token-service";
 import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
-import { listRequiredBroadcasterScopesForUser } from "../module-scopes";
+import { MODULES } from "../../modules/registry";
+import { listRequiredBroadcasterScopesForUserAndModule } from "../module-scopes";
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -274,19 +275,24 @@ authRouter.get(
 );
 
 /**
- * Holt die Zusatz-Scopes aus der Session und den aktivierten Modulen der
- * eigenen Broadcaster-Kanäle. Der Request darf keine Scope-Liste vorgeben.
+ * Holt die Scopes des angeforderten Registry-Moduls sowie die Zusatz-Scopes
+ * aus den aktivierten Modulen der eigenen Broadcaster-Kanäle. Der Request darf
+ * keine Scope-Liste vorgeben.
  */
 authRouter.get(
-  "/auth/channels/:channelId/broadcaster-scopes",
+  "/auth/channels/:channelId/broadcaster-scopes/:moduleId",
   requireChannelAuthorization(),
   async (context) => {
     if (context.get("channelRole") !== "broadcaster") {
       return context.text("Nur der Broadcaster darf diese Zustimmung erteilen.", 403);
     }
-    const scopes = await listRequiredBroadcasterScopesForUser(
+    const module = MODULES.find((candidate) => candidate.id === context.req.param("moduleId"));
+    if (module === undefined) return context.text("Modul nicht gefunden.", 404);
+
+    const scopes = await listRequiredBroadcasterScopesForUserAndModule(
       context.env.DB,
       context.get("session").userId,
+      module,
     );
     const started = await startOAuthAuthorization(
       context.env.DB,
