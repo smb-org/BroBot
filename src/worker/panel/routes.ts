@@ -6,6 +6,7 @@ import {
   TwitchApiError,
 } from "../bot-maintenance";
 import { getTokenEncryptionKeys } from "../auth/crypto";
+import { getBetreiberUserIds } from "../config";
 import {
   requireChannelAuthorization,
   requireSessionAuthorization,
@@ -90,7 +91,10 @@ panelRouter.route("/", moduleRouter);
 
 panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) => {
   const session = context.get("session");
-  return context.json({ channels: await listChannelsForUser(context.env.DB, session.userId) });
+  return context.json({
+    channels: await listChannelsForUser(context.env.DB, session.userId),
+    betreiber: getBetreiberUserIds(context.env).has(session.userId),
+  });
 });
 
 panelRouter.get(

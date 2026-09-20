@@ -1,5 +1,8 @@
 import type {
   PanelAuditResponse,
+  PanelBetreiberMitgliederResponse,
+  PanelBetreiberAuditResponse,
+  PanelBetreiberÜbersichtResponse,
   PanelChannelOverview,
   PanelChannelsResponse,
   PanelChannelRole,
@@ -39,6 +42,8 @@ const hasParentPathSegment = (input: string): boolean => {
 const isAllowedRequestPath = (pathname: string): boolean =>
   pathname === "/api/channels" ||
   pathname.startsWith("/api/channels/") ||
+  pathname === "/api/betreiber" ||
+  pathname.startsWith("/api/betreiber/") ||
   pathname === "/api/csrf" ||
   pathname === "/auth/logout";
 
@@ -92,6 +97,75 @@ const modulePath = (channelId: string, moduleId?: string): string =>
 
 export const fetchChannels = (signal?: AbortSignal): Promise<PanelChannelsResponse> =>
   requestJson<PanelChannelsResponse>("/api/channels", requestOptions(signal));
+
+export const holeBetreiberÜbersicht = (): Promise<PanelBetreiberÜbersichtResponse> =>
+  requestJson<PanelBetreiberÜbersichtResponse>("/api/betreiber");
+
+export const sucheBetreiberNutzer = (login: string): Promise<{ user: PanelTwitchUser }> =>
+  requestJson<{ user: PanelTwitchUser }>(`/api/betreiber/nutzer?${new URLSearchParams({ login }).toString()}`);
+
+export const gibBetreiberKanalFrei = (
+  login: string,
+  vollzustimmung: boolean,
+): Promise<{ channel: PanelBetreiberÜbersichtResponse["channels"][number] }> => requestMutation(
+  "/api/betreiber/kanaele",
+  "POST",
+  { login, vollzustimmung },
+);
+
+export const setzeBetreiberVollzustimmung = (
+  channelId: string,
+  vollzustimmung: boolean,
+): Promise<{ channel: PanelBetreiberÜbersichtResponse["channels"][number] }> => requestMutation(
+  `/api/betreiber/kanaele/${encodeURIComponent(channelId)}`,
+  "PATCH",
+  { vollzustimmung },
+);
+
+export const holeBetreiberMitglieder = (
+  channelId: string,
+  cursor: string | null = null,
+): Promise<PanelBetreiberMitgliederResponse> => {
+  const parameter = new URLSearchParams();
+  if (cursor !== null) parameter.set("cursor", cursor);
+  const query = parameter.toString();
+  return requestJson<PanelBetreiberMitgliederResponse>(
+    `/api/betreiber/kanaele/${encodeURIComponent(channelId)}/mitglieder${query.length > 0 ? `?${query}` : ""}`,
+  );
+};
+
+export const fügeBetreiberMitgliedHinzu = (
+  channelId: string,
+  userId: string,
+  role: "verwalter" | "bediener",
+): Promise<{ member: PanelBetreiberMitgliederResponse["members"][number] }> => requestMutation(
+  `/api/betreiber/kanaele/${encodeURIComponent(channelId)}/mitglieder`,
+  "POST",
+  { userId, role },
+);
+
+export const ändereBetreiberMitglied = (
+  channelId: string,
+  userId: string,
+  role: "verwalter" | "bediener",
+): Promise<{ member: PanelBetreiberMitgliederResponse["members"][number] }> => requestMutation(
+  `/api/betreiber/kanaele/${encodeURIComponent(channelId)}/mitglieder/${encodeURIComponent(userId)}`,
+  "PATCH",
+  { role },
+);
+
+export const entferneBetreiberMitglied = (channelId: string, userId: string): Promise<undefined> =>
+  requestMutation<undefined>(
+    `/api/betreiber/kanaele/${encodeURIComponent(channelId)}/mitglieder/${encodeURIComponent(userId)}`,
+    "DELETE",
+  );
+
+export const holeBetreiberAudit = (cursor: string | null = null): Promise<PanelBetreiberAuditResponse> => {
+  const parameter = new URLSearchParams();
+  if (cursor !== null) parameter.set("cursor", cursor);
+  const query = parameter.toString();
+  return requestJson<PanelBetreiberAuditResponse>(`/api/betreiber/audit${query.length > 0 ? `?${query}` : ""}`);
+};
 
 export const fetchChannelOverview = (
   channelId: string,
