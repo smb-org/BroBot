@@ -4,7 +4,7 @@ import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
 import type { PanelActiveModule, PanelChannelRole, PanelModuleState } from "../panel-contract";
 import { dashboardLanguage, dashboardTexte, formatZahl, type DashboardLanguage, type LocaleCatalog } from "./locale";
-import { moduleDescription, moduleName, statusWord } from "./module-labels";
+import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
@@ -16,6 +16,7 @@ interface ModuleWorkspaceTexte {
   unbekannt: (name: string) => string;
   nichtAktiv: (name: string) => string;
   ausgeschaltet: (name: string) => string;
+  deaktiviert: string;
   keineBeschreibung: string;
 }
 
@@ -27,6 +28,7 @@ const workspaceKatalog: LocaleCatalog<ModuleWorkspaceTexte> = {
     unbekannt: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     nichtAktiv: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
     ausgeschaltet: (name) => `Das Modul „${name}“ ist ausgeschaltet.`,
+    deaktiviert: "Deaktiviert",
     keineBeschreibung: "Keine Beschreibung für dieses Modul.",
   },
   en: {
@@ -36,6 +38,7 @@ const workspaceKatalog: LocaleCatalog<ModuleWorkspaceTexte> = {
     unbekannt: (name) => `The module “${name}” is unknown.`,
     nichtAktiv: (name) => `The module “${name}” is not active in this channel.`,
     ausgeschaltet: (name) => `The module “${name}” is switched off.`,
+    deaktiviert: "Disabled",
     keineBeschreibung: "No description is available for this module.",
   },
 };
@@ -56,11 +59,14 @@ export const NavigationIcon = ({ kind, className = "navigation-icon" }: { kind: 
   </svg>
 );
 
-const iconFor = (moduleId: string): ReactElement => (
-  <svg className="module-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    {moduleId === "textbefehle" ? <><circle cx="12" cy="12" r="8" /><path d="M12 7v10M8.5 10.5h7M8.5 13.5h5" /></> : moduleId === "kanalereignisse" ? <><path d="M5 12h3l2-5 4 10 2-5h3" /><path d="M5 19h14" /></> : <><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 12h6M12 9v6" /></>}
-  </svg>
-);
+const iconFor = (moduleId: string): ReactElement => {
+  const symbol = moduleSymbol(moduleId);
+  return (
+    <svg className="module-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      {symbol === "textbefehle" ? <><circle cx="12" cy="12" r="8" /><path d="M12 7v10M8.5 10.5h7M8.5 13.5h5" /></> : symbol === "kanalereignisse" ? <><path d="M5 12h3l2-5 4 10 2-5h3" /><path d="M5 19h14" /></> : symbol === "werbung" ? <><path d="M6 8h12v8H6z" /><path d="M9 8V6h6v2M9 12h6M9 16v2h6v-2" /></> : <><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 12h6M12 9v6" /></>}
+    </svg>
+  );
+};
 
 export const ModuleIcon = ({ moduleId }: { moduleId: string }): ReactElement => iconFor(moduleId);
 
@@ -233,7 +239,9 @@ interface ModuleWorkspaceProperties {
 export const ModuleWorkspace = ({ channelId, modules, loading = false, error = null, onNavigate }: ModuleWorkspaceProperties): ReactElement => {
   const registeredModules = MODULES.map((module) => ({
     id: module.id,
-    enabled: modules.find((moduleState) => moduleState.id === module.id)?.enabled === true,
+    enabled: modules.find((moduleState) => moduleState.id === module.id)?.enabled === true &&
+      (modules.find((moduleState) => moduleState.id === module.id)?.missingBroadcasterScopes?.length ?? 0) === 0,
+    missing: modules.find((moduleState) => moduleState.id === module.id)?.missingBroadcasterScopes ?? [],
   }));
 
   return (
@@ -245,7 +253,14 @@ export const ModuleWorkspace = ({ channelId, modules, loading = false, error = n
         </header>
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         <div className="module-grid">
-          {registeredModules.map(({ id, enabled }) => <ModuleTaste key={id} channelId={channelId} moduleId={id} enabled={enabled} onNavigate={onNavigate} />)}
+          {registeredModules.map(({ id, enabled, missing }) => <ModuleTaste
+            key={id}
+            channelId={channelId}
+            moduleId={id}
+            enabled={enabled}
+            {...(missing.length === 0 ? {} : { ledStatus: "amber" as const, ledLabel: workspaceTexte().deaktiviert })}
+            onNavigate={onNavigate}
+          />)}
         </div>
       </div>
     </section>
@@ -294,15 +309,20 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const manageable = canManageModules(ownRole);
   const disabledReason = manageable ? null : texte.module.verwaltungGesperrt;
   const switchDisabled = registered === undefined || (moduleState === undefined && activeModule === undefined);
+  const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
+  const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
+  const effectiveEnabled = enabled && missingScopes.length === 0;
 
   const stateMessage = registered === undefined
     ? labels.unbekannt(details.name)
-    : moduleState?.enabled === false
+    : missingScopes.length > 0
+      ? texte.module.scopesFehlen(details.name)
+      : moduleState?.enabled === false
       ? labels.ausgeschaltet(details.name)
       : activeModule === undefined
         ? labels.nichtAktiv(details.name)
         : null;
-  const stateTone = registered === undefined || (moduleState?.enabled !== false && activeModule === undefined) ? "notice" : "neutral";
+  const stateTone = registered === undefined || missingScopes.length > 0 || (moduleState?.enabled !== false && activeModule === undefined) ? "notice" : "neutral";
 
   return (
     <>
@@ -318,11 +338,19 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
           <div>
             <strong>{labels.hauptschalter}</strong>
-            <Led status={enabled ? "green" : "off"} label={statusWord(enabled)} />
+            <Led status={effectiveEnabled ? "green" : "off"} label={statusWord(effectiveEnabled)} />
           </div>
-          <ModuleSwitch moduleId={moduleId} enabled={enabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />
+          <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />
           {disabledReason === null ? null : <p className="sperrgrund">{disabledReason}</p>}
         </section>
+        {missingScopes.length === 0 ? null : <section className="module-detail__authorization" aria-label={texte.module.scopeListe}>
+          <h2>{texte.module.scopeListe}</h2>
+          <ul className="scope-liste">{requiredScopes.map((scope) => <li key={scope}><span className="mono">{scope}</span> — {moduleScopePurpose(moduleId, scope)}</li>)}</ul>
+          {ownRole === "broadcaster"
+            ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes`}>{texte.module.scopeZustimmungAnfordern}</a>
+            : <button className="button" type="button" disabled>{texte.module.scopeZustimmungAnfordern}</button>}
+          {ownRole === "broadcaster" ? null : <p className="sperrgrund">{texte.module.scopeZustimmungGesperrt}</p>}
+        </section>}
         {loading ? <p className="muted">{texte.module.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {stateMessage === null ? (

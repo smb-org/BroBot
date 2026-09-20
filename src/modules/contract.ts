@@ -136,6 +136,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
+  /** Broadcaster-Zustimmung, die der Host vor dem EventSub-Abo nachweist. */
+  broadcasterScopes?: readonly string[];
   eventSubTypes?: readonly string[];
   routes?: Hono<ModuleRouteEnvironment>;
   /**

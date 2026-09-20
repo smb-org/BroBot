@@ -1,4 +1,5 @@
 import { MODULES } from "../modules/registry";
+import { moduleHasRequiredBroadcasterScopes, moduleScopeRequirement } from "./module-scopes";
 import { getAppAccessToken } from "./app-token";
 import { parseKeyRing } from "./auth/crypto";
 import {
@@ -68,6 +69,15 @@ const userSubscriptionDefinition = (subscriptionType: string, version: string): 
   channelIdFromCondition: conditionField("broadcaster_user_id"),
 });
 
+/** Abo mit ausschließlicher Broadcaster-Bedingung, wie channel.ad_break.begin. */
+const broadcasterSubscriptionDefinition = (subscriptionType: string, version: string): EventSubSubscriptionDefinition => ({
+  subscriptionType,
+  variant: "",
+  version,
+  buildCondition: (channelId) => ({ broadcaster_user_id: channelId }),
+  channelIdFromCondition: conditionField("broadcaster_user_id"),
+});
+
 /**
  * Die einzige Tabelle für EventSub-Bedingungen. Sie beschreibt sowohl das
  * Anlegen als auch die sichere Rückgewinnung des Kanal-Mandanten aus dem
@@ -96,6 +106,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDef
   moderatorSubscriptionDefinition("automod.message.hold", "1"),
   moderatorSubscriptionDefinition("channel.suspicious_user.message", "1"),
   moderatorSubscriptionDefinition("channel.suspicious_user.update", "1"),
+  broadcasterSubscriptionDefinition("channel.ad_break.begin", "1"),
 ];
 
 export const eventSubTargetKey = (target: Pick<EventSubTarget, "channelId" | "subscriptionType" | "variant" | "version">): string =>
@@ -124,7 +135,20 @@ const conditionContains = (
 interface EventSubTargetRow {
   channel_id: string;
   module_id: string;
+  channel_bot_consent: number;
+  broadcaster_scopes_json: string | null;
+  broadcaster_status: string | null;
 }
+
+const parseScopes = (serialized: string | null): string[] => {
+  if (serialized === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    return Array.isArray(parsed) && parsed.every((scope) => typeof scope === "string") ? parsed : [];
+  } catch {
+    return [];
+  }
+};
 
 interface EventSubRemoteSubscription {
   id: string;
@@ -216,10 +240,15 @@ export const listDesiredEventSubTargets = async (
   channelId?: string,
 ): Promise<EventSubTarget[]> => {
   const query = `SELECT channel.channel_id, channel_modules.module_id
+       , CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent
+       , broadcaster_identity.scopes_json AS broadcaster_scopes_json
+       , broadcaster_identity.status AS broadcaster_status
        FROM channels AS channel
        JOIN channel_modules ON channel_modules.channel_id = channel.channel_id
         AND channel_modules.enabled = 1
-      WHERE ${channelBotConsentCondition("channel")}
+       LEFT JOIN twitch_login_identity AS broadcaster_identity
+         ON broadcaster_identity.user_id = channel.channel_id
+      WHERE 1 = 1
         ${channelId === undefined ? "" : "AND channel.channel_id = ?"}
       ORDER BY channel.channel_id, channel_modules.module_id`;
   const result = channelId === undefined
@@ -229,7 +258,13 @@ export const listDesiredEventSubTargets = async (
   const targets = new Map<string, EventSubTarget>();
   for (const row of result.results) {
     const module = modules.get(row.module_id);
-    for (const subscriptionType of module?.eventSubTypes ?? []) {
+    if (module === undefined) continue;
+    const requiredScopes = moduleScopeRequirement(module);
+    const grantedScopes = row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : [];
+    if (requiredScopes.length === 0
+      ? row.channel_bot_consent !== 1
+      : !moduleHasRequiredBroadcasterScopes(module, grantedScopes)) continue;
+    for (const subscriptionType of module.eventSubTypes ?? []) {
       for (const definition of EVENTSUB_SUBSCRIPTION_DEFINITIONS) {
         if (definition.subscriptionType !== subscriptionType) continue;
         const target: EventSubTarget = {

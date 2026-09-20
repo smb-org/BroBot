@@ -34,6 +34,7 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
         ["automod.message.hold", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.suspicious_user.message", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.suspicious_user.update", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
+        ["channel.ad_break.begin", { broadcaster_user_id: "kanal-a" }],
       ]);
 
     const moderation = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.moderate");

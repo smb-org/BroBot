@@ -44,6 +44,7 @@ export interface OAuthState {
   transactionId: string;
   purpose: OAuthPurpose;
   expiresAt: string;
+  reconcileEventSub?: boolean;
 }
 
 export interface OAuthStart {
@@ -117,7 +118,8 @@ const isSignedOAuthState = (value: unknown): value is SignedOAuthState => {
   return typeof state.transactionId === "string" && state.transactionId.length > 0 &&
     (state.purpose === "login" || state.purpose === "bot") &&
     typeof state.expiresAt === "string" && Number.isFinite(Date.parse(state.expiresAt)) &&
-    typeof state.nonce === "string" && state.nonce.length > 0;
+    typeof state.nonce === "string" && state.nonce.length > 0 &&
+    (state.reconcileEventSub === undefined || typeof state.reconcileEventSub === "boolean");
 };
 
 /**
@@ -138,12 +140,14 @@ export const startOAuthAuthorization = async (
   environment: OAuthEnvironment,
   purpose: OAuthPurpose,
   now: string,
+  additionalScopes: readonly string[] = [],
+  reconcileEventSub = false,
 ): Promise<OAuthStart> => {
   const transactionId = randomToken(24);
   const stateNonce = randomToken(24);
   const expiresAt = stateExpiresAt(now);
   const state = await signJson(
-    { transactionId, purpose, expiresAt, nonce: stateNonce },
+    { transactionId, purpose, expiresAt, nonce: stateNonce, reconcileEventSub },
     parseKeyRing(environment.SESSION_COOKIE_KEYS),
   );
 
@@ -158,7 +162,9 @@ export const startOAuthAuthorization = async (
   url.searchParams.set("client_id", environment.TWITCH_CLIENT_ID);
   url.searchParams.set("redirect_uri", redirectUri(environment.PUBLIC_ORIGIN));
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", (purpose === "login" ? LOGIN_SCOPES : BOT_SCOPES).join(" "));
+  const baseScopes = purpose === "login" ? LOGIN_SCOPES : BOT_SCOPES;
+  const scopes = [...new Set([...baseScopes, ...additionalScopes])];
+  url.searchParams.set("scope", scopes.join(" "));
   if (purpose === "bot") url.searchParams.set("force_verify", "true");
   url.searchParams.set("state", state);
   return { url: url.toString(), state, transactionId, stateNonce };
@@ -179,7 +185,12 @@ export const verifyOAuthState = async (
   const nowMs = Date.parse(now);
   if (!isSignedOAuthState(state) || !Number.isFinite(expiresAtMs) || !Number.isFinite(nowMs) || expiresAtMs <= nowMs) return null;
   if (cookieNonce === null || !equalsConstantTime(state.nonce, cookieNonce)) return null;
-  return { transactionId: state.transactionId, purpose: state.purpose, expiresAt: state.expiresAt };
+  return {
+    transactionId: state.transactionId,
+    purpose: state.purpose,
+    expiresAt: state.expiresAt,
+    reconcileEventSub: state.reconcileEventSub === true,
+  };
 };
 
 interface TwitchTokenApiResponse {

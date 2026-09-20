@@ -925,6 +925,11 @@ export const recordEventSubRevocation = async (
           SET status = 'revoked', reason = ?, updated_at = ?
         WHERE user_id = ? AND status <> 'revoked'`,
     ).bind(revocation.reason, revocation.updatedAt, revocation.channelId).run();
+    await db.prepare(
+      `UPDATE twitch_login_identity
+          SET scopes_json = '[]'
+        WHERE user_id = ? AND status = 'revoked'`,
+    ).bind(revocation.channelId).run();
   }
   await db.prepare(
     `INSERT INTO eventsub_subscriptions
@@ -1012,8 +1017,13 @@ export const rememberEventSubMessageAndRevocation = async (
         SET status = 'revoked', reason = ?, updated_at = ?
       WHERE user_id = ? AND status <> 'revoked'`,
   ).bind(revocation.reason, revocation.updatedAt, revocation.channelId);
+  const clearedIdentityScopes = db.prepare(
+    `UPDATE twitch_login_identity
+        SET scopes_json = '[]'
+      WHERE user_id = ? AND status = 'revoked'`,
+  ).bind(revocation.channelId);
   const results = await db.batch(revocation.reason === "authorization_revoked"
-    ? [message, storedRevocation, storedState, revokedIdentity]
+    ? [message, storedRevocation, storedState, revokedIdentity, clearedIdentityScopes]
     : [message, storedRevocation, storedState]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };
@@ -1127,7 +1137,15 @@ export const upsertLoginIdentity = async (
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
        login = excluded.login,
-       scopes_json = excluded.scopes_json,
+       scopes_json = (
+         SELECT json_group_array(scope)
+           FROM (
+             SELECT value AS scope FROM json_each(twitch_login_identity.scopes_json)
+             UNION
+             SELECT value AS scope FROM json_each(excluded.scopes_json)
+            ORDER BY scope
+           )
+       ),
        access_token_ciphertext = excluded.access_token_ciphertext,
        refresh_token_ciphertext = excluded.refresh_token_ciphertext,
        expires_at = excluded.expires_at,
@@ -1160,6 +1178,11 @@ export const setLoginIdentityStatus = async (
         SET status = ?, reason = ?, updated_at = ?
       WHERE user_id = ?`,
   ).bind(status, reason, updatedAt, userId).run();
+  if (status === "revoked") {
+    await db.prepare(
+      `UPDATE twitch_login_identity SET scopes_json = '[]' WHERE user_id = ? AND status = 'revoked'`,
+    ).bind(userId).run();
+  }
 };
 
 export const setLoginIdentityStatusIfCurrent = async (
@@ -1186,6 +1209,15 @@ export const setLoginIdentityStatusIfCurrent = async (
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
   ).run();
+  if (result.meta.changes > 0 && status === "revoked") {
+    await db.prepare(
+      `UPDATE twitch_login_identity
+          SET scopes_json = '[]'
+        WHERE user_id = ? AND status = 'revoked'
+          AND access_token_ciphertext = ?
+          AND refresh_token_ciphertext = ?`,
+    ).bind(userId, expectedAccessTokenCiphertext, expectedRefreshTokenCiphertext).run();
+  }
   return result.meta.changes > 0;
 };
 
@@ -1199,7 +1231,7 @@ export const revokeLoginIdentityAndSessionsForUser = async (
 ): Promise<boolean> => {
   const identityRevocation = db.prepare(
     `UPDATE twitch_login_identity
-        SET status = 'revoked', reason = ?, updated_at = ?
+        SET status = 'revoked', reason = ?, updated_at = ?, scopes_json = '[]'
       WHERE user_id = ?
         AND status <> 'revoked'
         AND access_token_ciphertext = ?

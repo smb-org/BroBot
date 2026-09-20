@@ -107,7 +107,7 @@ export const decodeLogCursor = (serialized: string): LogCursor | null => {
 
 const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, member.role,
-           CASE WHEN connection.connection_id IS NULL THEN 0 ELSE 1 END AS broadcaster_connection,
+           CASE WHEN broadcaster_identity.status = 'connected' THEN 1 ELSE 0 END AS broadcaster_connection,
            CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent,
            bot_status.status AS bot_status, bot_status.reason AS bot_reason,
            bot_status.updated_at AS bot_updated_at,
@@ -165,9 +165,8 @@ const channelStateQuery = `
              LIMIT 1) AS eventsub_error_updated_at
       FROM channels AS channel
       JOIN channel_members AS member ON member.channel_id = channel.channel_id
-      LEFT JOIN twitch_connections AS connection
-        ON connection.channel_id = channel.channel_id
-       AND connection.purpose = 'broadcaster'
+      LEFT JOIN twitch_login_identity AS broadcaster_identity
+        ON broadcaster_identity.user_id = channel.channel_id
       LEFT JOIN bot_identity_status AS bot_status ON bot_status.id = 1
       LEFT JOIN bot_identity ON bot_identity.id = 1
       LEFT JOIN twitch_login_identity AS login_identity ON login_identity.user_id = ?

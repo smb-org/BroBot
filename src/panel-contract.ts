@@ -87,6 +87,10 @@ export interface PanelModuleState {
   id: string;
   enabled: boolean;
   settings: string;
+  /** Vom Modul deklarierte Zustimmung, vor einer Weiterleitung angezeigt. */
+  requiredBroadcasterScopes?: string[];
+  /** Deklarierte Scopes, die die Broadcaster-Identität aktuell noch nicht nachweist. */
+  missingBroadcasterScopes?: string[];
 }
 
 export interface PanelModulesResponse {

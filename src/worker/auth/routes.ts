@@ -48,6 +48,7 @@ import {
 } from "./overlay-token-service";
 import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
+import { listRequiredBroadcasterScopesForUser } from "../module-scopes";
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -76,6 +77,14 @@ const maintainAfterBotAuthorization = async (env: Env, now: string): Promise<voi
     await maintainEventSubSubscriptions(env, now);
   } catch {
     // Fehler werden vom Wartungslauf protokolliert und duerfen den Callback nicht kippen.
+  }
+};
+
+const maintainAfterBroadcasterAuthorization = async (env: Env, now: string): Promise<void> => {
+  try {
+    await maintainEventSubSubscriptions(env, now);
+  } catch {
+    // Der Abgleich wird im Stundenlauf erneut versucht; die Zustimmung bleibt gespeichert.
   }
 };
 
@@ -265,6 +274,34 @@ authRouter.get(
 );
 
 /**
+ * Holt die Zusatz-Scopes aus der Session und den aktivierten Modulen der
+ * eigenen Broadcaster-Kanäle. Der Request darf keine Scope-Liste vorgeben.
+ */
+authRouter.get(
+  "/auth/channels/:channelId/broadcaster-scopes",
+  requireChannelAuthorization(),
+  async (context) => {
+    if (context.get("channelRole") !== "broadcaster") {
+      return context.text("Nur der Broadcaster darf diese Zustimmung erteilen.", 403);
+    }
+    const scopes = await listRequiredBroadcasterScopesForUser(
+      context.env.DB,
+      context.get("session").userId,
+    );
+    const started = await startOAuthAuthorization(
+      context.env.DB,
+      context.env,
+      "login",
+      nowIso(),
+      scopes,
+      true,
+    );
+    context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
+    return context.redirect(started.url, 302);
+  },
+);
+
+/**
  * Verlangt eine Session: Ohne diese Pruefung kann jeder den Bot-Verbindungsfluss
  * starten und damit bestimmen, welches Twitch-Konto der Bot benutzt.
  */
@@ -396,6 +433,14 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       encryptionKeys,
     );
     context.header("Set-Cookie", serializeSessionCookie(cookie));
+    if (state.reconcileEventSub) {
+      const maintenance = maintainAfterBroadcasterAuthorization(context.env, now);
+      try {
+        context.executionCtx.waitUntil(maintenance);
+      } catch {
+        void maintenance;
+      }
+    }
     return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);
   } catch (error) {
     await failOAuthTransaction(
