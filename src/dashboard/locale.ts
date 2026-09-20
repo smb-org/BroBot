@@ -89,6 +89,7 @@ export interface DashboardTexte {
     module: string;
     ereignisse: string;
     kanalAuswaehlen: string;
+    modulAuswaehlen: string;
     twitchAnmelden: string;
     twitchKonto: string;
     abmeldungLaeuft: string;
@@ -233,6 +234,7 @@ export interface DashboardTexte {
     aktivieren: string;
     deaktivieren: string;
     modulliste: string;
+    modulUebersicht: string;
     verwaltungGesperrt: string;
     keineAktiv: string;
     keineAnsicht: string;
@@ -274,6 +276,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     navigation: {
       hauptnavigation: "Hauptnavigation", brotkrume: "Brotkrume", uebersicht: "Übersicht", kanal: "Kanal", system: "System",
       mitglieder: "Mitglieder", module: "Module", ereignisse: "Ereignisse", kanalAuswaehlen: "Kanal auswählen",
+      modulAuswaehlen: "Modul auswählen",
       twitchAnmelden: "Mit Twitch anmelden", twitchKonto: "Twitch-Konto",
       abmeldungLaeuft: "Abmeldung …", abmelden: "Abmelden",
     },
@@ -345,6 +348,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       modul: "Modul", verfuegbar: "Verfügbare Module", laden: "Module werden geladen …",
       registriert: "Für diesen Bot ist noch kein Modul registriert.", aktiv: "Aktiv", inaktiv: "Inaktiv",
       aktivieren: "aktivieren", deaktivieren: "deaktivieren", modulliste: "Modulliste",
+      modulUebersicht: "Modulübersicht",
       verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Module ändern.", keineAktiv: "Keine Module aktiv.",
       keineAnsicht: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", ansichten: "Modulansichten",
       ansichtenLaden: "Modulansichten werden geladen …",
@@ -382,6 +386,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     navigation: {
       hauptnavigation: "Main navigation", brotkrume: "Breadcrumb", uebersicht: "Overview", kanal: "Channel", system: "System",
       mitglieder: "Members", module: "Modules", ereignisse: "Events", kanalAuswaehlen: "Select channel",
+      modulAuswaehlen: "Select module",
       twitchAnmelden: "Sign in with Twitch", twitchKonto: "Twitch account",
       abmeldungLaeuft: "Signing out …", abmelden: "Sign out",
     },
@@ -444,6 +449,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     module: {
       modul: "Module", verfuegbar: "Available modules", laden: "Loading modules …", registriert: "No module is registered for this bot yet.",
       aktiv: "Active", inaktiv: "Inactive", aktivieren: "enable", deaktivieren: "disable", modulliste: "Module list",
+      modulUebersicht: "Module overview",
       verwaltungGesperrt: "Only broadcasters and managers may change modules.", keineAktiv: "No modules active.",
       keineAnsicht: "This active module does not have a panel view yet.", ansichten: "Module views", ansichtenLaden: "Loading module views …",
       nichtAktiv: (name) => `The module “${name}” is not active in this channel.`,

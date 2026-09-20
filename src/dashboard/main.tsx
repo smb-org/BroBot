@@ -15,6 +15,7 @@ import type {
   PanelLastError,
   PanelMembersResponse,
   PanelModeratorStatus,
+  PanelModuleState,
   PanelModulesResponse,
   PanelSystemResponse,
   PanelTokenStatus,
@@ -41,7 +42,7 @@ import { MembersPage } from "./members";
 import { BetreiberSeite } from "./betreiber";
 import { betreiberTexte, kanalPanelTexte, roleLabel } from "./labels";
 import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail } from "./locale";
-import { eventSubName, moduleName, statusWord } from "./module-labels";
+import { disabledStatusWord, eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import { kuerzeAuf200Zeichen } from "../text";
 import "./styles.css";
@@ -318,6 +319,7 @@ interface PanelTopbarProperties {
   channels: PanelChannelState[];
   betreiber: boolean;
   activeChannel: PanelChannelState | undefined;
+  moduleStates: PanelModuleState[] | null;
   loadedAt: number | undefined;
   headerModule: { id: string; enabled: boolean } | undefined;
   headerModuleBusy: boolean;
@@ -337,18 +339,35 @@ const loadedAtForRoute = (route: DashboardRoute, loadedAt: PageLoadedAt): number
 };
 
 const focusableSelector = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
+const MODULE_OVERVIEW_OPTION_ID = "__module-overview__";
 
-const ChannelSwitcher = ({ channels, activeChannel, onNavigate }: {
-  channels: PanelChannelState[];
-  activeChannel: PanelChannelState | undefined;
-  onNavigate: (route: DashboardRoute) => void;
-}): ReactElement | null => {
-  const texte = dashboardTexte();
+interface BreadcrumbSwitcherOption {
+  id: string;
+  name: string;
+  icon: ReactNode;
+  secondary?: string;
+  status?: { status: LedStatus; label: string };
+}
+
+const BreadcrumbSwitcher = ({ kind, currentLabel, accessibleCurrentLabel = currentLabel, currentId, currentIcon, options, openable, buttonLabel, listLabel, listboxId, open, onOpenChange, onSelect }: {
+  kind: "channel" | "module";
+  currentLabel: string;
+  accessibleCurrentLabel?: string;
+  currentId: string;
+  currentIcon?: ReactNode;
+  options: BreadcrumbSwitcherOption[];
+  openable: boolean;
+  buttonLabel: string;
+  listLabel: string;
+  listboxId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (id: string) => void;
+}): ReactElement => {
   const switcherRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const optionRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const selectedIndex = Math.max(0, channels.findIndex((channel) => channel.channelId === activeChannel?.channelId));
-  const [open, setOpen] = useState(false);
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.id === currentId));
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
 
   useEffect(() => {
@@ -359,22 +378,20 @@ const ChannelSwitcher = ({ channels, activeChannel, onNavigate }: {
   useEffect(() => {
     const closeOnOutsideClick = (event: MouseEvent): void => {
       if (switcherRef.current?.contains(event.target as Node)) return;
-      setOpen(false);
+      onOpenChange(false);
     };
     document.addEventListener("mousedown", closeOnOutsideClick);
     return () => { document.removeEventListener("mousedown", closeOnOutsideClick); };
-  }, []);
-
-  if (activeChannel === undefined) return null;
+  }, [onOpenChange]);
 
   const closeAndFocusButton = (): void => {
-    setOpen(false);
+    onOpenChange(false);
     buttonRef.current?.focus();
   };
 
-  const selectChannel = (channelId: string): void => {
+  const selectOption = (id: string): void => {
     closeAndFocusButton();
-    onNavigate({ kind: "channel", channelId, section: "overview" });
+    onSelect(id);
   };
 
   const focusNextControl = (): void => {
@@ -387,23 +404,26 @@ const ChannelSwitcher = ({ channels, activeChannel, onNavigate }: {
 
   const openList = (): void => {
     setActiveIndex(selectedIndex);
-    setOpen(true);
+    onOpenChange(true);
   };
 
-  if (channels.length === 1) {
-    return <span className="topbar__channel-segment topbar__channel-segment--static" data-channel-id={activeChannel.channelId}>{activeChannel.displayName}</span>;
+  if (!openable) {
+    if (kind === "module") {
+      return <span className="topbar__breadcrumb-current topbar__breadcrumb-area"><span className="topbar__breadcrumb-icon" aria-hidden="true">{currentIcon}</span><span>{currentLabel}</span></span>;
+    }
+    return <span className="topbar__channel-segment topbar__channel-segment--static" data-channel-id={currentId}>{currentLabel}</span>;
   }
 
   return (
     <div className="topbar__channel-switch" ref={switcherRef}>
       <button
         ref={buttonRef}
-        className="topbar__channel-button"
+        className={kind === "module" ? "topbar__channel-button topbar__breadcrumb-link topbar__breadcrumb-area" : "topbar__channel-button"}
         type="button"
-        aria-label={`${texte.navigation.kanalAuswaehlen}: ${activeChannel.displayName}`}
+        aria-label={`${buttonLabel}: ${accessibleCurrentLabel}`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-controls="channel-switcher-listbox"
+        aria-controls={listboxId}
         onClick={() => { if (open) closeAndFocusButton(); else openList(); }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -412,24 +432,24 @@ const ChannelSwitcher = ({ channels, activeChannel, onNavigate }: {
           }
         }}
       >
-        <span className="topbar__channel-segment">{activeChannel.displayName}</span>
-        <span className="topbar__channel-chevron" aria-hidden="true">⌄</span>
+        {kind === "module" ? <span className="topbar__breadcrumb-icon" aria-hidden="true">{currentIcon}</span> : null}
+        <span className="topbar__channel-segment">{currentLabel}</span>
+        <svg className="topbar__breadcrumb-glyph topbar__channel-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" /></svg>
       </button>
-      {open ? <div id="channel-switcher-listbox" className="topbar__channel-list" role="listbox" aria-label={texte.navigation.kanalAuswaehlen}>
-        {channels.map((channel, index) => {
-          const tone = channelStatus(channel);
+      {open ? <div id={listboxId} className="topbar__channel-list" role="listbox" aria-label={listLabel}>
+        {options.map((option, index) => {
           return <div
-            key={channel.channelId}
+            key={option.id}
             ref={(element) => { optionRefs.current[index] = element; }}
             className="topbar__channel-option"
             role="option"
             aria-selected={index === activeIndex}
             tabIndex={index === activeIndex ? 0 : -1}
-            onClick={() => { selectChannel(channel.channelId); }}
+            onClick={() => { selectOption(option.id); }}
             onKeyDown={(event) => {
               if (event.key === "ArrowDown") {
                 event.preventDefault();
-                setActiveIndex(Math.min(channels.length - 1, activeIndex + 1));
+                setActiveIndex(Math.min(options.length - 1, activeIndex + 1));
               } else if (event.key === "ArrowUp") {
                 event.preventDefault();
                 setActiveIndex(Math.max(0, activeIndex - 1));
@@ -438,31 +458,64 @@ const ChannelSwitcher = ({ channels, activeChannel, onNavigate }: {
                 setActiveIndex(0);
               } else if (event.key === "End") {
                 event.preventDefault();
-                setActiveIndex(channels.length - 1);
+                setActiveIndex(options.length - 1);
               } else if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                selectChannel(channels[activeIndex]?.channelId ?? channel.channelId);
+                selectOption(options[activeIndex]?.id ?? option.id);
               } else if (event.key === "Escape") {
                 event.preventDefault();
                 closeAndFocusButton();
               } else if (event.key === "Tab") {
                 event.preventDefault();
-                setOpen(false);
+                onOpenChange(false);
                 window.setTimeout(focusNextControl, 0);
               }
             }}
           >
-            <NavigationIcon className="topbar__channel-option-icon" kind="channel" />
+            {option.icon}
             <span className="topbar__channel-option-copy">
-              <span className="topbar__channel-option-name">{channel.displayName}</span>
-              <span className="topbar__channel-option-id mono">{channel.channelId}</span>
+              <span className="topbar__channel-option-name">{option.name}</span>
+              {option.secondary === undefined ? null : <span className="topbar__channel-option-id mono">{option.secondary}</span>}
             </span>
-            <Led status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : "red"} label={statusText(channel)} />
+            {option.status === undefined ? null : <Led status={option.status.status} label={option.status.label} />}
           </div>;
         })}
       </div> : null}
     </div>
   );
+};
+
+const ChannelSwitcher = ({ channels, activeChannel, open, onOpenChange, onNavigate }: {
+  channels: PanelChannelState[];
+  activeChannel: PanelChannelState | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onNavigate: (route: DashboardRoute) => void;
+}): ReactElement | null => {
+  const texte = dashboardTexte();
+  if (activeChannel === undefined) return null;
+  return <BreadcrumbSwitcher
+    kind="channel"
+    currentLabel={activeChannel.displayName}
+    currentId={activeChannel.channelId}
+    options={channels.map((channel) => ({
+      id: channel.channelId,
+      name: channel.displayName,
+      icon: <NavigationIcon className="topbar__channel-option-icon" kind="channel" />,
+      secondary: channel.channelId,
+      status: {
+        status: channelToneToLedStatus(channelStatus(channel)),
+        label: statusText(channel),
+      },
+    }))}
+    openable={channels.length > 1}
+    buttonLabel={texte.navigation.kanalAuswaehlen}
+    listLabel={texte.navigation.kanalAuswaehlen}
+    listboxId="channel-switcher-listbox"
+    open={open}
+    onOpenChange={onOpenChange}
+    onSelect={(channelId) => { onNavigate({ kind: "channel", channelId, section: "overview" }); }}
+  />;
 };
 
 const BreadcrumbAreaLink = ({ route, label, icon, onNavigate }: {
@@ -481,9 +534,10 @@ const BreadcrumbAreaLink = ({ route, label, icon, onNavigate }: {
   </a>
 );
 
-const PanelTopbar = ({ route, channels, betreiber, activeChannel, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: PanelTopbarProperties): ReactElement => {
+const PanelTopbar = ({ route, channels, betreiber, activeChannel, moduleStates, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: PanelTopbarProperties): ReactElement => {
   const texte = dashboardTexte();
   const betreiberTexteWerte = betreiberTexte();
+  const [openSwitcher, setOpenSwitcher] = useState<"channel" | "module" | null>(null);
   const tone = activeChannel === undefined ? "neutral" : channelStatus(activeChannel);
   const connectionLabel = activeChannel === undefined
     ? null
@@ -502,12 +556,54 @@ const PanelTopbar = ({ route, channels, betreiber, activeChannel, loadedAt, head
         : areaRoute.section === "modules" ? texte.navigation.module : texte.navigation.ereignisse;
   const moduleLabel = route.kind === "module" ? moduleName(route.moduleId) : null;
   const moduleBreadcrumbIcon = route.kind === "module" ? <ModuleIcon moduleId={route.moduleId} /> : null;
+  const moduleOptions = moduleStates?.map((module): BreadcrumbSwitcherOption => {
+    const missingScopes = module.missingBroadcasterScopes ?? [];
+    const effectiveEnabled = module.enabled && missingScopes.length === 0;
+    return {
+      id: module.id,
+      name: moduleName(module.id),
+      icon: <ModuleIcon moduleId={module.id} className="topbar__channel-option-icon" />,
+      status: {
+        status: missingScopes.length > 0 ? "amber" : effectiveEnabled ? "green" : "off",
+        label: missingScopes.length > 0 ? disabledStatusWord() : statusWord(effectiveEnabled),
+      },
+    };
+  }) ?? [];
+  const moduleArea = route.kind === "module" && moduleStates !== null
+    ? <BreadcrumbSwitcher
+        kind="module"
+        currentLabel={texte.navigation.module}
+        accessibleCurrentLabel={moduleLabel ?? texte.navigation.module}
+        currentId={route.moduleId}
+        currentIcon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />}
+        options={[...moduleOptions, {
+          id: MODULE_OVERVIEW_OPTION_ID,
+          name: texte.module.modulUebersicht,
+          icon: <NavigationIcon kind="modules" className="topbar__channel-option-icon" />,
+        }]}
+        openable={moduleOptions.length > 1}
+        buttonLabel={texte.navigation.modulAuswaehlen}
+        listLabel={texte.navigation.modulAuswaehlen}
+        listboxId="module-switcher-listbox"
+        open={openSwitcher === "module"}
+        onOpenChange={(open) => { setOpenSwitcher(open ? "module" : null); }}
+        onSelect={(id) => {
+          if (id === MODULE_OVERVIEW_OPTION_ID) {
+            onNavigate({ kind: "channel", channelId: route.channelId, section: "modules" });
+          } else {
+            onNavigate({ kind: "module", channelId: route.channelId, moduleId: id });
+          }
+        }}
+      />
+    : route.kind === "module" && areaRoute !== null && areaLabel !== null
+      ? <BreadcrumbAreaLink route={areaRoute} label={areaLabel} icon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />} onNavigate={onNavigate} />
+      : null;
   return (
     <header className={`topbar${headerModuleLabel === null ? "" : " topbar--module-detail"}`}>
       <nav className={`topbar__breadcrumb${route.kind === "module" ? " topbar__breadcrumb--module" : ""}`} aria-label={texte.navigation.brotkrume}>
         <a className="brand-mark" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
-        {activeChannel === undefined ? null : <><span className="topbar__breadcrumb-separator" aria-hidden="true">›</span><ChannelSwitcher channels={channels} activeChannel={activeChannel} onNavigate={onNavigate} /></>}
-        {areaRoute === null || areaLabel === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator topbar__area-separator" aria-hidden="true">›</span>{route.kind === "module" ? <BreadcrumbAreaLink route={areaRoute} label={areaLabel} icon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />} onNavigate={onNavigate} /> : <span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind={areaRoute.section === "overview" ? "channel" : areaRoute.section} className="topbar__breadcrumb-glyph" /></span><span>{areaLabel}</span></span>}</>}
+        {activeChannel === undefined ? null : <><span className="topbar__breadcrumb-separator" aria-hidden="true">›</span><ChannelSwitcher channels={channels} activeChannel={activeChannel} open={openSwitcher === "channel"} onOpenChange={(open) => { setOpenSwitcher(open ? "channel" : null); }} onNavigate={onNavigate} /></>}
+        {areaRoute === null || areaLabel === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator topbar__area-separator" aria-hidden="true">›</span>{route.kind === "module" ? moduleArea : <span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind={areaRoute.section === "overview" ? "channel" : areaRoute.section} className="topbar__breadcrumb-glyph" /></span><span>{areaLabel}</span></span>}</>}
         {route.kind === "betreiber" && betreiber ? <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator" aria-hidden="true">›</span><span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind="members" className="topbar__breadcrumb-glyph" /></span><span>{betreiberTexteWerte.navigation}</span></span></> : null}
         {moduleLabel === null || moduleBreadcrumbIcon === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-module-separator topbar__crumb-area" aria-hidden="true">›</span><span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{moduleBreadcrumbIcon}</span><span>{moduleLabel}</span></span></>}
       </nav>
@@ -1545,7 +1641,7 @@ export const DashboardApp = (): ReactElement => {
 
   return (
     <div className="app-shell">
-      <PanelTopbar route={route} channels={channels.data ?? []} betreiber={istBetreiber} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
+      <PanelTopbar route={route} channels={channels.data ?? []} betreiber={istBetreiber} activeChannel={selectedChannel ?? undefined} moduleStates={route.kind === "module" ? modules.data?.modules ?? null : null} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
       <div className="app-body">
         <Rail route={route} channels={channels.data ?? []} betreiber={istBetreiber} onNavigate={navigate} />
         <main className="main-content">

@@ -139,14 +139,17 @@ export const moduleScopePurpose = (
 interface ModulStatus {
   laeuft: string;
   aus: string;
+  deaktiviert: string;
 }
 
 const modulStatus: LocaleCatalog<ModulStatus> = {
-  de: { laeuft: "Läuft", aus: "Aus" },
-  en: { laeuft: "Running", aus: "Off" },
+  de: { laeuft: "Läuft", aus: "Aus", deaktiviert: "Deaktiviert" },
+  en: { laeuft: "Running", aus: "Off", deaktiviert: "Disabled" },
 };
 
 export const statusWord = (enabled: boolean, language: DashboardLanguage = dashboardLanguage()): string => {
   const texte = modulStatus[language];
   return enabled ? texte.laeuft : texte.aus;
 };
+
+export const disabledStatusWord = (language: DashboardLanguage = dashboardLanguage()): string => modulStatus[language].deaktiviert;
