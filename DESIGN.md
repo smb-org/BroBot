@@ -31,6 +31,12 @@ colors:
   fehler-text: "#e8655d"
   fehler-grund: "rgba(226, 86, 77, 0.09)"
 typography:
+  grundgroesse:
+    fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
   modultitel:
     fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
     fontSize: "22px"
@@ -341,6 +347,7 @@ Ort des Bedieners, drei Zustandsfarben. Sonst nichts.
 **Charakter:** Eine Grotesk mit technischer Ruhe, in einem festen 14-px-Raster, das nicht mitwächst. Die Hierarchie entsteht aus wenigen Größen zwischen 10 und 22 px und aus den vier Textstufen, nicht aus Größensprüngen. Es gibt keine Großüberschrift: Der Modultitel (22 px) ist die größte Schrift im System.
 
 ### Hierarchy
+- **Grundgröße** (400, 14 px, 1.5): steht am `body`; alle Bauteile erben von hier, auch als rem-Basis. Bewusst keine Endstufe — Bauteile liegen bewusst darunter (12/13 px) oder darüber (22 px).
 - **Modultitel** (600, 22 px, 1.25, −0.015 em): `h1` im Seitenkopf jeder Seite (Übersicht, Kanalname, System, Mitglieder, Ereignisse, Module, Modulname).
 - **Bereichstitel** (600, 15 px): `h2` in der Bereichsüberschrift `section-heading` („Aktive Module“, „Audit-Log“, „Eigenschaften“, „Protokoll“, Leerzustand-Titel). Rechts daneben steht die Anzahl als Zahl in Mono.
 - **Abschnitt** (600, 13 px): Inspektor-Abschnitte (`h2`/`h3` innerhalb `inspector-section__heading`), Titel des Sub-Inspectors (Aktion bzw. Ereignistext), Zustands-Etikett. Bewusst so klein wie der Fließtext — Gewicht trennt, nicht Größe.

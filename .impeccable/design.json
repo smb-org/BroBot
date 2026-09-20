@@ -146,6 +146,10 @@
       }
     },
     "typographyMeta": {
+      "grundgroesse": {
+        "displayName": "Grundgröße",
+        "purpose": "Steht am body; alle Bauteile erben von hier. Bauteile liegen bewusst darunter (12/13 px) oder darüber (22 px)."
+      },
       "modultitel": {
         "displayName": "Modultitel",
         "purpose": "Größte Schrift im System; Modulkopf und Rasterüberschrift."
