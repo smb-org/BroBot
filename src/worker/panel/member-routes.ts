@@ -142,7 +142,7 @@ const fetchWithTimeout = async (
   }
 };
 
-const fetchTwitchUserByLogin = async (
+export const fetchTwitchUserByLogin = async (
   fetcher: typeof fetch,
   environment: Env,
   login: string,

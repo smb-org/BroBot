@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 
 import { authRouter } from "./auth/routes";
+import { betreiberRouter } from "./betreiber/routes";
 import { getHealthStatus } from "./config";
 import { eventSubRouter } from "./eventsub";
 import { panelRouter } from "./panel/routes";
@@ -11,6 +12,7 @@ export { ChannelObject } from "./durable/ChannelObject";
 const app = new Hono<{ Bindings: Env }>();
 
 app.route("/", authRouter);
+app.route("/", betreiberRouter);
 app.route("/", panelRouter);
 app.route("/", eventSubRouter);
 
