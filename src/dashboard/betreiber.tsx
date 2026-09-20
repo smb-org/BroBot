@@ -305,6 +305,7 @@ const KanalInspector = ({
           <span className="muted">{kanal.vollzustimmung ? texte.ja : texte.nein}</span>
         </div>
       </section>
+      <Einladungslink kanal={kanal} />
       <section className="config-section" aria-label={texte.mitglieder}>
         <div className="section-heading"><h3>{texte.mitglieder}</h3></div>
         {mitglieder.status === "loading" && mitglieder.data === null ? <p className="loading-line">{texte.mitgliederLaden}</p> : null}
@@ -448,13 +449,12 @@ const KanalFreigabe = ({
   );
 };
 
-const Einladungslink = ({ kanal }: { kanal: PanelBetreiberKanalÜbersicht | null }): ReactElement => {
+const Einladungslink = ({ kanal }: { kanal: PanelBetreiberKanalÜbersicht }): ReactElement => {
   const texte = betreiberTexte();
   const [status, setStatus] = useState<string | null>(null);
-  const link = kanal === null ? "" : window.location.origin + "/auth/login?kanal=" + encodeURIComponent(kanal.login);
+  const link = window.location.origin + "/auth/login?kanal=" + encodeURIComponent(kanal.login);
 
   const kopieren = async (): Promise<void> => {
-    if (kanal === null) return;
     const zwischenablage = Reflect.get(navigator, "clipboard") as { writeText: (text: string) => Promise<void> } | undefined;
     if (zwischenablage === undefined) return;
     await zwischenablage.writeText(link);
@@ -465,18 +465,14 @@ const Einladungslink = ({ kanal }: { kanal: PanelBetreiberKanalÜbersicht | null
     <section className="config-section" aria-label={texte.einladungslink}>
       <div className="section-heading"><h2>{texte.einladungslink}</h2></div>
       <p className="muted">{texte.einladungslinkHinweis}</p>
-      {kanal === null ? <p className="sperrgrund">{texte.kanalAuswählen}</p> : (
-        <>
-          <label className="config-field config-field--breit" htmlFor="betreiber-einladungslink">{texte.einladungslink}
-            <input id="betreiber-einladungslink" readOnly value={link} />
-          </label>
-          <div className="form-actions">
-            <button className="button" type="button" onClick={() => { void kopieren(); }}>{texte.linkKopieren}</button>
-            {status === null ? null : <span className="muted">{status}</span>}
-          </div>
-          {!kanal.broadcasterConnected && kanal.vollzustimmung ? <ZustandZeile label={texte.identität} tone="warning" wort={texte.zustimmungAusstehend} detail={texte.zustimmungAusstehendHinweis} /> : null}
-        </>
-      )}
+      <label className="config-field config-field--breit" htmlFor="betreiber-einladungslink">{texte.einladungslink}
+        <input id="betreiber-einladungslink" readOnly value={link} />
+      </label>
+      <div className="form-actions">
+        <button className="button" type="button" onClick={() => { void kopieren(); }}>{texte.linkKopieren}</button>
+        {status === null ? null : <span className="muted">{status}</span>}
+      </div>
+      {!kanal.broadcasterConnected && kanal.vollzustimmung ? <ZustandZeile label={texte.identität} tone="warning" wort={texte.zustimmungAusstehend} detail={texte.zustimmungAusstehendHinweis} /> : null}
     </section>
   );
 };
@@ -592,10 +588,9 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
             </table>
           </div>
         )}
+        {ausgewählterKanal === null ? null : <KanalInspector key={ausgewählterKanal.channelId} kanal={ausgewählterKanal} beiAnmeldungErforderlich={beiAnmeldungErforderlich} aufÜbersichtLaden={ladeÜbersicht} />}
       </section>
       <KanalFreigabe aufÜbersichtLaden={ladeÜbersicht} beiAnmeldungErforderlich={beiAnmeldungErforderlich} />
-      <Einladungslink kanal={ausgewählterKanal} />
-      {ausgewählterKanal === null ? null : <KanalInspector key={ausgewählterKanal.channelId} kanal={ausgewählterKanal} beiAnmeldungErforderlich={beiAnmeldungErforderlich} aufÜbersichtLaden={ladeÜbersicht} />}
       <BetreiberAudit auditZustand={audit} kanäle={übersicht.data ?? []} aufWeitereLaden={() => { void ladeWeitereAudit(); }} weitereLädt={weitereAuditLädt} />
     </section>
   );

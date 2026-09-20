@@ -120,4 +120,19 @@ describe("Betreiberebene", () => {
 
     expect(link).toHaveValue("http://localhost:3000/auth/login?kanal=alpha_login");
   });
+
+  it("zeigt den Einladungslink nur im Editor des gewählten Kanals", async () => {
+    richteBetreiberEin(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const übersicht = await screen.findByRole("region", { name: "Kanalübersicht" });
+    expect(within(übersicht).queryByRole("textbox", { name: "Einladungslink" })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
+    const editor = await within(übersicht).findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    expect(await within(editor).findByRole("textbox", { name: "Einladungslink" })).toBeInTheDocument();
+    expect(within(übersicht).getByRole("region", { name: "Einladungslink" })).toContainElement(within(editor).getByRole("textbox", { name: "Einladungslink" }));
+  });
 });
