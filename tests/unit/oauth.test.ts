@@ -54,8 +54,10 @@ describe("Twitch-OAuth", () => {
     expect(loginUrl.pathname).toBe("/oauth2/authorize");
     expect(loginUrl.searchParams.get("redirect_uri")).toBe("https://brobot.example/auth/twitch/callback");
     expect(loginUrl.searchParams.get("scope")?.split(" ")).toEqual([...LOGIN_SCOPES]);
+    expect(loginUrl.searchParams.get("force_verify")).toBeNull();
     expect(botUrl.searchParams.get("scope")?.split(" ")).toEqual([...BOT_SCOPES]);
     expect(botUrl.searchParams.get("scope")?.split(" ")).toContain("user:read:moderated_channels");
+    expect(botUrl.searchParams.get("force_verify")).toBe("true");
     expect(botUrl.searchParams.get("scope")?.split(" ")).toEqual(expect.arrayContaining([
       "moderator:manage:blocked_terms",
       "moderator:manage:chat_settings",
@@ -64,6 +66,8 @@ describe("Twitch-OAuth", () => {
       "moderator:manage:warnings",
       "moderator:read:moderators",
       "moderator:read:vips",
+      "moderator:manage:automod",
+      "moderator:read:suspicious_users",
     ]));
     expect(loginUrl.searchParams.get("state")).not.toBe(botUrl.searchParams.get("state"));
   });
