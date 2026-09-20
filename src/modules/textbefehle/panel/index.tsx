@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
-import type { DashboardLanguage } from "../../../dashboard/locale";
+import { dashboardGemeinsameTexte, type DashboardLanguage } from "../../../dashboard/locale";
 import type { Textbefehl } from "../contracts";
 import { loescheTextbefehl, ladeTextbefehle, legeTextbefehlAn, speichereTextbefehl } from "./service";
 import { textbefehleTexte } from "./locale";
@@ -20,6 +20,12 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<Text
   const [cooldownSekunden, setCooldownSekunden] = useState(initial.cooldownSekunden);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (confirmingDelete) confirmButtonRef.current?.focus();
+  }, [confirmingDelete]);
 
   const save = async (): Promise<void> => {
     setBusy(true);
@@ -39,6 +45,7 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<Text
     setError(null);
     try {
       await loescheTextbefehl(channelId, initial.name);
+      setConfirmingDelete(false);
       await onChanged();
     } catch {
       setError(labels.loeschenFehler);
@@ -48,20 +55,39 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<Text
   };
 
   return (
-    <section className="command-inspector" aria-label={labels.details(initial.name)}>
-      <div className="inspector-section__heading"><h3>!{initial.name}</h3><span className="mono muted command-inspector__meta">{labels.spalten.zuletzt} {relativeZeit(initial.zuletztVerwendetAt, labels)}</span></div>
-      <label>
+    <section className="command-inspector sub-inspector config-section" aria-label={labels.details(initial.name)}>
+      <div className="section-heading"><h3>!{initial.name}</h3><span className="mono muted command-inspector__meta">{labels.spalten.zuletzt} {relativeZeit(initial.zuletztVerwendetAt, labels)}</span></div>
+      <label className="config-field config-field--breit">
         {labels.text}
         <textarea value={text} onChange={(event) => { setText(event.target.value); }} disabled={busy} />
       </label>
-      <label>
+      <label className="config-field config-field--schmal">
         {labels.abkuehlung}
         <input type="number" min="0" max="86400" value={cooldownSekunden} onChange={(event) => { setCooldownSekunden(Number(event.target.value)); }} disabled={busy} />
       </label>
       <div className="form-actions">
         <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={busy}>{labels.speichern(initial.name)}</button>
-        <button className="button button--quiet" type="button" onClick={() => { void remove(); }} disabled={busy}>{labels.loeschen(initial.name)}</button>
       </div>
+      <div className="form-actions form-actions--destructive">
+        <button className="button button--danger" type="button" onClick={() => { setError(null); setConfirmingDelete(true); }} disabled={busy}>{labels.loeschen(initial.name)}</button>
+      </div>
+      {confirmingDelete ? (
+        <div
+          className="inspector-confirmation"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="text-command-delete-confirmation-title"
+          aria-describedby="text-command-delete-confirmation-description"
+          onKeyDown={(event) => { if (event.key === "Escape") setConfirmingDelete(false); }}
+        >
+          <h3 id="text-command-delete-confirmation-title">{labels.loeschenTitel(initial.name)}</h3>
+          <p id="text-command-delete-confirmation-description">{labels.loeschenBestaetigung(initial.name)}</p>
+          <div className="form-actions">
+            <button ref={confirmButtonRef} className="button button--danger" type="button" onClick={() => { void remove(); }} disabled={busy}>{labels.loeschungBestaetigen(initial.name)}</button>
+            <button className="button button--quiet" type="button" onClick={() => { setConfirmingDelete(false); }} disabled={busy}>{dashboardGemeinsameTexte().abbrechen}</button>
+          </div>
+        </div>
+      ) : null}
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     </section>
   );
@@ -155,26 +181,26 @@ export const TextbefehlePanel = ({ channelId, language }: { channelId: string; l
 
   return (
     <section className="module-stack command-panel" aria-label={labels.titel}>
-      <section className="command-list" aria-label={labels.liste}>
-        <div className="inspector-section__heading"><h2>{labels.liste}</h2></div>
+      <section className="command-list config-section" aria-label={labels.liste}>
+        <div className="section-heading"><h2>{labels.liste}</h2></div>
         {loading ? <p className="loading-line">{labels.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
         {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} />)}</tbody></table></div> : null}
       </section>
       {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} />}
-      <form className="command-create inspector-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>
-        <div className="inspector-section__heading"><h2>{labels.anlegen}</h2></div>
-        <label>
+      <form className="command-create config-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+        <div className="section-heading"><h2>{labels.anlegen}</h2></div>
+        <label className="config-field config-field--mittel">
           {labels.name}
           <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
           <span className="muted">{labels.nameHinweis}</span>
         </label>
-        <label>
+        <label className="config-field config-field--breit">
           {labels.text}
           <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} />
         </label>
-        <label>
+        <label className="config-field config-field--schmal">
           {labels.abkuehlung}
           <input type="number" min="0" max="86400" value={cooldownSekunden} onChange={(event) => { setCooldownSekunden(Number(event.target.value)); }} />
         </label>

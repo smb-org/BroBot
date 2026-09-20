@@ -9,6 +9,9 @@ interface TextbefehleTexte {
   abkuehlung: string;
   speichern: (name: string) => string;
   loeschen: (name: string) => string;
+  loeschenTitel: (name: string) => string;
+  loeschenBestaetigung: (name: string) => string;
+  loeschungBestaetigen: (name: string) => string;
   leer: string;
   laden: string;
   fehler: string;
@@ -40,6 +43,9 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     abkuehlung: "Abkühlzeit (Sekunden)",
     speichern: (name) => `Befehl !${name} speichern`,
     loeschen: (name) => `Befehl !${name} löschen`,
+    loeschenTitel: (name) => `Befehl !${name} löschen?`,
+    loeschenBestaetigung: (name) => `Der Textbefehl !${name} wird dauerhaft gelöscht. Diese Handlung kann nicht rückgängig gemacht werden.`,
+    loeschungBestaetigen: (name) => `Befehl !${name} endgültig löschen`,
     leer: "Noch keine Textbefehle angelegt.",
     laden: "Textbefehle werden geladen …",
     fehler: "Die Textbefehle konnten nicht geladen werden.",
@@ -64,6 +70,9 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     abkuehlung: "Cooldown (seconds)",
     speichern: (name) => `Save !${name}`,
     loeschen: (name) => `Delete !${name}`,
+    loeschenTitel: (name) => `Delete !${name}?`,
+    loeschenBestaetigung: (name) => `The text command !${name} will be deleted permanently. This action cannot be undone.`,
+    loeschungBestaetigen: (name) => `Delete !${name} permanently`,
     leer: "No text commands yet.",
     laden: "Loading text commands …",
     fehler: "The text commands could not be loaded.",

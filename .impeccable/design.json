@@ -146,6 +146,10 @@
       }
     },
     "typographyMeta": {
+      "grundgroesse": {
+        "displayName": "Grundgröße",
+        "purpose": "Steht am body; alle Bauteile erben von hier. Bauteile liegen bewusst darunter (12/13 px) oder darüber (22 px)."
+      },
       "modultitel": {
         "displayName": "Modultitel",
         "purpose": "Größte Schrift im System; Modulkopf und Rasterüberschrift."
@@ -289,6 +293,21 @@
       {
         "name": "zustandsrand",
         "value": "color-mix(in srgb, <zustand> 45%, var(--linie))"
+      },
+      {
+        "name": "config-field-schmal",
+        "value": "9rem",
+        "purpose": "Zahlen und kurze Werte; bestehende Zahlengrenze."
+      },
+      {
+        "name": "config-field-mittel",
+        "value": "20rem",
+        "purpose": "Namen und Bezeichner; halbe bestehende Formularbreite von 40rem."
+      },
+      {
+        "name": "config-field-breit",
+        "value": "40rem",
+        "purpose": "Fließtext; bestehende maximale Formularbreite."
       }
     ]
   },
@@ -334,12 +353,36 @@
       "css": ".ds-actions{display:flex;align-items:center;gap:8px;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border:1px solid var(--linie-stark,#403c38);border-radius:6px;color:var(--text,#f2efeb);background:var(--erhoben,#1e1c1a);font-size:13px;font-weight:500;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}.ds-btn:hover{border-color:var(--linie-hell,#68615a);background:#262321}.ds-btn:active{background:#1b1917}.ds-btn:disabled{cursor:not-allowed;opacity:.5}.ds-hint{color:var(--text-3,#8b857e);font-size:12px}"
     },
     {
-      "name": "Stiller Knopf (Löschen)",
+      "name": "Stiller Knopf (nicht zerstörend)",
       "kind": "button",
       "refersTo": "button-quiet",
-      "description": "Zerstörendes ist still, bis man hinzeigt: erst dann Rot auf Fehler-Grund.",
-      "html": "<button class=\"ds-btn-quiet\" type=\"button\">Löschen</button>",
+      "description": "Zurückhaltende, nicht zerstörende Aktion: erst beim Hinzeigen Rot auf Fehler-Grund. Für Löschen am 20. September 2026 durch danger abgelöst.",
+      "html": "<button class=\"ds-btn-quiet\" type=\"button\">Abbrechen</button>",
       "css": ".ds-btn-quiet{display:inline-flex;align-items:center;min-height:44px;padding:10px 16px;border:1px solid transparent;border-radius:6px;color:var(--text-2,#b3aca4);background:none;font-family:Archivo,ui-sans-serif,system-ui,sans-serif;font-size:12.5px;font-weight:500;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}.ds-btn-quiet:hover{color:var(--fehler,#e2564d);border-color:rgba(226,86,77,.45);background:rgba(226,86,77,.09)}.ds-btn-quiet:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px}"
+    },
+    {
+      "name": "Konfigurationsabschnitt",
+      "kind": "custom",
+      "refersTo": "config-section",
+      "description": "Fachlicher Abschnitt einer Panel-Konfiguration: Überschrift mit Haarlinie, danach fließende Felder. Keine Container-Karte.",
+      "html": "<section class=\"config-section\"><div class=\"section-heading\"><h2>Automatische Ansage</h2></div><label class=\"config-field config-field--breit\">Automatische Werbepause<textarea></textarea><span class=\"config-field__hint\">{dauer} wird durch die Dauer in Sekunden ersetzt.</span></label></section>",
+      "css": ".config-section{display:grid;gap:16px}.config-section>.section-heading{margin-bottom:0}.section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:8px;margin-bottom:16px;border-bottom:1px solid var(--linie,#312e2b)}"
+    },
+    {
+      "name": "Konfigurationsfeldbreiten",
+      "kind": "input",
+      "refersTo": "config-field",
+      "description": "Drei benannte Inhaltsstufen: schmal 9 rem für Zahlen, mittel 20 rem als halbe Formularbreite für Namen, breit 40 rem für Fließtext.",
+      "html": "<label class=\"config-field config-field--schmal\">Abkühlzeit<input type=\"number\" value=\"30\"></label><label class=\"config-field config-field--mittel\">Name<input value=\"discord\"></label><label class=\"config-field config-field--breit\">Antwort<textarea></textarea></label>",
+      "css": ".config-field{display:grid;gap:6px;width:100%;color:var(--text-2,#b3aca4);font:500 12px Archivo,ui-sans-serif,system-ui,sans-serif}.config-field--schmal{max-width:9rem}.config-field--mittel{max-width:20rem}.config-field--breit{max-width:40rem}.config-field>input,.config-field>textarea,.config-field>select{width:100%;min-height:44px}"
+    },
+    {
+      "name": "Gefahrhandlung mit Bestätigung",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Löschen bleibt dauerhaft rot, vom primären Knopf abgesetzt, und öffnet die bestehende Inspector-Bestätigung. Abbrechen führt keine Mutation aus.",
+      "html": "<div class=\"form-actions form-actions--destructive\"><button class=\"ds-btn ds-btn--danger\" type=\"button\">Befehl löschen</button></div><div class=\"ds-confirm inspector-confirmation\" role=\"alertdialog\"><h3>Befehl löschen?</h3><p>Diese Handlung kann nicht rückgängig gemacht werden.</p><div class=\"ds-actions\"><button class=\"ds-btn ds-btn--danger\" type=\"button\">Endgültig löschen</button><button class=\"ds-btn-quiet\" type=\"button\">Abbrechen</button></div></div>",
+      "css": ".ds-btn--danger{color:var(--fehler,#e2564d);border-color:transparent;background:transparent}.ds-btn--danger:hover{color:var(--text,#f2efeb);border-color:var(--fehler,#e2564d);background:var(--fehler,#e2564d)}.form-actions--destructive{margin-top:16px;padding-top:16px;border-top:1px solid var(--linie,#312e2b)}.ds-confirm{display:grid;gap:12px;margin-top:16px;padding:16px;border:1px solid var(--linie-stark,#403c38);border-radius:6px;background:var(--erhoben,#1e1c1a)}"
     },
     {
       "name": "Eingabefeld",
@@ -479,6 +522,21 @@
         "name": "Die Kein-Skelett-Regel",
         "body": "Veraltete Werte bleiben mit 55 % Deckkraft stehen (.veraltet um die Tabelle, sobald Audit, Ereignisse oder Mitglieder nachladen und schon Daten da sind); nichts schimmert. Beim ersten Laden ohne Daten steht eine Ladezeile. Bewegung im Augenwinkel sieht neben einem laufenden Stream wie eine Änderung aus.",
         "section": "elevation"
+      },
+      {
+        "name": "Das Konfigurationsflächen-Vokabular",
+        "body": "Panel-Ansichten liegen in .module-stack und teilen ihre Konfiguration in .config-section mit Überschrift und Haarlinie. Die Fläche bleibt im Fluss; gewählte Tabellenzeilen öffnen ihren Bearbeiten-Teil auf der .sub-inspector-Fläche.",
+        "section": "components"
+      },
+      {
+        "name": "Die Feldbreiten-Regel",
+        "body": "config-field--schmal ist 9 rem für Zahlen und kurze Werte, config-field--mittel 20 rem als halbe 40-rem-Formularbreite für Namen und Bezeichner, config-field--breit 40 rem für Fließtext.",
+        "section": "components"
+      },
+      {
+        "name": "Die Gefahr-handlung-Regel",
+        "body": "Löschende Handlungen nutzen dauerhaft button--danger, stehen vom primären Knopf abgesetzt und öffnen vor der Mutation die bestehende inspector-confirmation. Abbrechen löscht nicht.",
+        "section": "components"
       }
     ],
     "dos": [
@@ -492,7 +550,9 @@
       "Do die Seite auf 960 px begrenzen und Bereiche mit Haarlinie plus Abstand trennen.",
       "Do den Sperr- oder Fehlergrund an die Wirkung schreiben (Sperrgrund unter dem Schalter oder Knopf, Hinweis neben dem gedeckten Knopf).",
       "Do veraltete Werte mit 55 % Deckkraft stehen lassen; nur beim ersten Laden eine Ladezeile.",
-      "Do wählbare Tabellenzeilen mit tabIndex und aria-selected bauen und ihren Inspector im Fluss darunter öffnen."
+      "Do wählbare Tabellenzeilen mit tabIndex und aria-selected bauen und ihren Inspector im Fluss darunter öffnen.",
+      "Do Panel-Ansichten in .module-stack und Konfigurationsabschnitte mit Überschrift, Haarlinie und einer benannten Feldbreite bauen.",
+      "Do Löschhandlungen dauerhaft als danger markieren und mit inspector-confirmation bestätigen lassen."
     ],
     "donts": [
       "Don't ein ausgeschaltetes Modul bernstein färben. Aus ist neutral; Bernstein heißt unbekannt oder Hinweis.",
@@ -504,7 +564,8 @@
       "Don't eine Taste mit Absatz, Zähler oder verschachteltem Layout beladen — dann ist sie eine Karte.",
       "Don't Schriftgrößen an den Viewport koppeln; schmal klappt das Gerüst um, nicht die Schrift.",
       "Don't ein rechtes Dock bauen; der Inspector öffnet sich im Fluss unter der Tabelle.",
-      "Don't Zeilen ohne Inspector klickbar stylen; Zeiger und Hover gibt es nur mit tabindex."
+      "Don't Zeilen ohne Inspector klickbar stylen; Zeiger und Hover gibt es nur mit tabindex.",
+      "Don't eine Panel-Ansicht ohne .module-stack oder eine Löschhandlung als quiet bauen."
     ]
   }
 }

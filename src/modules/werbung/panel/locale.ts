@@ -2,6 +2,9 @@ import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from ".
 
 interface WerbungPanelTexte {
   titel: string;
+  automatischAbschnitt: string;
+  manuellAbschnitt: string;
+  aktionen: string;
   automatisch: string;
   manuell: string;
   platzhalter: string;
@@ -14,6 +17,9 @@ interface WerbungPanelTexte {
 const texte: LocaleCatalog<WerbungPanelTexte> = {
   de: {
     titel: "Ansagen",
+    automatischAbschnitt: "Automatische Ansage",
+    manuellAbschnitt: "Manuelle Ansage",
+    aktionen: "Aktionen",
     automatisch: "Automatische Werbepause",
     manuell: "Manuell gestartete Werbepause",
     platzhalter: "{dauer} wird durch die Dauer in Sekunden ersetzt.",
@@ -24,6 +30,9 @@ const texte: LocaleCatalog<WerbungPanelTexte> = {
   },
   en: {
     titel: "Announcements",
+    automatischAbschnitt: "Automatic announcement",
+    manuellAbschnitt: "Manual announcement",
+    aktionen: "Actions",
     automatisch: "Automatic ad break",
     manuell: "Manually started ad break",
     platzhalter: "{dauer} is replaced with the duration in seconds.",
