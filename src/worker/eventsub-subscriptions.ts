@@ -50,19 +50,31 @@ const channelAndBotCondition = (
   [botField]: botUserId,
 });
 
+/** Abo mit Moderator-Bedingung (`broadcaster_user_id` + `moderator_user_id`), Kanal aus `broadcaster_user_id`. */
+const moderatorSubscriptionDefinition = (subscriptionType: string, version: string): EventSubSubscriptionDefinition => ({
+  subscriptionType,
+  variant: "",
+  version,
+  buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
+  channelIdFromCondition: conditionField("broadcaster_user_id"),
+});
+
+/** Abo mit Nutzer-Bedingung (`broadcaster_user_id` + `user_id`), Kanal aus `broadcaster_user_id`. */
+const userSubscriptionDefinition = (subscriptionType: string, version: string): EventSubSubscriptionDefinition => ({
+  subscriptionType,
+  variant: "",
+  version,
+  buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "user_id", botUserId, channelId),
+  channelIdFromCondition: conditionField("broadcaster_user_id"),
+});
+
 /**
  * Die einzige Tabelle für EventSub-Bedingungen. Sie beschreibt sowohl das
  * Anlegen als auch die sichere Rückgewinnung des Kanal-Mandanten aus dem
  * geprüften Abo. Ein Raid ist absichtlich zweimal vertreten.
  */
 export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDefinition[] = [
-  {
-    subscriptionType: "channel.chat.message",
-    variant: "",
-    version: "1",
-    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "user_id", botUserId, channelId),
-    channelIdFromCondition: conditionField("broadcaster_user_id"),
-  },
+  userSubscriptionDefinition("channel.chat.message", "1"),
   {
     subscriptionType: "channel.raid",
     variant: "eingehend",
@@ -77,55 +89,13 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDef
     buildCondition: (channelId) => ({ from_broadcaster_user_id: channelId }),
     channelIdFromCondition: conditionField("from_broadcaster_user_id"),
   },
-  {
-    subscriptionType: "channel.shoutout.create",
-    variant: "",
-    version: "1",
-    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
-    channelIdFromCondition: conditionField("broadcaster_user_id"),
-  },
-  {
-    subscriptionType: "channel.shoutout.receive",
-    variant: "",
-    version: "1",
-    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
-    channelIdFromCondition: conditionField("broadcaster_user_id"),
-  },
-  {
-    subscriptionType: "channel.chat.notification",
-    variant: "",
-    version: "1",
-    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "user_id", botUserId, channelId),
-    channelIdFromCondition: conditionField("broadcaster_user_id"),
-  },
-  {
-    subscriptionType: "channel.moderate",
-    variant: "",
-    version: "2",
-    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
-    channelIdFromCondition: conditionField("broadcaster_user_id"),
-  },
-  {
-    subscriptionType: "automod.message.hold",
-    variant: "",
-    version: "1",
-    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
-    channelIdFromCondition: conditionField("broadcaster_user_id"),
-  },
-  {
-    subscriptionType: "channel.suspicious_user.message",
-    variant: "",
-    version: "1",
-    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
-    channelIdFromCondition: conditionField("broadcaster_user_id"),
-  },
-  {
-    subscriptionType: "channel.suspicious_user.update",
-    variant: "",
-    version: "1",
-    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
-    channelIdFromCondition: conditionField("broadcaster_user_id"),
-  },
+  moderatorSubscriptionDefinition("channel.shoutout.create", "1"),
+  moderatorSubscriptionDefinition("channel.shoutout.receive", "1"),
+  userSubscriptionDefinition("channel.chat.notification", "1"),
+  moderatorSubscriptionDefinition("channel.moderate", "2"),
+  moderatorSubscriptionDefinition("automod.message.hold", "1"),
+  moderatorSubscriptionDefinition("channel.suspicious_user.message", "1"),
+  moderatorSubscriptionDefinition("channel.suspicious_user.update", "1"),
 ];
 
 export const eventSubTargetKey = (target: Pick<EventSubTarget, "channelId" | "subscriptionType" | "variant" | "version">): string =>
