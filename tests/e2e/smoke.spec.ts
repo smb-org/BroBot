@@ -1,6 +1,54 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.use({ locale: "de-DE" });
+
+const breadcrumbSegmentKeys = ["brand-mark", "channel", "area", "module"] as const;
+
+const assertBreadcrumbGeometry = async (page: Page): Promise<void> => {
+  const measurement = await page.locator(".topbar__breadcrumb").evaluate((breadcrumb) => {
+    const topbar = breadcrumb.closest<HTMLElement>(".topbar");
+    if (topbar === null) throw new Error("Die Brotkrume liegt nicht in der Kopfleiste.");
+
+    const segmentElements = [
+      { key: "brand-mark", classNames: ["brand-mark"] },
+      { key: "channel", classNames: ["topbar__channel-switch", "topbar__channel-segment"] },
+      { key: "area", classNames: ["topbar__breadcrumb-area"] },
+      { key: "module", classNames: ["topbar__breadcrumb-module"] },
+    ].map(({ key, classNames }) => {
+      const element = Array.from(breadcrumb.children).find((child) => classNames.some((className) => child.classList.contains(className)));
+      if (!(element instanceof HTMLElement)) throw new Error(`Brotkrumen-Segment fehlt: ${key}`);
+      const rect = element.getBoundingClientRect();
+      return { key, left: rect.left, right: rect.right };
+    });
+    const separators = Array.from(breadcrumb.querySelectorAll<HTMLElement>(".topbar__breadcrumb-separator"));
+    const gap = Number.parseFloat(getComputedStyle(breadcrumb).columnGap);
+    const topbarRect = topbar.getBoundingClientRect();
+    return {
+      topbar: { left: topbarRect.left, right: topbarRect.right, width: topbarRect.width },
+      segments: segmentElements,
+      separatorWidths: separators.map((separator) => separator.getBoundingClientRect().width),
+      gap,
+    };
+  });
+
+  expect(measurement.segments.map(({ key }) => key)).toEqual([...breadcrumbSegmentKeys]);
+  expect([...measurement.segments].sort((first, second) => first.left - second.left).map(({ key }) => key)).toEqual([...breadcrumbSegmentKeys]);
+  const leftHalf = measurement.topbar.left + measurement.topbar.width / 2;
+  const maxSeparatorWidth = Math.max(...measurement.separatorWidths);
+  // Zwischen Segmenten liegen zwei Flex-Gaps und ein Trennzeichen; 1px erlaubt Subpixel-Rundung.
+  const maximumSegmentGap = measurement.gap * 2 + maxSeparatorWidth + 1;
+
+  for (const segment of measurement.segments) {
+    expect(segment.left).toBeGreaterThanOrEqual(measurement.topbar.left);
+    expect(segment.right).toBeLessThanOrEqual(leftHalf);
+    expect(segment.right).toBeLessThanOrEqual(measurement.topbar.right);
+  }
+  for (const [index, segment] of measurement.segments.entries()) {
+    const nextSegment = measurement.segments[index + 1];
+    if (nextSegment === undefined) continue;
+    expect(nextSegment.left - segment.right).toBeLessThanOrEqual(maximumSegmentGap);
+  }
+};
 
 test("Dashboard und Overlay laden als getrennte Oberflächen", async ({ page }) => {
   await page.route("**/api/channels", async (route) => {
@@ -57,4 +105,58 @@ test("der echte Worker schützt das Dashboard und zeigt die Anmeldung", async ({
   expect(channelsResponse.status()).toBe(401);
   await expect(page.getByRole("heading", { name: "Anmeldung erforderlich" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Mit Twitch anmelden" })).toBeVisible();
+});
+
+test("die Brotkrumensegmente bleiben bei jeder Fensterbreite zusammen", async ({ page }) => {
+  const channel = {
+    channelId: "kanal-e2e",
+    login: "brotkrumen-kanal",
+    displayName: "Brotkrumen-Kanal",
+    role: "verwalter",
+    broadcasterConnection: "connected",
+    channelBotConsent: "granted",
+    bot: { status: "connected", reason: null, updatedAt: "2026-09-20T08:00:00.000Z" },
+    moderator: { isModerator: true, checkedAt: "2026-09-20T08:00:00.000Z", reason: null },
+    chatSubscription: { status: "enabled", subscriptionId: "abo-e2e", reason: null, updatedAt: "2026-09-20T08:00:00.000Z" },
+    tokens: {
+      botExpiresAt: "2099-09-20T08:00:00.000Z",
+      loginStatus: "connected",
+      loginReason: null,
+      loginExpiresAt: "2099-09-20T08:00:00.000Z",
+    },
+    lastError: null,
+  };
+
+  await page.route("**/api/channels**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/channels") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel] }) });
+      return;
+    }
+    if (pathname === "/api/channels/kanal-e2e/overview") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...channel, activeModules: [{ moduleId: "textbefehle", settings: "{}" }] }),
+      });
+      return;
+    }
+    if (pathname === "/api/channels/kanal-e2e/modules") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+  });
+
+  await page.goto("/channels/kanal-e2e/modules/textbefehle");
+  await expect(page.getByRole("heading", { name: "Textbefehle", level: 1 })).toBeVisible();
+
+  for (const width of [1280, 1920, 3440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await assertBreadcrumbGeometry(page);
+  }
 });

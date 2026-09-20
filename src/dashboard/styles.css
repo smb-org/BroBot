@@ -290,7 +290,10 @@ pre {
   gap: 16px; height: 56px; padding: 0 20px; border-bottom: 1px solid var(--linie);
   position: relative; background: var(--rail);
 }
-.topbar__breadcrumb { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
+.topbar__breadcrumb {
+  display: flex; align-items: center; justify-content: flex-start; gap: 10px; min-width: 0; white-space: nowrap;
+  /* Die Segmente bleiben mit flex-grow: 0 direkt beieinander, auch auf breiten Kopfleisten. */
+}
 .brand-mark { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; min-width: 44px; min-height: 44px; flex: none; color: var(--text); text-decoration: none; font-size: 15px; font-weight: 700; cursor: pointer; }
 .brand-mark__dot { width: 18px; height: 18px; border: 2px solid var(--marke-text); border-radius: var(--r-control); background: transparent; }
 .topbar__breadcrumb-separator { flex: none; color: var(--text-4); }
@@ -310,6 +313,8 @@ pre {
 .topbar__channel-segment { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
 .topbar__channel-segment--static { max-width: 100%; }
 .topbar__channel-chevron { flex: none; color: var(--text-2); font-size: 16px; line-height: 1; }
+/* Direkte Brotkrumen-Kinder dürfen ihre freie Breite niemals als Abstand verteilen. */
+.topbar__breadcrumb > * { flex-grow: 0; }
 .topbar__channel-list { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; display: grid; width: min(520px, calc(100vw - 24px)); min-width: 0; max-width: calc(100vw - 24px); max-height: min(60vh, 420px); overflow: auto; padding: 6px; border: 1px solid var(--linie); border-radius: var(--r-container); background: var(--taste); }
 .topbar__channel-option { display: grid; grid-template-columns: 20px minmax(0, 1fr) 150px; grid-template-rows: minmax(20px, auto); align-items: center; gap: 0 8px; min-height: 52px; padding: 6px 8px; border-radius: var(--r-control); color: var(--text); cursor: pointer; }
 .topbar__channel-option:hover { background: var(--taste-hover); }
