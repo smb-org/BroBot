@@ -39,8 +39,10 @@ und schreibt ausschließlich diese Tabelle.
 Der Host mountet registrierte Modulrouten kanalbezogen unter
 `/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die
 CRUD-Routen unter `/befehle` bereit. Die Host-Middleware prüft Session,
-CSRF und Mitgliedschaft und gibt dem Modul anschließend nur den Akteur und
-eine SQL-gebundene Mutationsautorisierung weiter.
+CSRF und Mitgliedschaft und gibt dem Modul anschließend den Akteur, eine
+SQL-gebundene Mutationsautorisierung und eine vorbereitete Audit-Funktion für
+Moduldatenänderungen weiter. Das Modul entscheidet selbst, ob es diese
+Funktion nutzt; der Host erzwingt sie nicht rückwirkend.
 
 ## Aktivierung und Bundles
 

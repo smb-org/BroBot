@@ -143,6 +143,7 @@ export interface PanelAuditEntry {
   auditId: string;
   actorUserId: string;
   createdAt: string;
+  moduleId: string | null;
   action: string;
   before: string;
   after: string;

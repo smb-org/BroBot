@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
+import { authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -24,10 +25,10 @@ describe("Textbefehle-D1-Adapter", () => {
 
     await expect(repository.anlegen({
       channelId: "kanal-a", name: "hallo", text: "A", cooldownSekunden: 5, now: NOW,
-    }, ACTOR)).resolves.toBe(true);
+    }, ACTOR)).resolves.toEqual({ ok: true });
     await expect(repository.anlegen({
       channelId: "kanal-b", name: "hallo", text: "B", cooldownSekunden: 5, now: NOW,
-    }, ACTOR)).resolves.toBe(true);
+    }, ACTOR)).resolves.toEqual({ ok: true });
 
     await expect(repository.auflisten("kanal-a")).resolves.toEqual([expect.objectContaining({
       channelId: "kanal-a", name: "hallo", text: "A",
@@ -68,5 +69,32 @@ describe("Textbefehle-D1-Adapter", () => {
     expect(tables.results).toEqual([{ name: "textbefehle_commands" }]);
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first<{ count: number }>())
       .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first<{ count: number }>())
+      .resolves.toEqual({ count: 0 });
+  });
+
+  it("unterscheidet eine abgelehnte Löschung von einer fehlenden Zeile", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    const erlaubt = createTextbefehlRepository(database as unknown as D1Database, authorize);
+    await erlaubt.anlegen({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", cooldownSekunden: 5, now: NOW,
+    }, ACTOR);
+
+    const verweigert = createTextbefehlRepository(database as unknown as D1Database, authorizeModuleMutation);
+    const fremderAkteur = { userId: "user-2", sessionId: "session-user-2" };
+
+    await expect(verweigert.anlegen({
+      channelId: "kanal-a", name: "neu", text: "Antwort", cooldownSekunden: 5, now: NOW,
+    }, fremderAkteur)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+    await expect(verweigert.aendern({
+      channelId: "kanal-a", name: "hallo", text: "Neu", cooldownSekunden: 10, now: NOW,
+    }, fremderAkteur)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+
+    await expect(verweigert.loeschen("kanal-a", "hallo", fremderAkteur, NOW))
+      .resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+    await expect(verweigert.loeschen("kanal-a", "fehlt", ACTOR, NOW))
+      .resolves.toEqual({ ok: false, grund: "nicht_gefunden" });
   });
 });

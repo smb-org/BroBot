@@ -13,6 +13,7 @@ interface TextbefehleTexte {
   laden: string;
   fehler: string;
   speichernFehler: string;
+  loeschenFehler: string;
   nameHinweis: string;
   details: (name: string) => string;
   nie: string;
@@ -43,6 +44,7 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     laden: "Textbefehle werden geladen …",
     fehler: "Die Textbefehle konnten nicht geladen werden.",
     speichernFehler: "Der Textbefehl konnte nicht gespeichert werden.",
+    loeschenFehler: "Der Textbefehl konnte nicht gelöscht werden.",
     nameHinweis: "Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.",
     details: (name) => `Eigenschaften von !${name}`,
     nie: "noch nie",
@@ -66,6 +68,7 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     laden: "Loading text commands …",
     fehler: "The text commands could not be loaded.",
     speichernFehler: "The text command could not be saved.",
+    loeschenFehler: "The text command could not be deleted.",
     nameHinweis: "Lowercase letters, numbers, hyphen and underscore.",
     details: (name) => `Properties for !${name}`,
     nie: "never",

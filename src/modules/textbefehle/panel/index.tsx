@@ -41,7 +41,7 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<Text
       await loescheTextbefehl(channelId, initial.name);
       await onChanged();
     } catch {
-      setError(labels.speichernFehler);
+      setError(labels.loeschenFehler);
     } finally {
       setBusy(false);
     }

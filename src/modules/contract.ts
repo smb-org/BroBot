@@ -54,6 +54,25 @@ export interface ModuleMutationAuthorization {
   values: readonly (string | number | null)[];
 }
 
+export type ModuleAuditValue = string | number | boolean | null;
+
+/** Fachliche, von einem Modul ausdrücklich für das Audit freigegebene Werte. */
+export type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
+
+export interface ModuleAuditEntry {
+  channelId: string;
+  moduleId: string;
+  action: string;
+  before: ModuleAuditSnapshot | null;
+  after: ModuleAuditSnapshot | null;
+}
+
+/** Der Host bereitet den Audit-Teil derselben D1-Mutation vor. */
+export type PrepareModuleAudit = (
+  entry: ModuleAuditEntry,
+  changedAt: string,
+) => D1PreparedStatement;
+
 export type AuthorizeModuleMutation = (
   channelId: string,
   actor: ModuleMutationActor,
@@ -85,6 +104,7 @@ export interface ModuleRouteVariables {
   channelRole: "broadcaster" | "verwalter" | "bediener";
   actor: { userId: string; sessionId: string };
   authorizeMutation: AuthorizeModuleMutation;
+  prepareModuleAudit: PrepareModuleAudit;
 }
 
 export interface ModuleRouteEnvironment {
