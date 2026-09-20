@@ -205,7 +205,7 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
+    expect(await screen.findByText(/aktualisiert vor/)).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Ereignis" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Modul" })).toBeInTheDocument();
@@ -278,7 +278,7 @@ describe("Dashboard-Grundgerüst", () => {
     const eventsLink = await screen.findByRole("link", { name: "Ereignisse" });
     fireEvent.click(eventsLink);
     expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("neu")).toBeInTheDocument();
+    expect(await screen.findByText("neu")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
     expect(await screen.findByText("alt")).toBeInTheDocument();
@@ -403,7 +403,7 @@ describe("Dashboard-Grundgerüst", () => {
       viewerUserId: "100",
     });
 
-    expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
     expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(2);
 
     // Das Auswahlfeld bietet keinen Wert an, der abgelehnt würde.
@@ -420,7 +420,7 @@ describe("Dashboard-Grundgerüst", () => {
       viewerUserId: "100",
     });
 
-    expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeEnabled();
     expect(screen.queryByText("Letzter Broadcaster")).not.toBeInTheDocument();
   });
 
@@ -432,7 +432,7 @@ describe("Dashboard-Grundgerüst", () => {
       viewerUserId: "100",
     });
     vi.stubGlobal("confirm", frage);
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff für esembe entziehen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" }));
 
     expect(frage).toHaveBeenCalledOnce();
     expect(frage.mock.calls.at(0)?.[0] ?? "").toContain("selbst aus");
@@ -461,7 +461,7 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Mitglieder", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("Streamerin")).toBeInTheDocument();
+    expect(await screen.findByText("Streamerin")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "twitch.tv/streamer" }))
       .toHaveAttribute("href", "https://twitch.tv/streamer");
     const avatarImage = document.querySelector("img.member-avatar");
@@ -504,7 +504,7 @@ describe("Dashboard-Grundgerüst", () => {
       viewerUserId: "100",
     });
 
-    const table = screen.getByRole("table");
+    const table = await screen.findByRole("table");
     expect(table.querySelector("thead")).toHaveClass("sr-only");
     expect(screen.getByRole("columnheader", { name: "Name" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Rolle" })).toBeInTheDocument();
@@ -542,7 +542,7 @@ describe("Dashboard-Grundgerüst", () => {
     const freigeben = screen.getByRole("button", { name: "Zugriff freigeben" });
     expect(freigeben).toBeDisabled();
     expect(freigeben).toHaveAttribute("title", grund);
-    expect(screen.getByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
+    expect(await screen.findByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
     const entziehen = screen.getByRole("button", { name: "Zugriff für Moderation entziehen" });
     expect(entziehen).toBeDisabled();
     expect(screen.getAllByText(grund).length).toBeGreaterThan(0);
@@ -1422,7 +1422,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "System" }));
     await screen.findByRole("heading", { name: "System", level: 1 });
-    expect(screen.getByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
+    expect(await screen.findByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
   });
 
   it("zeigt einen fehlenden Moderatorstatus als roten Fehlerzustand", async () => {
