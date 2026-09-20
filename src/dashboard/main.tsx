@@ -612,7 +612,7 @@ const eventGroupKey = (entry: PanelEventEntry): string =>
     : `event:${entry.eventId}`;
 
 const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] => {
-  const grouped = new Map<string, PanelEventEntry[]>();
+  const grouped = new Map<string, [PanelEventEntry, ...PanelEventEntry[]]>();
   for (const entry of entries) {
     const key = eventGroupKey(entry);
     const group = grouped.get(key);
@@ -622,14 +622,14 @@ const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] => {
   return Array.from(grouped, ([key, groupEntries]) => ({
     key,
     entries: groupEntries,
-    representative: groupEntries.reduce((current, candidate) => {
+    representative: groupEntries.slice(1).reduce((current, candidate) => {
       const currentRank = eventToneRang(eventTone(current.code));
       const candidateRank = eventToneRang(eventTone(candidate.code));
       return candidateRank > currentRank ||
         (candidateRank === currentRank && candidate.createdAt < current.createdAt)
         ? candidate
         : current;
-    }),
+    }, groupEntries[0]),
   }));
 };
 

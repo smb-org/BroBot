@@ -74,6 +74,18 @@ describe("Textbefehle-Service", () => {
     }]);
   });
 
+  it("trimmt Argumente nach mehreren Leerzeichen zwischen Name und Argument", async () => {
+    const result = await verarbeiteTextbefehlNachricht(
+      eventFuer("!wiki   foo bar"),
+      repositoryFuer([befehl("wiki", "Antwort")]),
+    );
+
+    expect(result.diagnostics).toEqual([{
+      code: "textbefehle.ausgeloest",
+      detail: { name: "wiki", argumente: "foo bar", antwort: "Antwort" },
+    }]);
+  });
+
   it("kürzt Argumente und Antwort sichtbar, lässt genau 200 Zeichen aber unverändert", async () => {
     const exaktZweihundert = "x".repeat(200);
     const zuLang = "y".repeat(201);

@@ -6,6 +6,7 @@ import {
   cooldownRestzeit,
   gueltigerBefehlsname,
 } from "./domain";
+import type { TextbefehlEingabe } from "./domain";
 import type { TextbefehlRepository } from "./repository";
 
 export const TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN = 5;
@@ -29,13 +30,15 @@ const userFuer = (event: ModuleEvent): string =>
 const channelFuer = (event: ModuleEvent): string =>
   textWert(event.payload.broadcaster_user_login) ?? event.channelId;
 
-const diagnoseAusgeloest = (nachricht: string, antwort: string) => {
-  const match = /^!(\S+)(?:\s+([\s\S]*))?$/u.exec(nachricht.trim());
-  const argumente = match?.[2]?.trim();
+const diagnoseAusgeloest = (
+  eingabe: Exclude<TextbefehlEingabe, { art: "unbekannt" }>,
+  antwort: string,
+) => {
+  const argumente = eingabe.argumente;
   return {
     code: "textbefehle.ausgeloest",
     detail: {
-      name: match?.[1] ?? "",
+      name: eingabe.name,
       ...(argumente === undefined || argumente.length === 0
         ? {}
         : { argumente: kuerzeAuf200Zeichen(argumente) }),
@@ -44,7 +47,7 @@ const diagnoseAusgeloest = (nachricht: string, antwort: string) => {
   } as const;
 };
 
-const antwort = (event: ModuleEvent, nachricht: string, text: string): ModuleResult => {
+const antwort = (event: ModuleEvent, eingabe: Exclude<TextbefehlEingabe, { art: "unbekannt" }>, text: string): ModuleResult => {
   const replyToMessageId = textWert(event.payload.message_id);
   return {
     actions: [{
@@ -52,7 +55,7 @@ const antwort = (event: ModuleEvent, nachricht: string, text: string): ModuleRes
       text,
       ...(replyToMessageId === null ? {} : { replyToMessageId }),
     }],
-    diagnostics: [diagnoseAusgeloest(nachricht, text)],
+    diagnostics: [diagnoseAusgeloest(eingabe, text)],
   };
 };
 
@@ -81,25 +84,25 @@ export const verarbeiteTextbefehlNachricht = async (
     }
     const angelegt = await repository.anlegen({
       channelId: event.channelId,
-      name: eingabe.name,
+      name: eingabe.zielname,
       text: eingabe.text,
       cooldownSekunden: TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN,
       now: event.receivedAt,
     }, { userId: event.actor.userId });
     return angelegt
-      ? antwort(event, text, `Befehl !${eingabe.name} wurde angelegt.`)
-      : { actions: [], diagnostics: [{ code: "textbefehle.bereits_vorhanden", detail: { name: eingabe.name } }] };
+      ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde angelegt.`)
+      : { actions: [], diagnostics: [{ code: "textbefehle.bereits_vorhanden", detail: { name: eingabe.zielname } }] };
   }
 
   if (eingabe.art === "entfernen") {
     if (event.actor?.role === null || event.actor === null) return nichtBerechtigt();
-    if (!gueltigerBefehlsname(eingabe.name)) {
+    if (!gueltigerBefehlsname(eingabe.zielname)) {
       return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
     }
-    const entfernt = await repository.loeschen(event.channelId, eingabe.name, { userId: event.actor.userId }, event.receivedAt);
+    const entfernt = await repository.loeschen(event.channelId, eingabe.zielname, { userId: event.actor.userId }, event.receivedAt);
     return entfernt
-      ? antwort(event, text, `Befehl !${eingabe.name} wurde entfernt.`)
-      : { actions: [], diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.name } }] };
+      ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde entfernt.`)
+      : { actions: [], diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.zielname } }] };
   }
 
   if (eingabe.art === "listen") {
@@ -107,7 +110,7 @@ export const verarbeiteTextbefehlNachricht = async (
     const liste = befehle.length === 0
       ? "Keine Textbefehle angelegt."
       : `Befehle: ${befehle.map((befehl) => `!${befehl.name}`).join(", ")}`;
-    return antwort(event, text, liste);
+    return antwort(event, eingabe, liste);
   }
 
   if (!gueltigerBefehlsname(eingabe.name)) {
@@ -132,7 +135,7 @@ export const verarbeiteTextbefehlNachricht = async (
     };
   }
 
-  return antwort(event, text, befehlTextMitPlatzhaltern(
+  return antwort(event, eingabe, befehlTextMitPlatzhaltern(
     beanspruchung.befehl.text,
     userFuer(event),
     channelFuer(event),
