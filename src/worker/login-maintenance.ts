@@ -11,6 +11,7 @@ import {
   shouldRefreshBotToken,
   TwitchApiError,
   validateBotToken,
+  logMaintenanceError,
 } from "./bot-maintenance";
 
 const markLoginRevoked = async (
@@ -82,6 +83,7 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
   const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
   const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys);
   if (accessToken === null || refreshToken === null) {
+    logMaintenanceError({ channelId: identity.userId, subscriptionType: "login-identity", variant: "token" }, new Error(), "token_ciphertext_unreadable");
     await setLoginIdentityStatusIfCurrent(
       env.DB,
       identity.userId,
@@ -104,6 +106,7 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
     if (error instanceof TwitchApiError && error.status === 401) {
       validateReturned401 = true;
     } else {
+      logMaintenanceError({ channelId: identity.userId, subscriptionType: "login-identity", variant: "validation" }, error, "validate_failed");
       await setLoginIdentityStatusIfCurrent(
         env.DB,
         identity.userId,
@@ -143,6 +146,7 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
       statusExpectedAccessTokenCiphertext = accessTokenCiphertext;
       statusExpectedRefreshTokenCiphertext = refreshTokenCiphertext;
     } catch (error: unknown) {
+      logMaintenanceError({ channelId: identity.userId, subscriptionType: "login-identity", variant: "refresh" }, error, refreshFailureReason(error));
       if (isInvalidGrant(error)) {
         await markLoginRevoked(env, identity, now, "authorization_revoked");
       } else {
@@ -172,20 +176,25 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
 };
 
 export const maintainLoginIdentities = async (env: Env, now: string): Promise<void> => {
-  const identities = await listLoginIdentities(env.DB, now);
-  const concurrency = 4;
-  let nextIndex = 0;
-  const worker = async (): Promise<void> => {
-    while (nextIndex < identities.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      const listedIdentity = identities[index];
-      if (listedIdentity === undefined) return;
-      await maintainLoginIdentity(env, listedIdentity, now);
-    }
-  };
-  await Promise.all(Array.from(
-    { length: Math.min(concurrency, identities.length) },
-    () => worker(),
-  ));
+  try {
+    const identities = await listLoginIdentities(env.DB, now);
+    const concurrency = 4;
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (nextIndex < identities.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const listedIdentity = identities[index];
+        if (listedIdentity === undefined) return;
+        await maintainLoginIdentity(env, listedIdentity, now);
+      }
+    };
+    await Promise.all(Array.from(
+      { length: Math.min(concurrency, identities.length) },
+      () => worker(),
+    ));
+  } catch (error: unknown) {
+    logMaintenanceError({ channelId: "global", subscriptionType: "login-identities", variant: "run" }, error);
+    throw error;
+  }
 };

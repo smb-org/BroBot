@@ -9,6 +9,7 @@ import {
 } from "./auth/repository";
 import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
+import { kuerzeAuf200Zeichen } from "../text";
 
 export interface TwitchClientEnvironment {
   TWITCH_CLIENT_ID: string;
@@ -39,6 +40,45 @@ export class TwitchApiError extends Error {
     this.code = code;
   }
 }
+
+export interface MaintenanceLogContext {
+  channelId: string;
+  subscriptionType: string;
+  variant: string;
+}
+
+export interface MaintenanceErrorDetails {
+  message: string | null;
+  status: number | null;
+  code: string;
+}
+
+const logPart = (value: string | null | undefined): string => kuerzeAuf200Zeichen(value ?? "-").replace(/[\r\n]+/g, " ");
+
+export const maintenanceErrorDetails = (
+  error: unknown,
+  fallbackCode = "maintenance_failed",
+): MaintenanceErrorDetails => error instanceof TwitchApiError
+  ? {
+    message: logPart(error.message),
+    status: error.status,
+    code: error.code ?? fallbackCode,
+  }
+  : { message: null, status: null, code: fallbackCode };
+
+/** Schreibt nur strukturierte Wartungsdaten, niemals Request- oder Token-Inhalte. */
+export const logMaintenanceError = (
+  context: MaintenanceLogContext,
+  error: unknown,
+  fallbackCode = "maintenance_failed",
+): void => {
+  const details = maintenanceErrorDetails(error, fallbackCode);
+  console.error(
+    `maintenance_error channel=${logPart(context.channelId)} subscription_type=${logPart(context.subscriptionType)} ` +
+    `variant=${logPart(context.variant)} status=${details.status === null ? "-" : String(details.status)} ` +
+    `code=${logPart(details.code)} message=${details.message ?? "-"}`,
+  );
+};
 
 export const MODERATOR_STATUS_REQUEST_TIMEOUT_MS = 5_000;
 
@@ -285,7 +325,7 @@ const isInvalidGrant = (error: unknown): boolean =>
 const refreshFailureReason = (error: unknown): string =>
   error instanceof TwitchApiError && error.code !== null ? error.code : "refresh_failed";
 
-export const maintainBotIdentity = async (
+const maintainBotIdentityInternal = async (
   env: Env,
   now: string,
   fetcher: typeof fetch = fetch,
@@ -300,6 +340,7 @@ export const maintainBotIdentity = async (
   const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
   const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys);
   if (accessToken === null || refreshToken === null) {
+    logMaintenanceError({ channelId: "global", subscriptionType: "bot-identity", variant: "token" }, new Error(), "token_ciphertext_unreadable");
     await setBotIdentityStatusIfCurrent(
       env.DB,
       "error",
@@ -321,6 +362,7 @@ export const maintainBotIdentity = async (
       currentStatus = { userId: identity.userId, login: identity.login, expiresIn: 0 };
       validateReturned401 = true;
     } else {
+      logMaintenanceError({ channelId: "global", subscriptionType: "bot-identity", variant: "validation" }, error, "validate_failed");
       await setBotIdentityStatusIfCurrent(
         env.DB,
         "error",
@@ -362,6 +404,7 @@ export const maintainBotIdentity = async (
       statusExpectedAccessTokenCiphertext = accessTokenCiphertext;
       statusExpectedRefreshTokenCiphertext = refreshTokenCiphertext;
     } catch (error: unknown) {
+      logMaintenanceError({ channelId: "global", subscriptionType: "bot-identity", variant: "refresh" }, error, refreshFailureReason(error));
       if (isInvalidGrant(error)) {
         await setBotIdentityStatusIfCurrent(
           env.DB,
@@ -404,6 +447,7 @@ export const maintainBotIdentity = async (
       statusExpectedRefreshTokenCiphertext,
     );
   } catch (error: unknown) {
+    logMaintenanceError({ channelId: "global", subscriptionType: "bot-identity", variant: "moderated-channels" }, error, "moderator_status_failed");
     const reason = error instanceof TwitchApiError ? "moderator_status_failed" : "maintenance_failed";
     await setBotIdentityStatusIfCurrent(
       env.DB,
@@ -413,5 +457,18 @@ export const maintainBotIdentity = async (
       statusExpectedAccessTokenCiphertext,
       statusExpectedRefreshTokenCiphertext,
     );
+  }
+};
+
+export const maintainBotIdentity = async (
+  env: Env,
+  now: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> => {
+  try {
+    await maintainBotIdentityInternal(env, now, fetcher);
+  } catch (error: unknown) {
+    logMaintenanceError({ channelId: "global", subscriptionType: "bot-identity", variant: "run" }, error);
+    throw error;
   }
 };

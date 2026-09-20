@@ -4,6 +4,7 @@ import { purgeOldEventLogEntries } from "./event-log";
 import { maintainLoginIdentities } from "./login-maintenance";
 import { purgeOldEventSubMessages } from "./auth/repository";
 import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
+import { eventSubMessageCutoff } from "./eventsub";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   _controller,
@@ -11,7 +12,7 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   executionContext,
 ) => {
   const now = new Date().toISOString();
-  const eventSubCutoff = new Date(Date.parse(now) - 24 * 60 * 60 * 1000).toISOString();
+  const eventSubCutoff = eventSubMessageCutoff(now);
   const work = Promise.all([
     purgeOldEventLogEntries(env.DB, now),
     purgeOldEventSubMessages(env.DB, eventSubCutoff),

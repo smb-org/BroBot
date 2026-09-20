@@ -36,6 +36,10 @@ export interface PanelLastError {
   source: "moderator" | "bot" | "login" | "eventsub";
   reason: string;
   at: string;
+  message?: string | null;
+  status?: number | null;
+  subscriptionType?: string | undefined;
+  subscriptionVariant?: string | undefined;
 }
 
 export interface PanelChannelState {

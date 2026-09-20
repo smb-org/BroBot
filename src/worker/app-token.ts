@@ -8,7 +8,7 @@ import {
   getTokenEncryptionKeys,
   parseKeyRing,
 } from "./auth/crypto";
-import { TwitchApiError } from "./bot-maintenance";
+import { logMaintenanceError, TwitchApiError } from "./bot-maintenance";
 import { APP_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 
 export interface AppTokenEnvironment {
@@ -156,5 +156,10 @@ export const maintainAppAccessToken = async (
   now: string,
   fetcher: typeof fetch = fetch,
 ): Promise<void> => {
-  await getAppAccessToken(env, now, fetcher);
+  try {
+    await getAppAccessToken(env, now, fetcher);
+  } catch (error: unknown) {
+    logMaintenanceError({ channelId: "global", subscriptionType: "app-token", variant: "client-credentials" }, error);
+    throw error;
+  }
 };

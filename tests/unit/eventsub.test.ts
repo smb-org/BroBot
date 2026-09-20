@@ -7,9 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EVENTSUB_MAX_BODY_BYTES,
   eventSubRouter,
+  eventSubMessageCutoff,
   isEventSubTimestampFresh,
   parseEventSubTimestamp,
 } from "../../src/worker/eventsub";
+import { purgeOldEventSubMessages } from "../../src/worker/auth/repository";
 import { scheduled } from "../../src/worker/scheduled";
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
@@ -181,6 +183,28 @@ describe("EventSub-Eingang", () => {
     );
 
     expect(response.status).toBe(403);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("erkennt eine Nachricht innerhalb des Wiederholungsfensters erneut als Wiederholung", async () => {
+    await insertChannel(database, "channel-replay");
+    const body = JSON.stringify({
+      subscription: { type: "channel.chat.message", condition: { broadcaster_user_id: "channel-replay" } },
+      event: {},
+    });
+    const first = await eventSubRouter.fetch(
+      signedRequest(secret, "notification", body, "message-replay"),
+      environment(),
+    );
+    vi.setSystemTime(new Date("2026-09-19T10:00:01.000Z"));
+    const repeat = await eventSubRouter.fetch(
+      signedRequest(secret, "notification", body, "message-replay", "2026-09-19T10:00:00.000Z"),
+      environment(),
+    );
+
+    expect(first.status).toBe(204);
+    expect(repeat.status).toBe(204);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 1 });
   });
 
   it("weist einen zu weit in der Zukunft liegenden Zeitstempel ab", async () => {
@@ -466,6 +490,33 @@ describe("EventSub-Eingang", () => {
     expect(isEventSubTimestampFresh("2026-09-19T10:10:30.001Z", Date.parse("2026-09-19T10:00:00.000Z"))).toBe(false);
   });
 
+  it("leitet die Aufbewahrung aus dem jeweils gesetzten Wiederholungsfenster ab", () => {
+    const now = "2026-09-19T10:00:00.000Z";
+
+    expect(eventSubMessageCutoff(now, 10 * 60 * 1000)).toBe("2026-09-19T09:40:00.000Z");
+    expect(eventSubMessageCutoff(now, 60 * 60 * 1000)).toBe("2026-09-19T08:00:00.000Z");
+  });
+
+  it("verwendet für das EventSub-Aufräumen den Zeitindex", async () => {
+    const preparedSql: string[] = [];
+    const databaseProxy = {
+      prepare: (sql: string): TestPreparedStatement => {
+        preparedSql.push(sql);
+        return database.prepare(sql);
+      },
+    } as unknown as D1Database;
+    await purgeOldEventSubMessages(databaseProxy, "2026-09-19T09:40:00.000Z");
+    const deleteSql = preparedSql.find((sql) => sql.includes("DELETE FROM eventsub_messages"));
+    expect(deleteSql).toBeDefined();
+    const plan = database.sqlite.prepare(
+      `EXPLAIN QUERY PLAN ${deleteSql ?? ""}`,
+    ).all("2026-09-19T09:40:00.000Z") as Array<{ detail: string }>;
+    const details = plan.map((row) => row.detail).join(" ");
+
+    expect(details).toMatch(/USING (?:COVERING )?INDEX eventsub_messages_received_idx/);
+    expect(details).not.toContain("SCAN eventsub_messages");
+  });
+
   it("wendet die EventSub-Migration idempotent erneut an", () => {
     const migration = readFileSync(
       resolve(import.meta.dirname, "../../migrations/0008_eventsub_eingang.sql"),
@@ -482,9 +533,9 @@ describe("EventSub-Eingang", () => {
       "INSERT INTO eventsub_messages (message_id, received_at) VALUES (?, ?), (?, ?)",
     ).bind(
       "old-message",
-      "2026-09-18T09:59:59.999Z",
+      "2026-09-19T09:39:59.999Z",
       "boundary-message",
-      "2026-09-18T10:00:00.000Z",
+      "2026-09-19T09:40:00.000Z",
     ).run();
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(

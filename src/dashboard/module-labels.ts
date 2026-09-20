@@ -16,6 +16,59 @@ export const moduleName = (moduleId: string, language: DashboardLanguage = dashb
   return moduleId;
 };
 
+interface EreignisAboNamen {
+  chatNachrichten: string;
+  chatBenachrichtigungen: string;
+  raids: string;
+  raidEingehend: string;
+  raidAusgehend: string;
+  shoutoutsGesendet: string;
+  shoutoutsEmpfangen: string;
+  moderation: string;
+}
+
+const ereignisAboNamen: LocaleCatalog<EreignisAboNamen> = {
+  de: {
+    chatNachrichten: "Chat-Nachrichten",
+    chatBenachrichtigungen: "Chat-Benachrichtigungen",
+    raids: "Raids",
+    raidEingehend: "Eingehende Raids",
+    raidAusgehend: "Ausgehende Raids",
+    shoutoutsGesendet: "Gesendete Shoutouts",
+    shoutoutsEmpfangen: "Empfangene Shoutouts",
+    moderation: "Moderationsereignisse",
+  },
+  en: {
+    chatNachrichten: "Chat messages",
+    chatBenachrichtigungen: "Chat notifications",
+    raids: "Raids",
+    raidEingehend: "Incoming raids",
+    raidAusgehend: "Outgoing raids",
+    shoutoutsGesendet: "Sent shoutouts",
+    shoutoutsEmpfangen: "Received shoutouts",
+    moderation: "Moderation events",
+  },
+};
+
+export const eventSubName = (
+  subscriptionType: string,
+  variant = "",
+  language: DashboardLanguage = dashboardLanguage(),
+): string => {
+  const texte = ereignisAboNamen[language];
+  if (subscriptionType === "channel.chat.message") return texte.chatNachrichten;
+  if (subscriptionType === "channel.chat.notification") return texte.chatBenachrichtigungen;
+  if (subscriptionType === "channel.raid") {
+    if (variant === "eingehend") return texte.raidEingehend;
+    if (variant === "ausgehend") return texte.raidAusgehend;
+    return texte.raids;
+  }
+  if (subscriptionType === "channel.shoutout.create") return texte.shoutoutsGesendet;
+  if (subscriptionType === "channel.shoutout.receive") return texte.shoutoutsEmpfangen;
+  if (subscriptionType === "channel.moderate") return texte.moderation;
+  return subscriptionType;
+};
+
 interface ModulBeschreibungen {
   textbefehle: string;
   kanalereignisse: string;

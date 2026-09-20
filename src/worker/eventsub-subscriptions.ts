@@ -9,7 +9,11 @@ import {
   type EventSubSubscriptionStatus,
   upsertEventSubSubscription,
 } from "./auth/repository";
-import { TwitchApiError } from "./bot-maintenance";
+import {
+  logMaintenanceError,
+  maintenanceErrorDetails,
+  TwitchApiError,
+} from "./bot-maintenance";
 
 export const EVENTSUB_SUBSCRIPTIONS_URL = "https://api.twitch.tv/helix/eventsub/subscriptions";
 export const EVENTSUB_CALLBACK_PATH = "/api/twitch/eventsub";
@@ -318,6 +322,14 @@ const isOwnedByTarget = (
 const reasonFor = (error: unknown): string =>
   error instanceof TwitchApiError && error.code !== null ? error.code : "maintenance_failed";
 
+const logTargetError = (target: EventSubTarget, error: unknown, fallbackCode = "maintenance_failed"): void => {
+  logMaintenanceError({
+    channelId: target.channelId,
+    subscriptionType: target.subscriptionType,
+    variant: target.variant,
+  }, error, fallbackCode);
+};
+
 const mark = async (
   db: D1Database,
   target: EventSubTarget,
@@ -326,6 +338,8 @@ const mark = async (
   subscriptionId: string | null,
   now: string,
   secretId: string | null = null,
+  errorMessage: string | null = null,
+  errorStatus: number | null = null,
 ): Promise<void> => {
   await upsertEventSubSubscription(db, {
     channelId: target.channelId,
@@ -336,6 +350,8 @@ const mark = async (
     secretId,
     status,
     reason,
+    errorMessage,
+    errorStatus,
     updatedAt: now,
   });
 };
@@ -413,7 +429,9 @@ export const reconcileEventSubSubscriptions = async (
     state,
   ]));
   const markError = async (target: EventSubTarget, error: unknown, subscriptionId: string | null = null): Promise<void> => {
-    await mark(env.DB, target, "error", reasonFor(error), subscriptionId, now);
+    const details = maintenanceErrorDetails(error, reasonFor(error));
+    logTargetError(target, error, details.code);
+    await mark(env.DB, target, "error", details.code, subscriptionId, now, null, details.message, details.status);
   };
 
   let remote: EventSubRemoteSubscription[];
@@ -421,17 +439,30 @@ export const reconcileEventSubSubscriptions = async (
     remote = await fetchEventSubSubscriptions(fetcher, env.TWITCH_CLIENT_ID, appAccessToken);
   } catch (error: unknown) {
     const desiredKeys = new Set(targetByKey.keys());
+    if (targets.length === 0 && currentStates.size === 0) {
+      logMaintenanceError({ channelId: channelId ?? "global", subscriptionType: "eventsub", variant: "list" }, error);
+    }
+    const details = maintenanceErrorDetails(error, reasonFor(error));
     await Promise.all([
       ...targets.map((target) => markError(target, error, currentStates.get(eventSubTargetKey(target))?.subscriptionId ?? null)),
       ...[...currentStates.values()]
         .filter((state) => !desiredKeys.has(eventSubTargetKey(state)))
-        .map((state) => upsertEventSubSubscription(env.DB, {
-          ...state,
-          status: "error",
-          secretId: null,
-          reason: reasonFor(error),
-          updatedAt: now,
-        })),
+        .map((state) => {
+          logMaintenanceError({
+            channelId: state.channelId,
+            subscriptionType: state.subscriptionType,
+            variant: state.variant,
+          }, error, details.code);
+          return upsertEventSubSubscription(env.DB, {
+            ...state,
+            status: "error",
+            secretId: null,
+            reason: details.code,
+            errorMessage: details.message,
+            errorStatus: details.status,
+            updatedAt: now,
+          });
+        }),
     ]);
     return;
   }
@@ -495,12 +526,20 @@ export const reconcileEventSubSubscriptions = async (
         const state = currentStates.get(targetKey);
         if (state !== undefined) {
           failedStaleCleanup.add(targetKey);
+          const details = maintenanceErrorDetails(error, reasonFor(error));
+          logMaintenanceError({
+            channelId: state.channelId,
+            subscriptionType: state.subscriptionType,
+            variant: state.variant,
+          }, error, details.code);
           await upsertEventSubSubscription(env.DB, {
             ...state,
             status: "error",
             subscriptionId: subscription.id,
             secretId: null,
-            reason: reasonFor(error),
+            reason: details.code,
+            errorMessage: details.message,
+            errorStatus: details.status,
             updatedAt: now,
           });
         }
@@ -530,6 +569,8 @@ export const reconcileEventSubSubscriptions = async (
     subscriptionId: null,
     secretId: null,
     reason: state.status === "revoked" ? state.reason : "channel_or_consent_missing",
+    errorMessage: null,
+    errorStatus: null,
     updatedAt: now,
   })));
 };
@@ -544,29 +585,50 @@ export const maintainEventSubSubscriptions = async (
   let targets: EventSubTarget[];
   try {
     targets = await listDesiredEventSubTargets(env.DB, channelId);
-  } catch {
+  } catch (error: unknown) {
+    logMaintenanceError({ channelId: channelId ?? "global", subscriptionType: "eventsub", variant: "targets" }, error);
     return;
   }
   const botIdentity = await getBotIdentity(env.DB);
   if (botIdentity === null) {
-    await Promise.all(targets.map((target) => mark(env.DB, target, "error", "bot_identity_missing", null, now)));
+    await Promise.all(targets.map((target) => {
+      logTargetError(target, new Error(), "bot_identity_missing");
+      return mark(env.DB, target, "error", "bot_identity_missing", null, now);
+    }));
     return;
   }
   const botStatus = await getBotIdentityStatus(env.DB);
   if (botStatus?.status === "revoked") {
-    await Promise.all(targets.map((target) => mark(env.DB, target, "error", "bot_identity_revoked", null, now)));
+    await Promise.all(targets.map((target) => {
+      logTargetError(target, new Error(), "bot_identity_revoked");
+      return mark(env.DB, target, "error", "bot_identity_revoked", null, now);
+    }));
     return;
   }
   let appAccessToken: string;
   try {
     appAccessToken = await getAppAccessToken(env, now, fetcher);
   } catch (error: unknown) {
-    await Promise.all(targets.map((target) => mark(env.DB, target, "error", reasonFor(error), null, now)));
+    if (targets.length === 0) {
+      logMaintenanceError({ channelId: channelId ?? "global", subscriptionType: "app-token", variant: "eventsub" }, error);
+    }
+    await Promise.all(targets.map((target) => {
+      const details = maintenanceErrorDetails(error, reasonFor(error));
+      logTargetError(target, error, details.code);
+      return mark(env.DB, target, "error", details.code, null, now, null, details.message, details.status);
+    }));
     return;
   }
   try {
     await reconcileEventSubSubscriptions(env, now, appAccessToken, botIdentity.userId, fetcher, channelId);
   } catch (error: unknown) {
-    await Promise.all(targets.map((target) => mark(env.DB, target, "error", reasonFor(error), null, now)));
+    const details = maintenanceErrorDetails(error, reasonFor(error));
+    if (targets.length === 0) {
+      logMaintenanceError({ channelId: channelId ?? "global", subscriptionType: "eventsub", variant: "reconcile" }, error, details.code);
+    }
+    await Promise.all(targets.map((target) => {
+      logTargetError(target, error, details.code);
+      return mark(env.DB, target, "error", details.code, null, now, null, details.message, details.status);
+    }));
   }
 };

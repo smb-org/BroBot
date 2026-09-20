@@ -36,8 +36,9 @@ import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTaste, M
 import { MembersPage } from "./members";
 import { roleLabel } from "./labels";
 import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail } from "./locale";
-import { moduleName, statusWord } from "./module-labels";
+import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
+import { kuerzeAuf200Zeichen } from "../text";
 import "./styles.css";
 
 interface LoadState<T> {
@@ -637,7 +638,20 @@ const moderatorRow = (moderator: PanelModeratorStatus | null): StatusEntry => {
 const lastErrorRow = (error: PanelLastError | null): StatusEntry => {
   const texte = dashboardTexte();
   const tone: ZustandsTon = error === null ? "healthy" : "error";
-  return { key: "fehler", tone, node: <ZustandZeile label={texte.fehler.letzter} tone={tone} wort={error === null ? texte.status.gesund : texte.status.fehler} detail={error === null ? texte.fehler.keineUrsache : `${error.reason} · ${formatTimestamp(error.at)}`} /> };
+  if (error === null) {
+    return { key: "fehler", tone, node: <ZustandZeile label={texte.fehler.letzter} tone={tone} wort={texte.status.gesund} detail={texte.fehler.keineUrsache} /> };
+  }
+  const aboName = error.source === "eventsub" && error.subscriptionType !== undefined
+    ? eventSubName(error.subscriptionType, error.subscriptionVariant ?? "")
+    : null;
+  const grund = aboName === null ? error.reason : `${aboName}: ${error.reason}`;
+  const detail = [
+    grund,
+    error.message === null || error.message === undefined ? null : kuerzeAuf200Zeichen(error.message),
+    error.status === null || error.status === undefined ? null : `HTTP ${String(error.status)}`,
+    formatTimestamp(error.at),
+  ].filter((part): part is string => part !== null).join(" · ");
+  return { key: "fehler", tone, node: <ZustandZeile label={texte.fehler.letzter} tone={tone} wort={texte.status.fehler} detail={detail} /> };
 };
 
 interface ChannelOverviewPageProperties {
