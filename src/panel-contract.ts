@@ -42,6 +42,10 @@ export interface PanelBotPermissions {
   missingScopes: string[];
 }
 
+export interface PanelBroadcasterPermissions {
+  missingScopes: string[];
+}
+
 export interface PanelTokenStatus {
   botExpiresAt: string | null;
   loginStatus: PanelLoginStatusName | null;
@@ -68,6 +72,7 @@ export interface PanelChannelState {
   channelBotConsent: PanelChannelBotConsentStatus;
   bot: PanelBotStatus | null;
   botPermissions: PanelBotPermissions | null;
+  broadcasterPermissions: PanelBroadcasterPermissions | null;
   moderator: PanelModeratorStatus | null;
   chatSubscription: PanelChatSubscription | null;
   tokens: PanelTokenStatus;
@@ -183,6 +188,7 @@ export interface PanelSystemResponse {
   broadcasterConnection: PanelBroadcasterConnectionStatus;
   bot: PanelBotStatus | null;
   botPermissions: PanelBotPermissions | null;
+  broadcasterPermissions: PanelBroadcasterPermissions | null;
   chatSubscription: PanelChatSubscription | null;
   subscriptions?: PanelEventSubSubscription[];
   tokens: PanelTokenStatus;

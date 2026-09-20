@@ -5,6 +5,7 @@ import type {
   PanelAuditResponse,
   PanelBotPermissions,
   PanelBotStatus,
+  PanelBroadcasterPermissions,
   PanelChannelOverview,
   PanelChannelState,
   PanelEventEntry,
@@ -37,7 +38,7 @@ import {
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTaste, ModuleWorkspace, NavigationIcon, ZustandZeile, type LedStatus, type ZustandsTon } from "./module-panels";
 import { MembersPage } from "./members";
 import { BetreiberSeite } from "./betreiber";
-import { betreiberTexte, roleLabel } from "./labels";
+import { betreiberTexte, kanalPanelTexte, roleLabel } from "./labels";
 import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail } from "./locale";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
@@ -156,12 +157,16 @@ const tokenView = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): TokenV
 const channelBotConsentMissing = (channel: PanelChannelState): boolean =>
   channel.channelBotConsent === "missing";
 
+const broadcasterConsentMissing = (permissions: PanelBroadcasterPermissions | null | undefined): permissions is PanelBroadcasterPermissions =>
+  permissions !== null && permissions !== undefined && permissions.missingScopes.length > 0;
+
 const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "error" => {
   if (channel.moderator?.isModerator === false) return "error";
   if (channel.chatSubscription?.status === "error" || channel.chatSubscription?.status === "revoked") return "error";
   if (channel.lastError?.source === "eventsub") return "error";
   if (channel.bot?.status === "error" || channel.bot?.status === "revoked") return "error";
   if (channel.botPermissions?.missingScopes.length) return "warning";
+  if (broadcasterConsentMissing(channel.broadcasterPermissions)) return "warning";
   if (channel.tokens.loginStatus === "error" || channel.tokens.loginStatus === "revoked") return "error";
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (tokenStatus.tone === "error") return "error";
@@ -184,6 +189,7 @@ const statusText = (channel: PanelChannelState): string => {
   if (channel.bot?.status === "error") return texte.status.botFehler;
   if (channel.bot?.status === "revoked") return texte.status.botTokenWiderrufen;
   if (channel.botPermissions?.missingScopes.length) return texte.status.botBerechtigungenFehlen(formatZahl(channel.botPermissions.missingScopes.length));
+  if (broadcasterConsentMissing(channel.broadcasterPermissions)) return kanalPanelTexte().vollzustimmungFehlt;
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (channelBotConsentMissing(channel) && tokenStatus.tone === "healthy") return texte.status.broadcasterZustimmungFehlt;
   if (channel.chatSubscription == null && !channelBotConsentMissing(channel)) return texte.status.chatAboFehlt;
@@ -608,6 +614,21 @@ const ChannelBotConsentAction = ({ channelId, needed, canRequest }: {
   );
 };
 
+const BroadcasterConsentAction = ({ login, needed, canRequest }: {
+  login: string;
+  needed: boolean;
+  canRequest: boolean;
+}): ReactElement | null => {
+  if (!needed) return null;
+  const texte = kanalPanelTexte();
+  return (
+    <div className="header-action">
+      {canRequest ? <a className="button button--primary" href={`/auth/login?kanal=${encodeURIComponent(login)}`}>{texte.vollzustimmungAnfordern}</a> : <button className="button" type="button" disabled>{texte.vollzustimmungAnfordern}</button>}
+      {!canRequest ? <span className="sperrgrund">{texte.vollzustimmungGesperrt}</span> : null}
+    </div>
+  );
+};
+
 const toneRank: Record<ZustandsTon, number> = { error: 0, warning: 1, neutral: 2, healthy: 3 };
 
 interface StatusEntry {
@@ -664,6 +685,21 @@ const botPermissionsRow = (permissions: PanelBotPermissions | null | undefined):
   };
 };
 
+const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | null | undefined): StatusEntry | null => {
+  const texte = kanalPanelTexte();
+  if (!broadcasterConsentMissing(permissions)) return null;
+  return {
+    key: "broadcaster-permissions",
+    tone: "warning",
+    node: <ZustandZeile
+      label={texte.vollzustimmungFehlt}
+      tone="warning"
+      wort={texte.vollzustimmungFehlt}
+      detail={texte.vollzustimmungGesperrt}
+    />,
+  };
+};
+
 const tokenRow = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): StatusEntry => {
   const texte = dashboardTexte();
   const token = tokenView(tokens, bot);
@@ -712,6 +748,18 @@ const BotPermissionsInspector = ({ permissions }: { permissions: PanelBotPermiss
     <section className="command-inspector sub-inspector" aria-label={texte.system.botBerechtigungenInspector}>
       <div className="inspector-section__heading"><h3>{texte.system.botBerechtigungenInspector}</h3><span className="mono muted">{formatZahl(permissions.missingScopes.length)}</span></div>
       <h4>{texte.system.fehlendeScopes}</h4>
+      <ul className="scope-liste">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
+    </section>
+  );
+};
+
+const BroadcasterPermissionsInspector = ({ permissions }: { permissions: PanelBroadcasterPermissions | null | undefined }): ReactElement | null => {
+  const texte = kanalPanelTexte();
+  if (!broadcasterConsentMissing(permissions)) return null;
+  return (
+    <section className="command-inspector sub-inspector" aria-label={texte.fehlendeBroadcasterBerechtigungen}>
+      <div className="inspector-section__heading"><h3>{texte.fehlendeBroadcasterBerechtigungen}</h3><span className="mono muted">{formatZahl(permissions.missingScopes.length)}</span></div>
+      <h4>{texte.fehlendeScopes}</h4>
       <ul className="scope-liste">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
     </section>
   );
@@ -785,6 +833,7 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
     moderatorRow(overview.moderator),
     botRow(overview.bot),
     botPermissionsRow(overview.botPermissions),
+    broadcasterPermissionsRow(overview.broadcasterPermissions),
     tokenRow(overview.tokens, overview.bot),
     lastErrorRow(overview.lastError),
   ].filter((entry): entry is StatusEntry => entry !== null));
@@ -795,10 +844,11 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
         kind="channel"
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
-        actions={<><ModeratorCheckAction canCheck={overview.role !== "bediener"} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /></>}
+        actions={<><ModeratorCheckAction canCheck={overview.role !== "bediener"} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
       />
       <div className="zustand-liste">{eintraege.map((eintrag) => <Fragment key={eintrag.key}>{eintrag.node}</Fragment>)}</div>
       <BotPermissionsInspector permissions={overview.botPermissions} />
+      <BroadcasterPermissionsInspector permissions={overview.broadcasterPermissions} />
       <section className="content-section"><div className="section-heading"><h2>{dashboardTexte().overview.aktiveModule}</h2><span className="muted zahl">{formatZahl(overview.activeModules.length)}</span></div>{overview.activeModules.length === 0 ? <p className="empty-state">{dashboardTexte().module.keineAktiv}</p> : <div className="module-grid">{overview.activeModules.map(({ moduleId }) => <ModuleTaste key={moduleId} channelId={overview.channelId} moduleId={moduleId} enabled onNavigate={onNavigate} />)}</div>}</section>
     </>
   );
@@ -827,8 +877,9 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
       {system === null && systemState.status === "loading" ? <p className="loading-line">{texte.system.zustandLaden}</p> : null}
       {systemState.error !== null ? <ErrorPanel message={systemState.error} /> : null}
       {system === null ? null : <>
-        <div className="zustand-liste">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), botPermissionsRow(system.botPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+        <div className="zustand-liste">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
         <BotPermissionsInspector permissions={system.botPermissions} />
+        <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
         <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
         <SystemProperties system={system} />
       </>}

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { listeAlleBroadcasterScopes } from "../../src/worker/module-scopes";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -249,6 +250,25 @@ describe("Panel-Leseendpunkte", () => {
         { subscriptionType: "channel.raid", variant: "eingehend", status: "enabled" },
       ],
     });
+  });
+
+  it("liefert fehlende Broadcaster-Scopes nur für markierte Kanäle aus dem Worker", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await database.prepare("UPDATE channels SET vollzustimmung = 1 WHERE channel_id = ?").bind("kanal-a").run();
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json<{ broadcasterPermissions: { missingScopes: string[] } }>();
+    expect(body.broadcasterPermissions.missingScopes).toEqual(
+      expect.arrayContaining(listeAlleBroadcasterScopes().filter((scope) => scope !== "channel:read:ads")),
+    );
   });
 
   it("liefert ausschließlich die Kanäle mit einer Mitgliedszeile des Benutzers", async () => {
