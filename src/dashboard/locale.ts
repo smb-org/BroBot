@@ -188,6 +188,9 @@ export interface DashboardTexte {
     unbekannt: string;
     code: string;
     zeitstempel: string;
+    vorgang: string;
+    beteiligte: string;
+    verlauf: string;
     laden: string;
     keine: string;
     detail: string;
@@ -299,7 +302,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     },
     ereignisse: {
       titel: "Ereignisse", anzahl: (anzahl) => `${anzahl} Einträge`, protokoll: "Ereignisprotokoll", zeit: "Zeit", ereignis: "Ereignis",
-      modul: "Modul", wer: "Wer", automatisch: "Automatisch", info: "Info", fehler: "Fehler", hinweis: "Hinweis", unbekannt: "Unbekannt", code: "Code", zeitstempel: "Zeitstempel",
+      modul: "Modul", wer: "Wer", automatisch: "Automatisch", info: "Info", fehler: "Fehler", hinweis: "Hinweis", unbekannt: "Unbekannt", code: "Code", zeitstempel: "Zeitstempel", vorgang: "Vorgang", beteiligte: "Beteiligte", verlauf: "Verlauf",
       laden: "Ereignisse werden geladen …",
       keine: "Noch keine Ereignisse protokolliert.", detail: "Detail", aeltereLaden: "Ältere Ereignisse laden", aeltereWerdenGeladen: "Ältere Ereignisse werden geladen …",
     },
@@ -388,7 +391,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     },
     ereignisse: {
       titel: "Events", anzahl: (anzahl) => `${anzahl} entries`, protokoll: "Event log", zeit: "Time", ereignis: "Event", modul: "Module",
-      wer: "Who", automatisch: "Automatic", info: "Info", fehler: "Error", hinweis: "Notice", unbekannt: "Unknown", code: "Code", zeitstempel: "Timestamp", laden: "Loading events …", keine: "No events logged yet.", detail: "Detail",
+      wer: "Who", automatisch: "Automatic", info: "Info", fehler: "Error", hinweis: "Notice", unbekannt: "Unknown", code: "Code", zeitstempel: "Timestamp", vorgang: "Operation", beteiligte: "Participants", verlauf: "History", laden: "Loading events …", keine: "No events logged yet.", detail: "Detail",
       aeltereLaden: "Load older events", aeltereWerdenGeladen: "Loading older events …",
     },
     anmeldung: {
@@ -415,12 +418,28 @@ export type EreignisCode =
   | "host.overlay.nicht_ausgefuehrt"
   | "shoutout.unterdrueckt"
   | "textbefehle.abgekuehlt"
+  | "textbefehle.ausgeloest"
   | "textbefehle.bereits_vorhanden"
   | "textbefehle.nicht_berechtigt"
   | "textbefehle.unbekannt"
   | "textbefehle.ungueltig";
 
-export const ereignisTexte: LocaleCatalog<Record<EreignisCode, string>> = {
+export type EreignisDetail = Readonly<Record<string, unknown>>;
+export type EreignisText = string | ((detail: EreignisDetail) => string);
+
+const textbefehlName = (detail: EreignisDetail): string | null =>
+  typeof detail.name === "string" && detail.name.length > 0 ? detail.name : null;
+
+const ereignisTextMitName = (
+  detail: EreignisDetail,
+  ohneName: string,
+  mitName: (name: string) => string,
+): string => {
+  const name = textbefehlName(detail);
+  return name === null ? ohneName : mitName(name);
+};
+
+export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = {
   de: {
     "host.aktion.fehler": "Aktion fehlgeschlagen",
     "host.chat.fehlgeschlagen": "Chat-Nachricht fehlgeschlagen",
@@ -429,10 +448,16 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, string>> = {
     "host.modul.unbekannt": "Unbekanntes Modul",
     "host.overlay.nicht_ausgefuehrt": "Overlay nicht ausgeführt",
     "shoutout.unterdrueckt": "Shoutout unterdrückt",
-    "textbefehle.abgekuehlt": "Textbefehl abgekühlt",
-    "textbefehle.bereits_vorhanden": "Textbefehl bereits vorhanden",
+    "textbefehle.abgekuehlt": (detail) => {
+      const name = textbefehlName(detail);
+      return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
+        ? "Textbefehl abgekühlt"
+        : `Befehl !${name} abgekühlt, noch ${String(detail.restSekunden)} s`;
+    },
+    "textbefehle.ausgeloest": (detail) => ereignisTextMitName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
+    "textbefehle.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Textbefehl bereits vorhanden", (name) => `Textbefehl !${name} bereits vorhanden`),
     "textbefehle.nicht_berechtigt": "Textbefehl nicht berechtigt",
-    "textbefehle.unbekannt": "Textbefehl unbekannt",
+    "textbefehle.unbekannt": (detail) => ereignisTextMitName(detail, "Textbefehl unbekannt", (name) => `Textbefehl !${name} unbekannt`),
     "textbefehle.ungueltig": "Textbefehl ungültig",
   },
   en: {
@@ -443,10 +468,16 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, string>> = {
     "host.modul.unbekannt": "Unknown module",
     "host.overlay.nicht_ausgefuehrt": "Overlay not executed",
     "shoutout.unterdrueckt": "Shoutout suppressed",
-    "textbefehle.abgekuehlt": "Text command on cooldown",
-    "textbefehle.bereits_vorhanden": "Text command already exists",
+    "textbefehle.abgekuehlt": (detail) => {
+      const name = textbefehlName(detail);
+      return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
+        ? "Text command on cooldown"
+        : `Command !${name} on cooldown, ${String(detail.restSekunden)}s left`;
+    },
+    "textbefehle.ausgeloest": (detail) => ereignisTextMitName(detail, "Command executed", (name) => `Command !${name} executed`),
+    "textbefehle.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Text command already exists", (name) => `Text command !${name} already exists`),
     "textbefehle.nicht_berechtigt": "Text command not authorized",
-    "textbefehle.unbekannt": "Unknown text command",
+    "textbefehle.unbekannt": (detail) => ereignisTextMitName(detail, "Unknown text command", (name) => `Unknown text command !${name}`),
     "textbefehle.ungueltig": "Invalid text command",
   },
 };
@@ -460,18 +491,30 @@ export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green"> = {
   "host.overlay.nicht_ausgefuehrt": "red",
   "shoutout.unterdrueckt": "amber",
   "textbefehle.abgekuehlt": "amber",
+  "textbefehle.ausgeloest": "green",
   "textbefehle.bereits_vorhanden": "amber",
   "textbefehle.nicht_berechtigt": "red",
   "textbefehle.unbekannt": "red",
   "textbefehle.ungueltig": "red",
 };
 
-export const ereignisText = (code: string, language: DashboardLanguage = dashboardLanguage()): string => {
-  if (Object.prototype.hasOwnProperty.call(ereignisTexte[language], code)) {
-    return ereignisTexte[language][code as EreignisCode];
+export function ereignisText(code: string, language?: DashboardLanguage): string;
+export function ereignisText(code: string, detail: EreignisDetail, language?: DashboardLanguage): string;
+export function ereignisText(
+  code: string,
+  detailOderSprache: EreignisDetail | DashboardLanguage = {},
+  language?: DashboardLanguage,
+): string {
+  const detail = typeof detailOderSprache === "string" ? {} : detailOderSprache;
+  const aufloesungsSprache = typeof detailOderSprache === "string"
+    ? detailOderSprache
+    : language ?? dashboardLanguage();
+  if (Object.prototype.hasOwnProperty.call(ereignisTexte[aufloesungsSprache], code)) {
+    const text = ereignisTexte[aufloesungsSprache][code as EreignisCode];
+    return typeof text === "function" ? text(detail) : text;
   }
   return code;
-};
+}
 
 export const dashboardTexte = (): DashboardTexte => dashboardTexteKatalog[dashboardLanguage()];
 

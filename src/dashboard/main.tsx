@@ -6,6 +6,7 @@ import type {
   PanelBotStatus,
   PanelChannelOverview,
   PanelChannelState,
+  PanelEventEntry,
   PanelEventsResponse,
   PanelLastError,
   PanelMembersResponse,
@@ -34,7 +35,7 @@ import {
 import { Led, ModuleCount, ModuleHeading, ModulePage, ModuleTaste, ModuleWorkspace, NavigationIcon, ZustandZeile, type LedStatus, type ZustandsTon } from "./module-panels";
 import { MembersPage } from "./members";
 import { roleLabel } from "./labels";
-import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode } from "./locale";
+import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail } from "./locale";
 import { moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import "./styles.css";
@@ -596,6 +597,71 @@ const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactEle
 const eventTone = (code: string): "red" | "amber" | "green" | null =>
   Object.prototype.hasOwnProperty.call(ereignisTon, code) ? ereignisTon[code as EreignisCode] : null;
 
+const eventToneRang = (tone: "red" | "amber" | "green" | null): number =>
+  tone === "red" ? 3 : tone === "amber" ? 2 : tone === "green" ? 1 : 0;
+
+interface EventGroup {
+  key: string;
+  entries: PanelEventEntry[];
+  representative: PanelEventEntry;
+}
+
+const eventGroupKey = (entry: PanelEventEntry): string =>
+  typeof entry.triggerId === "string" && entry.triggerId.length > 0
+    ? `trigger:${entry.triggerId}`
+    : `event:${entry.eventId}`;
+
+const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] => {
+  const grouped = new Map<string, [PanelEventEntry, ...PanelEventEntry[]]>();
+  for (const entry of entries) {
+    const key = eventGroupKey(entry);
+    const group = grouped.get(key);
+    if (group === undefined) grouped.set(key, [entry]);
+    else group.push(entry);
+  }
+  return Array.from(grouped, ([key, groupEntries]) => ({
+    key,
+    entries: groupEntries,
+    representative: groupEntries.slice(1).reduce((current, candidate) => {
+      const currentRank = eventToneRang(eventTone(current.code));
+      const candidateRank = eventToneRang(eventTone(candidate.code));
+      return candidateRank > currentRank ||
+        (candidateRank === currentRank && candidate.createdAt < current.createdAt)
+        ? candidate
+        : current;
+    }, groupEntries[0]),
+  }));
+};
+
+const actorLabel = (entry: PanelEventEntry, texte: ReturnType<typeof dashboardTexte>): string =>
+  entry.actorDisplayName ?? (entry.actorLogin == null
+    ? entry.actorUserId == null ? texte.ereignisse.automatisch : entry.actorUserId
+    : `@${entry.actorLogin}`);
+
+const actorCell = (entry: PanelEventEntry, texte: ReturnType<typeof dashboardTexte>): ReactNode =>
+  entry.actorDisplayName ?? (entry.actorLogin == null
+    ? entry.actorUserId == null ? texte.ereignisse.automatisch : <span className="mono">{entry.actorUserId}</span>
+    : `@${entry.actorLogin}`);
+
+const moduleLabel = (entry: PanelEventEntry): string => moduleName(entry.moduleId);
+
+const eventWord = (tone: "red" | "amber" | "green" | null, texte: ReturnType<typeof dashboardTexte>): string =>
+  tone === "red" ? texte.ereignisse.fehler : tone === "amber" ? texte.ereignisse.hinweis : tone === "green" ? texte.ereignisse.info : texte.ereignisse.unbekannt;
+
+const chronologisch = (left: PanelEventEntry, right: PanelEventEntry): number =>
+  left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId);
+
+const eventDetail = (detail: string): EreignisDetail => {
+  try {
+    const parsed: unknown = JSON.parse(detail);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as EreignisDetail
+      : {};
+  } catch {
+    return {};
+  }
+};
+
 const formatEventDetail = (detail: string): string => {
   try {
     return JSON.stringify(JSON.parse(detail), null, 2);
@@ -606,13 +672,15 @@ const formatEventDetail = (detail: string): string => {
 
 const EventsPage = ({ eventsState, onNextPage, loadingNextPage }: { eventsState: LoadState<PanelEventsResponse>; onNextPage: () => void; loadingNextPage: boolean }): ReactElement => {
   const texte = dashboardTexte();
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
   const eventsWereLoading = useRef(eventsState.status === "loading");
   useEffect(() => {
-    if (eventsState.status === "loading" && !eventsWereLoading.current) setSelectedEventId(null);
+    if (eventsState.status === "loading" && !eventsWereLoading.current) setSelectedGroupKey(null);
     eventsWereLoading.current = eventsState.status === "loading";
   }, [eventsState.status]);
-  const selectedEvent = eventsState.data?.entries.find((entry) => entry.eventId === selectedEventId) ?? null;
+  const groups = eventsState.data === null ? [] : eventGroups(eventsState.data.entries);
+  const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
+  const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronologisch);
   return (
     <>
       <ModuleHeading kind="events" title={texte.ereignisse.titel} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texte.ereignisse.anzahl} />} />
@@ -624,22 +692,22 @@ const EventsPage = ({ eventsState, onNextPage, loadingNextPage }: { eventsState:
           <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
             <table className="tabelle ereignis-tabelle">
               <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.modul}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
-              <tbody>{eventsState.data.entries.map((entry) => {
+              <tbody>{groups.map((group) => {
+                const entry = group.representative;
                 const tone = eventTone(entry.code);
-                const actor = entry.actorDisplayName ?? (entry.actorLogin == null
-                  ? entry.actorUserId == null ? texte.ereignisse.automatisch : <span className="mono">{entry.actorUserId}</span>
-                  : `@${entry.actorLogin}`);
-                const moduleLabel = moduleName(entry.moduleId);
-                const eventLabel = ereignisText(entry.code);
-                const eventWord = tone === "red" ? texte.ereignisse.fehler : tone === "amber" ? texte.ereignisse.hinweis : tone === "green" ? texte.ereignisse.info : texte.ereignisse.unbekannt;
-                return <tr key={entry.eventId} tabIndex={0} aria-selected={selectedEventId === entry.eventId} onClick={() => { setSelectedEventId(entry.eventId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedEventId(entry.eventId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><Led status={tone ?? "off"} label={eventWord} /><span className={tone === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel === entry.moduleId ? "mono" : undefined}>{moduleLabel}</td><td>{actor}</td></tr>;
+                const eventLabel = ereignisText(entry.code, eventDetail(entry.detail));
+                return <tr key={group.key} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { setSelectedGroupKey(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedGroupKey(group.key); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><Led status={tone ?? "off"} label={eventWord(tone, texte)} /><span className={tone === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
               })}</tbody>
             </table>
           </div>
-          {selectedEvent === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.ereignisse.detail}>
-            <div className="inspector-section__heading"><h3>{ereignisText(selectedEvent.code)}</h3><span className="mono muted">{selectedEvent.eventId}</span></div>
-            <dl className="eigenschaften"><div><dt>{texte.ereignisse.code}</dt><dd className="mono">{selectedEvent.code}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd className={moduleName(selectedEvent.moduleId) === selectedEvent.moduleId ? "mono" : undefined}>{moduleName(selectedEvent.moduleId)}</dd></div><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedEvent.createdAt}>{formatTimestamp(selectedEvent.createdAt)}</dd></div></dl>
-            <pre className="event-detail-json">{formatEventDetail(selectedEvent.detail)}</pre>
+          {selectedGroup === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.ereignisse.detail}>
+            <div className="inspector-section__heading"><h3>{texte.ereignisse.vorgang}</h3><span className="mono muted">{selectedGroup.representative.triggerId || selectedGroup.representative.eventId}</span></div>
+            <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
+            <div className="inspector-section__heading"><h3>{texte.ereignisse.verlauf}</h3></div>
+            <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
+              const tone = eventTone(entry.code);
+              return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><Led status={tone ?? "off"} label={eventWord(tone, texte)} /><span className={tone === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
+            })}</ol>
           </section>}
           {eventsState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texte.ereignisse.aeltereWerdenGeladen : texte.ereignisse.aeltereLaden}</button>}
         </> : null}

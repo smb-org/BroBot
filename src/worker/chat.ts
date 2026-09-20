@@ -1,6 +1,7 @@
 import { getTokenEncryptionKeys } from "./auth/crypto";
 import { getBotIdentity } from "./auth/repository";
 import { decryptStoredToken } from "./bot-maintenance";
+import { kuerzeAuf200Zeichen } from "../modules/contract";
 
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
 
@@ -37,16 +38,17 @@ export const sendChatMessage = async (
   replyToMessageId: string | undefined,
   fetcher: typeof fetch = fetch,
 ): Promise<ChatSendResult> => {
+  const textDetail = { text: kuerzeAuf200Zeichen(text) };
   const identity = await getBotIdentity(environment.DB);
   if (identity === null) {
-    return { sent: false, reason: "bot_identity_missing", detail: {} };
+    return { sent: false, reason: "bot_identity_missing", detail: textDetail };
   }
   const accessToken = await decryptStoredToken(
     identity.accessTokenCiphertext,
     getTokenEncryptionKeys(environment),
   );
   if (accessToken === null) {
-    return { sent: false, reason: "bot_token_unreadable", detail: {} };
+    return { sent: false, reason: "bot_token_unreadable", detail: textDetail };
   }
 
   const payload: Record<string, string> = {
@@ -68,7 +70,7 @@ export const sendChatMessage = async (
       body: JSON.stringify(payload),
     });
   } catch {
-    return { sent: false, reason: "network_error", detail: {} };
+    return { sent: false, reason: "network_error", detail: textDetail };
   }
 
   let body: unknown;
@@ -83,7 +85,7 @@ export const sendChatMessage = async (
     return {
       sent: false,
       reason: response.status === 429 ? "rate_limited" : `http_${String(response.status)}`,
-      detail: { status: response.status, message: readText(record.message) },
+      detail: { ...textDetail, status: response.status, message: readText(record.message) },
     };
   }
 
@@ -98,9 +100,9 @@ export const sendChatMessage = async (
     return {
       sent: false,
       reason: readText(dropReason.code) ?? "not_sent",
-      detail: { message: readText(dropReason.message) },
+      detail: { ...textDetail, message: readText(dropReason.message) },
     };
   }
 
-  return { sent: true, reason: null, detail: { messageId: readText(first.message_id) } };
+  return { sent: true, reason: null, detail: { messageId: readText(first.message_id), ...textDetail } };
 };

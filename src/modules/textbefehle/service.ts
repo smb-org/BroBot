@@ -1,3 +1,4 @@
+import { kuerzeAuf200Zeichen } from "../contract";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import {
   befehlAusNachricht,
@@ -5,6 +6,7 @@ import {
   cooldownRestzeit,
   gueltigerBefehlsname,
 } from "./domain";
+import type { TextbefehlEingabe } from "./domain";
 import type { TextbefehlRepository } from "./repository";
 
 export const TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN = 5;
@@ -28,7 +30,24 @@ const userFuer = (event: ModuleEvent): string =>
 const channelFuer = (event: ModuleEvent): string =>
   textWert(event.payload.broadcaster_user_login) ?? event.channelId;
 
-const antwort = (event: ModuleEvent, text: string): ModuleResult => {
+const diagnoseAusgeloest = (
+  eingabe: Exclude<TextbefehlEingabe, { art: "unbekannt" }>,
+  antwort: string,
+) => {
+  const argumente = eingabe.argumente;
+  return {
+    code: "textbefehle.ausgeloest",
+    detail: {
+      name: eingabe.name,
+      ...(argumente === undefined || argumente.length === 0
+        ? {}
+        : { argumente: kuerzeAuf200Zeichen(argumente) }),
+      antwort: kuerzeAuf200Zeichen(antwort),
+    },
+  } as const;
+};
+
+const antwort = (event: ModuleEvent, eingabe: Exclude<TextbefehlEingabe, { art: "unbekannt" }>, text: string): ModuleResult => {
   const replyToMessageId = textWert(event.payload.message_id);
   return {
     actions: [{
@@ -36,7 +55,7 @@ const antwort = (event: ModuleEvent, text: string): ModuleResult => {
       text,
       ...(replyToMessageId === null ? {} : { replyToMessageId }),
     }],
-    diagnostics: [],
+    diagnostics: [diagnoseAusgeloest(eingabe, text)],
   };
 };
 
@@ -65,25 +84,25 @@ export const verarbeiteTextbefehlNachricht = async (
     }
     const angelegt = await repository.anlegen({
       channelId: event.channelId,
-      name: eingabe.name,
+      name: eingabe.zielname,
       text: eingabe.text,
       cooldownSekunden: TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN,
       now: event.receivedAt,
     }, { userId: event.actor.userId });
     return angelegt
-      ? antwort(event, `Befehl !${eingabe.name} wurde angelegt.`)
-      : { actions: [], diagnostics: [{ code: "textbefehle.bereits_vorhanden", detail: { name: eingabe.name } }] };
+      ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde angelegt.`)
+      : { actions: [], diagnostics: [{ code: "textbefehle.bereits_vorhanden", detail: { name: eingabe.zielname } }] };
   }
 
   if (eingabe.art === "entfernen") {
     if (event.actor?.role === null || event.actor === null) return nichtBerechtigt();
-    if (!gueltigerBefehlsname(eingabe.name)) {
+    if (!gueltigerBefehlsname(eingabe.zielname)) {
       return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
     }
-    const entfernt = await repository.loeschen(event.channelId, eingabe.name, { userId: event.actor.userId }, event.receivedAt);
+    const entfernt = await repository.loeschen(event.channelId, eingabe.zielname, { userId: event.actor.userId }, event.receivedAt);
     return entfernt
-      ? antwort(event, `Befehl !${eingabe.name} wurde entfernt.`)
-      : { actions: [], diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.name } }] };
+      ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde entfernt.`)
+      : { actions: [], diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.zielname } }] };
   }
 
   if (eingabe.art === "listen") {
@@ -91,7 +110,7 @@ export const verarbeiteTextbefehlNachricht = async (
     const liste = befehle.length === 0
       ? "Keine Textbefehle angelegt."
       : `Befehle: ${befehle.map((befehl) => `!${befehl.name}`).join(", ")}`;
-    return antwort(event, liste);
+    return antwort(event, eingabe, liste);
   }
 
   if (!gueltigerBefehlsname(eingabe.name)) {
@@ -116,7 +135,7 @@ export const verarbeiteTextbefehlNachricht = async (
     };
   }
 
-  return antwort(event, befehlTextMitPlatzhaltern(
+  return antwort(event, eingabe, befehlTextMitPlatzhaltern(
     beanspruchung.befehl.text,
     userFuer(event),
     channelFuer(event),
