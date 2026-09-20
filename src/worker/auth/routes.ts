@@ -46,6 +46,8 @@ import {
   issueOverlayToken,
   revokeOverlayToken,
 } from "./overlay-token-service";
+import { maintainBotIdentity } from "../bot-maintenance";
+import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -63,6 +65,19 @@ const randomId = (): string => {
 };
 
 const redirectHome = (origin: string): string => `${origin.replace(/\/+$/, "")}/`;
+
+const maintainAfterBotAuthorization = async (env: Env, now: string): Promise<void> => {
+  try {
+    await maintainBotIdentity(env, now);
+  } catch {
+    // Die Autorisierung ist bereits gespeichert; der Stundenlauf bleibt das Sicherheitsnetz.
+  }
+  try {
+    await maintainEventSubSubscriptions(env, now);
+  } catch {
+    // Fehler werden vom Wartungslauf protokolliert und duerfen den Callback nicht kippen.
+  }
+};
 
 const oauthError = (
   context: { text: (body: string, status: 400 | 403) => Response },
@@ -333,6 +348,13 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         createdAt: current?.createdAt ?? now,
         updatedAt: now,
       }, "connected", null, now);
+      const maintenance = maintainAfterBotAuthorization(context.env, now);
+      try {
+        context.executionCtx.waitUntil(maintenance);
+      } catch {
+        // In Tests oder anderen runtimes ohne ExecutionContext laeuft die Arbeit weiter.
+        void maintenance;
+      }
       return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);
     }
 

@@ -1,10 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { authRouter, getSessionFromRequest } from "../../src/worker/auth/routes";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { maintainBotIdentity } from "../../src/worker/bot-maintenance";
+import { maintainEventSubSubscriptions } from "../../src/worker/eventsub-subscriptions";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
+
+vi.mock("../../src/worker/bot-maintenance", () => ({
+  maintainBotIdentity: vi.fn(),
+}));
+
+vi.mock("../../src/worker/eventsub-subscriptions", () => ({
+  maintainEventSubSubscriptions: vi.fn(),
+}));
+
+const mockedMaintainBotIdentity = vi.mocked(maintainBotIdentity);
+const mockedMaintainEventSubSubscriptions = vi.mocked(maintainEventSubSubscriptions);
 
 /**
  * Ein CSRF-Token fuer den Jetzt-Zeitpunkt. Ein festes Datum waere eine
@@ -121,6 +134,11 @@ const fetchWith = (...responses: Response[]) => {
 };
 
 describe("Auth-Routen", () => {
+  beforeEach(() => {
+    mockedMaintainBotIdentity.mockReset();
+    mockedMaintainEventSubSubscriptions.mockReset();
+  });
+
   it("startet Login mit einem Twitch-Redirect und bindet den State an den Browser", async () => {
     const { environment } = makeEnvironment();
     const response = await authRouter.fetch(new Request("https://brobot.example/auth/login"), environment);
@@ -203,6 +221,8 @@ describe("Auth-Routen", () => {
     expect(response.headers.get("set-cookie") ?? "").not.toContain("__Host-brobot_session=");
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("foreign-user") || args.includes("someone-else"))).toBe(false);
     expect(statement.bind.mock.calls.some((args: unknown[]) => args[0] === "bot_identity_mismatch")).toBe(true);
+    expect(mockedMaintainBotIdentity).not.toHaveBeenCalled();
+    expect(mockedMaintainEventSubSubscriptions).not.toHaveBeenCalled();
   });
 
   it("akzeptiert den konfigurierten Bot-Login case-insensitiv", async () => {
@@ -233,6 +253,157 @@ describe("Auth-Routen", () => {
     // Die Betreiberautorisierung legt keine Anmeldesession an.
     expect(response.headers.get("set-cookie") ?? "").not.toContain("__Host-brobot_session=");
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("bot-user") && args.includes("BROBOT"))).toBe(true);
+  });
+
+  it("stößt nach erfolgreicher Bot-Autorisierung beide globalen Wartungsläufe sequenziell an", async () => {
+    const transaction = {
+      transaction_id: "transaction-1",
+      purpose: "bot",
+      expires_at: "2099-09-18T00:05:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+    };
+    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("betreiber"));
+    const login = await authRouter.fetch(
+      new Request("https://brobot.example/auth/bot/login", {
+        headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+      }),
+      environment,
+    );
+    fetchWith(
+      new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
+      new Response(JSON.stringify({ data: [{ id: "bot-user", login: "brobot" }] }), { status: 200 }),
+    );
+    const order: string[] = [];
+    mockedMaintainBotIdentity.mockImplementation(() => {
+      order.push("identity");
+      return Promise.resolve();
+    });
+    mockedMaintainEventSubSubscriptions.mockImplementation(() => {
+      order.push("eventsub");
+      return Promise.resolve();
+    });
+    const waitUntil = vi.fn();
+
+    const response = await authRouter.fetch(
+      callbackRequest(login),
+      environment,
+      { waitUntil } as unknown as ExecutionContext,
+    );
+    const maintenance = waitUntil.mock.calls[0]?.[0] as Promise<void> | undefined;
+    expect(response.status).toBe(302);
+    expect(maintenance).toBeDefined();
+    await maintenance;
+
+    expect(order).toEqual(["identity", "eventsub"]);
+    expect(mockedMaintainBotIdentity).toHaveBeenCalledWith(environment, expect.any(String));
+    expect(mockedMaintainEventSubSubscriptions).toHaveBeenCalledWith(environment, expect.any(String));
+    expect(mockedMaintainEventSubSubscriptions.mock.calls[0]).toHaveLength(2);
+    expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("bot-user") && args.includes("brobot"))).toBe(true);
+  });
+
+  it("wartet bei der Weiterleitung nicht auf die Wartung", async () => {
+    const transaction = {
+      transaction_id: "transaction-1",
+      purpose: "bot",
+      expires_at: "2099-09-18T00:05:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+    };
+    const { environment } = makeEnvironment(transaction, sessionRowFor("betreiber"));
+    const login = await authRouter.fetch(
+      new Request("https://brobot.example/auth/bot/login", {
+        headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+      }),
+      environment,
+    );
+    fetchWith(
+      new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
+      new Response(JSON.stringify({ data: [{ id: "bot-user", login: "brobot" }] }), { status: 200 }),
+    );
+    let releaseIdentity: (() => void) | undefined;
+    const identityPending = new Promise<void>((resolve) => {
+      releaseIdentity = resolve;
+    });
+    mockedMaintainBotIdentity.mockReturnValue(identityPending);
+    const waitUntil = vi.fn();
+
+    const response = await authRouter.fetch(
+      callbackRequest(login),
+      environment,
+      { waitUntil } as unknown as ExecutionContext,
+    );
+
+    expect(response.status).toBe(302);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(mockedMaintainBotIdentity).toHaveBeenCalledTimes(1);
+    expect(mockedMaintainEventSubSubscriptions).not.toHaveBeenCalled();
+
+    releaseIdentity?.();
+    const maintenance = waitUntil.mock.calls[0]?.[0] as Promise<void> | undefined;
+    await maintenance;
+    expect(mockedMaintainEventSubSubscriptions).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["Bot-Identität", "EventSub-Abos"])(
+    "lässt die Weiterleitung und die gespeicherte Identität bei einem Fehler im Lauf %s gültig",
+    async (failedRun) => {
+      const transaction = {
+        transaction_id: "transaction-1",
+        purpose: "bot",
+        expires_at: "2099-09-18T00:05:00.000Z",
+        created_at: "2099-09-18T00:00:00.000Z",
+      };
+      const { environment, statement } = makeEnvironment(transaction, sessionRowFor("betreiber"));
+      const login = await authRouter.fetch(
+        new Request("https://brobot.example/auth/bot/login", {
+          headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+        }),
+        environment,
+      );
+      fetchWith(
+        new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
+        new Response(JSON.stringify({ data: [{ id: "bot-user", login: "brobot" }] }), { status: 200 }),
+      );
+      if (failedRun === "Bot-Identität") {
+        mockedMaintainBotIdentity.mockRejectedValueOnce(new Error("identity failed"));
+      } else {
+        mockedMaintainEventSubSubscriptions.mockRejectedValueOnce(new Error("eventsub failed"));
+      }
+      const waitUntil = vi.fn();
+
+      const response = await authRouter.fetch(
+        callbackRequest(login),
+        environment,
+        { waitUntil } as unknown as ExecutionContext,
+      );
+      const maintenance = waitUntil.mock.calls[0]?.[0] as Promise<void> | undefined;
+      await maintenance;
+
+      expect(response.status).toBe(302);
+      expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("bot-user") && args.includes("brobot"))).toBe(true);
+      expect(mockedMaintainBotIdentity).toHaveBeenCalledTimes(1);
+      expect(mockedMaintainEventSubSubscriptions).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("stößt beim Login-Rückweg keine Bot-Wartung an", async () => {
+    const transaction = {
+      transaction_id: "transaction-1",
+      purpose: "login",
+      expires_at: "2099-09-18T00:05:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+    };
+    const { environment } = makeEnvironment(transaction);
+    const login = await authRouter.fetch(new Request("https://brobot.example/auth/login"), environment);
+    fetchWith(
+      new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: [] }), { status: 200 }),
+      new Response(JSON.stringify({ data: [{ id: "user-1", login: "tester" }] }), { status: 200 }),
+    );
+
+    const response = await authRouter.fetch(callbackRequest(login), environment);
+
+    expect(response.status).toBe(302);
+    expect(mockedMaintainBotIdentity).not.toHaveBeenCalled();
+    expect(mockedMaintainEventSubSubscriptions).not.toHaveBeenCalled();
   });
 
   it("stellt einer gültigen Session ein gebundenes CSRF-Token aus", async () => {
@@ -666,6 +837,8 @@ describe("Auth-Routen", () => {
     expect(response.status).toBe(403);
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("uebernehmer"))).toBe(false);
     expect(statement.bind.mock.calls.some((args: unknown[]) => args[0] === "bot_identity_user_mismatch")).toBe(true);
+    expect(mockedMaintainBotIdentity).not.toHaveBeenCalled();
+    expect(mockedMaintainEventSubSubscriptions).not.toHaveBeenCalled();
   });
 
   it("gibt zwei Abrufen dasselbe CSRF-Token, damit ein zweiter Tab den ersten nicht entwertet", async () => {
