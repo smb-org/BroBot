@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1031,10 +1034,11 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("zeigt im Kopf Anzeigename, Twitch-ID und den beschrifteten Modulschalter", async () => {
     const channel = { ...healthyChannel("26876135", "Esembe"), login: "esembe" };
+    const zweiterKanal = healthyChannel("987654", "ZweiteRinne");
     const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel, zweiterKanal] });
       if (path === "/api/channels/26876135/overview") return jsonResponse(aktivesModul);
       if (path === "/api/channels/26876135/modules") return jsonResponse({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] });
       return jsonResponse({}, 404);
@@ -1044,11 +1048,211 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Esembe" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Esembe · esembe" })).not.toBeInTheDocument();
-    expect(screen.getByText("26876135")).toBeInTheDocument();
+    const channelButton = screen.getByRole("button", { name: "Kanal auswählen: Esembe" });
+    fireEvent.click(channelButton);
+    expect(within(screen.getByRole("listbox")).getByRole("option", { name: /Esembe/ })).toHaveTextContent("26876135");
     const headerSwitch = await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
     expect(headerSwitch).toHaveTextContent("Textbefehle · Läuft");
+  });
+
+  it("öffnet den Kanalumschalter per Enter und Pfeil ab, bewegt den Fokus und schließt ohne Auswahl per Escape", async () => {
+    const alpha = healthyChannel("kanal-a", "Alpha");
+    const beta = healthyChannel("kanal-b", "Beta");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta] });
+      if (path.endsWith("/overview")) return jsonResponse(overview(path.includes("kanal-b") ? beta : alpha));
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    const button = screen.getByRole("button", { name: "Kanal auswählen: Alpha" });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.keyDown(button, { key: "Enter" });
+    const listbox = screen.getByRole("listbox");
+    const options = within(listbox).getAllByRole("option");
+    const [firstOption, secondOption] = options;
+    if (firstOption === undefined || secondOption === undefined) throw new Error("Der Kanalumschalter braucht zwei Optionen.");
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(document.activeElement).toBe(firstOption);
+    expect(firstOption).toHaveAttribute("aria-selected", "true");
+    expect(secondOption).toHaveAttribute("aria-selected", "false");
+    expect(within(firstOption).getByText("Gesund")).toBeInTheDocument();
+    expect(within(firstOption).getByText("kanal-a")).toHaveClass("mono");
+
+    fireEvent.keyDown(firstOption, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(secondOption);
+    expect(secondOption).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(secondOption, { key: "End" });
+    expect(document.activeElement).toBe(secondOption);
+    fireEvent.keyDown(secondOption, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(button).toHaveFocus();
+    expect(window.location.pathname).toBe("/channels/kanal-a");
+
+    fireEvent.keyDown(button, { key: "ArrowDown" });
+    const reopenedOptions = within(screen.getByRole("listbox")).getAllByRole("option");
+    const [reopenedFirstOption, reopenedSecondOption] = reopenedOptions;
+    if (reopenedFirstOption === undefined || reopenedSecondOption === undefined) throw new Error("Der wieder geöffnete Kanalumschalter braucht zwei Optionen.");
+    expect(document.activeElement).toBe(reopenedFirstOption);
+    fireEvent.keyDown(reopenedFirstOption, { key: "ArrowDown" });
+    fireEvent.keyDown(reopenedSecondOption, { key: "Enter" });
+    await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-b"));
+    expect(screen.getByRole("button", { name: "Kanal auswählen: Beta" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Kanal auswählen: Beta" }), { key: "ArrowDown" });
+    const tabOptions = within(screen.getByRole("listbox")).getAllByRole("option");
+    const tabOption = tabOptions[1];
+    if (tabOption === undefined) throw new Error("Der Kanalumschalter braucht eine zweite Option.");
+    fireEvent.keyDown(tabOption, { key: "Tab" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Abmelden" })).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole("button", { name: "Kanal auswählen: Beta" }), { key: "ArrowDown" });
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("hält alle Optionen offen, ohne dass die Brotkrume die Liste beschneidet", async () => {
+    const channels = [
+      healthyChannel("kanal-a", "Alpha"),
+      healthyChannel("kanal-b", "Beta"),
+      healthyChannel("kanal-c", "Gamma"),
+    ];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels });
+      if (path.endsWith("/overview")) return jsonResponse(overview(channels[0] as typeof channels[number]));
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Kanal auswählen: Alpha" }));
+
+    const listbox = screen.getByRole("listbox");
+    expect(within(listbox).getAllByRole("option")).toHaveLength(3);
+    expect(within(listbox).getByRole("option", { name: /Gamma/ })).toBeInTheDocument();
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Brotkrume" });
+    // jsdom injiziert die importierte CSS-Datei nicht und berechnet keine
+    // Layoutrechtecke; DOM-Struktur und die zugehoerige Regel halten deshalb
+    // fest, dass alle Optionen existieren und nichts abschneidet.
+    const styles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
+    const breadcrumbRule = styles.match(/\.topbar__breadcrumb\s*\{[^}]*\}/)?.[0];
+    expect(breadcrumb).toBeInTheDocument();
+    expect(breadcrumbRule).toBeDefined();
+    expect(breadcrumbRule).not.toMatch(/overflow\s*:\s*hidden/);
+  });
+
+  it("markiert Bereichs- und Modulsegment als separat ausblendbare Teile der Brotkrume", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+
+    render(<DashboardApp />);
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Brotkrume" });
+    await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
+    // jsdom berechnet keine CSS-Layouts; die Regression wird deshalb über die
+    // eigene DOM-Klasse und die dazugehörige schmale CSS-Regel abgesichert.
+    expect(breadcrumb.querySelector(".topbar__breadcrumb-area")).toBeInTheDocument();
+    expect(breadcrumb.querySelector(".topbar__breadcrumb-module")).toBeInTheDocument();
+    const styles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
+    expect(styles).toMatch(/\.topbar__breadcrumb-area[\s\S]*?display:\s*none/);
+    expect(styles).toMatch(/\.topbar__breadcrumb-module[\s\S]*?display:\s*none/);
+  });
+
+  it("lässt das Kanalsegment bei genau einem Kanal ohne Bedienelement", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse(overview(channel));
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    expect(screen.queryByRole("button", { name: /Kanal auswählen/ })).not.toBeInTheDocument();
+    const segment = document.querySelector(".topbar__channel-segment--static");
+    expect(segment).toHaveTextContent("Alpha");
+    expect(segment).not.toHaveAttribute("aria-haspopup");
+  });
+
+  it("zeigt die Brotkrume und die fünf Einträge der Schiene auf allen Bereichen und der Moduldetailseite", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse(path.includes("modules/textbefehle") ? activeModuleOverview : overview(channel));
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/audit-log")) return jsonResponse(audit);
+      if (path.endsWith("/members")) return jsonResponse({ members: [], broadcasterCount: 1, viewerUserId: "viewer", nextCursor: null });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] });
+      if (path.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+
+    const pages = [
+      { path: "/", heading: "Übersicht", current: "BroBot" },
+      { path: "/channels/kanal-a", heading: "Alpha", current: "Kanal" },
+      { path: "/channels/kanal-a/system", heading: "System", current: "System" },
+      { path: "/channels/kanal-a/members", heading: "Mitglieder", current: "Mitglieder" },
+      { path: "/channels/kanal-a/modules", heading: "Module", current: "Module" },
+      { path: "/channels/kanal-a/events", heading: "Ereignisse", current: "Ereignisse" },
+      { path: "/channels/kanal-a/modules/textbefehle", heading: "Textbefehle", current: "Textbefehle" },
+    ];
+
+    for (const page of pages) {
+      cleanup();
+      window.history.replaceState({}, "", page.path);
+      render(<DashboardApp />);
+      await screen.findByRole("heading", { name: page.heading, level: 1 });
+      const breadcrumb = screen.getByRole("navigation", { name: "Brotkrume" });
+      expect(breadcrumb.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+      expect(breadcrumb.querySelector('[aria-current="page"]')).toHaveTextContent(page.current);
+      expect(within(screen.getByRole("navigation", { name: "Hauptnavigation" })).getAllByRole("link")).toHaveLength(5);
+      if (page.path === "/") {
+        expect(breadcrumb).toHaveTextContent("BroBot");
+        expect(breadcrumb.querySelector('[aria-current="page"]')).toHaveTextContent("BroBot");
+        expect(screen.getByRole("link", { name: "BroBot" })).toHaveAttribute("aria-current", "page");
+      } else {
+        expect(breadcrumb.querySelector(".topbar__channel-segment--static")).toHaveTextContent("Alpha");
+      }
+    }
+  });
+
+  it("führt die Marke als fokussierbaren Link auf die Kanalliste", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse(overview(channel));
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    const brand = screen.getByRole("link", { name: "BroBot" });
+    expect(brand).toHaveAttribute("href", "/");
+    fireEvent.click(brand);
+    expect(window.location.pathname).toBe("/");
   });
 
   it("mountet beim Wechsel zur Modulroute nicht den alten Übersichtsstand", async () => {

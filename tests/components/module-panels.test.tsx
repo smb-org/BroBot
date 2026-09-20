@@ -85,23 +85,19 @@ describe("Modul-Panel-Lader", () => {
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.")).toBeInTheDocument();
   });
 
-  it("zeigt Brotkrume und Modulsymbol auf der Detailseite", () => {
-    const onNavigate = vi.fn();
+  it("zeigt das Modulsymbol im Detailkopf; die Brotkrume liegt in der Kopfleiste", () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
       ownRole="verwalter"
       modules={[{ id: "aktiv", enabled: true, settings: "{}" }]}
       activeModules={[{ moduleId: "aktiv", settings: "{}" }]}
-      onNavigate={onNavigate}
+      onNavigate={vi.fn()}
       onToggle={vi.fn()}
     />);
 
-    const breadcrumb = screen.getByRole("link", { name: "Module" });
-    expect(breadcrumb).toHaveAttribute("href", "/channels/kanal-a/modules");
-    fireEvent.click(breadcrumb);
-    expect(onNavigate).toHaveBeenCalledWith({ kind: "channel", channelId: "kanal-a", section: "modules" });
-    expect(document.querySelectorAll(".module-glyph").length).toBeGreaterThanOrEqual(2);
+    expect(document.querySelector(".module-detail-breadcrumb")).not.toBeInTheDocument();
+    expect(document.querySelector(".module-detail__icon .module-glyph")).toBeInTheDocument();
   });
 
   it("zeigt unbekannte und deaktivierte Modul-IDs auf der Detailseite verständlich", () => {
