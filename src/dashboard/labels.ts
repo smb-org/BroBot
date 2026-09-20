@@ -63,6 +63,7 @@ export interface BetreiberTexte {
   hinzufügen: string;
   ändern: string;
   entfernen: string;
+  broadcasterEntfernenHinweis: string;
   entfernenFrage: (name: string) => string;
   endgültigEntfernen: string;
   audit: string;
@@ -125,6 +126,7 @@ const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
     hinzufügen: "Hinzufügen",
     ändern: "Ändern",
     entfernen: "Entfernen",
+    broadcasterEntfernenHinweis: "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.",
     entfernenFrage: (name) => `Zugriff für ${name} wirklich entfernen?`,
     endgültigEntfernen: "Endgültig entfernen",
     audit: "Betreiber-Audit",
@@ -191,6 +193,7 @@ const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
     hinzufügen: "Add",
     ändern: "Change",
     entfernen: "Remove",
+    broadcasterEntfernenHinweis: "The operator cannot remove the broadcaster role.",
     entfernenFrage: (name) => `Remove access for ${name}?`,
     endgültigEntfernen: "Remove permanently",
     audit: "Operator audit",

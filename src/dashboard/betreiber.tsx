@@ -113,7 +113,20 @@ const MitgliederTabelle = ({
                   )}
                 </td>
                 <td className="tabelle__aktion">
-                  {mitglied.role === "broadcaster" ? <span className="muted">{texte.broadcaster}</span> : (
+                  {mitglied.role === "broadcaster" ? (
+                    <>
+                      <button
+                        className="button button--danger"
+                        type="button"
+                        disabled
+                        title={texte.broadcasterEntfernenHinweis}
+                        aria-describedby={"betreiber-entfernen-hinweis-" + mitglied.userId}
+                      >
+                        {texte.entfernen}
+                      </button>
+                      <span id={"betreiber-entfernen-hinweis-" + mitglied.userId} className="sr-only">{texte.broadcasterEntfernenHinweis}</span>
+                    </>
+                  ) : (
                     <button className="button button--danger" type="button" onClick={() => { aufEntfernen(mitglied); }}>
                       {texte.entfernen}
                     </button>
@@ -573,7 +586,7 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
         {übersicht.data?.length === 0 ? <p className="muted">{texte.keineKanäle}</p> : null}
         {übersicht.data === null ? null : übersicht.data.length === 0 ? null : (
           <div className="tabelle-wrap">
-            <table className="tabelle">
+            <table className="tabelle tabelle--inhalt">
               <thead><tr><th scope="col">{texte.login}</th><th scope="col">{texte.kennung}</th><th scope="col">{texte.vollzustimmung}</th><th scope="col">{texte.broadcaster}</th><th scope="col">{texte.verwalter}</th><th scope="col">{texte.bediener}</th><th scope="col">{texte.identität}</th></tr></thead>
               <tbody>{übersicht.data.map((kanal) => <tr key={kanal.channelId} tabIndex={0} aria-selected={kanal.channelId === ausgewählterKanalId} onClick={() => { setAusgewählterKanalId(kanal.channelId); }} onKeyDown={(ereignis) => { if (ereignis.key === "Enter" || ereignis.key === " ") { ereignis.preventDefault(); setAusgewählterKanalId(kanal.channelId); } }}><th scope="row">{kanal.login}</th><td className="mono">{kanal.channelId}</td><td>{kanal.vollzustimmung ? texte.ja : texte.nein}</td><td className="zahl">{formatZahl(kanal.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(kanal.memberCounts.verwalter)}</td><td className="zahl">{formatZahl(kanal.memberCounts.bediener)}</td><td><span className="led" data-status={verbindungsTon(kanal) === "healthy" ? "green" : verbindungsTon(kanal) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{verbindungswort(kanal)}</span></span></td></tr>)}</tbody>
             </table>

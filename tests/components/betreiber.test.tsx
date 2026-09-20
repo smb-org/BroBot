@@ -86,11 +86,27 @@ describe("Betreiberebene", () => {
     render(<DashboardApp />);
 
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
-    const entfernen = await screen.findByRole("button", { name: "Entfernen" });
+    const helferZeile = await screen.findByRole("row", { name: /Helfer/ });
+    const entfernen = within(helferZeile).getByRole("button", { name: "Entfernen" });
     fireEvent.click(entfernen);
 
     expect(await screen.findByRole("alertdialog", { name: /Zugriff für Helfer wirklich entfernen/ })).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input, init]) => anfrageUrl(input).pathname.endsWith("/mitglieder/456") && init?.method === "DELETE")).toBe(false);
+  });
+
+  it("zeigt den Entfernen-Knopf der Broadcaster-Zeile deaktiviert mit Begründung", async () => {
+    richteBetreiberEin(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
+    const broadcasterZeile = await screen.findByRole("row", { name: /Alpha/ });
+    const entfernen = within(broadcasterZeile).getByRole("button", { name: "Entfernen" });
+
+    expect(entfernen).toBeDisabled();
+    expect(entfernen).toHaveAttribute("title", "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
+    expect(entfernen).toHaveAccessibleDescription("Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
   });
 
   it("setzt den Einladungslink aus dem Login des gewählten Kanals zusammen", async () => {
