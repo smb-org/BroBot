@@ -19,9 +19,9 @@ const befehl = (name: string, text: string, zuletztVerwendetAt: string | null = 
 const repositoryFuer = (befehle: Textbefehl[]): TextbefehlRepository => ({
   auflisten: () => Promise.resolve(befehle),
   finden: (_channelId, name) => Promise.resolve(befehle.find((eintrag) => eintrag.name === name) ?? null),
-  anlegen: () => Promise.resolve(true),
-  aendern: () => Promise.resolve(true),
-  loeschen: () => Promise.resolve(true),
+  anlegen: () => Promise.resolve({ ok: true }),
+  aendern: () => Promise.resolve({ ok: true }),
+  loeschen: () => Promise.resolve({ ok: true }),
   beanspruchen: (_channelId, name) => {
     const eintrag = befehle.find((candidate) => candidate.name === name);
     return Promise.resolve(eintrag === undefined ? null : { befehl: eintrag, beansprucht: eintrag.zuletztVerwendetAt === null });

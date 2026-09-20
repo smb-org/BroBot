@@ -1,3 +1,5 @@
+import { prepareModuleAudit as prepareHostModuleAudit } from "../module-audit";
+
 export interface NewSessionRecord {
   sessionId: string;
   userId: string;
@@ -415,14 +417,15 @@ const prepareMemberAudit = (
   after: ChannelMemberRecord | null,
 ): D1PreparedStatement => db.prepare(
   `INSERT INTO audit_log
-    (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
-   SELECT ?, ?, ?, ?, ?, ?, ?
+    (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json)
+   SELECT ?, ?, ?, ?, ?, ?, ?, ?
     WHERE changes() > 0`,
 ).bind(
   auditId(),
   actorUserId,
   changedAt,
   channelId,
+  null,
   action,
   memberJson(before),
   memberJson(after),
@@ -637,31 +640,6 @@ export const deleteChannelMemberWithAudit = async (
   return (results[0]?.meta.changes ?? 0) > 0;
 };
 
-const moduleJson = (module: ChannelModuleRecord | null): string => JSON.stringify(module);
-
-const prepareModuleAudit = (
-  db: D1Database,
-  actorUserId: string,
-  changedAt: string,
-  channelId: string,
-  action: string,
-  before: ChannelModuleRecord | null,
-  after: ChannelModuleRecord | null,
-): D1PreparedStatement => db.prepare(
-  `INSERT INTO audit_log
-    (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
-   SELECT ?, ?, ?, ?, ?, ?, ?
-    WHERE changes() > 0`,
-).bind(
-  auditId(),
-  actorUserId,
-  changedAt,
-  channelId,
-  action,
-  moduleJson(before),
-  moduleJson(after),
-);
-
 const getChannelModule = async (
   db: D1Database,
   channelId: string,
@@ -722,7 +700,13 @@ export const createChannelModuleWithAudit = async (
     module.moduleId,
     ...bindActorGuard(actor, module.channelId, changedAt),
   );
-  const audit = prepareModuleAudit(db, actor.userId, changedAt, module.channelId, action, null, module);
+  const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
+    channelId: module.channelId,
+    moduleId: module.moduleId,
+    action,
+    before: null,
+    after: { ...module },
+  });
   const results = await db.batch([mutation, audit]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };
@@ -756,7 +740,13 @@ export const updateChannelModuleWithAudit = async (
     before.settings,
     ...bindActorGuard(actor, after.channelId, changedAt),
   );
-  const audit = prepareModuleAudit(db, actor.userId, changedAt, channelId, action, before, after);
+  const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
+    channelId,
+    moduleId,
+    action,
+    before: { ...before },
+    after: { ...after },
+  });
   const results = await db.batch([mutation, audit]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };

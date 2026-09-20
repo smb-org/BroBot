@@ -1,7 +1,8 @@
 import { createMiddleware } from "hono/factory";
 
 import { authorizeModuleMutation } from "../module-authorization";
-import type { AuthorizeModuleMutation } from "../../modules/contract";
+import type { AuthorizeModuleMutation, PrepareModuleAudit } from "../../modules/contract";
+import { prepareModuleAudit } from "../module-audit";
 import { authorizeChannelAccess, type ChannelMemberRole } from "./authorization";
 import { verifyCsrfRequest } from "./csrf";
 import { getSessionFromRequest } from "./session-access";
@@ -12,6 +13,7 @@ export interface ChannelAuthorizationVariables {
   channelRole: ChannelMemberRole;
   actor: ActorContext;
   authorizeMutation: AuthorizeModuleMutation;
+  prepareModuleAudit: PrepareModuleAudit;
 }
 
 export interface SessionAuthorizationVariables {
@@ -57,6 +59,8 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
     context.set("channelRole", role);
     context.set("actor", { userId: session.userId, sessionId: session.sessionId });
     context.set("authorizeMutation", authorizeModuleMutation);
+    context.set("prepareModuleAudit", (entry, changedAt) =>
+      prepareModuleAudit(context.env.DB, session.userId, changedAt, entry));
     await next();
   },
 );

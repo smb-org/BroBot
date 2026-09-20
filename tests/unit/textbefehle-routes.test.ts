@@ -58,7 +58,7 @@ describe("Textbefehle-Panel", () => {
 
     const create = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle", "POST", {
-        name: "hallo", text: "Antwort", cooldownSekunden: 5,
+        name: "hallo", text: "A".repeat(205), cooldownSekunden: 5,
       }),
       environment,
     );
@@ -79,6 +79,72 @@ describe("Textbefehle-Panel", () => {
     expect(remove.status).toBe(204);
     await expect(database.prepare("SELECT COUNT(*) AS count FROM textbefehle_commands").first<{ count: number }>())
       .resolves.toEqual({ count: 0 });
+
+    const audits = await database.prepare(
+      `SELECT actor_user_id, created_at, channel_id, module_id, action, before_json, after_json
+         FROM audit_log
+        WHERE channel_id = ?
+        ORDER BY action`,
+    ).bind("kanal-a").all<{
+      actor_user_id: string;
+      created_at: string;
+      channel_id: string;
+      module_id: string | null;
+      action: string;
+      before_json: string;
+      after_json: string;
+    }>();
+    expect(audits.results).toHaveLength(3);
+    expect(audits.results.every((audit) => audit.created_at.length > 0)).toBe(true);
+    expect(audits.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        actor_user_id: "user-1",
+        channel_id: "kanal-a",
+        module_id: "textbefehle",
+        action: "textbefehle.befehl.angelegt",
+        before_json: "null",
+        after_json: JSON.stringify({ name: "hallo", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
+      }),
+      expect.objectContaining({
+        actor_user_id: "user-1",
+        channel_id: "kanal-a",
+        module_id: "textbefehle",
+        action: "textbefehle.befehl.geändert",
+        before_json: JSON.stringify({ name: "hallo", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
+        after_json: JSON.stringify({ name: "hallo", text: "Neue Antwort", cooldownSekunden: 10 }),
+      }),
+      expect.objectContaining({
+        actor_user_id: "user-1",
+        channel_id: "kanal-a",
+        module_id: "textbefehle",
+        action: "textbefehle.befehl.entfernt",
+        before_json: JSON.stringify({ name: "hallo", text: "Neue Antwort", cooldownSekunden: 10 }),
+        after_json: "null",
+      }),
+    ]));
+  });
+
+  it("unterscheidet beim Ändern und Löschen fehlende Befehle", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    const environment = environmentFor(database);
+
+    const edit = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/fehlt", "PATCH", {
+        text: "Neue Antwort", cooldownSekunden: 10,
+      }),
+      environment,
+    );
+    const remove = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/fehlt", "DELETE"),
+      environment,
+    );
+
+    expect(edit.status).toBe(404);
+    await expect(edit.json()).resolves.toEqual({ error: "Der Befehl wurde nicht gefunden." });
+    expect(remove.status).toBe(404);
+    await expect(remove.json()).resolves.toEqual({ error: "Der Befehl wurde nicht gefunden." });
   });
 
   it("verweigert Nicht-Mitgliedern einen Befehl im fremden Kanal", async () => {

@@ -89,9 +89,11 @@ export const verarbeiteTextbefehlNachricht = async (
       cooldownSekunden: TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN,
       now: event.receivedAt,
     }, { userId: event.actor.userId });
-    return angelegt
+    return angelegt.ok
       ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde angelegt.`)
-      : { actions: [], diagnostics: [{ code: "textbefehle.bereits_vorhanden", detail: { name: eingabe.zielname } }] };
+      : angelegt.grund === "nicht_berechtigt"
+        ? nichtBerechtigt()
+        : { actions: [], diagnostics: [{ code: "textbefehle.bereits_vorhanden", detail: { name: eingabe.zielname } }] };
   }
 
   if (eingabe.art === "entfernen") {
@@ -100,9 +102,11 @@ export const verarbeiteTextbefehlNachricht = async (
       return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
     }
     const entfernt = await repository.loeschen(event.channelId, eingabe.zielname, { userId: event.actor.userId }, event.receivedAt);
-    return entfernt
+    return entfernt.ok
       ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde entfernt.`)
-      : { actions: [], diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.zielname } }] };
+      : entfernt.grund === "nicht_berechtigt"
+        ? nichtBerechtigt()
+        : { actions: [], diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.zielname } }] };
   }
 
   if (eingabe.art === "listen") {

@@ -62,6 +62,7 @@ interface AuditLogRow {
   audit_id: string;
   actor_user_id: string;
   created_at: string;
+  module_id: string | null;
   action: string;
   before_json: string;
   after_json: string;
@@ -352,12 +353,12 @@ export const getAuditLogForChannel = async (
   cursor: LogCursor | null,
 ): Promise<PanelAuditResponse> => {
   const query = cursor === null
-    ? `SELECT audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json
+    ? `SELECT audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
         WHERE channel_id = ?
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`
-    : `SELECT audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json
+    : `SELECT audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
         WHERE channel_id = ?
           AND (created_at < ? OR (created_at = ? AND audit_id < ?))
@@ -373,6 +374,7 @@ export const getAuditLogForChannel = async (
     auditId: row.audit_id,
     actorUserId: row.actor_user_id,
     createdAt: row.created_at,
+    moduleId: row.module_id,
     action: row.action,
     before: row.before_json,
     after: row.after_json,

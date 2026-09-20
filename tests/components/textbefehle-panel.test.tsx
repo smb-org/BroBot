@@ -72,6 +72,39 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(add).toHaveClass("button--primary");
   });
 
+  it.each([
+    ["de-DE", "Der Textbefehl konnte nicht gelöscht werden."],
+    ["en-US", "The text command could not be deleted."],
+  ])("zeigt für einen Löschfehler den passenden Text (%s)", async (browserLanguage, expected) => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Hallo",
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }));
+      }
+      if (init?.method === "DELETE") return Promise.resolve(jsonResponse({ error: "forbidden" }, 403));
+      return Promise.resolve(jsonResponse({ token: "csrf" }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: browserLanguage === "de-DE" ? "Befehl !hallo löschen" : "Delete !hallo",
+    }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(expected);
+  });
+
   it("folgt mit dem Panel der Browsersprache", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ befehle: [] })));
     vi.stubGlobal("fetch", fetcher);

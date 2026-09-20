@@ -46,33 +46,50 @@ textbefehlRoutes.get("/befehle", async (context) => {
 textbefehlRoutes.post("/befehle", async (context) => {
   const body = await validBody(context.req.raw);
   if (body === null) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
-  const repository = createTextbefehlRepository(context.env.DB, context.get("authorizeMutation"));
+  const repository = createTextbefehlRepository(
+    context.env.DB,
+    context.get("authorizeMutation"),
+    context.get("prepareModuleAudit"),
+  );
   const channelId = param(context, "channelId");
   const angelegt = await repository.anlegen({ channelId, ...body, now: nowIso() }, context.get("actor"));
-  return angelegt
-    ? context.json({ befehl: { ...body, channelId, zuletztVerwendetAt: null } }, 201)
-    : context.json({ error: "Der Befehl existiert bereits." }, 409);
+  if (angelegt.ok) return context.json({ befehl: { ...body, channelId, zuletztVerwendetAt: null } }, 201);
+  return angelegt.grund === "existiert"
+    ? context.json({ error: "Der Befehl existiert bereits." }, 409)
+    : context.json({ error: "Der Befehl darf nicht angelegt werden." }, 403);
 });
 
 textbefehlRoutes.patch("/befehle/:name", async (context) => {
   const body = await validEditBody(context.req.raw);
   if (body === null) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
-  const repository = createTextbefehlRepository(context.env.DB, context.get("authorizeMutation"));
+  const repository = createTextbefehlRepository(
+    context.env.DB,
+    context.get("authorizeMutation"),
+    context.get("prepareModuleAudit"),
+  );
   const channelId = param(context, "channelId");
   const name = param(context, "name");
   const geaendert = await repository.aendern({ channelId, name, ...body, now: nowIso() }, context.get("actor"));
-  return geaendert
-    ? context.json({ befehl: { channelId, name, ...body } })
-    : context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (geaendert.ok) return context.json({ befehl: { channelId, name, ...body } });
+  if (geaendert.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (geaendert.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
+  return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });
 
 textbefehlRoutes.delete("/befehle/:name", async (context) => {
-  const repository = createTextbefehlRepository(context.env.DB, context.get("authorizeMutation"));
+  const repository = createTextbefehlRepository(
+    context.env.DB,
+    context.get("authorizeMutation"),
+    context.get("prepareModuleAudit"),
+  );
   const geloescht = await repository.loeschen(
     param(context, "channelId"),
     param(context, "name"),
     context.get("actor"),
     nowIso(),
   );
-  return geloescht ? new Response(null, { status: 204 }) : context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (geloescht.ok) return new Response(null, { status: 204 });
+  if (geloescht.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (geloescht.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);
+  return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });
