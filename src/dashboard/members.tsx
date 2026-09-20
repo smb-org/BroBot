@@ -413,9 +413,7 @@ export const MembersPage = ({
         {members.length === 0 && loading ? null : <div className={loading ? "veraltet" : undefined}>
           <MemberTable members={members} canManageMembers={canManageMembers} broadcasterCount={broadcasterCount} eigeneUserId={eigeneUserId} onRoleChange={(userId, role) => { void handleRoleChange(userId, role); }} onRemove={(member) => { void handleRemove(member); }} busyUserId={busyUserId} />
         </div>}
-        {members.length > 0 || !loading ? <>
-          {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loadingNextPage}>{loadingNextPage ? texte.weitereWerdenGeladen : texte.weitereLaden}</button>}
-        </> : null}
+        {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texte.weitereWerdenGeladen : texte.weitereLaden}</button>}
       </section>
     </>
   );

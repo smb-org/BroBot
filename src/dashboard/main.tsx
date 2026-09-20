@@ -1,4 +1,4 @@
-import { Fragment, StrictMode, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
 import type {
@@ -51,6 +51,11 @@ interface ModeratorCheckState {
   status: "idle" | "loading" | "error";
   error: string | null;
   nextAllowedAt: string | null;
+}
+
+interface MembersRequestState {
+  controller: AbortController | null;
+  generation: number;
 }
 
 const idleModeratorCheck = (): ModeratorCheckState => ({
@@ -666,18 +671,38 @@ export const DashboardApp = (): ReactElement => {
   const [loadingNextEventsPage, setLoadingNextEventsPage] = useState(false);
   const eventsPageController = useRef<AbortController | null>(null);
   const [loadingNextMembersPage, setLoadingNextMembersPage] = useState(false);
-  const membersPageController = useRef<AbortController | null>(null);
+  const membersRequest = useRef<MembersRequestState>({ controller: null, generation: 0 });
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [headerModuleBusy, setHeaderModuleBusy] = useState(false);
+
+  const startMembersRequest = useCallback((): { controller: AbortController; generation: number } => {
+    membersRequest.current.controller?.abort();
+    const request = {
+      controller: new AbortController(),
+      generation: membersRequest.current.generation + 1,
+    };
+    membersRequest.current = request;
+    return request;
+  }, []);
+
+  const isCurrentMembersRequest = useCallback((generation: number): boolean => membersRequest.current.generation === generation, []);
+
+  const finishMembersRequest = useCallback((generation: number): void => {
+    if (isCurrentMembersRequest(generation)) membersRequest.current.controller = null;
+  }, [isCurrentMembersRequest]);
+
+  const cancelMembersRequest = useCallback((): void => {
+    membersRequest.current.controller?.abort();
+    membersRequest.current = { controller: null, generation: membersRequest.current.generation + 1 };
+  }, []);
 
   const clearProtectedState = (): void => {
     auditPageController.current?.abort();
     auditPageController.current = null;
     eventsPageController.current?.abort();
     eventsPageController.current = null;
-    membersPageController.current?.abort();
-    membersPageController.current = null;
+    cancelMembersRequest();
     setChannels({ status: "success", data: [], error: null });
     setOverview(idleState());
     setOverviewRoutePath(null);
@@ -692,6 +717,7 @@ export const DashboardApp = (): ReactElement => {
     setEventsChannelId(null);
     setLoadingNextAuditPage(false);
     setLoadingNextEventsPage(false);
+    setLoadingNextMembersPage(false);
     setAuthenticationRequired(true);
     navigate({ kind: "overview" });
   };
@@ -726,8 +752,7 @@ export const DashboardApp = (): ReactElement => {
     eventsPageController.current?.abort();
     eventsPageController.current = null;
     setLoadingNextEventsPage(false);
-    membersPageController.current?.abort();
-    membersPageController.current = null;
+    cancelMembersRequest();
     setLoadingNextMembersPage(false);
     setOverview(loadingState());
     setOverviewRoutePath(null);
@@ -746,8 +771,7 @@ export const DashboardApp = (): ReactElement => {
       auditPageController.current = null;
       eventsPageController.current?.abort();
       eventsPageController.current = null;
-      membersPageController.current?.abort();
-      membersPageController.current = null;
+      cancelMembersRequest();
       setLoadingNextMembersPage(false);
     };
     if (route.kind !== "channel" && route.kind !== "module") return cleanup;
@@ -784,15 +808,21 @@ export const DashboardApp = (): ReactElement => {
         return;
       }
       if (route.section === "members") {
+        const routePath = dashboardRoutePath({ kind: "channel", channelId: route.channelId, section: "members" });
+        const request = startMembersRequest();
         setMembers(loadingState());
         try {
-          const response = await fetchMembers(route.channelId, null, controller.signal);
-          if (!cancelled && !controller.signal.aborted) setMembers(loadedState(response));
+          const response = await fetchMembers(route.channelId, null, request.controller.signal);
+          if (!cancelled && isCurrentMembersRequest(request.generation) && !request.controller.signal.aborted && window.location.pathname === routePath) {
+            setMembers(loadedState(response));
+          }
         } catch (error) {
-          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+          if (!cancelled && isCurrentMembersRequest(request.generation) && !request.controller.signal.aborted && window.location.pathname === routePath && !(error instanceof DOMException && error.name === "AbortError")) {
             setMembers({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
           }
+        } finally {
+          finishMembersRequest(request.generation);
         }
         return;
       }
@@ -864,7 +894,7 @@ export const DashboardApp = (): ReactElement => {
     };
     void load();
     return cleanup;
-  }, [route]);
+  }, [cancelMembersRequest, finishMembersRequest, isCurrentMembersRequest, route, startMembersRequest]);
 
   const handleModeratorStatusCheck = async (): Promise<void> => {
     if (route.kind !== "channel" || route.section !== "overview") return;
@@ -899,22 +929,21 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "channel" || route.section !== "members") return;
     const channelId = route.channelId;
     const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "members" });
-    membersPageController.current?.abort();
-    const controller = new AbortController();
-    membersPageController.current = controller;
+    setLoadingNextMembersPage(false);
+    const request = startMembersRequest();
     setMembers((current) => loadingState(current));
     try {
-      const response = await fetchMembers(channelId, null, controller.signal);
-      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      const response = await fetchMembers(channelId, null, request.controller.signal);
+      if (!isCurrentMembersRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
       setMembers(loadedState(response));
     } catch (error) {
-      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      if (!isCurrentMembersRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
       setMembers((current) => current.loadedAt === undefined
         ? { status: "error", data: null, error: errorMessage(error) }
         : { status: "error", data: null, error: errorMessage(error), loadedAt: current.loadedAt });
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
-      if (membersPageController.current === controller) membersPageController.current = null;
+      finishMembersRequest(request.generation);
     }
   };
 
@@ -954,17 +983,15 @@ export const DashboardApp = (): ReactElement => {
 
   const loadNextMembersPage = async (): Promise<void> => {
     if (route.kind !== "channel" || route.section !== "members" || loadingNextMembersPage ||
-        members.data?.nextCursor === null || members.data?.nextCursor === undefined) return;
+        members.status === "loading" || members.data?.nextCursor === null || members.data?.nextCursor === undefined) return;
     const channelId = route.channelId;
     const cursor = members.data.nextCursor;
     const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "members" });
-    membersPageController.current?.abort();
-    const controller = new AbortController();
-    membersPageController.current = controller;
+    const request = startMembersRequest();
     setLoadingNextMembersPage(true);
     try {
-      const nextPage = await fetchMembers(channelId, cursor, controller.signal);
-      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      const nextPage = await fetchMembers(channelId, cursor, request.controller.signal);
+      if (!isCurrentMembersRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
       setMembers((current) => {
         if (current.data === null || current.data.nextCursor !== cursor) return current;
         return {
@@ -981,14 +1008,12 @@ export const DashboardApp = (): ReactElement => {
         };
       });
     } catch (error) {
-      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      if (!isCurrentMembersRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
       setMembers((current) => ({ ...current, status: "error", error: errorMessage(error) }));
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
-      if (membersPageController.current === controller) {
-        membersPageController.current = null;
-        setLoadingNextMembersPage(false);
-      }
+      finishMembersRequest(request.generation);
+      setLoadingNextMembersPage(false);
     }
   };
 

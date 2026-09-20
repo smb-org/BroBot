@@ -702,6 +702,154 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("Verspätetes Alpha-Mitglied")).not.toBeInTheDocument();
   });
 
+  it("behält den erfolgreichen Reload-Stand gegen eine verspätete Erstantwort", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const neuerMember = { userId: "new-user", login: "new-user", displayName: "Neuer Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-19T00:00:00.000Z" };
+    const verspäteterMember = { userId: "late-user", login: "late-user", displayName: "Verspäteter Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    let resolveLateInitial: ((response: Response) => void) | undefined;
+    const lateInitial = new Promise<Response>((resolve) => {
+      resolveLateInitial = resolve;
+    });
+    let memberRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/members/search") return Promise.resolve(jsonResponse({ user: { userId: "new-user", login: "neue-person", displayName: "Neuer Stand", profileImageUrl: null } }));
+      if (url.pathname === "/api/channels/kanal-a/members" && init?.method === "POST") return Promise.resolve(jsonResponse({ member: neuerMember }, 201));
+      if (url.pathname === "/api/channels/kanal-a/members") {
+        memberRequestCount += 1;
+        if (memberRequestCount === 1) return lateInitial;
+        return Promise.resolve(jsonResponse({ members: [neuerMember], broadcasterCount: 1, viewerUserId: "new-user", nextCursor: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await waitFor(() => expect(resolveLateInitial).toBeTypeOf("function"));
+
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
+    fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
+    await screen.findByText("Neuer Stand");
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff endgültig freigeben" }));
+    await waitFor(() => expect(memberRequestCount).toBe(2));
+    expect(within(screen.getByRole("table")).getByText("Neuer Stand")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveLateInitial?.(jsonResponse({ members: [verspäteterMember], broadcasterCount: 1, viewerUserId: "late-user", nextCursor: null }));
+      await Promise.resolve();
+    });
+
+    expect(within(screen.getByRole("table")).getByText("Neuer Stand")).toBeInTheDocument();
+    expect(screen.queryByText("Verspäteter Stand")).not.toBeInTheDocument();
+  });
+
+  it("sperrt die Pagination während eines laufenden Mitglieder-Reloads", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const ersterMember = { userId: "first-user", login: "first-user", displayName: "Erster Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const reloadMember = { userId: "reload-user", login: "reload-user", displayName: "Reload-Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-19T00:00:00.000Z" };
+    let resolveReload: ((response: Response) => void) | undefined;
+    const reload = new Promise<Response>((resolve) => {
+      resolveReload = resolve;
+    });
+    let memberRequestCount = 0;
+    let paginationRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/members/first-user" && init?.method === "PATCH") return Promise.resolve(jsonResponse({ member: { ...ersterMember, role: "verwalter" } }));
+      if (url.pathname === "/api/channels/kanal-a/members" && url.search !== "") {
+        paginationRequestCount += 1;
+        return Promise.resolve(jsonResponse({ members: [], broadcasterCount: 1, viewerUserId: "first-user", nextCursor: null }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/members") {
+        memberRequestCount += 1;
+        if (memberRequestCount === 1) return Promise.resolve(jsonResponse({ members: [ersterMember], broadcasterCount: 1, viewerUserId: "first-user", nextCursor: "cursor-1" }));
+        return reload;
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByText("Erster Stand");
+    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "verwalter" } });
+    await waitFor(() => expect(resolveReload).toBeTypeOf("function"));
+
+    const more = screen.getByRole("button", { name: "Weitere Mitglieder laden" });
+    expect(more).toBeDisabled();
+    fireEvent.click(more);
+    expect(paginationRequestCount).toBe(0);
+
+    await act(async () => {
+      resolveReload?.(jsonResponse({ members: [reloadMember], broadcasterCount: 1, viewerUserId: "reload-user", nextCursor: "cursor-reload" }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Reload-Stand")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Weitere Mitglieder laden" })).toBeEnabled();
+  });
+
+  it("setzt den Pagination-Zustand nach einem Reload während der Pagination zurück", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const ersterMember = { userId: "first-user", login: "first-user", displayName: "Erster Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const reloadMember = { userId: "reload-user", login: "reload-user", displayName: "Reload-Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-19T00:00:00.000Z" };
+    const latePageMember = { userId: "late-page-user", login: "late-page-user", displayName: "Verspätete Seite", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-17T00:00:00.000Z" };
+    let resolveNextPage: ((response: Response) => void) | undefined;
+    const nextPage = new Promise<Response>((resolve) => {
+      resolveNextPage = resolve;
+    });
+    let resolveReload: ((response: Response) => void) | undefined;
+    const reload = new Promise<Response>((resolve) => {
+      resolveReload = resolve;
+    });
+    let memberRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/members/first-user" && init?.method === "PATCH") return Promise.resolve(jsonResponse({ member: { ...ersterMember, role: "verwalter" } }));
+      if (url.pathname === "/api/channels/kanal-a/members" && url.search === "?cursor=cursor-1") return nextPage;
+      if (url.pathname === "/api/channels/kanal-a/members") {
+        memberRequestCount += 1;
+        if (memberRequestCount === 1) return Promise.resolve(jsonResponse({ members: [ersterMember], broadcasterCount: 1, viewerUserId: "first-user", nextCursor: "cursor-1" }));
+        return reload;
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    await screen.findByText("Erster Stand");
+    fireEvent.click(screen.getByRole("button", { name: "Weitere Mitglieder laden" }));
+    await waitFor(() => expect(resolveNextPage).toBeTypeOf("function"));
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "verwalter" } });
+    await waitFor(() => expect(resolveReload).toBeTypeOf("function"));
+    expect(screen.getByRole("button", { name: "Weitere Mitglieder laden" })).toBeDisabled();
+
+    await act(async () => {
+      resolveReload?.(jsonResponse({ members: [reloadMember], broadcasterCount: 1, viewerUserId: "reload-user", nextCursor: "cursor-reload" }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Reload-Stand")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Weitere Mitglieder laden" })).toBeEnabled();
+
+    await act(async () => {
+      resolveNextPage?.(jsonResponse({ members: [latePageMember], broadcasterCount: 1, viewerUserId: "first-user", nextCursor: null }));
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Reload-Stand")).toBeInTheDocument();
+    expect(screen.queryByText("Verspätete Seite")).not.toBeInTheDocument();
+  });
+
   it("lädt die nächste Mitglieder-Seite mit dem gelieferten Cursor nach", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
