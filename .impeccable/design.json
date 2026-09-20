@@ -1,55 +1,295 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-20T00:00:00Z",
+  "generatedAt": "2026-09-20T12:00:00Z",
   "title": "Design System: BroBot Panel",
   "extensions": {
     "colorMeta": {
-      "grund": { "role": "neutral", "displayName": "Grund (Mattschwarz)", "canonical": "oklch(17% 0.004 60)", "tonalRamp": ["oklch(15% 0.004 60)", "oklch(22% 0.004 60)", "oklch(32% 0.004 60)", "oklch(45% 0.004 60)", "oklch(58% 0.004 60)", "oklch(72% 0.004 60)", "oklch(85% 0.004 60)", "oklch(95% 0.004 60)"] },
-      "taste": { "role": "neutral", "displayName": "Taste (erhoben)", "canonical": "oklch(21% 0.005 60)", "tonalRamp": ["oklch(15% 0.005 60)", "oklch(21% 0.005 60)", "oklch(32% 0.005 60)", "oklch(45% 0.005 60)", "oklch(58% 0.005 60)", "oklch(72% 0.005 60)", "oklch(85% 0.005 60)", "oklch(95% 0.005 60)"] },
-      "rinne": { "role": "neutral", "displayName": "Rinne (Vertiefung)", "canonical": "oklch(14% 0.003 60)" },
-      "text": { "role": "neutral", "displayName": "Text (Stufe 1)", "canonical": "oklch(95% 0.006 70)" },
-      "text-2": { "role": "neutral", "displayName": "Text 2 — 8,27:1 auf Grund", "canonical": "oklch(74% 0.012 70)" },
-      "text-3": { "role": "neutral", "displayName": "Text 3 — 5,08:1 auf Grund, 4,65:1 auf Taste", "canonical": "oklch(60% 0.012 70)" },
-      "text-4": { "role": "neutral", "displayName": "Text 4 — nur Trenner und Anzeigen", "canonical": "oklch(45% 0.010 70)" },
-      "marke": { "role": "primary", "displayName": "Marke (Ort des Bedieners)", "canonical": "oklch(62% 0.12 255)", "tonalRamp": ["oklch(15% 0.06 255)", "oklch(25% 0.09 255)", "oklch(38% 0.12 255)", "oklch(50% 0.12 255)", "oklch(62% 0.12 255)", "oklch(74% 0.10 255)", "oklch(85% 0.07 255)", "oklch(95% 0.03 255)"] },
-      "marke-text": { "role": "primary", "displayName": "Marke-Text (lesbar auf Grund)", "canonical": "oklch(80% 0.09 255)" },
-      "tint-1": { "role": "primary", "displayName": "Tint 1 (Marke als Material)", "canonical": "oklch(25% 0.04 255)" },
-      "tint-2": { "role": "primary", "displayName": "Tint 2 (Marke als Material, tiefer)", "canonical": "oklch(22% 0.035 255)" },
-      "gruen": { "role": "secondary", "displayName": "Grün — läuft, nie ohne Wort", "canonical": "oklch(80% 0.20 155)", "tonalRamp": ["oklch(15% 0.06 155)", "oklch(28% 0.10 155)", "oklch(42% 0.14 155)", "oklch(56% 0.18 155)", "oklch(70% 0.20 155)", "oklch(80% 0.20 155)", "oklch(88% 0.14 155)", "oklch(95% 0.06 155)"] },
-      "warn": { "role": "secondary", "displayName": "Bernstein — unbekannt / nicht aktiv", "canonical": "oklch(75% 0.13 80)", "tonalRamp": ["oklch(15% 0.04 80)", "oklch(28% 0.07 80)", "oklch(42% 0.10 80)", "oklch(56% 0.12 80)", "oklch(68% 0.13 80)", "oklch(75% 0.13 80)", "oklch(86% 0.09 80)", "oklch(95% 0.04 80)"] },
-      "fehler": { "role": "secondary", "displayName": "Rot — Fehler, Löschen", "canonical": "oklch(62% 0.19 28)", "tonalRamp": ["oklch(15% 0.06 28)", "oklch(28% 0.10 28)", "oklch(42% 0.15 28)", "oklch(52% 0.18 28)", "oklch(62% 0.19 28)", "oklch(74% 0.14 28)", "oklch(86% 0.08 28)", "oklch(95% 0.03 28)"] }
+      "grund": {
+        "role": "neutral",
+        "displayName": "Grund (Mattschwarz)",
+        "canonical": "oklch(17% 0.004 60)",
+        "tonalRamp": [
+          "oklch(15% 0.004 60)",
+          "oklch(22% 0.004 60)",
+          "oklch(32% 0.004 60)",
+          "oklch(45% 0.004 60)",
+          "oklch(58% 0.004 60)",
+          "oklch(72% 0.004 60)",
+          "oklch(85% 0.004 60)",
+          "oklch(95% 0.004 60)"
+        ]
+      },
+      "taste": {
+        "role": "neutral",
+        "displayName": "Taste (erhoben)",
+        "canonical": "oklch(21% 0.005 60)",
+        "tonalRamp": [
+          "oklch(15% 0.005 60)",
+          "oklch(21% 0.005 60)",
+          "oklch(32% 0.005 60)",
+          "oklch(45% 0.005 60)",
+          "oklch(58% 0.005 60)",
+          "oklch(72% 0.005 60)",
+          "oklch(85% 0.005 60)",
+          "oklch(95% 0.005 60)"
+        ]
+      },
+      "rinne": {
+        "role": "neutral",
+        "displayName": "Rinne (Vertiefung)",
+        "canonical": "oklch(14% 0.003 60)"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text (Stufe 1)",
+        "canonical": "oklch(95% 0.006 70)"
+      },
+      "text-2": {
+        "role": "neutral",
+        "displayName": "Text 2 — 8,27:1 auf Grund",
+        "canonical": "oklch(74% 0.012 70)"
+      },
+      "text-3": {
+        "role": "neutral",
+        "displayName": "Text 3 — 5,08:1 auf Grund, 4,65:1 auf Taste",
+        "canonical": "oklch(60% 0.012 70)"
+      },
+      "text-4": {
+        "role": "neutral",
+        "displayName": "Text 4 — nur Trenner und Anzeigen",
+        "canonical": "oklch(45% 0.010 70)"
+      },
+      "marke": {
+        "role": "primary",
+        "displayName": "Marke (Ort des Bedieners)",
+        "canonical": "oklch(62% 0.12 255)",
+        "tonalRamp": [
+          "oklch(15% 0.06 255)",
+          "oklch(25% 0.09 255)",
+          "oklch(38% 0.12 255)",
+          "oklch(50% 0.12 255)",
+          "oklch(62% 0.12 255)",
+          "oklch(74% 0.10 255)",
+          "oklch(85% 0.07 255)",
+          "oklch(95% 0.03 255)"
+        ]
+      },
+      "marke-text": {
+        "role": "primary",
+        "displayName": "Marke-Text (lesbar auf Grund)",
+        "canonical": "oklch(80% 0.09 255)"
+      },
+      "tint-1": {
+        "role": "primary",
+        "displayName": "Tint 1 (Marke als Material)",
+        "canonical": "oklch(25% 0.04 255)"
+      },
+      "tint-2": {
+        "role": "primary",
+        "displayName": "Tint 2 (Marke als Material, tiefer)",
+        "canonical": "oklch(22% 0.035 255)"
+      },
+      "gruen": {
+        "role": "secondary",
+        "displayName": "Grün — läuft, nie ohne Wort",
+        "canonical": "oklch(80% 0.20 155)",
+        "tonalRamp": [
+          "oklch(15% 0.06 155)",
+          "oklch(28% 0.10 155)",
+          "oklch(42% 0.14 155)",
+          "oklch(56% 0.18 155)",
+          "oklch(70% 0.20 155)",
+          "oklch(80% 0.20 155)",
+          "oklch(88% 0.14 155)",
+          "oklch(95% 0.06 155)"
+        ]
+      },
+      "warn": {
+        "role": "secondary",
+        "displayName": "Bernstein — unbekannt / nicht aktiv",
+        "canonical": "oklch(75% 0.13 80)",
+        "tonalRamp": [
+          "oklch(15% 0.04 80)",
+          "oklch(28% 0.07 80)",
+          "oklch(42% 0.10 80)",
+          "oklch(56% 0.12 80)",
+          "oklch(68% 0.13 80)",
+          "oklch(75% 0.13 80)",
+          "oklch(86% 0.09 80)",
+          "oklch(95% 0.04 80)"
+        ]
+      },
+      "fehler": {
+        "role": "secondary",
+        "displayName": "Rot — Fehler, Löschen",
+        "canonical": "oklch(62% 0.19 28)",
+        "tonalRamp": [
+          "oklch(15% 0.06 28)",
+          "oklch(28% 0.10 28)",
+          "oklch(42% 0.15 28)",
+          "oklch(52% 0.18 28)",
+          "oklch(62% 0.19 28)",
+          "oklch(74% 0.14 28)",
+          "oklch(86% 0.08 28)",
+          "oklch(95% 0.03 28)"
+        ]
+      },
+      "fehler-text": {
+        "role": "secondary",
+        "displayName": "Fehler-Text — nur LED-Wort bei Rot; 4,71:1 auf Tint-1, 5,70:1 auf Grund",
+        "canonical": "oklch(65% 0.18 28)"
+      },
+      "inspektor": {
+        "role": "neutral",
+        "displayName": "Inspektor (Sub-Inspector-Fläche)",
+        "canonical": "oklch(18.5% 0.004 60)"
+      }
     },
     "typographyMeta": {
-      "modultitel": { "displayName": "Modultitel", "purpose": "Größte Schrift im System; Modulkopf und Rasterüberschrift." },
-      "tastenname": { "displayName": "Tastenname", "purpose": "Name auf der Modultaste, eine Zeile mit Ellipse." },
-      "led-wort": { "displayName": "LED-Wort", "purpose": "Das Wort neben dem LED-Punkt, in Zustandsfarbe." },
-      "schienenetikett": { "displayName": "Schienenetikett", "purpose": "Wort unter dem Symbol in der 64er-Taste; Modul-ID." },
-      "spaltenkopf": { "displayName": "Spaltenkopf", "purpose": "Einziger Versalien-Einsatz; Tabellenköpfe auf Tint-2." },
-      "zahl": { "displayName": "Zahl (Plex Mono)", "purpose": "Twitch-ID, Sekunden, Zeitstempel, Befehlstoken. Nie für Namen." }
+      "modultitel": {
+        "displayName": "Modultitel",
+        "purpose": "Größte Schrift im System; Modulkopf und Rasterüberschrift."
+      },
+      "tastenname": {
+        "displayName": "Tastenname",
+        "purpose": "Name auf der Modultaste, eine Zeile mit Ellipse."
+      },
+      "led-wort": {
+        "displayName": "LED-Wort",
+        "purpose": "Das Wort neben dem LED-Punkt, in Zustandsfarbe."
+      },
+      "schienenetikett": {
+        "displayName": "Schienenetikett",
+        "purpose": "Wort unter dem Symbol in der 64er-Taste; Modul-ID."
+      },
+      "spaltenkopf": {
+        "displayName": "Spaltenkopf",
+        "purpose": "Einziger Versalien-Einsatz; Tabellenköpfe auf Tint-2."
+      },
+      "zahl": {
+        "displayName": "Zahl (Plex Mono)",
+        "purpose": "Twitch-ID, Sekunden, Zeitstempel, Befehlstoken. Nie für Namen."
+      },
+      "bereichstitel": {
+        "displayName": "Bereichstitel",
+        "purpose": "h2 der Bereichsüberschrift (Aktive Module, Audit-Log, Eigenschaften, Protokoll); Zähler daneben in Mono."
+      },
+      "abschnitt": {
+        "displayName": "Abschnitt",
+        "purpose": "Inspektor-Abschnitte, Sub-Inspector-Titel, Zustands-Etikett. So klein wie Fließtext; Gewicht trennt."
+      }
     },
     "shadows": [],
     "motion": [
-      { "name": "tastendruck", "value": "transform 120ms ease, border-color 120ms ease, background 160ms ease", "purpose": "Signatur: Taste sinkt auf scale(.97) und füllt sich mit 18 % Grün." },
-      { "name": "led", "value": "opacity 160ms, background-color 160ms", "purpose": "LED-Punkt und LED-Wort blenden um." },
-      { "name": "schalter", "value": "background 160ms ease, transform 160ms ease", "purpose": "Spur färbt sich grün, Knopf wandert 16 px." },
-      { "name": "knopf", "value": "background .15s ease, border-color .15s ease, color .15s ease", "purpose": "Hover-Zustand neutraler und primärer Knöpfe." },
-      { "name": "reduced-motion", "value": "transition-duration: .01ms", "purpose": "Alles fällt unter prefers-reduced-motion auf 0,01 ms." }
+      {
+        "name": "tastendruck",
+        "value": "transform 120ms ease, border-color 120ms ease, background 160ms ease",
+        "purpose": "Signatur: Taste sinkt auf scale(.97) und füllt sich mit 18 % Grün."
+      },
+      {
+        "name": "led",
+        "value": "opacity 160ms, background-color 160ms",
+        "purpose": "LED-Punkt und LED-Wort blenden um."
+      },
+      {
+        "name": "schalter",
+        "value": "background 160ms ease, transform 160ms ease",
+        "purpose": "Spur färbt sich grün, Knopf wandert 16 px."
+      },
+      {
+        "name": "knopf",
+        "value": "background .15s ease, border-color .15s ease, color .15s ease",
+        "purpose": "Hover-Zustand neutraler und primärer Knöpfe."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "transition-duration: .01ms",
+        "purpose": "Alles fällt unter prefers-reduced-motion auf 0,01 ms."
+      }
     ],
     "breakpoints": [
-      { "name": "schmal", "value": "768px", "purpose": "Kopfleiste zweizeilig, Schiene waagerecht, Raster zweispaltig." },
-      { "name": "eng", "value": "420px", "purpose": "Rasterlücke 8 px, Wortmarke 13 px." },
-      { "name": "container-befehlstabelle", "value": "640px", "purpose": "Container-Query: Spalte „zuletzt“ wandert in den Sub-Inspector." }
+      {
+        "name": "schmal",
+        "value": "768px",
+        "purpose": "Kopfleiste zweizeilig, Schiene waagerecht, Raster zweispaltig, Seitenkopf-Aktionen in eigener Zeile, Eigenschaftenliste einspaltig."
+      },
+      {
+        "name": "eng",
+        "value": "420px",
+        "purpose": "Rasterlücke 8 px, Wortmarke 13 px."
+      },
+      {
+        "name": "container-befehlstabelle",
+        "value": "640px",
+        "purpose": "Container-Query: Spalte „zuletzt“ wandert in den Sub-Inspector."
+      },
+      {
+        "name": "eng",
+        "value": "639px",
+        "purpose": "Zustandszeile bricht um, Vorher/Nachher untereinander, Tabellen ohne Mindestbreite und ohne dritte Spalte."
+      }
     ],
     "measures": [
-      { "name": "kopfleiste", "value": "56px" },
-      { "name": "schiene", "value": "80px" },
-      { "name": "schienentaste", "value": "64px" },
-      { "name": "modultaste", "value": "132px" },
-      { "name": "raster-luecke", "value": "12px" },
-      { "name": "detail-max", "value": "960px" },
-      { "name": "bedienelement", "value": "44px" },
-      { "name": "tabellenzeile", "value": "34px" },
-      { "name": "fokusring", "value": "2px solid var(--marke-text); outline-offset: 2px" }
+      {
+        "name": "kopfleiste",
+        "value": "56px"
+      },
+      {
+        "name": "schiene",
+        "value": "80px"
+      },
+      {
+        "name": "schienentaste",
+        "value": "64px"
+      },
+      {
+        "name": "modultaste",
+        "value": "132px"
+      },
+      {
+        "name": "raster-luecke",
+        "value": "12px"
+      },
+      {
+        "name": "detail-max",
+        "value": "960px"
+      },
+      {
+        "name": "bedienelement",
+        "value": "44px"
+      },
+      {
+        "name": "tabellenzeile",
+        "value": "34px"
+      },
+      {
+        "name": "fokusring",
+        "value": "2px solid var(--marke-text); outline-offset: 2px"
+      },
+      {
+        "name": "inhalt-mit-rand",
+        "value": "min(1024px, 100%) = --dashboard-content-width 960px + 2×32px"
+      },
+      {
+        "name": "zustand-zeile",
+        "value": "58px"
+      },
+      {
+        "name": "zustand-label",
+        "value": "240px (--zustand-label)"
+      },
+      {
+        "name": "tabelle-mindestbreite",
+        "value": "600px (scrollbar in .tabelle-wrap; 0 unter 640px)"
+      },
+      {
+        "name": "avatar",
+        "value": "28px"
+      },
+      {
+        "name": "zustandsrand",
+        "value": "color-mix(in srgb, <zustand> 45%, var(--linie))"
+      }
     ]
   },
   "components": [
@@ -112,16 +352,16 @@
     {
       "name": "Hauptschalter",
       "kind": "custom",
-      "refersTo": "modulkopf-symbol",
+      "refersTo": "seitenkopf-symbol",
       "description": "44×44 Trefferfläche, Pille 36×20; an: Spur Grün, Knopf wandert 16 px in 160 ms.",
       "html": "<button class=\"ds-switch\" type=\"button\" role=\"switch\" aria-checked=\"true\" aria-label=\"Textbefehle einschalten\"><span class=\"ds-switch__track\" aria-hidden=\"true\"><span class=\"ds-switch__thumb\"></span></span></button>",
       "css": ".ds-switch{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:6px;background:transparent;cursor:pointer}.ds-switch__track{display:block;width:36px;height:20px;padding:3px;border-radius:9999px;background:var(--text-4,#615c56);transition:background 160ms ease}.ds-switch__thumb{display:block;width:14px;height:14px;border-radius:50%;background:var(--text,#f2efeb);transition:transform 160ms ease}.ds-switch[aria-checked=true] .ds-switch__track{background:var(--gruen,#3ddc84)}.ds-switch[aria-checked=true] .ds-switch__thumb{transform:translateX(16px)}.ds-switch:disabled{cursor:not-allowed;opacity:.45}.ds-switch:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px}"
     },
     {
-      "name": "Tabelle mit Zeilenauswahl",
+      "name": "Befehlstabelle mit Zeilenauswahl",
       "kind": "custom",
       "refersTo": "tabellenzeile",
-      "description": "34-px-Zeilen, Spaltenkopf in Versalien auf Tint-2, gewählte Zeile Tint-1 mit 2 px Markenkante. Befehlstoken und Zahlen in Mono.",
+      "description": "Befehlstabelle (.tabelle im command-panel): 34-px-Zeilen, Befehlstoken als Zeilenkopf in Marke-Text und Mono, gewählte Zeile Tint-1 mit 2 px Markenkante.",
       "html": "<table class=\"ds-table\"><thead><tr><th>Befehl</th><th>Antwort</th><th>Abkühlzeit</th></tr></thead><tbody><tr tabindex=\"0\" aria-selected=\"true\"><th scope=\"row\" class=\"ds-mono\">!discord</th><td class=\"ds-table__answer\">Komm auf unseren Discord: …</td><td class=\"ds-mono\">30</td></tr><tr tabindex=\"0\"><th scope=\"row\" class=\"ds-mono\">!uptime</th><td class=\"ds-table__answer\">Der Stream läuft seit …</td><td class=\"ds-mono\">10</td></tr></tbody></table>",
       "css": ".ds-table{width:100%;border-collapse:collapse;table-layout:fixed;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-table th,.ds-table td{height:34px;min-width:0;padding:8px 10px;border-bottom:1px solid var(--linie,#312e2b);text-align:left;font-size:12px}.ds-table thead th{height:30px;color:var(--text-3,#8b857e);background:var(--tint-2,#14202e);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}.ds-table tbody tr{cursor:pointer}.ds-table tbody tr:hover{background:var(--erhoben,#1e1c1a)}.ds-table tbody tr:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:-2px}.ds-table tbody tr[aria-selected=true]{background:var(--tint-1,#172638)}.ds-table tbody tr[aria-selected=true]>*:first-child{box-shadow:inset 2px 0 0 var(--marke,#538dcc)}.ds-table tbody th{color:var(--marke-text,#9bc3ed);font-weight:600}.ds-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}.ds-table__answer{overflow:hidden;color:var(--text-2,#b3aca4);text-overflow:ellipsis;white-space:nowrap}"
     },
@@ -132,48 +372,139 @@
       "description": "Führt von der Detailseite zurück; aktuelles Glied mit 20-px-Glyph in Marke-Text.",
       "html": "<nav class=\"ds-crumb\" aria-label=\"Pfad\"><a class=\"ds-crumb__link\" href=\"#\">Module</a><span class=\"ds-crumb__sep\" aria-hidden=\"true\">/</span><span class=\"ds-crumb__current\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 7v10M8.5 10.5h7M8.5 13.5h5\"/></svg><span>Textbefehle</span></span></nav>",
       "css": ".ds-crumb{display:inline-flex;align-items:center;gap:10px;color:var(--text-2,#b3aca4);font-family:Archivo,ui-sans-serif,system-ui,sans-serif;font-size:13px}.ds-crumb__link{display:inline-flex;align-items:center;min-height:44px;color:var(--marke-text,#9bc3ed);text-decoration:none}.ds-crumb__link:hover{color:var(--text,#f2efeb);text-decoration:underline;text-underline-offset:3px}.ds-crumb__link:focus-visible{outline:2px solid var(--marke-text,#9bc3ed);outline-offset:2px;border-radius:6px}.ds-crumb__sep{color:var(--text-4,#615c56)}.ds-crumb__current{display:inline-flex;align-items:center;gap:7px;color:var(--marke-text,#9bc3ed);font-weight:600}.ds-crumb__current svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}"
+    },
+    {
+      "name": "Kanaltaste",
+      "kind": "custom",
+      "refersTo": "kanal-taste",
+      "description": "Übersicht: eine Modultaste je freigegebenem Kanal. data-status trägt den LED-Ton; nur gesund leuchtet die Symbolkachel grün.",
+      "html": "<a class=\"ds-taste\" href=\"#\" data-enabled=\"false\" data-status=\"amber\" aria-label=\"mein_kanal · Nicht verbunden\"><span class=\"ds-taste__icon\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\"><path d=\"M5 7.5h14M5 12h14M5 16.5h9\"/><circle cx=\"18\" cy=\"16.5\" r=\"1\"/></svg></span><strong>mein_kanal</strong><span class=\"ds-led\" data-status=\"amber\"><span class=\"ds-led__dot\"></span><span>Nicht verbunden</span></span></a>",
+      "css": ".ds-taste{display:grid;grid-template-rows:1fr auto auto;align-items:center;justify-items:center;gap:9px;width:132px;height:132px;padding:14px 10px 12px;border:1px solid #312e2b;border-radius:12px;color:#f2efeb;background:#1e1c1a;text-align:center;text-decoration:none;font-family:Archivo,ui-sans-serif,system-ui,sans-serif;transition:transform 120ms ease,border-color 120ms ease,background 160ms ease}.ds-taste:hover{border-color:#68615a;background:#262321}.ds-taste:active{transform:scale(.97);border-color:rgba(61,220,132,.18);background:rgba(61,220,132,.18)}.ds-taste strong{max-width:100%;overflow:hidden;font-size:13px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.ds-taste__icon{display:grid;place-items:center;width:44px;height:44px;border-radius:12px;color:#b3aca4;background:#100f0e}.ds-taste[data-enabled=true] .ds-taste__icon{color:#3ddc84;background:rgba(61,220,132,.12)}.ds-taste__icon svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.ds-led{display:inline-flex;align-items:center;gap:7px;min-height:20px;color:var(--text-2,#b3aca4);font-size:12px;font-weight:600;white-space:nowrap}.ds-led__dot{width:8px;height:8px;border-radius:6px;background:var(--text-4,#615c56)}.ds-led[data-status=green]{color:#3ddc84}.ds-led[data-status=green] .ds-led__dot{background:#3ddc84}.ds-led[data-status=amber]{color:#d9a441}.ds-led[data-status=amber] .ds-led__dot{background:#d9a441}.ds-led[data-status=red]{color:#e8655d}.ds-led[data-status=red] .ds-led__dot{background:#e2564d}.ds-led[data-status=off]{color:#8b857e}.ds-led[data-status=off] .ds-led__dot{background:#100f0e;border:1px solid #615c56}"
+    },
+    {
+      "name": "Seitenkopf",
+      "kind": "custom",
+      "refersTo": "seitenkopf-symbol",
+      "description": "ModuleHeading auf jeder Seite: 56-px-Symbolkachel, Titel 22 px, Unterzeile, optionale Aktionen rechts, Haarlinie unten.",
+      "html": "<header class=\"ds-head\"><div class=\"ds-head__icon\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"7\"/><path d=\"M12 8v4l2.5 2\"/></svg></div><div class=\"ds-head__copy\"><h1>System</h1><p>Nur lesend</p></div><div class=\"ds-head__actions\"><div class=\"ds-head-action\"><button class=\"ds-btn\" type=\"button\">Moderatorstatus prüfen</button><span class=\"ds-sperrgrund\">Nur für Moderatoren</span></div></div></header>",
+      "css": ".ds-head{display:grid;grid-template-columns:56px minmax(0,1fr) auto;align-items:center;gap:16px;width:min(960px,100%);min-height:56px;padding-bottom:24px;border-bottom:1px solid #312e2b;color:#f2efeb;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-head__icon{display:grid;place-items:center;width:56px;height:56px;border-radius:12px;color:#9bc3ed;background:#172638}.ds-head__icon svg{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.ds-head__copy{min-width:0}.ds-head__copy h1{margin:0;font-size:22px;font-weight:600;line-height:1.25;letter-spacing:-.015em}.ds-head__copy p{margin:4px 0 0;color:#b3aca4;font-size:13px}.ds-head__actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px}.ds-head-action{display:grid;justify-items:end;gap:2px}.ds-btn{display:inline-flex;align-items:center;min-height:44px;padding:10px 16px;border:1px solid #403c38;border-radius:6px;color:#f2efeb;background:#1e1c1a;font:inherit;font-size:13px;font-weight:500;cursor:pointer}.ds-btn:hover{border-color:#68615a;background:#262321}.ds-sperrgrund{color:#b3aca4;font-size:11px}"
+    },
+    {
+      "name": "Zustandszeile",
+      "kind": "custom",
+      "refersTo": "zustand-zeile",
+      "description": "LED + Wort + Detail + Aktion in fester 240-px-Etikettspalte. Gesund bleibt Haarlinie; Warnung und Fehler bekommen 45 %-Rand und Fläche.",
+      "html": "<div class=\"ds-zl\"><article class=\"ds-zz\" aria-label=\"Chat\"><strong class=\"ds-zz__label\">Chat</strong><span class=\"ds-led\" data-status=\"green\"><span class=\"ds-led__dot\"></span><span>Verbunden</span></span><span class=\"ds-zz__detail\">Abo aktiv seit 20.09.2026 09:12</span></article><article class=\"ds-zz\" data-status=\"warning\" aria-label=\"Moderator\"><strong class=\"ds-zz__label\">Moderator</strong><span class=\"ds-led\" data-status=\"amber\"><span class=\"ds-led__dot\"></span><span>Unbekannt</span></span><span class=\"ds-zz__detail\">Noch nicht geprüft</span><div class=\"ds-zz__action\"><button class=\"ds-btn\" type=\"button\">Prüfen</button></div></article><article class=\"ds-zz\" data-status=\"error\" aria-label=\"Letzter Fehler\"><strong class=\"ds-zz__label\">Letzter Fehler</strong><span class=\"ds-led\" data-status=\"red\"><span class=\"ds-led__dot\"></span><span>Fehler</span></span><span class=\"ds-zz__detail\">Chat-Nachricht fehlgeschlagen</span></article></div>",
+      "css": ".ds-zl{display:grid;gap:8px;width:min(960px,100%);font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-zz{display:grid;grid-template-columns:240px auto minmax(0,1fr) auto;align-items:center;gap:12px;min-height:58px;padding:16px;border:1px solid #312e2b;border-radius:6px;color:#b3aca4;background:transparent}.ds-zz__label{color:#f2efeb;font-size:13px;font-weight:600}.ds-zz__detail{min-width:0;overflow:hidden;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ds-zz[data-status=warning]{border-color:color-mix(in srgb,#d9a441 45%,#312e2b);background:rgba(217,164,65,.09)}.ds-zz[data-status=error]{border-color:color-mix(in srgb,#e2564d 45%,#312e2b);background:rgba(226,86,77,.09)}.ds-zz[data-status=warning] .ds-zz__detail,.ds-zz[data-status=error] .ds-zz__detail{color:#f2efeb}.ds-zz__action{justify-self:end}.ds-btn{display:inline-flex;align-items:center;min-height:44px;padding:10px 16px;border:1px solid #403c38;border-radius:6px;color:#f2efeb;background:#1e1c1a;font:inherit;font-size:13px;font-weight:500;cursor:pointer}@media (max-width:639px){.ds-zz{grid-template-columns:auto minmax(0,1fr)}.ds-zz__label,.ds-zz__action{grid-column:1/-1}.ds-zz__detail{white-space:normal}.ds-zz__action{justify-self:start}}.ds-led{display:inline-flex;align-items:center;gap:7px;min-height:20px;color:var(--text-2,#b3aca4);font-size:12px;font-weight:600;white-space:nowrap}.ds-led__dot{width:8px;height:8px;border-radius:6px;background:var(--text-4,#615c56)}.ds-led[data-status=green]{color:#3ddc84}.ds-led[data-status=green] .ds-led__dot{background:#3ddc84}.ds-led[data-status=amber]{color:#d9a441}.ds-led[data-status=amber] .ds-led__dot{background:#d9a441}.ds-led[data-status=red]{color:#e8655d}.ds-led[data-status=red] .ds-led__dot{background:#e2564d}.ds-led[data-status=off]{color:#8b857e}.ds-led[data-status=off] .ds-led__dot{background:#100f0e;border:1px solid #615c56}"
+    },
+    {
+      "name": "Eigenschaftenliste",
+      "kind": "custom",
+      "refersTo": "eigenschaft",
+      "description": "Lesende Werte ohne Zustand: zweispaltig, Paar 1fr/1.3fr, Name Text-3, Wert Text (Zeit und IDs in Mono), Haarlinien. Unter 768 px einspaltig.",
+      "html": "<dl class=\"ds-props\"><div><dt>Chat-Abo-ID</dt><dd class=\"ds-mono\">7f3c…a91e</dd></div><div><dt>Login-Status</dt><dd>Verbunden</dd></div><div><dt>Bot-Grund</dt><dd>—</dd></div><div><dd class=\"ds-mono\" style=\"grid-column:2\">20.09.2026 09:12</dd></div></dl>",
+      "css": ".ds-props{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);margin:0;border-top:1px solid #312e2b;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-props>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:16px;min-width:0;padding:10px 0;border-bottom:1px solid #312e2b}.ds-props dt{color:#8b857e;font-size:12px}.ds-props dd{min-width:0;margin:0;overflow:hidden;color:#f2efeb;font-size:13px;text-overflow:ellipsis;white-space:nowrap}.ds-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}@media (max-width:768px){.ds-props{grid-template-columns:1fr}}"
+    },
+    {
+      "name": "Tabelle (allgemein) mit Aktionsspalte",
+      "kind": "custom",
+      "refersTo": "tabellenzeile",
+      "description": ".tabelle für Mitglieder, Audit, Ereignisse: 34-px-Zeilen, Zeilenkopf in Text, Zeiger und Hover nur mit tabindex, Aktionsspalte rechtsbündig mit 34-px-Bedienelementen.",
+      "html": "<div class=\"ds-wrap\"><table class=\"ds-tabelle\"><thead><tr><th>Name</th><th>Rolle</th><th>Zugriff seit</th><th class=\"ds-tabelle__aktion\"><span class=\"ds-sr\">Aktionen</span></th></tr></thead><tbody><tr><th scope=\"row\"><span class=\"ds-avatar-row\"><span class=\"ds-avatar\"></span><span><span>Streamerin</span><span class=\"ds-login\">@streamerin</span></span></span></th><td>Moderator</td><td class=\"ds-mono\">19.09.2026 21:04</td><td class=\"ds-tabelle__aktion\"><button class=\"ds-btn-sm\" type=\"button\">Entfernen</button></td></tr></tbody></table></div>",
+      "css": ".ds-wrap{min-width:0;overflow-x:auto;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-tabelle{width:100%;min-width:600px;border-collapse:collapse;table-layout:fixed}.ds-tabelle th,.ds-tabelle td{height:34px;min-width:0;padding:8px 10px;border-bottom:1px solid #312e2b;text-align:left;vertical-align:middle;font-size:12px;color:#f2efeb}.ds-tabelle thead th{height:30px;color:#8b857e;background:#14202e;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}.ds-tabelle tbody th{font-weight:600}.ds-tabelle tbody tr:last-child>*{border-bottom:0}.ds-tabelle__aktion{text-align:right}.ds-btn-sm{min-height:34px;padding:6px 12px;border:1px solid #403c38;border-radius:6px;color:#f2efeb;background:#1e1c1a;font:inherit;font-size:13px;font-weight:500;cursor:pointer}.ds-avatar-row{display:flex;align-items:center;gap:8px}.ds-avatar-row>span:last-child{display:grid;gap:2px;min-width:0}.ds-avatar{width:28px;height:28px;flex:none;border:1px solid #403c38;border-radius:6px;background:#1e1c1a}.ds-login{display:block;margin-top:1px;color:#8b857e;font-size:12px;font-weight:400}.ds-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}.ds-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}"
+    },
+    {
+      "name": "Ereigniszeile mit Sub-Inspector",
+      "kind": "custom",
+      "refersTo": "sub-inspector",
+      "description": "Gewählte Ereigniszeile (Tint-1, Markenkante) mit LED-Wort aus ereignisTon; darunter der Sub-Inspector auf Inspektor-Fläche mit Eigenschaften und JSON in der Rinne.",
+      "html": "<div class=\"ds-wrap\"><table class=\"ds-tabelle\"><thead><tr><th>Zeit</th><th>Ereignis</th><th>Modul</th><th>Wer</th></tr></thead><tbody><tr tabindex=\"0\" aria-selected=\"true\"><td class=\"ds-mono\">20.09.2026 09:12</td><td><span class=\"ds-ev\"><span class=\"ds-led\" data-status=\"red\"><span class=\"ds-led__dot\"></span><span>Fehler</span></span><span>Chat-Nachricht fehlgeschlagen</span></span></td><td>Textbefehle</td><td>Automatisch</td></tr><tr tabindex=\"0\"><td class=\"ds-mono\">20.09.2026 09:10</td><td><span class=\"ds-ev\"><span class=\"ds-led\" data-status=\"amber\"><span class=\"ds-led__dot\"></span><span>Hinweis</span></span><span>Textbefehl abgekühlt</span></span></td><td>Textbefehle</td><td>@zuschauer</td></tr><tr tabindex=\"0\"><td class=\"ds-mono\">20.09.2026 09:09</td><td><span class=\"ds-ev\"><span class=\"ds-led\" data-status=\"off\"><span class=\"ds-led__dot\"></span><span>Unbekannt</span></span><span class=\"ds-mono\">host.neu.code</span></span></td><td class=\"ds-mono\">host</td><td>Automatisch</td></tr></tbody></table></div><section class=\"ds-sub\"><div class=\"ds-sub__head\"><h3>Chat-Nachricht fehlgeschlagen</h3><span class=\"ds-mono ds-muted\">ev_01HZ…</span></div><div class=\"ds-cols\"><div><h4>Vorher</h4><pre>{ \"enabled\": false }</pre></div><div><h4>Nachher</h4><pre>{ \"enabled\": true }</pre></div></div></section>",
+      "css": ".ds-wrap{min-width:0;overflow-x:auto;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-tabelle{width:100%;min-width:600px;border-collapse:collapse;table-layout:fixed}.ds-tabelle th,.ds-tabelle td{height:34px;min-width:0;padding:8px 10px;border-bottom:1px solid #312e2b;text-align:left;vertical-align:middle;font-size:12px;color:#f2efeb}.ds-tabelle thead th{height:30px;color:#8b857e;background:#14202e;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}.ds-tabelle tbody tr[tabindex]{cursor:pointer}.ds-tabelle tbody tr[tabindex]:hover{background:#1e1c1a}.ds-tabelle tbody tr:focus-visible{outline:2px solid #9bc3ed;outline-offset:-2px}.ds-tabelle tbody tr[aria-selected=true]{background:#172638}.ds-tabelle tbody tr[aria-selected=true]>*:first-child{box-shadow:inset 2px 0 0 #538dcc}.ds-ev{display:flex;align-items:center;gap:10px;min-width:0}.ds-ev>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}.ds-muted{color:#b3aca4;font-size:12.5px}.ds-sub{width:min(960px,100%);margin-top:16px;padding:18px 16px;border:1px solid #312e2b;border-radius:6px;background:#1a1917;color:#f2efeb;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-sub__head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;min-height:24px;margin-bottom:14px}.ds-sub__head h3{margin:0;font-size:13px;font-weight:600}.ds-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.ds-cols h4{margin:0;color:#8b857e;font-size:11px;font-weight:600}.ds-cols pre{min-height:88px;margin:8px 0 0;padding:10px;border:1px solid #312e2b;background:#100f0e;color:#f2efeb;font-size:12px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}@media (max-width:639px){.ds-cols{grid-template-columns:1fr}.ds-tabelle{min-width:0}}.ds-led{display:inline-flex;align-items:center;gap:7px;min-height:20px;color:var(--text-2,#b3aca4);font-size:12px;font-weight:600;white-space:nowrap}.ds-led__dot{width:8px;height:8px;border-radius:6px;background:var(--text-4,#615c56)}.ds-led[data-status=green]{color:#3ddc84}.ds-led[data-status=green] .ds-led__dot{background:#3ddc84}.ds-led[data-status=amber]{color:#d9a441}.ds-led[data-status=amber] .ds-led__dot{background:#d9a441}.ds-led[data-status=red]{color:#e8655d}.ds-led[data-status=red] .ds-led__dot{background:#e2564d}.ds-led[data-status=off]{color:#8b857e}.ds-led[data-status=off] .ds-led__dot{background:#100f0e;border:1px solid #615c56}"
     }
   ],
   "narrative": {
     "northStar": "Das Stream Deck",
-    "overview": "Das Panel ist ein Gerät, kein Dokument. Module sind beleuchtete Tasten in einem Raster, nicht Zeilen in einer Tabelle und nicht Karten in einem Stapel. Eine Taste ist ein Objekt: Sie trägt genau ein Symbol, einen Namen und eine LED mit Wort — nie einen Absatz, nie ein verschachteltes Layout. Genau diese Grenze unterscheidet die Taste vom Container, der am Vorgängerentwurf bemängelt wurde. Das Gerät steht nachts auf dem zweiten Monitor neben OBS: Mattschwarz mit warmem Grau, ein Grundton ohne Verlauf, feste Pixelmaße statt fluider Skalen, weil Betriebsoberflächen bei gleichbleibender Auflösung gelesen werden.\n\nDer Blick aufs Raster sagt, was läuft: Grün leuchtet, Aus ist gezeichnet. Tastendruck ist die Signatur-Interaktion — die Taste sinkt (Skalierung 0,97, 120 ms), färbt sich grün getönt, die LED blendet in 160 ms um. Die Detailseite in der Mitte wird von der Brotkrume geführt, hat einen Modulkopf mit Symbol und Hauptschalter, und begrenzt ihren Inhalt auf 960 px. Die Schiene links bleibt in jeder Breite ein Band fester 64×64-Tasten.\n\nAbgelehnt wurde am 19. September 2026 der Kategoriestandard (Seitenleiste mit Titelzeile und Tabelle): zu asketisch. Die Welt darf souverän sein, ohne bunt zu werden — die einzigen Farben bedeuten Zustand oder markieren den Ort des Bedieners.",
+    "overview": "Das Panel ist ein Gerät, kein Dokument. Module sind beleuchtete Tasten in einem Raster, nicht Zeilen in einer Tabelle und nicht Karten in einem Stapel. Eine Taste ist ein Objekt: Sie trägt genau ein Symbol, einen Namen und eine LED mit Wort — nie einen Absatz, nie ein verschachteltes Layout. Genau diese Grenze unterscheidet die Taste vom Container, der am Vorgängerentwurf bemängelt wurde. Das Gerät steht nachts auf dem zweiten Monitor neben OBS: Mattschwarz mit warmem Grau, ein Grundton ohne Verlauf, feste Pixelmaße statt fluider Skalen, weil Betriebsoberflächen bei gleichbleibender Auflösung gelesen werden.\n\nDer Blick aufs Raster sagt, was läuft: Grün leuchtet, Aus ist gezeichnet. Tastendruck ist die Signatur-Interaktion — die Taste sinkt (Skalierung 0,97, 120 ms), färbt sich grün getönt, die LED blendet in 160 ms um. Die Detailseite in der Mitte wird von der Brotkrume geführt, hat einen Modulkopf mit Symbol und Hauptschalter, und begrenzt ihren Inhalt auf 960 px. Die Schiene links bleibt in jeder Breite ein Band fester 64×64-Tasten.\n\nAbgelehnt wurde am 19. September 2026 der Kategoriestandard (Seitenleiste mit Titelzeile und Tabelle): zu asketisch. Die Welt darf souverän sein, ohne bunt zu werden — die einzigen Farben bedeuten Zustand oder markieren den Ort des Bedieners.\n\nSeit Phase 2 gilt das Gerät auf allen fünf Seiten: Die Übersicht zeigt Kanäle als Tasten, Kanal und System sprechen in Zustandszeilen (LED + Wort + Detail + Aktion), Mitglieder, Audit und Ereignisse liegen in einer gemeinsamen Tabelle, deren gewählte Zeile ihren Sub-Inspector im Fluss darunter öffnet. Die alte Welt (232-px-Seitenleiste, Zustandskarten, Versalien-Plaketten) ist aus dem Stylesheet entfernt.",
     "keyCharacteristics": [
       "Mattschwarz (#141312) mit warmen Graustufen; vier Textstufen, kein Verlauf, kein Schatten.",
       "Tasten sind Objekte mit 12 px Radius in dunklen Rinnen; Steuerelemente haben 6 px. Es gibt keinen dritten Radius.",
       "Zustand spricht in Grün, Bernstein, Rot — immer als LED mit Wort, nie Farbe allein. Aus ist neutral gezeichnet.",
       "Marke (Blau) markiert ausschließlich den Ort des Bedieners, nie Wichtigkeit.",
-      "Archivo für alles; IBM Plex Mono mit Tabellenziffern nur für Zahlen und Befehlstoken.",
+      "Archivo für alles; IBM Plex Mono mit Tabellenziffern nur für Zahlen, Zeitstempel, IDs und Befehlstoken.",
       "Eine Symbolfamilie: 24er-Viewbox, Strich 1,5, runde Enden, fill: none. Kein Emoji, keine zweite Familie.",
-      "Feste Maße: Kopfleiste 56 px, Schiene 80 px, Schienentaste 64×64, Modultaste 132×132, Bedienelement 44 px, Tabellenzeile 34 px."
+      "Feste Maße: Kopfleiste 56 px, Schiene 80 px, Schienentaste 64×64, Modul-/Kanaltaste 132×132, Bedienelement 44 px, Tabellenzeile 34 px, Zustandszeile 58 px, Zustands-Etikettspalte 240 px."
     ],
     "rules": [
-      { "name": "Die Zwei-Rollen-Regel", "body": "Marke markiert den Ort des Bedieners (Auswahl, Fokus, primäre Aktion, Verknüpfung). Zustand spricht in Grün, Bernstein, Rot. Das System spricht nie in Markenfarbe, und Zustand nie in Marke — die Rollen kollidieren strukturell nicht, nicht nur farbmetrisch.", "section": "colors" },
-      { "name": "Die LED-mit-Wort-Regel", "body": "Wo Zustand steht, steht eine LED (8 px Punkt) und ein Wort: „Läuft“, „Aus“, „Verbunden“. Farbe allein informiert nie. Grün ohne Wort ist ein Fehler, kein Stil.", "section": "colors" },
-      { "name": "Die Aus-ist-neutral-Regel", "body": "Ein ausgeschaltetes Modul ist kein Problem. Es bekommt eine gezeichnete LED (Rinne mit Text-4-Rand), Text-3 und keine Farbe. Bernstein bedeutet ausschließlich „unbekannt“ oder „nicht aktiv, obwohl es sollte“.", "section": "colors" },
-      { "name": "Die Mono-für-Zahlen-Regel", "body": "Plex Mono ist die Schrift für Werte, die man abliest und vergleicht: Twitch-ID, Sekunden, Zeitstempel. Der Build dehnt sie auf den Befehlstoken (!name) aus, weil er ein wörtlich einzutippendes Zeichen ist. Für Namen, Beschreibungen und Etiketten ist Mono verboten.", "section": "typography" },
-      { "name": "Die Feste-Skala-Regel", "body": "Keine clamp(), keine Viewport-Einheiten in der Schrift. Schmale Fenster klappen das Gerüst um; die Schriftgrößen bleiben.", "section": "typography" },
-      { "name": "Die Trefferflächen-Regel", "body": "Alleinstehende Bedienelemente (Knopf, Feld, Select, Schalter, Brotkrumen-Link) sind mindestens 44 px hoch. In dichten Tabellenzeilen gelten 34 px, weil Dichte dort ein Feature ist. Beides liegt über der AA-Untergrenze von 24 px.", "section": "layout" },
-      { "name": "Die Keine-Schatten-Regel", "body": "Kein box-shadow als Tiefe, kein Verlauf, kein Schimmer. Die einzigen inset-Kanten sind die 2 px Markenkante der gewählten Tabellenzeile.", "section": "elevation" },
-      { "name": "Die Kein-Skelett-Regel", "body": "Veraltete Werte bleiben mit 55 % Deckkraft stehen; nichts schimmert. Bewegung im Augenwinkel sieht neben einem laufenden Stream wie eine Änderung aus.", "section": "elevation" }
+      {
+        "name": "Die Zwei-Rollen-Regel",
+        "body": "Marke markiert den Ort des Bedieners (Auswahl, Fokus, primäre Aktion, Verknüpfung). Zustand spricht in Grün, Bernstein, Rot. Das System spricht nie in Markenfarbe, und Zustand nie in Marke — die Rollen kollidieren strukturell nicht, nicht nur farbmetrisch.",
+        "section": "colors"
+      },
+      {
+        "name": "Die LED-mit-Wort-Regel",
+        "body": "Wo Zustand steht, steht eine LED (8 px Punkt) und ein Wort: „Läuft“, „Aus“, „Verbunden“, „Fehler“, „Hinweis“, „Info“. Farbe allein informiert nie. Grün ohne Wort ist ein Fehler, kein Stil.",
+        "section": "colors"
+      },
+      {
+        "name": "Die Aus-ist-neutral-Regel",
+        "body": "Ein ausgeschaltetes Modul ist kein Problem. Es bekommt eine gezeichnete LED (Rinne mit Text-4-Rand), Text-3 und keine Farbe. Bernstein bedeutet ausschließlich „unbekannt“ oder „nicht aktiv, obwohl es sollte“.",
+        "section": "colors"
+      },
+      {
+        "name": "Die Ereignis-je-Code-Regel",
+        "body": "Die Farbe eines Ereignisses steht in ereignisTon (locale.ts) pro Ereigniscode — nie wird sie aus einem Namensmuster geraten. Ein Code ohne Eintrag bekommt die gezeichnete LED „Unbekannt“ und seinen rohen Code in Mono. Grün ist nur „läuft / verbunden / gesendet“; Erwartbar-Unerwünschtes (abgekühlt, unterdrückt, bereits vorhanden) ist Bernstein „Hinweis“, Gescheitertes Rot „Fehler“.",
+        "section": "colors"
+      },
+      {
+        "name": "Die Mono-für-Zahlen-Regel",
+        "body": "Plex Mono ist die Schrift für Werte, die man abliest, vergleicht oder wörtlich eintippt: Twitch-ID, Sekunden, Zeitstempel, Befehlstoken (!name), Aktions- und Ereigniscodes, Datensatz-IDs. Ein Ereignis oder Modul mit lesbarem Wort steht in Archivo; erst der unbekannte Code fällt auf Mono zurück. Für Namen, Beschreibungen und Etiketten ist Mono verboten.",
+        "section": "typography"
+      },
+      {
+        "name": "Die Feste-Skala-Regel",
+        "body": "Keine clamp(), keine Viewport-Einheiten in der Schrift. Schmale Fenster klappen das Gerüst um; die Schriftgrößen bleiben.",
+        "section": "typography"
+      },
+      {
+        "name": "Die Trefferflächen-Regel",
+        "body": "Alleinstehende Bedienelemente (Knopf, Feld, Select, Schalter, Brotkrumen-Link) sind mindestens 44 px hoch. In dichten Tabellenzeilen gelten 34 px — auch für Select und Knopf in der Aktionsspalte —, weil Dichte dort ein Feature ist. Beides liegt über der AA-Untergrenze von 24 px.",
+        "section": "layout"
+      },
+      {
+        "name": "Die Keine-Schatten-Regel",
+        "body": "Kein box-shadow als Tiefe, kein Verlauf, kein Schimmer. Die einzigen inset-Kanten sind die 2 px Markenkante der gewählten Tabellenzeile.",
+        "section": "elevation"
+      },
+      {
+        "name": "Die Kein-Skelett-Regel",
+        "body": "Veraltete Werte bleiben mit 55 % Deckkraft stehen (.veraltet um die Tabelle, sobald Audit, Ereignisse oder Mitglieder nachladen und schon Daten da sind); nichts schimmert. Beim ersten Laden ohne Daten steht eine Ladezeile. Bewegung im Augenwinkel sieht neben einem laufenden Stream wie eine Änderung aus.",
+        "section": "elevation"
+      }
     ],
     "dos": [
-      "Do jede Zustandsanzeige als LED mit Wort bauen; Grün nur mit „Läuft“/„Verbunden“ daneben.",
-      "Do neue Module als Taste ins Raster stellen: Symbol aus der Familie, Name, LED. Nichts weiter auf der Taste.",
-      "Do genau zwei Radien verwenden: 12 px für Objekte, 6 px für Bedienelemente.",
-      "Do alleinstehende Bedienelemente 44 px hoch machen, Tabellenzeilen 34 px.",
-      "Do Werte in Plex Mono mit Tabellenziffern setzen (Twitch-ID, Sekunden, Zeit, Befehlstoken).",
-      "Do die Detailseite auf 960 px begrenzen und Bereiche mit Haarlinie plus Abstand trennen.",
-      "Do den Sperr- oder Fehlergrund an die Wirkung schreiben (Sperrgrund unter dem Schalter, Hinweis neben dem gedeckten Knopf).",
-      "Do veraltete Werte mit 55 % Deckkraft stehen lassen."
+      "Do jede Zustandsanzeige als LED mit Wort bauen; Grün nur mit „Läuft“/„Verbunden“/„Info (gesendet)“ daneben.",
+      "Do neue Module und Kanäle als Taste ins Raster stellen: Symbol aus der Familie, Name, LED. Nichts weiter auf der Taste.",
+      "Do jede Seite mit dem Seitenkopf beginnen und Zustand in Zustandszeilen, lesende Werte in der Eigenschaftenliste zeigen.",
+      "Do Ereignisfarben pro Code in ereignisTon eintragen; ein neuer Code ohne Eintrag bleibt „Unbekannt“.",
+      "Do genau zwei Radien verwenden: 12 px für Objekte, 6 px für Bedienelemente und Anzeigen.",
+      "Do alleinstehende Bedienelemente 44 px hoch machen, Tabellenzeilen und ihre Bedienelemente 34 px.",
+      "Do Werte in Plex Mono mit Tabellenziffern setzen (Twitch-ID, Sekunden, Zeitstempel, IDs, Codes, Befehlstoken).",
+      "Do die Seite auf 960 px begrenzen und Bereiche mit Haarlinie plus Abstand trennen.",
+      "Do den Sperr- oder Fehlergrund an die Wirkung schreiben (Sperrgrund unter dem Schalter oder Knopf, Hinweis neben dem gedeckten Knopf).",
+      "Do veraltete Werte mit 55 % Deckkraft stehen lassen; nur beim ersten Laden eine Ladezeile.",
+      "Do wählbare Tabellenzeilen mit tabIndex und aria-selected bauen und ihren Inspector im Fluss darunter öffnen."
     ],
     "donts": [
-      "Don't ein ausgeschaltetes Modul bernstein färben. Aus ist neutral; Bernstein heißt unbekannt.",
+      "Don't ein ausgeschaltetes Modul bernstein färben. Aus ist neutral; Bernstein heißt unbekannt oder Hinweis.",
+      "Don't eine gesunde Zustandszeile grün hinterlegen; nur Warnung und Fehler bekommen Fläche und Rand.",
+      "Don't Ereignisfarben aus dem Codenamen raten oder Grün für etwas anderes als läuft/verbunden/gesendet vergeben.",
       "Don't Markenfarbe für Zustand oder Wichtigkeit verwenden, und Zustandsfarbe für Auswahl.",
       "Don't Schatten, Verläufe oder Skelett-Schimmer einsetzen.",
-      "Don't einen dritten Radius, eine dritte Schrift oder eine zweite Symbolfamilie einführen; kein Emoji.",
+      "Don't einen dritten Radius (auch kein 9999px), eine dritte Schrift oder eine zweite Symbolfamilie einführen; kein Emoji.",
       "Don't eine Taste mit Absatz, Zähler oder verschachteltem Layout beladen — dann ist sie eine Karte.",
       "Don't Schriftgrößen an den Viewport koppeln; schmal klappt das Gerüst um, nicht die Schrift.",
-      "Don't ein rechtes Dock bauen; der Inspector öffnet sich im Fluss unter der Tabelle."
+      "Don't ein rechtes Dock bauen; der Inspector öffnet sich im Fluss unter der Tabelle.",
+      "Don't Zeilen ohne Inspector klickbar stylen; Zeiger und Hover gibt es nur mit tabindex."
     ]
   }
 }

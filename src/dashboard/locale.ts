@@ -95,6 +95,7 @@ export interface DashboardTexte {
   overview: {
     einKanalFreigegeben: string;
     kanaeleFreigegeben: (anzahl: string) => string;
+    kanaeleFreigegebenKurz: (anzahl: string) => string;
     keinKanalFreigegeben: string;
     keineMitgliedschaft: string;
     aktiveModule: string;
@@ -106,6 +107,7 @@ export interface DashboardTexte {
     pruefungLaeuft: string;
     moderatorstatusPruefen: string;
     naechstePruefungAb: (zeitpunkt: string) => string;
+    pruefungGesperrt: string;
     broadcasterErneutAutorisieren: string;
     broadcasterZustimmungAnfordern: string;
   };
@@ -146,9 +148,23 @@ export interface DashboardTexte {
   };
   system: {
     titel: string;
+    nurLesend: string;
     zustandLaden: string;
+    eigenschaften: string;
+    botGrund: string;
+    botAktualisiert: string;
+    chatAboId: string;
+    chatAboGrund: string;
+    chatAboAktualisiert: string;
+    loginStatus: string;
+    loginGrund: string;
+    loginGueltigBis: string;
+    botGueltigBis: string;
     auditLog: string;
     eintraege: string;
+    zeit: string;
+    aktion: string;
+    wer: string;
     auditLaden: string;
     keineAuditEintraege: string;
     aenderungsdaten: string;
@@ -159,7 +175,19 @@ export interface DashboardTexte {
   };
   ereignisse: {
     titel: string;
+    anzahl: (anzahl: string) => string;
     protokoll: string;
+    zeit: string;
+    ereignis: string;
+    modul: string;
+    wer: string;
+    automatisch: string;
+    info: string;
+    fehler: string;
+    hinweis: string;
+    unbekannt: string;
+    code: string;
+    zeitstempel: string;
     laden: string;
     keine: string;
     detail: string;
@@ -221,8 +249,9 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       abmeldungLaeuft: "Abmeldung …", abmelden: "Abmelden",
     },
     overview: {
-      einKanalFreigegeben: "Ein Kanal ist für dich freigegeben.",
+      einKanalFreigegeben: "1 Kanal freigegeben",
       kanaeleFreigegeben: (anzahl) => `${anzahl} Kanäle sind für dich freigegeben.`,
+      kanaeleFreigegebenKurz: (anzahl) => `${anzahl} Kanäle freigegeben`,
       keinKanalFreigegeben: "Noch kein Kanal freigegeben",
       keineMitgliedschaft: "Für dieses Konto gibt es keine Mitgliedschaft in einem freigegebenen Kanal.",
       aktiveModule: "Aktive Module", zustandLaden: "Kanalzustand wird geladen …",
@@ -232,6 +261,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       letztePruefung: (zeitpunkt) => `Letzte Prüfung: ${zeitpunkt}`,
       pruefungLaeuft: "Prüfung läuft …", moderatorstatusPruefen: "Moderatorstatus prüfen",
       naechstePruefungAb: (zeitpunkt) => `Nächste Prüfung ab ${zeitpunkt}.`,
+      pruefungGesperrt: "Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.",
       broadcasterErneutAutorisieren: "Der Broadcaster muss Twitch erneut autorisieren.",
       broadcasterZustimmungAnfordern: "Broadcaster-Zustimmung anfordern",
     },
@@ -258,14 +288,19 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       vorMinuten: (anzahl) => `vor ${String(anzahl)} Min.`, vorStunden: (anzahl) => `vor ${String(anzahl)} Std.`,
     },
     system: {
-      titel: "System", zustandLaden: "Systemzustand wird geladen …", auditLog: "Audit-Log",
-      eintraege: "Einträge", auditLaden: "Audit-Log wird geladen …",
+      titel: "System", nurLesend: "nur lesend", zustandLaden: "Systemzustand wird geladen …", eigenschaften: "Eigenschaften",
+      botGrund: "Bot-Grund", botAktualisiert: "Bot zuletzt aktualisiert", chatAboId: "Chat-Abo-ID", chatAboGrund: "Chat-Abo-Grund",
+      chatAboAktualisiert: "Chat-Abo zuletzt aktualisiert", loginStatus: "Login-Token-Status", loginGrund: "Login-Token-Grund",
+      loginGueltigBis: "Login-Token gültig bis", botGueltigBis: "Bot-Token gültig bis", auditLog: "Audit-Log",
+      eintraege: "Einträge", zeit: "Zeit", aktion: "Aktion", wer: "Wer", auditLaden: "Audit-Log wird geladen …",
       keineAuditEintraege: "Noch keine Audit-Einträge gespeichert.", aenderungsdaten: "Änderungsdaten",
       vorher: "Vorher", nachher: "Nachher", aeltereEintraege: "Ältere Einträge laden",
       aeltereEintraegeLaden: "Ältere Einträge werden geladen …",
     },
     ereignisse: {
-      titel: "Ereignisse", protokoll: "Ereignisprotokoll", laden: "Ereignisse werden geladen …",
+      titel: "Ereignisse", anzahl: (anzahl) => `${anzahl} Einträge`, protokoll: "Ereignisprotokoll", zeit: "Zeit", ereignis: "Ereignis",
+      modul: "Modul", wer: "Wer", automatisch: "Automatisch", info: "Info", fehler: "Fehler", hinweis: "Hinweis", unbekannt: "Unbekannt", code: "Code", zeitstempel: "Zeitstempel",
+      laden: "Ereignisse werden geladen …",
       keine: "Noch keine Ereignisse protokolliert.", detail: "Detail", aeltereLaden: "Ältere Ereignisse laden", aeltereWerdenGeladen: "Ältere Ereignisse werden geladen …",
     },
     anmeldung: {
@@ -310,8 +345,9 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       abmeldungLaeuft: "Signing out …", abmelden: "Sign out",
     },
     overview: {
-      einKanalFreigegeben: "One channel is available to you.",
+      einKanalFreigegeben: "1 channel available",
       kanaeleFreigegeben: (anzahl) => `${anzahl} channels are available to you.`,
+      kanaeleFreigegebenKurz: (anzahl) => `${anzahl} channels available`,
       keinKanalFreigegeben: "No channel available yet", keineMitgliedschaft: "This account is not a member of an available channel.",
       aktiveModule: "Active modules", zustandLaden: "Loading channel status …",
     },
@@ -319,6 +355,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       fuerKanalKeinePruefung: "This channel has not been checked yet.", letztePruefung: (zeitpunkt) => `Last checked: ${zeitpunkt}`,
       pruefungLaeuft: "Checking …", moderatorstatusPruefen: "Check moderator status",
       naechstePruefungAb: (zeitpunkt) => `Next check available ${zeitpunkt}.`,
+      pruefungGesperrt: "Only broadcasters and managers may check moderator status.",
       broadcasterErneutAutorisieren: "The broadcaster must authorize Twitch again.", broadcasterZustimmungAnfordern: "Request broadcaster consent",
     },
     bot: {
@@ -341,12 +378,17 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       vorMinuten: (anzahl) => `${String(anzahl)} min ago`, vorStunden: (anzahl) => `${String(anzahl)} hr ago`,
     },
     system: {
-      titel: "System", zustandLaden: "Loading system status …", auditLog: "Audit log", eintraege: "entries",
+      titel: "System", nurLesend: "read-only", zustandLaden: "Loading system status …", eigenschaften: "Properties",
+      botGrund: "Bot reason", botAktualisiert: "Bot last updated", chatAboId: "Chat subscription ID", chatAboGrund: "Chat subscription reason",
+      chatAboAktualisiert: "Chat subscription last updated", loginStatus: "Login token status", loginGrund: "Login token reason",
+      loginGueltigBis: "Login token valid until", botGueltigBis: "Bot token valid until", auditLog: "Audit log", eintraege: "entries",
+      zeit: "Time", aktion: "Action", wer: "Who",
       auditLaden: "Loading audit log …", keineAuditEintraege: "No audit entries saved yet.", aenderungsdaten: "Change data",
       vorher: "Before", nachher: "After", aeltereEintraege: "Load older entries", aeltereEintraegeLaden: "Loading older entries …",
     },
     ereignisse: {
-      titel: "Events", protokoll: "Event log", laden: "Loading events …", keine: "No events logged yet.", detail: "Detail",
+      titel: "Events", anzahl: (anzahl) => `${anzahl} entries`, protokoll: "Event log", zeit: "Time", ereignis: "Event", modul: "Module",
+      wer: "Who", automatisch: "Automatic", info: "Info", fehler: "Error", hinweis: "Notice", unbekannt: "Unknown", code: "Code", zeitstempel: "Timestamp", laden: "Loading events …", keine: "No events logged yet.", detail: "Detail",
       aeltereLaden: "Load older events", aeltereWerdenGeladen: "Loading older events …",
     },
     anmeldung: {
@@ -362,6 +404,73 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       unbekannt: (name) => `The module “${name}” is unknown.`,
     },
   },
+};
+
+export type EreignisCode =
+  | "host.aktion.fehler"
+  | "host.chat.fehlgeschlagen"
+  | "host.chat.gesendet"
+  | "host.modul.fehler"
+  | "host.modul.unbekannt"
+  | "host.overlay.nicht_ausgefuehrt"
+  | "shoutout.unterdrueckt"
+  | "textbefehle.abgekuehlt"
+  | "textbefehle.bereits_vorhanden"
+  | "textbefehle.nicht_berechtigt"
+  | "textbefehle.unbekannt"
+  | "textbefehle.ungueltig";
+
+export const ereignisTexte: LocaleCatalog<Record<EreignisCode, string>> = {
+  de: {
+    "host.aktion.fehler": "Aktion fehlgeschlagen",
+    "host.chat.fehlgeschlagen": "Chat-Nachricht fehlgeschlagen",
+    "host.chat.gesendet": "Chat-Nachricht gesendet",
+    "host.modul.fehler": "Modulfehler",
+    "host.modul.unbekannt": "Unbekanntes Modul",
+    "host.overlay.nicht_ausgefuehrt": "Overlay nicht ausgeführt",
+    "shoutout.unterdrueckt": "Shoutout unterdrückt",
+    "textbefehle.abgekuehlt": "Textbefehl abgekühlt",
+    "textbefehle.bereits_vorhanden": "Textbefehl bereits vorhanden",
+    "textbefehle.nicht_berechtigt": "Textbefehl nicht berechtigt",
+    "textbefehle.unbekannt": "Textbefehl unbekannt",
+    "textbefehle.ungueltig": "Textbefehl ungültig",
+  },
+  en: {
+    "host.aktion.fehler": "Action failed",
+    "host.chat.fehlgeschlagen": "Chat message failed",
+    "host.chat.gesendet": "Chat message sent",
+    "host.modul.fehler": "Module error",
+    "host.modul.unbekannt": "Unknown module",
+    "host.overlay.nicht_ausgefuehrt": "Overlay not executed",
+    "shoutout.unterdrueckt": "Shoutout suppressed",
+    "textbefehle.abgekuehlt": "Text command on cooldown",
+    "textbefehle.bereits_vorhanden": "Text command already exists",
+    "textbefehle.nicht_berechtigt": "Text command not authorized",
+    "textbefehle.unbekannt": "Unknown text command",
+    "textbefehle.ungueltig": "Invalid text command",
+  },
+};
+
+export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green"> = {
+  "host.aktion.fehler": "red",
+  "host.chat.fehlgeschlagen": "red",
+  "host.chat.gesendet": "green",
+  "host.modul.fehler": "red",
+  "host.modul.unbekannt": "red",
+  "host.overlay.nicht_ausgefuehrt": "red",
+  "shoutout.unterdrueckt": "amber",
+  "textbefehle.abgekuehlt": "amber",
+  "textbefehle.bereits_vorhanden": "amber",
+  "textbefehle.nicht_berechtigt": "red",
+  "textbefehle.unbekannt": "red",
+  "textbefehle.ungueltig": "red",
+};
+
+export const ereignisText = (code: string, language: DashboardLanguage = dashboardLanguage()): string => {
+  if (Object.prototype.hasOwnProperty.call(ereignisTexte[language], code)) {
+    return ereignisTexte[language][code as EreignisCode];
+  }
+  return code;
 };
 
 export const dashboardTexte = (): DashboardTexte => dashboardTexteKatalog[dashboardLanguage()];

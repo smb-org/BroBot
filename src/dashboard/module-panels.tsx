@@ -1,9 +1,9 @@
-import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
+import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
 import type { PanelActiveModule, PanelChannelRole, PanelModuleState } from "../panel-contract";
-import { dashboardLanguage, dashboardTexte, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { dashboardLanguage, dashboardTexte, formatZahl, type DashboardLanguage, type LocaleCatalog } from "./locale";
 import { moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
@@ -68,45 +68,116 @@ const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboard
     description: workspaceTexte(language).keineBeschreibung,
   };
 
+export type ZustandsTon = "healthy" | "warning" | "error" | "neutral";
+export type LedStatus = "green" | "amber" | "red" | "off";
+
+export const NavigationIcon = ({ kind, className = "navigation-icon" }: { kind: string; className?: string }): ReactElement => (
+  <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    {kind === "overview" ? <><rect x="5" y="5" width="5" height="5" rx="1" /><rect x="14" y="5" width="5" height="5" rx="1" /><rect x="5" y="14" width="5" height="5" rx="1" /><rect x="14" y="14" width="5" height="5" rx="1" /></> : kind === "channel" ? <><path d="M5 7.5h14M5 12h14M5 16.5h9" /><circle cx="18" cy="16.5" r="1" /></> : kind === "system" ? <><circle cx="12" cy="12" r="7" /><path d="M12 8v4l2.5 2" /></> : kind === "members" ? <><circle cx="10" cy="9" r="3" /><path d="M4.5 18c.8-3 2.6-4.5 5.5-4.5s4.7 1.5 5.5 4.5M17 8.5a2.5 2.5 0 0 1 0 5" /></> : kind === "modules" ? <><rect x="5" y="5" width="6" height="6" rx="1" /><rect x="13" y="5" width="6" height="6" rx="1" /><rect x="5" y="13" width="6" height="6" rx="1" /><rect x="13" y="13" width="6" height="6" rx="1" /></> : <><path d="M6 5h12v14H6z" /><path d="M9 9h6M9 13h6M9 17h4" /></>}
+  </svg>
+);
+
 const iconFor = (moduleId: string): ReactElement => (
   <svg className="module-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
     {moduleId === "textbefehle" ? <><circle cx="12" cy="12" r="8" /><path d="M12 7v10M8.5 10.5h7M8.5 13.5h5" /></> : <><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 12h6M12 9v6" /></>}
   </svg>
 );
 
-const Led = ({ enabled, label }: { enabled: boolean; label: string }): ReactElement => (
-  <span className="led" data-status={enabled ? "green" : "off"}>
+export const Led = ({ status, label }: { status: LedStatus; label: string }): ReactElement => (
+  <span className="led" data-status={status}>
     <span className="led__dot" aria-hidden="true" />
     <span>{label}</span>
   </span>
 );
 
-const ModuleTaste = ({ channelId, moduleId, enabled, onNavigate }: {
+export const ZustandZeile = ({ label, tone, wort, detail, aktion }: {
+  label: string;
+  tone: ZustandsTon;
+  wort: string;
+  detail?: ReactNode;
+  aktion?: ReactNode;
+}): ReactElement => {
+  const status: LedStatus = tone === "healthy" ? "green" : tone === "warning" ? "amber" : tone === "error" ? "red" : "off";
+  return (
+    <article className="zustand-zeile" data-status={tone} aria-label={label}>
+      <strong className="zustand-zeile__label">{label}</strong>
+      <Led status={status} label={wort} />
+      {detail === undefined ? null : <span className="zustand-zeile__detail">{detail}</span>}
+      {aktion === undefined ? null : <div className="zustand-zeile__action">{aktion}</div>}
+    </article>
+  );
+};
+
+export const ModuleHeading = ({ kind, title, subtitle, actions }: {
+  kind: string;
+  title: string;
+  subtitle: ReactNode;
+  actions?: ReactNode;
+}): ReactElement => (
+  <header className="module-detail-heading">
+    <div className="module-detail-heading__icon"><NavigationIcon kind={kind} className="module-heading-glyph" /></div>
+    <div className="module-detail-heading__copy">
+      <h1>{title}</h1>
+      <p>{subtitle}</p>
+    </div>
+    {actions === undefined ? null : <div className="module-detail-heading__actions">{actions}</div>}
+  </header>
+);
+
+export const ModuleCount = ({ count, label }: { count: number; label: (formattedCount: string) => string }): ReactElement => {
+  const formattedCount = formatZahl(count);
+  return <>{<span className="zahl">{formattedCount}</span>}{label(formattedCount).slice(formattedCount.length)}</>;
+};
+
+export const ModuleTaste = ({ channelId, moduleId, enabled, onNavigate, name, icon, route, ledStatus, ledLabel }: {
   channelId: string;
   moduleId: string;
   enabled: boolean;
   onNavigate: (route: DashboardRoute) => void;
+  name?: string;
+  icon?: ReactElement;
+  route?: DashboardRoute;
+  ledStatus?: LedStatus;
+  ledLabel?: string;
 }): ReactElement => {
   const details = moduleDetails(moduleId);
-  const route: DashboardRoute = { kind: "module", channelId, moduleId };
-  const label = `${details.name} · ${statusWord(enabled)}`;
+  const tasteRoute: DashboardRoute = route ?? { kind: "module", channelId, moduleId };
+  const tasteName = name ?? details.name;
+  const tasteStatus = ledStatus ?? (enabled ? "green" : "off");
+  const tasteLabel = ledLabel ?? statusWord(enabled);
+  const label = `${tasteName} · ${tasteLabel}`;
   return (
     <a
       className="module-taste"
-      href={dashboardRoutePath(route)}
+      href={dashboardRoutePath(tasteRoute)}
       aria-label={label}
       data-enabled={enabled ? "true" : "false"}
+      data-status={tasteStatus}
       onClick={(event) => {
         event.preventDefault();
-        onNavigate(route);
+        onNavigate(tasteRoute);
       }}
     >
-      <span className="module-taste__icon" aria-hidden="true">{iconFor(moduleId)}</span>
-      <strong>{details.name}</strong>
-      <Led enabled={enabled} label={statusWord(enabled)} />
+      <span className="module-taste__icon" aria-hidden="true">{icon ?? iconFor(moduleId)}</span>
+      <strong>{tasteName}</strong>
+      <Led status={tasteStatus} label={tasteLabel} />
     </a>
   );
 };
+
+/** Kompatibler Navigationsbaustein für ältere Modul-Tests; die Seiten verwenden das Tastenraster. */
+export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
+  channelId: string;
+  activeModules: PanelActiveModule[];
+  onNavigate: (route: DashboardRoute) => void;
+}): ReactElement => (
+  <nav className="module-navigation" aria-label={dashboardTexte().module.modul}>
+    {activeModules.map(({ moduleId }) => {
+      const route: DashboardRoute = { kind: "module", channelId, moduleId };
+      return <a className="nav-link" href={dashboardRoutePath(route)} key={moduleId} onClick={(event) => { event.preventDefault(); onNavigate(route); }}>{moduleName(moduleId)}</a>;
+    })}
+  </nav>
+);
 
 const ModuleSwitch = ({ moduleId, enabled, disabled, busy, onToggle }: {
   moduleId: string;
@@ -125,7 +196,7 @@ const ModuleSwitch = ({ moduleId, enabled, disabled, busy, onToggle }: {
     disabled={disabled || busy}
     onClick={onToggle}
   >
-    <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
+        <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
   </button>
 );
 
@@ -142,43 +213,6 @@ interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
 }
-
-interface ModuleNavigationProperties {
-  channelId: string;
-  activeModules: PanelActiveModule[];
-  onNavigate: (route: DashboardRoute) => void;
-}
-
-export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: ModuleNavigationProperties): ReactElement => {
-  const texte = dashboardTexte();
-  if (activeModules.length === 0) {
-    return (
-      <section className="module-empty" aria-label={texte.module.modul}>
-        <p>{texte.module.keineAktiv}</p>
-      </section>
-    );
-  }
-  return (
-    <nav className="primary-nav module-navigation" aria-label={texte.module.modul}>
-      {activeModules.map(({ moduleId }) => {
-        const route: DashboardRoute = { kind: "module", channelId, moduleId };
-        return (
-          <a
-            className="nav-link"
-            href={dashboardRoutePath(route)}
-            key={moduleId}
-            onClick={(event) => {
-              event.preventDefault();
-              onNavigate(route);
-            }}
-          >
-            {moduleName(moduleId)}
-          </a>
-        );
-      })}
-    </nav>
-  );
-};
 
 export const ModulePanelMount = ({ channelId, activeModules }: ModulePanelMountProperties): ReactElement => {
   const registeredPanels = activeModules.flatMap((activeModule) => {
@@ -291,7 +325,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
 
   return (
     <>
-      <header className="page-heading module-detail-heading">
+      <header className="module-detail-breadcrumb">
         <nav className="breadcrumb" aria-label={texte.navigation.module}>
           <ModuleListLink channelId={channelId} onNavigate={onNavigate} />
           <span className="breadcrumb__separator" aria-hidden="true">›</span>
@@ -313,7 +347,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
           <div>
             <strong>{labels.hauptschalter}</strong>
-            <Led enabled={enabled} label={statusWord(enabled)} />
+            <Led status={enabled ? "green" : "off"} label={statusWord(enabled)} />
           </div>
           <ModuleSwitch moduleId={moduleId} enabled={enabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />
           {disabledReason === null ? null : <p className="sperrgrund">{disabledReason}</p>}
