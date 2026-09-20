@@ -728,7 +728,7 @@ describe("Dashboard-Grundgerüst", () => {
     window.history.replaceState({}, "", "/channels/kanal-a/members");
 
     render(<DashboardApp />);
-    await waitFor(() => expect(resolveLateInitial).toBeTypeOf("function"));
+    await screen.findByLabelText("Twitch-Name");
 
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
@@ -779,7 +779,9 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
     await screen.findByText("Erster Stand");
     fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "verwalter" } });
-    await waitFor(() => expect(resolveReload).toBeTypeOf("function"));
+    await waitFor(() => {
+      expect(memberRequestCount).toBe(2);
+    });
 
     const more = screen.getByRole("button", { name: "Weitere Mitglieder laden" });
     expect(more).toBeDisabled();
@@ -828,10 +830,14 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
     await screen.findByText("Erster Stand");
     fireEvent.click(screen.getByRole("button", { name: "Weitere Mitglieder laden" }));
-    await waitFor(() => expect(resolveNextPage).toBeTypeOf("function"));
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([reqInput]) => requestUrl(reqInput).search === "?cursor=cursor-1")).toBe(true);
+    });
 
     fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "verwalter" } });
-    await waitFor(() => expect(resolveReload).toBeTypeOf("function"));
+    await waitFor(() => {
+      expect(memberRequestCount).toBe(2);
+    });
     expect(screen.getByRole("button", { name: "Weitere Mitglieder laden" })).toBeDisabled();
 
     await act(async () => {
