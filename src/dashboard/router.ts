@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 export type DashboardRoute =
   | { kind: "overview" }
+  | { kind: "betreiber" }
   | { kind: "channel"; channelId: string; section: "overview" | "system" | "members" | "events" | "modules" }
   | { kind: "module"; channelId: string; moduleId: string };
 
@@ -17,6 +18,7 @@ const decodeSegment = (value: string): string | null => {
 export const parseDashboardRoute = (pathname: string): DashboardRoute => {
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) return { kind: "overview" };
+  if (segments.length === 1 && segments[0] === "betreiber") return { kind: "betreiber" };
   if (segments.length === 4 && segments[0] === "channels" && segments[2] === "modules") {
     const channelId = decodeSegment(segments[1] ?? "");
     const moduleId = decodeSegment(segments[3] ?? "");
@@ -40,6 +42,7 @@ export const parseDashboardRoute = (pathname: string): DashboardRoute => {
 
 export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "overview") return "/";
+  if (route.kind === "betreiber") return "/betreiber";
   const base = `/channels/${encodeURIComponent(route.channelId)}`;
   if (route.kind === "module") return `${base}/modules/${encodeURIComponent(route.moduleId)}`;
   if (route.section === "overview") return base;

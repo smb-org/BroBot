@@ -1,5 +1,6 @@
 import { createMiddleware } from "hono/factory";
 
+import { getBetreiberUserIds } from "../config";
 import { authorizeModuleMutation } from "../module-authorization";
 import type { AuthorizeModuleMutation, PrepareModuleAudit } from "../../modules/contract";
 import { prepareModuleAudit } from "../module-audit";
@@ -20,6 +21,11 @@ export interface SessionAuthorizationVariables {
   session: SessionRecord;
 }
 
+export interface BetreiberAuthorizationVariables {
+  session: SessionRecord;
+  actor: ActorContext;
+}
+
 interface ChannelAuthorizationEnvironment {
   Bindings: Env;
   Variables: ChannelAuthorizationVariables;
@@ -28,6 +34,11 @@ interface ChannelAuthorizationEnvironment {
 interface SessionAuthorizationEnvironment {
   Bindings: Env;
   Variables: SessionAuthorizationVariables;
+}
+
+interface BetreiberAuthorizationEnvironment {
+  Bindings: Env;
+  Variables: BetreiberAuthorizationVariables;
 }
 
 const csrfExemptMethods = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -61,6 +72,30 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
     context.set("authorizeMutation", authorizeModuleMutation);
     context.set("prepareModuleAudit", (entry, changedAt) =>
       prepareModuleAudit(context.env.DB, session.userId, changedAt, entry));
+    await next();
+  },
+);
+
+export const requireBetreiber = () => createMiddleware<BetreiberAuthorizationEnvironment>(
+  async (context, next) => {
+    const session = await getSessionFromRequest(context.req.raw, context.env);
+    if (session === null) return context.text("Session fehlt.", 401);
+
+    if (!csrfExemptMethods.has(context.req.method) && !await verifyCsrfRequest(
+      context.req.raw,
+      session.sessionId,
+      context.env.SESSION_COOKIE_KEYS,
+      nowIso(),
+    )) {
+      return context.text("CSRF-Token fehlt oder ist ungültig.", 403);
+    }
+
+    if (!getBetreiberUserIds(context.env).has(session.userId)) {
+      return context.text("Kein Betreiberzugang.", 403);
+    }
+
+    context.set("session", session);
+    context.set("actor", { userId: session.userId, sessionId: session.sessionId });
     await next();
   },
 );

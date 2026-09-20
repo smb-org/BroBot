@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   consumeOAuthTransaction,
+  actorGuard,
+  betreiberSessionGuard,
   createChannelMemberWithAudit,
   createSession,
   createOAuthTransaction,
@@ -1158,6 +1160,7 @@ describe("Auth-D1-Repository", () => {
         mitgliedFuer("kanal-a", "target-user", "bediener"),
         "mitglied.hinzugefügt",
         jetzt,
+        actorGuard("'broadcaster', 'verwalter'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1179,6 +1182,7 @@ describe("Auth-D1-Repository", () => {
         mitgliedFuer("kanal-a", "target-user", "bediener"),
         "mitglied.hinzugefügt",
         jetzt,
+        actorGuard("'broadcaster', 'verwalter'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1203,6 +1207,7 @@ describe("Auth-D1-Repository", () => {
         { ...mitgliedFuer("kanal-a", "target-user", "verwalter"), updatedAt: jetzt },
         "mitglied.rolle_geändert",
         jetzt,
+        actorGuard("'broadcaster', 'verwalter'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
@@ -1228,6 +1233,7 @@ describe("Auth-D1-Repository", () => {
         "target-user",
         "mitglied.entfernt",
         jetzt,
+        actorGuard("'broadcaster', 'verwalter'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
@@ -1251,6 +1257,7 @@ describe("Auth-D1-Repository", () => {
         { ...mitgliedFuer("kanal-a", "target-user", "verwalter"), updatedAt: jetzt },
         "mitglied.rolle_geändert",
         jetzt,
+        actorGuard("'broadcaster', 'verwalter'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
@@ -1276,6 +1283,7 @@ describe("Auth-D1-Repository", () => {
         "target-user",
         "mitglied.entfernt",
         jetzt,
+        actorGuard("'broadcaster', 'verwalter'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
@@ -1299,6 +1307,7 @@ describe("Auth-D1-Repository", () => {
         mitgliedFuer("kanal-b", "target-user", "bediener"),
         "mitglied.hinzugefügt",
         jetzt,
+        actorGuard("'broadcaster', 'verwalter'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-b", "target-user")).resolves.toBeNull();
@@ -1319,6 +1328,7 @@ describe("Auth-D1-Repository", () => {
         mitgliedFuer("kanal-a", "target-user", "broadcaster"),
         "mitglied.hinzugefügt",
         jetzt,
+        actorGuard("'broadcaster'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1342,6 +1352,7 @@ describe("Auth-D1-Repository", () => {
         { ...mitgliedFuer("kanal-a", "target-user", "broadcaster"), updatedAt: jetzt },
         "mitglied.rolle_geändert",
         jetzt,
+        actorGuard("'broadcaster'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
@@ -1366,9 +1377,42 @@ describe("Auth-D1-Repository", () => {
         "target-user",
         "mitglied.entfernt",
         jetzt,
+        actorGuard("'broadcaster', 'verwalter'"),
       ),
       async (database) => {
         await expect(leseKanalmitglied(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "bediener" });
       },
     ));
+
+  it("schreibt den Betreiber als Akteur in das Audit", async () => {
+    const database = new TestD1Database();
+    const jetzt = frischerZeitpunkt();
+    try {
+      await saeeKanal(database, "kanal-a");
+      await saeeLoginIdentitaet(database, { userId: "user-1", login: "betreiber" });
+      await saeeSitzung(database, {
+        userId: "user-1",
+        login: "betreiber",
+        expiresAt: zeitpunktMitAbstand(jetzt, 60_000),
+      });
+
+      const actor = { userId: "user-1", sessionId: "session-1" };
+      const changed = await createChannelMemberWithAudit(
+        database as unknown as D1Database,
+        actor,
+        mitgliedFuer("kanal-a", "target-user", "verwalter"),
+        "betreiber.mitglied.hinzugefügt",
+        jetzt,
+        betreiberSessionGuard(actor, jetzt),
+        "betreiber",
+      );
+
+      expect(changed).toBe(true);
+      await expect(database.prepare(
+        "SELECT actor_kind FROM audit_log WHERE action = ?",
+      ).bind("betreiber.mitglied.hinzugefügt").first()).resolves.toEqual({ actor_kind: "betreiber" });
+    } finally {
+      database.close();
+    }
+  });
 });

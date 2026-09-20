@@ -36,7 +36,8 @@ import {
 } from "./api";
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTaste, ModuleWorkspace, NavigationIcon, ZustandZeile, type LedStatus, type ZustandsTon } from "./module-panels";
 import { MembersPage } from "./members";
-import { roleLabel } from "./labels";
+import { BetreiberSeite } from "./betreiber";
+import { betreiberTexte, roleLabel } from "./labels";
 import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail } from "./locale";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
@@ -234,6 +235,7 @@ interface LinkProperties {
 
 const RouteLink = ({ route, current, children, onNavigate, className = "nav-link" }: LinkProperties): ReactElement => {
   const isCurrent = (route.kind === "overview" && current.kind === "overview") ||
+    (route.kind === "betreiber" && current.kind === "betreiber") ||
     (route.kind === "channel" && current.kind === "channel" &&
       route.channelId === current.channelId && route.section === current.section) ||
     (route.kind === "channel" && current.kind === "module" &&
@@ -274,11 +276,13 @@ const ErrorPanel = ({ message }: { message: string }): ReactElement => (
 interface SidebarProperties {
   route: DashboardRoute;
   channels: PanelChannelState[];
+  betreiber: boolean;
   onNavigate: (route: DashboardRoute) => void;
 }
 
-const Rail = ({ route, channels, onNavigate }: SidebarProperties): ReactElement => {
+const Rail = ({ route, channels, betreiber, onNavigate }: SidebarProperties): ReactElement => {
   const texte = dashboardTexte();
+  const betreiberTexteWerte = betreiberTexte();
   const activeChannel = route.kind === "channel" || route.kind === "module"
     ? channels.find((channel) => channel.channelId === route.channelId)
     : undefined;
@@ -296,6 +300,7 @@ const Rail = ({ route, channels, onNavigate }: SidebarProperties): ReactElement 
         <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "members" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="members" /><span>{texte.navigation.mitglieder}</span></span></RouteLink>
         <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "modules" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="modules" /><span>{texte.navigation.module}</span></span></RouteLink>
         <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "events" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="events" /><span>{texte.navigation.ereignisse}</span></span></RouteLink>
+        {betreiber ? <RouteLink route={{ kind: "betreiber" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="members" /><span>{betreiberTexteWerte.navigation}</span></span></RouteLink> : null}
       </nav>
     </aside>
   );
@@ -304,6 +309,7 @@ const Rail = ({ route, channels, onNavigate }: SidebarProperties): ReactElement 
 interface PanelTopbarProperties {
   route: DashboardRoute;
   channels: PanelChannelState[];
+  betreiber: boolean;
   activeChannel: PanelChannelState | undefined;
   loadedAt: number | undefined;
   headerModule: { id: string; enabled: boolean } | undefined;
@@ -318,6 +324,7 @@ type PageLoadedAt = Record<"overview" | "system" | "members" | "modules" | "even
 
 const loadedAtForRoute = (route: DashboardRoute, loadedAt: PageLoadedAt): number | undefined => {
   if (route.kind === "overview") return undefined;
+  if (route.kind === "betreiber") return undefined;
   if (route.kind === "module") return loadedAt.modules;
   return loadedAt[route.section];
 };
@@ -467,8 +474,9 @@ const BreadcrumbAreaLink = ({ route, label, icon, onNavigate }: {
   </a>
 );
 
-const PanelTopbar = ({ route, channels, activeChannel, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: PanelTopbarProperties): ReactElement => {
+const PanelTopbar = ({ route, channels, betreiber, activeChannel, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: PanelTopbarProperties): ReactElement => {
   const texte = dashboardTexte();
+  const betreiberTexteWerte = betreiberTexte();
   const tone = activeChannel === undefined ? "neutral" : channelStatus(activeChannel);
   const connectionLabel = activeChannel === undefined
     ? null
@@ -493,6 +501,7 @@ const PanelTopbar = ({ route, channels, activeChannel, loadedAt, headerModule, h
         <a className="brand-mark" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
         {activeChannel === undefined ? null : <><span className="topbar__breadcrumb-separator" aria-hidden="true">›</span><ChannelSwitcher channels={channels} activeChannel={activeChannel} onNavigate={onNavigate} /></>}
         {areaRoute === null || areaLabel === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator topbar__area-separator" aria-hidden="true">›</span>{route.kind === "module" ? <BreadcrumbAreaLink route={areaRoute} label={areaLabel} icon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />} onNavigate={onNavigate} /> : <span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind={areaRoute.section === "overview" ? "channel" : areaRoute.section} className="topbar__breadcrumb-glyph" /></span><span>{areaLabel}</span></span>}</>}
+        {route.kind === "betreiber" && betreiber ? <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator" aria-hidden="true">›</span><span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind="members" className="topbar__breadcrumb-glyph" /></span><span>{betreiberTexteWerte.navigation}</span></span></> : null}
         {moduleLabel === null || moduleBreadcrumbIcon === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-module-separator topbar__crumb-area" aria-hidden="true">›</span><span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{moduleBreadcrumbIcon}</span><span>{moduleLabel}</span></span></>}
       </nav>
       <span className="topbar__connection">{connectionLed}</span>
@@ -996,6 +1005,7 @@ export const DashboardApp = (): ReactElement => {
 
   const [route, navigate] = useDashboardRoute();
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
+  const [istBetreiber, setIstBetreiber] = useState(false);
   const [overview, setOverview] = useState<LoadState<PanelChannelOverview>>(() => idleState());
   const [overviewRoutePath, setOverviewRoutePath] = useState<string | null>(null);
   const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(() => idleModeratorCheck());
@@ -1016,6 +1026,7 @@ export const DashboardApp = (): ReactElement => {
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [headerModuleBusy, setHeaderModuleBusy] = useState(false);
+  const fordereAnmeldung = useCallback((): void => { setAuthenticationRequired(true); }, []);
 
   const startMembersRequest = useCallback((): { controller: AbortController; generation: number } => {
     membersRequest.current.controller?.abort();
@@ -1045,6 +1056,7 @@ export const DashboardApp = (): ReactElement => {
     eventsPageController.current = null;
     cancelMembersRequest();
     setChannels({ status: "success", data: [], error: null });
+    setIstBetreiber(false);
     setOverview(idleState());
     setOverviewRoutePath(null);
     setModeratorCheck(idleModeratorCheck());
@@ -1071,6 +1083,7 @@ export const DashboardApp = (): ReactElement => {
         const response = await fetchChannels();
         if (!cancelled) {
           setChannels({ status: "success", data: response.channels, error: null });
+          setIstBetreiber(response.betreiber);
           setAuthenticationRequired(false);
         }
       } catch (error) {
@@ -1083,6 +1096,12 @@ export const DashboardApp = (): ReactElement => {
     void load();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (route.kind === "betreiber" && channels.status === "success" && !istBetreiber) {
+      navigate({ kind: "overview" });
+    }
+  }, [channels.status, istBetreiber, navigate, route.kind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1470,13 +1489,14 @@ export const DashboardApp = (): ReactElement => {
 
   return (
     <div className="app-shell">
-      <PanelTopbar route={route} channels={channels.data ?? []} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
+      <PanelTopbar route={route} channels={channels.data ?? []} betreiber={istBetreiber} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
       <div className="app-body">
-        <Rail route={route} channels={channels.data ?? []} onNavigate={navigate} />
+        <Rail route={route} channels={channels.data ?? []} betreiber={istBetreiber} onNavigate={navigate} />
         <main className="main-content">
         {channels.status === "loading" ? <p className="loading-line">{dashboardTexte().anmeldung.kanalzugriffPruefen}</p> : null}
         {channels.error !== null ? <ErrorPanel message={channels.error} /> : null}
         {route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} onNavigate={navigate} /> : null}
+        {route.kind === "betreiber" && istBetreiber ? <BetreiberSeite beiAnmeldungErforderlich={fordereAnmeldung} /> : null}
         {(route.kind === "channel" || route.kind === "module") && selectedChannel === null && channels.status === "success" ? <ErrorPanel message={dashboardTexte().fehler.kanalNichtFreigegeben} /> : null}
         {route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexte().overview.zustandLaden}</p> : null}
         {route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}

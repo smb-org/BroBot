@@ -99,6 +99,51 @@ export interface PanelModulesResponse {
 
 export interface PanelChannelsResponse {
   channels: PanelChannelState[];
+  betreiber: boolean;
+}
+
+export interface PanelBetreiberKanal {
+  channelId: string;
+  login: string;
+  displayName: string;
+  vollzustimmung: boolean;
+}
+
+export interface PanelBetreiberKanalÜbersicht extends PanelBetreiberKanal {
+  memberCounts: {
+    broadcaster: number;
+    verwalter: number;
+    bediener: number;
+  };
+  broadcasterConnected: boolean;
+}
+
+export interface PanelBetreiberÜbersichtResponse {
+  channels: PanelBetreiberKanalÜbersicht[];
+}
+
+export interface PanelBetreiberMitgliederResponse {
+  members: PanelMember[];
+  nextCursor: string | null;
+  broadcasterCount: number;
+  viewerUserId: string;
+}
+
+export interface PanelBetreiberAuditEntry {
+  auditId: string;
+  actorUserId: string;
+  actorKind: "mitglied" | "betreiber";
+  createdAt: string;
+  channelId: string;
+  moduleId: string | null;
+  action: string;
+  before: string;
+  after: string;
+}
+
+export interface PanelBetreiberAuditResponse {
+  entries: PanelBetreiberAuditEntry[];
+  nextCursor: string | null;
 }
 
 export interface PanelMember {
@@ -146,6 +191,7 @@ export interface PanelSystemResponse {
 export interface PanelAuditEntry {
   auditId: string;
   actorUserId: string;
+  actorKind: "mitglied" | "betreiber";
   createdAt: string;
   moduleId: string | null;
   action: string;

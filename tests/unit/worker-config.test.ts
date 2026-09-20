@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   LATEST_SCHEMA_MIGRATION,
+  getBetreiberUserIds,
   getHealthStatus,
   getMissingBindings,
 } from "../../src/worker/config";
@@ -45,6 +46,7 @@ const environment = (
   SESSION_COOKIE_KEYS: keyRing(1),
   SESSION_ENCRYPTION_KEYS: keyRing(2),
   OVERLAY_TOKEN_PEPPER: pepper,
+  BETREIBER_USER_IDS: "[]",
   ...overrides,
 } as Env);
 
@@ -67,6 +69,26 @@ describe("Healthcheck-Bindingvalidierung", () => {
     );
 
     expect(missingBindings).toEqual([]);
+  });
+
+  it("akzeptiert ein leeres Betreiber-Array und liest gültige IDs als Set", () => {
+    const validPepper = Buffer.alloc(32, 4).toString("base64url");
+    const env = environment(validPepper, {
+      BETREIBER_USER_IDS: '["26876135", "42"]',
+    });
+
+    expect(getMissingBindings(env)).toEqual([]);
+    expect([...getBetreiberUserIds(env)]).toEqual(["26876135", "42"]);
+    expect(getBetreiberUserIds(environment(validPepper, { BETREIBER_USER_IDS: "[]" }))).toEqual(new Set());
+    expect(getBetreiberUserIds({})).toEqual(new Set());
+  });
+
+  it("meldet ein ungültiges Betreiber-Secret und liefert dafür ein leeres Set", () => {
+    const validPepper = Buffer.alloc(32, 4).toString("base64url");
+    const env = environment(validPepper, { BETREIBER_USER_IDS: '["nicht-numerisch"]' });
+
+    expect(getMissingBindings(env)).toContain("BETREIBER_USER_IDS");
+    expect(getBetreiberUserIds(env)).toEqual(new Set());
   });
 
   it("meldet fehlende Ressourcen-Bindings und eine ungültige Origin", () => {

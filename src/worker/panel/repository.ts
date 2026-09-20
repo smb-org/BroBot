@@ -61,6 +61,7 @@ interface ActiveModuleRow {
 interface AuditLogRow {
   audit_id: string;
   actor_user_id: string;
+  actor_kind: "mitglied" | "betreiber";
   created_at: string;
   module_id: string | null;
   action: string;
@@ -352,12 +353,12 @@ export const getAuditLogForChannel = async (
   cursor: LogCursor | null,
 ): Promise<PanelAuditResponse> => {
   const query = cursor === null
-    ? `SELECT audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json
+    ? `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
         WHERE channel_id = ?
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`
-    : `SELECT audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json
+    : `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
         WHERE channel_id = ?
           AND (created_at < ? OR (created_at = ? AND audit_id < ?))
@@ -372,6 +373,7 @@ export const getAuditLogForChannel = async (
   const entries: PanelAuditEntry[] = rows.map((row) => ({
     auditId: row.audit_id,
     actorUserId: row.actor_user_id,
+    actorKind: row.actor_kind,
     createdAt: row.created_at,
     moduleId: row.module_id,
     action: row.action,

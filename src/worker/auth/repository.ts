@@ -1,4 +1,7 @@
-import { prepareModuleAudit as prepareHostModuleAudit } from "../module-audit";
+import {
+  prepareModuleAudit as prepareHostModuleAudit,
+  type AuditActorKind,
+} from "../module-audit";
 
 export interface NewSessionRecord {
   sessionId: string;
@@ -181,6 +184,10 @@ interface LoginIdentityRow {
   updated_at: string;
 }
 
+interface VollzustimmungsKanalZeile {
+  vorhanden: number;
+}
+
 interface BotIdentityStatusRow {
   id: 1;
   status: BotIdentityStatus;
@@ -360,6 +367,30 @@ export const actorGuard = (allowedRoles: string): string => `
              AND actor.role IN (${allowedRoles})
         )`;
 
+export interface MutationGuard {
+  sql: string;
+  values: readonly (string | number | null)[];
+}
+
+export const betreiberSessionGuard = (
+  actor: ActorContext,
+  now: string,
+): MutationGuard => ({
+  sql: `
+        AND EXISTS (
+          SELECT 1
+            FROM auth_sessions AS actor_session
+            JOIN twitch_login_identity AS actor_identity
+              ON actor_identity.user_id = actor_session.user_id
+           WHERE actor_session.session_id = ?
+             AND actor_session.user_id = ?
+             AND actor_session.revoked_at IS NULL
+             AND actor_session.expires_at > ?
+             AND actor_identity.status <> 'revoked'
+        )`,
+  values: [actor.sessionId, actor.userId, now],
+});
+
 /**
  * Wer die Rolle `broadcaster` vergibt, kann den bisherigen Broadcaster
  * anschliessend entfernen — der Schutz des letzten Broadcasters greift dann
@@ -384,7 +415,7 @@ export const channelBotConsentCondition = (channelAlias: string): string => `
              )
         )`;
 
-const requiredActorRoles = (targetRole: ChannelMemberRecord["role"]): string =>
+export const requiredActorRoles = (targetRole: ChannelMemberRecord["role"]): string =>
   targetRole === "broadcaster" ? "'broadcaster'" : "'broadcaster', 'verwalter'";
 
 export const bindActorGuard = (actor: ActorContext, channelId: string, now: string) =>
@@ -418,10 +449,11 @@ const prepareMemberAudit = (
   action: string,
   before: ChannelMemberRecord | null,
   after: ChannelMemberRecord | null,
+  actorKind: AuditActorKind = "mitglied",
 ): D1PreparedStatement => db.prepare(
   `INSERT INTO audit_log
-    (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json)
-   SELECT ?, ?, ?, ?, ?, ?, ?, ?
+    (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
+   SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
     WHERE changes() > 0`,
 ).bind(
   auditId(),
@@ -432,7 +464,17 @@ const prepareMemberAudit = (
   action,
   memberJson(before),
   memberJson(after),
+  actorKind,
 );
+
+const mutationGuardParts = (
+  guard: string | MutationGuard,
+  actor: ActorContext,
+  channelId: string,
+  changedAt: string,
+): MutationGuard => typeof guard === "string"
+  ? { sql: guard, values: bindActorGuard(actor, channelId, changedAt) }
+  : guard;
 
 const encodeChannelMemberCursor = (cursor: ChannelMemberCursor): string => {
   const serialized = JSON.stringify(cursor);
@@ -527,7 +569,10 @@ export const createChannelMemberWithAudit = async (
   member: ChannelMemberRecord,
   action: string,
   changedAt: string,
+  guard: string | MutationGuard,
+  actorKind: AuditActorKind = "mitglied",
 ): Promise<boolean> => {
+  const guardParts = mutationGuardParts(guard, actor, member.channelId, changedAt);
   const mutation = db.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
      SELECT ?, ?, ?, ?, ?
@@ -535,7 +580,7 @@ export const createChannelMemberWithAudit = async (
         SELECT 1 FROM channel_members
          WHERE channel_id = ? AND user_id = ?
       )
-      ${actorGuard(requiredActorRoles(member.role))}`,
+      ${guardParts.sql}`,
   ).bind(
     member.channelId,
     member.userId,
@@ -544,7 +589,7 @@ export const createChannelMemberWithAudit = async (
     member.updatedAt,
     member.channelId,
     member.userId,
-    ...bindActorGuard(actor, member.channelId, changedAt),
+    ...guardParts.values,
   );
   const audit = prepareMemberAudit(
     db,
@@ -554,6 +599,7 @@ export const createChannelMemberWithAudit = async (
     action,
     null,
     member,
+    actorKind,
   );
   const results = await db.batch([mutation, audit]);
   return (results[0]?.meta.changes ?? 0) > 0;
@@ -565,10 +611,13 @@ export const updateChannelMemberWithAudit = async (
   member: ChannelMemberRecord,
   action: string,
   changedAt: string,
+  guard: string | MutationGuard,
+  actorKind: AuditActorKind = "mitglied",
 ): Promise<boolean> => {
   const before = await getChannelMember(db, member.channelId, member.userId);
   if (before === null) return false;
   const after: ChannelMemberRecord = { ...member, createdAt: before.createdAt };
+  const guardParts = mutationGuardParts(guard, actor, after.channelId, changedAt);
   const mutation = db.prepare(
     `UPDATE channel_members
         SET role = ?, updated_at = ?
@@ -576,7 +625,7 @@ export const updateChannelMemberWithAudit = async (
         AND role = ?
         AND created_at = ?
         AND updated_at = ?
-      ${actorGuard(requiredActorRoles(after.role))}
+      ${guardParts.sql}
       ${lastBroadcasterRoleChangeGuard}`,
   ).bind(
     after.role,
@@ -586,7 +635,7 @@ export const updateChannelMemberWithAudit = async (
     before.role,
     before.createdAt,
     before.updatedAt,
-    ...bindActorGuard(actor, after.channelId, changedAt),
+    ...guardParts.values,
     after.role,
     after.channelId,
   );
@@ -598,6 +647,7 @@ export const updateChannelMemberWithAudit = async (
     action,
     before,
     after,
+    actorKind,
   );
   const results = await db.batch([mutation, audit]);
   return (results[0]?.meta.changes ?? 0) > 0;
@@ -610,16 +660,19 @@ export const deleteChannelMemberWithAudit = async (
   userId: string,
   action: string,
   changedAt: string,
+  guard: string | MutationGuard,
+  actorKind: AuditActorKind = "mitglied",
 ): Promise<boolean> => {
   const before = await getChannelMember(db, channelId, userId);
   if (before === null) return false;
+  const guardParts = mutationGuardParts(guard, actor, channelId, changedAt);
   const mutation = db.prepare(
     `DELETE FROM channel_members
       WHERE channel_id = ? AND user_id = ?
         AND role = ?
         AND created_at = ?
         AND updated_at = ?
-      ${actorGuard("'broadcaster', 'verwalter'")}
+      ${guardParts.sql}
       ${lastBroadcasterGuard}`,
   ).bind(
     channelId,
@@ -627,7 +680,7 @@ export const deleteChannelMemberWithAudit = async (
     before.role,
     before.createdAt,
     before.updatedAt,
-    ...bindActorGuard(actor, channelId, changedAt),
+    ...guardParts.values,
     channelId,
   );
   const audit = prepareMemberAudit(
@@ -638,6 +691,7 @@ export const deleteChannelMemberWithAudit = async (
     action,
     before,
     null,
+    actorKind,
   );
   const results = await db.batch([mutation, audit]);
   return (results[0]?.meta.changes ?? 0) > 0;
@@ -1128,6 +1182,30 @@ export const getLoginIdentity = async (
       WHERE user_id = ?`,
   ).bind(userId).first<LoginIdentityRow>();
   return row === null ? null : mapLoginIdentity(row);
+};
+
+export const hatVollzustimmungFürKanalId = async (
+  db: D1Database,
+  kanalId: string,
+): Promise<boolean> => {
+  const zeile = await db.prepare(
+    `SELECT 1 AS vorhanden
+       FROM channels
+      WHERE channel_id = ? AND vollzustimmung = 1`,
+  ).bind(kanalId).first<VollzustimmungsKanalZeile>();
+  return zeile?.vorhanden === 1;
+};
+
+export const hatVollzustimmungFürKanalLogin = async (
+  db: D1Database,
+  kanalLogin: string,
+): Promise<boolean> => {
+  const zeile = await db.prepare(
+    `SELECT 1 AS vorhanden
+       FROM channels
+      WHERE login = ? COLLATE NOCASE AND vollzustimmung = 1`,
+  ).bind(kanalLogin).first<VollzustimmungsKanalZeile>();
+  return zeile?.vorhanden === 1;
 };
 
 export const upsertLoginIdentity = async (
