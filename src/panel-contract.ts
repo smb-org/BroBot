@@ -137,6 +137,8 @@ export interface PanelBetreiberMitgliederResponse {
 export interface PanelBetreiberAuditEntry {
   auditId: string;
   actorUserId: string;
+  actorLogin: string | null;
+  actorDisplayName: string | null;
   actorKind: "mitglied" | "betreiber";
   createdAt: string;
   channelId: string;
@@ -197,6 +199,8 @@ export interface PanelSystemResponse {
 export interface PanelAuditEntry {
   auditId: string;
   actorUserId: string;
+  actorLogin: string | null;
+  actorDisplayName: string | null;
   actorKind: "mitglied" | "betreiber";
   createdAt: string;
   moduleId: string | null;

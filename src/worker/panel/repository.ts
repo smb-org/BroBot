@@ -403,6 +403,8 @@ export const getAuditLogForChannel = async (
   const entries: PanelAuditEntry[] = rows.map((row) => ({
     auditId: row.audit_id,
     actorUserId: row.actor_user_id,
+    actorLogin: null,
+    actorDisplayName: null,
     actorKind: row.actor_kind,
     createdAt: row.created_at,
     moduleId: row.module_id,

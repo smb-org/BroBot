@@ -626,6 +626,8 @@ describe("Dashboard-Grundgerüst", () => {
     const auditEntry = {
       auditId: "audit-1",
       actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
       createdAt: "2026-09-18T04:00:00.000Z",
       action: "module.enabled",
       before: "{\"enabled\":false}",
@@ -633,7 +635,9 @@ describe("Dashboard-Grundgerüst", () => {
     };
     const secondAuditEntry = {
       auditId: "audit-2",
-      actorUserId: "user-1",
+      actorUserId: "gelöscht",
+      actorLogin: null,
+      actorDisplayName: null,
       createdAt: "2026-09-18T03:00:00.000Z",
       action: "module.disabled",
       before: "{\"enabled\":true}",
@@ -651,6 +655,8 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
+    expect(await screen.findByText("Alice")).toBeInTheDocument();
+    expect(await screen.findByText("gelöscht")).toBeInTheDocument();
     const row = screen.getByText("module.enabled").closest("tr");
     expect(row).not.toBeNull();
     expect(row).toHaveAttribute("aria-selected", "false");
@@ -659,6 +665,8 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("heading", { name: "Vorher" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Nachher" })).toBeInTheDocument();
     expect(screen.getByText('{"enabled":false}')).toBeInTheDocument();
+    const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
+    expect(await within(inspector).findByText("user-1")).toBeInTheDocument();
     const secondRow = screen.getByText("module.disabled").closest("tr");
     expect(secondRow).not.toBeNull();
     fireEvent.keyDown(secondRow as HTMLElement, { key: " " });

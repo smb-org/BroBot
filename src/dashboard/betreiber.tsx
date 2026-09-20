@@ -490,8 +490,10 @@ const BetreiberAudit = ({
 }): ReactElement => {
   const texte = betreiberTexte();
   const kanalnamen = useMemo(() => new Map(kanäle.map((kanal) => [kanal.channelId, kanal.login])), [kanäle]);
+  const akteurName = (eintrag: PanelBetreiberAuditEntry): string =>
+    eintrag.actorDisplayName ?? (eintrag.actorLogin == null ? eintrag.actorUserId : `@${eintrag.actorLogin}`);
   const akteur = (eintrag: PanelBetreiberAuditEntry): string =>
-    (eintrag.actorKind === "betreiber" ? texte.betreiber : texte.mitglied) + " · " + eintrag.actorUserId;
+    (eintrag.actorKind === "betreiber" ? texte.betreiber : texte.mitglied) + " · " + akteurName(eintrag);
   return (
     <section className="config-section" aria-label={texte.audit}>
       <div className="section-heading"><h2>{texte.audit}</h2></div>

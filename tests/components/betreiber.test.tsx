@@ -33,12 +33,15 @@ const mitglieder = {
   viewerUserId: "999",
 };
 
-const richteBetreiberEin = (betreiber: boolean): ReturnType<typeof vi.fn<typeof fetch>> => {
+const richteBetreiberEin = (
+  betreiber: boolean,
+  audit: { entries: unknown[]; nextCursor: string | null } = { entries: [], nextCursor: null },
+): ReturnType<typeof vi.fn<typeof fetch>> => {
   const fetcher = vi.fn<typeof fetch>((input) => {
     const url = anfrageUrl(input);
     if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], betreiber }));
     if (url.pathname === "/api/betreiber") return Promise.resolve(antwort({ channels: [kanal] }));
-    if (url.pathname === "/api/betreiber/audit") return Promise.resolve(antwort({ entries: [], nextCursor: null }));
+    if (url.pathname === "/api/betreiber/audit") return Promise.resolve(antwort(audit));
     if (url.pathname === "/api/betreiber/kanaele/123/mitglieder") return Promise.resolve(antwort(mitglieder));
     return Promise.resolve(antwort({}, 404));
   });
@@ -119,6 +122,45 @@ describe("Betreiberebene", () => {
     const link = await screen.findByRole("textbox", { name: "Einladungslink" });
 
     expect(link).toHaveValue("http://localhost:3000/auth/login?kanal=alpha_login");
+  });
+
+  it("zeigt im Betreiber-Audit den Anzeigenamen und bei fehlender Auflösung die ID", async () => {
+    richteBetreiberEin(true, {
+      entries: [{
+        auditId: "audit-1",
+        actorUserId: "26876135",
+        actorLogin: "esembe",
+        actorDisplayName: "Esembe",
+        actorKind: "betreiber",
+        createdAt: "2026-09-18T00:00:00.000Z",
+        channelId: "123",
+        moduleId: null,
+        action: "kanal.freigegeben",
+        before: "{}",
+        after: "{}",
+      }, {
+        auditId: "audit-2",
+        actorUserId: "gelöscht",
+        actorLogin: null,
+        actorDisplayName: null,
+        actorKind: "betreiber",
+        createdAt: "2026-09-18T00:00:01.000Z",
+        channelId: "123",
+        moduleId: null,
+        action: "kanal.vollzustimmung_geaendert",
+        before: "{}",
+        after: "{}",
+      }],
+      nextCursor: null,
+    });
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const audit = await screen.findByRole("region", { name: "Betreiber-Audit" });
+    expect(await within(audit).findByText("Betreiber · Esembe")).toBeInTheDocument();
+    expect(await within(audit).findByText("Betreiber · gelöscht")).toBeInTheDocument();
+    expect(within(audit).queryByText("Betreiber · 26876135")).not.toBeInTheDocument();
   });
 
   it("zeigt den Einladungslink nur im Editor des gewählten Kanals", async () => {

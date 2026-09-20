@@ -447,4 +447,39 @@ describe("Betreiberebene", () => {
     expect(zweiteSeite.entries[0]).toMatchObject({ auditId: "audit-betreiber-1", actorKind: "betreiber" });
     expect(zweiteSeite.nextCursor).toBeNull();
   });
+
+  it("löst Betreiber-Audit-Akteure gesammelt auf und behält ungelöste IDs", async () => {
+    await setzeBetreiber(datenbank);
+    await insertChannel(datenbank, "kanal-a");
+    await insertMember(datenbank, "kanal-a", "kanal-a", "broadcaster");
+    await setzeBotIdentität(datenbank);
+    await datenbank.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
+       VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?), (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
+    ).bind(
+      "audit-aufgelöst", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "kanal.freigegeben", "betreiber",
+      "audit-ungelöst", "gelöscht", "2026-09-18T00:00:01.000Z", "kanal-a", "kanal.vollzustimmung_geaendert", "betreiber",
+    ).run();
+    const twitch = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.pathname).toBe("/helix/users");
+      expect(url.searchParams.getAll("id")).toEqual(["betreiber", "gelöscht"]);
+      return Promise.resolve(antwortVonHelix([{ id: "betreiber", login: "esembe", display_name: "Esembe" }]));
+    });
+    vi.stubGlobal("fetch", twitch);
+
+    const antwort = await betreiberRouter.fetch(
+      await anfrageFür(betreiberId, "/api/betreiber/audit"),
+      umgebung,
+    );
+    const körper = await antwort.json<{ entries: Array<Record<string, unknown>> }>();
+
+    expect(antwort.status).toBe(200);
+    expect(twitch).toHaveBeenCalledTimes(1);
+    expect(körper.entries).toEqual([
+      expect.objectContaining({ actorUserId: "betreiber", actorLogin: "esembe", actorDisplayName: "Esembe", actorKind: "betreiber" }),
+      expect.objectContaining({ actorUserId: "gelöscht", actorLogin: null, actorDisplayName: null, actorKind: "betreiber" }),
+    ]);
+  });
 });

@@ -2,6 +2,7 @@ import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState
 import { createRoot } from "react-dom/client";
 
 import type {
+  PanelAuditEntry,
   PanelAuditResponse,
   PanelBotPermissions,
   PanelBotStatus,
@@ -891,11 +892,12 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
           <div className={auditState.status === "loading" ? "veraltet" : undefined}>
             <table className="tabelle audit-tabelle">
               <thead><tr><th scope="col">{texte.system.zeit}</th><th scope="col">{texte.system.aktion}</th><th scope="col">{texte.system.wer}</th></tr></thead>
-              <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { setSelectedAuditId(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedAuditId(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td className="mono">{entry.actorUserId}</td></tr>)}</tbody>
+              <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { setSelectedAuditId(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedAuditId(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
             </table>
           </div>
           {selectedAudit === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.system.aenderungsdaten}>
             <div className="inspector-section__heading"><h3>{selectedAudit.action}</h3><span className="mono muted">{selectedAudit.auditId}</span></div>
+            <dl className="eigenschaften"><div><dt>{texte.system.wer}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
             <div className="inspector-columns"><div><h4>{texte.system.vorher}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texte.system.nachher}</h4><pre>{selectedAudit.after}</pre></div></div>
           </section>}
           {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texte.system.aeltereEintraegeLaden : texte.system.aeltereEintraege}</button>}
@@ -975,6 +977,9 @@ const actorCell = (entry: PanelEventEntry, texte: ReturnType<typeof dashboardTex
   entry.actorDisplayName ?? (entry.actorLogin == null
     ? entry.actorUserId == null ? texte.ereignisse.automatisch : <span className="mono">{entry.actorUserId}</span>
     : `@${entry.actorLogin}`);
+
+const auditActorLabel = (entry: PanelAuditEntry): string =>
+  entry.actorDisplayName ?? (entry.actorLogin == null ? entry.actorUserId : `@${entry.actorLogin}`);
 
 const moduleLabel = (entry: PanelEventEntry): string => moduleName(entry.moduleId);
 

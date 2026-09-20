@@ -512,7 +512,7 @@ describe("Panel-Leseendpunkte", () => {
     }>();
 
     expect(firstResponse.status).toBe(200);
-    expect(first.entries).toEqual([{ auditId: "audit-1", actorUserId: "user-1", actorKind: "mitglied", createdAt: "2026-09-18T03:00:00.000Z", moduleId: null, action: "neu", before: "null", after: "{}" }]);
+    expect(first.entries).toEqual([{ auditId: "audit-1", actorUserId: "user-1", actorLogin: null, actorDisplayName: null, actorKind: "mitglied", createdAt: "2026-09-18T03:00:00.000Z", moduleId: null, action: "neu", before: "null", after: "{}" }]);
     expect(first.nextCursor).toEqual(expect.any(String));
 
     const secondResponse = await panelRouter.fetch(
@@ -522,8 +522,43 @@ describe("Panel-Leseendpunkte", () => {
     const second = await secondResponse.json<{ entries: Array<{ auditId: string; action: string }>; nextCursor: string | null }>();
 
     expect(secondResponse.status).toBe(200);
-    expect(second.entries).toEqual([{ auditId: "audit-2", actorUserId: "user-1", actorKind: "mitglied", createdAt: "2026-09-18T02:00:00.000Z", moduleId: null, action: "alt", before: "{}", after: "{}" }]);
+    expect(second.entries).toEqual([{ auditId: "audit-2", actorUserId: "user-1", actorLogin: null, actorDisplayName: null, actorKind: "mitglied", createdAt: "2026-09-18T02:00:00.000Z", moduleId: null, action: "alt", before: "{}", after: "{}" }]);
     expect(second.nextCursor).toBeNull();
+  });
+
+  it("löst Audit-Akteure seitenweise in einem Twitch-Aufruf auf und behält ungelöste IDs", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertBotIdentity(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-actor", "auflösbar", "2026-09-18T04:00:00.000Z", "kanal-a", "neu", "{}", "{}",
+      "audit-unknown", "gelöscht", "2026-09-18T03:00:00.000Z", "kanal-a", "alt", "{}", "{}",
+    ).run();
+    const twitch = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.pathname).toBe("/helix/users");
+      expect(url.searchParams.getAll("id")).toEqual(["auflösbar", "gelöscht"]);
+      return Promise.resolve(Response.json({ data: [{ id: "auflösbar", login: "alice", display_name: "Alice" }] }));
+    });
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<Record<string, unknown>> }>();
+
+    expect(response.status).toBe(200);
+    expect(twitch).toHaveBeenCalledTimes(1);
+    expect(body.entries).toEqual([
+      expect.objectContaining({ actorUserId: "auflösbar", actorLogin: "alice", actorDisplayName: "Alice" }),
+      expect.objectContaining({ actorUserId: "gelöscht", actorLogin: null, actorDisplayName: null }),
+    ]);
   });
 });
 
