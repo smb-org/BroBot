@@ -205,7 +205,7 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
+    expect(await screen.findByText(/aktualisiert vor/)).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Ereignis" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Modul" })).toBeInTheDocument();
@@ -278,7 +278,7 @@ describe("Dashboard-Grundgerüst", () => {
     const eventsLink = await screen.findByRole("link", { name: "Ereignisse" });
     fireEvent.click(eventsLink);
     expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("neu")).toBeInTheDocument();
+    expect(await screen.findByText("neu")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
     expect(await screen.findByText("alt")).toBeInTheDocument();
@@ -403,7 +403,7 @@ describe("Dashboard-Grundgerüst", () => {
       viewerUserId: "100",
     });
 
-    expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
     expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(2);
 
     // Das Auswahlfeld bietet keinen Wert an, der abgelehnt würde.
@@ -420,7 +420,7 @@ describe("Dashboard-Grundgerüst", () => {
       viewerUserId: "100",
     });
 
-    expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeEnabled();
     expect(screen.queryByText("Letzter Broadcaster")).not.toBeInTheDocument();
   });
 
@@ -432,7 +432,7 @@ describe("Dashboard-Grundgerüst", () => {
       viewerUserId: "100",
     });
     vi.stubGlobal("confirm", frage);
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff für esembe entziehen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" }));
 
     expect(frage).toHaveBeenCalledOnce();
     expect(frage.mock.calls.at(0)?.[0] ?? "").toContain("selbst aus");
@@ -461,7 +461,7 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Mitglieder", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("Streamerin")).toBeInTheDocument();
+    expect(await screen.findByText("Streamerin")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "twitch.tv/streamer" }))
       .toHaveAttribute("href", "https://twitch.tv/streamer");
     const avatarImage = document.querySelector("img.member-avatar");
@@ -504,7 +504,7 @@ describe("Dashboard-Grundgerüst", () => {
       viewerUserId: "100",
     });
 
-    const table = screen.getByRole("table");
+    const table = await screen.findByRole("table");
     expect(table.querySelector("thead")).toHaveClass("sr-only");
     expect(screen.getByRole("columnheader", { name: "Name" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Rolle" })).toBeInTheDocument();
@@ -542,7 +542,7 @@ describe("Dashboard-Grundgerüst", () => {
     const freigeben = screen.getByRole("button", { name: "Zugriff freigeben" });
     expect(freigeben).toBeDisabled();
     expect(freigeben).toHaveAttribute("title", grund);
-    expect(screen.getByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
+    expect(await screen.findByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
     const entziehen = screen.getByRole("button", { name: "Zugriff für Moderation entziehen" });
     expect(entziehen).toBeDisabled();
     expect(screen.getAllByText(grund).length).toBeGreaterThan(0);
@@ -664,6 +664,90 @@ describe("Dashboard-Grundgerüst", () => {
     fireEvent.keyDown(secondRow as HTMLElement, { key: " " });
     expect(secondRow).toHaveAttribute("aria-selected", "true");
     expect(row).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("zeigt alle Abos lesbar und öffnet Meldung und Status im Sub-Inspector", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
+    const subscriptions = [
+      { subscriptionType: "channel.chat.message", variant: "", version: "1", subscriptionId: "chat-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" },
+      { subscriptionType: "channel.raid", variant: "eingehend", version: "1", subscriptionId: "raid-in", status: "missing", reason: "subscription_replaced", message: null, statusCode: null, updatedAt: "2026-09-18T03:00:00.000Z" },
+      { subscriptionType: "channel.raid", variant: "ausgehend", version: "1", subscriptionId: "raid-out", status: "error", reason: "missing_scope", message: "Scope fehlt", statusCode: 403, updatedAt: "2026-09-18T02:00:00.000Z" },
+      { subscriptionType: "channel.future", variant: "", version: "9", subscriptionId: null, status: "pending", reason: "wartet", message: null, statusCode: null, updatedAt: "2026-09-18T01:00:00.000Z" },
+    ];
+    const systemResponse = { ...system, botPermissions: { missingScopes: [] }, subscriptions };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/system")) return Promise.resolve(jsonResponse(systemResponse));
+      if (path.endsWith("/audit-log")) return Promise.resolve(jsonResponse(audit));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("columnheader", { name: "Abo" })).toBeInTheDocument();
+    expect(screen.getByText("Chat-Nachrichten")).toBeInTheDocument();
+    expect(screen.getByText("Eingehende Raids")).toBeInTheDocument();
+    expect(screen.getByText("Ausgehende Raids")).toBeInTheDocument();
+    expect(screen.getByText("Chat-Nachrichten").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "green");
+    expect(screen.getByText("Eingehende Raids").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "amber");
+    expect(screen.getByText("Ausgehende Raids").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "red");
+    const unknown = screen.getByText("channel.future");
+    expect(unknown).toHaveClass("mono");
+    expect(screen.getByText("Ausstehend")).toBeInTheDocument();
+    expect(screen.getByText("missing_scope")).toBeInTheDocument();
+
+    const outgoing = screen.getByText("Ausgehende Raids").closest("tr");
+    expect(outgoing).not.toBeNull();
+    fireEvent.keyDown(outgoing as HTMLElement, { key: "Enter" });
+    expect(outgoing).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("channel.raid")).toBeInTheDocument();
+    expect(screen.getByText("Scope fehlt")).toBeInTheDocument();
+    expect(screen.getByText("403")).toBeInTheDocument();
+  });
+
+  it("zeigt Bot-Berechtigungen auf der Kanalseite, nennt fehlende Scopes und bietet keine Autorisierung an", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      botPermissions: { missingScopes: ["user:bot", "user:read:chat"] },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const permissions = await screen.findByRole("article", { name: "Bot-Berechtigungen" });
+    expect(permissions).toHaveAttribute("data-status", "warning");
+    expect(within(permissions).getByText("2 fehlen")).toBeInTheDocument();
+    expect(screen.getByText("Der Betreiber muss die Anwendung neu autorisieren.")).toBeInTheDocument();
+    expect(screen.getByText("user:bot")).toHaveClass("mono");
+    expect(screen.getByText("user:read:chat")).toHaveClass("mono");
+    // Die Autorisierung gehört zum Betreiber-Account, nicht in die kanalbezogene Panel-Rolle.
+    expect(screen.queryByRole("button", { name: /autoris/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /autoris/i })).not.toBeInTheDocument();
+  });
+
+  it("zeigt vollständige Bot-Berechtigungen als gesunden Zustand mit Wort", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const permissions = await screen.findByRole("article", { name: "Bot-Berechtigungen" });
+    expect(permissions).toHaveAttribute("data-status", "healthy");
+    expect(within(permissions).getByText("Gesund")).toBeInTheDocument();
   });
 
   it("fragt beim Hinzufügen ausdrücklich nach dem tatsächlichen Zugriffsumfang", async () => {
@@ -1338,7 +1422,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "System" }));
     await screen.findByRole("heading", { name: "System", level: 1 });
-    expect(screen.getByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
+    expect(await screen.findByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
   });
 
   it("zeigt einen fehlenden Moderatorstatus als roten Fehlerzustand", async () => {

@@ -21,7 +21,15 @@ export const BOT_SCOPES = [
   "moderator:manage:warnings",
   "moderator:read:moderators",
   "moderator:read:vips",
+  "moderator:manage:automod",
+  "moderator:read:suspicious_users",
 ] as const;
+
+/** Liefert die verlangten Bot-Scopes, die Twitch nicht erteilt hat. */
+export const missingBotScopes = (grantedScopes: readonly string[]): string[] => {
+  const granted = new Set(grantedScopes);
+  return BOT_SCOPES.filter((scope) => !granted.has(scope));
+};
 
 export type OAuthPurpose = "login" | "bot";
 
@@ -151,6 +159,7 @@ export const startOAuthAuthorization = async (
   url.searchParams.set("redirect_uri", redirectUri(environment.PUBLIC_ORIGIN));
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", (purpose === "login" ? LOGIN_SCOPES : BOT_SCOPES).join(" "));
+  if (purpose === "bot") url.searchParams.set("force_verify", "true");
   url.searchParams.set("state", state);
   return { url: url.toString(), state, transactionId, stateNonce };
 };

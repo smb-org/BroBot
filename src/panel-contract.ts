@@ -5,6 +5,7 @@ export type PanelLoginStatusName = "connected" | "revoked" | "error";
 export type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
 export type PanelChannelBotConsentStatus = "granted" | "missing";
 export type PanelChatSubscriptionStatus = "enabled" | "missing" | "error" | "revoked";
+export type PanelEventSubSubscriptionStatus = PanelChatSubscriptionStatus | "pending";
 
 export interface PanelBotStatus {
   status: PanelBotStatusName;
@@ -23,6 +24,22 @@ export interface PanelChatSubscription {
   subscriptionId: string | null;
   reason: string | null;
   updatedAt: string;
+}
+
+export interface PanelEventSubSubscription {
+  subscriptionType: string;
+  variant: string;
+  version: string;
+  subscriptionId: string | null;
+  status: PanelEventSubSubscriptionStatus;
+  reason: string | null;
+  message: string | null;
+  statusCode: number | null;
+  updatedAt: string;
+}
+
+export interface PanelBotPermissions {
+  missingScopes: string[];
 }
 
 export interface PanelTokenStatus {
@@ -50,6 +67,7 @@ export interface PanelChannelState {
   broadcasterConnection: PanelBroadcasterConnectionStatus;
   channelBotConsent: PanelChannelBotConsentStatus;
   bot: PanelBotStatus | null;
+  botPermissions: PanelBotPermissions | null;
   moderator: PanelModeratorStatus | null;
   chatSubscription: PanelChatSubscription | null;
   tokens: PanelTokenStatus;
@@ -115,7 +133,9 @@ export interface PanelTwitchUser {
 export interface PanelSystemResponse {
   broadcasterConnection: PanelBroadcasterConnectionStatus;
   bot: PanelBotStatus | null;
+  botPermissions: PanelBotPermissions | null;
   chatSubscription: PanelChatSubscription | null;
+  subscriptions?: PanelEventSubSubscription[];
   tokens: PanelTokenStatus;
 }
 

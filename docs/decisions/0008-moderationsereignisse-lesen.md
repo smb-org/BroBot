@@ -60,7 +60,8 @@ Version 2 steht.
 
 `channel.moderate` ist **alles oder nichts**. Eine Teilmenge abonniert nicht;
 Twitch verlangt jede Zeile der Bedingung. Das sind acht Scopes, von denen nur
-zwei nach „Bann" klingen:
+zwei nach „Bann" klingen. Für die beiden zusätzlichen Moderationsereignisse
+kommen zwei weitere Scopes hinzu:
 
 | Scope | Variante | Warum diese Variante |
 |---|---|---|
@@ -72,16 +73,25 @@ zwei nach „Bann" klingen:
 | `moderator:manage:chat_messages` | manage | war bereits vorhanden |
 | `moderator:read:moderators` | read | die Bedingung lässt hier kein `manage` zu |
 | `moderator:read:vips` | read | die Bedingung lässt hier kein `manage` zu |
+| `moderator:manage:automod` | manage | `automod.message.hold` verlangt diesen Scope; er ist keine Lesevariante und erlaubt das Freigeben oder Ablehnen zurückgehaltener Nachrichten |
+| `moderator:read:suspicious_users` | read | `channel.suspicious_user.message` liest Twitchs Bann-Umgehungs-Erkennung und damit Verdachtsdaten über namentlich benannte Zuschauer |
 
 Die Lesefläche ist damit deutlich größer, als „Bans protokollieren" vermuten
 lässt: gesperrte Begriffe, Chat-Einstellungen, Entsperranträge, gelöschte
-Nachrichten, Moderatoren- und VIP-Listen.
+Nachrichten, Moderatoren- und VIP-Listen sowie Twitchs Verdachtsdaten zu
+mutmaßlicher Bann-Umgehung.
+
+`moderator:manage:automod` ist dabei **keine** Lesevariante. Der Scope erlaubt,
+von AutoMod zurückgehaltene Nachrichten freizugeben oder abzulehnen — eine
+Moderationsentscheidung mit Wirkung im Chat. Geholt wird er, weil
+`automod.message.hold` ihn zwingend verlangt; ausgeübt wird diese Fähigkeit
+nicht.
 
 `moderator:read:moderators` und `moderator:read:vips` stehen in der Bedingung
 ohne Oder. Ihre `manage`-Gegenstücke sind Broadcaster-Scopes und kämen nur mit
 der Strecke, die diese Entscheidung gerade vermeidet.
 
-## 4. Warum `manage` vor dem ersten Nutzer
+## 4. Warum `manage` und die zusätzlichen Scopes vor dem ersten Nutzer
 
 Wo die Bedingung `read ODER manage` zulässt, kostet `manage` **nichts
 zusätzlich**: dieselbe Zeile, derselbe Dialog, dieselbe Zahl an Scopes.
@@ -91,11 +101,28 @@ Kommt ein Scope nach, muss dieses Konto die Anwendung erneut autorisieren — un
 bis dahin scheitern die Abos. Die Fähigkeit jetzt zu holen erspart genau diese
 zweite Hürde, wenn ein Modul erstmals moderieren soll.
 
-Der Preis ist ehrlich zu benennen: **ein gestohlenes Bot-Token kann bannen,
+Der Grund für die beiden zusätzlichen Scopes ist verschieden:
+`moderator:manage:automod` ist keine freiwillige Erweiterung, sondern wird vom
+Halte-Ereignis zwingend verlangt. `moderator:read:suspicious_users` liest
+Twitchs Bann-Umgehungs-Erkennung, also Verdachtsdaten über namentlich benannte
+Zuschauer.
+
+Der Preis ist ehrlich zu benennen: **Ein gestohlenes Bot-Token kann bannen,
 timeouten, entbannen, verwarnen, gesperrte Begriffe und Chat-Einstellungen
-ändern** — in jedem Kanal, in dem der Bot Moderator ist. Vorher konnte es
-Nachrichten löschen und Shoutouts senden. Der Schaden wächst von „ärgerlich" auf
-„sichtbar für die Zuschauerschaft".
+ändern, zusätzlich AutoMod-Entscheidungen treffen und Verdachtsdaten über
+namentlich benannte Zuschauer auslesen** — in jedem Kanal, in dem der Bot
+Moderator ist. Vorher konnte es Nachrichten löschen und Shoutouts senden. Der
+Schaden wächst von „ärgerlich" auf „sichtbar für die Zuschauerschaft".
+
+Die Sichtbarkeit dieser Daten im Panel bleibt bewusst bei allen
+Kanalmitgliedern; [0004](0004-ereignisprotokoll.md) gilt unverändert. Dadurch
+wird die Rolle `bediener` gewichtiger: Bediener können die gelesenen
+Moderations- und Verdachtsereignisse im Betriebsalltag einsehen, ohne selbst
+eine Moderationsaktion auszulösen.
+
+Der Grundsatz bleibt deshalb unverändert und wörtlich: **Gelesen wird,
+moderiert wird nicht.** Die Fähigkeit zur AutoMod-Entscheidung liegt jetzt
+trotzdem im Token; sie gehört als Risiko benannt und wird nicht verschwiegen.
 
 Das ist vertretbar, weil das Token verschlüsselt liegt (siehe
 [0003](0003-hash-und-salt-modell.md)), sein Zustand überwacht wird und der

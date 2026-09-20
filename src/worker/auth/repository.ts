@@ -1592,6 +1592,26 @@ export const rotateBotTokens = async (
   return (results[0]?.meta.changes ?? 0) > 0;
 };
 
+export const setBotIdentityMissingScopesIfCurrent = async (
+  db: D1Database,
+  missingScopes: readonly string[],
+  expectedAccessTokenCiphertext: string,
+  expectedRefreshTokenCiphertext: string,
+): Promise<boolean> => {
+  const result = await db.prepare(
+    `UPDATE bot_identity
+        SET missing_scopes_json = ?
+      WHERE id = 1
+        AND access_token_ciphertext = ?
+        AND refresh_token_ciphertext = ?`,
+  ).bind(
+    JSON.stringify([...missingScopes]),
+    expectedAccessTokenCiphertext,
+    expectedRefreshTokenCiphertext,
+  ).run();
+  return result.meta.changes > 0;
+};
+
 export const rotateLoginTokensForUser = async (
   db: D1Database,
   userId: string,

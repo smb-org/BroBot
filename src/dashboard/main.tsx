@@ -3,11 +3,13 @@ import { createRoot } from "react-dom/client";
 
 import type {
   PanelAuditResponse,
+  PanelBotPermissions,
   PanelBotStatus,
   PanelChannelOverview,
   PanelChannelState,
   PanelEventEntry,
   PanelEventsResponse,
+  PanelEventSubSubscription,
   PanelLastError,
   PanelMembersResponse,
   PanelModeratorStatus,
@@ -82,6 +84,18 @@ const statusLabel = (status: PanelBotStatus["status"]): string => {
   return texte.status.fehler;
 };
 
+const subscriptionTone = (status: PanelEventSubSubscription["status"]): ZustandsTon =>
+  status === "enabled" ? "healthy" : status === "missing" || status === "pending" ? "warning" : "error";
+
+const subscriptionStatusLabel = (status: PanelEventSubSubscription["status"]): string => {
+  const texte = dashboardTexte();
+  if (status === "enabled") return texte.status.aktiv;
+  if (status === "missing") return texte.status.fehlend;
+  if (status === "pending") return texte.status.ausstehend;
+  if (status === "revoked") return texte.status.widerrufen;
+  return texte.status.fehler;
+};
+
 const parseDate = (value: string | null): number | null => {
   if (value === null) return null;
   const parsed = Date.parse(value);
@@ -144,6 +158,7 @@ const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "err
   if (channel.chatSubscription?.status === "error" || channel.chatSubscription?.status === "revoked") return "error";
   if (channel.lastError?.source === "eventsub") return "error";
   if (channel.bot?.status === "error" || channel.bot?.status === "revoked") return "error";
+  if (channel.botPermissions?.missingScopes.length) return "warning";
   if (channel.tokens.loginStatus === "error" || channel.tokens.loginStatus === "revoked") return "error";
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (tokenStatus.tone === "error") return "error";
@@ -165,6 +180,7 @@ const statusText = (channel: PanelChannelState): string => {
   if (channel.lastError?.source === "eventsub") return texte.fehler.letzter;
   if (channel.bot?.status === "error") return texte.status.botFehler;
   if (channel.bot?.status === "revoked") return texte.status.botTokenWiderrufen;
+  if (channel.botPermissions?.missingScopes.length) return texte.status.botBerechtigungenFehlen(formatZahl(channel.botPermissions.missingScopes.length));
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (channelBotConsentMissing(channel) && tokenStatus.tone === "healthy") return texte.status.broadcasterZustimmungFehlt;
   if (channel.chatSubscription == null && !channelBotConsentMissing(channel)) return texte.status.chatAboFehlt;
@@ -613,6 +629,30 @@ const chatRow = (status: PanelChannelState["chatSubscription"] | undefined, expe
   return { key: "chat-subscription", tone, node: <ZustandZeile label={texte.statusKarte.chatAbo} tone={tone} wort={wort} detail={current?.reason ?? (current === null && expected ? texte.status.chatAboFehlt : undefined)} /> };
 };
 
+const botPermissionsRow = (permissions: PanelBotPermissions | null | undefined): StatusEntry | null => {
+  const texte = dashboardTexte();
+  if (permissions === undefined) return null;
+  if (permissions === null) {
+    return {
+      key: "bot-permissions",
+      tone: "neutral",
+      node: <ZustandZeile label={texte.statusKarte.botBerechtigungen} tone="neutral" wort={texte.status.nichtGeprueft} detail={texte.bot.keinGespeicherterStatus} />,
+    };
+  }
+  const missing = permissions.missingScopes.length;
+  const tone: ZustandsTon = missing === 0 ? "healthy" : "warning";
+  return {
+    key: "bot-permissions",
+    tone,
+    node: <ZustandZeile
+      label={texte.statusKarte.botBerechtigungen}
+      tone={tone}
+      wort={missing === 0 ? texte.status.gesund : texte.status.botBerechtigungenFehlen(formatZahl(missing))}
+      detail={missing === 0 ? texte.bot.botBerechtigungenVollstaendig : texte.bot.botBerechtigungenBetreiber}
+    />,
+  };
+};
+
 const tokenRow = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): StatusEntry => {
   const texte = dashboardTexte();
   const token = tokenView(tokens, bot);
@@ -654,6 +694,71 @@ const lastErrorRow = (error: PanelLastError | null): StatusEntry => {
   return { key: "fehler", tone, node: <ZustandZeile label={texte.fehler.letzter} tone={tone} wort={texte.status.fehler} detail={detail} /> };
 };
 
+const BotPermissionsInspector = ({ permissions }: { permissions: PanelBotPermissions | null | undefined }): ReactElement | null => {
+  const texte = dashboardTexte();
+  if (permissions === null || permissions === undefined || permissions.missingScopes.length === 0) return null;
+  return (
+    <section className="command-inspector sub-inspector" aria-label={texte.system.botBerechtigungenInspector}>
+      <div className="inspector-section__heading"><h3>{texte.system.botBerechtigungenInspector}</h3><span className="mono muted">{formatZahl(permissions.missingScopes.length)}</span></div>
+      <h4>{texte.system.fehlendeScopes}</h4>
+      <ul className="scope-liste">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
+    </section>
+  );
+};
+
+const subscriptionKey = (subscription: PanelEventSubSubscription): string =>
+  `${subscription.subscriptionType}\u0000${subscription.variant}\u0000${subscription.version}`;
+
+const subscriptionDisplayName = (subscription: PanelEventSubSubscription): string =>
+  eventSubName(subscription.subscriptionType, subscription.variant);
+
+const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubSubscription[] }): ReactElement => {
+  const texte = dashboardTexte();
+  const leer = "—";
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selected = subscriptions.find((subscription) => subscriptionKey(subscription) === selectedKey) ?? null;
+  return (
+    <section className="content-section" aria-label={texte.system.abonnements}>
+      <div className="section-heading"><h2>{texte.system.abonnements}</h2><span className="muted zahl">{formatZahl(subscriptions.length)}</span></div>
+      {subscriptions.length === 0 ? <p className="empty-state">{texte.system.keineAbonnements}</p> : <>
+        <div className="tabelle-wrap">
+          <table className="tabelle abonnements-tabelle">
+            <thead><tr><th scope="col">{texte.system.abo}</th><th scope="col">{texte.system.zustand}</th><th scope="col">{texte.system.grund}</th></tr></thead>
+            <tbody>{subscriptions.map((subscription) => {
+              const key = subscriptionKey(subscription);
+              const name = subscriptionDisplayName(subscription);
+              const unknown = name === subscription.subscriptionType;
+              const tone = subscriptionTone(subscription.status);
+              return <tr
+                key={key}
+                tabIndex={0}
+                aria-selected={selectedKey === key}
+                onClick={() => { setSelectedKey(key); }}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedKey(key); } }}
+              >
+                <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
+                <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status)} /></td>
+                <td>{subscription.reason ?? leer}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+        {selected === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.system.aboInspector}>
+          <div className="inspector-section__heading"><h3>{subscriptionDisplayName(selected)}</h3><span className="mono muted">{selected.subscriptionId ?? leer}</span></div>
+          <dl className="eigenschaften">
+            <div><dt>{texte.system.aboTyp}</dt><dd className="mono">{selected.subscriptionType}</dd></div>
+            <div><dt>{texte.system.aboVersion}</dt><dd className="mono">{selected.version}</dd></div>
+            <div><dt>{texte.system.aboId}</dt><dd className="mono">{selected.subscriptionId ?? leer}</dd></div>
+            <div><dt>{texte.system.aboAktualisiert}</dt><dd className="mono">{formatTimestamp(selected.updatedAt)}</dd></div>
+            <div><dt>{texte.system.twitchMeldung}</dt><dd>{selected.message ?? leer}</dd></div>
+            <div><dt>{texte.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? leer : String(selected.statusCode)}</dd></div>
+          </dl>
+        </section>}
+      </>}
+    </section>
+  );
+};
+
 interface ChannelOverviewPageProperties {
   overview: PanelChannelOverview;
   moderatorCheck: ModeratorCheckState;
@@ -668,9 +773,10 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
     chatRow(overview.chatSubscription, overview.channelBotConsent === "granted"),
     moderatorRow(overview.moderator),
     botRow(overview.bot),
+    botPermissionsRow(overview.botPermissions),
     tokenRow(overview.tokens, overview.bot),
     lastErrorRow(overview.lastError),
-  ]);
+  ].filter((entry): entry is StatusEntry => entry !== null));
 
   return (
     <>
@@ -681,6 +787,7 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
         actions={<><ModeratorCheckAction canCheck={overview.role !== "bediener"} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /></>}
       />
       <div className="zustand-liste">{eintraege.map((eintrag) => <Fragment key={eintrag.key}>{eintrag.node}</Fragment>)}</div>
+      <BotPermissionsInspector permissions={overview.botPermissions} />
       <section className="content-section"><div className="section-heading"><h2>{dashboardTexte().overview.aktiveModule}</h2><span className="muted zahl">{formatZahl(overview.activeModules.length)}</span></div>{overview.activeModules.length === 0 ? <p className="empty-state">{dashboardTexte().module.keineAktiv}</p> : <div className="module-grid">{overview.activeModules.map(({ moduleId }) => <ModuleTaste key={moduleId} channelId={overview.channelId} moduleId={moduleId} enabled onNavigate={onNavigate} />)}</div>}</section>
     </>
   );
@@ -709,7 +816,9 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
       {system === null && systemState.status === "loading" ? <p className="loading-line">{texte.system.zustandLaden}</p> : null}
       {systemState.error !== null ? <ErrorPanel message={systemState.error} /> : null}
       {system === null ? null : <>
-        <div className="zustand-liste">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), tokenRow(system.tokens, system.bot)].map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+        <div className="zustand-liste">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), botPermissionsRow(system.botPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+        <BotPermissionsInspector permissions={system.botPermissions} />
+        <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
         <SystemProperties system={system} />
       </>}
       <section className="content-section"><div className="section-heading"><h2>{texte.system.auditLog}</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{formatZahl(auditState.data.entries.length)}</span> {texte.system.eintraege}</span>}</div>

@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  BOT_SCOPES,
+  missingBotScopes,
+} from "../../src/worker/auth/oauth";
+import {
   fetchModeratedChannels,
   maintainBotIdentity,
   refreshBotToken,
@@ -31,6 +35,7 @@ const makeMaintenanceEnvironment = async (
     failTokenWriteAfterCommitOnce?: boolean;
     beforeTokenWrite?: () => Promise<void>;
     onSuccessfulTokenWrite?: () => void;
+    scopes?: string[];
   } = {},
 ) => {
   const keyRing = parseKeyRing(environment.SESSION_ENCRYPTION_KEYS);
@@ -54,6 +59,7 @@ const makeMaintenanceEnvironment = async (
   const bind = vi.fn();
   let tokenWriteAttempts = 0;
   let successfulTokenWrites = 0;
+  let missingScopesJson = "[]";
   const prepare = vi.fn((sql: string) => {
     let values: unknown[] = [];
     const statement = {
@@ -69,12 +75,20 @@ const makeMaintenanceEnvironment = async (
         id: 1,
         user_id: "bot-user",
         login: "brobot",
-        scopes_json: "[]",
+        scopes_json: JSON.stringify(options.scopes ?? []),
         ...identity,
         created_at: "2026-09-17T00:00:00.000Z",
       } : null),
       all: vi.fn().mockResolvedValue({ results: [{ channel_id: "channel-1" }] }),
       run: vi.fn().mockImplementation(async () => {
+        if (sql.includes("UPDATE bot_identity") && sql.includes("missing_scopes_json")) {
+          const [missingScopes, expectedAccess, expectedRefresh] = values;
+          if (identity.access_token_ciphertext !== expectedAccess || identity.refresh_token_ciphertext !== expectedRefresh) {
+            return { success: true, meta: { changes: 0 } };
+          }
+          missingScopesJson = String(missingScopes);
+          return { success: true, meta: { changes: 1 } };
+        }
         if (sql.includes("UPDATE bot_identity") && sql.includes("SET access_token_ciphertext")) {
           tokenWriteAttempts += 1;
           if (options.failTokenWriteOnce && tokenWriteAttempts === 1) throw new Error("D1 write failed");
@@ -145,6 +159,7 @@ const makeMaintenanceEnvironment = async (
     getSuccessfulTokenWrites: () => successfulTokenWrites,
     read: () => identity,
     readStatus: () => identityStatus,
+    readMissingScopes: () => JSON.parse(missingScopesJson) as string[],
     getInitialAccessTokenCiphertext: () => initialAccessTokenCiphertext,
     getInitialRefreshTokenCiphertext: () => initialRefreshTokenCiphertext,
   };
@@ -154,6 +169,22 @@ const requestedUrls = (fetcher: ReturnType<typeof vi.fn>): string[] =>
   fetcher.mock.calls.map((call: unknown[]) => String(call[0]));
 
 describe("Bot-Wartung", () => {
+  it("hinterlegt beim Wartungslauf die fehlenden Bot-Scopes", async () => {
+    const granted = [BOT_SCOPES[0], BOT_SCOPES[2]];
+    const { environment: env, readMissingScopes } = await makeMaintenanceEnvironment(
+      "2026-09-18T02:00:01.000Z",
+      "connected",
+      { scopes: granted },
+    );
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 7200 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+
+    await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
+
+    expect(readMissingScopes()).toEqual(missingBotScopes(granted));
+  });
+
   it("behandelt einen nicht parsebaren Datenbank-Ablaufwert als ablaufnah", () => {
     expect(shouldRefreshBotToken("kein-datum", "2026-09-18T00:00:00.000Z")).toBe(true);
   });

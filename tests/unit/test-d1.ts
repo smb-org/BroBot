@@ -53,7 +53,7 @@ export class TestPreparedStatement {
 export class TestD1Database {
   public readonly sqlite = new DatabaseSync(":memory:");
 
-  public constructor(migrationCount = 15) {
+  public constructor(migrationCount = 16) {
     this.sqlite.exec("PRAGMA foreign_keys = ON");
     const migrationNames = [
       "0000_init.sql",
@@ -71,6 +71,7 @@ export class TestD1Database {
       "0012_eventsub_abo_varianten.sql",
       "0013_eventsub_abo_versionen.sql",
       "0014_event_log_created_at_idx.sql",
+      "0015_bot_missing_scopes.sql",
     ];
     for (const migrationName of migrationNames.slice(0, migrationCount)) {
       this.sqlite.exec(readFileSync(resolve(import.meta.dirname, `../../migrations/${migrationName}`), "utf8"));

@@ -5,6 +5,7 @@ import {
   LOGIN_SCOPES,
   exchangeAuthorizationCode,
   fetchTwitchUser,
+  missingBotScopes,
   startOAuthAuthorization,
   verifyOAuthState,
 } from "../../src/worker/auth/oauth";
@@ -35,6 +36,14 @@ const fakeDatabase = () => {
 };
 
 describe("Twitch-OAuth", () => {
+  it("ermittelt fehlende Bot-Scopes unabhängig von Reihenfolge und Zusatz-Scopes", () => {
+    expect(missingBotScopes(["user:write:chat", "user:bot", "extra:scope"])).toEqual(
+      BOT_SCOPES.filter((scope) => scope !== "user:bot" && scope !== "user:write:chat"),
+    );
+    expect(missingBotScopes([...BOT_SCOPES].reverse())).toEqual([]);
+    expect(missingBotScopes([...BOT_SCOPES, "extra:scope"])).toEqual([]);
+  });
+
   it("erzeugt für Login und Bot unterschiedliche, vollständige Scope-URLs", async () => {
     const { database } = fakeDatabase();
     const login = await startOAuthAuthorization(database, environment, "login", "2026-09-18T00:00:00.000Z");
@@ -45,8 +54,10 @@ describe("Twitch-OAuth", () => {
     expect(loginUrl.pathname).toBe("/oauth2/authorize");
     expect(loginUrl.searchParams.get("redirect_uri")).toBe("https://brobot.example/auth/twitch/callback");
     expect(loginUrl.searchParams.get("scope")?.split(" ")).toEqual([...LOGIN_SCOPES]);
+    expect(loginUrl.searchParams.get("force_verify")).toBeNull();
     expect(botUrl.searchParams.get("scope")?.split(" ")).toEqual([...BOT_SCOPES]);
     expect(botUrl.searchParams.get("scope")?.split(" ")).toContain("user:read:moderated_channels");
+    expect(botUrl.searchParams.get("force_verify")).toBe("true");
     expect(botUrl.searchParams.get("scope")?.split(" ")).toEqual(expect.arrayContaining([
       "moderator:manage:blocked_terms",
       "moderator:manage:chat_settings",
@@ -55,6 +66,8 @@ describe("Twitch-OAuth", () => {
       "moderator:manage:warnings",
       "moderator:read:moderators",
       "moderator:read:vips",
+      "moderator:manage:automod",
+      "moderator:read:suspicious_users",
     ]));
     expect(loginUrl.searchParams.get("state")).not.toBe(botUrl.searchParams.get("state"));
   });
