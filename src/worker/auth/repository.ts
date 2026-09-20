@@ -69,6 +69,7 @@ export interface EventSubRevocationRecord {
   subscriptionType: string;
   /** Leer bei einem eindeutigen Ziel; wird nur für den lokalen Abo-Zustand benötigt. */
   variant?: string;
+  version?: string;
   status: string;
   reason: string | null;
   revokedAt: string;
@@ -81,6 +82,7 @@ export interface EventSubSubscriptionRecord {
   channelId: string;
   subscriptionType: string;
   variant: string;
+  version: string;
   subscriptionId: string | null;
   secretId: string | null;
   status: EventSubSubscriptionStatus;
@@ -205,6 +207,7 @@ interface EventSubSubscriptionRow {
   channel_id: string;
   subscription_type: string;
   variant: string;
+  version: string;
   subscription_id: string | null;
   secret_id: string | null;
   status: EventSubSubscriptionStatus;
@@ -308,6 +311,7 @@ const mapEventSubSubscription = (row: EventSubSubscriptionRow): EventSubSubscrip
   channelId: row.channel_id,
   subscriptionType: row.subscription_type,
   variant: row.variant,
+  version: row.version,
   subscriptionId: row.subscription_id,
   secretId: row.secret_id,
   status: row.status,
@@ -928,10 +932,10 @@ export const recordEventSubRevocation = async (
   }
   await db.prepare(
     `INSERT INTO eventsub_subscriptions
-      (channel_id, subscription_type, variant, subscription_id, secret_id, status, reason, updated_at)
-     SELECT ?, ?, ?, ?, NULL, 'revoked', ?, ?
+      (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
+     SELECT ?, ?, ?, ?, ?, NULL, 'revoked', ?, ?
       WHERE EXISTS (SELECT 1 FROM channels WHERE channel_id = ?)
-     ON CONFLICT(channel_id, subscription_type, variant) DO UPDATE SET
+     ON CONFLICT(channel_id, subscription_type, variant, version) DO UPDATE SET
        subscription_id = excluded.subscription_id,
        secret_id = NULL,
        status = excluded.status,
@@ -941,6 +945,7 @@ export const recordEventSubRevocation = async (
     revocation.channelId,
     revocation.subscriptionType,
     revocation.variant ?? "",
+    revocation.version ?? "1",
     revocation.subscriptionId,
     revocation.reason,
     revocation.updatedAt,
@@ -982,11 +987,11 @@ export const rememberEventSubMessageAndRevocation = async (
   );
   const storedState = db.prepare(
     `INSERT INTO eventsub_subscriptions
-      (channel_id, subscription_type, variant, subscription_id, secret_id, status, reason, updated_at)
-     SELECT ?, ?, ?, ?, NULL, 'revoked', ?, ?
+      (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
+     SELECT ?, ?, ?, ?, ?, NULL, 'revoked', ?, ?
       WHERE changes() = 1
         AND EXISTS (SELECT 1 FROM channels WHERE channel_id = ?)
-     ON CONFLICT(channel_id, subscription_type, variant) DO UPDATE SET
+     ON CONFLICT(channel_id, subscription_type, variant, version) DO UPDATE SET
        subscription_id = excluded.subscription_id,
        secret_id = NULL,
        status = excluded.status,
@@ -996,6 +1001,7 @@ export const rememberEventSubMessageAndRevocation = async (
     revocation.channelId,
     revocation.subscriptionType,
     revocation.variant ?? "",
+    revocation.version ?? "1",
     revocation.subscriptionId,
     revocation.reason,
     revocation.updatedAt,
@@ -1018,9 +1024,9 @@ export const upsertEventSubSubscription = async (
 ): Promise<void> => {
   await db.prepare(
     `INSERT INTO eventsub_subscriptions
-      (channel_id, subscription_type, variant, subscription_id, secret_id, status, reason, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(channel_id, subscription_type, variant) DO UPDATE SET
+      (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(channel_id, subscription_type, variant, version) DO UPDATE SET
        subscription_id = excluded.subscription_id,
        secret_id = excluded.secret_id,
        status = excluded.status,
@@ -1030,6 +1036,7 @@ export const upsertEventSubSubscription = async (
     subscription.channelId,
     subscription.subscriptionType,
     subscription.variant,
+    subscription.version,
     subscription.subscriptionId,
     subscription.secretId,
     subscription.status,
@@ -1043,13 +1050,13 @@ export const listEventSubSubscriptions = async (
   channelId?: string,
 ): Promise<EventSubSubscriptionRecord[]> => {
   const query = channelId === undefined
-    ? `SELECT channel_id, subscription_type, variant, subscription_id, secret_id, status, reason, updated_at
+    ? `SELECT channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at
          FROM eventsub_subscriptions
-        ORDER BY channel_id, subscription_type, variant`
-    : `SELECT channel_id, subscription_type, variant, subscription_id, secret_id, status, reason, updated_at
+        ORDER BY channel_id, subscription_type, variant, version`
+    : `SELECT channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at
          FROM eventsub_subscriptions
-        WHERE channel_id = ?
-        ORDER BY subscription_type, variant`;
+         WHERE channel_id = ?
+        ORDER BY subscription_type, variant, version`;
   const result = channelId === undefined
     ? await db.prepare(query).all<EventSubSubscriptionRow>()
     : await db.prepare(query).bind(channelId).all<EventSubSubscriptionRow>();

@@ -153,6 +153,7 @@ const subscriptionRecord = (
     channelId,
     subscriptionType: subscription.type,
     variant: definition.variant,
+    version: typeof subscription.version === "string" && subscription.version.length > 0 ? subscription.version : "1",
     status: "revoked",
     reason: subscription.status,
     revokedAt: now,

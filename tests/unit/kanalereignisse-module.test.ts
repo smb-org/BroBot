@@ -27,6 +27,13 @@ describe("Kanalereignisse-Modul", () => {
       event("channel.chat.notification", { notice_type: "community_sub_gift" }),
       event("channel.chat.notification", { notice_type: "announcement" }),
       event("channel.chat.notification", { notice_type: "unbekannt" }),
+      event("channel.moderate", { action: "ban", ban: { user_name: "person" } }),
+      event("channel.moderate", { action: "timeout", timeout: { user_name: "person", ends_at: "2026-09-20T10:05:00.000Z" } }),
+      event("channel.moderate", { action: "untimeout", untimeout: { user_name: "person" } }),
+      event("channel.moderate", { action: "unban", unban: { user_name: "person" } }),
+      event("channel.moderate", { action: "delete", delete: { user_name: "person", message_body: "text" } }),
+      event("channel.moderate", { action: "warn", warn: { user_name: "person" } }),
+      event("channel.moderate", { action: "shared_chat_ban" }),
     ];
 
     for (const moduleEvent of events) {

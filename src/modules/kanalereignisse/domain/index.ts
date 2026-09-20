@@ -38,6 +38,18 @@ const person = (
   return kuerzeAuf200Zeichen(`${displayName} (@${login})`);
 };
 
+const personAusObjekt = (
+  value: Readonly<Record<string, unknown>>,
+  prefix: string,
+): string | null => {
+  const displayName = textWert(value[`${prefix}_name`]);
+  const login = textWert(value[`${prefix}_login`]);
+  if (displayName === null && login === null) return null;
+  if (displayName === null) return login;
+  if (login === null || displayName === login) return displayName;
+  return kuerzeAuf200Zeichen(`${displayName} (@${login})`);
+};
+
 const detail = (values: KanalereignisDetail): KanalereignisDetail => values;
 
 const raidDiagnose = (
@@ -134,17 +146,70 @@ const chatNotificationDiagnose = (
   };
 };
 
+const dauerInSekunden = (ende: string | null, ereigniszeit: string | undefined): number | null => {
+  if (ende === null || ereigniszeit === undefined) return null;
+  const endeMs = Date.parse(ende);
+  const ereignisMs = Date.parse(ereigniszeit);
+  if (!Number.isFinite(endeMs) || !Number.isFinite(ereignisMs)) return null;
+  return Math.max(0, Math.round((endeMs - ereignisMs) / 1000));
+};
+
+const moderationDiagnose = (
+  payload: Readonly<Record<string, unknown>>,
+  ereigniszeit: string | undefined,
+): KanalereignisDiagnose => {
+  const action = textWert(feld(payload, "action"));
+  const actionName = action ?? "unbekannt";
+  const actionData = action !== null && isRecord(feld(payload, action)) ? feld(payload, action) as Readonly<Record<string, unknown>> : {};
+  const beteiligt = personAusObjekt(actionData, "user");
+  const moderator = person(payload, "moderator");
+  const grund = textWert(actionData.reason);
+  const common = { person: beteiligt, moderator, grund };
+
+  if (actionName === "ban") {
+    return { code: "kanalereignisse.moderation.ban", detail: detail(common) };
+  }
+  if (actionName === "timeout") {
+    const ende = textWert(actionData.ends_at);
+    return {
+      code: "kanalereignisse.moderation.timeout",
+      detail: detail({ ...common, ende, dauer: dauerInSekunden(ende, ereigniszeit) }),
+    };
+  }
+  if (actionName === "untimeout") {
+    return { code: "kanalereignisse.moderation.untimeout", detail: detail({ person: beteiligt, moderator }) };
+  }
+  if (actionName === "unban") {
+    return { code: "kanalereignisse.moderation.unban", detail: detail({ person: beteiligt, moderator }) };
+  }
+  if (actionName === "delete") {
+    return {
+      code: "kanalereignisse.moderation.delete",
+      detail: detail({ person: beteiligt, moderator, text: textWert(actionData.message_body) }),
+    };
+  }
+  if (actionName === "warn") {
+    return { code: "kanalereignisse.moderation.warn", detail: detail(common) };
+  }
+  return {
+    code: "kanalereignisse.moderation.unbekannt",
+    detail: detail({ aktion: actionName }),
+  };
+};
+
 /** Reine Abbildung des EventSub-Ereignisrumpfs auf Kanaldiagnosen. */
 export const diagnostiziereKanalereignis = (
   subscriptionType: string,
   payload: Readonly<Record<string, unknown>>,
   channelId: string,
   subscriptionVariant?: string,
+  ereigniszeit?: string,
 ): readonly KanalereignisDiagnose[] => {
   if (subscriptionType === "channel.raid") return [raidDiagnose(payload, channelId, subscriptionVariant)];
   if (subscriptionType === "channel.shoutout.create" || subscriptionType === "channel.shoutout.receive") {
     return [shoutoutDiagnose(subscriptionType, payload)];
   }
   if (subscriptionType === "channel.chat.notification") return [chatNotificationDiagnose(payload)];
+  if (subscriptionType === "channel.moderate") return [moderationDiagnose(payload, ereigniszeit)];
   return [];
 };

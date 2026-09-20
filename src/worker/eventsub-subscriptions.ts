@@ -26,6 +26,7 @@ export interface EventSubTarget {
 export interface EventSubSubscriptionDefinition {
   subscriptionType: string;
   variant: string;
+  version: string;
   buildCondition: (channelId: string, botUserId: string) => Readonly<Record<string, string>>;
   channelIdFromCondition: (condition: Readonly<Record<string, unknown>>) => string | null;
 }
@@ -54,43 +55,56 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDef
   {
     subscriptionType: "channel.chat.message",
     variant: "",
+    version: "1",
     buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "user_id", botUserId, channelId),
     channelIdFromCondition: conditionField("broadcaster_user_id"),
   },
   {
     subscriptionType: "channel.raid",
     variant: "eingehend",
+    version: "1",
     buildCondition: (channelId) => ({ to_broadcaster_user_id: channelId }),
     channelIdFromCondition: conditionField("to_broadcaster_user_id"),
   },
   {
     subscriptionType: "channel.raid",
     variant: "ausgehend",
+    version: "1",
     buildCondition: (channelId) => ({ from_broadcaster_user_id: channelId }),
     channelIdFromCondition: conditionField("from_broadcaster_user_id"),
   },
   {
     subscriptionType: "channel.shoutout.create",
     variant: "",
+    version: "1",
     buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
     channelIdFromCondition: conditionField("broadcaster_user_id"),
   },
   {
     subscriptionType: "channel.shoutout.receive",
     variant: "",
+    version: "1",
     buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
     channelIdFromCondition: conditionField("broadcaster_user_id"),
   },
   {
     subscriptionType: "channel.chat.notification",
     variant: "",
+    version: "1",
     buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "user_id", botUserId, channelId),
+    channelIdFromCondition: conditionField("broadcaster_user_id"),
+  },
+  {
+    subscriptionType: "channel.moderate",
+    variant: "",
+    version: "2",
+    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
     channelIdFromCondition: conditionField("broadcaster_user_id"),
   },
 ];
 
-export const eventSubTargetKey = (target: Pick<EventSubTarget, "channelId" | "subscriptionType" | "variant">): string =>
-  `${target.channelId}\u0000${target.subscriptionType}\u0000${target.variant}`;
+export const eventSubTargetKey = (target: Pick<EventSubTarget, "channelId" | "subscriptionType" | "variant" | "version">): string =>
+  `${target.channelId}\u0000${target.subscriptionType}\u0000${target.variant}\u0000${target.version}`;
 
 export const eventSubDefinitionForCondition = (
   subscriptionType: string,
@@ -103,7 +117,9 @@ export const eventSubDefinitionForCondition = (
 
 const eventSubDefinitionForTarget = (target: EventSubTarget): EventSubSubscriptionDefinition | null =>
   EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) =>
-    definition.subscriptionType === target.subscriptionType && definition.variant === target.variant) ?? null;
+    definition.subscriptionType === target.subscriptionType &&
+    definition.variant === target.variant &&
+    definition.version === target.version) ?? null;
 
 const conditionContains = (
   actual: Readonly<Record<string, unknown>>,
@@ -225,7 +241,7 @@ export const listDesiredEventSubTargets = async (
           channelId: row.channel_id,
           subscriptionType,
           variant: definition.variant,
-          version: "1",
+          version: definition.version,
         };
         targets.set(eventSubTargetKey(target), target);
       }
@@ -315,6 +331,7 @@ const mark = async (
     channelId: target.channelId,
     subscriptionType: target.subscriptionType,
     variant: target.variant,
+    version: target.version,
     subscriptionId,
     secretId,
     status,

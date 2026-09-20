@@ -8,5 +8,6 @@ export const verarbeiteKanalereignis = (event: ModuleEvent): ModuleResult => ({
     event.payload,
     event.channelId,
     event.subscriptionVariant,
+    event.receivedAt,
   ),
 });

@@ -426,6 +426,13 @@ export type EreignisCode =
   | "kanalereignisse.chat.community_gift"
   | "kanalereignisse.chat.ankuendigung"
   | "kanalereignisse.chat.unbekannt"
+  | "kanalereignisse.moderation.ban"
+  | "kanalereignisse.moderation.timeout"
+  | "kanalereignisse.moderation.untimeout"
+  | "kanalereignisse.moderation.unban"
+  | "kanalereignisse.moderation.delete"
+  | "kanalereignisse.moderation.warn"
+  | "kanalereignisse.moderation.unbekannt"
   | "shoutout.unterdrueckt"
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
@@ -455,6 +462,14 @@ const detailText = (detail: EreignisDetail, key: string, fallback: string): stri
 const detailZahl = (detail: EreignisDetail, key: string, fallback: string): string =>
   typeof detail[key] === "number" && Number.isFinite(detail[key]) ? String(detail[key]) : fallback;
 
+const detailDauer = (detail: EreignisDetail, einheit: string, fallback: string): string =>
+  typeof detail.dauer === "number" && Number.isFinite(detail.dauer) ? `${String(detail.dauer)} ${einheit}` : fallback;
+
+const detailGrund = (detail: EreignisDetail): string =>
+  typeof detail.grund === "string" && detail.grund.length > 0
+    ? `: ${detail.grund}`
+    : "";
+
 export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = {
   de: {
     "host.aktion.fehler": "Aktion fehlgeschlagen",
@@ -473,6 +488,13 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "kanalereignisse.chat.community_gift": (detail) => `Community-Gift von ${detailText(detail, "spender", "unbekannt")} für ${detailZahl(detail, "anzahl", "unbekannte Anzahl")} Subs`,
     "kanalereignisse.chat.ankuendigung": (detail) => `Ankündigung von ${detailText(detail, "person", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
     "kanalereignisse.chat.unbekannt": (detail) => `Unbekannte Chat-Benachrichtigung: ${detailText(detail, "art", "unbekannt")}`,
+    "kanalereignisse.moderation.ban": (detail) => `${detailText(detail, "person", "unbekannt")} gebannt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
+    "kanalereignisse.moderation.timeout": (detail) => `${detailText(detail, "person", "unbekannt")} für ${detailDauer(detail, "Sekunden", "unbekannte Dauer")} getimeoutet von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
+    "kanalereignisse.moderation.untimeout": (detail) => `${detailText(detail, "person", "unbekannt")} aus dem Timeout genommen von ${detailText(detail, "moderator", "unbekannt")}`,
+    "kanalereignisse.moderation.unban": (detail) => `${detailText(detail, "person", "unbekannt")} entbannt von ${detailText(detail, "moderator", "unbekannt")}`,
+    "kanalereignisse.moderation.delete": (detail) => `Nachricht von ${detailText(detail, "person", "unbekannt")} gelöscht von ${detailText(detail, "moderator", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
+    "kanalereignisse.moderation.warn": (detail) => `${detailText(detail, "person", "unbekannt")} verwarnt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
+    "kanalereignisse.moderation.unbekannt": (detail) => `Unbekannte Moderationsaktion: ${detailText(detail, "aktion", "unbekannt")}`,
     "shoutout.unterdrueckt": "Shoutout unterdrückt",
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
@@ -503,6 +525,13 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "kanalereignisse.chat.community_gift": (detail) => `Community gift from ${detailText(detail, "spender", "unknown")} for ${detailZahl(detail, "anzahl", "unknown number")} subs`,
     "kanalereignisse.chat.ankuendigung": (detail) => `Announcement from ${detailText(detail, "person", "unknown")}: ${detailText(detail, "text", "no text")}`,
     "kanalereignisse.chat.unbekannt": (detail) => `Unknown chat notification: ${detailText(detail, "art", "unknown")}`,
+    "kanalereignisse.moderation.ban": (detail) => `${detailText(detail, "person", "unknown")} banned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
+    "kanalereignisse.moderation.timeout": (detail) => `${detailText(detail, "person", "unknown")} timed out for ${detailDauer(detail, "seconds", "unknown duration")} by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
+    "kanalereignisse.moderation.untimeout": (detail) => `${detailText(detail, "person", "unknown")} removed from timeout by ${detailText(detail, "moderator", "unknown")}`,
+    "kanalereignisse.moderation.unban": (detail) => `${detailText(detail, "person", "unknown")} unbanned by ${detailText(detail, "moderator", "unknown")}`,
+    "kanalereignisse.moderation.delete": (detail) => `Message from ${detailText(detail, "person", "unknown")} deleted by ${detailText(detail, "moderator", "unknown")}: ${detailText(detail, "text", "no text")}`,
+    "kanalereignisse.moderation.warn": (detail) => `${detailText(detail, "person", "unknown")} warned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
+    "kanalereignisse.moderation.unbekannt": (detail) => `Unknown moderation action: ${detailText(detail, "aktion", "unknown")}`,
     "shoutout.unterdrueckt": "Shoutout suppressed",
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
@@ -518,7 +547,7 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
   },
 };
 
-export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green"> = {
+export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green" | "off"> = {
   "host.aktion.fehler": "red",
   "host.chat.fehlgeschlagen": "red",
   "host.chat.gesendet": "green",
@@ -535,6 +564,13 @@ export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green"> = {
   "kanalereignisse.chat.community_gift": "green",
   "kanalereignisse.chat.ankuendigung": "green",
   "kanalereignisse.chat.unbekannt": "green",
+  "kanalereignisse.moderation.ban": "amber",
+  "kanalereignisse.moderation.timeout": "amber",
+  "kanalereignisse.moderation.untimeout": "green",
+  "kanalereignisse.moderation.unban": "green",
+  "kanalereignisse.moderation.delete": "amber",
+  "kanalereignisse.moderation.warn": "amber",
+  "kanalereignisse.moderation.unbekannt": "off",
   "shoutout.unterdrueckt": "amber",
   "textbefehle.abgekuehlt": "amber",
   "textbefehle.ausgeloest": "green",

@@ -6,7 +6,8 @@ const diagnose = (
   subscriptionType: string,
   payload: Record<string, unknown>,
   variant?: string,
-) => diagnostiziereKanalereignis(subscriptionType, payload, "kanal-a", variant);
+  receivedAt?: string,
+) => diagnostiziereKanalereignis(subscriptionType, payload, "kanal-a", variant, receivedAt);
 
 describe("Kanalereignisse-Domain", () => {
   it("bildet eingehende und ausgehende Raids mit Quelle/Ziel und Zuschauern ab", () => {
@@ -94,6 +95,96 @@ describe("Kanalereignisse-Domain", () => {
     expect(diagnose("channel.chat.notification", { notice_type: noticeType })).toEqual([{
       code: "kanalereignisse.chat.unbekannt",
       detail: { art: `${"x".repeat(199)}…` },
+    }]);
+  });
+
+  it.each([
+    ["ban", "kanalereignisse.moderation.ban"],
+    ["warn", "kanalereignisse.moderation.warn"],
+  ])("bildet %s mit betroffener und ausführender Person sowie Grund ab", (action, code) => {
+    expect(diagnose("channel.moderate", {
+      action,
+      moderator_user_name: "Moderation",
+      moderator_user_login: "mod",
+      [action]: {
+        user_name: "Betroffene Person",
+        user_login: "betroffen",
+        reason: "Regelverstoß",
+      },
+    })).toEqual([{
+      code,
+      detail: {
+        person: "Betroffene Person (@betroffen)",
+        moderator: "Moderation (@mod)",
+        grund: "Regelverstoß",
+      },
+    }]);
+  });
+
+  it("berechnet die Timeout-Dauer aus Ereigniszeit und ends_at", () => {
+    expect(diagnose("channel.moderate", {
+      action: "timeout",
+      moderator_user_name: "Moderation",
+      timeout: {
+        user_name: "Betroffene Person",
+        ends_at: "2026-09-20T10:05:00.000Z",
+        reason: "Zu viele Nachrichten",
+      },
+    }, undefined, "2026-09-20T10:00:00.000Z")).toEqual([{
+      code: "kanalereignisse.moderation.timeout",
+      detail: {
+        person: "Betroffene Person",
+        moderator: "Moderation",
+        grund: "Zu viele Nachrichten",
+        ende: "2026-09-20T10:05:00.000Z",
+        dauer: 300,
+      },
+    }]);
+  });
+
+  it("gibt einen Ban mit ends_at nicht als Timeout aus", () => {
+    expect(diagnose("channel.moderate", {
+      action: "ban",
+      ban: { user_name: "Betroffene Person", ends_at: "2026-09-20T10:05:00.000Z" },
+    }, undefined, "2026-09-20T10:00:00.000Z")[0]?.code).toBe("kanalereignisse.moderation.ban");
+  });
+
+  it.each([
+    ["untimeout", "kanalereignisse.moderation.untimeout"],
+    ["unban", "kanalereignisse.moderation.unban"],
+  ])("bildet %s ohne Grund als Rücknahme ab", (action, code) => {
+    expect(diagnose("channel.moderate", {
+      action,
+      moderator_user_name: "Moderation",
+      [action]: { user_name: "Betroffene Person" },
+    })).toEqual([{
+      code,
+      detail: { person: "Betroffene Person", moderator: "Moderation" },
+    }]);
+  });
+
+  it("bildet die gelöschte Nachricht ab und kürzt Fremdtexte", () => {
+    expect(diagnose("channel.moderate", {
+      action: "delete",
+      moderator_user_name: "Moderation",
+      delete: {
+        user_name: "Betroffene Person",
+        message_body: "x".repeat(240),
+      },
+    })).toEqual([{
+      code: "kanalereignisse.moderation.delete",
+      detail: {
+        person: "Betroffene Person",
+        moderator: "Moderation",
+        text: `${"x".repeat(199)}…`,
+      },
+    }]);
+  });
+
+  it("meldet shared_chat_ban als genau eine unbekannte Moderationsaktion", () => {
+    expect(diagnose("channel.moderate", { action: "shared_chat_ban" })).toEqual([{
+      code: "kanalereignisse.moderation.unbekannt",
+      detail: { aktion: "shared_chat_ban" },
     }]);
   });
 });

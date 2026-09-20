@@ -38,6 +38,8 @@ interface ChannelStateRow {
   eventsub_subscription_id: string | null;
   eventsub_reason: string | null;
   eventsub_updated_at: string | null;
+  eventsub_error_reason: string | null;
+  eventsub_error_updated_at: string | null;
 }
 
 interface ActiveModuleRow {
@@ -107,7 +109,19 @@ const channelStateQuery = `
            eventsub.status AS eventsub_status,
            eventsub.subscription_id AS eventsub_subscription_id,
            eventsub.reason AS eventsub_reason,
-           eventsub.updated_at AS eventsub_updated_at
+           eventsub.updated_at AS eventsub_updated_at,
+           (SELECT state.reason
+              FROM eventsub_subscriptions AS state
+             WHERE state.channel_id = channel.channel_id
+               AND state.status IN ('error', 'revoked')
+             ORDER BY state.updated_at DESC
+             LIMIT 1) AS eventsub_error_reason,
+           (SELECT state.updated_at
+              FROM eventsub_subscriptions AS state
+             WHERE state.channel_id = channel.channel_id
+               AND state.status IN ('error', 'revoked')
+             ORDER BY state.updated_at DESC
+             LIMIT 1) AS eventsub_error_updated_at
       FROM channels AS channel
       JOIN channel_members AS member ON member.channel_id = channel.channel_id
       LEFT JOIN twitch_connections AS connection
@@ -168,6 +182,9 @@ const mapLastError = (row: ChannelStateRow): PanelLastError | null => {
   if (row.eventsub_reason !== null && row.eventsub_updated_at !== null &&
       (row.eventsub_status === "error" || row.eventsub_status === "revoked")) {
     candidates.push({ source: "eventsub", reason: row.eventsub_reason, at: row.eventsub_updated_at });
+  }
+  if (row.eventsub_error_reason !== null && row.eventsub_error_updated_at !== null) {
+    candidates.push({ source: "eventsub", reason: row.eventsub_error_reason, at: row.eventsub_error_updated_at });
   }
   candidates.sort((left, right) => right.at.localeCompare(left.at));
   return candidates[0] ?? null;

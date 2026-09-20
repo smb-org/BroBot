@@ -30,7 +30,12 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
         ["channel.shoutout.create", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.shoutout.receive", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.chat.notification", { broadcaster_user_id: "kanal-a", user_id: "bot-1" }],
+        ["channel.moderate", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
       ]);
+
+    const moderation = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.moderate");
+    expect(moderation?.version).toBe("2");
+    expect(moderation?.variant).toBe("");
   });
 
   it("nimmt ausgeschaltete Kanalereignisse nicht in den Sollstand auf", async () => {
@@ -87,6 +92,35 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
         subscription_type: "channel.chat.message",
         variant: "",
         subscription_id: "abo-1",
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("übernimmt alte Abo-Zustände als v1 und hält v2 separat", async () => {
+    const database = new TestD1Database(13);
+    try {
+      await insertChannel(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO eventsub_subscriptions
+          (channel_id, subscription_type, variant, subscription_id, secret_id, status, reason, updated_at)
+         VALUES ('kanal-a', 'channel.chat.message', '', 'abo-1', 'secret-1', 'enabled', NULL, ?)`,
+      ).bind("2026-09-20T00:00:00.000Z").run();
+      database.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0013_eventsub_abo_versionen.sql"), "utf8"));
+      await database.prepare(
+        `INSERT INTO eventsub_subscriptions
+          (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
+         VALUES ('kanal-a', 'channel.moderate', '', '2', 'abo-2', 'secret-1', 'enabled', NULL, ?)`,
+      ).bind("2026-09-20T00:00:00.000Z").run();
+
+      await expect(database.prepare(
+        "SELECT subscription_type, variant, version, subscription_id FROM eventsub_subscriptions ORDER BY subscription_type",
+      ).all()).resolves.toMatchObject({
+        results: [
+          { subscription_type: "channel.chat.message", variant: "", version: "1", subscription_id: "abo-1" },
+          { subscription_type: "channel.moderate", variant: "", version: "2", subscription_id: "abo-2" },
+        ],
       });
     } finally {
       database.close();

@@ -322,6 +322,30 @@ describe("Panel-Leseendpunkte", () => {
     expect(body.lastError).toEqual({ source: "eventsub", reason: "rate_limited", at: "2026-09-18T04:00:00.000Z" });
   });
 
+  it("zeigt auch die Ablehnung des Moderations-Abos als letzten Fehler", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
+       VALUES (?, 'channel.moderate', '', '2', NULL, NULL, 'error', ?, ?)`,
+    ).bind(
+      "kanal-a",
+      "missing_scope",
+      "2026-09-18T05:00:00.000Z",
+    ).run();
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+    const body = await response.json<{ lastError: { source: string; reason: string; at: string } | null }>();
+
+    expect(response.status).toBe(200);
+    expect(body.lastError).toEqual({ source: "eventsub", reason: "missing_scope", at: "2026-09-18T05:00:00.000Z" });
+  });
+
   it("liefert den tatsächlichen Kanalzustand, aktive Module und gespeicherte Ursachen", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
