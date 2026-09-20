@@ -186,6 +186,24 @@ components:
     rounded: "{rounded.control}"
     padding: "8px 10px"
     height: "44px"
+  config-section:
+    backgroundColor: "transparent"
+    textColor: "{colors.text}"
+    typography: "{typography.body}"
+  config-field-schmal:
+    maxWidth: "9rem"
+    description: "Zahlen und kurze Werte"
+  config-field-mittel:
+    maxWidth: "20rem"
+    description: "Namen und Bezeichner"
+  config-field-breit:
+    maxWidth: "40rem"
+    description: "Fließtext"
+  button-danger:
+    backgroundColor: "transparent"
+    textColor: "{colors.fehler}"
+    rounded: "{rounded.control}"
+    height: "44px"
   tabellenzeile:
     backgroundColor: "transparent"
     textColor: "{colors.text}"
@@ -293,7 +311,7 @@ Ort des Bedieners, drei Zustandsfarben. Sonst nichts.
 ### Secondary (Zustand)
 - **Grün** ({colors.gruen}, Fläche {colors.gruen-grund}): läuft, verbunden, gesendet, gesund. LED-Punkt und LED-Wort, Symbolkachel einer eingeschalteten Taste, Schalter-Spur „an“, Ereignis-LED „Info“ für `host.chat.gesendet`. Grün steht nie ohne Wort daneben.
 - **Bernstein** ({colors.warn}, Fläche {colors.warn-grund}): unbekannt oder nicht aktiv — Verbindung unklar, Modul ohne Zustand, Zustandszeile `warning`, Ereignis-LED „Hinweis“ (abgekühlt, unterdrückt, bereits vorhanden). **Nicht** für „ausgeschaltet“.
-- **Rot** ({colors.fehler}, Fläche {colors.fehler-grund}): Fehler, Löschen. LED-Punkt, Zustandszeile `error`, Fehlerkasten, Formularfehler mit vorangestelltem ×; der stille Löschknopf färbt sich erst beim Hinzeigen rot.
+- **Rot** ({colors.fehler}, Fläche {colors.fehler-grund}): Fehler, Löschen. LED-Punkt, Zustandszeile `error`, Fehlerkasten und Formularfehler mit vorangestelltem ×. Die Löschhandlung trägt dauerhaft die Gefahr-Variante.
 - **Fehler-Text** ({colors.fehler-text}): ausschließlich das LED-Wort bei rotem Punkt. Eine Stufe heller als Rot, weil das 12-px-Wort auf Tint-1 (gewählte Zeile) sonst unter AA fällt: 4,71:1 auf Tint-1, 5,70:1 auf Grund. Für Flächen, Ränder und Punkte bleibt {colors.fehler}.
 
 ### Neutral
@@ -405,8 +423,9 @@ In der Ereignistabelle steht vor jedem Ereignistext eine LED mit Wort, das aus `
 - **Neutral:** Taste mit Linie-Stark-Rand; Hover Taste-Hover mit Linie-Hell.
 - **Primär:** Marke mit Marke-Auf-Text, 600; Hover Marke-Hover, Druck Marke-Press. Genau einer pro Bereich. Auf der Kanalseite ist die Moderatorprüfung nur dann primär, wenn der Moderatorstatus fehlt (`dringend`); sonst neutral.
 - **Gedeckt:** Der Anlege-Knopf ist neutral, solange das Formular unvollständig ist, und wird erst mit gültigen Feldern primär; der Grund steht als Hinweis (Text-3, 12 px) direkt daneben.
-- **Still (`quiet`):** transparent, Text-2, 12.5 px; erst beim Hinzeigen Rot auf Fehler-Grund mit 45 % Fehler-Rand. Für Löschen.
+- **Still (`quiet`):** transparent, Text-2, 12.5 px; erst beim Hinzeigen Rot auf Fehler-Grund mit 45 % Fehler-Rand. **Für Löschen abgelöst am 20. September 2026 (Issue #112):** Die gefährlichste Handlung war dadurch im Ruhezustand die unauffälligste; `quiet` bleibt für nicht zerstörende, zurückhaltende Aktionen.
 - **Gefahr (`danger`):** Rot ohne Rand; Hover Weiß auf Rot.
+- Löschende Handlungen stehen mit `danger` dauerhaft in Fehlerfarbe, vom primären Knopf abgesetzt, und fragen anschließend in der bestehenden `inspector-confirmation` nach. Abbrechen bewirkt keine Mutation.
 - **Nachladen (`secondary`):** neutraler Knopf mit 16 px Abstand nach oben, unter Tabellen („Ältere Einträge laden“).
 - **Deaktiviert:** 50 % Deckkraft, `not-allowed`.
 
@@ -414,9 +433,18 @@ In der Ereignistabelle steht vor jedem Ereignistext eine LED mit Wort, das aus `
 44×44 Trefferfläche, Spur 36×20 auf Text-4, Knopf 14 px in Text; an: Spur Grün, Knopf um 16 px verschoben (160 ms). In der Kopfleiste mit Etikett links (12 px/600, Text-2). Für Bediener gesperrt (45 %) — der Sperrgrund steht als 11-px-Zeile direkt darunter, nicht als Meldung anderswo.
 
 ### Inputs / Fields
-- **Stil:** Rinne mit Linie-Stark-Rand, {rounded.control}, 44 px hoch, 8 px 10 px; Textarea 88 px, senkrecht ziehbar; Zahl max. 9 rem. Select in Tabellenzellen 34 px.
+- **Stil:** Rinne mit Linie-Stark-Rand, {rounded.control}, 44 px hoch, 8 px 10 px; Textarea 88 px, senkrecht ziehbar; Select in Tabellenzellen 34 px.
+- **Konfigurationsfeldbreiten:** `config-field--schmal` ist 9 rem für Zahlen und kurze Werte (die bestehende Zahlengrenze); `config-field--mittel` ist 20 rem für Namen und Bezeichner (die halbe bestehende Formularbreite); `config-field--breit` ist 40 rem für Fließtext (die bestehende maximal 40 rem breite Formularhülle). Die Stufe gehört an die Feldhülle, nicht an beliebige Einzelregeln.
 - **Hover:** Rand Linie-Hell. **Fokus:** 2 px Marke-Text außen, Abstand 2 px.
 - **Deaktiviert:** 55 % Deckkraft. **Fehler:** rote Zeile mit × unter den Aktionen, `role="alert"`.
+
+### Konfigurationsfläche
+Eine Modul-Panel-Ansicht liegt in `.module-stack`, damit Beschriftung, Feld,
+Textarea, Select und Hinweistext die Welt erben; ohne diese Hülle erscheint sie
+unformatiert. Jeder fachliche Abschnitt bekommt eine Überschrift und eine
+Haarlinie über `.config-section` und `.section-heading`. Die Fläche bleibt im
+Fluss: keine Container-Karten. Die Auswahl einer Tabellenzeile öffnet den
+Bearbeiten-Teil auf der Inspektor-Fläche (`sub-inspector`) unter der Tabelle.
 
 ### Seitenkopf (`ModuleHeading`)
 Auf jeder Seite dasselbe Bauteil: Raster `56px minmax(0,1fr) auto`, 16 px Lücke, min. 56 px hoch, Haarlinie unten, 24 px Abstand darunter, Breite `min(960px, 100%)`. Links die 56-px-Symbolkachel (Tint-1, Marke-Text, Glyph 28 px) mit dem Seitensymbol aus der Schienenfamilie; Mitte Titel 22 px und Unterzeile 13 px Text-2 (Rolle, Anzahl mit Zahl in Mono, „nur lesend“, Beschreibung max. 70 ch); rechts optional Aktionen (`header-action`: Knopf, darunter rechtsbündig 11.5-px-Zeitangabe, Sperrgrund 11 px, Fehlerzeile). Auf der Modulseite steht davor die Brotkrume (44 px Trefferhöhe, 8 px Abstand).
@@ -468,6 +496,8 @@ Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 
 - **Do** den Sperr- oder Fehlergrund an die Wirkung schreiben (Sperrgrund unter dem Schalter oder Knopf, Hinweis neben dem gedeckten Knopf).
 - **Do** veraltete Werte mit 55 % Deckkraft stehen lassen; nur beim ersten Laden eine Ladezeile.
 - **Do** wählbare Tabellenzeilen mit `tabIndex` und `aria-selected` bauen und ihren Inspector im Fluss darunter öffnen.
+- **Do** Panel-Ansichten in `.module-stack` und Konfigurationsabschnitte mit Überschrift, Haarlinie und einer benannten Feldbreite bauen.
+- **Do** Löschhandlungen dauerhaft als `danger` markieren und mit `inspector-confirmation` bestätigen lassen.
 
 ### Don't:
 - **Don't** ein ausgeschaltetes Modul bernstein färben. Aus ist neutral; Bernstein heißt unbekannt oder Hinweis.
@@ -480,6 +510,7 @@ Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 
 - **Don't** Schriftgrößen an den Viewport koppeln; schmal klappt das Gerüst um, nicht die Schrift.
 - **Don't** ein rechtes Dock bauen; der Inspector öffnet sich im Fluss unter der Tabelle.
 - **Don't** Zeilen ohne Inspector klickbar stylen; Zeiger und Hover gibt es nur mit `tabindex`.
+- **Don't** eine Panel-Ansicht ohne `.module-stack` oder eine Löschhandlung als `quiet` bauen.
 
 ### Eingelöst: Phase 2 (Issue #81)
 Übersicht (Kanaltasten), Kanal und System (Seitenkopf, Zustandszeilen, Eigenschaftenliste), Mitglieder (Tabelle mit Aktionsspalte, Inspector im Fluss), Audit und Ereignisse (Tabelle mit Zeilenauswahl, Sub-Inspector mit Vorher/Nachher bzw. JSON, Ereignis-LED-Wort) laufen in dieser Welt; die Blöcke der alten Welt (232-px-Seitenleiste, `status-card`, `channel-card`, `member-table`, `page-heading`, `command-table`, Versalien-Plakette) sind aus `styles.css` entfernt.

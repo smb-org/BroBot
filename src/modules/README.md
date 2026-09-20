@@ -23,6 +23,25 @@ Eine Panel-Ansicht rendert keine eigene Überschrift mit dem Modulnamen. Der
 Host trägt Name, Kennung und Kurzbeschreibung im Eigenschaften-Inspektor; die
 Ansicht beginnt direkt mit ihrem fachlichen Inhalt.
 
+### Hülle und Bauteile der Panel-Ansicht
+
+Die äußerste Ansicht liegt in `.module-stack` (normalerweise als `<section>`
+mit `aria-label`). Diese Hülle ist die Gestaltungskonvention des Hosts: Sie
+vererbt die Regeln für Beschriftungen, Eingabefelder, Textareas, Selects und
+Hinweise an die Modul-Ansicht. Ohne `.module-stack` bleibt eine neue Ansicht
+unformatiert und fällt auf das Browser-Standardaussehen zurück.
+
+Eine Konfigurationsfläche teilt ihren Inhalt in `.config-section`-Abschnitte.
+Jeder Abschnitt beginnt mit einer Überschrift in `.section-heading`, die von
+einer Haarlinie getrennt wird; Container-Karten gehören nicht zu dieser Welt.
+Die Feldhülle trägt genau eine Inhaltsstufe: `config-field--schmal` für
+Zahlen und kurze Werte, `config-field--mittel` für Namen und Bezeichner oder
+`config-field--breit` für Fließtext. Eine gewählte Tabellenzeile öffnet ihren
+Bearbeiten-Teil auf `.sub-inspector`, derselben Inspektor-Fläche wie Audit und
+Ereignisse. Zerstörende Handlungen verwenden `button--danger`, stehen vom
+primären Knopf abgesetzt und fragen mit `.inspector-confirmation` an Ort und
+Stelle nach.
+
 ## Registrierung
 
 1. Das Modulverzeichnis mit der Pflichtstruktur anlegen.

@@ -72,6 +72,11 @@
   --s5: 20px; --s6: 24px; --s8: 32px; --s10: 40px; --s12: 48px;
   --dashboard-content-width: 960px;
   --zustand-label: 240px;
+  /* Konfigurationsfelder: schmal ist die bestehende Zahlengrenze, breit die
+     bestehende Formularbreite; mittel ist deren halbe, abgeleitete Stufe. */
+  --config-field-schmal: 9rem;
+  --config-field-mittel: 20rem;
+  --config-field-breit: 40rem;
 
   color-scheme: dark;
   color: var(--text);
@@ -129,8 +134,8 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 }
 
 /* ── Bedienelemente ──────────────────────────────────────
-   Genau eine helle Aktion pro Bereich. Zerstoerendes ist still, bis man
-   hinzeigt — die Gewichtung folgt der Konsequenz, nicht der Haeufigkeit. */
+   Genau eine helle Aktion pro Bereich. Zerstoerendes steht dauerhaft in der
+   Gefahr-Variante — die Gewichtung folgt der Konsequenz, nicht der Haeufigkeit. */
 
 .button {
   display: inline-flex; align-items: center; justify-content: center;
@@ -172,7 +177,9 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 /* ── Formulare ───────────────────────────────────────────── */
 
 .inspector-form { display: grid; gap: 14px; max-width: 40rem; }
-.inspector-form label { display: grid; gap: var(--s1); color: var(--text-2); font-size: 12.5px; font-weight: 500; }
+.inspector-form label,
+.content-section label,
+.module-stack label { display: grid; gap: 6px; max-width: var(--config-field-breit); color: var(--text-2); font-size: 12px; font-weight: 500; }
 .form-row { display: flex; gap: var(--s2); }
 .form-row input { flex: 1; }
 .inspector-result {
@@ -191,43 +198,44 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .inspector-confirmation h3 { margin: 0; font-size: 14px; }
 .inspector-confirmation p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
 
-/* Allgemeine Formularfelder.
- *
- * Bis hierher gab es Regeln nur fuer die Mitgliedersuche. Jede Modulansicht
- * bekam deshalb den Browser-Standard: Beschriftungen klebten an den Feldern,
- * Hinweistexte liefen in die naechste Beschriftung. Diese Regeln greifen
- * ueberall, damit ein neues Modul nichts mitbringen muss, um anstaendig
- * auszusehen. */
-.content-section label { display: grid; gap: var(--s1); max-width: 40rem; color: var(--text-2); font-size: 12.5px; font-weight: 500; }
-/* Der Hinweis unter einem Feld erklaert die Regel, er benennt nichts. */
-.content-section label .muted { font-size: 12px; font-weight: 400; line-height: 1.45; }
+.inspector-form label .muted,
+.content-section label .muted,
+.module-stack label .muted,
+.config-field__hint { color: var(--text-3); font-size: 12px; font-weight: 400; line-height: 1.45; }
 
-.inspector-form input:not([type="checkbox"]):not([type="radio"]),
-.inspector-form textarea,
-.inspector-form select,
-.content-section input:not([type="checkbox"]):not([type="radio"]),
-.content-section textarea,
-.content-section select {
+/* Modul-Panels werden vom Host in .module-stack montiert. Die gemeinsame
+ * Huelle ist absichtlich Teil der Regel: ohne sie bleibt die Ansicht
+ * unformatiert statt zufaellig am Browser-Standard zu haengen. */
+:is(.inspector-form, .content-section, .module-stack) input:not([type="checkbox"]):not([type="radio"]),
+:is(.inspector-form, .content-section, .module-stack) textarea,
+:is(.inspector-form, .content-section, .module-stack) select {
   min-width: 0; min-height: 44px;
   border: 1px solid var(--linie-stark); border-radius: var(--r-control);
-  padding: 7px var(--s3); color: var(--text); background: var(--rinne);
+  padding: 8px 10px; color: var(--text); background: var(--rinne);
 }
-.inspector-form textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
-.content-section textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
-.inspector-form input:not([type="checkbox"]):not([type="radio"]):hover,
-.inspector-form textarea:hover,
-.inspector-form select:hover,
-.content-section input:not([type="checkbox"]):not([type="radio"]):hover,
-.content-section textarea:hover,
-.content-section select:hover { border-color: var(--linie-hell); }
+.inspector-form textarea,
+.content-section textarea,
+.module-stack textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
+:is(.inspector-form, .content-section, .module-stack) input:not([type="checkbox"]):not([type="radio"]):hover,
+:is(.inspector-form, .content-section, .module-stack) textarea:hover,
+:is(.inspector-form, .content-section, .module-stack) select:hover { border-color: var(--linie-hell); }
 
 /* Zahleneingaben brauchen nicht die Breite eines Antworttextes. */
-.inspector-form input[type="number"], .content-section input[type="number"] { max-width: 9rem; }
+.inspector-form input[type="number"],
+.content-section input[type="number"],
+.module-stack input[type="number"],
+.config-field--schmal { max-width: var(--config-field-schmal); }
+.config-field--mittel { max-width: var(--config-field-mittel); }
+.config-field--breit { max-width: var(--config-field-breit); }
+.config-field > input,
+.config-field > textarea,
+.config-field > select { width: 100%; }
 
 /* Formulare stapeln ihre Felder; nebeneinander wird es auf schmalen
  * Fenstern unlesbar, und die Felder haben sehr unterschiedliche Laengen. */
 form.content-section { display: grid; gap: var(--s4); }
 .form-actions { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+.form-actions--destructive { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--linie); }
 
 /* Der Grund steht an der Wirkung, nicht als Meldung an anderer Stelle. */
 .form-error {
@@ -246,6 +254,8 @@ form.content-section { display: grid; gap: var(--s4); }
 .error-panel { border-style: solid; border-color: rgba(226, 86, 77, .45); background: var(--fehler-grund); }
 .error-panel strong { color: var(--fehler); }
 .module-stack { display: grid; gap: var(--s3); }
+.config-section { display: grid; gap: var(--s4); }
+.config-section > .section-heading { margin-bottom: 0; }
 
 details { margin-top: var(--s2); color: var(--text-2); font-size: 12.5px; }
 summary { cursor: pointer; }
@@ -454,11 +464,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .command-panel .tabelle tbody tr[aria-selected="true"] > *:first-child { box-shadow: inset 2px 0 0 var(--marke); }
 .command-panel .tabelle tbody th { color: var(--marke-text); font-weight: 600; }
 .tabelle__answer { min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
-.command-create { display: grid; gap: 14px; max-width: 40rem; border-top: 1px solid var(--linie-stark); }
-.command-create label, .command-inspector label { display: grid; gap: 6px; color: var(--text-2); font-size: 12px; font-weight: 500; }
-.command-create input, .command-create textarea, .command-inspector input, .command-inspector textarea { min-height: 44px; border: 1px solid var(--linie-stark); border-radius: var(--r-control); padding: 8px 10px; color: var(--text); background: var(--rinne); }
-.command-create textarea, .command-inspector textarea { min-height: 88px; resize: vertical; }
-.command-create input[type="number"], .command-inspector input[type="number"] { max-width: 9rem; }
+.command-create { display: grid; gap: 14px; max-width: var(--config-field-breit); }
 .form-actions--create { align-items: center; }
 .form-hint { color: var(--text-3); font-size: 12px; }
 @media (max-width: 768px) {

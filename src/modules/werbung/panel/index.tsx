@@ -40,20 +40,29 @@ export const WerbungPanel = ({ channelId, language }: { channelId: string; langu
 
   return (
     <section className="module-stack" aria-label={labels.titel}>
-      <label>
-        {labels.automatisch}
-        <textarea value={settings.automatisch} disabled={busy} onChange={(event) => { setSettings({ ...settings, automatisch: event.target.value }); }} />
-        <span className="muted">{labels.platzhalter}</span>
-      </label>
-      <label>
-        {labels.manuell}
-        <textarea value={settings.manuell} disabled={busy} onChange={(event) => { setSettings({ ...settings, manuell: event.target.value }); }} />
-        <span className="muted">{labels.platzhalter}</span>
-      </label>
-      <div className="form-actions">
-        <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={busy}>{labels.speichern}</button>
-        {saved ? <span className="muted" role="status">{labels.gespeichert}</span> : null}
-      </div>
+      <section className="config-section" aria-label={labels.automatischAbschnitt}>
+        <div className="section-heading"><h2>{labels.automatischAbschnitt}</h2></div>
+        <label className="config-field config-field--breit">
+          {labels.automatisch}
+          <textarea value={settings.automatisch} disabled={busy} onChange={(event) => { setSettings({ ...settings, automatisch: event.target.value }); }} />
+          <span className="config-field__hint">{labels.platzhalter}</span>
+        </label>
+      </section>
+      <section className="config-section" aria-label={labels.manuellAbschnitt}>
+        <div className="section-heading"><h2>{labels.manuellAbschnitt}</h2></div>
+        <label className="config-field config-field--breit">
+          {labels.manuell}
+          <textarea value={settings.manuell} disabled={busy} onChange={(event) => { setSettings({ ...settings, manuell: event.target.value }); }} />
+          <span className="config-field__hint">{labels.platzhalter}</span>
+        </label>
+      </section>
+      <section className="config-section" aria-label={labels.aktionen}>
+        <div className="section-heading"><h2>{labels.aktionen}</h2></div>
+        <div className="form-actions">
+          <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={busy}>{labels.speichern}</button>
+          {saved ? <span className="muted" role="status">{labels.gespeichert}</span> : null}
+        </div>
+      </section>
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     </section>
   );

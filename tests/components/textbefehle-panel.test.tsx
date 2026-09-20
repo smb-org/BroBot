@@ -73,6 +73,92 @@ describe("Textbefehle-Panel-Ansicht", () => {
   });
 
   it.each([
+    ["de-DE", "Befehl !hallo löschen", "Befehl !hallo endgültig löschen", "Abbrechen"],
+    ["en-US", "Delete !hallo", "Delete !hallo permanently", "Cancel"],
+  ])("bestätigt das Löschen erst an Ort und Stelle (%s)", async (browserLanguage, deleteLabel, confirmLabel, cancelLabel) => {
+    let exists = true;
+    let deleteRequestCount = 0;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: exists ? [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Hallo",
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] : [] }));
+      }
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (init?.method === "DELETE") {
+        deleteRequestCount += 1;
+        exists = false;
+        return Promise.resolve(jsonResponse({}));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
+    const deleteButton = await screen.findByRole("button", { name: deleteLabel });
+    expect(deleteButton).toHaveClass("button--danger");
+    expect(deleteButton).not.toHaveClass("button--quiet");
+
+    fireEvent.click(deleteButton);
+    const confirmation = await screen.findByRole("alertdialog");
+    expect(confirmation).toHaveTextContent("hallo");
+    expect(deleteRequestCount).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: cancelLabel }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(deleteRequestCount).toBe(0);
+
+    fireEvent.click(await screen.findByRole("button", { name: deleteLabel }));
+    fireEvent.click(await screen.findByRole("button", { name: confirmLabel }));
+    await waitFor(() => expect(deleteRequestCount).toBe(1));
+  });
+
+  it("ordnet die drei Feldbreiten nach Inhaltsart zu", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Hallo",
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    expect(await screen.findByRole("heading", { name: "Befehle" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Name").closest("label")).toHaveClass("config-field--mittel");
+    expect(screen.getByLabelText("Antworttext").closest("label")).toHaveClass("config-field--breit");
+    expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual(["config-field config-field--schmal"]);
+
+    fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
+    const editorTextarea = await screen.findByDisplayValue("Hallo");
+    const editorField = editorTextarea.closest("label");
+    expect(editorField).toHaveClass("config-field--breit");
+    expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual([
+      "config-field config-field--schmal",
+      "config-field config-field--schmal",
+    ]);
+  });
+
+  it.each([
     ["de-DE", "Der Textbefehl konnte nicht gelöscht werden."],
     ["en-US", "The text command could not be deleted."],
   ])("zeigt für einen Löschfehler den passenden Text (%s)", async (browserLanguage, expected) => {
@@ -100,6 +186,9 @@ describe("Textbefehle-Panel-Ansicht", () => {
     fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
     fireEvent.click(await screen.findByRole("button", {
       name: browserLanguage === "de-DE" ? "Befehl !hallo löschen" : "Delete !hallo",
+    }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: browserLanguage === "de-DE" ? "Befehl !hallo endgültig löschen" : "Delete !hallo permanently",
     }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(expected);
