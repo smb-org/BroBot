@@ -74,8 +74,10 @@ export interface DashboardTexte {
     moderator: string;
     fehlend: string;
     aktiv: string;
+    ausstehend: string;
     nichtErforderlich: string;
     vorhanden: string;
+    botBerechtigungenFehlen: (anzahl: string) => string;
   };
   navigation: {
     hauptnavigation: string;
@@ -117,6 +119,8 @@ export interface DashboardTexte {
     optionaleModule: string;
     normalerBetrieb: string;
     channelBotNoetig: string;
+    botBerechtigungenBetreiber: string;
+    botBerechtigungenVollstaendig: string;
   };
   fehler: {
     titel: string;
@@ -132,6 +136,7 @@ export interface DashboardTexte {
     broadcasterOauth: string;
     chatZustimmung: string;
     botAccount: string;
+    botBerechtigungen: string;
     moderatorstatus: string;
     chatAbo: string;
     tokenZustand: string;
@@ -172,6 +177,20 @@ export interface DashboardTexte {
     nachher: string;
     aeltereEintraege: string;
     aeltereEintraegeLaden: string;
+    abonnements: string;
+    keineAbonnements: string;
+    abo: string;
+    zustand: string;
+    grund: string;
+    aboInspector: string;
+    aboTyp: string;
+    aboVersion: string;
+    aboId: string;
+    aboAktualisiert: string;
+    twitchMeldung: string;
+    httpStatus: string;
+    botBerechtigungenInspector: string;
+    fehlendeScopes: string;
   };
   ereignisse: {
     titel: string;
@@ -243,7 +262,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       botFehler: "Bot-Fehler", botTokenWiderrufen: "Bot-Token widerrufen", broadcasterZustimmungFehlt: "Broadcaster-Zustimmung fehlt",
       chatAboFehlt: "Chat-Abo fehlt", gesund: "Gesund", zustandUnvollstaendig: "Zustand unvollständig",
       nichtVerbunden: "Nicht verbunden", nichtEingerichtet: "Nicht eingerichtet", moderator: "Moderator", fehlend: "Fehlt",
-      aktiv: "Aktiv", nichtErforderlich: "Nicht erforderlich", vorhanden: "Vorhanden",
+      aktiv: "Aktiv", ausstehend: "Ausstehend", nichtErforderlich: "Nicht erforderlich", vorhanden: "Vorhanden",
+      botBerechtigungenFehlen: (anzahl) => `${anzahl} fehlen`,
     },
     navigation: {
       hauptnavigation: "Hauptnavigation", brotkrume: "Brotkrume", uebersicht: "Übersicht", kanal: "Kanal", system: "System",
@@ -274,6 +294,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       optionaleModule: "Für optionale Broadcaster-Module verbunden.",
       normalerBetrieb: "Optional; für den normalen Bot-Betrieb nicht erforderlich.",
       channelBotNoetig: "channel:bot wird vom Broadcaster benötigt.",
+      botBerechtigungenBetreiber: "Der Betreiber muss die Anwendung neu autorisieren.",
+      botBerechtigungenVollstaendig: "Alle angeforderten Bot-Berechtigungen sind vorhanden.",
     },
     fehler: {
       titel: "Fehler", warnung: "Warnung", sitzungUngueltig: "Deine Sitzung ist nicht mehr gültig.",
@@ -282,7 +304,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     },
     statusKarte: {
       deineRolle: "Deine Rolle", broadcasterOauth: "Broadcaster-OAuth", chatZustimmung: "Chat-Zustimmung",
-      botAccount: "Bot-Account", moderatorstatus: "Moderatorstatus", chatAbo: "Chat-Abo", tokenZustand: "Token-Zustand",
+      botAccount: "Bot-Account", botBerechtigungen: "Bot-Berechtigungen", moderatorstatus: "Moderatorstatus", chatAbo: "Chat-Abo", tokenZustand: "Token-Zustand",
       broadcasterZustimmungFehlt: "Broadcaster-Zustimmung fehlt", broadcastErklaerung: "Für optionale Broadcaster-Module verbunden.",
       keinBotStatus: "Es gibt noch keinen gespeicherten Botstatus.", chatBotNoetig: "channel:bot wird vom Broadcaster benötigt.",
     },
@@ -299,6 +321,9 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       keineAuditEintraege: "Noch keine Audit-Einträge gespeichert.", aenderungsdaten: "Änderungsdaten",
       vorher: "Vorher", nachher: "Nachher", aeltereEintraege: "Ältere Einträge laden",
       aeltereEintraegeLaden: "Ältere Einträge werden geladen …",
+      abonnements: "Abonnements", keineAbonnements: "Keine Abonnements gespeichert.", abo: "Abo", zustand: "Zustand", grund: "Grund",
+      aboInspector: "Abo-Details", aboTyp: "Roher Typ", aboVersion: "Version", aboId: "Abo-ID", aboAktualisiert: "Zuletzt geändert",
+      twitchMeldung: "Twitch-Meldung", httpStatus: "HTTP-Status", botBerechtigungenInspector: "Fehlende Bot-Berechtigungen", fehlendeScopes: "Fehlende Scopes",
     },
     ereignisse: {
       titel: "Ereignisse", anzahl: (anzahl) => `${anzahl} Einträge`, protokoll: "Ereignisprotokoll", zeit: "Zeit", ereignis: "Ereignis",
@@ -339,7 +364,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       botTokenWiderrufen: "Bot token revoked", broadcasterZustimmungFehlt: "Broadcaster consent missing",
       chatAboFehlt: "Chat subscription missing", gesund: "Healthy", zustandUnvollstaendig: "Incomplete status",
       nichtVerbunden: "Not connected", nichtEingerichtet: "Not set up", moderator: "Moderator", fehlend: "Missing", aktiv: "Active",
-      nichtErforderlich: "Not required", vorhanden: "Present",
+      ausstehend: "Pending", nichtErforderlich: "Not required", vorhanden: "Present",
+      botBerechtigungenFehlen: (anzahl) => `${anzahl} missing`,
     },
     navigation: {
       hauptnavigation: "Main navigation", brotkrume: "Breadcrumb", uebersicht: "Overview", kanal: "Channel", system: "System",
@@ -365,13 +391,15 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       keinGespeicherterStatus: "No bot status has been saved yet.", zuletztAktualisiert: (zeitpunkt) => `Last updated: ${zeitpunkt}`,
       optionaleModule: "Connected for optional broadcaster modules.", normalerBetrieb: "Optional; not required for normal bot operation.",
       channelBotNoetig: "channel:bot is required from the broadcaster.",
+      botBerechtigungenBetreiber: "The operator must authorize the application again.",
+      botBerechtigungenVollstaendig: "All requested bot permissions are present.",
     },
     fehler: {
       titel: "Error", warnung: "Warning", sitzungUngueltig: "Your session is no longer valid.", datenLaden: "The data could not be loaded.",
       letzter: "Last error", keineUrsache: "No saved cause", kanalNichtFreigegeben: "This channel is not available to your account.",
     },
     statusKarte: {
-      deineRolle: "Your role", broadcasterOauth: "Broadcaster OAuth", chatZustimmung: "Chat consent", botAccount: "Bot account",
+      deineRolle: "Your role", broadcasterOauth: "Broadcaster OAuth", chatZustimmung: "Chat consent", botAccount: "Bot account", botBerechtigungen: "Bot permissions",
       moderatorstatus: "Moderator status", chatAbo: "Chat subscription", tokenZustand: "Token status",
       broadcasterZustimmungFehlt: "Broadcaster consent missing", broadcastErklaerung: "Connected for optional broadcaster modules.",
       keinBotStatus: "No bot status has been saved yet.", chatBotNoetig: "channel:bot is required from the broadcaster.",
@@ -388,6 +416,9 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       zeit: "Time", aktion: "Action", wer: "Who",
       auditLaden: "Loading audit log …", keineAuditEintraege: "No audit entries saved yet.", aenderungsdaten: "Change data",
       vorher: "Before", nachher: "After", aeltereEintraege: "Load older entries", aeltereEintraegeLaden: "Loading older entries …",
+      abonnements: "Subscriptions", keineAbonnements: "No subscriptions saved.", abo: "Subscription", zustand: "State", grund: "Reason",
+      aboInspector: "Subscription details", aboTyp: "Raw type", aboVersion: "Version", aboId: "Subscription ID", aboAktualisiert: "Last changed",
+      twitchMeldung: "Twitch message", httpStatus: "HTTP status", botBerechtigungenInspector: "Missing bot permissions", fehlendeScopes: "Missing scopes",
     },
     ereignisse: {
       titel: "Events", anzahl: (anzahl) => `${anzahl} entries`, protokoll: "Event log", zeit: "Time", ereignis: "Event", modul: "Module",

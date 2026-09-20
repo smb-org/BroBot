@@ -215,6 +215,42 @@ describe("Panel-Leseendpunkte", () => {
     expect(system.broadcasterConnection).toBe("not_connected");
   });
 
+  it("liefert den gespeicherten Scope-Zustand und alle EventSub-Abos im System-Contract", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'brobot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+    await database.prepare(
+      `UPDATE bot_identity SET missing_scopes_json = ? WHERE id = 1`,
+    ).bind(JSON.stringify(["user:bot", "user:read:chat"])).run();
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, error_message, error_status, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "kanal-a", "channel.raid", "eingehend", "1", "raid-in", "secret", "enabled", null, null, null, "2026-09-18T04:00:00.000Z",
+      "kanal-a", "channel.raid", "ausgehend", "1", "raid-out", null, "error", "missing_scope", "Scope fehlt", 403, "2026-09-18T03:00:00.000Z",
+    ).run();
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/system"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      botPermissions: { missingScopes: ["user:bot", "user:read:chat"] },
+      subscriptions: [
+        { subscriptionType: "channel.raid", variant: "ausgehend", status: "error", message: "Scope fehlt", statusCode: 403 },
+        { subscriptionType: "channel.raid", variant: "eingehend", status: "enabled" },
+      ],
+    });
+  });
+
   it("liefert ausschließlich die Kanäle mit einer Mitgliedszeile des Benutzers", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertChannel(database, "kanal-b", "Beta");

@@ -3,6 +3,7 @@ import {
   getBotIdentityStatus,
   listChannelIds,
   purgeExpiredOAuthTransactions,
+  setBotIdentityMissingScopesIfCurrent,
   setBotChannelStatus,
   setBotIdentityStatusIfCurrent,
   rotateBotTokens,
@@ -10,6 +11,7 @@ import {
 import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 import { kuerzeAuf200Zeichen } from "../text";
+import { missingBotScopes } from "./auth/oauth";
 
 export interface TwitchClientEnvironment {
   TWITCH_CLIENT_ID: string;
@@ -332,9 +334,25 @@ const maintainBotIdentityInternal = async (
 ): Promise<void> => {
   await purgeExpiredOAuthTransactions(env.DB, now);
   const status = await getBotIdentityStatus(env.DB);
-  if (status?.status === "revoked") return;
   const identity = await getBotIdentity(env.DB);
   if (identity === null) return;
+
+  let storedScopes: unknown;
+  try {
+    storedScopes = JSON.parse(identity.scopesJson);
+  } catch {
+    storedScopes = [];
+  }
+  const grantedScopes = Array.isArray(storedScopes)
+    ? storedScopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  await setBotIdentityMissingScopesIfCurrent(
+    env.DB,
+    missingBotScopes(grantedScopes),
+    identity.accessTokenCiphertext,
+    identity.refreshTokenCiphertext,
+  );
+  if (status?.status === "revoked") return;
 
   const encryptionKeys = getTokenEncryptionKeys(env);
   const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);

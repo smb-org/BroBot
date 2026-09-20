@@ -23,6 +23,12 @@ export const BOT_SCOPES = [
   "moderator:read:vips",
 ] as const;
 
+/** Liefert die verlangten Bot-Scopes, die Twitch nicht erteilt hat. */
+export const missingBotScopes = (grantedScopes: readonly string[]): string[] => {
+  const granted = new Set(grantedScopes);
+  return BOT_SCOPES.filter((scope) => !granted.has(scope));
+};
+
 export type OAuthPurpose = "login" | "bot";
 
 export interface OAuthEnvironment {

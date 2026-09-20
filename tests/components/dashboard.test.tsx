@@ -666,6 +666,90 @@ describe("Dashboard-Grundgerüst", () => {
     expect(row).toHaveAttribute("aria-selected", "false");
   });
 
+  it("zeigt alle Abos lesbar und öffnet Meldung und Status im Sub-Inspector", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
+    const subscriptions = [
+      { subscriptionType: "channel.chat.message", variant: "", version: "1", subscriptionId: "chat-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" },
+      { subscriptionType: "channel.raid", variant: "eingehend", version: "1", subscriptionId: "raid-in", status: "missing", reason: "subscription_replaced", message: null, statusCode: null, updatedAt: "2026-09-18T03:00:00.000Z" },
+      { subscriptionType: "channel.raid", variant: "ausgehend", version: "1", subscriptionId: "raid-out", status: "error", reason: "missing_scope", message: "Scope fehlt", statusCode: 403, updatedAt: "2026-09-18T02:00:00.000Z" },
+      { subscriptionType: "channel.future", variant: "", version: "9", subscriptionId: null, status: "pending", reason: "wartet", message: null, statusCode: null, updatedAt: "2026-09-18T01:00:00.000Z" },
+    ];
+    const systemResponse = { ...system, botPermissions: { missingScopes: [] }, subscriptions };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/system")) return Promise.resolve(jsonResponse(systemResponse));
+      if (path.endsWith("/audit-log")) return Promise.resolve(jsonResponse(audit));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("columnheader", { name: "Abo" })).toBeInTheDocument();
+    expect(screen.getByText("Chat-Nachrichten")).toBeInTheDocument();
+    expect(screen.getByText("Eingehende Raids")).toBeInTheDocument();
+    expect(screen.getByText("Ausgehende Raids")).toBeInTheDocument();
+    expect(screen.getByText("Chat-Nachrichten").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "green");
+    expect(screen.getByText("Eingehende Raids").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "amber");
+    expect(screen.getByText("Ausgehende Raids").closest("tr")?.querySelector(".led")).toHaveAttribute("data-status", "red");
+    const unknown = screen.getByText("channel.future");
+    expect(unknown).toHaveClass("mono");
+    expect(screen.getByText("Ausstehend")).toBeInTheDocument();
+    expect(screen.getByText("missing_scope")).toBeInTheDocument();
+
+    const outgoing = screen.getByText("Ausgehende Raids").closest("tr");
+    expect(outgoing).not.toBeNull();
+    fireEvent.keyDown(outgoing as HTMLElement, { key: "Enter" });
+    expect(outgoing).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("channel.raid")).toBeInTheDocument();
+    expect(screen.getByText("Scope fehlt")).toBeInTheDocument();
+    expect(screen.getByText("403")).toBeInTheDocument();
+  });
+
+  it("zeigt Bot-Berechtigungen auf der Kanalseite, nennt fehlende Scopes und bietet keine Autorisierung an", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      botPermissions: { missingScopes: ["user:bot", "user:read:chat"] },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const permissions = await screen.findByRole("article", { name: "Bot-Berechtigungen" });
+    expect(permissions).toHaveAttribute("data-status", "warning");
+    expect(within(permissions).getByText("2 fehlen")).toBeInTheDocument();
+    expect(screen.getByText("Der Betreiber muss die Anwendung neu autorisieren.")).toBeInTheDocument();
+    expect(screen.getByText("user:bot")).toHaveClass("mono");
+    expect(screen.getByText("user:read:chat")).toHaveClass("mono");
+    // Die Autorisierung gehört zum Betreiber-Account, nicht in die kanalbezogene Panel-Rolle.
+    expect(screen.queryByRole("button", { name: /autoris/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /autoris/i })).not.toBeInTheDocument();
+  });
+
+  it("zeigt vollständige Bot-Berechtigungen als gesunden Zustand mit Wort", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const permissions = await screen.findByRole("article", { name: "Bot-Berechtigungen" });
+    expect(permissions).toHaveAttribute("data-status", "healthy");
+    expect(within(permissions).getByText("Gesund")).toBeInTheDocument();
+  });
+
   it("fragt beim Hinzufügen ausdrücklich nach dem tatsächlichen Zugriffsumfang", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let addRequestCount = 0;

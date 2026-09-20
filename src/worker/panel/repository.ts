@@ -3,6 +3,7 @@ import type {
   PanelAuditEntry,
   PanelAuditResponse,
   PanelBotStatus,
+  PanelBotPermissions,
   PanelChannelOverview,
   PanelChannelRole,
   PanelChannelState,
@@ -10,11 +11,12 @@ import type {
   PanelLoginStatusName,
   PanelModeratorStatus,
   PanelSystemResponse,
+  PanelEventSubSubscription,
   PanelTokenStatus,
   PanelEventEntry,
   PanelEventsResponse,
 } from "../../panel-contract";
-import { channelBotConsentCondition } from "../auth/repository";
+import { channelBotConsentCondition, listEventSubSubscriptions } from "../auth/repository";
 
 interface ChannelStateRow {
   channel_id: string;
@@ -26,6 +28,7 @@ interface ChannelStateRow {
   bot_status: PanelBotStatus["status"] | null;
   bot_reason: string | null;
   bot_updated_at: string | null;
+  bot_missing_scopes_json: string | null;
   bot_expires_at: string | null;
   login_status: PanelLoginStatusName | null;
   login_reason: string | null;
@@ -107,6 +110,7 @@ const channelStateQuery = `
            CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent,
            bot_status.status AS bot_status, bot_status.reason AS bot_reason,
            bot_status.updated_at AS bot_updated_at,
+           bot_identity.missing_scopes_json AS bot_missing_scopes_json,
            bot_identity.expires_at AS bot_expires_at,
            login_identity.status AS login_status, login_identity.reason AS login_reason,
            login_identity.expires_at AS login_expires_at,
@@ -177,6 +181,18 @@ const mapBotStatus = (row: ChannelStateRow): PanelBotStatus | null =>
   row.bot_status === null || row.bot_updated_at === null
     ? null
     : { status: row.bot_status, reason: row.bot_reason, updatedAt: row.bot_updated_at };
+
+const mapBotPermissions = (row: ChannelStateRow): PanelBotPermissions | null => {
+  if (row.bot_missing_scopes_json === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(row.bot_missing_scopes_json);
+    return Array.isArray(parsed) && parsed.every((scope) => typeof scope === "string")
+      ? { missingScopes: [...parsed] }
+      : null;
+  } catch {
+    return null;
+  }
+};
 
 const mapModerator = (row: ChannelStateRow): PanelModeratorStatus | null =>
   row.moderator_is_moderator === null || row.moderator_checked_at === null
@@ -250,6 +266,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   broadcasterConnection: row.broadcaster_connection === 1 ? "connected" : "not_connected",
   channelBotConsent: row.channel_bot_consent === 1 ? "granted" : "missing",
   bot: mapBotStatus(row),
+  botPermissions: mapBotPermissions(row),
   moderator: mapModerator(row),
   chatSubscription: mapEventSub(row),
   tokens: mapTokens(row),
@@ -307,10 +324,23 @@ export const getSystemOverviewForUser = async (
 ): Promise<PanelSystemResponse | null> => {
   const row = await getChannelStateRow(db, userId, channelId);
   if (row === null) return null;
+  const subscriptions = await listEventSubSubscriptions(db, channelId);
   return {
     broadcasterConnection: row.broadcaster_connection === 1 ? "connected" : "not_connected",
     bot: mapBotStatus(row),
+    botPermissions: mapBotPermissions(row),
     chatSubscription: mapEventSub(row),
+    subscriptions: subscriptions.map((subscription): PanelEventSubSubscription => ({
+      subscriptionType: subscription.subscriptionType,
+      variant: subscription.variant,
+      version: subscription.version,
+      subscriptionId: subscription.subscriptionId,
+      status: subscription.status,
+      reason: subscription.reason,
+      message: subscription.errorMessage,
+      statusCode: subscription.errorStatus,
+      updatedAt: subscription.updatedAt,
+    })),
     tokens: mapTokens(row),
   };
 };

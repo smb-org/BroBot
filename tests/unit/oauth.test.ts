@@ -5,6 +5,7 @@ import {
   LOGIN_SCOPES,
   exchangeAuthorizationCode,
   fetchTwitchUser,
+  missingBotScopes,
   startOAuthAuthorization,
   verifyOAuthState,
 } from "../../src/worker/auth/oauth";
@@ -35,6 +36,14 @@ const fakeDatabase = () => {
 };
 
 describe("Twitch-OAuth", () => {
+  it("ermittelt fehlende Bot-Scopes unabhängig von Reihenfolge und Zusatz-Scopes", () => {
+    expect(missingBotScopes(["user:write:chat", "user:bot", "extra:scope"])).toEqual(
+      BOT_SCOPES.filter((scope) => scope !== "user:bot" && scope !== "user:write:chat"),
+    );
+    expect(missingBotScopes([...BOT_SCOPES].reverse())).toEqual([]);
+    expect(missingBotScopes([...BOT_SCOPES, "extra:scope"])).toEqual([]);
+  });
+
   it("erzeugt für Login und Bot unterschiedliche, vollständige Scope-URLs", async () => {
     const { database } = fakeDatabase();
     const login = await startOAuthAuthorization(database, environment, "login", "2026-09-18T00:00:00.000Z");
