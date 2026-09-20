@@ -51,6 +51,8 @@ interface LoadState<T> {
   loadedAt?: number;
 }
 
+type LoadStateSetter<T> = (value: LoadState<T> | ((current: LoadState<T>) => LoadState<T>)) => void;
+
 interface ModeratorCheckState {
   status: "idle" | "loading" | "error";
   error: string | null;
@@ -1286,22 +1288,34 @@ export const DashboardApp = (): ReactElement => {
     }
   };
 
+  const reloadData = async <T,>(routePath: string, setState: LoadStateSetter<T>, fetchData: () => Promise<T>, preserveDataOnError: boolean, afterLoad?: () => void): Promise<void> => {
+    setState((current) => loadingState(current));
+    try {
+      const response = await fetchData();
+      if (window.location.pathname !== routePath) return;
+      setState(loadedState(response));
+      afterLoad?.();
+    } catch (error) {
+      if (window.location.pathname !== routePath) return;
+      setState((current) => current.loadedAt === undefined
+        ? { status: "error", data: null, error: errorMessage(error) }
+        : { status: "error", data: preserveDataOnError ? current.data : null, error: errorMessage(error), loadedAt: current.loadedAt });
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    }
+  };
+
   const reloadModules = async (): Promise<void> => {
     if (route.kind !== "module" && (route.kind !== "channel" || route.section !== "modules")) return;
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
-    setModules((current) => loadingState(current));
-    try {
-      const response = await fetchModules(channelId);
-      if (window.location.pathname !== routePath) return;
-      setModules(loadedState(response));
-    } catch (error) {
-      if (window.location.pathname !== routePath) return;
-      setModules((current) => current.loadedAt === undefined
-        ? { status: "error", data: null, error: errorMessage(error) }
-        : { status: "error", data: null, error: errorMessage(error), loadedAt: current.loadedAt });
-      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-    }
+    await reloadData(routePath, setModules, () => fetchModules(channelId), false);
+  };
+
+  const reloadOverview = async (): Promise<void> => {
+    if (route.kind !== "module") return;
+    const channelId = route.channelId;
+    const routePath = dashboardRoutePath(route);
+    await reloadData(routePath, setOverview, () => fetchChannelOverview(channelId), true, () => setOverviewRoutePath(routePath));
   };
 
   const toggleHeaderModule = async (): Promise<void> => {
@@ -1313,6 +1327,7 @@ export const DashboardApp = (): ReactElement => {
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);
       await reloadModules();
+      await reloadOverview();
     } catch (error) {
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
@@ -1470,7 +1485,7 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} /> : null}
         {route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexte().overview.zustandLaden}</p> : null}
         {route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? overview.data.activeModules.map((module) => ({ id: module.moduleId, enabled: true, settings: module.settings }))} activeModules={overview.data.activeModules} loading={modules.status === "loading"} error={modules.error} busy={headerModuleBusy} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} /> : null}
+        {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} /> : null}
         {route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} eventsState={events} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
         </main>

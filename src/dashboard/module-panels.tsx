@@ -306,25 +306,25 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const registered = MODULES.find((candidate) => candidate.id === moduleId);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
-  const enabled = moduleState?.enabled ?? activeModule !== undefined;
+  const enabled = moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
   const disabledReason = manageable ? null : texte.module.verwaltungGesperrt;
-  const switchDisabled = registered === undefined || (moduleState === undefined && activeModule === undefined);
+  const switchDisabled = registered === undefined || moduleState === undefined;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
   const missingScopeSet = new Set(missingScopes);
   const effectiveEnabled = enabled && missingScopes.length === 0;
+  const viewLoading = loading || moduleState === undefined || (enabled && activeModule === undefined);
+  const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
 
   const stateMessage = registered === undefined
     ? labels.unbekannt(details.name)
     : missingScopes.length > 0
       ? texte.module.scopesFehlen(details.name)
       : moduleState?.enabled === false
-      ? labels.ausgeschaltet(details.name)
-      : activeModule === undefined
-        ? labels.nichtAktiv(details.name)
+        ? labels.ausgeschaltet(details.name)
         : null;
-  const stateTone = registered === undefined || missingScopes.length > 0 || (moduleState?.enabled !== false && activeModule === undefined) ? "notice" : "neutral";
+  const stateTone = registered === undefined || missingScopes.length > 0 ? "notice" : "neutral";
 
   return (
     <>
@@ -365,12 +365,12 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             : <button className="button button--primary" type="button" disabled>{texte.module.scopeZustimmungAnfordern}</button>}
           {ownRole === "broadcaster" ? null : <p className="sperrgrund">{texte.module.scopeZustimmungGesperrt}</p>}
         </section>}
-        {loading ? <p className="muted">{texte.module.laden}</p> : null}
+        {viewLoading ? <p className="muted">{texte.module.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {stateMessage === null ? (
-          registered?.panel === undefined ? <p className="module-state">{texte.module.keineAnsicht}</p> : (
-            <section className="module-detail__content" aria-label={labels.inhalt}>
-              <ModulePanelMount channelId={channelId} activeModules={[activeModule as PanelActiveModule]} />
+          registered?.panel === undefined ? (showActiveView ? <p className="module-state">{texte.module.keineAnsicht}</p> : null) : !showActiveView ? null : (
+            <section className={`module-detail__content${viewLoading ? " veraltet" : ""}`} aria-label={labels.inhalt}>
+              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} />
             </section>
           )
         ) : (

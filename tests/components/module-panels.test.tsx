@@ -48,6 +48,22 @@ describe("Modul-Panel-Lader", () => {
     expect(screen.getByText("Für dieses aktive Modul gibt es noch keine Panel-Ansicht.")).toBeInTheDocument();
   });
 
+  it("verwendet die Modulliste als Quelle und behauptet bei fehlender Übersicht nicht inaktiv", () => {
+    render(<ModulePage
+      channelId="kanal-a"
+      moduleId="aktiv"
+      ownRole="verwalter"
+      modules={[{ id: "aktiv", enabled: true, settings: "{}" }]}
+      activeModules={[]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    expect(screen.getByRole("switch", { name: "aktiv: Läuft" })).toBeChecked();
+    expect(screen.queryByText("Das Modul „aktiv“ ist in diesem Kanal nicht aktiv.")).not.toBeInTheDocument();
+    expect(screen.getByText("Module werden geladen …")).toBeInTheDocument();
+  });
+
   it("navigiert beim Tippen auf eine Rastertaste, ohne beim Tippen zu schalten", () => {
     const fetcher = vi.fn<typeof fetch>();
     const onNavigate = vi.fn();

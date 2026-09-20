@@ -64,7 +64,8 @@ describe("Modulroute beim clientseitigen Wechsel", () => {
     expect(activeLoader).not.toHaveBeenCalled();
 
     loeseZweiteAntwortAuf(response(deaktivierterStand));
-    expect(await screen.findByText("Das Modul „aktiv“ ist in diesem Kanal nicht aktiv.")).toBeInTheDocument();
+    expect(await screen.findByText("Module werden geladen …")).toBeInTheDocument();
+    expect(screen.queryByText("Das Modul „aktiv“ ist in diesem Kanal nicht aktiv.")).not.toBeInTheDocument();
     expect(activeLoader).not.toHaveBeenCalled();
   });
 });

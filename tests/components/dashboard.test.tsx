@@ -1139,6 +1139,43 @@ describe("Dashboard-Grundgerüst", () => {
     expect(headerSwitch).toHaveTextContent("Textbefehle · Läuft");
   });
 
+  it("lädt die Kanalübersicht nach dem Einschalten neu und zeigt die Modulansicht", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
+    let overviewAufrufe = 0;
+    let modulesAufrufe = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/overview") {
+        overviewAufrufe += 1;
+        return jsonResponse(overviewAufrufe === 1 ? overview(channel) : {
+          ...overview(channel),
+          activeModules: [{ moduleId: "textbefehle", settings: "{}" }],
+        });
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
+        modulesAufrufe += 1;
+        return jsonResponse({ modules: [{ id: "textbefehle", enabled: modulesAufrufe > 1, settings: "{}" }] });
+      }
+      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      if (url.pathname === "/api/channels/kanal-a/modules/textbefehle" && init?.method === "PATCH") {
+        return jsonResponse({ module: { id: "textbefehle", enabled: true, settings: "{}" } });
+      }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+
+    render(<DashboardApp />);
+
+    const switcher = await screen.findByRole("switch", { name: "Textbefehle · Aus" });
+    fireEvent.click(switcher);
+
+    expect(await screen.findByRole("heading", { name: "Befehl anlegen" })).toBeInTheDocument();
+    expect(overviewAufrufe).toBe(2);
+    expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/overview")).toHaveLength(2);
+  });
+
   it("öffnet den Kanalumschalter per Enter und Pfeil ab, bewegt den Fokus und schließt ohne Auswahl per Escape", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
@@ -1363,7 +1400,8 @@ describe("Dashboard-Grundgerüst", () => {
 
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
     loeseZweiteAntwortAuf(jsonResponse(deaktiviertesModul));
-    expect(await screen.findByText("Das Modul „Textbefehle“ ist in diesem Kanal nicht aktiv.")).toBeInTheDocument();
+    expect(await screen.findByText("Module werden geladen …")).toBeInTheDocument();
+    expect(screen.queryByText("Das Modul „Textbefehle“ ist in diesem Kanal nicht aktiv.")).not.toBeInTheDocument();
   });
 
   it("meldet ein deaktiviertes Modul auf seiner Unterseite verständlich", async () => {
@@ -1372,13 +1410,14 @@ describe("Dashboard-Grundgerüst", () => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "textbefehle", enabled: false, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
 
     render(<DashboardApp />);
 
-    expect(await screen.findByText("Das Modul „Textbefehle“ ist in diesem Kanal nicht aktiv.")).toBeInTheDocument();
+    expect(await screen.findByText("Das Modul „Textbefehle“ ist ausgeschaltet.")).toBeInTheDocument();
   });
 
   it("meldet ein unbekanntes Modul auf seiner Unterseite verständlich", async () => {

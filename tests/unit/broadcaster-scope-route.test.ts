@@ -52,6 +52,9 @@ describe("Broadcaster-Scope-Route", () => {
 
     expect(response.status).toBe(302);
     expect(scopes).toEqual(["user:read:moderated_channels", "channel:bot", "channel:read:ads"]);
+    await expect(database.prepare(
+      "SELECT redirect_path FROM oauth_transactions",
+    ).first()).resolves.toEqual({ redirect_path: "/channels/kanal-a/modules/werbung" });
   });
 
   it("behält Scopes bereits aktivierter eigener Broadcaster-Module bei", async () => {
