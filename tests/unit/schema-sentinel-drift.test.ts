@@ -34,7 +34,9 @@ describe("Schema-Sentinel-Drift", () => {
       .map((match) => match[1]);
     const altered = [...source.matchAll(/ALTER TABLE\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
       .map((match) => match[1]);
+    const renamed = [...source.matchAll(/ALTER TABLE\s+[A-Za-z_][A-Za-z0-9_]*\s+RENAME TO\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
+      .map((match) => match[1]);
 
-    expect([...created, ...altered]).toContain(LATEST_SCHEMA_TABLE);
+    expect([...created, ...altered, ...renamed]).toContain(LATEST_SCHEMA_TABLE);
   });
 });

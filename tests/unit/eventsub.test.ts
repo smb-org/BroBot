@@ -295,6 +295,43 @@ describe("EventSub-Eingang", () => {
     expect(row).toEqual(firstRow);
   });
 
+  it("ordnet ein Raid trotz fremder Kanal-ID im Ereignisrumpf dem Abo-Kanal zu", async () => {
+    await insertChannel(database, "channel-condition");
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('channel-condition', 'kanalereignisse', 1, '{}')`,
+    ).run();
+    const body = JSON.stringify({
+      subscription: {
+        type: "channel.raid",
+        condition: { to_broadcaster_user_id: "channel-condition" },
+      },
+      event: {
+        from_broadcaster_user_id: "raid-source",
+        from_broadcaster_user_name: "Quelle",
+        to_broadcaster_user_id: "foreign-channel",
+        to_broadcaster_user_name: "Fremd",
+        viewers: 23,
+      },
+    });
+
+    const response = await eventSubRouter.fetch(
+      signedRequest(secret, "notification", body, "message-condition"),
+      environment(),
+    );
+
+    expect(response.status).toBe(204);
+    await expect(database.prepare(
+      `SELECT channel_id, module_id, code, detail_json
+         FROM event_log`,
+    ).first()).resolves.toEqual({
+      channel_id: "channel-condition",
+      module_id: "kanalereignisse",
+      code: "kanalereignisse.raid.eingehend",
+      detail_json: JSON.stringify({ quelle: "Quelle", zuschauer: 23 }),
+    });
+  });
+
   it("verbraucht bei einem fehlgeschlagenen Widerrufsspeichern die Message-ID nicht", async () => {
     await insertChannel(database, "channel-retry");
     const body = revocationBody("channel-retry", "subscription-retry");
@@ -360,6 +397,42 @@ describe("EventSub-Eingang", () => {
     await expect(database.prepare(
       "SELECT status, reason FROM twitch_login_identity WHERE user_id = 'channel-42'",
     ).first()).resolves.toEqual({ status: "revoked", reason: "authorization_revoked" });
+  });
+
+  it("gewinnt den Kanal eines Shoutout-Widerrufs über die gemeinsame Bedingungsdefinition zurück", async () => {
+    await insertChannel(database, "channel-shoutout");
+    const body = JSON.stringify({
+      subscription: {
+        id: "shoutout-subscription",
+        type: "channel.shoutout.create",
+        status: "authorization_revoked",
+        condition: { broadcaster_user_id: "channel-shoutout", moderator_user_id: "bot-user" },
+      },
+    });
+
+    const response = await eventSubRouter.fetch(
+      signedRequest(secret, "revocation", body, "message-shoutout-revoked"),
+      environment(),
+    );
+
+    expect(response.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT channel_id, subscription_type, subscription_id FROM eventsub_revocations",
+    ).first()).resolves.toEqual({
+      channel_id: "channel-shoutout",
+      subscription_type: "channel.shoutout.create",
+      subscription_id: "shoutout-subscription",
+    });
+    await expect(database.prepare(
+      "SELECT channel_id, subscription_type, variant, subscription_id, status, reason FROM eventsub_subscriptions",
+    ).first()).resolves.toEqual({
+      channel_id: "channel-shoutout",
+      subscription_type: "channel.shoutout.create",
+      variant: "",
+      subscription_id: "shoutout-subscription",
+      status: "revoked",
+      reason: "authorization_revoked",
+    });
   });
 
   it("bewahrt einen Widerruf für einen unbekannten Kanal sichtbar auf", async () => {

@@ -12,6 +12,7 @@ import { TestD1Database } from "./test-d1";
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     { id: "chat", eventSubTypes: ["channel.chat.message"] },
+    { id: "kanalereignisse", eventSubTypes: ["channel.shoutout.create"] },
     { id: "aus", eventSubTypes: ["channel.follow"] },
   ],
 }));
@@ -69,10 +70,10 @@ describe("EventSub-Abgleich", () => {
     ).run();
 
     await expect(listDesiredEventSubTargets(asD1(database))).resolves.toEqual([
-      { channelId: "kanal-a", subscriptionType: "channel.chat.message", version: "1" },
+      { channelId: "kanal-a", subscriptionType: "channel.chat.message", variant: "", version: "1" },
     ]);
     await expect(listDesiredEventSubTargets(asD1(database), "kanal-a")).resolves.toEqual([
-      { channelId: "kanal-a", subscriptionType: "channel.chat.message", version: "1" },
+      { channelId: "kanal-a", subscriptionType: "channel.chat.message", variant: "", version: "1" },
     ]);
   });
 
@@ -119,9 +120,14 @@ describe("EventSub-Abgleich", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         data: [{ id: "subscription-1", type: "channel.chat.message", version: "1", status: "enabled", condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" }, transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" } }],
-      }), { status: 202 }));
+      }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [{ id: "subscription-1", type: "channel.chat.message", version: "1", status: "enabled", condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" }, transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" } }],
+        pagination: {},
+      }), { status: 200 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T02:00:00.000Z", fetcher);
 
     expect(fetcher).toHaveBeenNthCalledWith(2, "https://api.twitch.tv/helix/eventsub/subscriptions", expect.objectContaining({
       method: "POST",
@@ -140,9 +146,47 @@ describe("EventSub-Abgleich", () => {
     const headers = new Headers(createRequest.headers);
     expect(headers.get("Authorization")).toBe("Bearer app-token");
     expect(headers.get("Client-ID")).toBe("client-id");
+    expect(fetcher).toHaveBeenCalledTimes(3);
     await expect(database.prepare(
       "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-1" });
+  });
+
+  it("erkennt ein bestehendes Shoutout-Abo mit Moderator-ID wieder und lässt es bei Folgeabgleichen unverändert", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'kanalereignisse', 1, '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+
+    const subscription = {
+      id: "shoutout-subscription",
+      type: "channel.shoutout.create",
+      version: "1",
+      status: "enabled",
+      condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription], pagination: {} }), { status: 200 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T02:00:00.000Z", fetcher);
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method ?? "GET")).toEqual(["GET", "GET"]);
+    await expect(database.prepare(
+      "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.shoutout.create'",
+    ).first()).resolves.toEqual({ status: "enabled", subscription_id: "shoutout-subscription" });
   });
 
   it("merkt Twitch-Fehler je Kanal und arbeitet mit dem nächsten Kanal weiter", async () => {

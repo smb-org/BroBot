@@ -102,6 +102,8 @@ export interface ModuleRouteEnvironment {
 export interface ModuleEvent<Settings = unknown> {
   channelId: string;
   subscriptionType: string;
+  /** Die Variante stammt wie der Kanal aus der EventSub-Abo-Bedingung. */
+  subscriptionVariant?: string;
   triggerId: string;
   payload: Readonly<Record<string, unknown>>;
   settings: Settings;

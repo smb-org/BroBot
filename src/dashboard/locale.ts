@@ -416,6 +416,16 @@ export type EreignisCode =
   | "host.modul.fehler"
   | "host.modul.unbekannt"
   | "host.overlay.nicht_ausgefuehrt"
+  | "kanalereignisse.raid.eingehend"
+  | "kanalereignisse.raid.ausgehend"
+  | "kanalereignisse.shoutout.gesendet"
+  | "kanalereignisse.shoutout.empfangen"
+  | "kanalereignisse.chat.sub"
+  | "kanalereignisse.chat.resub"
+  | "kanalereignisse.chat.gift_sub"
+  | "kanalereignisse.chat.community_gift"
+  | "kanalereignisse.chat.ankuendigung"
+  | "kanalereignisse.chat.unbekannt"
   | "shoutout.unterdrueckt"
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
@@ -439,6 +449,12 @@ const ereignisTextMitName = (
   return name === null ? ohneName : mitName(name);
 };
 
+const detailText = (detail: EreignisDetail, key: string, fallback: string): string =>
+  typeof detail[key] === "string" && detail[key].length > 0 ? detail[key] : fallback;
+
+const detailZahl = (detail: EreignisDetail, key: string, fallback: string): string =>
+  typeof detail[key] === "number" && Number.isFinite(detail[key]) ? String(detail[key]) : fallback;
+
 export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = {
   de: {
     "host.aktion.fehler": "Aktion fehlgeschlagen",
@@ -447,6 +463,16 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "host.modul.fehler": "Modulfehler",
     "host.modul.unbekannt": "Unbekanntes Modul",
     "host.overlay.nicht_ausgefuehrt": "Overlay nicht ausgeführt",
+    "kanalereignisse.raid.eingehend": (detail) => `Raid von ${detailText(detail, "quelle", "unbekannt")} mit ${detailZahl(detail, "zuschauer", "unbekannter Anzahl")} Zuschauern`,
+    "kanalereignisse.raid.ausgehend": (detail) => `Raid zu ${detailText(detail, "ziel", "unbekannt")} mit ${detailZahl(detail, "zuschauer", "unbekannter Anzahl")} Zuschauern`,
+    "kanalereignisse.shoutout.gesendet": (detail) => `Shoutout an ${detailText(detail, "ziel", "unbekannt")}`,
+    "kanalereignisse.shoutout.empfangen": (detail) => `Shoutout von ${detailText(detail, "quelle", "unbekannt")}${typeof detail.zuschauer === "number" && Number.isFinite(detail.zuschauer) ? ` mit ${String(detail.zuschauer)} Zuschauern` : ""}`,
+    "kanalereignisse.chat.sub": (detail) => `Sub von ${detailText(detail, "person", "unbekannt")}`,
+    "kanalereignisse.chat.resub": (detail) => `Resub von ${detailText(detail, "person", "unbekannt")}`,
+    "kanalereignisse.chat.gift_sub": (detail) => `Gift-Sub von ${detailText(detail, "spender", "unbekannt")} an ${detailText(detail, "empfaenger", "unbekannt")}`,
+    "kanalereignisse.chat.community_gift": (detail) => `Community-Gift von ${detailText(detail, "spender", "unbekannt")} für ${detailZahl(detail, "anzahl", "unbekannte Anzahl")} Subs`,
+    "kanalereignisse.chat.ankuendigung": (detail) => `Ankündigung von ${detailText(detail, "person", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
+    "kanalereignisse.chat.unbekannt": (detail) => `Unbekannte Chat-Benachrichtigung: ${detailText(detail, "art", "unbekannt")}`,
     "shoutout.unterdrueckt": "Shoutout unterdrückt",
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
@@ -467,6 +493,16 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "host.modul.fehler": "Module error",
     "host.modul.unbekannt": "Unknown module",
     "host.overlay.nicht_ausgefuehrt": "Overlay not executed",
+    "kanalereignisse.raid.eingehend": (detail) => `Raid from ${detailText(detail, "quelle", "unknown")} with ${detailZahl(detail, "zuschauer", "unknown number")} viewers`,
+    "kanalereignisse.raid.ausgehend": (detail) => `Raid to ${detailText(detail, "ziel", "unknown")} with ${detailZahl(detail, "zuschauer", "unknown number")} viewers`,
+    "kanalereignisse.shoutout.gesendet": (detail) => `Shoutout sent to ${detailText(detail, "ziel", "unknown")}`,
+    "kanalereignisse.shoutout.empfangen": (detail) => `Shoutout received from ${detailText(detail, "quelle", "unknown")}${typeof detail.zuschauer === "number" && Number.isFinite(detail.zuschauer) ? ` with ${String(detail.zuschauer)} viewers` : ""}`,
+    "kanalereignisse.chat.sub": (detail) => `Sub from ${detailText(detail, "person", "unknown")}`,
+    "kanalereignisse.chat.resub": (detail) => `Resub from ${detailText(detail, "person", "unknown")}`,
+    "kanalereignisse.chat.gift_sub": (detail) => `Gift sub from ${detailText(detail, "spender", "unknown")} to ${detailText(detail, "empfaenger", "unknown")}`,
+    "kanalereignisse.chat.community_gift": (detail) => `Community gift from ${detailText(detail, "spender", "unknown")} for ${detailZahl(detail, "anzahl", "unknown number")} subs`,
+    "kanalereignisse.chat.ankuendigung": (detail) => `Announcement from ${detailText(detail, "person", "unknown")}: ${detailText(detail, "text", "no text")}`,
+    "kanalereignisse.chat.unbekannt": (detail) => `Unknown chat notification: ${detailText(detail, "art", "unknown")}`,
     "shoutout.unterdrueckt": "Shoutout suppressed",
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
@@ -489,6 +525,16 @@ export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green"> = {
   "host.modul.fehler": "red",
   "host.modul.unbekannt": "red",
   "host.overlay.nicht_ausgefuehrt": "red",
+  "kanalereignisse.raid.eingehend": "green",
+  "kanalereignisse.raid.ausgehend": "green",
+  "kanalereignisse.shoutout.gesendet": "green",
+  "kanalereignisse.shoutout.empfangen": "green",
+  "kanalereignisse.chat.sub": "green",
+  "kanalereignisse.chat.resub": "green",
+  "kanalereignisse.chat.gift_sub": "green",
+  "kanalereignisse.chat.community_gift": "green",
+  "kanalereignisse.chat.ankuendigung": "green",
+  "kanalereignisse.chat.unbekannt": "green",
   "shoutout.unterdrueckt": "amber",
   "textbefehle.abgekuehlt": "amber",
   "textbefehle.ausgeloest": "green",

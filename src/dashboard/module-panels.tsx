@@ -4,15 +4,10 @@ import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
 import type { PanelActiveModule, PanelChannelRole, PanelModuleState } from "../panel-contract";
 import { dashboardLanguage, dashboardTexte, formatZahl, type DashboardLanguage, type LocaleCatalog } from "./locale";
-import { moduleName, statusWord } from "./module-labels";
+import { moduleDescription, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
-
-interface ModuleCatalogEntry {
-  name: string;
-  description: string;
-}
 
 interface ModuleWorkspaceTexte {
   status: string;
@@ -47,26 +42,10 @@ const workspaceKatalog: LocaleCatalog<ModuleWorkspaceTexte> = {
 
 const workspaceTexte = (language: DashboardLanguage = dashboardLanguage()): ModuleWorkspaceTexte => workspaceKatalog[language];
 
-const moduleCatalog: LocaleCatalog<Record<string, ModuleCatalogEntry>> = {
-  de: {
-    textbefehle: {
-      name: "Textbefehle",
-      description: "Antwortet auf kurze Befehle im Chat.",
-    },
-  },
-  en: {
-    textbefehle: {
-      name: "Text commands",
-      description: "Replies to short commands in chat.",
-    },
-  },
-};
-
-const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): ModuleCatalogEntry =>
-  moduleCatalog[language][moduleId] ?? {
-    name: moduleName(moduleId, language),
-    description: workspaceTexte(language).keineBeschreibung,
-  };
+const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): { name: string; description: string } => ({
+  name: moduleName(moduleId, language),
+  description: moduleDescription(moduleId, language) ?? workspaceTexte(language).keineBeschreibung,
+});
 
 export type ZustandsTon = "healthy" | "warning" | "error" | "neutral";
 export type LedStatus = "green" | "amber" | "red" | "off";
@@ -79,7 +58,7 @@ export const NavigationIcon = ({ kind, className = "navigation-icon" }: { kind: 
 
 const iconFor = (moduleId: string): ReactElement => (
   <svg className="module-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    {moduleId === "textbefehle" ? <><circle cx="12" cy="12" r="8" /><path d="M12 7v10M8.5 10.5h7M8.5 13.5h5" /></> : <><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 12h6M12 9v6" /></>}
+    {moduleId === "textbefehle" ? <><circle cx="12" cy="12" r="8" /><path d="M12 7v10M8.5 10.5h7M8.5 13.5h5" /></> : moduleId === "kanalereignisse" ? <><path d="M5 12h3l2-5 4 10 2-5h3" /><path d="M5 19h14" /></> : <><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 12h6M12 9v6" /></>}
   </svg>
 );
 
