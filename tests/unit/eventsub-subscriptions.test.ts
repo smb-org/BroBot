@@ -71,6 +71,9 @@ describe("EventSub-Abgleich", () => {
     await expect(listDesiredEventSubTargets(asD1(database))).resolves.toEqual([
       { channelId: "kanal-a", subscriptionType: "channel.chat.message", version: "1" },
     ]);
+    await expect(listDesiredEventSubTargets(asD1(database), "kanal-a")).resolves.toEqual([
+      { channelId: "kanal-a", subscriptionType: "channel.chat.message", version: "1" },
+    ]);
   });
 
   it("liest die Twitch-Aboliste durchpaginiert und stoppt bei einem Cursor-Kreis", async () => {
@@ -173,6 +176,58 @@ describe("EventSub-Abgleich", () => {
       results: [
         { channel_id: "kanal-a", status: "error", reason: "rate_limited" },
         { channel_id: "kanal-b", status: "enabled", reason: null },
+      ],
+      success: true,
+      meta: { changes: 0, size: 0 },
+    });
+  });
+
+  it("fasst ein gefilterter Lauf keine EventSub-Abos eines zweiten Kanals an", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await insertLoginIdentityAndSession(database, "kanal-b", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'chat', 1, '{}'), ('kanal-b', 'chat', 1, '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+       VALUES
+        ('kanal-a', 'channel.chat.message', 'subscription-a', 'eventsub-v1', 'enabled', NULL, ?),
+        ('kanal-b', 'channel.chat.message', 'subscription-b', 'eventsub-v1', 'enabled', NULL, ?)`,
+    ).bind("2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+
+    const subscription = (channelId: string, id: string) => ({
+      id,
+      type: "channel.chat.message",
+      version: "1",
+      status: "enabled",
+      condition: { broadcaster_user_id: channelId, user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    });
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      data: [subscription("kanal-a", "subscription-a"), subscription("kanal-b", "subscription-b")],
+      pagination: {},
+    }), { status: 200 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher, "kanal-a");
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(database.prepare(
+      "SELECT channel_id, status, subscription_id, reason FROM eventsub_subscriptions ORDER BY channel_id",
+    ).all()).resolves.toEqual({
+      results: [
+        { channel_id: "kanal-a", status: "enabled", subscription_id: "subscription-a", reason: null },
+        { channel_id: "kanal-b", status: "enabled", subscription_id: "subscription-b", reason: null },
       ],
       success: true,
       meta: { changes: 0, size: 0 },

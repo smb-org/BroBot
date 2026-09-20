@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import type { BotModule } from "../../src/modules/contract";
+import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -14,6 +15,7 @@ const testModule: BotModule<typeof testModuleSchema> = {
   id: "test-modul",
   settingsSchema: testModuleSchema,
   defaultSettings: { betrag: 42 },
+  eventSubTypes: ["channel.chat.message"],
 };
 
 vi.mock("../../src/modules/registry", () => ({ MODULES: [testModule] }));
@@ -36,6 +38,9 @@ const environmentKeys = {
 const environmentFor = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
+  TWITCH_CLIENT_SECRET: "client-secret",
+  TWITCH_EVENTSUB_SECRET: JSON.stringify({ active: { id: "eventsub-v1", key: key(3) }, retired: [] }),
+  PUBLIC_ORIGIN: "https://brobot.example",
   ...environmentKeys,
 } as unknown as Env);
 
@@ -65,6 +70,31 @@ const auditCount = async (database: TestD1Database): Promise<number> => {
   const row = await database.prepare("SELECT COUNT(*) AS count FROM audit_log").first<{ count: number }>();
   return row?.count ?? 0;
 };
+
+const insertBotAndAppToken = async (database: TestD1Database): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, created_at, updated_at)
+     VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+  ).bind("2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+  const keys = environmentKeys.SESSION_ENCRYPTION_KEYS;
+  const ciphertext = await encryptJson({ token: "app-token" }, parseKeyRing(keys));
+  await database.prepare(
+    `INSERT INTO twitch_app_access_token
+      (id, access_token_ciphertext, expires_at, created_at, updated_at)
+     VALUES (1, ?, ?, ?, ?)`,
+  ).bind(ciphertext, "2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+};
+
+const remoteSubscription = (channelId: string, id: string) => ({
+  id,
+  type: "channel.chat.message",
+  version: "1",
+  status: "enabled",
+  condition: { broadcaster_user_id: channelId, user_id: "bot-user" },
+  transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+});
 
 // Gemeinsamer Ablauf der Verweigerungs-Faelle: Mitgliedschaft mit einer Rolle
 // in einem Kanal anlegen, PATCH auf einen (moeglicherweise anderen) Zielkanal
@@ -146,6 +176,117 @@ describe("Modulverwaltung im Panel", () => {
     );
     const list = await listResponse.json<{ modules: Array<{ id: string; enabled: boolean }> }>();
     expect(list.modules).toEqual([{ id: "test-modul", enabled: true, settings: '{"betrag":42}' }]);
+  });
+
+  it("legt beim Aktivieren das Chat-Abo sofort an", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await insertBotAndAppToken(database);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [remoteSubscription("kanal-a", "subscription-a")] }), { status: 202 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await expect(database.prepare(
+      "SELECT status, subscription_id, reason FROM eventsub_subscriptions WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-a", reason: null });
+  });
+
+  it("entfernt beim Deaktivieren das Chat-Abo sofort", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await insertBotAndAppToken(database);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'test-modul', 1, '{"betrag":42}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+       VALUES ('kanal-a', 'channel.chat.message', 'subscription-a', 'eventsub-v1', 'enabled', NULL, ?)`,
+    ).bind("2026-09-18T00:00:00.000Z").run();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [remoteSubscription("kanal-a", "subscription-a")],
+        pagination: {},
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: false }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetcher).toHaveBeenNthCalledWith(2, "https://api.twitch.tv/helix/eventsub/subscriptions?id=subscription-a", expect.objectContaining({ method: "DELETE" }));
+    await expect(database.prepare(
+      "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ status: "missing", subscription_id: null });
+  });
+
+  it("antwortet beim fehlgeschlagenen sofortigen Anlegen weiter mit 200 und speichert den Fehler", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await insertBotAndAppToken(database);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
+      .mockRejectedValueOnce(new Error("Twitch nicht erreichbar"));
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(database.prepare(
+      "SELECT status, subscription_id, reason FROM eventsub_subscriptions WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ status: "error", subscription_id: null, reason: "network_error" });
+  });
+
+  it("legt ohne channel:bot-Zustimmung kein Abo an und speichert keinen Twitch-Fehler", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await insertBotAndAppToken(database);
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+       VALUES ('kanal-a', 'channel.chat.message', 'subscription-a', 'eventsub-v1', 'enabled', NULL, ?)`,
+    ).bind("2026-09-18T00:00:00.000Z").run();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [remoteSubscription("kanal-a", "subscription-a")],
+        pagination: {},
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(String(fetcher.mock.calls[1]?.[0])).toContain("?id=subscription-a");
+    await expect(database.prepare(
+      "SELECT status, subscription_id, reason FROM eventsub_subscriptions WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ status: "missing", subscription_id: null, reason: "channel_or_consent_missing" });
   });
 
   it("verweigert einem Bediener das Aktivieren eines Moduls", async () => {

@@ -13,6 +13,7 @@ import {
 import type { ChannelMemberRole } from "../auth/authorization";
 import { MODULES } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
+import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { actorOf, readJsonBody } from "./member-routes";
 
 interface ModuleRouteEnvironment {
@@ -88,6 +89,11 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       now,
     );
   if (!changed) return context.text("Modul wurde inzwischen geändert.", 409);
+  try {
+    await maintainEventSubSubscriptions(context.env, now, fetch, channelId);
+  } catch {
+    // Der Abgleich schreibt den Fehlerzustand selbst; die Moduländerung bleibt erfolgreich.
+  }
   return context.json({ module: moduleState(moduleId, enabled, settings) });
 });
 

@@ -111,15 +111,20 @@ const requestEventSubApi = async (
 };
 
 /** Ermittelt den Sollstand ausschließlich aus aktivierten Modulen und Zustimmung. */
-export const listDesiredEventSubTargets = async (db: D1Database): Promise<EventSubTarget[]> => {
-  const result = await db.prepare(
-    `SELECT channel.channel_id, channel_modules.module_id
+export const listDesiredEventSubTargets = async (
+  db: D1Database,
+  channelId?: string,
+): Promise<EventSubTarget[]> => {
+  const query = `SELECT channel.channel_id, channel_modules.module_id
        FROM channels AS channel
        JOIN channel_modules ON channel_modules.channel_id = channel.channel_id
         AND channel_modules.enabled = 1
       WHERE ${channelBotConsentCondition("channel")}
-      ORDER BY channel.channel_id, channel_modules.module_id`,
-  ).all<EventSubTargetRow>();
+        ${channelId === undefined ? "" : "AND channel.channel_id = ?"}
+      ORDER BY channel.channel_id, channel_modules.module_id`;
+  const result = channelId === undefined
+    ? await db.prepare(query).all<EventSubTargetRow>()
+    : await db.prepare(query).bind(channelId).all<EventSubTargetRow>();
   const modules = new Map(MODULES.map((module) => [module.id, module]));
   const targets = new Map<string, EventSubTarget>();
   for (const row of result.results) {
@@ -281,10 +286,11 @@ export const reconcileEventSubSubscriptions = async (
   appAccessToken: string,
   botUserId: string,
   fetcher: typeof fetch = fetch,
+  channelId?: string,
 ): Promise<void> => {
-  const targets = await listDesiredEventSubTargets(env.DB);
+  const targets = await listDesiredEventSubTargets(env.DB, channelId);
   const targetByKey = new Map(targets.map((target) => [`${target.channelId}\u0000${target.subscriptionType}`, target]));
-  const currentStates = new Map((await listEventSubSubscriptions(env.DB)).map((state) => [
+  const currentStates = new Map((await listEventSubSubscriptions(env.DB, channelId)).map((state) => [
     `${state.channelId}\u0000${state.subscriptionType}`,
     state,
   ]));
@@ -319,6 +325,7 @@ export const reconcileEventSubSubscriptions = async (
   const blocked = new Set<string>();
   const failedStaleCleanup = new Set<string>();
   for (const subscription of remote) {
+    if (channelId !== undefined && subscription.condition.broadcaster_user_id !== channelId) continue;
     const target = targets.find((candidate) => isOwnedByTarget(subscription, candidate, botUserId, expectedCallback));
     const owned = target !== undefined || (
       subscription.transport.method === "webhook" && subscription.transport.callback === expectedCallback &&
@@ -407,10 +414,11 @@ export const maintainEventSubSubscriptions = async (
   env: Env,
   now: string,
   fetcher: typeof fetch = fetch,
+  channelId?: string,
 ): Promise<void> => {
   let targets: EventSubTarget[];
   try {
-    targets = await listDesiredEventSubTargets(env.DB);
+    targets = await listDesiredEventSubTargets(env.DB, channelId);
   } catch {
     return;
   }
@@ -432,7 +440,7 @@ export const maintainEventSubSubscriptions = async (
     return;
   }
   try {
-    await reconcileEventSubSubscriptions(env, now, appAccessToken, botIdentity.userId, fetcher);
+    await reconcileEventSubSubscriptions(env, now, appAccessToken, botIdentity.userId, fetcher, channelId);
   } catch (error: unknown) {
     await Promise.all(targets.map((target) => mark(env.DB, target, "error", reasonFor(error), null, now)));
   }
