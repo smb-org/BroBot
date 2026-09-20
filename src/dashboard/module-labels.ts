@@ -25,6 +25,9 @@ interface EreignisAboNamen {
   shoutoutsGesendet: string;
   shoutoutsEmpfangen: string;
   moderation: string;
+  automodHalte: string;
+  verdachtNachrichten: string;
+  verdachtEinstufungen: string;
 }
 
 const ereignisAboNamen: LocaleCatalog<EreignisAboNamen> = {
@@ -37,6 +40,9 @@ const ereignisAboNamen: LocaleCatalog<EreignisAboNamen> = {
     shoutoutsGesendet: "Gesendete Shoutouts",
     shoutoutsEmpfangen: "Empfangene Shoutouts",
     moderation: "Moderationsereignisse",
+    automodHalte: "AutoMod-Haltevorgänge",
+    verdachtNachrichten: "Nachrichten auffälliger Nutzer",
+    verdachtEinstufungen: "Einstufungen auffälliger Nutzer",
   },
   en: {
     chatNachrichten: "Chat messages",
@@ -47,6 +53,9 @@ const ereignisAboNamen: LocaleCatalog<EreignisAboNamen> = {
     shoutoutsGesendet: "Sent shoutouts",
     shoutoutsEmpfangen: "Received shoutouts",
     moderation: "Moderation events",
+    automodHalte: "AutoMod holds",
+    verdachtNachrichten: "Suspicious user messages",
+    verdachtEinstufungen: "Suspicious user classifications",
   },
 };
 
@@ -66,6 +75,9 @@ export const eventSubName = (
   if (subscriptionType === "channel.shoutout.create") return texte.shoutoutsGesendet;
   if (subscriptionType === "channel.shoutout.receive") return texte.shoutoutsEmpfangen;
   if (subscriptionType === "channel.moderate") return texte.moderation;
+  if (subscriptionType === "automod.message.hold") return texte.automodHalte;
+  if (subscriptionType === "channel.suspicious_user.message") return texte.verdachtNachrichten;
+  if (subscriptionType === "channel.suspicious_user.update") return texte.verdachtEinstufungen;
   return subscriptionType;
 };
 

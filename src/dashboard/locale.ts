@@ -464,6 +464,10 @@ export type EreignisCode =
   | "kanalereignisse.moderation.delete"
   | "kanalereignisse.moderation.warn"
   | "kanalereignisse.moderation.unbekannt"
+  | "kanalereignisse.automod.halte"
+  | "kanalereignisse.verdacht.nachricht"
+  | "kanalereignisse.verdacht.einstufung"
+  | "kanalereignisse.verdacht.entwarnung"
   | "shoutout.unterdrueckt"
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
@@ -501,6 +505,20 @@ const detailGrund = (detail: EreignisDetail): string =>
     ? `: ${detail.grund}`
     : "";
 
+const detailGrundMit = (detail: EreignisDetail, praeposition: string): string =>
+  typeof detail.grund === "string" && detail.grund.length > 0
+    ? ` ${praeposition} ${detail.grund}`
+    : "";
+
+const detailEinstufung = (detail: EreignisDetail, fallback: string): string =>
+  typeof detail.einstufung === "string" && detail.einstufung.length > 0 ? detail.einstufung : fallback;
+
+const detailModerator = (detail: EreignisDetail, fallback: string): string =>
+  typeof detail.moderator === "string" && detail.moderator.length > 0 ? ` von ${detail.moderator}` : fallback;
+
+const detailModeratorEn = (detail: EreignisDetail, fallback: string): string =>
+  typeof detail.moderator === "string" && detail.moderator.length > 0 ? ` by ${detail.moderator}` : fallback;
+
 export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = {
   de: {
     "host.aktion.fehler": "Aktion fehlgeschlagen",
@@ -526,6 +544,10 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "kanalereignisse.moderation.delete": (detail) => `Nachricht von ${detailText(detail, "person", "unbekannt")} gelöscht von ${detailText(detail, "moderator", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
     "kanalereignisse.moderation.warn": (detail) => `${detailText(detail, "person", "unbekannt")} verwarnt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
     "kanalereignisse.moderation.unbekannt": (detail) => `Unbekannte Moderationsaktion: ${detailText(detail, "aktion", "unbekannt")}`,
+    "kanalereignisse.automod.halte": (detail) => `AutoMod hielt die Nachricht von ${detailText(detail, "person", "unbekannt")}${detailGrundMit(detail, "wegen")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
+    "kanalereignisse.verdacht.nachricht": (detail) => `Nachricht von auffälligem Nutzer ${detailText(detail, "person", "unbekannt")} (${detailEinstufung(detail, "unbekannte Einstufung")}): ${detailText(detail, "text", "ohne Text")}`,
+    "kanalereignisse.verdacht.einstufung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} verschärft${detailModerator(detail, "")}: ${detailEinstufung(detail, "unbekannt")}`,
+    "kanalereignisse.verdacht.entwarnung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} aufgehoben${detailModerator(detail, "")}`,
     "shoutout.unterdrueckt": "Shoutout unterdrückt",
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
@@ -563,6 +585,10 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "kanalereignisse.moderation.delete": (detail) => `Message from ${detailText(detail, "person", "unknown")} deleted by ${detailText(detail, "moderator", "unknown")}: ${detailText(detail, "text", "no text")}`,
     "kanalereignisse.moderation.warn": (detail) => `${detailText(detail, "person", "unknown")} warned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
     "kanalereignisse.moderation.unbekannt": (detail) => `Unknown moderation action: ${detailText(detail, "aktion", "unknown")}`,
+    "kanalereignisse.automod.halte": (detail) => `AutoMod held a message from ${detailText(detail, "person", "unknown")}${detailGrundMit(detail, "for")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
+    "kanalereignisse.verdacht.nachricht": (detail) => `Message from suspicious user ${detailText(detail, "person", "unknown")} (${detailEinstufung(detail, "unknown classification")}): ${detailText(detail, "text", "no text")}`,
+    "kanalereignisse.verdacht.einstufung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} tightened${detailModeratorEn(detail, "")}: ${detailEinstufung(detail, "unknown")}`,
+    "kanalereignisse.verdacht.entwarnung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} cleared${detailModeratorEn(detail, "")}`,
     "shoutout.unterdrueckt": "Shoutout suppressed",
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
@@ -602,6 +628,10 @@ export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green" | "off"
   "kanalereignisse.moderation.delete": "amber",
   "kanalereignisse.moderation.warn": "amber",
   "kanalereignisse.moderation.unbekannt": "off",
+  "kanalereignisse.automod.halte": "amber",
+  "kanalereignisse.verdacht.nachricht": "amber",
+  "kanalereignisse.verdacht.einstufung": "amber",
+  "kanalereignisse.verdacht.entwarnung": "green",
   "shoutout.unterdrueckt": "amber",
   "textbefehle.abgekuehlt": "amber",
   "textbefehle.ausgeloest": "green",

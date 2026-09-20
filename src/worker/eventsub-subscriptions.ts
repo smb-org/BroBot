@@ -105,6 +105,27 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDef
     buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
     channelIdFromCondition: conditionField("broadcaster_user_id"),
   },
+  {
+    subscriptionType: "automod.message.hold",
+    variant: "",
+    version: "1",
+    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
+    channelIdFromCondition: conditionField("broadcaster_user_id"),
+  },
+  {
+    subscriptionType: "channel.suspicious_user.message",
+    variant: "",
+    version: "1",
+    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
+    channelIdFromCondition: conditionField("broadcaster_user_id"),
+  },
+  {
+    subscriptionType: "channel.suspicious_user.update",
+    variant: "",
+    version: "1",
+    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
+    channelIdFromCondition: conditionField("broadcaster_user_id"),
+  },
 ];
 
 export const eventSubTargetKey = (target: Pick<EventSubTarget, "channelId" | "subscriptionType" | "variant" | "version">): string =>

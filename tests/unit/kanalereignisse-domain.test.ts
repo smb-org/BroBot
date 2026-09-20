@@ -187,4 +187,100 @@ describe("Kanalereignisse-Domain", () => {
       detail: { aktion: "shared_chat_ban" },
     }]);
   });
+
+  it("bildet einen AutoMod-Haltevorgang mit Person, Kategorie und Nachricht ab", () => {
+    expect(diagnose("automod.message.hold", {
+      user_name: "TwitchDev",
+      user_login: "twitchdev",
+      category: "aggressive",
+      message: { text: "Das ist eine zurückgehaltene Nachricht." },
+    })).toEqual([{
+      code: "kanalereignisse.automod.halte",
+      detail: {
+        person: "TwitchDev (@twitchdev)",
+        grund: "aggressive",
+        text: "Das ist eine zurückgehaltene Nachricht.",
+      },
+    }]);
+  });
+
+  it("bildet eine Verdachtsnachricht mit dokumentierter Einstufung und Text ab", () => {
+    expect(diagnose("channel.suspicious_user.message", {
+      user_name: "Xemdo",
+      user_login: "xemdo",
+      low_trust_status: "active_monitoring",
+      types: ["ban_evader"],
+      ban_evasion_evaluation: "possible",
+      message: { text: "Eine auffällige Nachricht." },
+    })).toEqual([{
+      code: "kanalereignisse.verdacht.nachricht",
+      detail: {
+        person: "Xemdo (@xemdo)",
+        einstufung: "active_monitoring / ban_evader / possible",
+        text: "Eine auffällige Nachricht.",
+      },
+    }]);
+  });
+
+  it("trennt verschärfte Einstufung und Entwarnung samt ausführender Person", () => {
+    expect(diagnose("channel.suspicious_user.update", {
+      user_name: "Xemdo",
+      user_login: "xemdo",
+      low_trust_status: "restricted",
+      moderator_user_name: "BlueLava",
+      moderator_user_login: "bluelava",
+    })).toEqual([{
+      code: "kanalereignisse.verdacht.einstufung",
+      detail: {
+        person: "Xemdo (@xemdo)",
+        einstufung: "restricted",
+        moderator: "BlueLava (@bluelava)",
+      },
+    }]);
+    expect(diagnose("channel.suspicious_user.update", {
+      user_name: "Xemdo",
+      low_trust_status: "none",
+      moderator_user_name: "BlueLava",
+    })).toEqual([{
+      code: "kanalereignisse.verdacht.entwarnung",
+      detail: {
+        person: "Xemdo",
+        einstufung: "none",
+        moderator: "BlueLava",
+      },
+    }]);
+  });
+
+  it("lässt unbekannte oder fehlende Verdachtsfelder weg", () => {
+    expect(diagnose("automod.message.hold", {})).toEqual([{
+      code: "kanalereignisse.automod.halte",
+      detail: {},
+    }]);
+    expect(diagnose("channel.suspicious_user.message", {
+      low_trust_status: "unbekannt",
+      types: ["unbekannt"],
+      ban_evasion_evaluation: "unbekannt",
+      message: { text: 42 },
+    })).toEqual([{
+      code: "kanalereignisse.verdacht.nachricht",
+      detail: {},
+    }]);
+    expect(diagnose("channel.suspicious_user.update", {
+      low_trust_status: "unbekannt",
+      moderator_user_name: 42,
+    })).toEqual([{
+      code: "kanalereignisse.verdacht.einstufung",
+      detail: {},
+    }]);
+  });
+
+  it("kürzt den zurückgehaltenen AutoMod-Text sichtbar", () => {
+    expect(diagnose("automod.message.hold", {
+      user_name: "Person",
+      message: "x".repeat(240),
+    })).toEqual([{
+      code: "kanalereignisse.automod.halte",
+      detail: { person: "Person", text: `${"x".repeat(199)}…` },
+    }]);
+  });
 });
