@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { dashboardLanguage, ereignisText } from "../../src/dashboard/locale";
+import { dashboardLanguage, ereignisText, ereignisTon } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 
 const setBrowserLanguage = (language: string): void => {
@@ -44,5 +44,19 @@ describe("Dashboard-Locale", () => {
     expect(ereignisText("textbefehle.abgekuehlt", { name: "wiki", restSekunden: 4 })).toBe("Command !wiki on cooldown, 4s left");
     expect(ereignisText("textbefehle.bereits_vorhanden", { name: "wiki" })).toBe("Text command !wiki already exists");
     expect(ereignisText("textbefehle.unbekannt", { name: "wiki" })).toBe("Unknown text command !wiki");
+  });
+
+  it("rendert Moderationsdetails zweisprachig mit Bedeutungston", () => {
+    setBrowserLanguage("de-DE");
+    expect(ereignisText("kanalereignisse.moderation.timeout", {
+      person: "Alice", moderator: "Mod", dauer: 300, grund: "Spam",
+    })).toBe("Alice für 300 Sekunden getimeoutet von Mod: Spam");
+    expect(ereignisTon["kanalereignisse.moderation.timeout"]).toBe("amber");
+    expect(ereignisTon["kanalereignisse.moderation.untimeout"]).toBe("green");
+    expect(ereignisTon["kanalereignisse.moderation.unban"]).toBe("green");
+    expect(ereignisTon["kanalereignisse.moderation.unbekannt"]).toBe("off");
+
+    setBrowserLanguage("en-US");
+    expect(ereignisText("kanalereignisse.moderation.unbekannt", { aktion: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
   });
 });

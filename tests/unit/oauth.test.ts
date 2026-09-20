@@ -47,6 +47,15 @@ describe("Twitch-OAuth", () => {
     expect(loginUrl.searchParams.get("scope")?.split(" ")).toEqual([...LOGIN_SCOPES]);
     expect(botUrl.searchParams.get("scope")?.split(" ")).toEqual([...BOT_SCOPES]);
     expect(botUrl.searchParams.get("scope")?.split(" ")).toContain("user:read:moderated_channels");
+    expect(botUrl.searchParams.get("scope")?.split(" ")).toEqual(expect.arrayContaining([
+      "moderator:manage:blocked_terms",
+      "moderator:manage:chat_settings",
+      "moderator:manage:unban_requests",
+      "moderator:manage:banned_users",
+      "moderator:manage:warnings",
+      "moderator:read:moderators",
+      "moderator:read:vips",
+    ]));
     expect(loginUrl.searchParams.get("state")).not.toBe(botUrl.searchParams.get("state"));
   });
 

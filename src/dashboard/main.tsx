@@ -141,6 +141,7 @@ const channelBotConsentMissing = (channel: PanelChannelState): boolean =>
 const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "error" => {
   if (channel.moderator?.isModerator === false) return "error";
   if (channel.chatSubscription?.status === "error" || channel.chatSubscription?.status === "revoked") return "error";
+  if (channel.lastError?.source === "eventsub") return "error";
   if (channel.bot?.status === "error" || channel.bot?.status === "revoked") return "error";
   if (channel.tokens.loginStatus === "error" || channel.tokens.loginStatus === "revoked") return "error";
   const tokenStatus = tokenView(channel.tokens, channel.bot);
@@ -160,6 +161,7 @@ const statusText = (channel: PanelChannelState): string => {
   if (channel.moderator?.isModerator === false) return texte.status.moderatorrolleFehlt;
   if (channel.chatSubscription?.status === "error") return texte.status.chatAboFehler;
   if (channel.chatSubscription?.status === "revoked") return texte.status.chatAboWiderrufen;
+  if (channel.lastError?.source === "eventsub") return texte.fehler.letzter;
   if (channel.bot?.status === "error") return texte.status.botFehler;
   if (channel.bot?.status === "revoked") return texte.status.botTokenWiderrufen;
   const tokenStatus = tokenView(channel.tokens, channel.bot);
@@ -594,10 +596,10 @@ const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactEle
   );
 };
 
-const eventTone = (code: string): "red" | "amber" | "green" | null =>
+const eventTone = (code: string): "red" | "amber" | "green" | "off" | null =>
   Object.prototype.hasOwnProperty.call(ereignisTon, code) ? ereignisTon[code as EreignisCode] : null;
 
-const eventToneRang = (tone: "red" | "amber" | "green" | null): number =>
+const eventToneRang = (tone: "red" | "amber" | "green" | "off" | null): number =>
   tone === "red" ? 3 : tone === "amber" ? 2 : tone === "green" ? 1 : 0;
 
 interface EventGroup {
@@ -645,7 +647,7 @@ const actorCell = (entry: PanelEventEntry, texte: ReturnType<typeof dashboardTex
 
 const moduleLabel = (entry: PanelEventEntry): string => moduleName(entry.moduleId);
 
-const eventWord = (tone: "red" | "amber" | "green" | null, texte: ReturnType<typeof dashboardTexte>): string =>
+const eventWord = (tone: "red" | "amber" | "green" | "off" | null, texte: ReturnType<typeof dashboardTexte>): string =>
   tone === "red" ? texte.ereignisse.fehler : tone === "amber" ? texte.ereignisse.hinweis : tone === "green" ? texte.ereignisse.info : texte.ereignisse.unbekannt;
 
 const chronologisch = (left: PanelEventEntry, right: PanelEventEntry): number =>

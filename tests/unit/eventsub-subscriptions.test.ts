@@ -13,6 +13,7 @@ vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     { id: "chat", eventSubTypes: ["channel.chat.message"] },
     { id: "kanalereignisse", eventSubTypes: ["channel.shoutout.create"] },
+    { id: "moderation", eventSubTypes: ["channel.moderate"] },
     { id: "aus", eventSubTypes: ["channel.follow"] },
   ],
 }));
@@ -150,6 +151,115 @@ describe("EventSub-Abgleich", () => {
     await expect(database.prepare(
       "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-1" });
+  });
+
+  it("legt channel.moderate mit Version 2 und moderator_user_id an", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'moderation', 1, '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [{
+          id: "moderation-subscription",
+          type: "channel.moderate",
+          version: "2",
+          status: "enabled",
+          condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
+          transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+        }],
+      }), { status: 202 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+
+    expect((fetcher.mock.calls[1]?.[1] as RequestInit).method).toBe("POST");
+    const createBody = (fetcher.mock.calls[1]?.[1] as RequestInit).body;
+    expect(typeof createBody).toBe("string");
+    const parsedCreateBody: unknown = JSON.parse(typeof createBody === "string" ? createBody : "{}");
+    expect(parsedCreateBody).toMatchObject({
+      type: "channel.moderate",
+      version: "2",
+      condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
+    });
+    await expect(database.prepare(
+      "SELECT version, status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.moderate'",
+    ).first()).resolves.toEqual({ version: "2", status: "enabled", subscription_id: "moderation-subscription" });
+  });
+
+  it("erkennt ein vorhandenes channel.moderate-v2-Abo, aber kein v1-Abo als passend", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'moderation', 1, '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+    const subscription = (version: string, id: string) => ({
+      id,
+      type: "channel.moderate",
+      version,
+      status: "enabled",
+      condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("2", "v2")], pagination: {} }), { status: 200 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect((fetcher.mock.calls[0]?.[1] as RequestInit).method).toBeUndefined();
+
+    const v1Fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("1", "v1")], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("2", "v2-replaced")], pagination: {} }), { status: 202 }));
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T02:00:00.000Z", v1Fetcher);
+    expect(v1Fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET")).toEqual(["GET", "DELETE", "POST"]);
+    const replacementBody = (v1Fetcher.mock.calls[2]?.[1] as RequestInit).body;
+    expect(typeof replacementBody).toBe("string");
+    const parsedReplacementBody: unknown = JSON.parse(typeof replacementBody === "string" ? replacementBody : "{}");
+    expect(parsedReplacementBody).toMatchObject({ version: "2" });
+  });
+
+  it("speichert einen unterscheidbaren Twitch-Ablehnungsgrund je v2-Ziel", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'moderation', 1, '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "missing_scope", message: "Scope fehlt" }), { status: 403 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+
+    await expect(database.prepare(
+      "SELECT version, status, reason FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.moderate'",
+    ).first()).resolves.toEqual({ version: "2", status: "error", reason: "missing_scope" });
   });
 
   it("erkennt ein bestehendes Shoutout-Abo mit Moderator-ID wieder und lässt es bei Folgeabgleichen unverändert", async () => {

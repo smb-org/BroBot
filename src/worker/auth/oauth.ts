@@ -14,6 +14,13 @@ export const BOT_SCOPES = [
   "moderator:read:shoutouts",
   "moderator:manage:chat_messages",
   "user:read:moderated_channels",
+  "moderator:manage:blocked_terms",
+  "moderator:manage:chat_settings",
+  "moderator:manage:unban_requests",
+  "moderator:manage:banned_users",
+  "moderator:manage:warnings",
+  "moderator:read:moderators",
+  "moderator:read:vips",
 ] as const;
 
 export type OAuthPurpose = "login" | "bot";

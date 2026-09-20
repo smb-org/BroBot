@@ -17,6 +17,7 @@ export const kanalereignisseModul: BotModule<typeof settingsSchema> = {
     "channel.shoutout.create",
     "channel.shoutout.receive",
     "channel.chat.notification",
+    "channel.moderate",
   ],
   handleEvent: (event) => verarbeiteKanalereignis(event),
 };
