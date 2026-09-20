@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import { hmacSha256, parseKeyRing } from "./auth/crypto";
 import { dispatchEventSubNotification } from "./dispatch";
+import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
 import {
   rememberEventSubMessageAndRevocation,
   rememberEventSubMessage,
@@ -143,13 +144,15 @@ const subscriptionRecord = (
   if (!isRecord(subscription) || typeof subscription.id !== "string" || subscription.id.length === 0 ||
       typeof subscription.type !== "string" || subscription.type.length === 0 ||
       typeof subscription.status !== "string" || subscription.status.length === 0 ||
-      !isRecord(subscription.condition) ||
-      typeof subscription.condition.broadcaster_user_id !== "string" ||
-      subscription.condition.broadcaster_user_id.length === 0) return null;
+      !isRecord(subscription.condition)) return null;
+  const definition = eventSubDefinitionForCondition(subscription.type, subscription.condition);
+  const channelId = definition?.channelIdFromCondition(subscription.condition) ?? null;
+  if (definition === null || channelId === null) return null;
   return {
     subscriptionId: subscription.id,
-    channelId: subscription.condition.broadcaster_user_id,
+    channelId,
     subscriptionType: subscription.type,
+    variant: definition.variant,
     status: "revoked",
     reason: subscription.status,
     revokedAt: now,
@@ -159,25 +162,28 @@ const subscriptionRecord = (
 
 /**
  * Liest Kanal und Abo-Typ aus der geprüften Benachrichtigung. Der Kanal kommt
- * ausschließlich von hier und nie vom Modul — sonst könnte ein Modul in einen
- * fremden Kanal wirken.
+ * ausschließlich aus der Bedingung des Abos und nie aus dem Ereignisrumpf —
+ * sonst könnte ein fremder Kanal in unseren hineinschreiben.
  */
 const notificationZiel = (body: Record<string, unknown>): {
   channelId: string;
   subscriptionType: string;
+  subscriptionVariant: string;
   payload: Readonly<Record<string, unknown>>;
 } | null => {
   const subscription = body.subscription;
   if (!isRecord(subscription)) return null;
   const condition = subscription.condition;
   if (!isRecord(condition)) return null;
-  const channelId = condition.broadcaster_user_id;
   const subscriptionType = subscription.type;
-  if (typeof channelId !== "string" || channelId.length === 0) return null;
   if (typeof subscriptionType !== "string" || subscriptionType.length === 0) return null;
+  const definition = eventSubDefinitionForCondition(subscriptionType, condition);
+  const channelId = definition?.channelIdFromCondition(condition) ?? null;
+  if (definition === null || channelId === null) return null;
   return {
     channelId,
     subscriptionType,
+    subscriptionVariant: definition.variant,
     payload: isRecord(body.event) ? body.event : {},
   };
 };
@@ -253,6 +259,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   await dispatchEventSubNotification(context.env, {
     channelId: ziel.channelId,
     subscriptionType: ziel.subscriptionType,
+    subscriptionVariant: ziel.subscriptionVariant,
     triggerId: messageId,
     payload: ziel.payload,
     receivedAt: now,

@@ -2,16 +2,43 @@ import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from ".
 
 interface ModulNamen {
   textbefehle: string;
+  kanalereignisse: string;
 }
 
 const modulNamen: LocaleCatalog<ModulNamen> = {
-  de: { textbefehle: "Textbefehle" },
-  en: { textbefehle: "Text commands" },
+  de: { textbefehle: "Textbefehle", kanalereignisse: "Kanalereignisse" },
+  en: { textbefehle: "Text commands", kanalereignisse: "Channel events" },
 };
 
 export const moduleName = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): string => {
   if (moduleId === "textbefehle") return modulNamen[language].textbefehle;
+  if (moduleId === "kanalereignisse") return modulNamen[language].kanalereignisse;
   return moduleId;
+};
+
+interface ModulBeschreibungen {
+  textbefehle: string;
+  kanalereignisse: string;
+}
+
+const modulBeschreibungen: LocaleCatalog<ModulBeschreibungen> = {
+  de: {
+    textbefehle: "Antwortet auf kurze Befehle im Chat.",
+    kanalereignisse: "Protokolliert, was im Kanal geschieht.",
+  },
+  en: {
+    textbefehle: "Replies to short commands in chat.",
+    kanalereignisse: "Records what happens in the channel.",
+  },
+};
+
+export const moduleDescription = (
+  moduleId: string,
+  language: DashboardLanguage = dashboardLanguage(),
+): string | null => {
+  if (moduleId === "textbefehle") return modulBeschreibungen[language].textbefehle;
+  if (moduleId === "kanalereignisse") return modulBeschreibungen[language].kanalereignisse;
+  return null;
 };
 
 interface ModulStatus {

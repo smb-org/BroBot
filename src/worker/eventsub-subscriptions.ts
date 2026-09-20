@@ -18,8 +18,97 @@ export const EVENTSUB_REQUEST_TIMEOUT_MS = 5_000;
 export interface EventSubTarget {
   channelId: string;
   subscriptionType: string;
+  /** Leer bei EventSub-Typen mit genau einem Ziel; Raid unterscheidet die Richtungen. */
+  variant: string;
   version: string;
 }
+
+export interface EventSubSubscriptionDefinition {
+  subscriptionType: string;
+  variant: string;
+  buildCondition: (channelId: string, botUserId: string) => Readonly<Record<string, string>>;
+  channelIdFromCondition: (condition: Readonly<Record<string, unknown>>) => string | null;
+}
+
+const conditionField = (field: string): ((condition: Readonly<Record<string, unknown>>) => string | null) =>
+  (condition) => typeof condition[field] === "string" && condition[field].length > 0
+    ? condition[field]
+    : null;
+
+const channelAndBotCondition = (
+  channelField: string,
+  botField: string,
+  botUserId: string,
+  channelId: string,
+): Readonly<Record<string, string>> => ({
+  [channelField]: channelId,
+  [botField]: botUserId,
+});
+
+/**
+ * Die einzige Tabelle für EventSub-Bedingungen. Sie beschreibt sowohl das
+ * Anlegen als auch die sichere Rückgewinnung des Kanal-Mandanten aus dem
+ * geprüften Abo. Ein Raid ist absichtlich zweimal vertreten.
+ */
+export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDefinition[] = [
+  {
+    subscriptionType: "channel.chat.message",
+    variant: "",
+    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "user_id", botUserId, channelId),
+    channelIdFromCondition: conditionField("broadcaster_user_id"),
+  },
+  {
+    subscriptionType: "channel.raid",
+    variant: "eingehend",
+    buildCondition: (channelId) => ({ to_broadcaster_user_id: channelId }),
+    channelIdFromCondition: conditionField("to_broadcaster_user_id"),
+  },
+  {
+    subscriptionType: "channel.raid",
+    variant: "ausgehend",
+    buildCondition: (channelId) => ({ from_broadcaster_user_id: channelId }),
+    channelIdFromCondition: conditionField("from_broadcaster_user_id"),
+  },
+  {
+    subscriptionType: "channel.shoutout.create",
+    variant: "",
+    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
+    channelIdFromCondition: conditionField("broadcaster_user_id"),
+  },
+  {
+    subscriptionType: "channel.shoutout.receive",
+    variant: "",
+    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
+    channelIdFromCondition: conditionField("broadcaster_user_id"),
+  },
+  {
+    subscriptionType: "channel.chat.notification",
+    variant: "",
+    buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "user_id", botUserId, channelId),
+    channelIdFromCondition: conditionField("broadcaster_user_id"),
+  },
+];
+
+export const eventSubTargetKey = (target: Pick<EventSubTarget, "channelId" | "subscriptionType" | "variant">): string =>
+  `${target.channelId}\u0000${target.subscriptionType}\u0000${target.variant}`;
+
+export const eventSubDefinitionForCondition = (
+  subscriptionType: string,
+  condition: Readonly<Record<string, unknown>>,
+): EventSubSubscriptionDefinition | null => {
+  const matches = EVENTSUB_SUBSCRIPTION_DEFINITIONS.filter((definition) =>
+    definition.subscriptionType === subscriptionType && definition.channelIdFromCondition(condition) !== null);
+  return matches.length === 1 ? matches[0] ?? null : null;
+};
+
+const eventSubDefinitionForTarget = (target: EventSubTarget): EventSubSubscriptionDefinition | null =>
+  EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) =>
+    definition.subscriptionType === target.subscriptionType && definition.variant === target.variant) ?? null;
+
+const conditionContains = (
+  actual: Readonly<Record<string, unknown>>,
+  expected: Readonly<Record<string, string>>,
+): boolean => Object.entries(expected).every(([key, value]) => actual[key] === value);
 
 interface EventSubTargetRow {
   channel_id: string;
@@ -130,12 +219,16 @@ export const listDesiredEventSubTargets = async (
   for (const row of result.results) {
     const module = modules.get(row.module_id);
     for (const subscriptionType of module?.eventSubTypes ?? []) {
-      const target: EventSubTarget = {
-        channelId: row.channel_id,
-        subscriptionType,
-        version: "1",
-      };
-      targets.set(`${target.channelId}\u0000${target.subscriptionType}`, target);
+      for (const definition of EVENTSUB_SUBSCRIPTION_DEFINITIONS) {
+        if (definition.subscriptionType !== subscriptionType) continue;
+        const target: EventSubTarget = {
+          channelId: row.channel_id,
+          subscriptionType,
+          variant: definition.variant,
+          version: "1",
+        };
+        targets.set(eventSubTargetKey(target), target);
+      }
     }
   }
   return [...targets.values()];
@@ -196,12 +289,15 @@ const isOwnedByTarget = (
   target: EventSubTarget,
   botUserId: string,
   expectedCallback: string,
-): boolean => subscription.type === target.subscriptionType &&
-  subscription.version === target.version &&
-  subscription.condition.broadcaster_user_id === target.channelId &&
-  subscription.condition.user_id === botUserId &&
-  subscription.transport.method === "webhook" &&
-  subscription.transport.callback === expectedCallback;
+): boolean => {
+  const definition = eventSubDefinitionForTarget(target);
+  return subscription.type === target.subscriptionType &&
+    subscription.version === target.version &&
+    definition !== null &&
+    conditionContains(subscription.condition, definition.buildCondition(target.channelId, botUserId)) &&
+    subscription.transport.method === "webhook" &&
+    subscription.transport.callback === expectedCallback;
+};
 
 const reasonFor = (error: unknown): string =>
   error instanceof TwitchApiError && error.code !== null ? error.code : "maintenance_failed";
@@ -218,6 +314,7 @@ const mark = async (
   await upsertEventSubSubscription(db, {
     channelId: target.channelId,
     subscriptionType: target.subscriptionType,
+    variant: target.variant,
     subscriptionId,
     secretId,
     status,
@@ -234,6 +331,10 @@ const createSubscription = async (
   fetcher: typeof fetch,
 ): Promise<EventSubRemoteSubscription> => {
   const ring = parseKeyRing(env.TWITCH_EVENTSUB_SECRET);
+  const definition = eventSubDefinitionForTarget(target);
+  if (definition === null) {
+    throw new TwitchApiError("Unbekannter EventSub-Zieltyp.", 500, "invalid_target");
+  }
   const { body } = await requestEventSubApi(
     fetcher,
     appAccessToken,
@@ -245,7 +346,7 @@ const createSubscription = async (
       body: JSON.stringify({
         type: target.subscriptionType,
         version: target.version,
-        condition: { broadcaster_user_id: target.channelId, user_id: botUserId },
+        condition: definition.buildCondition(target.channelId, botUserId),
         transport: {
           method: "webhook",
           callback: callbackUrl(env.PUBLIC_ORIGIN),
@@ -289,9 +390,9 @@ export const reconcileEventSubSubscriptions = async (
   channelId?: string,
 ): Promise<void> => {
   const targets = await listDesiredEventSubTargets(env.DB, channelId);
-  const targetByKey = new Map(targets.map((target) => [`${target.channelId}\u0000${target.subscriptionType}`, target]));
+  const targetByKey = new Map(targets.map((target) => [eventSubTargetKey(target), target]));
   const currentStates = new Map((await listEventSubSubscriptions(env.DB, channelId)).map((state) => [
-    `${state.channelId}\u0000${state.subscriptionType}`,
+    eventSubTargetKey(state),
     state,
   ]));
   const markError = async (target: EventSubTarget, error: unknown, subscriptionId: string | null = null): Promise<void> => {
@@ -304,9 +405,9 @@ export const reconcileEventSubSubscriptions = async (
   } catch (error: unknown) {
     const desiredKeys = new Set(targetByKey.keys());
     await Promise.all([
-      ...targets.map((target) => markError(target, error, currentStates.get(`${target.channelId}\u0000${target.subscriptionType}`)?.subscriptionId ?? null)),
+      ...targets.map((target) => markError(target, error, currentStates.get(eventSubTargetKey(target))?.subscriptionId ?? null)),
       ...[...currentStates.values()]
-        .filter((state) => !desiredKeys.has(`${state.channelId}\u0000${state.subscriptionType}`))
+        .filter((state) => !desiredKeys.has(eventSubTargetKey(state)))
         .map((state) => upsertEventSubSubscription(env.DB, {
           ...state,
           status: "error",
@@ -325,16 +426,23 @@ export const reconcileEventSubSubscriptions = async (
   const blocked = new Set<string>();
   const failedStaleCleanup = new Set<string>();
   for (const subscription of remote) {
-    if (channelId !== undefined && subscription.condition.broadcaster_user_id !== channelId) continue;
+    const definition = eventSubDefinitionForCondition(subscription.type, subscription.condition);
+    const remoteChannelId = definition?.channelIdFromCondition(subscription.condition) ?? null;
+    if (channelId !== undefined && remoteChannelId !== channelId) continue;
     const target = targets.find((candidate) => isOwnedByTarget(subscription, candidate, botUserId, expectedCallback));
-    const owned = target !== undefined || (
+    const owned = definition !== null && remoteChannelId !== null &&
       subscription.transport.method === "webhook" && subscription.transport.callback === expectedCallback &&
-      subscription.condition.user_id === botUserId
-    );
+      conditionContains(subscription.condition, definition.buildCondition(remoteChannelId, botUserId));
     if (!owned) continue;
+    const remoteTarget: EventSubTarget = {
+      channelId: remoteChannelId,
+      subscriptionType: subscription.type,
+      variant: definition.variant,
+      version: subscription.version,
+    };
     const targetKey = target === undefined
-      ? `${String(subscription.condition.broadcaster_user_id)}\u0000${subscription.type}`
-      : `${target.channelId}\u0000${target.subscriptionType}`;
+      ? eventSubTargetKey(remoteTarget)
+      : eventSubTargetKey(target);
     const desired = targetByKey.get(targetKey);
     const valid = desired !== undefined && subscription.status === "enabled" &&
       isOwnedByTarget(subscription, desired, botUserId, expectedCallback) && !kept.has(targetKey);
@@ -363,7 +471,7 @@ export const reconcileEventSubSubscriptions = async (
       }
     } catch (error: unknown) {
       if (desired !== undefined) {
-        const desiredKey = `${desired.channelId}\u0000${desired.subscriptionType}`;
+        const desiredKey = eventSubTargetKey(desired);
         blocked.add(desiredKey);
         await markError(desired, error, subscription.id);
       } else {
@@ -384,7 +492,7 @@ export const reconcileEventSubSubscriptions = async (
   }
 
   for (const target of targets) {
-    const targetKey = `${target.channelId}\u0000${target.subscriptionType}`;
+    const targetKey = eventSubTargetKey(target);
     if (matched.has(targetKey) || blocked.has(targetKey)) continue;
     try {
       const subscription = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
@@ -396,7 +504,7 @@ export const reconcileEventSubSubscriptions = async (
 
   const desiredKeys = new Set(targetByKey.keys());
   const staleStates = [...currentStates.values()].filter((state) => {
-    const key = `${state.channelId}\u0000${state.subscriptionType}`;
+    const key = eventSubTargetKey(state);
     return !desiredKeys.has(key) && !failedStaleCleanup.has(key);
   });
   await Promise.all(staleStates.map((state) => upsertEventSubSubscription(env.DB, {

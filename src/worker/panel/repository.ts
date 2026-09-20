@@ -120,6 +120,7 @@ const channelStateQuery = `
       LEFT JOIN eventsub_subscriptions AS eventsub
         ON eventsub.channel_id = channel.channel_id
        AND eventsub.subscription_type = 'channel.chat.message'
+       AND eventsub.variant = ''
      WHERE member.user_id = ?`;
 
 const mapBotStatus = (row: ChannelStateRow): PanelBotStatus | null =>

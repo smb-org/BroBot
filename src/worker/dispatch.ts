@@ -109,6 +109,7 @@ export const dispatchEventSubNotification = async (
   event: {
     channelId: string;
     subscriptionType: string;
+    subscriptionVariant?: string;
     triggerId: string;
     payload: Readonly<Record<string, unknown>>;
     receivedAt: string;
@@ -141,6 +142,7 @@ export const dispatchEventSubNotification = async (
       const moduleEvent: ModuleEvent = {
         channelId: event.channelId,
         subscriptionType: event.subscriptionType,
+        ...(event.subscriptionVariant === undefined ? {} : { subscriptionVariant: event.subscriptionVariant }),
         triggerId: event.triggerId,
         payload: event.payload,
         settings: gepruefteEinstellungen,
