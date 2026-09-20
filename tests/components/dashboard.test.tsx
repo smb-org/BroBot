@@ -165,6 +165,33 @@ describe("Dashboard-Grundgerüst", () => {
           code: "shoutout.unterdrueckt",
           detail: '{"grund":"raid_erkannt"}',
           actorUserId: null,
+        }, {
+          eventId: "event-2",
+          createdAt: "2026-09-18T04:01:00.000Z",
+          moduleId: "unbekanntes-modul",
+          code: "plugin.anderes",
+          detail: "kein-json",
+          actorUserId: "user-2",
+          actorLogin: null,
+          actorDisplayName: null,
+        }, {
+          eventId: "event-3",
+          createdAt: "2026-09-18T04:02:00.000Z",
+          moduleId: "chat",
+          code: "host.chat.gesendet",
+          detail: "{}",
+          actorUserId: "user-1",
+          actorLogin: "alice",
+          actorDisplayName: null,
+        }, {
+          eventId: "event-4",
+          createdAt: "2026-09-18T04:03:00.000Z",
+          moduleId: "chat",
+          code: "host.aktion.fehler",
+          detail: "{}",
+          actorUserId: "user-1",
+          actorLogin: "alice",
+          actorDisplayName: null,
         }],
         nextCursor: null,
       });
@@ -175,10 +202,35 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("shoutout.unterdrueckt")).toBeInTheDocument();
+    expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Ereignis" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Modul" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Wer" })).toBeInTheDocument();
+    expect(screen.getByText("Shoutout unterdrückt")).toBeInTheDocument();
     expect(screen.getByText("raid")).toBeInTheDocument();
     expect(screen.getByText("Automatisch")).toBeInTheDocument();
-    expect(screen.getByText('{"grund":"raid_erkannt"}')).toBeInTheDocument();
+    expect(screen.getByText("plugin.anderes")).toHaveClass("mono");
+    expect(screen.getByText("user-2")).toHaveClass("mono");
+    const sentRow = screen.getByText("Chat-Nachricht gesendet").closest("tr");
+    const failedRow = screen.getByText("Aktion fehlgeschlagen").closest("tr");
+    expect(sentRow?.querySelector(".led")).toHaveAttribute("data-status", "green");
+    expect(within(sentRow as HTMLElement).getByText("Info")).toBeInTheDocument();
+    expect(failedRow?.querySelector(".led")).toHaveAttribute("data-status", "red");
+    expect(within(failedRow as HTMLElement).getByText("Fehler")).toBeInTheDocument();
+    const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
+    const unknownEventRow = screen.getByText("plugin.anderes").closest("tr");
+    expect(eventRow).not.toBeNull();
+    expect(unknownEventRow).not.toBeNull();
+    fireEvent.keyDown(unknownEventRow as HTMLElement, { key: " " });
+    expect(unknownEventRow).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Unbekannt")).toBeInTheDocument();
+    expect(screen.getByText("kein-json")).toBeInTheDocument();
+    fireEvent.keyDown(eventRow as HTMLElement, { key: "Enter" });
+    expect(eventRow).toHaveAttribute("aria-selected", "true");
+    expect(unknownEventRow).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByText("shoutout.unterdrueckt")).toBeInTheDocument();
+    expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
   });
 
   it("erreicht Ereignisse über die Navigation und lädt die nächste Seite", async () => {
@@ -228,6 +280,7 @@ describe("Dashboard-Grundgerüst", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
     expect(await screen.findByText("alt")).toBeInTheDocument();
     expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
   });
 
   it("zeigt den Ereignis-Leerzustand als einzelnen Satz", async () => {
@@ -257,7 +310,7 @@ describe("Dashboard-Grundgerüst", () => {
     });
 
     expect(screen.getByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
-    expect(screen.getByText("Letzter Broadcaster")).toBeInTheDocument();
+    expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(2);
 
     // Das Auswahlfeld bietet keinen Wert an, der abgelehnt würde.
     const rolle = screen.getByRole("combobox", { name: "Rolle für esembe" });
@@ -350,6 +403,25 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("button", { name: "Zugriff freigeben" })).toBeDisabled();
   });
 
+  it("behält die Semantik der Mitgliedertabelle für schmale Karten", async () => {
+    await zeigeMitglieder({
+      members: [{ userId: "100", login: "streamer", displayName: "Streamerin", profileImageUrl: null, role: "verwalter", joinedAt: "2026-09-17T12:00:00.000Z" }],
+      broadcasterCount: 1,
+      viewerUserId: "100",
+    });
+
+    const table = screen.getByRole("table");
+    expect(table.querySelector("thead")).toHaveClass("sr-only");
+    expect(screen.getByRole("columnheader", { name: "Name" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Rolle" })).toBeInTheDocument();
+
+    const row = table.querySelector("tbody tr");
+    expect(row).toHaveAttribute("role", "row");
+    expect(row?.querySelector("th[scope='row']")).toHaveAttribute("role", "rowheader");
+    expect(row?.querySelectorAll("td")).toHaveLength(3);
+    expect(Array.from(row?.querySelectorAll("td") ?? []).every((cell) => cell.getAttribute("role") === "cell")).toBe(true);
+  });
+
   it("zeigt dem Bediener Mitgliederaktionen deaktiviert mit Begründung", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "bediener" };
     const members = {
@@ -380,6 +452,37 @@ describe("Dashboard-Grundgerüst", () => {
     const entziehen = screen.getByRole("button", { name: "Zugriff für Moderation entziehen" });
     expect(entziehen).toBeDisabled();
     expect(screen.getAllByText(grund).length).toBeGreaterThan(0);
+  });
+
+  it("verwirft Suchergebnis und Freigabebestätigung beim Kanalwechsel", async () => {
+    const alpha = { ...healthyChannel("kanal-a", "Alpha"), role: "verwalter" };
+    const beta = { ...healthyChannel("kanal-b", "Beta"), role: "bediener" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta] });
+      if (path === "/api/channels/kanal-a/members/search") return jsonResponse({ user: {
+        userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: null,
+      } });
+      if (path === "/api/channels/kanal-a/members") return jsonResponse({ members: [], broadcasterCount: 1, viewerUserId: "100", nextCursor: null });
+      if (path === "/api/channels/kanal-b/members") return jsonResponse({ members: [], broadcasterCount: 1, viewerUserId: "200", nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/members");
+
+    render(<DashboardApp />);
+    const search = await screen.findByRole("textbox", { name: "Twitch-Name" });
+    fireEvent.change(search, { target: { value: "neue-person" } });
+    fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
+    expect(await screen.findByText("Neue Person")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    expect(screen.getByRole("button", { name: "Zugriff endgültig freigeben" })).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState({}, "", "/channels/kanal-b/members");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => expect(screen.queryByText("Neue Person")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Suchen" })).toBeDisabled();
   });
 
   it("zeigt dem Bediener die Modulaktivierung deaktiviert mit Begründung", async () => {
@@ -422,6 +525,51 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("Audit-Log wird geladen …")).toBeInTheDocument();
     resolveAudit?.(jsonResponse(audit));
     await waitFor(() => expect(screen.queryByText("Audit-Log wird geladen …")).not.toBeInTheDocument());
+  });
+
+  it("öffnet den ausgewählten Audit-Eintrag im Sub-Inspector", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const auditEntry = {
+      auditId: "audit-1",
+      actorUserId: "user-1",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      action: "module.enabled",
+      before: "{\"enabled\":false}",
+      after: "{\"enabled\":true}",
+    };
+    const secondAuditEntry = {
+      auditId: "audit-2",
+      actorUserId: "user-1",
+      createdAt: "2026-09-18T03:00:00.000Z",
+      action: "module.disabled",
+      before: "{\"enabled\":true}",
+      after: "{\"enabled\":false}",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/audit-log")) return jsonResponse({ entries: [auditEntry, secondAuditEntry], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
+    const row = screen.getByText("module.enabled").closest("tr");
+    expect(row).not.toBeNull();
+    expect(row).toHaveAttribute("aria-selected", "false");
+    fireEvent.keyDown(row as HTMLElement, { key: "Enter" });
+    expect(row).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "Vorher" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Nachher" })).toBeInTheDocument();
+    expect(screen.getByText('{"enabled":false}')).toBeInTheDocument();
+    const secondRow = screen.getByText("module.disabled").closest("tr");
+    expect(secondRow).not.toBeNull();
+    fireEvent.keyDown(secondRow as HTMLElement, { key: " " });
+    expect(secondRow).toHaveAttribute("aria-selected", "true");
+    expect(row).toHaveAttribute("aria-selected", "false");
   });
 
   it("fragt beim Hinzufügen ausdrücklich nach dem tatsächlichen Zugriffsumfang", async () => {
@@ -613,7 +761,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
 
-    const link = await screen.findByRole("link", { name: "Textbefehle" });
+    const link = await screen.findByRole("link", { name: /Textbefehle ·/ });
     expect(link).toHaveAttribute("href", "/channels/kanal-a/modules/textbefehle");
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
   });
@@ -677,7 +825,7 @@ describe("Dashboard-Grundgerüst", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const link = await screen.findByRole("link", { name: "Textbefehle" });
+    const link = await screen.findByRole("link", { name: /Textbefehle ·/ });
     link.click();
 
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
@@ -729,10 +877,11 @@ describe("Dashboard-Grundgerüst", () => {
     window.history.replaceState({}, "", "/");
 
     render(<DashboardApp />);
-    await screen.findByRole("heading", { name: "Alpha", level: 2 });
-    expect(screen.getByText("Nicht verbunden")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Alpha", level: 2 }).closest("article"))
-      .not.toHaveAttribute("data-status", "error");
+    const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
+    expect(screen.getByText("1 Kanal freigegeben")).toBeInTheDocument();
+    expect(screen.queryByText("Keine Verbindung")).not.toBeInTheDocument();
+    expect(channelTaste).toHaveAccessibleName(/Alpha ·/);
+    expect(channelTaste).toHaveAttribute("data-status", "green");
 
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
@@ -785,7 +934,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     expect((await screen.findAllByText("Broadcaster-Zustimmung fehlt")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Der Broadcaster muss Twitch erneut autorisieren.")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Broadcaster-Zustimmung anfordern" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Broadcaster-Zustimmung anfordern" })).toBeDisabled();
 
     cleanup();
     const broadcasterChannel = { ...channel, role: "broadcaster" };
@@ -813,7 +962,7 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("article", { name: "Moderatorstatus" });
-    expect(screen.getByText(/Letzte Prüfung:/)).toBeInTheDocument();
+    expect(within(screen.getByRole("article", { name: "Moderatorstatus" })).getByText("moderator_entfernt")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Moderatorstatus prüfen" })).toBeInTheDocument();
 
     cleanup();
@@ -828,7 +977,8 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("article", { name: "Moderatorstatus" });
-    expect(screen.queryByRole("button", { name: "Moderatorstatus prüfen" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Moderatorstatus prüfen" })).toBeDisabled();
+    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.")).toBeInTheDocument();
   });
 
   it("zeigt während und nach der manuellen Prüfung eine Rückmeldung", async () => {
@@ -860,12 +1010,46 @@ describe("Dashboard-Grundgerüst", () => {
       nextAllowedAt: "2026-09-18T04:05:00.000Z",
     }));
 
-    // Nach erfolgreicher Prüfung ist der Kanal gesund; die Moderatorzeile
-    // verschwindet deshalb. Beweis für den neuen Stand ist die aktualisierte
-    // Prüfzeit neben der Aktion.
-    await waitFor(() => expect(screen.getByText(/Letzte Prüfung:/)).toBeInTheDocument());
-    expect(screen.queryByRole("article", { name: "Moderatorstatus" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Letzte Prüfung:/)).toBeInTheDocument();
+    // Gesunde Zustände bleiben sichtbar und tragen weiterhin eine grüne LED.
+    await waitFor(() => expect(screen.getAllByText(/Letzte Prüfung:/).length).toBeGreaterThanOrEqual(1));
+    expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
+    expect(screen.getAllByText(/Letzte Prüfung:/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("reaktiviert die Moderatorprüfung nach Ablauf der Sperrzeit", async () => {
+    vi.useFakeTimers();
+    try {
+      const channel = {
+        ...healthyChannel("kanal-a", "Alpha"),
+        role: "broadcaster",
+        moderator: { isModerator: true, checkedAt: "2026-09-18T02:00:00.000Z", reason: null },
+      };
+      const nextAllowedAt = new Date(Date.now() + 5000).toISOString();
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+        if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
+        if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+        if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({
+          moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
+          nextAllowedAt,
+        }));
+        return Promise.resolve(jsonResponse({}, 404));
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a");
+
+      render(<DashboardApp />);
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      const button = screen.getByRole("button", { name: "Moderatorstatus prüfen" });
+      fireEvent.click(button);
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      expect(button).toBeDisabled();
+
+      act(() => { vi.advanceTimersByTime(5000); });
+      expect(button).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("zeigt Twitch-Fehler an und behält den bisherigen Moderatorstand", async () => {
@@ -889,7 +1073,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     expect(await screen.findByText("Twitch ist vorübergehend nicht erreichbar.", { selector: "p" })).toBeInTheDocument();
     expect(screen.queryByText("Nicht geprüft")).not.toBeInTheDocument();
-    expect(screen.queryByRole("article", { name: "Moderatorstatus" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
   });
 
   it("zeigt fehlende Token-Ablaufdaten nicht als gültig oder gesund", async () => {
@@ -932,21 +1116,16 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
 
-    const channelHeading = await screen.findByRole("heading", { name: "Alpha", level: 2 });
-    const channelCard = channelHeading.closest("article");
-    expect(channelCard).not.toBeNull();
-    expect(channelCard).toHaveAttribute("data-status", "healthy");
-    expect(within(channelCard as HTMLElement).getByText("Gesund", { selector: "span" })).toBeInTheDocument();
-    expect(within(channelCard as HTMLElement).queryByText("Warnung")).not.toBeInTheDocument();
+    const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
+    expect(channelTaste).toHaveAttribute("data-status", "green");
+    expect(within(channelTaste).getByText("Gesund", { selector: "span" })).toBeInTheDocument();
+    expect(within(channelTaste).queryByText("Warnung")).not.toBeInTheDocument();
 
-    // Auf der Kanalseite ist Gesundheit die Abwesenheit von Meldungen: keine
-    // Zustandszeile erscheint, der Inhalt beginnt sofort. Die Werte selbst
-    // stehen weiterhin vollständig auf der Systemseite.
+    // Gesunde Zustände bleiben auf der Kanalseite sichtbar.
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    expect(screen.queryByRole("article", { name: "Token-Zustand" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("article", { name: "Bot-Account" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Warnung")).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Token-Zustand" })).toHaveAttribute("data-status", "healthy");
+    expect(screen.getByRole("article", { name: "Bot-Account" })).toHaveAttribute("data-status", "healthy");
   });
 
   it("bleibt gesund, solange der Ablauf nur turnusmäßig näherrückt", async () => {
@@ -975,11 +1154,9 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
 
-    const channelHeading = await screen.findByRole("heading", { name: "Alpha", level: 2 });
-    const channelCard = channelHeading.closest("article");
-    expect(channelCard).not.toBeNull();
-    expect(channelCard).toHaveAttribute("data-status", "healthy");
-    expect(within(channelCard as HTMLElement).queryByText("Erneuerung überfällig")).not.toBeInTheDocument();
+    const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
+    expect(channelTaste).toHaveAttribute("data-status", "green");
+    expect(within(channelTaste).queryByText("Erneuerung überfällig")).not.toBeInTheDocument();
   });
 
   it("warnt, wenn ein Wartungslauf das fällige Token nicht erneuert hat", async () => {
@@ -1005,11 +1182,9 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
 
-    const channelHeading = await screen.findByRole("heading", { name: "Alpha", level: 2 });
-    const channelCard = channelHeading.closest("article");
-    expect(channelCard).not.toBeNull();
-    expect(channelCard).toHaveAttribute("data-status", "warning");
-    expect(within(channelCard as HTMLElement).getByText("Erneuerung überfällig", { selector: "span" })).toBeInTheDocument();
+    const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
+    expect(channelTaste).toHaveAttribute("data-status", "amber");
+    expect(within(channelTaste).getByText("Erneuerung überfällig", { selector: "span" })).toBeInTheDocument();
   });
 
   it("warnt bei einem seit mehr als einem Wartungsintervall veralteten Lauf", async () => {
@@ -1027,11 +1202,9 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
 
-    const channelHeading = await screen.findByRole("heading", { name: "Alpha", level: 2 });
-    const channelCard = channelHeading.closest("article");
-    expect(channelCard).not.toBeNull();
-    expect(channelCard).toHaveAttribute("data-status", "warning");
-    expect(within(channelCard as HTMLElement).getByText("Wartung überfällig", { selector: "span" })).toBeInTheDocument();
+    const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
+    expect(channelTaste).toHaveAttribute("data-status", "amber");
+    expect(within(channelTaste).getByText("Wartung überfällig", { selector: "span" })).toBeInTheDocument();
   });
 
   it("verwirft beim Kanalwechsel den alten Datenstand vor der neuen Antwort", async () => {
@@ -1097,13 +1270,13 @@ describe("Dashboard-Grundgerüst", () => {
       window.history.pushState({}, "", "/channels/kanal-b/system");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    expect(await screen.findByText("beta-system")).toBeInTheDocument();
+    expect((await screen.findAllByText("beta-system")).length).toBeGreaterThanOrEqual(1);
 
     await act(async () => {
       resolveAlphaSystem?.(jsonResponse(systemFor("alpha-system")));
       await Promise.resolve();
     });
-    expect(screen.getByText("beta-system")).toBeInTheDocument();
+    expect(screen.getAllByText("beta-system").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("alpha-system")).not.toBeInTheDocument();
   });
 
@@ -1181,7 +1354,7 @@ describe("Dashboard-Grundgerüst", () => {
     }));
 
     render(<DashboardApp />);
-    await screen.findByRole("heading", { name: "Alpha", level: 2 });
+    await screen.findByRole("heading", { name: "Übersicht", level: 1 });
     fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
 
     await waitFor(() => {
@@ -1189,7 +1362,7 @@ describe("Dashboard-Grundgerüst", () => {
     });
     expect(screen.queryByRole("heading", { name: "Anmeldung erforderlich", level: 1 }))
       .not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Alpha", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Übersicht", level: 1 })).toBeInTheDocument();
   });
 
   it("holt vor dem Logout den CSRF-Token und sendet ihn im Header", async () => {
@@ -1205,7 +1378,7 @@ describe("Dashboard-Grundgerüst", () => {
     vi.stubGlobal("fetch", fetcher);
 
     render(<DashboardApp />);
-    await screen.findByRole("heading", { name: "Alpha", level: 2 });
+    await screen.findByRole("heading", { name: "Übersicht", level: 1 });
     fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
 
     await waitFor(() => {

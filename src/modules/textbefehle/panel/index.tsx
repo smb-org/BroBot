@@ -90,9 +90,9 @@ const TextbefehlZeile = ({ initial, language, selected, onSelect }: TextbefehlZe
   return (
     <tr tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
-      <td className="command-table__answer" title={initial.text}>{initial.text}</td>
+      <td className="tabelle__answer" title={initial.text}>{initial.text}</td>
       <td className="mono">{initial.cooldownSekunden}</td>
-      <td className="command-table__last-used">{relativeZeit(initial.zuletztVerwendetAt, labels)}</td>
+      <td className="tabelle__last-used">{relativeZeit(initial.zuletztVerwendetAt, labels)}</td>
     </tr>
   );
 };
@@ -160,7 +160,7 @@ export const TextbefehlePanel = ({ channelId, language }: { channelId: string; l
         {loading ? <p className="loading-line">{labels.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-        {!loading && error === null && befehle.length > 0 ? <div className="command-table-wrap"><table className="command-table"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} />)}</tbody></table></div> : null}
+        {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} />)}</tbody></table></div> : null}
       </section>
       {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} />}
       <form className="command-create inspector-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>

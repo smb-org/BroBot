@@ -57,7 +57,7 @@ describe("Modulroute beim clientseitigen Wechsel", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const link = await screen.findByRole("link", { name: "aktiv" });
+    const link = await screen.findByRole("link", { name: /^aktiv · Läuft$/ });
     expect(activeLoader).not.toHaveBeenCalled();
 
     link.click();

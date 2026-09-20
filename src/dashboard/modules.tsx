@@ -3,6 +3,8 @@ import { useState, type ReactElement } from "react";
 import type { PanelChannelRole, PanelModuleState } from "../panel-contract";
 import { PanelApiError, setChannelModuleEnabled } from "./api";
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatZahl } from "./locale";
+import { ModuleHeading } from "./module-panels";
+
 
 interface ModulesTexte {
   verwaltungGesperrt: string;
@@ -55,7 +57,9 @@ const errorMessage = (error: unknown): string => {
 
 const canManageModules = (role: PanelChannelRole): boolean => role !== "bediener";
 
-export const ModulesPage = ({
+// Legacy-only file: the component intentionally is no longer exported.
+// eslint-disable-next-line react-refresh/only-export-components
+const ModulesPage = ({
   channelId,
   ownRole,
   modules,
@@ -85,10 +89,7 @@ export const ModulesPage = ({
 
   return (
     <>
-      <header className="page-heading">
-        <h1>{texte.titel}</h1>
-        <span className="muted zahl">{formatZahl(modules.length)}</span>
-      </header>
+      <ModuleHeading kind="modules" title={texte.titel} subtitle={formatZahl(modules.length)} />
       <section className="content-section" aria-label={texte.liste}>
         <div className="section-heading"><h2>{texte.verfuegbar}</h2></div>
         {loading ? <p className="loading-line">{texte.laden}</p> : null}
@@ -97,8 +98,8 @@ export const ModulesPage = ({
         {loading || error !== null ? null : modules.length === 0 ? (
           <p className="muted">{texte.registriert}</p>
         ) : (
-          <div className="member-table-wrap">
-            <table className="member-table">
+          <div className="tabelle-wrap">
+            <table className="tabelle">
               <thead><tr><th scope="col">{texte.modul}</th><th scope="col">{texte.aktiv}</th></tr></thead>
               <tbody>
                 {modules.map((module) => (
@@ -128,3 +129,7 @@ export const ModulesPage = ({
     </>
   );
 };
+
+// Diese Legacy-Ansicht ist nicht mehr Teil des Dashboard-Routings. Die Datei
+// bleibt als Übergang erhalten; ihr unreferenzierter Export ist entfernt.
+void ModulesPage;
