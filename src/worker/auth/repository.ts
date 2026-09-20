@@ -21,6 +21,7 @@ export interface OAuthTransactionRecord {
   purpose: OAuthPurpose;
   expiresAt: string;
   createdAt: string;
+  redirectPath?: string | null;
 }
 
 export interface BotIdentityRecord {
@@ -152,6 +153,7 @@ interface OAuthTransactionRow {
   purpose: OAuthPurpose;
   expires_at: string;
   created_at: string;
+  redirect_path?: string | null;
 }
 
 interface BotIdentityRow {
@@ -254,6 +256,7 @@ const mapOAuthTransaction = (row: OAuthTransactionRow): OAuthTransactionRecord =
   purpose: row.purpose,
   expiresAt: row.expires_at,
   createdAt: row.created_at,
+  ...(row.redirect_path === null || row.redirect_path === undefined ? {} : { redirectPath: row.redirect_path }),
 });
 
 const mapBotIdentity = (row: BotIdentityRow): BotIdentityRecord => ({
@@ -811,13 +814,14 @@ export const createOAuthTransaction = async (
 ): Promise<void> => {
   await db.prepare(
     `INSERT INTO oauth_transactions
-      (transaction_id, purpose, expires_at, created_at)
-     VALUES (?, ?, ?, ?)`,
+      (transaction_id, purpose, expires_at, created_at, redirect_path)
+     VALUES (?, ?, ?, ?, ?)`,
   ).bind(
     transaction.transactionId,
     transaction.purpose,
     transaction.expiresAt,
     transaction.createdAt,
+    transaction.redirectPath ?? null,
   ).run();
 };
 
@@ -1539,7 +1543,7 @@ export const consumeOAuthTransaction = async (
       WHERE transaction_id = ?
         AND used_at IS NULL
         AND julianday(expires_at) > julianday(?)
-      RETURNING transaction_id, purpose, expires_at, created_at`,
+      RETURNING transaction_id, purpose, expires_at, created_at, redirect_path`,
   ).bind(consumedAt, transactionId, consumedAt).first<OAuthTransactionRow>();
   return row === null ? null : mapOAuthTransaction(row);
 };

@@ -68,6 +68,30 @@ const randomId = (): string => {
 
 const redirectHome = (origin: string): string => `${origin.replace(/\/+$/, "")}/`;
 
+const moduleDashboardPath = (channelId: string, moduleId: string): string =>
+  `/channels/${encodeURIComponent(channelId)}/modules/${encodeURIComponent(moduleId)}`;
+
+const isEncodedPathSegment = (segment: string): boolean => {
+  if (segment.length === 0) return false;
+  try {
+    const decoded = decodeURIComponent(segment);
+    return decoded !== "." && decoded !== ".." && !decoded.includes("/") && !decoded.includes("\\") &&
+      encodeURIComponent(decoded) === segment;
+  } catch {
+    return false;
+  }
+};
+
+const isSafeModuleRedirectPath = (path: string | null | undefined): path is string => {
+  if (path === undefined || path === null || path.startsWith("//") || !path.startsWith("/")) return false;
+  const segments = path.split("/");
+  return segments.length === 5 && segments[1] === "channels" && segments[3] === "modules" &&
+    isEncodedPathSegment(segments[2] ?? "") && isEncodedPathSegment(segments[4] ?? "");
+};
+
+const redirectAfterLogin = (origin: string, path: string | null | undefined): string =>
+  isSafeModuleRedirectPath(path) ? `${origin.replace(/\/+$/, "")}${path}` : redirectHome(origin);
+
 const maintainAfterBotAuthorization = async (env: Env, now: string): Promise<void> => {
   try {
     await maintainBotIdentity(env, now);
@@ -301,6 +325,7 @@ authRouter.get(
       nowIso(),
       scopes,
       true,
+      moduleDashboardPath(context.req.param("channelId"), module.id),
     );
     context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
     return context.redirect(started.url, 302);
@@ -447,7 +472,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         void maintenance;
       }
     }
-    return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);
+    return context.redirect(redirectAfterLogin(context.env.PUBLIC_ORIGIN, transaction.redirectPath), 302);
   } catch (error) {
     await failOAuthTransaction(
       context.env.DB,

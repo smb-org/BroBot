@@ -192,6 +192,48 @@ describe("Auth-Routen", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("führt einen serverseitig hinterlegten Modul-Rückweg aus", async () => {
+    const transaction = {
+      transaction_id: "transaction-1",
+      purpose: "login",
+      expires_at: "2099-09-18T00:05:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+      redirect_path: "/channels/kanal-a/modules/werbung",
+    };
+    const { environment } = makeEnvironment(transaction);
+    const login = await authRouter.fetch(new Request("https://brobot.example/auth/login"), environment);
+    fetchWith(
+      new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: [] }), { status: 200 }),
+      new Response(JSON.stringify({ data: [{ id: "user-1", login: "tester" }] }), { status: 200 }),
+    );
+
+    const response = await authRouter.fetch(callbackRequest(login), environment);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://brobot.example/channels/kanal-a/modules/werbung");
+  });
+
+  it("ignoriert ein nicht einfaches hinterlegtes Rückwegziel", async () => {
+    const transaction = {
+      transaction_id: "transaction-1",
+      purpose: "login",
+      expires_at: "2099-09-18T00:05:00.000Z",
+      created_at: "2099-09-18T00:00:00.000Z",
+      redirect_path: "https://angreifer.example/weiter",
+    };
+    const { environment } = makeEnvironment(transaction);
+    const login = await authRouter.fetch(new Request("https://brobot.example/auth/login"), environment);
+    fetchWith(
+      new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: [] }), { status: 200 }),
+      new Response(JSON.stringify({ data: [{ id: "user-1", login: "tester" }] }), { status: 200 }),
+    );
+
+    const response = await authRouter.fetch(callbackRequest(login), environment);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://brobot.example/");
+  });
+
   it("legt bei der Betreiberautorisierung nur die globale Bot-Identität an", async () => {
     const transaction = {
       transaction_id: "transaction-1",
