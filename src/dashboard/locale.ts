@@ -534,6 +534,13 @@ export type EreignisCode =
   | "shoutout.unterdrueckt"
   | "werbung.ankuendigung"
   | "werbung.uebersprungen"
+  | "werbung.vorwarnung.angekuendigt"
+  | "werbung.vorwarnung.kein_termin"
+  | "werbung.vorwarnung.zu_spaet"
+  | "werbung.vorwarnung.pause_begonnen"
+  | "werbung.vorwarnung.termin_verschoben"
+  | "werbung.vorwarnung.scope_fehlt"
+  | "werbung.vorwarnung.zeitplan_fehler"
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
   | "textbefehle.deaktiviert"
@@ -639,6 +646,13 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "shoutout.unterdrueckt": "Shoutout unterdrückt",
     "werbung.ankuendigung": (detail) => `Werbepause ${detail.automatisch === true ? "automatisch" : "manuell"} gestartet: ${detailZahl(detail, "dauer", "unbekannte Dauer")} Sekunden`,
     "werbung.uebersprungen": (detail) => `Werbepause übersprungen: ${detail.grund === "dauer_null" ? "Dauer ist null" : "Ereignisdaten sind ungültig"}`,
+    "werbung.vorwarnung.angekuendigt": (detail) => `Vorwarnung: Werbung in ${detailZahl(detail, "sekunden", "unbekannter Zeit")} Sekunden`,
+    "werbung.vorwarnung.kein_termin": "Keine nächste Werbepause geplant",
+    "werbung.vorwarnung.zu_spaet": "Werbe-Vorwarnung unterdrückt: Termin zu nah",
+    "werbung.vorwarnung.pause_begonnen": "Werbe-Vorwarnung unterdrückt: Werbepause hat begonnen",
+    "werbung.vorwarnung.termin_verschoben": "Werbe-Vorwarnung unterdrückt: Termin wurde verschoben",
+    "werbung.vorwarnung.scope_fehlt": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
+    "werbung.vorwarnung.zeitplan_fehler": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "grund", "unbekannter Fehler")}`,
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
@@ -689,6 +703,13 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "shoutout.unterdrueckt": "Shoutout suppressed",
     "werbung.ankuendigung": (detail) => `Ad break ${detail.automatisch === true ? "automatically" : "manually"} started: ${detailZahl(detail, "dauer", "unknown duration")} seconds`,
     "werbung.uebersprungen": (detail) => `Ad break skipped: ${detail.grund === "dauer_null" ? "duration is zero" : "event data is invalid"}`,
+    "werbung.vorwarnung.angekuendigt": (detail) => `Ad warning: ad in ${detailZahl(detail, "sekunden", "unknown time")} seconds`,
+    "werbung.vorwarnung.kein_termin": "No next ad break scheduled",
+    "werbung.vorwarnung.zu_spaet": "Ad warning suppressed: ad is too close",
+    "werbung.vorwarnung.pause_begonnen": "Ad warning suppressed: ad break has started",
+    "werbung.vorwarnung.termin_verschoben": "Ad warning suppressed: schedule changed",
+    "werbung.vorwarnung.scope_fehlt": "Ad warning suppressed: channel:read:ads is missing",
+    "werbung.vorwarnung.zeitplan_fehler": (detail) => `Ad schedule could not be read: ${detailText(detail, "grund", "unknown error")}`,
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
@@ -754,6 +775,13 @@ export const ereignisTon: Record<EreignisCode, EreignisTon> = {
   "shoutout.unterdrueckt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
   "werbung.ankuendigung": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: "dauer", ton: "info" },
   "werbung.uebersprungen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "werbung.vorwarnung.angekuendigt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
+  "werbung.vorwarnung.kein_termin": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "werbung.vorwarnung.zu_spaet": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "werbung.vorwarnung.pause_begonnen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "werbung.vorwarnung.termin_verschoben": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "werbung.vorwarnung.scope_fehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "werbung.vorwarnung.zeitplan_fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
   "textbefehle.abgekuehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: "restSekunden", ton: "hinweis" },
   "textbefehle.ausgeloest": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
   "textbefehle.deaktiviert": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
