@@ -64,7 +64,7 @@ export type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
 
 export interface ModuleAuditEntry {
   channelId: string;
-  moduleId: string;
+  moduleId: string | null;
   action: string;
   before: ModuleAuditSnapshot | null;
   after: ModuleAuditSnapshot | null;
@@ -92,6 +92,8 @@ export interface ModuleExecutionContext {
 export interface ModuleEnableContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
+  /** Bereitet ein erfolgsgekoppeltes Audit für vorbereitete Initialdaten vor. */
+  prepareModuleAudit?: PrepareModuleAudit;
   actor: ModuleMutationActor;
   now: string;
 }
@@ -170,7 +172,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
   /** Wird vor dem Einschalten aufgerufen, um modulare Initialdaten anzulegen. */
-  onEnable?: (context: ModuleEnableContext, channelId: string) => void | Promise<void>;
+  onEnable?: (
+    context: ModuleEnableContext,
+    channelId: string,
+  ) => readonly D1PreparedStatement[] | undefined | Promise<readonly D1PreparedStatement[] | undefined>;
   // Modulmigrationen und weitere Aktionsarten treten dem Contract bei, sobald
   // das erste Modul sie benötigt. Die Command-Verarbeitung ist mit
   // ModuleResult angetreten.

@@ -748,6 +748,7 @@ export const createChannelModuleWithAudit = async (
   module: ChannelModuleRecord,
   action: string,
   changedAt: string,
+  dependentMutations: readonly D1PreparedStatement[] = [],
 ): Promise<boolean> => {
   const mutation = db.prepare(
     `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
@@ -773,7 +774,7 @@ export const createChannelModuleWithAudit = async (
     before: null,
     after: { ...module },
   });
-  const results = await db.batch([mutation, audit]);
+  const results = await db.batch([mutation, audit, ...dependentMutations]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };
 
@@ -786,6 +787,7 @@ export const updateChannelModuleWithAudit = async (
   settings: string,
   action: string,
   changedAt: string,
+  dependentMutations: readonly D1PreparedStatement[] = [],
 ): Promise<boolean> => {
   const before = await getChannelModule(db, channelId, moduleId);
   if (before === null) return false;
@@ -813,7 +815,7 @@ export const updateChannelModuleWithAudit = async (
     before: { ...before },
     after: { ...after },
   });
-  const results = await db.batch([mutation, audit]);
+  const results = await db.batch([mutation, audit, ...dependentMutations]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };
 

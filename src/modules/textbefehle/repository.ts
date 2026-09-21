@@ -9,6 +9,7 @@ import type {
 export type TextbefehlMutationsgrund =
   | "existiert"
   | "nicht_gefunden"
+  | "konflikt"
   | "nicht_berechtigt";
 
 export type TextbefehlMutationsergebnis =

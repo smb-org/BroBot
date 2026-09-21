@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { authRouter } from "../../src/worker/auth/routes";
@@ -292,6 +292,67 @@ describe("Overlay-Routen", () => {
     expect(valid.status).toBe(201);
     expect(validBody.expiresAt).toBe("2099-09-18T12:00:00.000Z");
     expect(invalid.status).toBe(400);
+  });
+
+  it("stellt bei Ablauf der Session während der Übertragung kein Token aus", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-21T00:00:00.000Z"));
+      await insertMember(database);
+      const headers = await sessionHeaders(environment, true);
+      let releaseBody: (() => void) | undefined;
+      const bodyGate = new Promise<void>((resolve) => { releaseBody = resolve; });
+      const roleQueryDone = new Promise<void>((resolve) => {
+        const originalPrepare = database.prepare.bind(database);
+        environment.DB = {
+          prepare(sql: string) {
+            const statement = originalPrepare(sql);
+            if (!sql.includes("FROM channels AS channel")) return statement as unknown as D1PreparedStatement;
+            return {
+              bind(...values: unknown[]) {
+                const bound = statement.bind(...values as Parameters<typeof statement.bind>);
+                return {
+                  first: async <T>() => {
+                    const row = await bound.first<T>();
+                    resolve();
+                    return row;
+                  },
+                };
+              },
+            } as unknown as D1PreparedStatement;
+          },
+          batch: database.batch.bind(database),
+        } as unknown as D1Database;
+      });
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          return bodyGate.then(() => {
+            controller.enqueue(new TextEncoder().encode("{}"));
+            controller.close();
+          });
+        },
+      });
+      const request = new Request(issuePath, {
+        method: "POST",
+        headers,
+        body,
+        duplex: "half",
+      } as RequestInit & { duplex: "half" });
+      const responsePromise = authRouter.fetch(request, environment);
+
+      await roleQueryDone;
+      vi.setSystemTime(new Date("2100-01-01T00:00:00.000Z"));
+      releaseBody?.();
+      const response = await responsePromise;
+
+      expect(response.status).toBe(403);
+      await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_tokens").first())
+        .resolves.toEqual({ count: 0 });
+      await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first())
+        .resolves.toEqual({ count: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("weist einen abgelaufenen Token auf Routenebene ab", async () => {
