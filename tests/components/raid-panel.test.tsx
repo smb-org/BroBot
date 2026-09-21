@@ -1,7 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { WerbungPanel } from "../../src/modules/werbung/panel";
+import { ladeWerbungseinstellungen } from "../../src/modules/werbung/panel/service";
+import { ladeRaidEinstellungen } from "../../src/modules/raid/panel/service";
 import { RaidPanel } from "../../src/modules/raid/panel";
+import { ladeTextbefehle } from "../../src/modules/textbefehle/panel/service";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
@@ -67,5 +71,74 @@ describe("Raid-Panel-Ansicht", () => {
     expect(await screen.findByRole("switch", { name: "Helix-Shoutout automatisch senden: ausgeschaltet" })).not.toBeChecked();
     expect(screen.getByLabelText("Shoutout-Schwelle (Zuschauer)")).toBeDisabled();
     expect(screen.getByLabelText("Text-Schwelle (Zuschauer)")).toBeEnabled();
+  });
+
+  it("blendet die Erfolgsmeldung nach einer weiteren Änderung in beiden Panels aus", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/raid/einstellungen")) return Promise.resolve(jsonResponse({ settings: {
+        shoutoutAktiv: true, shoutoutSchwelle: 3, textSchwelle: 3, textVoll: "voll", textKlein: "klein",
+      } }));
+      if (url.pathname.endsWith("/werbung/zeitplan")) return Promise.resolve(jsonResponse({
+        schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
+        snoozeScopeVorhanden: true, letzteWerbepausen: [],
+      }));
+      if (url.pathname.endsWith("/werbung/einstellungen")) return Promise.resolve(jsonResponse({ settings: {
+        automatisch: "auto {duration}", manuell: "manuell {duration}", vorwarnung: true, vorlaufSekunden: 60, vorwarnungText: "gleich {seconds}",
+      } }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (init?.method === "PATCH") return Promise.resolve(jsonResponse({}));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<RaidPanel channelId="kanal-a" language="de" />);
+    const raidText = await screen.findByLabelText("Voller Raid-Text");
+    fireEvent.click(screen.getByRole("button", { name: "Raid-Einstellungen speichern" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("gespeichert");
+    fireEvent.change(raidText, { target: { value: "neu" } });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    cleanup();
+    render(<WerbungPanel channelId="kanal-a" language="de" />);
+    const adText = (await screen.findAllByRole("textbox"))[0];
+    if (adText === undefined) throw new Error("Werbungstextfeld fehlt");
+    fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("gespeichert");
+    fireEvent.change(adText, { target: { value: "neu" } });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("behandelt ein geleertes Raid-Zahlenfeld als Feldfehler statt als null", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/raid/einstellungen") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
+        shoutoutAktiv: true, shoutoutSchwelle: 3, textSchwelle: 3, textVoll: "voll", textKlein: "klein",
+      } }));
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<RaidPanel channelId="kanal-a" language="de" />);
+    const field = await screen.findByLabelText("Text-Schwelle (Zuschauer)");
+    fireEvent.change(field, { target: { value: "" } });
+    expect((field as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Raid-Einstellungen speichern" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Zahl eingeben");
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+    expect((field as HTMLInputElement).value).toBe("");
+  });
+
+  it("reicht abgelaufene Sessions aller drei Panel-Services als PanelApiError mit Status 401 weiter", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ error: "Sitzung abgelaufen" }, 401)));
+
+    for (const load of [
+      () => ladeTextbefehle("kanal-a"),
+      () => ladeRaidEinstellungen("kanal-a"),
+      () => ladeWerbungseinstellungen("kanal-a"),
+    ]) {
+      await expect(load()).rejects.toMatchObject({ name: "PanelApiError", status: 401 });
+    }
   });
 });

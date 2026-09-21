@@ -16,6 +16,7 @@ export interface RaidPanelTexte {
   gespeichert: string;
   laden: string;
   fehler: string;
+  zahlFehlt: string;
   verwaltungGesperrt: string;
 }
 
@@ -36,6 +37,7 @@ const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
     gespeichert: "Raid-Einstellungen gespeichert.",
     laden: "Raid-Einstellungen werden geladen …",
     fehler: "Die Raid-Einstellungen konnten nicht geladen oder gespeichert werden.",
+    zahlFehlt: "Zahl eingeben",
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Raid-Einstellungen ändern.",
   },
   en: {
@@ -54,6 +56,7 @@ const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
     gespeichert: "Raid settings saved.",
     laden: "Loading raid settings …",
     fehler: "The raid settings could not be loaded or saved.",
+    zahlFehlt: "Enter a number",
     verwaltungGesperrt: "Only broadcasters and managers may change raid settings.",
   },
 };

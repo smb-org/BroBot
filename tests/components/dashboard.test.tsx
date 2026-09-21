@@ -850,6 +850,40 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("Keine Ereignisse passen zu den Filtern.")).not.toBeInTheDocument();
   });
 
+  it("entprellt fünf Eingaben im Personenfilter zu genau einer weiteren Ereignisanfrage", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const eventRequests: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        eventRequests.push(url);
+        return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const person = await screen.findByRole("textbox", { name: "Person" });
+    const initialRequests = eventRequests.length;
+    for (const value of ["a", "al", "ali", "alic", "alice"]) {
+      fireEvent.change(person, { target: { value } });
+    }
+    expect(eventRequests).toHaveLength(initialRequests);
+
+    // Kein `setTimeout` mit echter Wartezeit: der Test war damit von der Laufzeit
+    // der Maschine abhängig und fiel in drei Läufen einmal grundlos durch.
+    // `waitFor` pollt bis zur eigenen Frist und ist deshalb zuverlässig, egal
+    // wie schnell oder langsam die Entprellung tatsächlich abläuft.
+    await waitFor(
+      () => { expect(eventRequests).toHaveLength(initialRequests + 1); },
+      { timeout: 2000 },
+    );
+    expect(eventRequests.at(-1)?.searchParams.get("actor")).toBe("alice");
+  });
+
   it("stellt den letzten Broadcaster nicht als entziehbar dar", async () => {
     // Der Worker würde beides ablehnen. Ein Knopf, der garantiert scheitert,
     // sieht aus wie eine Möglichkeit — man muss ihn drücken, um zu erfahren,

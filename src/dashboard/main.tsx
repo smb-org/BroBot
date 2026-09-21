@@ -84,6 +84,8 @@ const leereEreignisFilter: PanelEventFilters = {
   person: null,
 };
 
+const PERSON_FILTER_DEBOUNCE_MS = 300;
+
 const idleModeratorCheck = (): ModeratorCheckState => ({
   status: "idle",
   error: null,
@@ -1162,6 +1164,25 @@ const EventFilterBar = ({
   onChange: (filters: PanelEventFilters) => void;
 }): ReactElement => {
   const texte = dashboardTexte();
+  const [personDraft, setPersonDraft] = useState(filters.person ?? "");
+  // Der angewendete Filter ist die Quelle; der Entwurf zieht nach, wenn er sich
+  // von aussen aendert (Zuruecksetzen, Navigation, zweiter Tab). Das geschieht
+  // waehrend des Renders statt in einem Effect: ein Effect wuerde einen zweiten
+  // Durchlauf mit veraltetem Wert zeigen, und React verbietet das Muster.
+  const [zuletztAngewendet, setZuletztAngewendet] = useState(filters.person);
+  if (zuletztAngewendet !== filters.person) {
+    setZuletztAngewendet(filters.person);
+    setPersonDraft(filters.person ?? "");
+  }
+  const commitPerson = useCallback((draft: string): void => {
+    const value = draft.trim();
+    onChange({ ...filters, person: value.length === 0 ? null : value });
+  }, [filters, onChange]);
+  useEffect(() => {
+    if (personDraft.trim() === (filters.person ?? "")) return;
+    const timeout = window.setTimeout(() => { commitPerson(personDraft); }, PERSON_FILTER_DEBOUNCE_MS);
+    return () => { window.clearTimeout(timeout); };
+  }, [commitPerson, filters.person, personDraft]);
   const aktiveFilter: string[] = [];
   if (filters.herkunft === "kanal") aktiveFilter.push(texte.ereignisse.kanalereignisse);
   if (filters.herkunft === "modul") aktiveFilter.push(texte.ereignisse.moduldiagnosen);
@@ -1179,9 +1200,9 @@ const EventFilterBar = ({
       <label>{texte.ereignisse.ton}<select aria-label={texte.ereignisse.ton} value={filters.ton ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, ton: value === "info" || value === "hinweis" || value === "fehler" ? value : null }); }}>
         <option value="">{texte.ereignisse.alle}</option><option value="info">{texte.ereignisse.info}</option><option value="hinweis">{texte.ereignisse.hinweis}</option><option value="fehler">{texte.ereignisse.fehler}</option>
       </select></label>
-      <label>{texte.ereignisse.person}<input aria-label={texte.ereignisse.person} value={filters.person ?? ""} onChange={(event) => { const value = event.target.value.trim(); onChange({ ...filters, person: value.length === 0 ? null : value }); }} /></label>
+      <label>{texte.ereignisse.person}<input aria-label={texte.ereignisse.person} value={personDraft} onChange={(event) => { setPersonDraft(event.target.value); }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }} /></label>
     </div>
-    {aktiveFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texte.ereignisse.aktiveFilter} {aktiveFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { onChange(leereEreignisFilter); }}>{texte.ereignisse.filterZuruecksetzen}</button></div>}
+    {aktiveFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texte.ereignisse.aktiveFilter} {aktiveFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(leereEreignisFilter); }}>{texte.ereignisse.filterZuruecksetzen}</button></div>}
   </div>;
 };
 

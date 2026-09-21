@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WerbungPanel } from "../../src/modules/werbung/panel";
@@ -130,5 +130,30 @@ describe("Werbung-Panel-Ansicht", () => {
     // gleich formatiert wird: 11:00Z bleibt 11:00 statt zur Zeitzone der Maschine
     // zu wandern.
     expect(screen.getByText(/11:00/)).toBeInTheDocument();
+  });
+
+  it("behandelt eine geleerte Vorlaufzeit als Feldfehler statt als null", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (path.endsWith("/zeitplan")) return Promise.resolve(jsonResponse({
+        schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
+        snoozeScopeVorhanden: true, letzteWerbepausen: [],
+      }));
+      if (path.endsWith("/einstellungen") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
+        automatisch: "auto {duration}", manuell: "manuell {duration}", vorwarnung: true, vorlaufSekunden: 60, vorwarnungText: "gleich {seconds}",
+      } }));
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<WerbungPanel channelId="kanal-a" language="de" />);
+    const field = await screen.findByLabelText("Vorlaufzeit (Sekunden)");
+    fireEvent.change(field, { target: { value: "" } });
+    expect((field as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Zahl eingeben");
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+    expect((field as HTMLInputElement).value).toBe("");
   });
 });

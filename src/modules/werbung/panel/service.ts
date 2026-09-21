@@ -1,4 +1,5 @@
 import type { WerbungSettings, WerbungZeitplanAntwort } from "../contracts";
+import { PanelApiError } from "../../../contracts/panel-error";
 
 const leereEinstellungen: WerbungSettings = {
   automatisch: "",
@@ -26,10 +27,12 @@ const pathFor = (channelId: string): string =>
 
 const json = async <T>(response: Response): Promise<T> => {
   const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(
+  if (!response.ok) throw new PanelApiError(
+    response.status,
     typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
       ? body.error
       : "Anfrage fehlgeschlagen.",
+    body,
   );
   return body as T;
 };

@@ -17,16 +17,10 @@ import type {
   PanelTwitchUser,
 } from "../panel-contract";
 
-export class PanelApiError extends Error {
-  public constructor(
-    public readonly status: number,
-    message: string,
-    public readonly details: unknown = null,
-  ) {
-    super(message);
-    this.name = "PanelApiError";
-  }
-}
+import { PanelApiError } from "../contracts/panel-error";
+
+export { PanelApiError };
+
 
 const hasParentPathSegment = (input: string): boolean => {
   const pathEnd = input.search(/[?#]/);

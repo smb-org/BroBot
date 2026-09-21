@@ -78,6 +78,66 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(add).toHaveClass("button--primary");
   });
 
+  it("sperrt das Anlegeformular während des Requests", async () => {
+    let resolveCreate!: (response: Response) => void;
+    const createFinished = new Promise<Response>((resolve) => { resolveCreate = resolve; });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (init?.method === "POST") return createFinished;
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "hallo" } });
+    fireEvent.change(screen.getByLabelText("Antworttext"), { target: { value: "Hallo" } });
+    const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
+
+    fireEvent.click(add);
+    await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+
+    expect(createPanel.querySelector("form")).toHaveAttribute("aria-busy", "true");
+    expect(add).toBeDisabled();
+    expect(screen.getByLabelText("Name")).toBeDisabled();
+    expect(screen.getByLabelText("Art")).toBeDisabled();
+    expect(screen.getByLabelText("Antworttext")).toBeDisabled();
+    expect(screen.getByRole("spinbutton")).toBeDisabled();
+
+    resolveCreate(jsonResponse({}));
+    await waitFor(() => expect(createPanel.querySelector("form")).toHaveAttribute("aria-busy", "false"));
+    expect(add).toBeDisabled();
+  });
+
+  it("setzt beim Wechsel zu einem anderen Befehl die Entwurfswerte neu", async () => {
+    const befehle = [
+      {
+        channelId: "kanal-a", name: "alpha", text: "Antwort A", art: "text" as const, enabled: true,
+        cooldownSekunden: 5, zuletztVerwendetAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+      },
+      {
+        channelId: "kanal-a", name: "beta", text: "Antwort B", art: "text" as const, enabled: true,
+        cooldownSekunden: 10, zuletztVerwendetAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ befehle })));
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /!alpha/ }));
+    fireEvent.change(await screen.findByDisplayValue("Antwort A"), { target: { value: "Entwurf" } });
+    fireEvent.click(screen.getByRole("row", { name: /!beta/ }));
+
+    expect(await screen.findByDisplayValue("Antwort B")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Entwurf")).not.toBeInTheDocument();
+  });
+
   it.each([
     ["de-DE", "Befehl !hallo löschen", "Befehl !hallo endgültig löschen", "Abbrechen"],
     ["en-US", "Delete !hallo", "Delete !hallo permanently", "Cancel"],
@@ -121,6 +181,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     const confirmation = await screen.findByRole("alertdialog");
     expect(confirmation).toHaveTextContent("hallo");
     expect(deleteRequestCount).toBe(0);
+    expect(screen.getByRole("button", { name: cancelLabel })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: cancelLabel }));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(deleteRequestCount).toBe(0);
@@ -128,6 +189,36 @@ describe("Textbefehle-Panel-Ansicht", () => {
     fireEvent.click(await screen.findByRole("button", { name: deleteLabel }));
     fireEvent.click(await screen.findByRole("button", { name: confirmLabel }));
     await waitFor(() => expect(deleteRequestCount).toBe(1));
+  });
+
+  it("behält ein geleertes Zahlenfeld leer und speichert es nicht als null", async () => {
+    let created = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (init?.method === "POST") {
+        created = true;
+        return Promise.resolve(jsonResponse({}));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "hallo" } });
+    fireEvent.change(screen.getByLabelText("Antworttext"), { target: { value: "Hallo" } });
+    const cooldown = screen.getByRole("spinbutton");
+    fireEvent.change(cooldown, { target: { value: "" } });
+
+    expect((cooldown as HTMLInputElement).value).toBe("");
+    fireEvent.click(within(await screen.findByRole("region", { name: "Befehl anlegen" })).getByRole("button", { name: "Befehl anlegen" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(created).toBe(false);
+    expect((cooldown as HTMLInputElement).value).toBe("");
   });
 
   it("ordnet die drei Feldbreiten nach Inhaltsart zu", async () => {
