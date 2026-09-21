@@ -143,6 +143,21 @@
         "role": "neutral",
         "displayName": "Inspektor (Sub-Inspector-Fläche)",
         "canonical": "oklch(18.5% 0.004 60)"
+      },
+      "gemeinschaft": {
+        "role": "secondary",
+        "displayName": "Gemeinschaft — Herkunft: Abo, Resub, Gift, Ankündigung; nur im Art-Chip. Gefüllt 7,15:1 auf Grund, 5,73:1 auf Tint-1",
+        "canonical": "oklch(77% 0.12 302)"
+      },
+      "raid": {
+        "role": "secondary",
+        "displayName": "Raid — Herkunft: Raid und Shoutout; nur im Art-Chip. Gefüllt 7,80:1 auf Grund, 6,27:1 auf Tint-1",
+        "canonical": "oklch(81% 0.11 343)"
+      },
+      "moderation": {
+        "role": "secondary",
+        "displayName": "Moderation — Herkunft: Bann, Auszeit, Löschung, Verwarnung, AutoMod, Verdacht; nie Rot. Gefüllt 7,58:1 auf Grund, 6,03:1 auf Tint-1",
+        "canonical": "oklch(77% 0.10 191)"
       }
     },
     "typographyMeta": {
@@ -267,6 +282,10 @@
         "value": "34px"
       },
       {
+        "name": "chip",
+        "value": "20px"
+      },
+      {
         "name": "fokusring",
         "value": "2px solid var(--marke-text); outline-offset: 2px"
       },
@@ -308,6 +327,10 @@
         "name": "config-field-breit",
         "value": "40rem",
         "purpose": "Fließtext; bestehende maximale Formularbreite."
+      },
+      {
+        "name": "familienrand",
+        "value": "color-mix(in srgb, <familie> 45%, var(--linie))"
       }
     ]
   },
@@ -460,9 +483,9 @@
       "name": "Ereigniszeile mit Sub-Inspector",
       "kind": "custom",
       "refersTo": "sub-inspector",
-      "description": "Gewählte Ereigniszeile (Tint-1, Markenkante) mit LED-Wort aus ereignisTon; darunter der Sub-Inspector auf Inspektor-Fläche mit Eigenschaften und JSON in der Rinne.",
-      "html": "<div class=\"ds-wrap\"><table class=\"ds-tabelle\"><thead><tr><th>Zeit</th><th>Ereignis</th><th>Modul</th><th>Wer</th></tr></thead><tbody><tr tabindex=\"0\" aria-selected=\"true\"><td class=\"ds-mono\">20.09.2026 09:12</td><td><span class=\"ds-ev\"><span class=\"ds-led\" data-status=\"red\"><span class=\"ds-led__dot\"></span><span>Fehler</span></span><span>Chat-Nachricht fehlgeschlagen</span></span></td><td>Textbefehle</td><td>Automatisch</td></tr><tr tabindex=\"0\"><td class=\"ds-mono\">20.09.2026 09:10</td><td><span class=\"ds-ev\"><span class=\"ds-led\" data-status=\"amber\"><span class=\"ds-led__dot\"></span><span>Hinweis</span></span><span>Textbefehl abgekühlt</span></span></td><td>Textbefehle</td><td>@zuschauer</td></tr><tr tabindex=\"0\"><td class=\"ds-mono\">20.09.2026 09:09</td><td><span class=\"ds-ev\"><span class=\"ds-led\" data-status=\"off\"><span class=\"ds-led__dot\"></span><span>Unbekannt</span></span><span class=\"ds-mono\">host.neu.code</span></span></td><td class=\"ds-mono\">host</td><td>Automatisch</td></tr></tbody></table></div><section class=\"ds-sub\"><div class=\"ds-sub__head\"><h3>Chat-Nachricht fehlgeschlagen</h3><span class=\"ds-mono ds-muted\">ev_01HZ…</span></div><div class=\"ds-cols\"><div><h4>Vorher</h4><pre>{ \"enabled\": false }</pre></div><div><h4>Nachher</h4><pre>{ \"enabled\": true }</pre></div></div></section>",
-      "css": ".ds-wrap{min-width:0;overflow-x:auto;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-tabelle{width:100%;min-width:600px;border-collapse:collapse;table-layout:fixed}.ds-tabelle th,.ds-tabelle td{height:34px;min-width:0;padding:8px 10px;border-bottom:1px solid #312e2b;text-align:left;vertical-align:middle;font-size:12px;color:#f2efeb}.ds-tabelle thead th{height:30px;color:#8b857e;background:#14202e;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}.ds-tabelle tbody tr[tabindex]{cursor:pointer}.ds-tabelle tbody tr[tabindex]:hover{background:#1e1c1a}.ds-tabelle tbody tr:focus-visible{outline:2px solid #9bc3ed;outline-offset:-2px}.ds-tabelle tbody tr[aria-selected=true]{background:#172638}.ds-tabelle tbody tr[aria-selected=true]>*:first-child{box-shadow:inset 2px 0 0 #538dcc}.ds-ev{display:flex;align-items:center;gap:10px;min-width:0}.ds-ev>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}.ds-muted{color:#b3aca4;font-size:12.5px}.ds-sub{width:min(960px,100%);margin-top:16px;padding:18px 16px;border:1px solid #312e2b;border-radius:6px;background:#1a1917;color:#f2efeb;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-sub__head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;min-height:24px;margin-bottom:14px}.ds-sub__head h3{margin:0;font-size:13px;font-weight:600}.ds-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.ds-cols h4{margin:0;color:#8b857e;font-size:11px;font-weight:600}.ds-cols pre{min-height:88px;margin:8px 0 0;padding:10px;border:1px solid #312e2b;background:#100f0e;color:#f2efeb;font-size:12px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}@media (max-width:639px){.ds-cols{grid-template-columns:1fr}.ds-tabelle{min-width:0}}.ds-led{display:inline-flex;align-items:center;gap:7px;min-height:20px;color:var(--text-2,#b3aca4);font-size:12px;font-weight:600;white-space:nowrap}.ds-led__dot{width:8px;height:8px;border-radius:6px;background:var(--text-4,#615c56)}.ds-led[data-status=green]{color:#3ddc84}.ds-led[data-status=green] .ds-led__dot{background:#3ddc84}.ds-led[data-status=amber]{color:#d9a441}.ds-led[data-status=amber] .ds-led__dot{background:#d9a441}.ds-led[data-status=red]{color:#e8655d}.ds-led[data-status=red] .ds-led__dot{background:#e2564d}.ds-led[data-status=off]{color:#8b857e}.ds-led[data-status=off] .ds-led__dot{background:#100f0e;border:1px solid #615c56}"
+      "description": "Gewählte Ereigniszeile (Tint-1, Markenkante) mit Chip-Paar aus ereignisTon — Zahl in der Rinne, Art in Familienfarbe (voll/gezeichnet), Betrieb gezeichnet in Zustandsfarbe; darunter der Sub-Inspector auf Inspektor-Fläche mit Eigenschaften und JSON in der Rinne.",
+      "html": "<div class=\"ds-wrap\"><table class=\"ds-tabelle\"><thead><tr><th>Zeit</th><th>Ereignis</th><th>Modul</th><th>Wer</th></tr></thead><tbody><tr tabindex=\"0\" aria-selected=\"true\"><td class=\"ds-mono\">20.09.2026 09:12</td><td><span class=\"ds-ev\"><span class=\"ds-chip ds-chip--zahl\">42</span><span class=\"ds-chip\" data-familie=\"raid\" data-stufe=\"voll\">Raid</span><span>Raid von streamerin mit 42 Zuschauern</span></span></td><td>Kanalereignisse</td><td>Automatisch</td></tr><tr tabindex=\"0\"><td class=\"ds-mono\">20.09.2026 09:11</td><td><span class=\"ds-ev\"><span class=\"ds-chip\" data-familie=\"gemeinschaft\" data-stufe=\"voll\">Abo</span><span>Sub von zuschauer</span></span></td><td>Kanalereignisse</td><td>Automatisch</td></tr><tr tabindex=\"0\"><td class=\"ds-mono\">20.09.2026 09:10</td><td><span class=\"ds-ev\"><span class=\"ds-chip\" data-familie=\"moderation\" data-stufe=\"gezeichnet\">Entbannt</span><span>troll entbannt von mod</span></span></td><td>Kanalereignisse</td><td>Automatisch</td></tr><tr tabindex=\"0\"><td class=\"ds-mono\">20.09.2026 09:09</td><td><span class=\"ds-ev\"><span class=\"ds-chip\" data-ton=\"red\">Fehler</span><span>Chat-Nachricht fehlgeschlagen</span></span></td><td>Textbefehle</td><td>Automatisch</td></tr><tr tabindex=\"0\"><td class=\"ds-mono\">20.09.2026 09:08</td><td><span class=\"ds-ev\"><span class=\"ds-chip\">Unbekannt</span><span class=\"ds-mono\">host.neu.code</span></span></td><td class=\"ds-mono\">host</td><td>Automatisch</td></tr></tbody></table></div><section class=\"ds-sub\"><div class=\"ds-sub__head\"><h3>Raid von streamerin mit 42 Zuschauern</h3><span class=\"ds-mono ds-muted\">ev_01HZ…</span></div><div class=\"ds-cols\"><div><h4>Vorher</h4><pre>{ \"enabled\": false }</pre></div><div><h4>Nachher</h4><pre>{ \"enabled\": true }</pre></div></div></section>",
+      "css": ".ds-wrap{min-width:0;overflow-x:auto;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-tabelle{width:100%;min-width:600px;border-collapse:collapse;table-layout:fixed}.ds-tabelle th,.ds-tabelle td{height:34px;min-width:0;padding:8px 10px;border-bottom:1px solid #312e2b;text-align:left;vertical-align:middle;font-size:12px;color:#f2efeb}.ds-tabelle thead th{height:30px;color:#8b857e;background:#14202e;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}.ds-tabelle tbody tr[tabindex]{cursor:pointer}.ds-tabelle tbody tr[tabindex]:hover{background:#1e1c1a}.ds-tabelle tbody tr:focus-visible{outline:2px solid #9bc3ed;outline-offset:-2px}.ds-tabelle tbody tr[aria-selected=true]{background:#172638}.ds-tabelle tbody tr[aria-selected=true]>*:first-child{box-shadow:inset 2px 0 0 #538dcc}.ds-ev{display:flex;align-items:center;gap:10px;min-width:0}.ds-ev>.ds-chip+.ds-chip{margin-left:-6px}.ds-ev>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}.ds-muted{color:#b3aca4;font-size:12.5px}.ds-sub{width:min(960px,100%);margin-top:16px;padding:18px 16px;border:1px solid #312e2b;border-radius:6px;background:#1a1917;color:#f2efeb;font-family:Archivo,ui-sans-serif,system-ui,sans-serif}.ds-sub__head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;min-height:24px;margin-bottom:14px}.ds-sub__head h3{margin:0;font-size:13px;font-weight:600}.ds-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.ds-cols h4{margin:0;color:#8b857e;font-size:11px;font-weight:600}.ds-cols pre{min-height:88px;margin:8px 0 0;padding:10px;border:1px solid #312e2b;background:#100f0e;color:#f2efeb;font-size:12px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}@media (max-width:639px){.ds-cols{grid-template-columns:1fr}.ds-tabelle{min-width:0}}.ds-chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border:1px solid #312e2b;border-radius:6px;color:#b3aca4;font-size:12px;font-weight:600;white-space:nowrap}.ds-chip--zahl{color:#f2efeb;background:#100f0e;font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:400;font-variant-numeric:tabular-nums}.ds-chip[data-familie=gemeinschaft]{color:#c4a3f5;border-color:#736386}.ds-chip[data-familie=gemeinschaft][data-stufe=voll]{background:rgba(196,163,245,.12)}.ds-chip[data-familie=raid]{color:#f4a2d3;border-color:#896277}.ds-chip[data-familie=raid][data-stufe=voll]{background:rgba(244,162,211,.12)}.ds-chip[data-familie=moderation]{color:#5cc9c4;border-color:#447470}.ds-chip[data-familie=moderation][data-stufe=voll]{background:rgba(92,201,196,.12)}.ds-chip[data-ton=red]{color:#e8655d;border-color:#81403a}.ds-chip[data-ton=amber]{color:#d9a441;border-color:#7d6335}"
     }
   ],
   "narrative": {
@@ -471,7 +494,7 @@
     "keyCharacteristics": [
       "Mattschwarz (#141312) mit warmen Graustufen; vier Textstufen, kein Verlauf, kein Schatten.",
       "Tasten sind Objekte mit 12 px Radius in dunklen Rinnen; Steuerelemente haben 6 px. Es gibt keinen dritten Radius.",
-      "Zustand spricht in Grün, Bernstein, Rot — immer als LED mit Wort, nie Farbe allein. Aus ist neutral gezeichnet.",
+      "Zustand spricht in Grün, Bernstein, Rot — immer als LED mit Wort, nie Farbe allein. Aus ist neutral gezeichnet. Herkunft spricht in Violett, Magenta, Türkis — nur im Art-Chip des Ereignisprotokolls.",
       "Marke (Blau) markiert ausschließlich den Ort des Bedieners, nie Wichtigkeit.",
       "Archivo für alles; IBM Plex Mono mit Tabellenziffern nur für Zahlen, Zeitstempel, IDs und Befehlstoken.",
       "Eine Symbolfamilie: 24er-Viewbox, Strich 1,5, runde Enden, fill: none. Kein Emoji, keine zweite Familie.",
@@ -479,8 +502,8 @@
     ],
     "rules": [
       {
-        "name": "Die Zwei-Rollen-Regel",
-        "body": "Marke markiert den Ort des Bedieners (Auswahl, Fokus, primäre Aktion, Verknüpfung). Zustand spricht in Grün, Bernstein, Rot. Das System spricht nie in Markenfarbe, und Zustand nie in Marke — die Rollen kollidieren strukturell nicht, nicht nur farbmetrisch.",
+        "name": "Die Drei-Rollen-Regel",
+        "body": "Marke markiert den Ort des Bedieners (Auswahl, Fokus, primäre Aktion, Verknüpfung). Zustand spricht in Grün, Bernstein, Rot. Herkunft spricht in Violett, Magenta, Türkis — und nur im Art-Chip des Ereignisprotokolls. Keine Rolle leiht sich die Farbe einer anderen: Ein Bann ist nicht rot, ein Abo nicht grün, ein Raid nicht blau. Die Rollen kollidieren strukturell nicht, nicht nur farbmetrisch.",
         "section": "colors"
       },
       {
@@ -495,7 +518,7 @@
       },
       {
         "name": "Die Ereignis-je-Code-Regel",
-        "body": "Die Farbe eines Ereignisses steht in ereignisTon (locale.ts) pro Ereigniscode — nie wird sie aus einem Namensmuster geraten. Ein Code ohne Eintrag bekommt die gezeichnete LED „Unbekannt“ und seinen rohen Code in Mono. Grün ist nur „läuft / verbunden / gesendet“; Erwartbar-Unerwünschtes (abgekühlt, unterdrückt, bereits vorhanden) ist Bernstein „Hinweis“, Gescheitertes Rot „Fehler“.",
+        "body": "Familie, Stufe, Chip-Wort und Zahl eines Ereignisses stehen in ereignisTon (locale.ts) pro Ereigniscode — nie werden sie aus einem Namensmuster geraten. Ein Code ohne Eintrag bekommt den neutralen gezeichneten Chip „Unbekannt“ und seinen rohen Code in Mono. Was im Kanal geschah, hat eine Familie (Gemeinschaft, Raid, Moderation); was der Bot tat oder nicht tat, ist Betrieb. Tun ist voll, Aufheben und Ausgehendes sind gezeichnet. Betrieb spricht in Zustand: Erwartbar-Unerwünschtes ist Bernstein „Hinweis“, Gescheitertes Fehler-Text „Fehler“, Gelungenes Text-2 „Info“. Grün ist kein Ereigniston mehr. Eine vierte farbige Familie gibt es nicht — der Farbkreis ist voll (engster Abstand Moderation–Grün 30°). Für Deuteranope fallen Raid und Moderation zusammen; deshalb trägt das Wort.",
         "section": "colors"
       },
       {
@@ -540,10 +563,10 @@
       }
     ],
     "dos": [
-      "Do jede Zustandsanzeige als LED mit Wort bauen; Grün nur mit „Läuft“/„Verbunden“/„Info (gesendet)“ daneben.",
+      "Do jede Zustandsanzeige als LED mit Wort bauen; Grün nur mit „Läuft“/„Verbunden“ daneben.",
       "Do neue Module und Kanäle als Taste ins Raster stellen: Symbol aus der Familie, Name, LED. Nichts weiter auf der Taste.",
       "Do jede Seite mit dem Seitenkopf beginnen und Zustand in Zustandszeilen, lesende Werte in der Eigenschaftenliste zeigen.",
-      "Do Ereignisfarben pro Code in ereignisTon eintragen; ein neuer Code ohne Eintrag bleibt „Unbekannt“.",
+      "Do ein neues Ereignis in eine der vier Familien einsortieren und Familie, Stufe, Wort und Zahl-Schlüssel pro Code in ereignisTon eintragen; ein Code ohne Eintrag bleibt „Unbekannt“, Betrieb bleibt gezeichnet.",
       "Do genau zwei Radien verwenden: 12 px für Objekte, 6 px für Bedienelemente und Anzeigen.",
       "Do alleinstehende Bedienelemente 44 px hoch machen, Tabellenzeilen und ihre Bedienelemente 34 px.",
       "Do Werte in Plex Mono mit Tabellenziffern setzen (Twitch-ID, Sekunden, Zeitstempel, IDs, Codes, Befehlstoken).",
@@ -557,7 +580,8 @@
     "donts": [
       "Don't ein ausgeschaltetes Modul bernstein färben. Aus ist neutral; Bernstein heißt unbekannt oder Hinweis.",
       "Don't eine gesunde Zustandszeile grün hinterlegen; nur Warnung und Fehler bekommen Fläche und Rand.",
-      "Don't Ereignisfarben aus dem Codenamen raten oder Grün für etwas anderes als läuft/verbunden/gesendet vergeben.",
+      "Don't Ereignisfamilien aus dem Codenamen raten oder Grün für etwas anderes als läuft/verbunden vergeben.",
+      "Don't eine vierte Familienfarbe erfinden, Familienfarbe außerhalb des Art-Chips verwenden, eine Familie in Zustandsfarbe färben oder einen Betrieb-Chip füllen.",
       "Don't Markenfarbe für Zustand oder Wichtigkeit verwenden, und Zustandsfarbe für Auswahl.",
       "Don't Schatten, Verläufe oder Skelett-Schimmer einsetzen.",
       "Don't einen dritten Radius (auch kein 9999px), eine dritte Schrift oder eine zweite Symbolfamilie einführen; kein Emoji.",
