@@ -41,7 +41,7 @@ import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTaste, M
 import { MembersPage } from "./members";
 import { BetreiberSeite } from "./betreiber";
 import { betreiberTexte, kanalPanelTexte, roleLabel } from "./labels";
-import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail } from "./locale";
+import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail, type EreignisZahlSchluessel } from "./locale";
 import { disabledStatusWord, eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import { kuerzeAuf200Zeichen } from "../text";
@@ -1025,11 +1025,14 @@ const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactEle
   );
 };
 
-const eventTone = (code: string): "red" | "amber" | "green" | "off" | null =>
+const eventMetadata = (code: string) =>
   Object.prototype.hasOwnProperty.call(ereignisTon, code) ? ereignisTon[code as EreignisCode] : null;
 
-const eventToneRang = (tone: "red" | "amber" | "green" | "off" | null): number =>
-  tone === "red" ? 3 : tone === "amber" ? 2 : tone === "green" ? 1 : 0;
+const eventTone = (code: string): "info" | "hinweis" | "fehler" | null =>
+  eventMetadata(code)?.ton ?? null;
+
+const eventToneRang = (tone: "info" | "hinweis" | "fehler" | null): number =>
+  tone === "fehler" ? 3 : tone === "hinweis" ? 2 : tone === "info" ? 1 : 0;
 
 interface EventGroup {
   key: string;
@@ -1079,9 +1082,6 @@ const auditActorLabel = (entry: PanelAuditEntry): string =>
 
 const moduleLabel = (entry: PanelEventEntry): string => moduleName(entry.moduleId);
 
-const eventWord = (tone: "red" | "amber" | "green" | "off" | null, texte: ReturnType<typeof dashboardTexte>): string =>
-  tone === "red" ? texte.ereignisse.fehler : tone === "amber" ? texte.ereignisse.hinweis : tone === "green" ? texte.ereignisse.info : texte.ereignisse.unbekannt;
-
 const chronologisch = (left: PanelEventEntry, right: PanelEventEntry): number =>
   left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId);
 
@@ -1094,6 +1094,31 @@ const eventDetail = (detail: string): EreignisDetail => {
   } catch {
     return {};
   }
+};
+
+const eventChipNumber = (detail: EreignisDetail, key: EreignisZahlSchluessel): string | null => {
+  if (key === null) return null;
+  const value = detail[key];
+  if (key === "stufe") {
+    if (typeof value === "string" && /^\d+$/.test(value) && value !== "0") return value;
+    return typeof value === "number" && Number.isFinite(value) && value !== 0 ? String(value) : null;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return null;
+  if (key === "anzahl") return `${formatZahl(value)}x`;
+  if (key === "dauer" || key === "restSekunden") return `${formatZahl(value)} s`;
+  return formatZahl(value);
+};
+
+const EventChipPair = ({ code, detail, texte }: { code: string; detail: EreignisDetail; texte: ReturnType<typeof dashboardTexte> }): ReactElement => {
+  const metadata = eventMetadata(code);
+  if (metadata === null) {
+    return <span className="event-chip-pair"><span className="event-chip" data-stufe="gezeichnet">{texte.ereignisse.unbekannt}</span></span>;
+  }
+  const number = eventChipNumber(detail, metadata.zahlSchluessel);
+  return <span className="event-chip-pair">
+    {number === null ? null : <span className="event-chip event-chip--number">{number}</span>}
+    <span className="event-chip" data-familie={metadata.familie} data-stufe={metadata.stufe} data-ton={metadata.ton}>{metadata.wort[dashboardLanguage()]}</span>
+  </span>;
 };
 
 const formatEventDetail = (detail: string): string => {
@@ -1128,9 +1153,8 @@ const EventsPage = ({ eventsState, onNextPage, loadingNextPage }: { eventsState:
               <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.modul}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
               <tbody>{groups.map((group) => {
                 const entry = group.representative;
-                const tone = eventTone(entry.code);
                 const eventLabel = ereignisText(entry.code, eventDetail(entry.detail));
-                return <tr key={group.key} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { setSelectedGroupKey(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedGroupKey(group.key); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><Led status={tone ?? "off"} label={eventWord(tone, texte)} /><span className={tone === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
+                return <tr key={group.key} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { setSelectedGroupKey(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedGroupKey(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
               })}</tbody>
             </table>
           </div>
@@ -1139,8 +1163,7 @@ const EventsPage = ({ eventsState, onNextPage, loadingNextPage }: { eventsState:
             <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
             <div className="inspector-section__heading"><h3>{texte.ereignisse.verlauf}</h3></div>
             <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
-              const tone = eventTone(entry.code);
-              return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><Led status={tone ?? "off"} label={eventWord(tone, texte)} /><span className={tone === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
+              return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
             })}</ol>
           </section>}
           {eventsState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texte.ereignisse.aeltereWerdenGeladen : texte.ereignisse.aeltereLaden}</button>}

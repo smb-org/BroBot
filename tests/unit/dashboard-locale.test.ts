@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { dashboardLanguage, ereignisText, ereignisTon } from "../../src/dashboard/locale";
+import { dashboardLanguage, ereignisText, ereignisTon, type EreignisCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -56,13 +56,48 @@ describe("Dashboard-Locale", () => {
     expect(ereignisText("kanalereignisse.moderation.timeout", {
       person: "Alice", moderator: "Mod", dauer: 300, grund: "Spam",
     })).toBe("Alice für 300 Sekunden getimeoutet von Mod: Spam");
-    expect(ereignisTon["kanalereignisse.moderation.timeout"]).toBe("amber");
-    expect(ereignisTon["kanalereignisse.moderation.untimeout"]).toBe("green");
-    expect(ereignisTon["kanalereignisse.moderation.unban"]).toBe("green");
-    expect(ereignisTon["kanalereignisse.moderation.unbekannt"]).toBe("off");
+    expect(ereignisTon["kanalereignisse.moderation.timeout"]).toMatchObject({ familie: "moderation", stufe: "voll", zahlSchluessel: "dauer" });
+    expect(ereignisTon["kanalereignisse.moderation.untimeout"]).toMatchObject({ familie: "moderation", stufe: "gezeichnet" });
+    expect(ereignisTon["kanalereignisse.moderation.unban"]).toMatchObject({ familie: "moderation", stufe: "gezeichnet" });
+    expect(ereignisTon["kanalereignisse.moderation.unbekannt"]).toMatchObject({ familie: "moderation", stufe: "voll" });
 
     setBrowserLanguage("en-US");
     expect(ereignisText("kanalereignisse.moderation.unbekannt", { aktion: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
+  });
+
+  it("führt für jeden bekannten Ereigniscode Familie, Stufe, Wort und Zahl-Schlüssel", () => {
+    const codes: EreignisCode[] = [
+      "host.aktion.fehler", "host.chat.fehlgeschlagen", "host.chat.gesendet", "host.modul.fehler",
+      "host.modul.unbekannt", "host.overlay.nicht_ausgefuehrt", "kanalereignisse.raid.eingehend",
+      "kanalereignisse.raid.ausgehend", "kanalereignisse.shoutout.gesendet", "kanalereignisse.shoutout.empfangen",
+      "kanalereignisse.chat.sub", "kanalereignisse.chat.resub", "kanalereignisse.chat.gift_sub",
+      "kanalereignisse.chat.community_gift", "kanalereignisse.chat.ankuendigung", "kanalereignisse.chat.unbekannt",
+      "kanalereignisse.moderation.ban", "kanalereignisse.moderation.timeout", "kanalereignisse.moderation.untimeout",
+      "kanalereignisse.moderation.unban", "kanalereignisse.moderation.delete", "kanalereignisse.moderation.warn",
+      "kanalereignisse.moderation.unbekannt", "kanalereignisse.automod.halte", "kanalereignisse.verdacht.nachricht",
+      "kanalereignisse.verdacht.einstufung", "kanalereignisse.verdacht.entwarnung", "shoutout.unterdrueckt",
+      "werbung.ankuendigung", "werbung.uebersprungen", "textbefehle.abgekuehlt", "textbefehle.ausgeloest",
+      "textbefehle.deaktiviert", "textbefehle.berechtigung", "textbefehle.bereits_vorhanden",
+      "textbefehle.nicht_berechtigt", "textbefehle.unbekannt", "textbefehle.ungueltig",
+    ];
+
+    expect(Object.keys(ereignisTon).sort()).toEqual([...codes].sort());
+    expect(ereignisTon["kanalereignisse.chat.community_gift"]).toEqual({
+      familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "anzahl",
+    });
+    expect(ereignisTon["kanalereignisse.raid.eingehend"]).toEqual({
+      familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer",
+    });
+    expect(ereignisTon["kanalereignisse.moderation.untimeout"]).toEqual({
+      familie: "moderation", stufe: "gezeichnet", wort: { de: "Entsperrt", en: "Untimeout" }, zahlSchluessel: null,
+    });
+    expect(ereignisTon["host.chat.gesendet"]).toEqual({
+      familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info",
+    });
+    for (const code of codes) {
+      expect(ereignisTon[code].wort.de.length).toBeLessThanOrEqual(12);
+      expect(ereignisTon[code].wort.en.length).toBeLessThanOrEqual(12);
+    }
   });
 
   it("benennt EventSub-Abos im Panel zweisprachig", () => {
@@ -93,10 +128,10 @@ describe("Dashboard-Locale", () => {
     expect(ereignisText("kanalereignisse.verdacht.entwarnung", {
       person: "Alice", einstufung: "none", moderator: "Mod",
     })).toBe("Einstufung von Alice aufgehoben von Mod");
-    expect(ereignisTon["kanalereignisse.automod.halte"]).toBe("amber");
-    expect(ereignisTon["kanalereignisse.verdacht.nachricht"]).toBe("amber");
-    expect(ereignisTon["kanalereignisse.verdacht.einstufung"]).toBe("amber");
-    expect(ereignisTon["kanalereignisse.verdacht.entwarnung"]).toBe("green");
+    expect(ereignisTon["kanalereignisse.automod.halte"]).toMatchObject({ familie: "moderation", stufe: "voll" });
+    expect(ereignisTon["kanalereignisse.verdacht.nachricht"]).toMatchObject({ familie: "moderation", stufe: "voll" });
+    expect(ereignisTon["kanalereignisse.verdacht.einstufung"]).toMatchObject({ familie: "moderation", stufe: "voll" });
+    expect(ereignisTon["kanalereignisse.verdacht.entwarnung"]).toMatchObject({ familie: "moderation", stufe: "gezeichnet" });
 
     setBrowserLanguage("en-US");
     expect(ereignisText("kanalereignisse.automod.halte", {

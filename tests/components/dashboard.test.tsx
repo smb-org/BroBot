@@ -217,9 +217,9 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("user-2")).toHaveClass("mono");
     const sentRow = screen.getByText("Chat-Nachricht gesendet").closest("tr");
     const failedRow = screen.getByText("Aktion fehlgeschlagen").closest("tr");
-    expect(sentRow?.querySelector(".led")).toHaveAttribute("data-status", "green");
+    expect(sentRow?.querySelector(".event-chip[data-ton='info']")).toHaveTextContent("Info");
     expect(within(sentRow as HTMLElement).getByText("Info")).toBeInTheDocument();
-    expect(failedRow?.querySelector(".led")).toHaveAttribute("data-status", "red");
+    expect(failedRow?.querySelector(".event-chip[data-ton='fehler']")).toHaveTextContent("Fehler");
     expect(within(failedRow as HTMLElement).getByText("Fehler")).toBeInTheDocument();
     const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
     const unknownEventRow = screen.getByText("plugin.anderes").closest("tr");
@@ -234,6 +234,50 @@ describe("Dashboard-Grundgerüst", () => {
     expect(unknownEventRow).toHaveAttribute("aria-selected", "false");
     expect(screen.getByText("shoutout.unterdrueckt")).toBeInTheDocument();
     expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
+  });
+
+  it("zeigt das Ereignis-Chip-Paar mit Familie, Stufe, Zahl und Zeit-Tooltip", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({
+        entries: [
+          { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.community_gift", detail: '{"anzahl":5}', actorUserId: null },
+          { eventId: "raid", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":21}', actorUserId: null },
+          { eventId: "untimeout", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.moderation.untimeout", detail: "{}", actorUserId: null },
+          { eventId: "sent", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "textbefehle", code: "host.chat.gesendet", detail: "{}", actorUserId: null },
+          { eventId: "unknown", createdAt: "2026-09-18T04:04:00.000Z", moduleId: "plugin", code: "plugin.anderes", detail: "kein-json", actorUserId: null },
+        ],
+        nextCursor: null,
+      });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const giftRow = (await screen.findByText("Community-Gift von unbekannt für 5 Subs")).closest("tr");
+    const raidRow = (await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).closest("tr");
+    const untimeoutRow = (await screen.findByText("unbekannt aus dem Timeout genommen von unbekannt")).closest("tr");
+    const sentRow = (await screen.findByText("Chat-Nachricht gesendet")).closest("tr");
+    const unknownRow = (await screen.findByText("plugin.anderes")).closest("tr");
+    if (giftRow === null || raidRow === null || untimeoutRow === null || sentRow === null || unknownRow === null) {
+      throw new Error("Ereigniszeile fehlt");
+    }
+
+    expect([...giftRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["5x", "Gift"]);
+    expect(giftRow.querySelector(".event-chip[data-familie='gemeinschaft'][data-stufe='voll']")).toHaveTextContent("Gift");
+    expect([...raidRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["21", "Raid"]);
+    expect(raidRow.querySelector(".event-chip[data-familie='raid'][data-stufe='voll']")).toHaveTextContent("Raid");
+    expect(untimeoutRow.querySelector(".event-chip[data-familie='moderation'][data-stufe='gezeichnet']")).toHaveTextContent("Entsperrt");
+    expect(sentRow.querySelector(".event-chip[data-ton='info'][data-stufe='gezeichnet']")).toHaveTextContent("Info");
+    expect(sentRow.querySelector(".event-chip[data-stufe='voll']")).toBeNull();
+    expect(unknownRow.querySelector(".event-chip")).toHaveTextContent("Unbekannt");
+    expect(unknownRow.querySelector(".event-label > .mono")).toHaveTextContent("plugin.anderes");
+    const firstCell = giftRow.querySelector("td");
+    if (firstCell === null) throw new Error("Zeitspalte fehlt");
+    expect(firstCell.getAttribute("title")).toBe("2026-09-18T04:00:00.000Z");
   });
 
   it("erreicht Ereignisse über die Navigation und lädt die nächste Seite", async () => {
