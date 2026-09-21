@@ -19,6 +19,16 @@ const auditWerte = (befehl: Pick<Textbefehl, "name" | "text" | "art" | "enabled"
   cooldownSekunden: befehl.cooldownSekunden,
 });
 
+const gleicheMutationswerte = (
+  links: Pick<Textbefehl, "name" | "text" | "art" | "enabled" | "mindeststufe" | "cooldownSekunden">,
+  rechts: Pick<Textbefehl, "name" | "text" | "art" | "enabled" | "mindeststufe" | "cooldownSekunden">,
+): boolean => links.name === rechts.name &&
+  links.text === rechts.text &&
+  links.art === rechts.art &&
+  links.enabled === rechts.enabled &&
+  links.mindeststufe === rechts.mindeststufe &&
+  links.cooldownSekunden === rechts.cooldownSekunden;
+
 const erfolgreich = (): TextbefehlMutationsergebnis => ({ ok: true });
 
 const fehlgeschlagen = (grund: Exclude<TextbefehlMutationsergebnis, { ok: true }>["grund"]): TextbefehlMutationsergebnis => ({
@@ -134,24 +144,34 @@ export const createTextbefehlRepository = (
       return fehlgeschlagen("existiert");
     }
     const authorization = authorizeMutation(input.channelId, actor, input.now);
-    const mindeststufe = input.mindeststufe ?? before.mindeststufe;
+    const beforeMindeststufe = before.mindeststufe;
+    const mindeststufe = input.mindeststufe ?? beforeMindeststufe;
     const mutation = input.nurSchalter === true
       ? db.prepare(
         `UPDATE textbefehle_commands
             SET enabled = ?, updated_at = ?
           WHERE channel_id = ? AND command_name = ?
+            AND response_text = ? AND art = ? AND enabled = ?
+            AND minimum_level = ? AND cooldown_seconds = ?
             ${authorization.sql}`,
       ).bind(
         input.enabled ? 1 : 0,
         input.now,
         input.channelId,
         input.name,
+        before.text,
+        before.art,
+        before.enabled ? 1 : 0,
+        beforeMindeststufe,
+        before.cooldownSekunden,
         ...authorization.values,
       )
       : db.prepare(
         `UPDATE textbefehle_commands
-            SET command_name = ?, response_text = ?, art = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?, updated_at = ?
+          SET command_name = ?, response_text = ?, art = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?, updated_at = ?
           WHERE channel_id = ? AND command_name = ?
+            AND response_text = ? AND art = ? AND enabled = ?
+            AND minimum_level = ? AND cooldown_seconds = ?
             AND (? = command_name OR NOT EXISTS (
               SELECT 1 FROM textbefehle_commands
                WHERE channel_id = ? AND command_name = ?
@@ -167,6 +187,11 @@ export const createTextbefehlRepository = (
         input.now,
         input.channelId,
         input.name,
+        before.text,
+        before.art,
+        before.enabled ? 1 : 0,
+        beforeMindeststufe,
+        before.cooldownSekunden,
         input.neuerName,
         input.channelId,
         input.neuerName,
@@ -191,10 +216,12 @@ export const createTextbefehlRepository = (
       after: auditWerte(after),
     }, input.now);
     if (changes > 0) return erfolgreich();
+    const current = await this.finden(input.channelId, input.name);
     if (await this.finden(input.channelId, input.neuerName) !== null && input.neuerName !== input.name) {
       return fehlgeschlagen("existiert");
     }
-    return fehlgeschlagen(await this.finden(input.channelId, input.name) === null ? "nicht_gefunden" : "nicht_berechtigt");
+    if (current === null) return fehlgeschlagen("nicht_gefunden");
+    return fehlgeschlagen(gleicheMutationswerte(current, before) ? "nicht_berechtigt" : "konflikt");
   },
 
   async loeschen(channelId: string, name: string, actor: TextbefehlAkteur, now: string): Promise<TextbefehlMutationsergebnis> {
@@ -204,8 +231,19 @@ export const createTextbefehlRepository = (
     const mutation = db.prepare(
       `DELETE FROM textbefehle_commands
         WHERE channel_id = ? AND command_name = ?
+          AND response_text = ? AND art = ? AND enabled = ?
+          AND minimum_level = ? AND cooldown_seconds = ?
           ${authorization.sql}`,
-    ).bind(channelId, name, ...authorization.values);
+    ).bind(
+      channelId,
+      name,
+      before.text,
+      before.art,
+      before.enabled ? 1 : 0,
+      before.mindeststufe,
+      before.cooldownSekunden,
+      ...authorization.values,
+    );
     const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
       channelId,
       moduleId: MODULE_ID,
@@ -214,7 +252,9 @@ export const createTextbefehlRepository = (
       after: null,
     }, now);
     if (changes > 0) return erfolgreich();
-    return fehlgeschlagen(await this.finden(channelId, name) === null ? "nicht_gefunden" : "nicht_berechtigt");
+    const current = await this.finden(channelId, name);
+    if (current === null) return fehlgeschlagen("nicht_gefunden");
+    return fehlgeschlagen(gleicheMutationswerte(current, before) ? "nicht_berechtigt" : "konflikt");
   },
 
   async beanspruchen(channelId: string, name: string, now: string): Promise<TextbefehlBeanspruchung | null> {
@@ -237,9 +277,10 @@ export const initialisiereListenbefehl = async (
   actor: TextbefehlAkteur,
   now: string,
   authorizeMutation: AuthorizeModuleMutation,
-): Promise<void> => {
+  prepareModuleAudit?: PrepareModuleAudit,
+): Promise<readonly D1PreparedStatement[] | undefined> => {
   const authorization = authorizeMutation(channelId, actor, now);
-  await db.prepare(
+  const mutation = db.prepare(
     `INSERT INTO textbefehle_commands
       (channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
      SELECT ?, 'befehle', '', 'liste', 1, 'alle', 5, NULL, ?, ?
@@ -247,6 +288,7 @@ export const initialisiereListenbefehl = async (
         SELECT 1 FROM textbefehle_commands
          WHERE channel_id = ? AND command_name = 'befehle'
       )
+      ${prepareModuleAudit === undefined ? "" : "AND changes() > 0"}
       ${authorization.sql}`,
   ).bind(
     channelId,
@@ -254,5 +296,19 @@ export const initialisiereListenbefehl = async (
     now,
     channelId,
     ...authorization.values,
-  ).run();
+  );
+  if (prepareModuleAudit === undefined) {
+    await mutation.run();
+    return;
+  }
+  return [
+    mutation,
+    prepareModuleAudit({
+      channelId,
+      moduleId: MODULE_ID,
+      action: "textbefehle.befehl.angelegt",
+      before: null,
+      after: { name: "befehle", art: "liste", enabled: true, mindeststufe: "alle", text: "", cooldownSekunden: 5 },
+    }, now),
+  ];
 };

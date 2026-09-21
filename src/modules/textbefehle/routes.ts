@@ -120,6 +120,7 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
   if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, art, cooldownSekunden, mindeststufe, enabled: body.enabled ?? before.enabled } });
   if (geaendert.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (geaendert.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
+  if (geaendert.grund === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });
 
@@ -137,5 +138,6 @@ textbefehlRoutes.delete("/befehle/:name", async (context) => {
   if (geloescht.ok) return new Response(null, { status: 204 });
   if (geloescht.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (geloescht.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);
+  if (geloescht.grund === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });

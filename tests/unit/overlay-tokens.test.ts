@@ -96,6 +96,20 @@ const insertStoredToken = async (
   return tokenId;
 };
 
+const readAudits = async (database: TestD1Database) => database.prepare(
+  `SELECT actor_user_id, created_at, channel_id, module_id, action, before_json, after_json
+     FROM audit_log
+    ORDER BY created_at, audit_id`,
+).all<{
+  actor_user_id: string;
+  created_at: string;
+  channel_id: string;
+  module_id: string | null;
+  action: string;
+  before_json: string;
+  after_json: string;
+}>();
+
 describe("Overlay-Token-Service", () => {
   let database: TestD1Database;
 
@@ -175,6 +189,90 @@ describe("Overlay-Token-Service", () => {
       pepper: pepper(4),
       now: "2026-09-18T00:02:00.000Z",
     })).resolves.toBeNull();
+  });
+
+  it("auditiert Ausgabe und Widerruf ohne das Token und nur bei Erfolg", async () => {
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a",
+      pepper: pepper(4),
+      publicOrigin: "https://brobot.example",
+      expiresAt: "2099-09-18T12:00:00.000Z",
+      createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    const token = tokenFromUrl(issued.overlayUrl);
+
+    await expect(readAudits(database)).resolves.toMatchObject({
+      results: [{
+        actor_user_id: TEST_ACTOR.userId,
+        channel_id: "kanal-a",
+        module_id: null,
+        action: "overlay.token.ausgestellt",
+        before_json: "null",
+        after_json: JSON.stringify({
+          tokenId: issued.tokenId,
+          createdAt: "2026-09-18T00:00:00.000Z",
+          expiresAt: "2099-09-18T12:00:00.000Z",
+          revokedAt: null,
+          revocationReason: null,
+        }),
+      }],
+    });
+
+    await expect(revokeOverlayToken(database as unknown as D1Database, {
+      actor: TEST_ACTOR,
+      channelId: "kanal-a",
+      tokenId: issued.tokenId,
+      reason: "Quelle entfernt",
+      revokedAt: "2026-09-18T00:01:00.000Z",
+    })).resolves.toBe(true);
+
+    await expect(readAudits(database)).resolves.toMatchObject({
+      results: [
+        expect.anything(),
+        {
+          actor_user_id: TEST_ACTOR.userId,
+          channel_id: "kanal-a",
+          module_id: null,
+          action: "overlay.token.widerrufen",
+          before_json: JSON.stringify({
+            tokenId: issued.tokenId,
+            createdAt: "2026-09-18T00:00:00.000Z",
+            expiresAt: "2099-09-18T12:00:00.000Z",
+            revokedAt: null,
+            revocationReason: null,
+          }),
+          after_json: JSON.stringify({
+            tokenId: issued.tokenId,
+            createdAt: "2026-09-18T00:00:00.000Z",
+            expiresAt: "2099-09-18T12:00:00.000Z",
+            revokedAt: "2026-09-18T00:01:00.000Z",
+            revocationReason: "Quelle entfernt",
+          }),
+        },
+      ],
+    });
+    const auditText = JSON.stringify(await readAudits(database));
+    expect(auditText).not.toContain(token);
+
+    await expect(revokeOverlayToken(database as unknown as D1Database, {
+      actor: TEST_ACTOR,
+      channelId: "kanal-a",
+      tokenId: issued.tokenId,
+      reason: "Noch einmal",
+      revokedAt: "2026-09-18T00:02:00.000Z",
+    })).resolves.toBe(false);
+    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = ? AND user_id = ?")
+      .bind("kanal-a", TEST_ACTOR.userId).run();
+    await expect(issueOverlayToken(database as unknown as D1Database, {
+      channelId: "kanal-a",
+      actor: TEST_ACTOR,
+      pepper: pepper(4),
+      publicOrigin: "https://brobot.example",
+      expiresAt: null,
+      createdAt: "2026-09-18T00:03:00.000Z",
+    })).resolves.toBeNull();
+    const finalAudits = await readAudits(database);
+    expect(finalAudits.results).toHaveLength(2);
   });
 
   it("verweigert dem Bediener Ausgabe und Widerruf im Mutations-Guard", async () => {
