@@ -1657,7 +1657,7 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Befehl anlegen" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Module" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
   });
 
@@ -1716,7 +1716,7 @@ describe("Dashboard-Grundgerüst", () => {
     const switcher = await screen.findByRole("switch", { name: "Textbefehle · Aus" });
     fireEvent.click(switcher);
 
-    expect(await screen.findByRole("heading", { name: "Befehl anlegen" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
     expect(overviewAufrufe).toBe(2);
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/overview")).toHaveLength(2);
   });

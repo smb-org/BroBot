@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 
 import { dashboardGemeinsameTexte, type DashboardLanguage } from "../../../dashboard/locale";
 import { TEXTBEFEHL_MINDESTSTUFEN, type Textbefehl, type TextbefehlMindeststufe } from "../contracts";
@@ -28,6 +28,34 @@ interface TextbefehleSelection {
   rowRef: (key: string) => (row: HTMLTableRowElement | null) => void;
   close: () => void;
 }
+
+interface TextbefehleSubInspectorProperties {
+  ariaLabel: string;
+  title: ReactNode;
+  identifier?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+}
+
+const TextbefehleSubInspector = ({ ariaLabel, title, identifier, onClose, children }: TextbefehleSubInspectorProperties): ReactElement => (
+  <section className="command-inspector sub-inspector config-section" aria-label={ariaLabel} onKeyDown={(event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+  }}>
+    <div className="inspector-section__heading">
+      <h3>{title}</h3>
+      {identifier === undefined ? null : <span className="mono muted">{identifier}</span>}
+      <button className="button button--quiet inspector-close" type="button" aria-label={dashboardGemeinsameTexte().schliessen} onClick={onClose}>
+        <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+    {children}
+  </section>
+);
 
 const useTextbefehleSelection = (): TextbefehleSelection => {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -106,21 +134,7 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
   };
 
   return (
-    <section className="command-inspector sub-inspector config-section" aria-label={labels.details(initial.name)} onKeyDown={(event) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    }}>
-      <div className="inspector-section__heading">
-        <h3>{`!${initial.name}`}</h3>
-        <span className="mono muted"><span className="command-inspector__meta">{labels.spalten.zuletzt} {relativeZeit(initial.zuletztVerwendetAt, labels)}</span></span>
-        <button className="button button--quiet inspector-close" type="button" aria-label={dashboardGemeinsameTexte().schliessen} onClick={onClose}>
-          <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M6 6l12 12M18 6 6 18" />
-          </svg>
-        </button>
-      </div>
+    <TextbefehleSubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.spalten.zuletzt} {relativeZeit(initial.zuletztVerwendetAt, labels)}</span>} onClose={onClose}>
       {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
       <label className="config-field config-field--mittel">
         {labels.name}
@@ -165,7 +179,7 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
         </div>
       ) : null}
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-    </section>
+    </TextbefehleSubInspector>
   );
 };
 
@@ -233,6 +247,8 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
   const labels = textbefehleTexte(language);
   const [befehle, setBefehle] = useState<Textbefehl[]>([]);
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useTextbefehleSelection();
+  const [anlegenOffen, setAnlegenOffen] = useState(false);
+  const anlegenButton = useRef<HTMLButtonElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -275,6 +291,15 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
     closeSelection();
     onCloseInspector?.();
   }, [closeSelection, onCloseInspector]);
+  const openCreate = (): void => {
+    closeSelection();
+    setAnlegenOffen(true);
+    anlegenButton.current?.focus();
+  };
+  const closeCreate = (): void => {
+    setAnlegenOffen(false);
+    anlegenButton.current?.focus();
+  };
   const nameValid = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name.trim());
   const canCreate = nameValid && (art === "liste" || text.trim().length > 0);
 
@@ -321,43 +346,52 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
 
   return (
     <section className="module-stack command-panel" aria-label={labels.titel}>
-      <section className={`inspektor-bereich${selected === null ? "" : " inspektor-bereich--offen"}`}>
+      <section className={`inspektor-bereich${selected === null && !anlegenOffen ? "" : " inspektor-bereich--offen"}`}>
         <div className="inspektor-bereich__liste">
           <section className="command-list config-section" aria-label={labels.liste}>
-            <div className="section-heading"><h2>{labels.liste}</h2></div>
+            <div className="section-heading">
+              <h2>{labels.liste}</h2>
+              <button ref={anlegenButton} className="button button--quiet inspector-close" type="button" aria-label={labels.anlegen} onClick={openCreate}>
+                <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </div>
             {loading ? <p className="loading-line">{labels.laden}</p> : null}
             {error === null ? null : <p className="form-error" role="alert">{error}</p>}
             {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-            {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { selectName(befehl.name); }} rowRef={rowRef(befehl.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
+            {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setAnlegenOffen(false); selectName(befehl.name); }} rowRef={rowRef(befehl.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
           </section>
         </div>
-        {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} />}
+        {selected !== null ? <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} /> : anlegenOffen ? (
+          <TextbefehleSubInspector ariaLabel={labels.anlegen} title={labels.anlegen} onClose={closeCreate}>
+            <form className="config-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+              {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
+              <label className="config-field config-field--mittel">
+                {labels.name}
+                <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />
+                <span className="muted">{labels.nameHinweis}</span>
+              </label>
+              <label className="config-field config-field--schmal">
+                {labels.art}
+                <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "liste"); }} disabled={!canManageContent}>
+                  <option value="text">{labels.artText}</option>
+                  <option value="liste">{labels.artListe}</option>
+                </select>
+              </label>
+              {art === "text" ? <label className="config-field config-field--breit">
+                {labels.text}
+                <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent} />
+              </label> : null}
+              <label className="config-field config-field--schmal">
+                {labels.abkuehlung}
+                <input type="number" min="0" max="86400" value={cooldownSekunden} onChange={(event) => { setCooldownSekunden(Number(event.target.value)); }} disabled={!canManageContent} />
+              </label>
+              <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canManageContent || !canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (art === "text" ? labels.antwortFehlt : labels.nameFehlt) : (art === "text" ? labels.nameAntwortFehlt : labels.nameFehlt)}</span>}</div>
+            </form>
+          </TextbefehleSubInspector>
+        ) : null}
       </section>
-      <form className="command-create config-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>
-        <div className="section-heading"><h2>{labels.anlegen}</h2></div>
-        {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
-        <label className="config-field config-field--mittel">
-          {labels.name}
-          <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />
-          <span className="muted">{labels.nameHinweis}</span>
-        </label>
-        <label className="config-field config-field--schmal">
-          {labels.art}
-          <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "liste"); }} disabled={!canManageContent}>
-            <option value="text">{labels.artText}</option>
-            <option value="liste">{labels.artListe}</option>
-          </select>
-        </label>
-        {art === "text" ? <label className="config-field config-field--breit">
-          {labels.text}
-          <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent} />
-        </label> : null}
-        <label className="config-field config-field--schmal">
-          {labels.abkuehlung}
-          <input type="number" min="0" max="86400" value={cooldownSekunden} onChange={(event) => { setCooldownSekunden(Number(event.target.value)); }} disabled={!canManageContent} />
-        </label>
-        <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canManageContent || !canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (art === "text" ? labels.antwortFehlt : labels.nameFehlt) : (art === "text" ? labels.nameAntwortFehlt : labels.nameFehlt)}</span>}</div>
-      </form>
     </section>
   );
 };

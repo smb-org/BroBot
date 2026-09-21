@@ -64,7 +64,9 @@ describe("Textbefehle-Panel-Ansicht", () => {
 
     render(<TextbefehlePanel channelId="kanal-a" />);
 
-    const add = await screen.findByRole("button", { name: "Befehl anlegen" });
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
+    const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
     expect(add).toBeDisabled();
     expect(add).not.toHaveClass("button--primary");
     expect(screen.getByText(/Name und Antworttext ausfüllen/i)).toBeInTheDocument();
@@ -152,6 +154,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
     render(<TextbefehlePanel channelId="kanal-a" />);
 
     expect(await screen.findByRole("heading", { name: "Befehle" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Befehl anlegen" }));
+    await screen.findByRole("region", { name: "Befehl anlegen" });
     expect(screen.getByLabelText("Name").closest("label")).toHaveClass("config-field--mittel");
     expect(screen.getByLabelText("Antworttext").closest("label")).toHaveClass("config-field--breit");
     expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual(["config-field config-field--schmal"]);
@@ -161,7 +165,6 @@ describe("Textbefehle-Panel-Ansicht", () => {
     const editorField = editorTextarea.closest("label");
     expect(editorField).toHaveClass("config-field--breit");
     expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual([
-      "config-field config-field--schmal",
       "config-field config-field--schmal",
     ]);
   });
@@ -212,7 +215,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
     render(<TextbefehlePanel channelId="kanal-a" />);
 
     expect(await screen.findByRole("heading", { name: "Commands" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add command" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add command" }));
+    expect(await screen.findByRole("region", { name: "Add command" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Type" })).toBeInTheDocument();
   });
 
@@ -232,11 +236,13 @@ describe("Textbefehle-Panel-Ansicht", () => {
 
     render(<TextbefehlePanel channelId="kanal-a" />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
     const art = await screen.findByRole("combobox", { name: "Art" });
     fireEvent.change(art, { target: { value: "liste" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "befehle" } });
     expect(screen.queryByLabelText("Antworttext")).not.toBeInTheDocument();
-    const add = screen.getByRole("button", { name: "Befehl anlegen" });
+    const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
     expect(add).toBeEnabled();
     fireEvent.click(add);
     await waitFor(() => expect(createdBody).toEqual({ name: "befehle", art: "liste", cooldownSekunden: 5 }));
@@ -275,7 +281,9 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(toggle).toBeEnabled();
     expect(within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" })).toBeDisabled();
 
-    const create = await screen.findByRole("button", { name: "Befehl anlegen" });
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
+    const create = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
     expect(create).toBeDisabled();
     expect(screen.getByLabelText("Name")).toBeDisabled();
     expect(screen.getByLabelText("Art")).toBeDisabled();
@@ -415,6 +423,59 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
     expect(row).toHaveFocus();
     expect(onCloseInspector).toHaveBeenCalledTimes(2);
+  });
+
+  it("öffnet das Anlegen in der Inspektorspalte und wechselt ohne Doppelbelegung", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Hallo",
+          art: "text",
+          enabled: true,
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    const liste = await screen.findByRole("region", { name: "Befehle" });
+    const bereich = liste.parentElement?.parentElement;
+    expect(bereich).not.toBeNull();
+    expect(bereich?.children).toHaveLength(1);
+    const plus = within(liste).getByRole("button", { name: "Befehl anlegen" });
+    fireEvent.click(plus);
+    await screen.findByRole("region", { name: "Befehl anlegen" });
+    expect(bereich?.children).toHaveLength(2);
+
+    const row = await screen.findByRole("row", { name: /!hallo/ });
+    fireEvent.click(row);
+    expect(screen.queryByRole("region", { name: "Befehl anlegen" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Eigenschaften von !hallo" })).toBeInTheDocument();
+
+    fireEvent.click(plus);
+    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
+    const reopenedCreatePanel = await screen.findByRole("region", { name: "Befehl anlegen" });
+    expect(row).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.click(within(reopenedCreatePanel).getByRole("button", { name: "Schließen" }));
+    expect(screen.queryByRole("region", { name: "Befehl anlegen" })).not.toBeInTheDocument();
+    expect(plus).toHaveFocus();
+
+    fireEvent.click(plus);
+    const escapedCreatePanel = await screen.findByRole("region", { name: "Befehl anlegen" });
+    fireEvent.keyDown(escapedCreatePanel, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Befehl anlegen" })).not.toBeInTheDocument();
+    expect(plus).toHaveFocus();
   });
 
   it("reicht den Schließen-Weg des Modul-Contracts an den Host weiter", async () => {
