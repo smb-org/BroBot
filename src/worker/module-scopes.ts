@@ -102,10 +102,11 @@ export const listRequiredBroadcasterScopesForUser = async (
        JOIN channel_members
          ON channel_members.channel_id = channel_modules.channel_id
         AND channel_members.user_id = ?
+        AND channel_members.channel_id = ?
         AND channel_members.role = 'broadcaster'
       WHERE channel_modules.enabled = 1
       ORDER BY channel_modules.module_id`,
-  ).bind(userId).all<ModuleChannelRow>();
+  ).bind(userId, userId).all<ModuleChannelRow>();
   const modules = new Map(MODULES.map((module) => [module.id, module]));
   return unique(rows.results.flatMap((row) => declaredScopes(modules.get(row.module_id))));
 };

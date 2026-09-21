@@ -65,14 +65,27 @@ describe("Broadcaster-Scopes", () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
-    await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "broadcaster");
-    await insertMember(database, "kanal-b", "user-1", "verwalter");
+    await insertLoginIdentityAndSession(database, "kanal-a");
+    await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+    await insertMember(database, "kanal-b", "kanal-a", "verwalter");
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'werbung', 1, '{}'), ('kanal-b', 'werbung', 1, '{}')",
     ).run();
 
-    await expect(listRequiredBroadcasterScopesForUser(asD1(database), "user-1")).resolves.toEqual(["channel:read:ads"]);
+    await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual(["channel:read:ads"]);
+  });
+
+  it("ignoriert ein fremdes Kanalmodul trotz Broadcaster-Rolle des Nutzers", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "kanal-a");
+    await insertMember(database, "kanal-b", "kanal-a", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-b', 'werbung', 1, '{}')",
+    ).run();
+
+    await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual([]);
   });
 
   it("meldet fehlende und vorhandene Modul-Scopes getrennt", async () => {

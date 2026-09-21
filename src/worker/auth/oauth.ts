@@ -147,6 +147,7 @@ export const startOAuthAuthorization = async (
   reconcileEventSub = false,
   redirectPath: string | null = null,
   vollzustimmungZweiterVersuch = false,
+  expectedUserId: string | null = null,
 ): Promise<OAuthStart> => {
   const transactionId = randomToken(24);
   const stateNonce = randomToken(24);
@@ -169,6 +170,7 @@ export const startOAuthAuthorization = async (
     expiresAt,
     createdAt: now,
     redirectPath,
+    expectedUserId,
   });
 
   const url = new URL("https://id.twitch.tv/oauth2/authorize");

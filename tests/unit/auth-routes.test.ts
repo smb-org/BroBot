@@ -1023,6 +1023,41 @@ describe("Auth-Routen", () => {
     }
   });
 
+  it("verwirft den Callback mit einer anderen Kanalinhaber-Identität ohne Speicherung", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "kanal-a");
+      await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+      const environment = umgebungFürDatenbank(database);
+
+      const login = await authRouter.fetch(
+        new Request("https://brobot.example/auth/channels/kanal-a/broadcaster-scopes/werbung", {
+          headers: { Cookie: await sessionCookieHeaderFor("kanal-a") },
+        }),
+        environment,
+      );
+      expect(login.status).toBe(302);
+      await expect(database.prepare(
+        "SELECT expected_user_id FROM oauth_transactions",
+      ).first()).resolves.toEqual({ expected_user_id: "kanal-a" });
+
+      fetchWith(tokenAntwort(LOGIN_SCOPES), identitätsAntwort("fremdes-konto", "fremdes-konto"));
+      const response = await authRouter.fetch(callbackRequest(login), environment);
+
+      expect(response.status).toBe(403);
+      await expect(response.text()).resolves.toContain("Kanalinhaber");
+      await expect(database.prepare(
+        "SELECT user_id FROM twitch_login_identity ORDER BY user_id",
+      ).all()).resolves.toMatchObject({ results: [{ user_id: "kanal-a" }] });
+      await expect(database.prepare(
+        "SELECT failure_reason FROM oauth_transactions WHERE transaction_id = (SELECT transaction_id FROM oauth_transactions LIMIT 1)",
+      ).first()).resolves.toEqual({ failure_reason: "login_identity_user_mismatch" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("übernimmt keine Bot-Identität mit abweichender Twitch-User-ID", async () => {
     // Logins lassen sich ändern und neu vergeben. Wird der Bot-Account
     // umbenannt und jemand registriert den frei gewordenen Namen, darf er die
