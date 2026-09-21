@@ -30,6 +30,7 @@ export const textbefehlModul: BotModule<typeof settingsSchema> = {
     context.actor,
     context.now,
     context.authorizeMutation,
+    context.prepareModuleAudit,
   ),
   routes: textbefehlRoutes,
   panel: () => import("./panel"),

@@ -133,16 +133,17 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const action = enabled ? "modul.aktiviert" : "modul.deaktiviert";
   const actor = actorOf(context);
 
+  const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  let dependentMutations: readonly D1PreparedStatement[] = [];
   if (enabled && module.onEnable !== undefined) {
-    await module.onEnable({
+    dependentMutations = await module.onEnable({
       DB: context.env.DB,
       authorizeMutation: context.get("authorizeManagementMutation"),
+      prepareModuleAudit: context.get("prepareModuleAudit"),
       actor,
       now,
-    }, channelId);
+    }, channelId) ?? [];
   }
-
-  const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
   const settings = existing === null || enabled ? defaultSettingsJson : existing.settings;
   const changed = existing === null
     ? await createChannelModuleWithAudit(
@@ -151,6 +152,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       { channelId, moduleId, enabled, settings },
       action,
       now,
+      dependentMutations,
     )
     : await updateChannelModuleWithAudit(
       context.env.DB,
@@ -161,6 +163,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       settings,
       action,
       now,
+      dependentMutations,
     );
   if (!changed) return context.text("Modul wurde inzwischen geändert.", 409);
   try {
