@@ -8,8 +8,8 @@ import {
 } from "../../src/modules/textbefehle/domain";
 
 describe("Textbefehle-Domain", () => {
-  it("erkennt das Listen-Kommando", () => {
-    expect(befehlAusNachricht("!befehle")).toEqual({ art: "listen", name: "befehle" });
+  it("erkennt ein generisches !-Wort ohne Sonderfall", () => {
+    expect(befehlAusNachricht("!befehle")).toEqual({ art: "befehl", name: "befehle" });
   });
 
   it("erlaubt nur einfache kleingeschriebene Befehlsnamen", () => {

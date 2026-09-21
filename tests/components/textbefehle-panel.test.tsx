@@ -22,6 +22,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo {user}",
+          art: "text",
+          enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: new Date(Date.now() - 60_000).toISOString(),
           createdAt: "2026-09-19T12:00:00.000Z",
@@ -37,9 +39,11 @@ describe("Textbefehle-Panel-Ansicht", () => {
 
     expect(await screen.findByText("!hallo")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "!Name" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Art" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Antwort" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Abkühl." })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Zuletzt" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Schalter" })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /!hallo.*vor 1 min/ })).toBeInTheDocument();
     expect(screen.queryByDisplayValue("Hallo {user}")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("row", { name: /!hallo/ }));
@@ -85,6 +89,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
+          art: "text",
+          enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
@@ -130,6 +136,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
+          art: "text",
+          enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
@@ -169,6 +177,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
+          art: "text",
+          enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
@@ -203,5 +213,55 @@ describe("Textbefehle-Panel-Ansicht", () => {
 
     expect(await screen.findByRole("heading", { name: "Commands" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add command" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Type" })).toBeInTheDocument();
+  });
+
+  it("blendet das Antwortfeld für die Art liste aus und legt ohne Text an", async () => {
+    let createdBody: Record<string, unknown> | null = null;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (init?.method === "POST") {
+        createdBody = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : null;
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    const art = await screen.findByRole("combobox", { name: "Art" });
+    fireEvent.change(art, { target: { value: "liste" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "befehle" } });
+    expect(screen.queryByLabelText("Antworttext")).not.toBeInTheDocument();
+    const add = screen.getByRole("button", { name: "Befehl anlegen" });
+    expect(add).toBeEnabled();
+    fireEvent.click(add);
+    await waitFor(() => expect(createdBody).toEqual({ name: "befehle", art: "liste", cooldownSekunden: 5 }));
+  });
+
+  it("zeigt den Schalter für Bediener sichtbar, aber deaktiviert mit Begründung", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ befehle: [{
+      channelId: "kanal-a",
+      name: "hallo",
+      text: "Antwort",
+      art: "text",
+      enabled: false,
+      cooldownSekunden: 5,
+      zuletztVerwendetAt: null,
+      createdAt: "2026-09-19T12:00:00.000Z",
+      updatedAt: "2026-09-19T12:00:00.000Z",
+    }] })));
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" canManage={false} />);
+
+    await screen.findByRole("row", { name: /!hallo/ });
+    const toggle = await screen.findByRole("switch", { name: "Befehl !hallo: ausgeschaltet" });
+    expect(toggle).toBeDisabled();
+    expect(screen.getAllByText("Nur Broadcaster und Verwalter dürfen Befehle schalten.").length).toBeGreaterThan(0);
   });
 });

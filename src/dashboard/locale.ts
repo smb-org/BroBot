@@ -497,6 +497,7 @@ export type EreignisCode =
   | "werbung.uebersprungen"
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
+  | "textbefehle.deaktiviert"
   // Seit dem Wegfall der ändernden Chat-Befehle (#120) erzeugt niemand mehr
   // diese beiden Kennungen. Sie bleiben, weil das Ereignisprotokoll seine
   // Zeilen 14 Tage hält: Ohne Beschriftung wären bereits geschriebene
@@ -588,6 +589,7 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
         : `Befehl !${name} abgekühlt, noch ${String(detail.restSekunden)} s`;
     },
     "textbefehle.ausgeloest": (detail) => ereignisTextMitName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
+    "textbefehle.deaktiviert": (detail) => ereignisTextMitName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
     "textbefehle.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Textbefehl bereits vorhanden", (name) => `Textbefehl !${name} bereits vorhanden`),
     "textbefehle.nicht_berechtigt": "Textbefehl nicht berechtigt",
     "textbefehle.unbekannt": (detail) => ereignisTextMitName(detail, "Textbefehl unbekannt", (name) => `Textbefehl !${name} unbekannt`),
@@ -631,6 +633,7 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
         : `Command !${name} on cooldown, ${String(detail.restSekunden)}s left`;
     },
     "textbefehle.ausgeloest": (detail) => ereignisTextMitName(detail, "Command executed", (name) => `Command !${name} executed`),
+    "textbefehle.deaktiviert": (detail) => ereignisTextMitName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
     "textbefehle.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Text command already exists", (name) => `Text command !${name} already exists`),
     "textbefehle.nicht_berechtigt": "Text command not authorized",
     "textbefehle.unbekannt": (detail) => ereignisTextMitName(detail, "Unknown text command", (name) => `Unknown text command !${name}`),
@@ -671,6 +674,7 @@ export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green" | "off"
   "werbung.uebersprungen": "amber",
   "textbefehle.abgekuehlt": "amber",
   "textbefehle.ausgeloest": "green",
+  "textbefehle.deaktiviert": "amber",
   "textbefehle.bereits_vorhanden": "amber",
   "textbefehle.nicht_berechtigt": "red",
   "textbefehle.unbekannt": "red",

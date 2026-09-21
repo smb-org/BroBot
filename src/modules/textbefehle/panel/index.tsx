@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 
 import { dashboardGemeinsameTexte, type DashboardLanguage } from "../../../dashboard/locale";
 import type { Textbefehl } from "../contracts";
-import { loescheTextbefehl, ladeTextbefehle, legeTextbefehlAn, speichereTextbefehl } from "./service";
+import { loescheTextbefehl, ladeTextbefehle, legeTextbefehlAn, schalteTextbefehl, speichereTextbefehl } from "./service";
 import { textbefehleTexte } from "./locale";
 
 interface TextbefehlZeileProperties {
@@ -12,10 +12,14 @@ interface TextbefehlZeileProperties {
   onChanged: () => Promise<void>;
   selected: boolean;
   onSelect: () => void;
+  canManage: boolean;
+  toggleBusy: boolean;
+  onToggle: () => Promise<void>;
 }
 
-const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<TextbefehlZeileProperties, "selected" | "onSelect">): ReactElement => {
+const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<TextbefehlZeileProperties, "selected" | "onSelect" | "canManage" | "toggleBusy" | "onToggle">): ReactElement => {
   const labels = textbefehleTexte(language);
+  const [name, setName] = useState(initial.name);
   const [text, setText] = useState(initial.text);
   const [cooldownSekunden, setCooldownSekunden] = useState(initial.cooldownSekunden);
   const [busy, setBusy] = useState(false);
@@ -31,7 +35,12 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<Text
     setBusy(true);
     setError(null);
     try {
-      await speichereTextbefehl(channelId, { name: initial.name, text, cooldownSekunden });
+      await speichereTextbefehl(channelId, {
+        oldName: initial.name,
+        name: name.trim(),
+        ...(initial.art === "text" ? { text } : {}),
+        cooldownSekunden,
+      });
       await onChanged();
     } catch {
       setError(labels.speichernFehler);
@@ -57,10 +66,14 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<Text
   return (
     <section className="command-inspector sub-inspector config-section" aria-label={labels.details(initial.name)}>
       <div className="section-heading"><h3>!{initial.name}</h3><span className="mono muted command-inspector__meta">{labels.spalten.zuletzt} {relativeZeit(initial.zuletztVerwendetAt, labels)}</span></div>
-      <label className="config-field config-field--breit">
+      <label className="config-field config-field--mittel">
+        {labels.name}
+        <input value={name} onChange={(event) => { setName(event.target.value); }} disabled={busy} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
+      </label>
+      {initial.art === "text" ? <label className="config-field config-field--breit">
         {labels.text}
         <textarea value={text} onChange={(event) => { setText(event.target.value); }} disabled={busy} />
-      </label>
+      </label> : null}
       <label className="config-field config-field--schmal">
         {labels.abkuehlung}
         <input type="number" min="0" max="86400" value={cooldownSekunden} onChange={(event) => { setCooldownSekunden(Number(event.target.value)); }} disabled={busy} />
@@ -111,19 +124,37 @@ const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: 
   }
 };
 
-const TextbefehlZeile = ({ initial, language, selected, onSelect }: TextbefehlZeileProperties): ReactElement => {
+const TextbefehlZeile = ({ initial, language, selected, onSelect, canManage, toggleBusy, onToggle }: TextbefehlZeileProperties): ReactElement => {
   const labels = textbefehleTexte(language);
+  const disabledReason = canManage ? undefined : labels.verwaltungGesperrt;
   return (
     <tr tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
-      <td className="tabelle__answer" title={initial.text}>{initial.text}</td>
+      <td>{initial.art === "text" ? labels.artText : labels.artListe}</td>
+      <td className="tabelle__answer" title={initial.art === "text" ? initial.text : undefined}>{initial.art === "text" ? initial.text : "—"}</td>
       <td className="mono">{initial.cooldownSekunden}</td>
       <td className="tabelle__last-used">{relativeZeit(initial.zuletztVerwendetAt, labels)}</td>
+      <td>
+        <button
+          className="switch"
+          type="button"
+          role="switch"
+          aria-label={labels.schalter(initial.name, initial.enabled)}
+          aria-checked={initial.enabled}
+          aria-busy={toggleBusy}
+          disabled={!canManage || toggleBusy}
+          title={disabledReason}
+          onClick={(event) => { event.stopPropagation(); void onToggle(); }}
+        >
+          <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
+        </button>
+        {disabledReason === undefined ? null : <span className="sperrgrund">{disabledReason}</span>}
+      </td>
     </tr>
   );
 };
 
-export const TextbefehlePanel = ({ channelId, language }: { channelId: string; language?: DashboardLanguage }): ReactElement => {
+export const TextbefehlePanel = ({ channelId, language, canManage = true }: { channelId: string; language?: DashboardLanguage; canManage?: boolean }): ReactElement => {
   const labels = textbefehleTexte(language);
   const [befehle, setBefehle] = useState<Textbefehl[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -131,7 +162,9 @@ export const TextbefehlePanel = ({ channelId, language }: { channelId: string; l
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [text, setText] = useState("");
+  const [art, setArt] = useState<"text" | "liste">("text");
   const [cooldownSekunden, setCooldownSekunden] = useState(5);
+  const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -163,19 +196,33 @@ export const TextbefehlePanel = ({ channelId, language }: { channelId: string; l
 
   const selected = useMemo(() => befehle.find((befehl) => befehl.name === selectedName) ?? null, [befehle, selectedName]);
   const nameValid = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name.trim());
-  const canCreate = nameValid && text.trim().length > 0;
+  const canCreate = nameValid && (art === "liste" || text.trim().length > 0);
 
   const create = async (): Promise<void> => {
     if (!canCreate) return;
     setError(null);
     try {
-      await legeTextbefehlAn(channelId, { name: name.trim(), text, cooldownSekunden });
+      await legeTextbefehlAn(channelId, { name: name.trim(), art, ...(art === "text" ? { text } : {}), cooldownSekunden });
       setName("");
       setText("");
+      setArt("text");
       setCooldownSekunden(5);
       await load();
     } catch {
       setError(labels.speichernFehler);
+    }
+  };
+
+  const toggle = async (befehl: Textbefehl): Promise<void> => {
+    setToggleBusyName(befehl.name);
+    setError(null);
+    try {
+      await schalteTextbefehl(channelId, befehl.name, !befehl.enabled);
+      await load();
+    } catch {
+      setError(labels.speichernFehler);
+    } finally {
+      setToggleBusyName(null);
     }
   };
 
@@ -186,7 +233,7 @@ export const TextbefehlePanel = ({ channelId, language }: { channelId: string; l
         {loading ? <p className="loading-line">{labels.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-        {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} />)}</tbody></table></div> : null}
+        {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} canManage={canManage} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} />)}</tbody></table></div> : null}
       </section>
       {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} />}
       <form className="command-create config-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>
@@ -196,15 +243,22 @@ export const TextbefehlePanel = ({ channelId, language }: { channelId: string; l
           <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
           <span className="muted">{labels.nameHinweis}</span>
         </label>
-        <label className="config-field config-field--breit">
+        <label className="config-field config-field--schmal">
+          {labels.art}
+          <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "liste"); }}>
+            <option value="text">{labels.artText}</option>
+            <option value="liste">{labels.artListe}</option>
+          </select>
+        </label>
+        {art === "text" ? <label className="config-field config-field--breit">
           {labels.text}
           <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} />
-        </label>
+        </label> : null}
         <label className="config-field config-field--schmal">
           {labels.abkuehlung}
           <input type="number" min="0" max="86400" value={cooldownSekunden} onChange={(event) => { setCooldownSekunden(Number(event.target.value)); }} />
         </label>
-        <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? labels.antwortFehlt : labels.nameAntwortFehlt}</span>}</div>
+        <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (art === "text" ? labels.antwortFehlt : labels.nameFehlt) : (art === "text" ? labels.nameAntwortFehlt : labels.nameFehlt)}</span>}</div>
       </form>
     </section>
   );

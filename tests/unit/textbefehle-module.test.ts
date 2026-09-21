@@ -61,6 +61,7 @@ const legeBefehlAn = async (database: TestD1Database, name = "hallo"): Promise<v
     channelId: "kanal-a",
     name,
     text: "Hallo {user}",
+    art: "text",
     cooldownSekunden: 5,
     now: JETZT,
   }, { userId: "user-1" });
@@ -163,6 +164,74 @@ describe("Textbefehle-Modul", () => {
 
       expect(fetcher).toHaveBeenCalledTimes(1);
       await expect(eventCodes(database)).resolves.toContain("textbefehle.abgekuehlt");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("initialisiert den Listenbefehl beim Aktivieren des Moduls", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await textbefehlModul.onEnable?.({
+        DB: database as unknown as D1Database,
+        authorizeMutation: () => ({ sql: "AND 1 = 1", values: [] as const }),
+        actor: { userId: "user-1" },
+        now: JETZT,
+      }, "kanal-a");
+
+      await expect(database.prepare(
+        "SELECT command_name, response_text, art, enabled FROM textbefehle_commands",
+      ).all()).resolves.toEqual({
+        results: [{ command_name: "befehle", response_text: "", art: "liste", enabled: 1 }],
+        success: true,
+        meta: { changes: 0, size: 0 },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("löst einen ausgeschalteten Befehl nicht aus und begründet das im Ereignisprotokoll", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "bediener");
+      await mitBot(database);
+      await aktiviere(database, "kanal-a");
+      await legeBefehlAn(database);
+      await database.prepare("UPDATE textbefehle_commands SET enabled = 0 WHERE command_name = 'hallo'").run();
+      const fetcher = fetcherFuerChat();
+
+      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo"), fetcher, [textbefehlModul]);
+
+      expect(fetcher).not.toHaveBeenCalled();
+      await expect(eventCodes(database)).resolves.toEqual(["textbefehle.deaktiviert"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("listet nur eingeschaltete Befehle", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "bediener");
+      await mitBot(database);
+      await aktiviere(database, "kanal-a");
+      const repository = createTextbefehlRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await repository.anlegen({ channelId: "kanal-a", name: "befehle", text: "", art: "liste", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
+      await repository.anlegen({ channelId: "kanal-a", name: "aktiv", text: "Antwort", art: "text", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
+      await repository.anlegen({ channelId: "kanal-a", name: "aus", text: "Antwort", art: "text", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
+      await database.prepare("UPDATE textbefehle_commands SET enabled = 0 WHERE command_name = 'aus'").run();
+      const fetcher = fetcherFuerChat();
+
+      await dispatchEventSubNotification(umgebung(database), eventFuer("!befehle"), fetcher, [textbefehlModul]);
+
+      expect(koerper(fetcher, 0).message).toBe("Befehle: !aktiv, !befehle");
     } finally {
       database.close();
     }

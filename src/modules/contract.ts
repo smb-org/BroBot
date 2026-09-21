@@ -85,11 +85,21 @@ export interface ModuleExecutionContext {
   authorizeMutation: AuthorizeModuleMutation;
 }
 
+/** Infrastruktur für einmalige Initialdaten beim Aktivieren eines Moduls. */
+export interface ModuleEnableContext {
+  DB: D1Database;
+  authorizeMutation: AuthorizeModuleMutation;
+  actor: ModuleMutationActor;
+  now: string;
+}
+
 /** Gemeinsame Props für lazy geladene Panel-Ansichten. */
 export interface ModulePanelProperties {
   channelId: string;
   /** Die vom Host aufgelöste Panel-Sprache; optional für alte Module. */
   language?: ModuleLanguage;
+  /** Darf die Ansicht verwaltende Bedienelemente ausführen? */
+  canManage?: boolean;
 }
 
 export type ModuleLanguage = "de" | "en";
@@ -104,6 +114,7 @@ export interface ModuleRouteVariables {
   channelRole: "broadcaster" | "verwalter" | "bediener";
   actor: { userId: string; sessionId: string };
   authorizeMutation: AuthorizeModuleMutation;
+  authorizeManagementMutation: AuthorizeModuleMutation;
   prepareModuleAudit: PrepareModuleAudit;
 }
 
@@ -153,6 +164,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     event: ModuleEvent<z.output<SettingsSchema>>,
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
+  /** Wird vor dem Einschalten aufgerufen, um modulare Initialdaten anzulegen. */
+  onEnable?: (context: ModuleEnableContext, channelId: string) => void | Promise<void>;
   // Modulmigrationen und weitere Aktionsarten treten dem Contract bei, sobald
   // das erste Modul sie benötigt. Die Command-Verarbeitung ist mit
   // ModuleResult angetreten.

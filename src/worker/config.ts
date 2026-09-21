@@ -14,8 +14,8 @@ export const REQUIRED_SECRET_NAMES = [
 // Wrangler führt die angewandten Dateinamen in d1_migrations. Dadurch muss
 // nicht die komplette Tabelle-zu-Migration-Liste dupliziert werden; nur der
 // aktuelle Release-Sentinel ändert sich, wenn eine neue Migration hinzukommt.
-export const LATEST_SCHEMA_MIGRATION = "0019_oauth_transaction_expected_user.sql";
-export const LATEST_SCHEMA_TABLE = "oauth_transactions";
+export const LATEST_SCHEMA_MIGRATION = "0020_textbefehle_art_enabled.sql";
+export const LATEST_SCHEMA_TABLE = "textbefehle_commands";
 
 const REQUIRED_BINDING_NAMES = ["DB", "CHANNEL", "ASSETS", "CF_VERSION_METADATA"] as const;
 

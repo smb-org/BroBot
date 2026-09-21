@@ -35,6 +35,7 @@ describe("Dashboard-Locale", () => {
     expect(ereignisText("textbefehle.abgekuehlt", { name: "wiki", restSekunden: 4 })).toBe("Befehl !wiki abgekühlt, noch 4 s");
     expect(ereignisText("textbefehle.abgekuehlt", { name: "wiki" })).toBe("Textbefehl abgekühlt");
     expect(ereignisText("textbefehle.unbekannt", { name: "wiki" })).toBe("Textbefehl !wiki unbekannt");
+    expect(ereignisText("textbefehle.deaktiviert", { name: "wiki" })).toBe("Textbefehl !wiki ausgeschaltet");
     expect(ereignisText("host.chat.gesendet", { name: "wiki" })).toBe("Chat-Nachricht gesendet");
   });
 
@@ -45,6 +46,7 @@ describe("Dashboard-Locale", () => {
     expect(ereignisText("textbefehle.abgekuehlt", { name: "wiki", restSekunden: 4 })).toBe("Command !wiki on cooldown, 4s left");
     expect(ereignisText("textbefehle.bereits_vorhanden", { name: "wiki" })).toBe("Text command !wiki already exists");
     expect(ereignisText("textbefehle.unbekannt", { name: "wiki" })).toBe("Unknown text command !wiki");
+    expect(ereignisText("textbefehle.deaktiviert", { name: "wiki" })).toBe("Text command !wiki disabled");
   });
 
   it("rendert Moderationsdetails zweisprachig mit Bedeutungston", () => {

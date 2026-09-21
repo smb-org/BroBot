@@ -4,7 +4,6 @@ import {
   befehlAusNachricht,
   befehlTextMitPlatzhaltern,
   cooldownRestzeit,
-  gueltigerBefehlsname,
 } from "./domain";
 import type { TextbefehlEingabe } from "./domain";
 import type { TextbefehlRepository } from "./repository";
@@ -70,22 +69,17 @@ export const verarbeiteTextbefehlNachricht = async (
     return { actions: [], diagnostics: [{ code: "textbefehle.unbekannt" }] };
   }
 
-  if (eingabe.art === "listen") {
-    const befehle = await repository.auflisten(event.channelId);
-    const liste = befehle.length === 0
-      ? "Keine Textbefehle angelegt."
-      : `Befehle: ${befehle.map((befehl) => `!${befehl.name}`).join(", ")}`;
-    return antwort(event, eingabe, liste);
-  }
-
-  if (!gueltigerBefehlsname(eingabe.name)) {
-    return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
-  }
   const beanspruchung = await repository.beanspruchen(event.channelId, eingabe.name, event.receivedAt);
   if (beanspruchung === null) {
     return {
       actions: [],
       diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.name } }],
+    };
+  }
+  if (!beanspruchung.befehl.enabled) {
+    return {
+      actions: [],
+      diagnostics: [{ code: "textbefehle.deaktiviert", detail: { name: eingabe.name } }],
     };
   }
   if (!beanspruchung.beansprucht) {
@@ -98,6 +92,16 @@ export const verarbeiteTextbefehlNachricht = async (
       actions: [],
       diagnostics: [{ code: "textbefehle.abgekuehlt", detail: { name: eingabe.name, restSekunden } }],
     };
+  }
+
+  if (beanspruchung.befehl.art === "liste") {
+    const befehle = (await repository.auflisten(event.channelId))
+      .filter((befehl) => befehl.enabled)
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const liste = befehle.length === 0
+      ? "Keine Textbefehle angelegt."
+      : `Befehle: ${befehle.map((befehl) => `!${befehl.name}`).join(", ")}`;
+    return antwort(event, eingabe, liste);
   }
 
   return antwort(event, eingabe, befehlTextMitPlatzhaltern(
