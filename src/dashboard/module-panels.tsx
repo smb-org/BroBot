@@ -200,9 +200,10 @@ const getLazyPanel = (module: (typeof MODULES)[number]): LazyExoticComponent<Com
 interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
+  canManage?: boolean;
 }
 
-export const ModulePanelMount = ({ channelId, activeModules }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, canManage = true }: ModulePanelMountProperties): ReactElement => {
   const registeredPanels = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -222,7 +223,7 @@ export const ModulePanelMount = ({ channelId, activeModules }: ModulePanelMountP
   return (
     <section className="module-stack" aria-label={dashboardTexte().module.ansichten}>
       <Suspense fallback={<p className="muted">{dashboardTexte().module.ansichtenLaden}</p>}>
-        {registeredPanels.map(({ id, Panel }) => <Panel key={id} channelId={channelId} language={dashboardLanguage()} />)}
+        {registeredPanels.map(({ id, Panel }) => <Panel key={id} channelId={channelId} language={dashboardLanguage()} canManage={canManage} />)}
       </Suspense>
     </section>
   );
@@ -237,7 +238,8 @@ interface ModuleWorkspaceProperties {
   onNavigate: (route: DashboardRoute) => void;
 }
 
-export const ModuleWorkspace = ({ channelId, modules, loading = false, error = null, onNavigate }: ModuleWorkspaceProperties): ReactElement => {
+export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate }: ModuleWorkspaceProperties): ReactElement => {
+  void ownRole;
   const registeredModules = MODULES.map((module) => ({
     id: module.id,
     enabled: modules.find((moduleState) => moduleState.id === module.id)?.enabled === true &&
@@ -370,7 +372,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined ? (showActiveView ? <p className="module-state">{texte.module.keineAnsicht}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " veraltet" : ""}`} aria-label={labels.inhalt}>
-              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} />
+              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "bediener"} />
             </section>
           )
         ) : (

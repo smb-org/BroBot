@@ -23,7 +23,7 @@ export const ladeTextbefehle = async (channelId: string): Promise<Textbefehl[]> 
 const mutation = async (
   channelId: string,
   method: "POST" | "PATCH" | "DELETE",
-  body?: Record<string, string | number>,
+  body?: Record<string, string | number | boolean>,
   name?: string,
 ): Promise<void> => {
   const csrfResponse = await fetch("/api/csrf");
@@ -41,17 +41,23 @@ const mutation = async (
 
 export const legeTextbefehlAn = async (
   channelId: string,
-  command: { name: string; text: string; cooldownSekunden: number },
+  command: { name: string; art: "text" | "liste"; text?: string; cooldownSekunden: number },
 ): Promise<void> => mutation(channelId, "POST", command);
 
 export const speichereTextbefehl = async (
   channelId: string,
-  command: { name: string; text: string; cooldownSekunden: number },
+  command: { oldName: string; name: string; text?: string; cooldownSekunden: number },
 ): Promise<void> => mutation(channelId, "PATCH", {
-  text: command.text,
+  name: command.name,
+  ...(command.text === undefined ? {} : { text: command.text }),
   cooldownSekunden: command.cooldownSekunden,
-}, command.name);
+}, command.oldName);
+
+export const schalteTextbefehl = async (
+  channelId: string,
+  name: string,
+  enabled: boolean,
+): Promise<void> => mutation(channelId, "PATCH", { enabled }, name);
 
 export const loescheTextbefehl = async (channelId: string, name: string): Promise<void> =>
   mutation(channelId, "DELETE", undefined, name);
-

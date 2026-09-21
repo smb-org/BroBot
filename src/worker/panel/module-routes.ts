@@ -133,6 +133,15 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const action = enabled ? "modul.aktiviert" : "modul.deaktiviert";
   const actor = actorOf(context);
 
+  if (enabled && module.onEnable !== undefined) {
+    await module.onEnable({
+      DB: context.env.DB,
+      authorizeMutation: context.get("authorizeManagementMutation"),
+      actor,
+      now,
+    }, channelId);
+  }
+
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
   const settings = existing === null || enabled ? defaultSettingsJson : existing.settings;
   const changed = existing === null

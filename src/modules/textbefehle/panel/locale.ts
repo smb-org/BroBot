@@ -5,8 +5,13 @@ interface TextbefehleTexte {
   liste: string;
   anlegen: string;
   name: string;
+  art: string;
+  artText: string;
+  artListe: string;
   text: string;
   abkuehlung: string;
+  schalter: (name: string, enabled: boolean) => string;
+  verwaltungGesperrt: string;
   speichern: (name: string) => string;
   loeschen: (name: string) => string;
   loeschenTitel: (name: string) => string;
@@ -24,12 +29,15 @@ interface TextbefehleTexte {
   vorMinuten: (anzahl: number) => string;
   vorStunden: (anzahl: number) => string;
   antwortFehlt: string;
+  nameFehlt: string;
   nameAntwortFehlt: string;
   spalten: {
     name: string;
+    art: string;
     text: string;
     abkuehlung: string;
     zuletzt: string;
+    aktiv: string;
   };
 }
 
@@ -39,8 +47,13 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     liste: "Befehle",
     anlegen: "Befehl anlegen",
     name: "Name",
+    art: "Art",
+    artText: "Antworttext",
+    artListe: "Befehlsliste",
     text: "Antworttext",
     abkuehlung: "Abkühlzeit (Sekunden)",
+    schalter: (name, enabled) => `Befehl !${name}: ${enabled ? "eingeschaltet" : "ausgeschaltet"}`,
+    verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Befehle schalten.",
     speichern: (name) => `Befehl !${name} speichern`,
     loeschen: (name) => `Befehl !${name} löschen`,
     loeschenTitel: (name) => `Befehl !${name} löschen?`,
@@ -58,16 +71,22 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     vorMinuten: (anzahl) => `vor ${String(anzahl)} min`,
     vorStunden: (anzahl) => `vor ${String(anzahl)} h`,
     antwortFehlt: "Antworttext ausfüllen",
+    nameFehlt: "Namen ausfüllen",
     nameAntwortFehlt: "Name und Antworttext ausfüllen",
-    spalten: { name: "!Name", text: "Antwort", abkuehlung: "Abkühl.", zuletzt: "Zuletzt" },
+    spalten: { name: "!Name", art: "Art", text: "Antwort", abkuehlung: "Abkühl.", zuletzt: "Zuletzt", aktiv: "Schalter" },
   },
   en: {
     titel: "Text commands",
     liste: "Commands",
     anlegen: "Add command",
     name: "Name",
+    art: "Type",
+    artText: "Response text",
+    artListe: "Command list",
     text: "Response text",
     abkuehlung: "Cooldown (seconds)",
+    schalter: (name, enabled) => `Command !${name}: ${enabled ? "enabled" : "disabled"}`,
+    verwaltungGesperrt: "Only broadcasters and managers may switch commands.",
     speichern: (name) => `Save !${name}`,
     loeschen: (name) => `Delete !${name}`,
     loeschenTitel: (name) => `Delete !${name}?`,
@@ -85,8 +104,9 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     vorMinuten: (anzahl) => `${String(anzahl)} min ago`,
     vorStunden: (anzahl) => `${String(anzahl)} h ago`,
     antwortFehlt: "Fill in a response",
+    nameFehlt: "Fill in a name",
     nameAntwortFehlt: "Fill in a name and response",
-    spalten: { name: "!Name", text: "Response", abkuehlung: "Cooldown", zuletzt: "Last" },
+    spalten: { name: "!Name", art: "Type", text: "Response", abkuehlung: "Cooldown", zuletzt: "Last", aktiv: "Switch" },
   },
 };
 

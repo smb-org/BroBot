@@ -7,10 +7,16 @@ import { gueltigerBefehlsname } from "./domain";
 
 const bodySchema = z.object({
   name: z.string(),
-  text: z.string(),
+  art: z.enum(["text", "liste"]).default("text"),
+  text: z.string().optional(),
   cooldownSekunden: z.number().int().min(0).max(86400),
 });
-const editBodySchema = bodySchema.omit({ name: true });
+const editBodySchema = z.object({
+  name: z.string().optional(),
+  text: z.string().optional(),
+  cooldownSekunden: z.number().int().min(0).max(86400).optional(),
+  enabled: z.boolean().optional(),
+});
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -24,13 +30,15 @@ const readBody = async (request: Request): Promise<unknown> => {
 
 const validBody = async (request: Request): Promise<z.infer<typeof bodySchema> | null> => {
   const parsed = bodySchema.safeParse(await readBody(request));
-  if (!parsed.success || !gueltigerBefehlsname(parsed.data.name) || parsed.data.text.trim().length === 0) return null;
-  return parsed.data;
+  if (!parsed.success || !gueltigerBefehlsname(parsed.data.name)) return null;
+  if (parsed.data.art === "text" && (parsed.data.text === undefined || parsed.data.text.trim().length === 0)) return null;
+  return { ...parsed.data, text: parsed.data.art === "liste" ? "" : parsed.data.text ?? "" };
 };
 
 const validEditBody = async (request: Request): Promise<z.infer<typeof editBodySchema> | null> => {
   const parsed = editBodySchema.safeParse(await readBody(request));
-  return parsed.success && parsed.data.text.trim().length > 0 ? parsed.data : null;
+  if (!parsed.success || Object.keys(parsed.data).length === 0) return null;
+  return parsed.data;
 };
 
 export const textbefehlRoutes = new Hono<ModuleRouteEnvironment>();
@@ -52,7 +60,7 @@ textbefehlRoutes.post("/befehle", async (context) => {
     context.get("prepareModuleAudit"),
   );
   const channelId = param(context, "channelId");
-  const angelegt = await repository.anlegen({ channelId, ...body, now: nowIso() }, context.get("actor"));
+  const angelegt = await repository.anlegen({ channelId, ...body, text: body.text ?? "", now: nowIso() }, context.get("actor"));
   if (angelegt.ok) return context.json({ befehl: { ...body, channelId, zuletztVerwendetAt: null } }, 201);
   return angelegt.grund === "existiert"
     ? context.json({ error: "Der Befehl existiert bereits." }, 409)
@@ -68,9 +76,36 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
     context.get("prepareModuleAudit"),
   );
   const channelId = param(context, "channelId");
-  const name = param(context, "name");
-  const geaendert = await repository.aendern({ channelId, name, ...body, now: nowIso() }, context.get("actor"));
-  if (geaendert.ok) return context.json({ befehl: { channelId, name, ...body } });
+  const oldName = param(context, "name");
+  const before = await repository.finden(channelId, oldName);
+  if (before === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  const newName = body.name ?? before.name;
+  if (!gueltigerBefehlsname(newName)) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
+  if (body.enabled !== undefined && context.get("channelRole") === "bediener") {
+    return context.json({ error: "Nur Broadcaster und Verwalter dürfen Befehle schalten." }, 403);
+  }
+  const text = before.art === "liste" ? "" : body.text ?? before.text;
+  if (before.art === "text" && text.trim().length === 0) {
+    return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
+  }
+  const cooldownSekunden = body.cooldownSekunden ?? before.cooldownSekunden;
+  const authorizeMutation = body.enabled === undefined
+    ? context.get("authorizeMutation")
+    : context.get("authorizeManagementMutation");
+  const geaendert = await createTextbefehlRepository(
+    context.env.DB,
+    authorizeMutation,
+    context.get("prepareModuleAudit"),
+  ).aendern({
+    channelId,
+    name: oldName,
+    neuerName: newName,
+    text,
+    cooldownSekunden,
+    enabled: body.enabled ?? before.enabled,
+    now: nowIso(),
+  }, context.get("actor"));
+  if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, cooldownSekunden, enabled: body.enabled ?? before.enabled } });
   if (geaendert.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (geaendert.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);

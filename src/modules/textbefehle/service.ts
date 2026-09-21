@@ -4,12 +4,9 @@ import {
   befehlAusNachricht,
   befehlTextMitPlatzhaltern,
   cooldownRestzeit,
-  gueltigerBefehlsname,
 } from "./domain";
 import type { TextbefehlEingabe } from "./domain";
 import type { TextbefehlRepository } from "./repository";
-
-export const TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN = 5;
 
 const recordWert = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -59,11 +56,6 @@ const antwort = (event: ModuleEvent, eingabe: Exclude<TextbefehlEingabe, { art: 
   };
 };
 
-const nichtBerechtigt = (): ModuleResult => ({
-  actions: [],
-  diagnostics: [{ code: "textbefehle.nicht_berechtigt" }],
-});
-
 export const verarbeiteTextbefehlNachricht = async (
   event: ModuleEvent,
   repository: TextbefehlRepository,
@@ -77,54 +69,17 @@ export const verarbeiteTextbefehlNachricht = async (
     return { actions: [], diagnostics: [{ code: "textbefehle.unbekannt" }] };
   }
 
-  if (eingabe.art === "hinzufuegen") {
-    if (event.actor?.role === null || event.actor === null) return nichtBerechtigt();
-    if (!gueltigerBefehlsname(eingabe.name) || eingabe.text.length === 0) {
-      return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
-    }
-    const angelegt = await repository.anlegen({
-      channelId: event.channelId,
-      name: eingabe.zielname,
-      text: eingabe.text,
-      cooldownSekunden: TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN,
-      now: event.receivedAt,
-    }, { userId: event.actor.userId });
-    return angelegt.ok
-      ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde angelegt.`)
-      : angelegt.grund === "nicht_berechtigt"
-        ? nichtBerechtigt()
-        : { actions: [], diagnostics: [{ code: "textbefehle.bereits_vorhanden", detail: { name: eingabe.zielname } }] };
-  }
-
-  if (eingabe.art === "entfernen") {
-    if (event.actor?.role === null || event.actor === null) return nichtBerechtigt();
-    if (!gueltigerBefehlsname(eingabe.zielname)) {
-      return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
-    }
-    const entfernt = await repository.loeschen(event.channelId, eingabe.zielname, { userId: event.actor.userId }, event.receivedAt);
-    return entfernt.ok
-      ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde entfernt.`)
-      : entfernt.grund === "nicht_berechtigt"
-        ? nichtBerechtigt()
-        : { actions: [], diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.zielname } }] };
-  }
-
-  if (eingabe.art === "listen") {
-    const befehle = await repository.auflisten(event.channelId);
-    const liste = befehle.length === 0
-      ? "Keine Textbefehle angelegt."
-      : `Befehle: ${befehle.map((befehl) => `!${befehl.name}`).join(", ")}`;
-    return antwort(event, eingabe, liste);
-  }
-
-  if (!gueltigerBefehlsname(eingabe.name)) {
-    return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
-  }
   const beanspruchung = await repository.beanspruchen(event.channelId, eingabe.name, event.receivedAt);
   if (beanspruchung === null) {
     return {
       actions: [],
       diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.name } }],
+    };
+  }
+  if (!beanspruchung.befehl.enabled) {
+    return {
+      actions: [],
+      diagnostics: [{ code: "textbefehle.deaktiviert", detail: { name: eingabe.name } }],
     };
   }
   if (!beanspruchung.beansprucht) {
@@ -137,6 +92,16 @@ export const verarbeiteTextbefehlNachricht = async (
       actions: [],
       diagnostics: [{ code: "textbefehle.abgekuehlt", detail: { name: eingabe.name, restSekunden } }],
     };
+  }
+
+  if (beanspruchung.befehl.art === "liste") {
+    const befehle = (await repository.auflisten(event.channelId))
+      .filter((befehl) => befehl.enabled)
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const liste = befehle.length === 0
+      ? "Keine Textbefehle angelegt."
+      : `Befehle: ${befehle.map((befehl) => `!${befehl.name}`).join(", ")}`;
+    return antwort(event, eingabe, liste);
   }
 
   return antwort(event, eingabe, befehlTextMitPlatzhaltern(

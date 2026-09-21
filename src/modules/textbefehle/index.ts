@@ -1,6 +1,7 @@
 export type {
   NeuerTextbefehl,
   Textbefehl,
+  TextbefehlArt,
   TextbefehlAenderung,
   TextbefehlBeanspruchung,
   TextbefehlAkteur,
@@ -10,7 +11,7 @@ export type { TextbefehlRepository } from "./repository";
 import { z } from "zod";
 
 import type { BotModule } from "../contract";
-import { createTextbefehlRepository } from "./adapters/d1";
+import { createTextbefehlRepository, initialisiereListenbefehl } from "./adapters/d1";
 import { textbefehlRoutes } from "./routes";
 import { verarbeiteTextbefehlNachricht } from "./service";
 
@@ -21,6 +22,13 @@ export const textbefehlModul: BotModule<typeof settingsSchema> = {
   settingsSchema,
   defaultSettings: {},
   eventSubTypes: ["channel.chat.message"],
+  onEnable: (context, channelId) => initialisiereListenbefehl(
+    context.DB,
+    channelId,
+    context.actor,
+    context.now,
+    context.authorizeMutation,
+  ),
   routes: textbefehlRoutes,
   panel: () => import("./panel"),
   handleEvent: (event, context) => verarbeiteTextbefehlNachricht(

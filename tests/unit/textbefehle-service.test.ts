@@ -10,6 +10,8 @@ const befehl = (name: string, text: string, zuletztVerwendetAt: string | null = 
   channelId: "kanal-a",
   name,
   text,
+  art: "text",
+  enabled: true,
   cooldownSekunden: 5,
   zuletztVerwendetAt,
   createdAt: JETZT,
@@ -117,7 +119,7 @@ describe("Textbefehle-Service", () => {
     const result = await verarbeiteTextbefehlNachricht(eventFuer("!befehl unbekannt"), repositoryFuer([]));
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics).toEqual([{ code: "textbefehle.unbekannt" }]);
+    expect(result.diagnostics).toEqual([{ code: "textbefehle.unbekannt", detail: { name: "befehl" } }]);
   });
 
   it("schweigt während der Abkühlzeit und meldet die Restzeit", async () => {
@@ -130,13 +132,44 @@ describe("Textbefehle-Service", () => {
     expect(result.diagnostics[0]?.code).toBe("textbefehle.abgekuehlt");
   });
 
-  it("verweigert Änderungen ohne Kanalmitgliedschaft", async () => {
+  it("schweigt bei einem ausgeschalteten Befehl und begründet das separat", async () => {
     const result = await verarbeiteTextbefehlNachricht(
-      eventFuer("!befehl hinzufuegen hallo Antwort", { userId: "fremd", login: "fremd", role: null }),
-      repositoryFuer([]),
+      eventFuer("!hallo"),
+      repositoryFuer([{ ...befehl("hallo", "Antwort"), enabled: false }]),
     );
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics).toEqual([{ code: "textbefehle.nicht_berechtigt" }]);
+    expect(result.diagnostics).toEqual([{
+      code: "textbefehle.deaktiviert",
+      detail: { name: "hallo" },
+    }]);
   });
+
+  it("listet nur eingeschaltete Befehle und zählt die eigene Listenzeile mit auf", async () => {
+    const result = await verarbeiteTextbefehlNachricht(
+      eventFuer("!befehle"),
+      repositoryFuer([
+        { ...befehl("befehle", ""), art: "liste" },
+        { ...befehl("aktiv", "Antwort") },
+        { ...befehl("aus", "Antwort"), enabled: false },
+      ]),
+    );
+
+    expect(result.actions).toEqual([{
+      kind: "chat",
+      text: "Befehle: !aktiv, !befehle",
+      replyToMessageId: "twitch-message-1",
+    }]);
+  });
+
+  it("wendet die Abkühlzeit auch auf Listenzeilen an", async () => {
+    const result = await verarbeiteTextbefehlNachricht(
+      eventFuer("!befehle"),
+      repositoryFuer([{ ...befehl("befehle", "", JETZT), art: "liste" }]),
+    );
+
+    expect(result.actions).toEqual([]);
+    expect(result.diagnostics[0]?.code).toBe("textbefehle.abgekuehlt");
+  });
+
 });

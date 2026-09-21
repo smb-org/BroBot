@@ -8,24 +8,8 @@ import {
 } from "../../src/modules/textbefehle/domain";
 
 describe("Textbefehle-Domain", () => {
-  it("zerlegt das Hinzufügen-Kommando mit Leerzeichen im Ausgabetext", () => {
-    expect(befehlAusNachricht("!befehl hinzufuegen willkommen Willkommen  im Kanal")).toEqual({
-      art: "hinzufuegen",
-      name: "befehl",
-      argumente: "hinzufuegen willkommen Willkommen  im Kanal",
-      zielname: "willkommen",
-      text: "Willkommen  im Kanal",
-    });
-  });
-
-  it("erkennt das Entfernen- und Listen-Kommando", () => {
-    expect(befehlAusNachricht("!befehl entfernen willkommen")).toEqual({
-      art: "entfernen",
-      name: "befehl",
-      argumente: "entfernen willkommen",
-      zielname: "willkommen",
-    });
-    expect(befehlAusNachricht("!befehle")).toEqual({ art: "listen", name: "befehle" });
+  it("erkennt ein generisches !-Wort ohne Sonderfall", () => {
+    expect(befehlAusNachricht("!befehle")).toEqual({ art: "befehl", name: "befehle" });
   });
 
   it("erlaubt nur einfache kleingeschriebene Befehlsnamen", () => {
