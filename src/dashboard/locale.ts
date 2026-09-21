@@ -505,6 +505,8 @@ export type EreignisCode =
   | "host.modul.fehler"
   | "host.modul.unbekannt"
   | "host.overlay.nicht_ausgefuehrt"
+  | "host.shoutout.fehlgeschlagen"
+  | "host.shoutout.gesendet"
   | "kanalereignisse.raid.eingehend"
   | "kanalereignisse.raid.ausgehend"
   | "kanalereignisse.shoutout.gesendet"
@@ -526,6 +528,9 @@ export type EreignisCode =
   | "kanalereignisse.verdacht.nachricht"
   | "kanalereignisse.verdacht.einstufung"
   | "kanalereignisse.verdacht.entwarnung"
+  | "raid.ausgehend"
+  | "raid.shoutout"
+  | "raid.ungueltig"
   | "shoutout.unterdrueckt"
   | "werbung.ankuendigung"
   | "werbung.uebersprungen"
@@ -605,6 +610,8 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "host.modul.fehler": "Modulfehler",
     "host.modul.unbekannt": "Unbekanntes Modul",
     "host.overlay.nicht_ausgefuehrt": "Overlay nicht ausgeführt",
+    "host.shoutout.fehlgeschlagen": "Shoutout fehlgeschlagen",
+    "host.shoutout.gesendet": "Shoutout gesendet",
     "kanalereignisse.raid.eingehend": (detail) => `Raid von ${detailText(detail, "quelle", "unbekannt")} mit ${detailZahl(detail, "zuschauer", "unbekannter Anzahl")} Zuschauern`,
     "kanalereignisse.raid.ausgehend": (detail) => `Raid zu ${detailText(detail, "ziel", "unbekannt")} mit ${detailZahl(detail, "zuschauer", "unbekannter Anzahl")} Zuschauern`,
     "kanalereignisse.shoutout.gesendet": (detail) => `Shoutout an ${detailText(detail, "ziel", "unbekannt")}`,
@@ -626,6 +633,9 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "kanalereignisse.verdacht.nachricht": (detail) => `Nachricht von auffälligem Nutzer ${detailText(detail, "person", "unbekannt")} (${detailEinstufung(detail, "unbekannte Einstufung")}): ${detailText(detail, "text", "ohne Text")}`,
     "kanalereignisse.verdacht.einstufung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} verschärft${detailModerator(detail, "")}: ${detailEinstufung(detail, "unbekannt")}`,
     "kanalereignisse.verdacht.entwarnung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} aufgehoben${detailModerator(detail, "")}`,
+    "raid.ausgehend": (detail) => `Ausgehender Raid zu ${detailText(detail, "zielKanalId", "unbekannt")}`,
+    "raid.shoutout": (detail) => `Raid über der Schwelle (${detailZahl(detail, "zuschauer", "unbekannt")} von ${detailZahl(detail, "schwelle", "unbekannt")}): Shoutout und Chatzeile`,
+    "raid.ungueltig": (detail) => `Raid verworfen: ${detailText(detail, "grund", "ungültige Daten")}`,
     "shoutout.unterdrueckt": "Shoutout unterdrückt",
     "werbung.ankuendigung": (detail) => `Werbepause ${detail.automatisch === true ? "automatisch" : "manuell"} gestartet: ${detailZahl(detail, "dauer", "unbekannte Dauer")} Sekunden`,
     "werbung.uebersprungen": (detail) => `Werbepause übersprungen: ${detail.grund === "dauer_null" ? "Dauer ist null" : "Ereignisdaten sind ungültig"}`,
@@ -650,6 +660,8 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "host.modul.fehler": "Module error",
     "host.modul.unbekannt": "Unknown module",
     "host.overlay.nicht_ausgefuehrt": "Overlay not executed",
+    "host.shoutout.fehlgeschlagen": "Shoutout failed",
+    "host.shoutout.gesendet": "Shoutout sent",
     "kanalereignisse.raid.eingehend": (detail) => `Raid from ${detailText(detail, "quelle", "unknown")} with ${detailZahl(detail, "zuschauer", "unknown number")} viewers`,
     "kanalereignisse.raid.ausgehend": (detail) => `Raid to ${detailText(detail, "ziel", "unknown")} with ${detailZahl(detail, "zuschauer", "unknown number")} viewers`,
     "kanalereignisse.shoutout.gesendet": (detail) => `Shoutout sent to ${detailText(detail, "ziel", "unknown")}`,
@@ -671,6 +683,9 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "kanalereignisse.verdacht.nachricht": (detail) => `Message from suspicious user ${detailText(detail, "person", "unknown")} (${detailEinstufung(detail, "unknown classification")}): ${detailText(detail, "text", "no text")}`,
     "kanalereignisse.verdacht.einstufung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} tightened${detailModeratorEn(detail, "")}: ${detailEinstufung(detail, "unknown")}`,
     "kanalereignisse.verdacht.entwarnung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} cleared${detailModeratorEn(detail, "")}`,
+    "raid.ausgehend": (detail) => `Outgoing raid to ${detailText(detail, "zielKanalId", "unknown")}`,
+    "raid.shoutout": (detail) => `Raid above threshold (${detailZahl(detail, "zuschauer", "unknown")} of ${detailZahl(detail, "schwelle", "unknown")}): shoutout and chat line`,
+    "raid.ungueltig": (detail) => `Raid discarded: ${detailText(detail, "grund", "invalid data")}`,
     "shoutout.unterdrueckt": "Shoutout suppressed",
     "werbung.ankuendigung": (detail) => `Ad break ${detail.automatisch === true ? "automatically" : "manually"} started: ${detailZahl(detail, "dauer", "unknown duration")} seconds`,
     "werbung.uebersprungen": (detail) => `Ad break skipped: ${detail.grund === "dauer_null" ? "duration is zero" : "event data is invalid"}`,
@@ -710,6 +725,8 @@ export const ereignisTon: Record<EreignisCode, EreignisTon> = {
   "host.modul.fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
   "host.modul.unbekannt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
   "host.overlay.nicht_ausgefuehrt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "host.shoutout.fehlgeschlagen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "host.shoutout.gesendet": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
   "kanalereignisse.raid.eingehend": { familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
   "kanalereignisse.raid.ausgehend": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
   "kanalereignisse.shoutout.gesendet": { familie: "raid", stufe: "gezeichnet", wort: { de: "Shoutout", en: "Shoutout" }, zahlSchluessel: null },
@@ -731,6 +748,9 @@ export const ereignisTon: Record<EreignisCode, EreignisTon> = {
   "kanalereignisse.verdacht.nachricht": { familie: "moderation", stufe: "voll", wort: { de: "Verdacht", en: "Suspicious" }, zahlSchluessel: null },
   "kanalereignisse.verdacht.einstufung": { familie: "moderation", stufe: "voll", wort: { de: "Einstufung", en: "Classified" }, zahlSchluessel: null },
   "kanalereignisse.verdacht.entwarnung": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entwarnt", en: "Cleared" }, zahlSchluessel: null },
+  "raid.ausgehend": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer", ton: "hinweis" },
+  "raid.shoutout": { familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
+  "raid.ungueltig": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: null, ton: "hinweis" },
   "shoutout.unterdrueckt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
   "werbung.ankuendigung": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: "dauer", ton: "info" },
   "werbung.uebersprungen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },

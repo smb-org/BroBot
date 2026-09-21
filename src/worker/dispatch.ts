@@ -3,6 +3,7 @@ import type { RealtimeEnvelope } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
 import { getChannelMemberForChannel, listChannelModulesForChannel } from "./auth/repository";
 import { sendChatMessage } from "./chat";
+import { sendShoutout } from "./shoutout";
 import { publishRealtimeMessage } from "./realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
@@ -103,26 +104,39 @@ const ausfuehren = async (
   // Reihenfolge bleibt erhalten: Eine Antwort nach einer Ansage ergibt eine
   // andere Unterhaltung als umgekehrt.
   for (const action of actions) {
-    if (action.kind === "chat") {
-      const ergebnis = await sendChatMessage(
-        environment,
-        channelId,
-        action.text,
-        action.replyToMessageId,
-        fetcher,
-      );
-      diagnostics.push(ergebnis.sent
-        ? { code: "host.chat.gesendet", detail: ergebnis.detail }
-        : { code: "host.chat.fehlgeschlagen", detail: { grund: ergebnis.reason, ...ergebnis.detail } });
-      continue;
+    try {
+      if (action.kind === "chat") {
+        const ergebnis = await sendChatMessage(
+          environment,
+          channelId,
+          action.text,
+          action.replyToMessageId,
+          fetcher,
+        );
+        diagnostics.push(ergebnis.sent
+          ? { code: "host.chat.gesendet", detail: ergebnis.detail }
+          : { code: "host.chat.fehlgeschlagen", detail: { grund: ergebnis.reason, ...ergebnis.detail } });
+        continue;
+      }
+      if (action.kind === "shoutout") {
+        const ergebnis = await sendShoutout(environment, channelId, action.zielKanalId, fetcher);
+        diagnostics.push(ergebnis.sent
+          ? { code: "host.shoutout.gesendet", detail: ergebnis.detail }
+          : { code: "host.shoutout.fehlgeschlagen", detail: { ursache: ergebnis.reason, ...ergebnis.detail } });
+        continue;
+      }
+      // Die Realtime-Strecke ist #7. Bis dahin verschwindet eine
+      // Overlay-Aktion nicht stillschweigend, sondern wird als unausgeführt
+      // protokolliert.
+      diagnostics.push({
+        code: "host.overlay.nicht_ausgefuehrt",
+        detail: { typ: action.type },
+      });
+    } catch (error: unknown) {
+      // Eine fehlgeschlagene Aktion darf die nachfolgenden geordneten
+      // Aktionen nicht unterdrücken, etwa den Chat nach einem Shoutout.
+      diagnostics.push({ code: "host.aktion.fehler", detail: { meldung: fehlermeldung(error) } });
     }
-    // Die Realtime-Strecke ist #7. Bis dahin verschwindet eine
-    // Overlay-Aktion nicht stillschweigend, sondern wird als unausgeführt
-    // protokolliert.
-    diagnostics.push({
-      code: "host.overlay.nicht_ausgefuehrt",
-      detail: { typ: action.type },
-    });
   }
   return diagnostics;
 };
