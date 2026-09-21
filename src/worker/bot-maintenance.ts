@@ -324,6 +324,54 @@ const rotateBotTokensWithRetry = async (
 const isInvalidGrant = (error: unknown): boolean =>
   error instanceof TwitchApiError && error.code === "invalid_grant";
 
+/** Bestätigt einen Bot-Widerruf, ohne den Widerrufszustand selbst zu schreiben. */
+export const confirmBotIdentityAuthorization = async (
+  env: Env,
+  expectedUserId: string,
+  now: string,
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> => {
+  const identity = await getBotIdentity(env.DB);
+  if (identity === null || identity.userId !== expectedUserId) return false;
+  const status = await getBotIdentityStatus(env.DB);
+  if (status?.status === "revoked") return true;
+
+  const encryptionKeys = getTokenEncryptionKeys(env);
+  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
+  const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys);
+  if (accessToken === null || refreshToken === null) return false;
+
+  try {
+    await validateBotToken(fetcher, env, accessToken);
+    return false;
+  } catch (error: unknown) {
+    if (!(error instanceof TwitchApiError) || error.status !== 401) return false;
+    try {
+      const refreshed = await refreshBotToken(fetcher, env, refreshToken);
+      const accessTokenCiphertext = await encryptJson(
+        { token: refreshed.accessToken },
+        parseKeyRing(encryptionKeys),
+      );
+      const refreshTokenCiphertext = await encryptJson(
+        { token: refreshed.refreshToken },
+        parseKeyRing(encryptionKeys),
+      );
+      await rotateBotTokensWithRetry(
+        env.DB,
+        identity.accessTokenCiphertext,
+        identity.refreshTokenCiphertext,
+        accessTokenCiphertext,
+        refreshTokenCiphertext,
+        new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString(),
+        now,
+      );
+      return false;
+    } catch (refreshError: unknown) {
+      return isInvalidGrant(refreshError);
+    }
+  }
+};
+
 const refreshFailureReason = (error: unknown): string =>
   error instanceof TwitchApiError && error.code !== null ? error.code : "refresh_failed";
 

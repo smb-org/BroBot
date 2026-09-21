@@ -9,8 +9,10 @@ import {
   eventSubRouter,
   eventSubMessageCutoff,
   isEventSubTimestampFresh,
+  listDesiredEventSubTargets,
   parseEventSubTimestamp,
 } from "../../src/worker/eventsub";
+import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { purgeOldEventSubMessages } from "../../src/worker/auth/repository";
 import { scheduled } from "../../src/worker/scheduled";
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
@@ -75,6 +77,52 @@ const revocationBody = (channelId: string, subscriptionId: string): string => JS
     status: "authorization_revoked",
     condition: { broadcaster_user_id: channelId },
   },
+});
+
+const botRevocationBody = (subscriptionId: string): string => JSON.stringify({
+  subscription: {
+    id: subscriptionId,
+    type: "channel.moderate",
+    version: "2",
+    status: "authorization_revoked",
+    condition: { broadcaster_user_id: "200", moderator_user_id: "777" },
+  },
+});
+
+const insertBotIdentity = async (database: TestD1Database, userId = "777"): Promise<void> => {
+  const accessTokenCiphertext = await encryptJson({ token: "bot-access" }, parseKeyRing(encryptionKeys));
+  const refreshTokenCiphertext = await encryptJson({ token: "bot-refresh" }, parseKeyRing(encryptionKeys));
+  await database.prepare(
+    `INSERT INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, created_at, updated_at)
+     VALUES (1, ?, 'bot', '[]', ?, ?, ?, ?, ?)`,
+  ).bind(
+    userId,
+    accessTokenCiphertext,
+    refreshTokenCiphertext,
+    "2099-09-19T00:00:00.000Z",
+    "2026-09-19T00:00:00.000Z",
+    "2026-09-19T00:00:00.000Z",
+  ).run();
+  await database.prepare(
+    `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+     VALUES (1, 'connected', NULL, ?)`,
+  ).bind("2026-09-19T00:00:00.000Z").run();
+};
+
+const requestUrl = (input: RequestInfo | URL): string =>
+  typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+const invalidTokenFetcher = (): ReturnType<typeof vi.fn> => vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+  const url = requestUrl(input);
+  if (url === "https://id.twitch.tv/oauth2/validate") {
+    return new Response(JSON.stringify({ message: "Token ungültig" }), { status: 401 });
+  }
+  if (url === "https://id.twitch.tv/oauth2/token" && init?.method === "POST") {
+    return new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 });
+  }
+  throw new Error(`unerwarteter Twitch-Aufruf: ${url}`);
 });
 
 const failingBatchDatabase = (database: TestD1Database): D1Database => ({
@@ -319,6 +367,99 @@ describe("EventSub-Eingang", () => {
     expect(row).toEqual(firstRow);
   });
 
+  it("sperrt bei bestätigtem Widerruf des Moderatoren-Abos die Bot-Identität", async () => {
+    await insertChannel(database, "200");
+    await insertLoginIdentityAndSession(database, "200", ["channel:read:ads"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('200', 'werbung', 1, '{}')`,
+    ).run();
+    await insertBotIdentity(database);
+    vi.stubGlobal("fetch", invalidTokenFetcher());
+
+    const response = await eventSubRouter.fetch(
+      signedRequest(secret, "revocation", botRevocationBody("moderate-revoked"), "message-bot-revoked"),
+      environment(),
+    );
+
+    expect(response.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT status, reason FROM bot_identity_status WHERE id = 1",
+    ).first()).resolves.toEqual({ status: "revoked", reason: "authorization_revoked" });
+    await expect(database.prepare(
+      "SELECT status, scopes_json FROM twitch_login_identity WHERE user_id = '200'",
+    ).first()).resolves.toEqual({ status: "connected", scopes_json: JSON.stringify(["channel:read:ads"]) });
+    await expect(listDesiredEventSubTargets(environment().DB, "200")).resolves.toContainEqual({
+      channelId: "200",
+      subscriptionType: "channel.ad_break.begin",
+      variant: "",
+      version: "1",
+    });
+  });
+
+  it("sperrt trotz Widerrufsnachricht nicht, wenn das Bot-Token noch gültig ist", async () => {
+    await insertChannel(database, "200");
+    await insertLoginIdentityAndSession(database, "200", ["channel:bot"]);
+    await insertBotIdentity(database);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url !== "https://id.twitch.tv/oauth2/validate") {
+        throw new Error(`unerwarteter Twitch-Aufruf: ${url}`);
+      }
+      return new Response(JSON.stringify({
+        client_id: "client-id",
+        user_id: "777",
+        login: "bot",
+        expires_in: 3600,
+      }), { status: 200 });
+    }));
+
+    const response = await eventSubRouter.fetch(
+      signedRequest(secret, "revocation", botRevocationBody("moderate-still-valid"), "message-still-valid"),
+      environment(),
+    );
+
+    expect(response.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT status, reason FROM bot_identity_status WHERE id = 1",
+    ).first()).resolves.toEqual({ status: "connected", reason: null });
+    await expect(database.prepare(
+      "SELECT status, scopes_json FROM twitch_login_identity WHERE user_id = '200'",
+    ).first()).resolves.toEqual({ status: "connected", scopes_json: JSON.stringify(["channel:bot"]) });
+  });
+
+  it("wendet die Identitätswirkung einer bekannten Message-ID nach der Wiederverbindung nicht erneut an", async () => {
+    await insertChannel(database, "200");
+    await insertLoginIdentityAndSession(database, "200", ["channel:bot"]);
+    await insertBotIdentity(database);
+    vi.stubGlobal("fetch", invalidTokenFetcher());
+    const body = botRevocationBody("moderate-reconnected");
+
+    await expect(eventSubRouter.fetch(
+      signedRequest(secret, "revocation", body, "message-reconnected"),
+      environment(),
+    )).resolves.toMatchObject({ status: 204 });
+    await database.prepare(
+      "UPDATE bot_identity_status SET status = 'connected', reason = NULL WHERE id = 1",
+    ).run();
+    await database.prepare(
+      "UPDATE twitch_login_identity SET status = 'connected', scopes_json = '[\"channel:bot\"]' WHERE user_id = '200'",
+    ).run();
+
+    const repeated = await eventSubRouter.fetch(
+      signedRequest(secret, "revocation", body, "message-reconnected"),
+      environment(),
+    );
+
+    expect(repeated.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT status, reason FROM bot_identity_status WHERE id = 1",
+    ).first()).resolves.toEqual({ status: "connected", reason: null });
+    await expect(database.prepare(
+      "SELECT status, scopes_json FROM twitch_login_identity WHERE user_id = '200'",
+    ).first()).resolves.toEqual({ status: "connected", scopes_json: JSON.stringify(["channel:bot"]) });
+  });
+
   it("ordnet ein Raid trotz fremder Kanal-ID im Ereignisrumpf dem Abo-Kanal zu", async () => {
     await insertChannel(database, "channel-condition");
     await database.prepare(
@@ -357,8 +498,11 @@ describe("EventSub-Eingang", () => {
   });
 
   it("verbraucht bei einem fehlgeschlagenen Widerrufsspeichern die Message-ID nicht", async () => {
-    await insertChannel(database, "channel-retry");
-    const body = revocationBody("channel-retry", "subscription-retry");
+    await insertChannel(database, "200");
+    await insertLoginIdentityAndSession(database, "200", ["channel:bot"]);
+    await insertBotIdentity(database);
+    vi.stubGlobal("fetch", invalidTokenFetcher());
+    const body = botRevocationBody("subscription-retry");
     const first = await eventSubRouter.fetch(
       signedRequest(secret, "revocation", body, "message-retry"),
       { ...environment(), DB: failingBatchDatabase(database) },
@@ -369,6 +513,9 @@ describe("EventSub-Eingang", () => {
       "SELECT COUNT(*) AS count FROM eventsub_messages",
     ).first<{ count: number }>();
     expect(afterFailure?.count).toBe(0);
+    await expect(database.prepare(
+      "SELECT status, reason FROM bot_identity_status WHERE id = 1",
+    ).first()).resolves.toEqual({ status: "connected", reason: null });
 
     const second = await eventSubRouter.fetch(
       signedRequest(secret, "revocation", body, "message-retry"),
@@ -379,6 +526,9 @@ describe("EventSub-Eingang", () => {
     await expect(database.prepare(
       "SELECT subscription_id FROM eventsub_revocations WHERE subscription_id = 'subscription-retry'",
     ).first()).resolves.toEqual({ subscription_id: "subscription-retry" });
+    await expect(database.prepare(
+      "SELECT status, reason FROM bot_identity_status WHERE id = 1",
+    ).first()).resolves.toEqual({ status: "revoked", reason: "authorization_revoked" });
   });
 
   it("speichert einen Widerruf kanalgebunden für das spätere Panel", async () => {
@@ -419,8 +569,8 @@ describe("EventSub-Eingang", () => {
       reason: "authorization_revoked",
     });
     await expect(database.prepare(
-      "SELECT status, reason FROM twitch_login_identity WHERE user_id = 'channel-42'",
-    ).first()).resolves.toEqual({ status: "revoked", reason: "authorization_revoked" });
+      "SELECT status, scopes_json FROM twitch_login_identity WHERE user_id = 'channel-42'",
+    ).first()).resolves.toEqual({ status: "connected", scopes_json: JSON.stringify(["channel:bot"]) });
   });
 
   it("gewinnt den Kanal eines Shoutout-Widerrufs über die gemeinsame Bedingungsdefinition zurück", async () => {

@@ -47,6 +47,27 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
     }
   });
 
+  it("leitet die zustimmende Identität aus der jeweiligen Bedingung ab", () => {
+    const moderation = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.moderate");
+    expect(moderation?.consentingIdentityFromCondition({
+      broadcaster_user_id: "200",
+      moderator_user_id: "777",
+    })).toEqual({ kind: "bot", userId: "777" });
+
+    const chat = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.chat.message");
+    expect(chat?.consentingIdentityFromCondition({
+      broadcaster_user_id: "200",
+      user_id: "777",
+    })).toEqual({ kind: "bot", userId: "777" });
+
+    const broadcaster = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.ad_break.begin");
+    expect(broadcaster?.consentingIdentityFromCondition({ broadcaster_user_id: "200" }))
+      .toEqual({ kind: "login", userId: "200" });
+
+    const raid = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.raid");
+    expect(raid?.consentingIdentityFromCondition({ to_broadcaster_user_id: "200" })).toBeNull();
+  });
+
   it("nimmt ausgeschaltete Kanalereignisse nicht in den Sollstand auf", async () => {
     const database = new TestD1Database();
     try {
