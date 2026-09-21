@@ -242,27 +242,58 @@ describe("Textbefehle-Panel-Ansicht", () => {
     await waitFor(() => expect(createdBody).toEqual({ name: "befehle", art: "liste", cooldownSekunden: 5 }));
   });
 
-  it("zeigt den Schalter für Bediener sichtbar, aber deaktiviert mit Begründung", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ befehle: [{
-      channelId: "kanal-a",
-      name: "hallo",
-      text: "Antwort",
-      art: "text",
-      enabled: false,
-      cooldownSekunden: 5,
-      zuletztVerwendetAt: null,
-      createdAt: "2026-09-19T12:00:00.000Z",
-      updatedAt: "2026-09-19T12:00:00.000Z",
-    }] })));
+  it("zeigt Bedienern den Schalter offen und Inhaltsaktionen sichtbar, aber gesperrt", async () => {
+    let enabled = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Antwort",
+          art: "text",
+          enabled,
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }));
+      }
+      if (init?.method === "PATCH") {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) as { enabled?: boolean } : {};
+        enabled = body.enabled ?? enabled;
+      }
+      return Promise.resolve(jsonResponse({ befehl: {} }));
+    });
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
     render(<TextbefehlePanel channelId="kanal-a" canManage={false} />);
 
-    await screen.findByRole("row", { name: /!hallo/ });
+    const row = await screen.findByRole("row", { name: /!hallo/ });
     const toggle = await screen.findByRole("switch", { name: "Befehl !hallo: ausgeschaltet" });
-    expect(toggle).toBeDisabled();
-    expect(screen.getAllByText("Nur Broadcaster und Verwalter dürfen Befehle schalten.").length).toBeGreaterThan(0);
+    expect(toggle).toBeEnabled();
+    expect(within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" })).toBeDisabled();
+
+    const create = await screen.findByRole("button", { name: "Befehl anlegen" });
+    expect(create).toBeDisabled();
+    expect(screen.getByLabelText("Name")).toBeDisabled();
+    expect(screen.getByLabelText("Art")).toBeDisabled();
+    expect(screen.getByLabelText("Antworttext")).toBeDisabled();
+    expect(screen.getByRole("spinbutton")).toBeDisabled();
+
+    fireEvent.click(toggle);
+    expect(await screen.findByRole("switch", { name: "Befehl !hallo: eingeschaltet" })).toBeEnabled();
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ enabled: true }))).toBe(true);
+
+    fireEvent.click(row);
+    const editor = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    expect(within(editor).getByLabelText("Name")).toBeDisabled();
+    expect(within(editor).getByLabelText("Antworttext")).toBeDisabled();
+    expect(within(editor).getByLabelText("Abkühlzeit (Sekunden)")).toBeDisabled();
+    expect(within(editor).getByRole("button", { name: "Befehl !hallo speichern" })).toBeDisabled();
+    expect(within(editor).getByRole("button", { name: "Befehl !hallo löschen" })).toBeDisabled();
+    expect(screen.getAllByText("Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.").length).toBeGreaterThan(0);
   });
 
   it("zeigt die Mindeststufe als eigene Spalte und ändert sie über den Verwaltungsweg", async () => {

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
-import { authorizeModuleMutation } from "../../src/worker/module-authorization";
+import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -91,13 +91,63 @@ describe("Textbefehle-D1-Adapter", () => {
       channelId: "kanal-a", name: "neu", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
     }, fremderAkteur)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
     await expect(verweigert.aendern({
-      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", enabled: true, cooldownSekunden: 10, now: NOW,
+      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", art: "text", enabled: true, cooldownSekunden: 10, now: NOW,
     }, fremderAkteur)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
 
     await expect(verweigert.loeschen("kanal-a", "hallo", fremderAkteur, NOW))
       .resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
     await expect(verweigert.loeschen("kanal-a", "fehlt", ACTOR, NOW))
       .resolves.toEqual({ ok: false, grund: "nicht_gefunden" });
+  });
+
+  it("sichert Inhaltsmutationen mit der verwaltenden SQL-Schwelle ab", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    const repository = createTextbefehlRepository(database as unknown as D1Database, authorizeModuleManagementMutation);
+
+    await expect(repository.anlegen({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+
+    await database.prepare("UPDATE channel_members SET role = 'verwalter' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+    await expect(repository.anlegen({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+
+    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+    await expect(repository.aendern({
+      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", art: "text", enabled: true, cooldownSekunden: 10, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+    await expect(repository.loeschen("kanal-a", "hallo", ACTOR, NOW))
+      .resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+  });
+
+  it("schaltet nur enabled und schreibt keine veralteten Inhaltswerte zurück", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    const repository = createTextbefehlRepository(database as unknown as D1Database, authorizeModuleMutation);
+
+    await expect(repository.anlegen({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+
+    await expect(repository.aendern({
+      channelId: "kanal-a",
+      name: "hallo",
+      neuerName: "hallo",
+      text: "Veraltete Antwort",
+      art: "text",
+      enabled: false,
+      cooldownSekunden: 999,
+      now: "2026-09-19T12:01:00.000Z",
+      nurSchalter: true,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+
+    await expect(database.prepare(
+      "SELECT response_text, art, enabled, cooldown_seconds FROM textbefehle_commands WHERE command_name = 'hallo'",
+    ).first()).resolves.toEqual({ response_text: "Antwort", art: "text", enabled: 0, cooldown_seconds: 5 });
   });
 
   it("erlaubt Listen ohne Antworttext, verlangt ihn aber für Textzeilen", async () => {

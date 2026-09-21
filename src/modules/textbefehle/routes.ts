@@ -16,6 +16,7 @@ const bodySchema = z.object({
 const editBodySchema = z.object({
   name: z.string().optional(),
   text: z.string().optional(),
+  art: z.enum(["text", "liste"]).optional(),
   cooldownSekunden: z.number().int().min(0).max(86400).optional(),
   mindeststufe: z.enum(TEXTBEFEHL_MINDESTSTUFEN).optional(),
   enabled: z.boolean().optional(),
@@ -44,6 +45,9 @@ const validEditBody = async (request: Request): Promise<z.infer<typeof editBodyS
   return parsed.data;
 };
 
+const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
+  context.json({ error: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, ändern oder löschen." }, 403);
+
 export const textbefehlRoutes = new Hono<ModuleRouteEnvironment>();
 
 const param = (context: { req: { param: (name: string) => string | undefined } }, name: string): string =>
@@ -57,9 +61,10 @@ textbefehlRoutes.get("/befehle", async (context) => {
 textbefehlRoutes.post("/befehle", async (context) => {
   const body = await validBody(context.req.raw);
   if (body === null) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
+  if (context.get("channelRole") === "bediener") return managementDenied(context);
   const repository = createTextbefehlRepository(
     context.env.DB,
-    context.get("authorizeMutation"),
+    context.get("authorizeManagementMutation"),
     context.get("prepareModuleAudit"),
   );
   const channelId = param(context, "channelId");
@@ -84,21 +89,18 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
   if (before === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   const newName = body.name ?? before.name;
   if (!gueltigerBefehlsname(newName)) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
-  if (body.enabled !== undefined && context.get("channelRole") === "bediener") {
-    return context.json({ error: "Nur Broadcaster und Verwalter dürfen Befehle schalten." }, 403);
-  }
-  if (body.mindeststufe !== undefined && context.get("channelRole") === "bediener") {
-    return context.json({ error: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern." }, 403);
-  }
-  const text = before.art === "liste" ? "" : body.text ?? before.text;
-  if (before.art === "text" && text.trim().length === 0) {
+  const contentChanged = Object.keys(body).some((key) => key !== "enabled");
+  if (contentChanged && context.get("channelRole") === "bediener") return managementDenied(context);
+  const art = body.art ?? before.art;
+  const text = art === "liste" ? "" : body.text ?? before.text;
+  if (art === "text" && text.trim().length === 0) {
     return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
   }
   const cooldownSekunden = body.cooldownSekunden ?? before.cooldownSekunden;
   const mindeststufe = body.mindeststufe ?? before.mindeststufe;
-  const authorizeMutation = body.enabled === undefined && body.mindeststufe === undefined
-    ? context.get("authorizeMutation")
-    : context.get("authorizeManagementMutation");
+  const authorizeMutation = contentChanged
+    ? context.get("authorizeManagementMutation")
+    : context.get("authorizeMutation");
   const geaendert = await createTextbefehlRepository(
     context.env.DB,
     authorizeMutation,
@@ -108,12 +110,14 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
     name: oldName,
     neuerName: newName,
     text,
+    art,
     cooldownSekunden,
     mindeststufe,
     enabled: body.enabled ?? before.enabled,
+    nurSchalter: !contentChanged,
     now: nowIso(),
   }, context.get("actor"));
-  if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, cooldownSekunden, mindeststufe, enabled: body.enabled ?? before.enabled } });
+  if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, art, cooldownSekunden, mindeststufe, enabled: body.enabled ?? before.enabled } });
   if (geaendert.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (geaendert.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
@@ -122,15 +126,14 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
 textbefehlRoutes.delete("/befehle/:name", async (context) => {
   const repository = createTextbefehlRepository(
     context.env.DB,
-    context.get("authorizeMutation"),
+    context.get("authorizeManagementMutation"),
     context.get("prepareModuleAudit"),
   );
-  const geloescht = await repository.loeschen(
-    param(context, "channelId"),
-    param(context, "name"),
-    context.get("actor"),
-    nowIso(),
-  );
+  const channelId = param(context, "channelId");
+  const name = param(context, "name");
+  if (await repository.finden(channelId, name) === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (context.get("channelRole") === "bediener") return managementDenied(context);
+  const geloescht = await repository.loeschen(channelId, name, context.get("actor"), nowIso());
   if (geloescht.ok) return new Response(null, { status: 204 });
   if (geloescht.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (geloescht.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);

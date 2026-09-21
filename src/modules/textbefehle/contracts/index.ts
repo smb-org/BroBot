@@ -30,7 +30,9 @@ export interface TextbefehlAenderung {
   name: string;
   neuerName: string;
   text: string;
+  art: TextbefehlArt;
   enabled: boolean;
+  nurSchalter?: boolean;
   mindeststufe?: TextbefehlMindeststufe;
   cooldownSekunden: number;
   now: string;

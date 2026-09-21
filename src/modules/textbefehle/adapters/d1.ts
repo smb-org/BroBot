@@ -130,47 +130,65 @@ export const createTextbefehlRepository = (
   async aendern(input: TextbefehlAenderung, actor: TextbefehlAkteur): Promise<TextbefehlMutationsergebnis> {
     const before = await this.finden(input.channelId, input.name);
     if (before === null) return fehlgeschlagen("nicht_gefunden");
-    if (input.neuerName !== input.name && await this.finden(input.channelId, input.neuerName) !== null) {
+    if (input.nurSchalter !== true && input.neuerName !== input.name && await this.finden(input.channelId, input.neuerName) !== null) {
       return fehlgeschlagen("existiert");
     }
     const authorization = authorizeMutation(input.channelId, actor, input.now);
     const mindeststufe = input.mindeststufe ?? before.mindeststufe;
-    const mutation = db.prepare(
-      `UPDATE textbefehle_commands
-          SET command_name = ?, response_text = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?, updated_at = ?
-        WHERE channel_id = ? AND command_name = ?
-          AND (? = command_name OR NOT EXISTS (
-            SELECT 1 FROM textbefehle_commands
-             WHERE channel_id = ? AND command_name = ?
-          ))
-          ${authorization.sql}`,
-    ).bind(
-      input.neuerName,
-      input.text,
-      input.enabled ? 1 : 0,
-      mindeststufe,
-      input.cooldownSekunden,
-      input.now,
-      input.channelId,
-      input.name,
-      input.neuerName,
-      input.channelId,
-      input.neuerName,
-      ...authorization.values,
-    );
+    const mutation = input.nurSchalter === true
+      ? db.prepare(
+        `UPDATE textbefehle_commands
+            SET enabled = ?, updated_at = ?
+          WHERE channel_id = ? AND command_name = ?
+            ${authorization.sql}`,
+      ).bind(
+        input.enabled ? 1 : 0,
+        input.now,
+        input.channelId,
+        input.name,
+        ...authorization.values,
+      )
+      : db.prepare(
+        `UPDATE textbefehle_commands
+            SET command_name = ?, response_text = ?, art = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?, updated_at = ?
+          WHERE channel_id = ? AND command_name = ?
+            AND (? = command_name OR NOT EXISTS (
+              SELECT 1 FROM textbefehle_commands
+               WHERE channel_id = ? AND command_name = ?
+            ))
+            ${authorization.sql}`,
+      ).bind(
+        input.neuerName,
+        input.text,
+        input.art,
+        input.enabled ? 1 : 0,
+        mindeststufe,
+        input.cooldownSekunden,
+        input.now,
+        input.channelId,
+        input.name,
+        input.neuerName,
+        input.channelId,
+        input.neuerName,
+        ...authorization.values,
+      );
+    const after = input.nurSchalter === true
+      ? { ...before, enabled: input.enabled }
+      : {
+        ...before,
+        name: input.neuerName,
+        text: input.text,
+        art: input.art,
+        enabled: input.enabled,
+        mindeststufe,
+        cooldownSekunden: input.cooldownSekunden,
+      };
     const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
       action: "textbefehle.befehl.geändert",
       before: auditWerte(before),
-      after: auditWerte({
-        ...before,
-        name: input.neuerName,
-        text: input.text,
-        enabled: input.enabled,
-        mindeststufe,
-        cooldownSekunden: input.cooldownSekunden,
-      }),
+      after: auditWerte(after),
     }, input.now);
     if (changes > 0) return erfolgreich();
     if (await this.finden(input.channelId, input.neuerName) !== null && input.neuerName !== input.name) {
