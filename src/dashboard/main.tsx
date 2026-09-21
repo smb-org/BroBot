@@ -39,10 +39,12 @@ import {
   setChannelModuleEnabled,
 } from "./api";
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTaste, ModuleWorkspace, NavigationIcon, ZustandZeile, type LedStatus, type ZustandsTon } from "./module-panels";
+import { SubInspector } from "./inspector";
+import { useInspectorSelection } from "./inspector-selection";
 import { MembersPage } from "./members";
 import { BetreiberSeite } from "./betreiber";
 import { betreiberTexte, kanalPanelTexte, roleLabel } from "./labels";
-import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail, type EreignisZahlSchluessel } from "./locale";
+import { dashboardGemeinsameTexte, dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail, type EreignisZahlSchluessel } from "./locale";
 import { disabledStatusWord, eventSubName, moduleName, statusWord } from "./module-labels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus } from "./realtime";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
@@ -876,7 +878,7 @@ const subscriptionDisplayName = (subscription: PanelEventSubSubscription): strin
 const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubSubscription[] }): ReactElement => {
   const texte = dashboardTexte();
   const leer = "—";
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const { selectedKey, select, rowRef, close } = useInspectorSelection<string>();
   const selected = subscriptions.find((subscription) => subscriptionKey(subscription) === selectedKey) ?? null;
   return (
     <section className={`content-section inspektor-bereich${selected === null ? "" : " inspektor-bereich--offen"}`} aria-label={texte.system.abonnements}>
@@ -893,10 +895,11 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
                 const tone = subscriptionTone(subscription.status);
                 return <tr
                   key={key}
+                  ref={rowRef(key)}
                   tabIndex={0}
                   aria-selected={selectedKey === key}
-                  onClick={() => { setSelectedKey(key); }}
-                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedKey(key); } }}
+                  onClick={() => { select(key); }}
+                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(key); } }}
                 >
                   <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
                   <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status)} /></td>
@@ -907,8 +910,7 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
           </div>
         )}
       </div>
-      {selected === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.system.aboInspector}>
-        <div className="inspector-section__heading"><h3>{subscriptionDisplayName(selected)}</h3><span className="mono muted">{selected.subscriptionId ?? leer}</span></div>
+      {selected === null ? null : <SubInspector ariaLabel={texte.system.aboInspector} title={subscriptionDisplayName(selected)} identifier={selected.subscriptionId ?? leer} closeLabel={dashboardGemeinsameTexte().schliessen} onClose={close}>
         <dl className="eigenschaften">
           <div><dt>{texte.system.aboTyp}</dt><dd className="mono">{selected.subscriptionType}</dd></div>
           <div><dt>{texte.system.aboVersion}</dt><dd className="mono">{selected.version}</dd></div>
@@ -917,7 +919,7 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
           <div><dt>{texte.system.twitchMeldung}</dt><dd>{selected.message ?? leer}</dd></div>
           <div><dt>{texte.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? leer : String(selected.statusCode)}</dd></div>
         </dl>
-      </section>}
+      </SubInspector>}
     </section>
   );
 };
@@ -968,7 +970,7 @@ interface SystemPageProperties {
 
 const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPage }: SystemPageProperties): ReactElement => {
   const texte = dashboardTexte();
-  const [selectedAuditId, setSelectedAuditId] = useState<string | null>(null);
+  const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>();
   const selectedAudit = auditState.data?.entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   return (
     <>
@@ -991,17 +993,16 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
             <div className={auditState.status === "loading" ? "veraltet" : undefined}>
               <table className="tabelle audit-tabelle">
                 <thead><tr><th scope="col">{texte.system.zeit}</th><th scope="col">{texte.system.aktion}</th><th scope="col">{texte.system.wer}</th></tr></thead>
-                <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { setSelectedAuditId(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedAuditId(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
+                <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
               </table>
             </div>
             {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texte.system.aeltereEintraegeLaden : texte.system.aeltereEintraege}</button>}
           </> : null}
         </div>
-        {selectedAudit === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.system.aenderungsdaten}>
-          <div className="inspector-section__heading"><h3>{selectedAudit.action}</h3><span className="mono muted">{selectedAudit.auditId}</span></div>
+        {selectedAudit === null ? null : <SubInspector ariaLabel={texte.system.aenderungsdaten} title={selectedAudit.action} identifier={selectedAudit.auditId} closeLabel={dashboardGemeinsameTexte().schliessen} onClose={closeAudit}>
           <dl className="eigenschaften"><div><dt>{texte.system.wer}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
           <div className="inspector-columns"><div><h4>{texte.system.vorher}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texte.system.nachher}</h4><pre>{selectedAudit.after}</pre></div></div>
-        </section>}
+        </SubInspector>}
       </section>
     </>
   );
@@ -1286,7 +1287,7 @@ const EventsPage = ({
     refreshFirstPage: () => onRefreshFirstPage(channelId, filters),
     scrollToBeginning,
   });
-  const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
+  const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>();
   const groups = eventsState.data === null ? [] : eventGroups(eventsState.data.entries);
   const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
   const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronologisch);
@@ -1309,7 +1310,7 @@ const EventsPage = ({
                   <tbody>{groups.map((group) => {
                     const entry = group.representative;
                     const eventLabel = ereignisText(entry.code, eventDetail(entry.detail));
-                    return <tr key={group.key} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { setSelectedGroupKey(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedGroupKey(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
+                    return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
                   })}</tbody>
                 </table>
               </div>
@@ -1317,14 +1318,13 @@ const EventsPage = ({
             <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
           </> : null}
         </div>
-        {selectedGroup === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.ereignisse.detail}>
-          <div className="inspector-section__heading"><h3>{texte.ereignisse.vorgang}</h3><span className="mono muted">{selectedGroup.representative.triggerId || selectedGroup.representative.eventId}</span></div>
+        {selectedGroup === null ? null : <SubInspector ariaLabel={texte.ereignisse.detail} title={texte.ereignisse.vorgang} identifier={selectedGroup.representative.triggerId || selectedGroup.representative.eventId} closeLabel={dashboardGemeinsameTexte().schliessen} onClose={closeGroup}>
           <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
           <div className="inspector-section__heading"><h3>{texte.ereignisse.verlauf}</h3></div>
           <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
             return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
           })}</ol>
-        </section>}
+        </SubInspector>}
       </section>
     </>
   );

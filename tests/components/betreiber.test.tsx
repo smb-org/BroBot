@@ -191,4 +191,33 @@ describe("Betreiberebene", () => {
     expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
     expect(bereich.children[1]).toHaveClass("sub-inspector");
   });
+
+  it("schließt den Betreiber-Kanal-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+    richteBetreiberEin(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const row = await screen.findByRole("row", { name: /alpha_login/ });
+    row.focus();
+    fireEvent.click(row);
+    expect(row).toHaveFocus();
+    await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    const closeButton = screen.getByRole("button", { name: "Schließen" });
+    closeButton.focus();
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole("region", { name: "Kanal bearbeiten: Alpha" })).not.toBeInTheDocument();
+    expect(row).toHaveAttribute("aria-selected", "false");
+    expect(row).toHaveFocus();
+
+    fireEvent.click(row);
+    const reopenedInspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    expect(reopenedInspector).toBeInTheDocument();
+    expect(row).toHaveFocus();
+    const reopenedCloseButton = within(reopenedInspector).getByRole("button", { name: "Schließen" });
+    reopenedCloseButton.focus();
+    fireEvent.keyDown(reopenedCloseButton, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Kanal bearbeiten: Alpha" })).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+  });
 });

@@ -12,6 +12,7 @@ interface TextbefehlZeileProperties {
   onChanged: () => Promise<void>;
   selected: boolean;
   onSelect: () => void;
+  rowRef: (row: HTMLTableRowElement | null) => void;
   canManageContent: boolean;
   toggleBusy: boolean;
   onToggle: () => Promise<void>;
@@ -19,9 +20,44 @@ interface TextbefehlZeileProperties {
   onMinimumChange: (mindeststufe: TextbefehlMindeststufe) => Promise<void>;
 }
 
-type TextbefehlEditorProperties = Pick<TextbefehlZeileProperties, "channelId" | "language" | "initial" | "onChanged" | "canManageContent">;
+type TextbefehlEditorProperties = Pick<TextbefehlZeileProperties, "channelId" | "language" | "initial" | "onChanged" | "canManageContent"> & { onClose: () => void };
 
-const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageContent }: TextbefehlEditorProperties): ReactElement => {
+interface TextbefehleSelection {
+  selectedKey: string | null;
+  select: (key: string) => void;
+  rowRef: (key: string) => (row: HTMLTableRowElement | null) => void;
+  close: () => void;
+}
+
+const useTextbefehleSelection = (): TextbefehleSelection => {
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedKeyRef = useRef<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+
+  const select = useCallback((key: string): void => {
+    selectedKeyRef.current = key;
+    setSelectedKey(key);
+  }, []);
+
+  const rowRef = useCallback((key: string) => (row: HTMLTableRowElement | null): void => {
+    if (row === null) {
+      rowRefs.current.delete(key);
+    } else {
+      rowRefs.current.set(key, row);
+    }
+  }, []);
+
+  const close = useCallback((): void => {
+    const key = selectedKeyRef.current;
+    selectedKeyRef.current = null;
+    setSelectedKey(null);
+    if (key !== null) rowRefs.current.get(key)?.focus();
+  }, []);
+
+  return { selectedKey, select, rowRef, close };
+};
+
+const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageContent, onClose }: TextbefehlEditorProperties): ReactElement => {
   const labels = textbefehleTexte(language);
   const [name, setName] = useState(initial.name);
   const [text, setText] = useState(initial.text);
@@ -70,8 +106,21 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
   };
 
   return (
-    <section className="command-inspector sub-inspector config-section" aria-label={labels.details(initial.name)}>
-      <div className="section-heading"><h3>!{initial.name}</h3><span className="mono muted command-inspector__meta">{labels.spalten.zuletzt} {relativeZeit(initial.zuletztVerwendetAt, labels)}</span></div>
+    <section className="command-inspector sub-inspector config-section" aria-label={labels.details(initial.name)} onKeyDown={(event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }}>
+      <div className="inspector-section__heading">
+        <h3>{`!${initial.name}`}</h3>
+        <span className="mono muted"><span className="command-inspector__meta">{labels.spalten.zuletzt} {relativeZeit(initial.zuletztVerwendetAt, labels)}</span></span>
+        <button className="button button--quiet inspector-close" type="button" aria-label={dashboardGemeinsameTexte().schliessen} onClick={onClose}>
+          <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
       {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
       <label className="config-field config-field--mittel">
         {labels.name}
@@ -105,7 +154,7 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
           aria-modal="true"
           aria-labelledby="text-command-delete-confirmation-title"
           aria-describedby="text-command-delete-confirmation-description"
-          onKeyDown={(event) => { if (event.key === "Escape") setConfirmingDelete(false); }}
+          onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setConfirmingDelete(false); } }}
         >
           <h3 id="text-command-delete-confirmation-title">{labels.loeschenTitel(initial.name)}</h3>
           <p id="text-command-delete-confirmation-description">{labels.loeschenBestaetigung(initial.name)}</p>
@@ -138,12 +187,12 @@ const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: 
   }
 };
 
-const TextbefehlZeile = ({ initial, language, selected, onSelect, canManageContent, toggleBusy, onToggle, minimumBusy, onMinimumChange }: TextbefehlZeileProperties): ReactElement => {
+const TextbefehlZeile = ({ initial, language, selected, onSelect, rowRef, canManageContent, toggleBusy, onToggle, minimumBusy, onMinimumChange }: TextbefehlZeileProperties): ReactElement => {
   const labels = textbefehleTexte(language);
   const minimumDisabledReason = canManageContent ? undefined : labels.mindeststufeGesperrt;
   const mindeststufe = (initial as { mindeststufe?: TextbefehlMindeststufe }).mindeststufe ?? "alle";
   return (
-    <tr tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
+    <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
       <td>{initial.art === "text" ? labels.artText : labels.artListe}</td>
       <td className="tabelle__answer" title={initial.art === "text" ? initial.text : undefined}>{initial.art === "text" ? initial.text : "—"}</td>
@@ -180,10 +229,10 @@ const TextbefehlZeile = ({ initial, language, selected, onSelect, canManageConte
   );
 };
 
-export const TextbefehlePanel = ({ channelId, language, canManage: canManageContent = true }: { channelId: string; language?: DashboardLanguage; canManage?: boolean }): ReactElement => {
+export const TextbefehlePanel = ({ channelId, language, canManage: canManageContent = true, onCloseInspector }: { channelId: string; language?: DashboardLanguage; canManage?: boolean; onCloseInspector?: () => void }): ReactElement => {
   const labels = textbefehleTexte(language);
   const [befehle, setBefehle] = useState<Textbefehl[]>([]);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+  const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useTextbefehleSelection();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -199,13 +248,13 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
     try {
       const data = await ladeTextbefehle(channelId);
       setBefehle(data);
-      setSelectedName((current) => current !== null && data.some((befehl) => befehl.name === current) ? current : null);
+      if (selectedName !== null && !data.some((befehl) => befehl.name === selectedName)) closeSelection();
     } catch {
       setError(labels.fehler);
     } finally {
       setLoading(false);
     }
-  }, [channelId, labels.fehler]);
+  }, [channelId, closeSelection, labels.fehler, selectedName]);
 
   useEffect(() => {
     let active = true;
@@ -222,6 +271,10 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
   }, [channelId, labels.fehler]);
 
   const selected = useMemo(() => befehle.find((befehl) => befehl.name === selectedName) ?? null, [befehle, selectedName]);
+  const closeInspector = useCallback((): void => {
+    closeSelection();
+    onCloseInspector?.();
+  }, [closeSelection, onCloseInspector]);
   const nameValid = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name.trim());
   const canCreate = nameValid && (art === "liste" || text.trim().length > 0);
 
@@ -275,10 +328,10 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
             {loading ? <p className="loading-line">{labels.laden}</p> : null}
             {error === null ? null : <p className="form-error" role="alert">{error}</p>}
             {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-            {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
+            {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { selectName(befehl.name); }} rowRef={rowRef(befehl.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
           </section>
         </div>
-        {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} />}
+        {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} />}
       </section>
       <form className="command-create config-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>
         <div className="section-heading"><h2>{labels.anlegen}</h2></div>

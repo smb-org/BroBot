@@ -367,4 +367,83 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(bereich?.children[0]).toHaveClass("inspektor-bereich__liste");
     expect(bereich?.children[1]).toHaveClass("sub-inspector");
   });
+
+  it("schließt den Befehls-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Hallo",
+          art: "text",
+          enabled: true,
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    const onCloseInspector = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" onCloseInspector={onCloseInspector} />);
+
+    const row = await screen.findByRole("row", { name: /!hallo/ });
+    row.focus();
+    fireEvent.click(row);
+    expect(row).toHaveFocus();
+    await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    const closeButton = screen.getByRole("button", { name: "Schließen" });
+    closeButton.focus();
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
+    expect(row).toHaveAttribute("aria-selected", "false");
+    expect(row).toHaveFocus();
+    expect(onCloseInspector).toHaveBeenCalledOnce();
+
+    fireEvent.click(row);
+    const reopenedInspector = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    expect(reopenedInspector).toBeInTheDocument();
+    expect(row).toHaveFocus();
+    const reopenedCloseButton = within(reopenedInspector).getByRole("button", { name: "Schließen" });
+    reopenedCloseButton.focus();
+    fireEvent.keyDown(reopenedCloseButton, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+    expect(onCloseInspector).toHaveBeenCalledTimes(2);
+  });
+
+  it("reicht den Schließen-Weg des Modul-Contracts an den Host weiter", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Hallo",
+          art: "text",
+          enabled: true,
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    const onCloseInspector = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" onCloseInspector={onCloseInspector} />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
+    fireEvent.keyDown(await screen.findByRole("region", { name: "Eigenschaften von !hallo" }), { key: "Escape" });
+
+    expect(onCloseInspector).toHaveBeenCalledOnce();
+  });
 });

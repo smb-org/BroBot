@@ -2756,4 +2756,155 @@ describe("Dashboard-Grundgerüst", () => {
     expect(botScopes).not.toHaveClass("sub-inspector");
     expect(broadcasterScopes).not.toHaveClass("sub-inspector");
   });
+
+  it("schließt den Abonnement-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const beta = healthyChannel("kanal-b", "Beta");
+    const subscription = {
+      subscriptionType: "channel.chat.message",
+      variant: "",
+      version: "1",
+      subscriptionId: "chat-1",
+      status: "enabled",
+      reason: null,
+      message: null,
+      statusCode: null,
+      updatedAt: "2026-09-18T04:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel, beta] });
+      if (path.endsWith("/system")) return jsonResponse({ ...system, subscriptions: [subscription] });
+      if (path.endsWith("/audit-log")) return jsonResponse(audit);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText("Chat-Nachrichten")).closest("tr");
+    if (row === null) throw new Error("Abo-Zeile fehlt");
+    row.focus();
+    fireEvent.click(row);
+    expect(row).toHaveFocus();
+    await screen.findByRole("region", { name: "Abo-Details" });
+    const closeButton = screen.getByRole("button", { name: "Schließen" });
+    closeButton.focus();
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole("region", { name: "Abo-Details" })).not.toBeInTheDocument();
+    expect(row).toHaveAttribute("aria-selected", "false");
+    expect(row).toHaveFocus();
+
+    fireEvent.click(row);
+    const reopenedInspector = await screen.findByRole("region", { name: "Abo-Details" });
+    expect(reopenedInspector).toBeInTheDocument();
+    expect(row).toHaveFocus();
+    const reopenedCloseButton = within(reopenedInspector).getByRole("button", { name: "Schließen" });
+    reopenedCloseButton.focus();
+    fireEvent.keyDown(reopenedCloseButton, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Abo-Details" })).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+
+    fireEvent.click(row);
+    expect(await screen.findByRole("region", { name: "Abo-Details" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Kanal auswählen: Alpha" }));
+    const option = within(screen.getByRole("listbox", { name: "Kanal auswählen" })).getByRole("option", { name: /Alpha/ });
+    fireEvent.keyDown(option, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Kanal auswählen" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Abo-Details" })).toBeInTheDocument();
+  });
+
+  it("schließt den Audit-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const entry = {
+      auditId: "audit-1",
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      action: "module.enabled",
+      before: "{}",
+      after: "{}",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/audit-log")) return jsonResponse({ entries: [entry], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText("module.enabled")).closest("tr");
+    if (row === null) throw new Error("Audit-Zeile fehlt");
+    row.focus();
+    fireEvent.click(row);
+    expect(row).toHaveFocus();
+    await screen.findByRole("region", { name: "Änderungsdaten" });
+    const closeButton = screen.getByRole("button", { name: "Schließen" });
+    closeButton.focus();
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+
+    fireEvent.click(row);
+    const reopenedInspector = await screen.findByRole("region", { name: "Änderungsdaten" });
+    expect(reopenedInspector).toBeInTheDocument();
+    expect(row).toHaveFocus();
+    const reopenedCloseButton = within(reopenedInspector).getByRole("button", { name: "Schließen" });
+    reopenedCloseButton.focus();
+    fireEvent.keyDown(reopenedCloseButton, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+  });
+
+  it("schließt den Ereignis-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const entry = {
+      eventId: "event-1",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      moduleId: "textbefehle",
+      triggerId: "trigger-1",
+      code: "textbefehle.ausgeloest",
+      detail: '{"name":"wiki","antwort":"Antwort"}',
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+    };
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({ entries: [entry], nextCursor: null });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText("Befehl !wiki ausgeführt")).closest("tr");
+    if (row === null) throw new Error("Ereignis-Zeile fehlt");
+    row.focus();
+    fireEvent.click(row);
+    expect(row).toHaveFocus();
+    await screen.findByRole("region", { name: "Detail" });
+    const closeButton = screen.getByRole("button", { name: "Schließen" });
+    closeButton.focus();
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+
+    fireEvent.click(row);
+    const reopenedInspector = await screen.findByRole("region", { name: "Detail" });
+    expect(reopenedInspector).toBeInTheDocument();
+    expect(row).toHaveFocus();
+    const reopenedCloseButton = within(reopenedInspector).getByRole("button", { name: "Schließen" });
+    reopenedCloseButton.focus();
+    fireEvent.keyDown(reopenedCloseButton, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+  });
 });
