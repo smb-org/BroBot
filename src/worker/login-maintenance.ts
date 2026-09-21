@@ -3,6 +3,7 @@ import {
   listLoginIdentities,
   revokeLoginIdentityAndSessionsForUser,
   rotateLoginTokensForUser,
+  setLoginIdentityTokenScopes,
   setLoginIdentityStatusIfCurrent,
 } from "./auth/repository";
 import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
@@ -90,8 +91,8 @@ export const confirmLoginIdentityAuthorization = async (
     now,
     () => getLoginIdentity(env.DB, userId),
     (identity) => identity.status === "revoked",
-    (db, identity, accessTokenCiphertext, refreshTokenCiphertext, expiresAt, updatedAt) =>
-      rotateLoginTokensWithRetry(
+    async (db, identity, accessTokenCiphertext, refreshTokenCiphertext, expiresAt, updatedAt, scopes) => {
+      const replaced = await rotateLoginTokensWithRetry(
         db,
         identity.userId,
         identity.accessTokenCiphertext,
@@ -101,7 +102,19 @@ export const confirmLoginIdentityAuthorization = async (
         expiresAt,
         updatedAt,
         identity.updatedAt,
-      ),
+      );
+      if (replaced) {
+        await setLoginIdentityTokenScopes(
+          db,
+          identity.userId,
+          JSON.stringify(scopes),
+          updatedAt,
+          accessTokenCiphertext,
+          refreshTokenCiphertext,
+        );
+      }
+      return replaced;
+    },
     fetcher,
   );
 };
@@ -132,7 +145,15 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
   let statusExpectedAccessTokenCiphertext = identity.accessTokenCiphertext;
   let statusExpectedRefreshTokenCiphertext = identity.refreshTokenCiphertext;
   try {
-    await validateBotToken(fetch, env, accessToken);
+    const validated = await validateBotToken(fetch, env, accessToken);
+    await setLoginIdentityTokenScopes(
+      env.DB,
+      identity.userId,
+      JSON.stringify(validated.scopes),
+      now,
+      identity.accessTokenCiphertext,
+      identity.refreshTokenCiphertext,
+    );
   } catch (error: unknown) {
     if (error instanceof TwitchApiError && error.status === 401) {
       validateReturned401 = true;
@@ -174,6 +195,14 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
         identity.updatedAt,
       );
       if (!replaced) return;
+      await setLoginIdentityTokenScopes(
+        env.DB,
+        identity.userId,
+        JSON.stringify(refreshed.scopes),
+        now,
+        accessTokenCiphertext,
+        refreshTokenCiphertext,
+      );
       statusExpectedAccessTokenCiphertext = accessTokenCiphertext;
       statusExpectedRefreshTokenCiphertext = refreshTokenCiphertext;
     } catch (error: unknown) {

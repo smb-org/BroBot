@@ -46,6 +46,7 @@ export interface LoginIdentityRecord {
   userId: string;
   login: string;
   scopesJson: string;
+  tokenScopesJson: string;
   accessTokenCiphertext: string;
   refreshTokenCiphertext: string;
   expiresAt: string;
@@ -182,6 +183,7 @@ interface LoginIdentityRow {
   user_id: string;
   login: string;
   scopes_json: string;
+  token_scopes_json: string;
   access_token_ciphertext: string;
   refresh_token_ciphertext: string;
   expires_at: string;
@@ -292,6 +294,7 @@ const mapLoginIdentity = (row: LoginIdentityRow): LoginIdentityRecord => ({
   userId: row.user_id,
   login: row.login,
   scopesJson: row.scopes_json,
+  tokenScopesJson: row.token_scopes_json,
   accessTokenCiphertext: row.access_token_ciphertext,
   refreshTokenCiphertext: row.refresh_token_ciphertext,
   expiresAt: row.expires_at,
@@ -1117,7 +1120,7 @@ export const rememberEventSubMessageAndRevocation = async (
         ).bind(revocation.reason, revocation.updatedAt, identity.userId),
         db.prepare(
           `UPDATE twitch_login_identity
-              SET scopes_json = '[]'
+              SET scopes_json = '[]', token_scopes_json = '[]'
             WHERE changes() = 1
               AND user_id = ?
               AND status = 'revoked'`,
@@ -1196,7 +1199,7 @@ export const listLoginIdentities = async (
   now: string = new Date().toISOString(),
 ): Promise<LoginIdentityRecord[]> => {
   const result = await db.prepare(
-    `SELECT user_id, login, scopes_json, access_token_ciphertext,
+    `SELECT user_id, login, scopes_json, token_scopes_json, access_token_ciphertext,
             refresh_token_ciphertext, expires_at, status, reason,
             created_at, updated_at
        FROM twitch_login_identity
@@ -1217,7 +1220,7 @@ export const getLoginIdentity = async (
   userId: string,
 ): Promise<LoginIdentityRecord | null> => {
   const row = await db.prepare(
-    `SELECT user_id, login, scopes_json, access_token_ciphertext,
+    `SELECT user_id, login, scopes_json, token_scopes_json, access_token_ciphertext,
             refresh_token_ciphertext, expires_at, status, reason,
             created_at, updated_at
        FROM twitch_login_identity
@@ -1254,11 +1257,12 @@ export const upsertLoginIdentity = async (
   db: D1Database,
   identity: LoginIdentityRecord,
 ): Promise<void> => {
+  // scopes_json wächst als historische Zustimmung; token_scopes_json beschreibt nur das gespeicherte Token und ersetzt.
   await db.prepare(
     `INSERT INTO twitch_login_identity
-      (user_id, login, scopes_json, access_token_ciphertext,
+      (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext,
        refresh_token_ciphertext, expires_at, status, reason, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
        login = excluded.login,
        scopes_json = (
@@ -1270,6 +1274,7 @@ export const upsertLoginIdentity = async (
             ORDER BY scope
            )
        ),
+       token_scopes_json = excluded.token_scopes_json,
        access_token_ciphertext = excluded.access_token_ciphertext,
        refresh_token_ciphertext = excluded.refresh_token_ciphertext,
        expires_at = excluded.expires_at,
@@ -1280,6 +1285,7 @@ export const upsertLoginIdentity = async (
     identity.userId,
     identity.login,
     identity.scopesJson,
+    identity.tokenScopesJson,
     identity.accessTokenCiphertext,
     identity.refreshTokenCiphertext,
     identity.expiresAt,
@@ -1288,6 +1294,39 @@ export const upsertLoginIdentity = async (
     identity.createdAt,
     identity.updatedAt,
   ).run();
+};
+
+export const setLoginIdentityTokenScopes = async (
+  db: D1Database,
+  userId: string,
+  scopesJson: string,
+  updatedAt: string,
+  expectedAccessTokenCiphertext?: string,
+  expectedRefreshTokenCiphertext?: string,
+): Promise<void> => {
+  const currentToken = expectedAccessTokenCiphertext !== undefined && expectedRefreshTokenCiphertext !== undefined;
+  const statement = currentToken
+    ? db.prepare(
+        `UPDATE twitch_login_identity
+          SET token_scopes_json = ?, updated_at = ?
+        WHERE user_id = ?
+          AND status <> 'revoked'
+          AND access_token_ciphertext = ?
+          AND refresh_token_ciphertext = ?`,
+    ).bind(
+      scopesJson,
+      updatedAt,
+      userId,
+      expectedAccessTokenCiphertext,
+      expectedRefreshTokenCiphertext,
+    )
+    : db.prepare(
+        `UPDATE twitch_login_identity
+          SET token_scopes_json = ?, updated_at = ?
+        WHERE user_id = ?
+          AND status <> 'revoked'`,
+    ).bind(scopesJson, updatedAt, userId);
+  await statement.run();
 };
 
 export const setLoginIdentityStatus = async (
@@ -1304,7 +1343,9 @@ export const setLoginIdentityStatus = async (
   ).bind(status, reason, updatedAt, userId).run();
   if (status === "revoked") {
     await db.prepare(
-      `UPDATE twitch_login_identity SET scopes_json = '[]' WHERE user_id = ? AND status = 'revoked'`,
+      `UPDATE twitch_login_identity
+          SET scopes_json = '[]', token_scopes_json = '[]'
+        WHERE user_id = ? AND status = 'revoked'`,
     ).bind(userId).run();
   }
 };
@@ -1336,7 +1377,7 @@ export const setLoginIdentityStatusIfCurrent = async (
   if (result.meta.changes > 0 && status === "revoked") {
     await db.prepare(
       `UPDATE twitch_login_identity
-          SET scopes_json = '[]'
+          SET scopes_json = '[]', token_scopes_json = '[]'
         WHERE user_id = ? AND status = 'revoked'
           AND access_token_ciphertext = ?
           AND refresh_token_ciphertext = ?`,
@@ -1355,7 +1396,7 @@ export const revokeLoginIdentityAndSessionsForUser = async (
 ): Promise<boolean> => {
   const identityRevocation = db.prepare(
     `UPDATE twitch_login_identity
-        SET status = 'revoked', reason = ?, updated_at = ?, scopes_json = '[]'
+        SET status = 'revoked', reason = ?, updated_at = ?, scopes_json = '[]', token_scopes_json = '[]'
       WHERE user_id = ?
         AND status <> 'revoked'
         AND access_token_ciphertext = ?

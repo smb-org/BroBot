@@ -31,6 +31,20 @@ Im laufenden Betrieb taucht der Broadcaster in keinem Ablauf auf. Er autorisiert
 
 ## 3. Scope-Listen
 
+In `twitch_login_identity` beantworten die beiden Scope-Spalten unterschiedliche Fragen: `scopes_json` hält die jemals erteilte Zustimmung fest, wird bei Logins vereinigt und von der EventSub-Zielauswahl als `grantedScopes` gelesen; `token_scopes_json` hält dagegen den Umfang des aktuell gespeicherten Tokens fest, wird beim Login und in der Wartung ersetzt und schrumpft bei einem neuen Token oder Widerruf. Die erste Aussage verhindert, dass ein erneuter Login laufende Abos verliert, die zweite verhindert 401-Fehler bei Helix-Aufrufen mit dem aktuellen Broadcaster-Token.
+
+| Spalte | Beantwortet | Pflege und Leser |
+|---|---|---|
+| `scopes_json` | Was hat der Nutzer jemals erteilt? | Login vereinigt; EventSub-Zielauswahl liest `grantedScopes`. |
+| `token_scopes_json` | Welche Scopes trägt das gespeicherte Token gerade? | Login und Wartung ersetzen; künftige Broadcaster-Helix-Aufrufe lesen den aktuellen Umfang. |
+
+`token_scopes_json` hat heute **noch keinen Leser**. Das ist Absicht: Die
+Spalte entsteht, bevor der erste Helix-Aufruf mit einem fremden Nutzertoken
+gebraucht wird, nicht mittendrin. Die Werbe-Vorwarnung aus #22 ist dieser Fall
+ausdrücklich **nicht** — Get Ad Schedule nimmt laut Twitch auch ein App-Token,
+sofern die Zustimmung einmal erteilt wurde, und stützt sich damit auf
+`scopes_json` (siehe [0011](0011-werbe-vorwarnung.md) Abschnitt 2).
+
 ### Login
 
 ```

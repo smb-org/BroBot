@@ -18,6 +18,7 @@ const loginIdentity = (userId: string, scopes: string[], status: "connected" | "
   userId,
   login: userId,
   scopesJson: JSON.stringify(scopes),
+  tokenScopesJson: JSON.stringify(scopes),
   accessTokenCiphertext: `access-${userId}`,
   refreshTokenCiphertext: `refresh-${userId}`,
   expiresAt: "2099-09-19T00:00:00.000Z",
@@ -44,6 +45,19 @@ describe("Broadcaster-Scopes", () => {
       .resolves.toEqual({ scopes_json: '["channel:bot","channel:read:ads"]' });
   });
 
+  it("ersetzt beim kleineren Zweit-Login die Token-Scopes und behält die erteilte Vereinigung", async () => {
+    database = new TestD1Database();
+    await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:read:ads"]));
+    await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot"]));
+
+    await expect(database.prepare(
+      "SELECT scopes_json, token_scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'",
+    ).first()).resolves.toEqual({
+      scopes_json: '["channel:bot","channel:read:ads"]',
+      token_scopes_json: '["channel:bot"]',
+    });
+  });
+
   it("leitet den vollständigen Broadcaster-Umfang aus Login, Modulen und Abschnitt 7 ab", () => {
     database = new TestD1Database();
     expect(new Set(listeAlleBroadcasterScopes())).toEqual(new Set([
@@ -59,6 +73,16 @@ describe("Broadcaster-Scopes", () => {
 
     await expect(database.prepare("SELECT status, scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'").first())
       .resolves.toEqual({ status: "revoked", scopes_json: "[]" });
+  });
+
+  it("leert beim Widerruf auch die Token-Scopes", async () => {
+    database = new TestD1Database();
+    await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:read:ads"]));
+    await setLoginIdentityStatus(asD1(database), "user-1", "revoked", "authorization_revoked", "2026-09-20T10:00:00.000Z");
+
+    await expect(database.prepare(
+      "SELECT scopes_json, token_scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'",
+    ).first()).resolves.toEqual({ scopes_json: "[]", token_scopes_json: "[]" });
   });
 
   it("ermittelt die Autorisierung nur aus aktivierten Modulen eigener Broadcaster-Kanäle", async () => {

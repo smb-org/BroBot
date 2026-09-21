@@ -26,6 +26,8 @@ import {
   setBotChannelStatus,
   setBotIdentityStatusIfCurrent,
   setBotIdentityStatus,
+  setLoginIdentityStatus,
+  setLoginIdentityTokenScopes,
   getBotChannelStatusCheckLock,
   releaseBotChannelStatusCheck,
   tryReserveBotChannelStatusCheck,
@@ -122,6 +124,7 @@ interface LoginIdentitaetFixture {
   userId: string;
   login: string;
   scopesJson: string;
+  tokenScopesJson: string;
   accessTokenCiphertext: string;
   refreshTokenCiphertext: string;
   expiresAt: string;
@@ -139,6 +142,7 @@ const saeeLoginIdentitaet = async (
     userId: "user-1",
     login: "tester",
     scopesJson: "[]",
+    tokenScopesJson: "[]",
     accessTokenCiphertext: "access-alt",
     refreshTokenCiphertext: "refresh-alt",
     expiresAt: "2026-09-19T00:00:00.000Z",
@@ -150,13 +154,14 @@ const saeeLoginIdentitaet = async (
   };
   await database.prepare(
     `INSERT INTO twitch_login_identity
-      (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+      (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext, refresh_token_ciphertext,
        expires_at, status, reason, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     identitaet.userId,
     identitaet.login,
     identitaet.scopesJson,
+    identitaet.tokenScopesJson,
     identitaet.accessTokenCiphertext,
     identitaet.refreshTokenCiphertext,
     identitaet.expiresAt,
@@ -556,6 +561,7 @@ describe("Auth-D1-Repository", () => {
       userId: "user-1",
       login: "tester",
       scopesJson: "[\"user:read:moderated_channels\"]",
+      tokenScopesJson: "[\"user:read:moderated_channels\"]",
       accessTokenCiphertext: "access-ciphertext",
       refreshTokenCiphertext: "refresh-ciphertext",
       expiresAt: "2026-09-18T02:00:00.000Z",
@@ -578,6 +584,62 @@ describe("Auth-D1-Repository", () => {
       await expect(getLoginIdentity(database as unknown as D1Database, "user-1")).resolves.toEqual(identity);
       await expect(listLoginIdentities(database as unknown as D1Database, "2026-09-18T01:00:00.000Z"))
         .resolves.toEqual([identity]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("verwirft veraltete Token-Scopes nach einer zwischenzeitlichen Login-Rotation", async () => {
+    const database = new TestD1Database();
+    try {
+      await saeeLoginIdentitaet(database, { tokenScopesJson: "[\"aktuell\"]" });
+      await database.prepare(
+        `UPDATE twitch_login_identity
+            SET access_token_ciphertext = 'access-neu', refresh_token_ciphertext = 'refresh-neu'
+          WHERE user_id = 'user-1'`,
+      ).run();
+
+      await setLoginIdentityTokenScopes(
+        database as unknown as D1Database,
+        "user-1",
+        "[\"veraltet\"]",
+        "2026-09-18T01:00:00.000Z",
+        "access-alt",
+        "refresh-alt",
+      );
+
+      await expect(database.prepare(
+        "SELECT token_scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'",
+      ).first()).resolves.toEqual({ token_scopes_json: '["aktuell"]' });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("füllt nach einem parallelen Widerruf keine Token-Scopes wieder auf", async () => {
+    const database = new TestD1Database();
+    try {
+      await saeeLoginIdentitaet(database, { tokenScopesJson: "[\"aktuell\"]" });
+      await setLoginIdentityStatus(
+        database as unknown as D1Database,
+        "user-1",
+        "revoked",
+        "authorization_revoked",
+        "2026-09-18T01:00:00.000Z",
+      );
+
+      await setLoginIdentityTokenScopes(
+        database as unknown as D1Database,
+        "user-1",
+        "[\"veraltet\"]",
+        "2026-09-18T01:01:00.000Z",
+        "access-alt",
+        "refresh-alt",
+      );
+
+      await expect(database.prepare(
+        "SELECT token_scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'",
+      ).first()).resolves.toEqual({ token_scopes_json: "[]" });
     } finally {
       database.close();
     }
