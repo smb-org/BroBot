@@ -5,7 +5,7 @@ import type { BotModule, ModuleEvent, ModuleResult } from "../../src/modules/con
 import { dispatchEventSubNotification, selectModulesForEvent } from "../../src/worker/dispatch";
 import { upsertBotIdentity } from "../../src/worker/auth/repository";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { insertChannel, insertMember } from "./fixtures";
+import { insertAppAccessToken, insertChannel, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const CHAT_TYP = "channel.chat.message";
@@ -39,6 +39,7 @@ const aktivierung = (moduleId: string, enabled = true, settings = '{"praefix":"!
 const umgebung = (database: TestD1Database) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
+  TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: schluessel,
 });
 
@@ -67,6 +68,13 @@ const mitBot = async (database: TestD1Database): Promise<void> => {
     createdAt: JETZT,
     updatedAt: JETZT,
   });
+  await insertAppAccessToken(
+    database,
+    await encryptJson({ token: "app-token" }, parseKeyRing(schluessel)),
+    "2099-09-21T00:00:00.000Z",
+    JETZT,
+    JETZT,
+  );
 };
 
 const protokoll = async (database: TestD1Database) => {

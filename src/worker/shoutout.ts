@@ -1,6 +1,5 @@
-import { getTokenEncryptionKeys } from "./auth/crypto";
 import { getBotIdentity } from "./auth/repository";
-import { decryptStoredToken } from "./bot-maintenance";
+import { getAppAccessToken } from "./app-token";
 
 const SHOUTOUT_URL = "https://api.twitch.tv/helix/chat/shoutouts";
 
@@ -31,6 +30,7 @@ export const sendShoutout = async (
   environment: {
     DB: D1Database;
     TWITCH_CLIENT_ID: string;
+    TWITCH_CLIENT_SECRET: string;
     TOKEN_ENCRYPTION_KEYS?: string;
     SESSION_ENCRYPTION_KEYS?: string;
   },
@@ -42,11 +42,16 @@ export const sendShoutout = async (
   const identity = await getBotIdentity(environment.DB);
   if (identity === null) return { sent: false, reason: "bot_identity_missing", detail };
 
-  const accessToken = await decryptStoredToken(
-    identity.accessTokenCiphertext,
-    getTokenEncryptionKeys(environment),
-  );
-  if (accessToken === null) return { sent: false, reason: "bot_token_unreadable", detail };
+  let accessToken: string;
+  try {
+    accessToken = await getAppAccessToken(
+      environment as unknown as Env,
+      new Date().toISOString(),
+      fetcher,
+    );
+  } catch {
+    return { sent: false, reason: "app_token_unavailable", detail };
+  }
 
   const url = new URL(SHOUTOUT_URL);
   // Absender ist der eigene Kanal, Empfaenger der Quellkanal des Raids.

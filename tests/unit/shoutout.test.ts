@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { upsertBotIdentity } from "../../src/worker/auth/repository";
 import { sendShoutout } from "../../src/worker/shoutout";
-import { insertChannel } from "./fixtures";
+import { insertAppAccessToken, insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const SCHLUESSEL = JSON.stringify({
@@ -14,6 +14,7 @@ const SCHLUESSEL = JSON.stringify({
 const umgebung = (database: TestD1Database, keys = SCHLUESSEL) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
+  TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: keys,
 });
 
@@ -33,10 +34,21 @@ const botEinrichten = async (database: TestD1Database, ciphertext = "lesbar"): P
 };
 
 describe("Helix-Shoutout", () => {
-  it("sendet einen Shoutout mit Bot-Identität und Zielparametern", async () => {
+  const appTokenEinrichten = async (database: TestD1Database): Promise<void> => {
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(SCHLUESSEL)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-19T00:00:00.000Z",
+      "2026-09-19T00:00:00.000Z",
+    );
+  };
+
+  it("sendet einen Shoutout mit App-Token, Bot-ID und Zielparametern", async () => {
     const database = new TestD1Database();
     try {
-      await botEinrichten(database, await encryptJson({ token: "bot-token" }, parseKeyRing(SCHLUESSEL)));
+      await botEinrichten(database, "unlesbare-bot-chiffre");
+      await appTokenEinrichten(database);
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
 
       await expect(sendShoutout(umgebung(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
@@ -49,7 +61,7 @@ describe("Helix-Shoutout", () => {
           method: "POST",
           headers: {
             "Client-ID": "client-id",
-            Authorization: "Bearer bot-token",
+            Authorization: "Bearer app-token",
           },
         }),
       );
@@ -62,6 +74,7 @@ describe("Helix-Shoutout", () => {
     const database = new TestD1Database();
     try {
       await botEinrichten(database, await encryptJson({ token: "bot-token" }, parseKeyRing(SCHLUESSEL)));
+      await appTokenEinrichten(database);
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
 
       await expect(sendShoutout(umgebung(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
@@ -74,17 +87,17 @@ describe("Helix-Shoutout", () => {
     }
   });
 
-  it("meldet ein unlesbares Bot-Token ohne Helix-Aufruf", async () => {
+  it("meldet ein nicht beschaffbares App-Token ohne Helix-Aufruf", async () => {
     const database = new TestD1Database();
     try {
-      await botEinrichten(database);
-      const fetcher = vi.fn<typeof fetch>();
+      await botEinrichten(database, "unlesbare-bot-chiffre");
+      const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("App-Token nicht erreichbar"));
 
       await expect(sendShoutout(umgebung(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
         sent: false,
-        reason: "bot_token_unreadable",
+        reason: "app_token_unavailable",
       });
-      expect(fetcher).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledWith("https://id.twitch.tv/oauth2/token", expect.anything());
     } finally {
       database.close();
     }

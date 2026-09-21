@@ -5,7 +5,7 @@ import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapte
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { upsertBotIdentity } from "../../src/worker/auth/repository";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { insertChannel, insertMember } from "./fixtures";
+import { insertAppAccessToken, insertChannel, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const JETZT = "2026-09-19T12:00:00.000Z";
@@ -29,6 +29,7 @@ const koerper = (fetcher: ReturnType<typeof fetcherFuerChat>, index: number): Re
 const umgebung = (database: TestD1Database) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
+  TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: schluessel,
 });
 
@@ -81,6 +82,13 @@ const mitBot = async (database: TestD1Database): Promise<void> => {
     createdAt: JETZT,
     updatedAt: JETZT,
   });
+  await insertAppAccessToken(
+    database,
+    await encryptJson({ token: "app-token" }, parseKeyRing(schluessel)),
+    "2099-09-21T00:00:00.000Z",
+    JETZT,
+    JETZT,
+  );
 };
 
 const eventCodes = async (database: TestD1Database): Promise<string[]> => {
