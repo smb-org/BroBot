@@ -280,6 +280,43 @@ describe("Dashboard-Grundgerüst", () => {
     expect(firstCell.getAttribute("title")).toBe("2026-09-18T04:00:00.000Z");
   });
 
+  it("zeigt Abo-Stufen im Zahl-Chip als T1/T2/T3/Prime statt roh, unbekannte Werte ohne Chip", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({
+        entries: [
+          { eventId: "t1", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier1","stufe":"1000"}', actorUserId: null },
+          { eventId: "t2", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier2","stufe":"2000"}', actorUserId: null },
+          { eventId: "t3", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier3","stufe":"3000"}', actorUserId: null },
+          { eventId: "prime", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"primeperson","stufe":"Prime"}', actorUserId: null },
+          { eventId: "unbekannt", createdAt: "2026-09-18T04:04:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"rätselperson","stufe":"9999"}', actorUserId: null },
+        ],
+        nextCursor: null,
+      });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const t1Row = (await screen.findByText("Sub von tier1")).closest("tr");
+    const t2Row = (await screen.findByText("Sub von tier2")).closest("tr");
+    const t3Row = (await screen.findByText("Sub von tier3")).closest("tr");
+    const primeRow = (await screen.findByText("Sub von primeperson")).closest("tr");
+    const unbekanntRow = (await screen.findByText("Sub von rätselperson")).closest("tr");
+    if (t1Row === null || t2Row === null || t3Row === null || primeRow === null || unbekanntRow === null) {
+      throw new Error("Ereigniszeile fehlt");
+    }
+
+    expect([...t1Row.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["T1", "Abo"]);
+    expect([...t2Row.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["T2", "Abo"]);
+    expect([...t3Row.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["T3", "Abo"]);
+    expect([...primeRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["Prime", "Abo"]);
+    expect([...unbekanntRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["Abo"]);
+  });
+
   it("erreicht Ereignisse über die Navigation und lädt die nächste Seite", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const ersteSeite = {

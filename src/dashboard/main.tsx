@@ -1100,8 +1100,13 @@ const eventChipNumber = (detail: EreignisDetail, key: EreignisZahlSchluessel): s
   if (key === null) return null;
   const value = detail[key];
   if (key === "stufe") {
-    if (typeof value === "string" && /^\d+$/.test(value) && value !== "0") return value;
-    return typeof value === "number" && Number.isFinite(value) && value !== 0 ? String(value) : null;
+    const stufe = typeof value === "number" ? String(value) : value;
+    if (typeof stufe !== "string") return null;
+    if (stufe === "1000") return "T1";
+    if (stufe === "2000") return "T2";
+    if (stufe === "3000") return "T3";
+    if (stufe.toLowerCase() === "prime") return "Prime";
+    return null;
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return null;
   if (key === "anzahl") return `${formatZahl(value)}x`;
