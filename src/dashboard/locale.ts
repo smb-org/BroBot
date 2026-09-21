@@ -6,6 +6,7 @@ export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
 
 export interface DashboardCommonTexte {
   abbrechen: string;
+  schliessen: string;
   speichern: string;
   rollen: Record<PanelChannelRole, string>;
 }
@@ -13,6 +14,7 @@ export interface DashboardCommonTexte {
 const gemeinsameTexte: LocaleCatalog<DashboardCommonTexte> = {
   de: {
     abbrechen: "Abbrechen",
+    schliessen: "Schließen",
     speichern: "Speichern",
     rollen: {
       broadcaster: "Broadcaster",
@@ -22,6 +24,7 @@ const gemeinsameTexte: LocaleCatalog<DashboardCommonTexte> = {
   },
   en: {
     abbrechen: "Cancel",
+    schliessen: "Close",
     speichern: "Save",
     rollen: {
       broadcaster: "Broadcaster",

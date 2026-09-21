@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
@@ -190,5 +190,99 @@ describe("Betreiberebene", () => {
     expect(bereich.children).toHaveLength(2);
     expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
     expect(bereich.children[1]).toHaveClass("sub-inspector");
+  });
+
+  it("schließt den Betreiber-Kanal-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+    richteBetreiberEin(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const row = await screen.findByRole("row", { name: /alpha_login/ });
+    row.focus();
+    fireEvent.click(row);
+    expect(row).toHaveFocus();
+    await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    const closeButton = screen.getByRole("button", { name: "Schließen" });
+    closeButton.focus();
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole("region", { name: "Kanal bearbeiten: Alpha" })).not.toBeInTheDocument();
+    expect(row).toHaveAttribute("aria-selected", "false");
+    expect(row).toHaveFocus();
+
+    fireEvent.click(row);
+    const reopenedInspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    expect(reopenedInspector).toBeInTheDocument();
+    expect(row).toHaveFocus();
+    const reopenedCloseButton = within(reopenedInspector).getByRole("button", { name: "Schließen" });
+    reopenedCloseButton.focus();
+    fireEvent.keyDown(reopenedCloseButton, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Kanal bearbeiten: Alpha" })).not.toBeInTheDocument();
+    expect(row).toHaveFocus();
+  });
+
+  it("öffnet die Kanalfreigabe in der Inspektorspalte und wechselt ohne Doppelbelegung", async () => {
+    richteBetreiberEin(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const bereich = await screen.findByRole("region", { name: "Kanalübersicht" });
+    expect(bereich.children).toHaveLength(1);
+    const plus = within(bereich).getByRole("button", { name: "Kanal freigeben" });
+    fireEvent.click(plus);
+    const freigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
+    expect(bereich.children).toHaveLength(2);
+
+    const row = await screen.findByRole("row", { name: /alpha_login/ });
+    fireEvent.click(row);
+    expect(screen.queryByRole("region", { name: "Kanal freigeben" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" })).toBeInTheDocument();
+
+    fireEvent.click(plus);
+    expect(screen.queryByRole("region", { name: "Kanal bearbeiten: Alpha" })).not.toBeInTheDocument();
+    const reopenedFreigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
+    expect(row).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.click(within(reopenedFreigabe).getByRole("button", { name: "Schließen" }));
+    expect(screen.queryByRole("region", { name: "Kanal freigeben" })).not.toBeInTheDocument();
+    expect(plus).toHaveFocus();
+
+    fireEvent.click(plus);
+    const escapedFreigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
+    fireEvent.keyDown(escapedFreigabe, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Kanal freigeben" })).not.toBeInTheDocument();
+    expect(plus).toHaveFocus();
+    expect(freigabe).not.toBeInTheDocument();
+  });
+
+  it("gibt einen Kanal weiterhin über das geöffnete Formular frei", async () => {
+    const freigegeben = { ...kanal };
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = anfrageUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], betreiber: true }));
+      if (url.pathname === "/api/betreiber") return Promise.resolve(antwort({ channels: [freigegeben] }));
+      if (url.pathname === "/api/betreiber/audit") return Promise.resolve(antwort({ entries: [], nextCursor: null }));
+      if (url.pathname === "/api/betreiber/kanaele/123/mitglieder") return Promise.resolve(antwort(mitglieder));
+      if (url.pathname === "/api/betreiber/nutzer") return Promise.resolve(antwort({ user: { userId: "789", login: "beta_login", displayName: "Beta" } }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(antwort({ token: "csrf" }));
+      if (url.pathname === "/api/betreiber/kanaele" && init?.method === "POST") return Promise.resolve(antwort({ channel: freigegeben }));
+      return Promise.resolve(antwort({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const plus = await screen.findByRole("button", { name: "Kanal freigeben" });
+    fireEvent.click(plus);
+    const freigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
+    fireEvent.change(within(freigabe).getByRole("textbox", { name: "Twitch-Login" }), { target: { value: "beta_login" } });
+    fireEvent.click(within(freigabe).getByRole("button", { name: "Nutzer suchen" }));
+    expect(await within(freigabe).findByText(/Beta/)).toBeInTheDocument();
+    fireEvent.click(within(freigabe).getByRole("button", { name: "Kanal freigeben" }));
+    fireEvent.click(await within(freigabe).findByRole("button", { name: "Endgültig freigeben" }));
+
+    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => anfrageUrl(input).pathname === "/api/betreiber/kanaele" && init?.method === "POST")).toBe(true));
   });
 });

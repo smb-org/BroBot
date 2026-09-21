@@ -105,6 +105,8 @@ export interface ModulePanelProperties {
   language?: ModuleLanguage;
   /** Darf die Ansicht verwaltende Bedienelemente ausführen? */
   canManage?: boolean;
+  /** Wird beim Schließen eines Inspektors vom Host ausgeführt. */
+  onCloseInspector?: () => void;
 }
 
 export type ModuleLanguage = "de" | "en";

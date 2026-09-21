@@ -22,6 +22,8 @@ import {
 } from "./api";
 import { betreiberHandlungLabel, betreiberTexte, roleLabel } from "./labels";
 import { dashboardGemeinsameTexte, formatZeitpunkt, formatZahl } from "./locale";
+import { SubInspector } from "./inspector";
+import { useInspectorSelection } from "./inspector-selection";
 import { NavigationIcon, ZustandZeile, type ZustandsTon } from "./module-panels";
 
 interface BetreiberSeitenEigenschaften {
@@ -163,10 +165,12 @@ const KanalInspector = ({
   kanal,
   beiAnmeldungErforderlich,
   aufÜbersichtLaden,
+  onClose,
 }: {
   kanal: PanelBetreiberKanalÜbersicht;
   beiAnmeldungErforderlich: () => void;
   aufÜbersichtLaden: () => Promise<void>;
+  onClose: () => void;
 }): ReactElement => {
   const texte = betreiberTexte();
   const [mitglieder, setMitglieder] = useState<Ladezustand<PanelBetreiberMitgliederResponse>>(() => leererLadezustand());
@@ -288,8 +292,7 @@ const KanalInspector = ({
   };
 
   return (
-    <section className="sub-inspector" aria-label={texte.kanalBearbeiten(kanal.displayName)}>
-      <div className="section-heading"><h2>{texte.kanalBearbeiten(kanal.displayName)}</h2></div>
+    <SubInspector ariaLabel={texte.kanalBearbeiten(kanal.displayName)} title={texte.kanalBearbeiten(kanal.displayName)} identifier={kanal.channelId} closeLabel={dashboardGemeinsameTexte().schliessen} onClose={onClose}>
       <ZustandZeile
         label={texte.identität}
         tone={verbindungsTon(kanal)}
@@ -349,16 +352,18 @@ const KanalInspector = ({
         )}
         {aktionsfehler === null ? null : <p className="form-error" role="alert">{aktionsfehler}</p>}
       </section>
-    </section>
+    </SubInspector>
   );
 };
 
 const KanalFreigabe = ({
   aufÜbersichtLaden,
   beiAnmeldungErforderlich,
+  onClose,
 }: {
   aufÜbersichtLaden: () => Promise<void>;
   beiAnmeldungErforderlich: () => void;
+  onClose: () => void;
 }): ReactElement => {
   const texte = betreiberTexte();
   const [login, setLogin] = useState("");
@@ -410,8 +415,7 @@ const KanalFreigabe = ({
   };
 
   return (
-    <section className="config-section" aria-label={texte.kanalFreigeben}>
-      <div className="section-heading"><h2>{texte.kanalFreigeben}</h2></div>
+    <SubInspector ariaLabel={texte.kanalFreigeben} title={texte.kanalFreigeben} closeLabel={dashboardGemeinsameTexte().schliessen} onClose={onClose}>
       <form className="inspector-form" onSubmit={(ereignis) => { void sucheNutzer(ereignis); }}>
         <label className="config-field config-field--mittel" htmlFor="betreiber-kanal-login">{texte.twitchLogin}
           <input id="betreiber-kanal-login" value={login} onChange={(ereignis) => { setLogin(ereignis.target.value); }} autoComplete="off" />
@@ -445,7 +449,7 @@ const KanalFreigabe = ({
         </div>
       ) : null}
       {aktionsfehler === null ? null : <p className="form-error" role="alert">{aktionsfehler}</p>}
-    </section>
+    </SubInspector>
   );
 };
 
@@ -517,15 +521,28 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
   const texte = betreiberTexte();
   const [übersicht, setÜbersicht] = useState<Ladezustand<PanelBetreiberKanalÜbersicht[]>>(() => leererLadezustand());
   const [audit, setAudit] = useState<Ladezustand<PanelBetreiberAuditResponse>>(() => leererLadezustand());
-  const [ausgewählterKanalId, setAusgewählterKanalId] = useState<string | null>(null);
+  const { selectedKey: ausgewählterKanalId, select: selectKanal, rowRef: kanalRowRef, close: closeKanal } = useInspectorSelection<string>();
+  const [kanalFreigabeOffen, setKanalFreigabeOffen] = useState(false);
+  const kanalFreigabeButton = useRef<HTMLButtonElement | null>(null);
   const [weitereAuditLädt, setWeitereAuditLädt] = useState(false);
+
+  const öffneKanalFreigabe = (): void => {
+    closeKanal();
+    setKanalFreigabeOffen(true);
+    kanalFreigabeButton.current?.focus();
+  };
+
+  const schließeKanalFreigabe = (): void => {
+    setKanalFreigabeOffen(false);
+    kanalFreigabeButton.current?.focus();
+  };
 
   const ladeÜbersicht = async (): Promise<void> => {
     setÜbersicht((aktuell) => aktuell.data === null ? ladezustand() : { ...aktuell, status: "loading", error: null });
     try {
       const antwort = await holeBetreiberÜbersicht();
       setÜbersicht(geladenerZustand(antwort.channels));
-      setAusgewählterKanalId((aktuell) => aktuell !== null && antwort.channels.some((kanal) => kanal.channelId === aktuell) ? aktuell : null);
+      if (ausgewählterKanalId !== null && !antwort.channels.some((kanal) => kanal.channelId === ausgewählterKanalId)) closeKanal();
     } catch (fehler: unknown) {
       setÜbersicht({ status: "error", data: null, error: fehlertext(fehler, texte.fehler) });
       if (fehler instanceof PanelApiError && fehler.status === 401) beiAnmeldungErforderlich();
@@ -541,7 +558,7 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
         const [kanalantwort, auditantwort] = await Promise.all([holeBetreiberÜbersicht(), holeBetreiberAudit()]);
         if (abgebrochen) return;
         setÜbersicht(geladenerZustand(kanalantwort.channels));
-        setAusgewählterKanalId(null);
+        closeKanal();
         setAudit(geladenerZustand(auditantwort));
       } catch (fehler: unknown) {
         if (abgebrochen) return;
@@ -553,7 +570,7 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
     };
     void laden();
     return () => { abgebrochen = true; };
-  }, [beiAnmeldungErforderlich, texte.fehler]);
+  }, [beiAnmeldungErforderlich, closeKanal, texte.fehler]);
 
   const ausgewählterKanal = übersicht.data?.find((kanal) => kanal.channelId === ausgewählterKanalId) ?? null;
 
@@ -577,9 +594,16 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
         <div className="module-detail-heading__icon" aria-hidden="true"><NavigationIcon kind="members" className="module-heading-glyph" /></div>
         <div className="module-detail-heading__copy"><h1>{texte.titel}</h1><p>{texte.untertitel(formatZahl(übersicht.data?.length ?? 0))}</p></div>
       </header>
-      <section className={`config-section inspektor-bereich${ausgewählterKanal === null ? "" : " inspektor-bereich--offen"}`} aria-label={texte.kanalübersicht}>
+      <section className={`config-section inspektor-bereich${ausgewählterKanal === null && !kanalFreigabeOffen ? "" : " inspektor-bereich--offen"}`} aria-label={texte.kanalübersicht}>
         <div className="inspektor-bereich__liste">
-          <div className="section-heading"><h2>{texte.kanalübersicht}</h2></div>
+          <div className="section-heading">
+            <h2>{texte.kanalübersicht}</h2>
+            <button ref={kanalFreigabeButton} className="button button--quiet inspector-close" type="button" aria-label={texte.kanalFreigeben} onClick={öffneKanalFreigabe}>
+              <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
           {übersicht.status === "loading" && übersicht.data === null ? <p className="loading-line">{texte.laden}</p> : null}
           {übersicht.error === null ? null : <p className="form-error" role="alert">{übersicht.error}</p>}
           {übersicht.data?.length === 0 ? <p className="muted">{texte.keineKanäle}</p> : null}
@@ -587,14 +611,15 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
             <div className="tabelle-wrap">
               <table className="tabelle tabelle--inhalt">
                 <thead><tr><th scope="col">{texte.login}</th><th scope="col">{texte.kennung}</th><th scope="col">{texte.vollzustimmung}</th><th scope="col">{texte.broadcaster}</th><th scope="col">{texte.verwalter}</th><th scope="col">{texte.bediener}</th><th scope="col">{texte.identität}</th></tr></thead>
-                <tbody>{übersicht.data.map((kanal) => <tr key={kanal.channelId} tabIndex={0} aria-selected={kanal.channelId === ausgewählterKanalId} onClick={() => { setAusgewählterKanalId(kanal.channelId); }} onKeyDown={(ereignis) => { if (ereignis.key === "Enter" || ereignis.key === " ") { ereignis.preventDefault(); setAusgewählterKanalId(kanal.channelId); } }}><th scope="row">{kanal.login}</th><td className="mono">{kanal.channelId}</td><td>{kanal.vollzustimmung ? texte.ja : texte.nein}</td><td className="zahl">{formatZahl(kanal.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(kanal.memberCounts.verwalter)}</td><td className="zahl">{formatZahl(kanal.memberCounts.bediener)}</td><td><span className="led" data-status={verbindungsTon(kanal) === "healthy" ? "green" : verbindungsTon(kanal) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{verbindungswort(kanal)}</span></span></td></tr>)}</tbody>
+                <tbody>{übersicht.data.map((kanal) => <tr key={kanal.channelId} ref={kanalRowRef(kanal.channelId)} tabIndex={0} aria-selected={kanal.channelId === ausgewählterKanalId} onClick={() => { setKanalFreigabeOffen(false); selectKanal(kanal.channelId); }} onKeyDown={(ereignis) => { if (ereignis.key === "Enter" || ereignis.key === " ") { ereignis.preventDefault(); setKanalFreigabeOffen(false); selectKanal(kanal.channelId); } }}><th scope="row">{kanal.login}</th><td className="mono">{kanal.channelId}</td><td>{kanal.vollzustimmung ? texte.ja : texte.nein}</td><td className="zahl">{formatZahl(kanal.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(kanal.memberCounts.verwalter)}</td><td className="zahl">{formatZahl(kanal.memberCounts.bediener)}</td><td><span className="led" data-status={verbindungsTon(kanal) === "healthy" ? "green" : verbindungsTon(kanal) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{verbindungswort(kanal)}</span></span></td></tr>)}</tbody>
               </table>
             </div>
           )}
         </div>
-        {ausgewählterKanal === null ? null : <KanalInspector key={ausgewählterKanal.channelId} kanal={ausgewählterKanal} beiAnmeldungErforderlich={beiAnmeldungErforderlich} aufÜbersichtLaden={ladeÜbersicht} />}
+        {ausgewählterKanal === null
+          ? kanalFreigabeOffen ? <KanalFreigabe aufÜbersichtLaden={ladeÜbersicht} beiAnmeldungErforderlich={beiAnmeldungErforderlich} onClose={schließeKanalFreigabe} /> : null
+          : <KanalInspector key={ausgewählterKanal.channelId} kanal={ausgewählterKanal} beiAnmeldungErforderlich={beiAnmeldungErforderlich} aufÜbersichtLaden={ladeÜbersicht} onClose={closeKanal} />}
       </section>
-      <KanalFreigabe aufÜbersichtLaden={ladeÜbersicht} beiAnmeldungErforderlich={beiAnmeldungErforderlich} />
       <BetreiberAudit auditZustand={audit} kanäle={übersicht.data ?? []} aufWeitereLaden={() => { void ladeWeitereAudit(); }} weitereLädt={weitereAuditLädt} />
     </section>
   );
