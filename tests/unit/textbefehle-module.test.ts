@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { textbefehlModul } from "../../src/modules/textbefehle";
+import { textbefehlModul, type TextbefehlMindeststufe } from "../../src/modules/textbefehle";
 import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { upsertBotIdentity } from "../../src/worker/auth/repository";
@@ -32,7 +32,7 @@ const umgebung = (database: TestD1Database) => ({
   TOKEN_ENCRYPTION_KEYS: schluessel,
 });
 
-const eventFuer = (text: string, channelId = "kanal-a", receivedAt = JETZT, triggerId = "trigger-1") => ({
+const eventFuer = (text: string, channelId = "kanal-a", receivedAt = JETZT, triggerId = "trigger-1", badges: readonly { set_id: string }[] = []) => ({
   channelId,
   subscriptionType: "channel.chat.message",
   triggerId,
@@ -42,6 +42,7 @@ const eventFuer = (text: string, channelId = "kanal-a", receivedAt = JETZT, trig
     chatter_user_id: "user-1",
     chatter_user_login: "alice",
     broadcaster_user_login: channelId,
+    badges,
   },
   receivedAt,
 });
@@ -52,7 +53,7 @@ const aktiviere = async (database: TestD1Database, channelId: string): Promise<v
   ).bind(channelId, textbefehlModul.id).run();
 };
 
-const legeBefehlAn = async (database: TestD1Database, name = "hallo"): Promise<void> => {
+const legeBefehlAn = async (database: TestD1Database, name = "hallo", mindeststufe: TextbefehlMindeststufe = "alle"): Promise<void> => {
   const repository = createTextbefehlRepository(
     database as unknown as D1Database,
     () => ({ sql: "AND 1 = 1", values: [] as const }),
@@ -62,6 +63,7 @@ const legeBefehlAn = async (database: TestD1Database, name = "hallo"): Promise<v
     name,
     text: "Hallo {user}",
     art: "text",
+    mindeststufe,
     cooldownSekunden: 5,
     now: JETZT,
   }, { userId: "user-1" });
@@ -203,10 +205,55 @@ describe("Textbefehle-Modul", () => {
       await database.prepare("UPDATE textbefehle_commands SET enabled = 0 WHERE command_name = 'hallo'").run();
       const fetcher = fetcherFuerChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo"), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", JETZT, "trigger-disabled-broadcaster", [{ set_id: "broadcaster" }]), fetcher, [textbefehlModul]);
 
       expect(fetcher).not.toHaveBeenCalled();
       await expect(eventCodes(database)).resolves.toEqual(["textbefehle.deaktiviert"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("lässt Moderatoren einen Moderator-Befehl auslösen und schweigt bei Zuschauern mit Diagnose", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "bediener");
+      await mitBot(database);
+      await aktiviere(database, "kanal-a");
+      await legeBefehlAn(database, "hallo", "moderator");
+      const fetcher = fetcherFuerChat();
+
+      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", JETZT, "trigger-moderator", [{ set_id: "moderator" }]), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", "2026-09-19T12:00:01.000Z", "trigger-viewer"), fetcher, [textbefehlModul]);
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const denied = await database.prepare(
+        "SELECT code, detail_json FROM event_log WHERE code = 'textbefehle.berechtigung'",
+      ).first<{ code: string; detail_json: string }>();
+      expect(denied?.code).toBe("textbefehle.berechtigung");
+      expect(JSON.parse(denied?.detail_json ?? "{}" )).toEqual({
+        name: "hallo", geforderteStufe: "moderator", vorhandeneStufe: ["zuschauer"],
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("wertet Moderatoren ohne Abo und Founder als Abonnenten", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "bediener");
+      await mitBot(database);
+      await aktiviere(database, "kanal-a");
+      await legeBefehlAn(database, "hallo", "abonnent");
+      const fetcher = fetcherFuerChat();
+
+      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", JETZT, "trigger-moderator", [{ set_id: "moderator" }]), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", "2026-09-19T12:00:06.000Z", "trigger-founder", [{ set_id: "founder" }]), fetcher, [textbefehlModul]);
+
+      expect(fetcher).toHaveBeenCalledTimes(2);
     } finally {
       database.close();
     }

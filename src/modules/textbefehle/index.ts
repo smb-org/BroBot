@@ -2,10 +2,12 @@ export type {
   NeuerTextbefehl,
   Textbefehl,
   TextbefehlArt,
+  TextbefehlMindeststufe,
   TextbefehlAenderung,
   TextbefehlBeanspruchung,
   TextbefehlAkteur,
 } from "./contracts";
+export { TEXTBEFEHL_MINDESTSTUFEN } from "./contracts";
 export type { TextbefehlRepository } from "./repository";
 
 import { z } from "zod";

@@ -1,4 +1,4 @@
-import type { Textbefehl } from "../contracts";
+import type { Textbefehl, TextbefehlMindeststufe } from "../contracts";
 
 const pathFor = (channelId: string, name?: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/textbefehle/befehle${name === undefined ? "" : `/${encodeURIComponent(name)}`}`;
@@ -58,6 +58,12 @@ export const schalteTextbefehl = async (
   name: string,
   enabled: boolean,
 ): Promise<void> => mutation(channelId, "PATCH", { enabled }, name);
+
+export const setzeTextbefehlMindeststufe = async (
+  channelId: string,
+  name: string,
+  mindeststufe: TextbefehlMindeststufe,
+): Promise<void> => mutation(channelId, "PATCH", { mindeststufe }, name);
 
 export const loescheTextbefehl = async (channelId: string, name: string): Promise<void> =>
   mutation(channelId, "DELETE", undefined, name);

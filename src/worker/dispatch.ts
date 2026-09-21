@@ -1,4 +1,4 @@
-import type { BotModule, ModuleAction, ModuleActor, ModuleDiagnostic, ModuleEvent, ModuleResult } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleActor, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleResult } from "../modules/contract";
 import { MODULES } from "../modules/registry";
 import { getChannelMemberForChannel, listChannelModulesForChannel } from "./auth/repository";
 import { sendChatMessage } from "./chat";
@@ -20,6 +20,33 @@ const fehlermeldung = (error: unknown): string =>
 
 const textwert = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
+
+const recordWert = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const chatStatusFuer = (
+  subscriptionType: string,
+  payload: Readonly<Record<string, unknown>>,
+): readonly ModuleChatStatus[] | null => {
+  if (subscriptionType !== "channel.chat.message") return null;
+  const badges = payload.badges;
+  const badgeIds = Array.isArray(badges)
+    ? badges.flatMap((badge) => {
+      if (!recordWert(badge)) return [];
+      const setId = badge.set_id;
+      return typeof setId === "string" ? [setId] : [];
+    })
+    : [];
+  // Mehrere Badges sind gleichzeitig möglich. VIP und Abonnent bleiben daher
+  // getrennte Status; `founder` zählt weiterhin als Abonnent. Ohne besondere
+  // Badges bleibt die Liste für jedes Chatereignis mit `zuschauer` nicht leer.
+  const statusse: ModuleChatStatus[] = [];
+  if (badgeIds.includes("broadcaster")) statusse.push("broadcaster");
+  if (badgeIds.includes("moderator")) statusse.push("moderator");
+  if (badgeIds.includes("vip")) statusse.push("vip");
+  if (badgeIds.includes("subscriber") || badgeIds.includes("founder")) statusse.push("abonnent");
+  return statusse.length === 0 ? ["zuschauer"] : statusse;
+};
 
 const akteurFuerEreignis = async (
   db: D1Database,
@@ -148,6 +175,7 @@ export const dispatchEventSubNotification = async (
         settings: gepruefteEinstellungen,
         receivedAt: event.receivedAt,
         actor,
+        chatStatus: chatStatusFuer(event.subscriptionType, event.payload),
       };
       ergebnis = module.handleEvent === undefined
         ? null

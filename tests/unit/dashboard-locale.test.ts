@@ -36,6 +36,7 @@ describe("Dashboard-Locale", () => {
     expect(ereignisText("textbefehle.abgekuehlt", { name: "wiki" })).toBe("Textbefehl abgekühlt");
     expect(ereignisText("textbefehle.unbekannt", { name: "wiki" })).toBe("Textbefehl !wiki unbekannt");
     expect(ereignisText("textbefehle.deaktiviert", { name: "wiki" })).toBe("Textbefehl !wiki ausgeschaltet");
+    expect(ereignisText("textbefehle.berechtigung", { name: "wiki", geforderteStufe: "moderator", vorhandeneStufe: ["zuschauer"] })).toBe("Befehl !wiki nicht ausgelöst: Mindeststufe Moderatoren, vorhanden Zuschauer");
     expect(ereignisText("host.chat.gesendet", { name: "wiki" })).toBe("Chat-Nachricht gesendet");
   });
 
@@ -47,6 +48,7 @@ describe("Dashboard-Locale", () => {
     expect(ereignisText("textbefehle.bereits_vorhanden", { name: "wiki" })).toBe("Text command !wiki already exists");
     expect(ereignisText("textbefehle.unbekannt", { name: "wiki" })).toBe("Unknown text command !wiki");
     expect(ereignisText("textbefehle.deaktiviert", { name: "wiki" })).toBe("Text command !wiki disabled");
+    expect(ereignisText("textbefehle.berechtigung", { name: "wiki", geforderteStufe: "moderator", vorhandeneStufe: ["zuschauer"] })).toBe("Command !wiki not executed: minimum level moderators, present viewer");
   });
 
   it("rendert Moderationsdetails zweisprachig mit Bedeutungston", () => {

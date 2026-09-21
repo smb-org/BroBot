@@ -3,11 +3,13 @@ import { z } from "zod";
 
 import type { ModuleRouteEnvironment } from "./contract";
 import { createTextbefehlRepository } from "./adapters/d1";
+import { TEXTBEFEHL_MINDESTSTUFEN } from "./contracts";
 import { gueltigerBefehlsname } from "./domain";
 
 const bodySchema = z.object({
   name: z.string(),
   art: z.enum(["text", "liste"]).default("text"),
+  mindeststufe: z.enum(TEXTBEFEHL_MINDESTSTUFEN).default("alle"),
   text: z.string().optional(),
   cooldownSekunden: z.number().int().min(0).max(86400),
 });
@@ -15,6 +17,7 @@ const editBodySchema = z.object({
   name: z.string().optional(),
   text: z.string().optional(),
   cooldownSekunden: z.number().int().min(0).max(86400).optional(),
+  mindeststufe: z.enum(TEXTBEFEHL_MINDESTSTUFEN).optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -84,12 +87,16 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
   if (body.enabled !== undefined && context.get("channelRole") === "bediener") {
     return context.json({ error: "Nur Broadcaster und Verwalter dürfen Befehle schalten." }, 403);
   }
+  if (body.mindeststufe !== undefined && context.get("channelRole") === "bediener") {
+    return context.json({ error: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern." }, 403);
+  }
   const text = before.art === "liste" ? "" : body.text ?? before.text;
   if (before.art === "text" && text.trim().length === 0) {
     return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
   }
   const cooldownSekunden = body.cooldownSekunden ?? before.cooldownSekunden;
-  const authorizeMutation = body.enabled === undefined
+  const mindeststufe = body.mindeststufe ?? before.mindeststufe;
+  const authorizeMutation = body.enabled === undefined && body.mindeststufe === undefined
     ? context.get("authorizeMutation")
     : context.get("authorizeManagementMutation");
   const geaendert = await createTextbefehlRepository(
@@ -102,10 +109,11 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
     neuerName: newName,
     text,
     cooldownSekunden,
+    mindeststufe,
     enabled: body.enabled ?? before.enabled,
     now: nowIso(),
   }, context.get("actor"));
-  if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, cooldownSekunden, enabled: body.enabled ?? before.enabled } });
+  if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, cooldownSekunden, mindeststufe, enabled: body.enabled ?? before.enabled } });
   if (geaendert.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (geaendert.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);

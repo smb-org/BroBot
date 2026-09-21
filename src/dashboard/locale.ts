@@ -498,6 +498,7 @@ export type EreignisCode =
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
   | "textbefehle.deaktiviert"
+  | "textbefehle.berechtigung"
   // Seit dem Wegfall der ändernden Chat-Befehle (#120) erzeugt niemand mehr
   // diese beiden Kennungen. Sie bleiben, weil das Ereignisprotokoll seine
   // Zeilen 14 Tage hält: Ohne Beschriftung wären bereits geschriebene
@@ -524,6 +525,18 @@ const ereignisTextMitName = (
 
 const detailText = (detail: EreignisDetail, key: string, fallback: string): string =>
   typeof detail[key] === "string" && detail[key].length > 0 ? detail[key] : fallback;
+
+const textbefehlStufe = (detail: EreignisDetail, key: string, fallback: string, language: DashboardLanguage): string => {
+  const value = detail[key];
+  const labels: Record<string, string> = language === "de"
+    ? { alle: "alle", abonnent: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster", zuschauer: "Zuschauer" }
+    : { alle: "everyone", abonnent: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcaster", zuschauer: "viewer" };
+  const werte = Array.isArray(value) ? value : [value];
+  const beschrifteteWerte = werte.filter((eintrag): eintrag is string => typeof eintrag === "string" && eintrag.length > 0);
+  return beschrifteteWerte.length === 0
+    ? fallback
+    : beschrifteteWerte.map((eintrag) => labels[eintrag] ?? eintrag).join(", ");
+};
 
 const detailZahl = (detail: EreignisDetail, key: string, fallback: string): string =>
   typeof detail[key] === "number" && Number.isFinite(detail[key]) ? String(detail[key]) : fallback;
@@ -590,6 +603,7 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     },
     "textbefehle.ausgeloest": (detail) => ereignisTextMitName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
     "textbefehle.deaktiviert": (detail) => ereignisTextMitName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
+    "textbefehle.berechtigung": (detail) => ereignisTextMitName(detail, "Textbefehl nicht berechtigt", (name) => `Befehl !${name} nicht ausgelöst: Mindeststufe ${textbefehlStufe(detail, "geforderteStufe", "unbekannt", "de")}, vorhanden ${textbefehlStufe(detail, "vorhandeneStufe", "kein Chat-Status", "de")}`),
     "textbefehle.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Textbefehl bereits vorhanden", (name) => `Textbefehl !${name} bereits vorhanden`),
     "textbefehle.nicht_berechtigt": "Textbefehl nicht berechtigt",
     "textbefehle.unbekannt": (detail) => ereignisTextMitName(detail, "Textbefehl unbekannt", (name) => `Textbefehl !${name} unbekannt`),
@@ -634,6 +648,7 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     },
     "textbefehle.ausgeloest": (detail) => ereignisTextMitName(detail, "Command executed", (name) => `Command !${name} executed`),
     "textbefehle.deaktiviert": (detail) => ereignisTextMitName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
+    "textbefehle.berechtigung": (detail) => ereignisTextMitName(detail, "Text command not authorized", (name) => `Command !${name} not executed: minimum level ${textbefehlStufe(detail, "geforderteStufe", "unknown", "en")}, present ${textbefehlStufe(detail, "vorhandeneStufe", "no chat status", "en")}`),
     "textbefehle.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Text command already exists", (name) => `Text command !${name} already exists`),
     "textbefehle.nicht_berechtigt": "Text command not authorized",
     "textbefehle.unbekannt": (detail) => ereignisTextMitName(detail, "Unknown text command", (name) => `Unknown text command !${name}`),
@@ -675,6 +690,7 @@ export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green" | "off"
   "textbefehle.abgekuehlt": "amber",
   "textbefehle.ausgeloest": "green",
   "textbefehle.deaktiviert": "amber",
+  "textbefehle.berechtigung": "amber",
   "textbefehle.bereits_vorhanden": "amber",
   "textbefehle.nicht_berechtigt": "red",
   "textbefehle.unbekannt": "red",

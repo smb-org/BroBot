@@ -1,4 +1,6 @@
 export type TextbefehlArt = "text" | "liste";
+export const TEXTBEFEHL_MINDESTSTUFEN = ["alle", "abonnent", "vip", "moderator", "broadcaster"] as const;
+export type TextbefehlMindeststufe = (typeof TEXTBEFEHL_MINDESTSTUFEN)[number];
 
 export interface Textbefehl {
   channelId: string;
@@ -6,6 +8,7 @@ export interface Textbefehl {
   text: string;
   art: TextbefehlArt;
   enabled: boolean;
+  mindeststufe: TextbefehlMindeststufe;
   cooldownSekunden: number;
   zuletztVerwendetAt: string | null;
   createdAt: string;
@@ -17,6 +20,7 @@ export interface NeuerTextbefehl {
   name: string;
   text: string;
   art: TextbefehlArt;
+  mindeststufe?: TextbefehlMindeststufe;
   cooldownSekunden: number;
   now: string;
 }
@@ -27,6 +31,7 @@ export interface TextbefehlAenderung {
   neuerName: string;
   text: string;
   enabled: boolean;
+  mindeststufe?: TextbefehlMindeststufe;
   cooldownSekunden: number;
   now: string;
 }

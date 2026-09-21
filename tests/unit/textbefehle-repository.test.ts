@@ -132,10 +132,11 @@ describe("Textbefehle-D1-Adapter", () => {
          VALUES ('kanal-a', 'alt', 'Antwort', 5, '${NOW}', '${NOW}')`,
       ).run();
       legacy.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0020_textbefehle_art_enabled.sql"), "utf8"));
+      legacy.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0021_textbefehle_mindeststufe.sql"), "utf8"));
 
       expect(legacy.sqlite.prepare(
-        "SELECT art, enabled FROM textbefehle_commands WHERE command_name = 'alt'",
-      ).get()).toEqual({ art: "text", enabled: 1 });
+        "SELECT art, enabled, minimum_level FROM textbefehle_commands WHERE command_name = 'alt'",
+      ).get()).toEqual({ art: "text", enabled: 1, minimum_level: "alle" });
     } finally {
       legacy.close();
     }

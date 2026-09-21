@@ -1,3 +1,6 @@
+import type { ModuleChatStatus } from "../contract";
+import type { TextbefehlMindeststufe } from "../contracts";
+
 export const BEFEHLSNAME_MUSTER = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 export type TextbefehlEingabe =
@@ -29,3 +32,22 @@ export const cooldownRestzeit = (zuletztVerwendet: string | null, jetzt: string,
   if (!Number.isFinite(vergangen) || vergangen < 0) return cooldownSekunden;
   return Math.max(0, Math.ceil(cooldownSekunden - vergangen / 1000));
 };
+
+/**
+ * Die Stufen sind absichtlich keine Zahlenleiter. Die Statusliste kann mehrere
+ * Badges enthalten: Moderator und Broadcaster erfüllen auch „Abonnent“ und
+ * „VIP“, ein VIP aber nicht „Abonnent“.
+ */
+const statusFuerStufe: Record<TextbefehlMindeststufe, readonly ModuleChatStatus[]> = {
+  alle: ["zuschauer", "abonnent", "vip", "moderator", "broadcaster"],
+  abonnent: ["abonnent", "moderator", "broadcaster"],
+  vip: ["vip", "moderator", "broadcaster"],
+  moderator: ["moderator", "broadcaster"],
+  broadcaster: ["broadcaster"],
+};
+
+export const chatStatusErfuelltStufe = (
+  status: readonly ModuleChatStatus[] | null,
+  mindeststufe: TextbefehlMindeststufe,
+): boolean => mindeststufe === "alle"
+  || (status !== null && status.some((eintrag) => statusFuerStufe[mindeststufe].includes(eintrag)));

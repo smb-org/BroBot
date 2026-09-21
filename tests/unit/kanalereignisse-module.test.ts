@@ -12,6 +12,7 @@ const event = (subscriptionType: string, payload: Record<string, unknown>, subsc
   settings: {},
   receivedAt: "2026-09-20T10:00:00.000Z",
   actor: null,
+  chatStatus: null,
 });
 
 describe("Kanalereignisse-Modul", () => {

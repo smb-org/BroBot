@@ -12,6 +12,7 @@ const befehl = (name: string, text: string, zuletztVerwendetAt: string | null = 
   text,
   art: "text",
   enabled: true,
+  mindeststufe: "alle",
   cooldownSekunden: 5,
   zuletztVerwendetAt,
   createdAt: JETZT,
@@ -44,6 +45,7 @@ const eventFuer = (text: string, actor: ModuleEvent["actor"] = {
   settings: {},
   receivedAt: JETZT,
   actor,
+  chatStatus: ["zuschauer"],
 });
 
 describe("Textbefehle-Service", () => {

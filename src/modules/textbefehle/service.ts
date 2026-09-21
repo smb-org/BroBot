@@ -3,6 +3,7 @@ import type { ModuleEvent, ModuleResult } from "../contract";
 import {
   befehlAusNachricht,
   befehlTextMitPlatzhaltern,
+  chatStatusErfuelltStufe,
   cooldownRestzeit,
 } from "./domain";
 import type { TextbefehlEingabe } from "./domain";
@@ -69,17 +70,38 @@ export const verarbeiteTextbefehlNachricht = async (
     return { actions: [], diagnostics: [{ code: "textbefehle.unbekannt" }] };
   }
 
-  const beanspruchung = await repository.beanspruchen(event.channelId, eingabe.name, event.receivedAt);
-  if (beanspruchung === null) {
+  const befehl = await repository.finden(event.channelId, eingabe.name);
+  if (befehl === null) {
     return {
       actions: [],
       diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.name } }],
     };
   }
-  if (!beanspruchung.befehl.enabled) {
+  if (!befehl.enabled) {
     return {
       actions: [],
       diagnostics: [{ code: "textbefehle.deaktiviert", detail: { name: eingabe.name } }],
+    };
+  }
+  if (!chatStatusErfuelltStufe(event.chatStatus, befehl.mindeststufe)) {
+    return {
+      actions: [],
+      diagnostics: [{
+        code: "textbefehle.berechtigung",
+        detail: {
+          name: eingabe.name,
+          geforderteStufe: befehl.mindeststufe,
+          vorhandeneStufe: event.chatStatus,
+        },
+      }],
+    };
+  }
+
+  const beanspruchung = await repository.beanspruchen(event.channelId, eingabe.name, event.receivedAt);
+  if (beanspruchung === null) {
+    return {
+      actions: [],
+      diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.name } }],
     };
   }
   if (!beanspruchung.beansprucht) {

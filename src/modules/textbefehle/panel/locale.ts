@@ -1,4 +1,5 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
+import type { TextbefehlMindeststufe } from "../contracts";
 
 interface TextbefehleTexte {
   titel: string;
@@ -10,6 +11,10 @@ interface TextbefehleTexte {
   artListe: string;
   text: string;
   abkuehlung: string;
+  mindeststufe: string;
+  mindeststufeFuer: (name: string) => string;
+  mindeststufeGesperrt: string;
+  stufen: Record<TextbefehlMindeststufe, string>;
   schalter: (name: string, enabled: boolean) => string;
   verwaltungGesperrt: string;
   speichern: (name: string) => string;
@@ -37,6 +42,7 @@ interface TextbefehleTexte {
     text: string;
     abkuehlung: string;
     zuletzt: string;
+    mindeststufe: string;
     aktiv: string;
   };
 }
@@ -52,6 +58,10 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     artListe: "Befehlsliste",
     text: "Antworttext",
     abkuehlung: "Abkühlzeit (Sekunden)",
+    mindeststufe: "Mindeststufe",
+    mindeststufeFuer: (name) => `Mindeststufe für Befehl !${name}`,
+    mindeststufeGesperrt: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern.",
+    stufen: { alle: "Alle", abonnent: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     schalter: (name, enabled) => `Befehl !${name}: ${enabled ? "eingeschaltet" : "ausgeschaltet"}`,
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Befehle schalten.",
     speichern: (name) => `Befehl !${name} speichern`,
@@ -73,7 +83,7 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     antwortFehlt: "Antworttext ausfüllen",
     nameFehlt: "Namen ausfüllen",
     nameAntwortFehlt: "Name und Antworttext ausfüllen",
-    spalten: { name: "!Name", art: "Art", text: "Antwort", abkuehlung: "Abkühl.", zuletzt: "Zuletzt", aktiv: "Schalter" },
+    spalten: { name: "!Name", art: "Art", text: "Antwort", abkuehlung: "Abkühl.", zuletzt: "Zuletzt", mindeststufe: "Mindeststufe", aktiv: "Schalter" },
   },
   en: {
     titel: "Text commands",
@@ -85,6 +95,10 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     artListe: "Command list",
     text: "Response text",
     abkuehlung: "Cooldown (seconds)",
+    mindeststufe: "Minimum level",
+    mindeststufeFuer: (name) => `Minimum level for !${name}`,
+    mindeststufeGesperrt: "Only broadcasters and managers may change minimum levels.",
+    stufen: { alle: "Everyone", abonnent: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
     schalter: (name, enabled) => `Command !${name}: ${enabled ? "enabled" : "disabled"}`,
     verwaltungGesperrt: "Only broadcasters and managers may switch commands.",
     speichern: (name) => `Save !${name}`,
@@ -106,7 +120,7 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     antwortFehlt: "Fill in a response",
     nameFehlt: "Fill in a name",
     nameAntwortFehlt: "Fill in a name and response",
-    spalten: { name: "!Name", art: "Type", text: "Response", abkuehlung: "Cooldown", zuletzt: "Last", aktiv: "Switch" },
+    spalten: { name: "!Name", art: "Type", text: "Response", abkuehlung: "Cooldown", zuletzt: "Last", mindeststufe: "Minimum level", aktiv: "Switch" },
   },
 };
 
