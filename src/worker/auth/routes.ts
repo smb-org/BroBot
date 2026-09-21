@@ -295,19 +295,29 @@ authRouter.get("/auth/login", async (context) => {
 });
 
 /**
- * Die fehlende channel:bot-Zustimmung kann nur die Broadcaster-Rolle des
- * betroffenen Kanals nachfordern. Ein Verwalter darf den Zustand sehen, aber
- * nicht versehentlich seine eigene Twitch-Identität an die Stelle des
- * Broadcasters setzen.
+ * Die fehlende channel:bot-Zustimmung kann nur der Kanalinhaber nachfordern.
+ * Die Mitgliedsrolle reicht dafür nicht: Ein Broadcaster darf weiterhin einen
+ * Vertreter benennen, aber Twitch bindet die Zustimmung an die Identität.
  */
 authRouter.get(
   "/auth/channels/:channelId/channel-bot",
   requireChannelAuthorization(),
   async (context) => {
-    if (context.get("channelRole") !== "broadcaster") {
-      return context.text("Nur der Broadcaster darf diese Zustimmung nachfordern.", 403);
+    const channelId = context.req.param("channelId");
+    if (context.get("session").userId !== channelId) {
+      return context.text("Nur der Kanalinhaber darf diese Zustimmung nachfordern.", 403);
     }
-    const started = await startOAuthAuthorization(context.env.DB, context.env, "login", nowIso());
+    const started = await startOAuthAuthorization(
+      context.env.DB,
+      context.env,
+      "login",
+      nowIso(),
+      [],
+      false,
+      null,
+      false,
+      channelId,
+    );
     context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
     return context.redirect(started.url, 302);
   },
@@ -322,8 +332,9 @@ authRouter.get(
   "/auth/channels/:channelId/broadcaster-scopes/:moduleId",
   requireChannelAuthorization(),
   async (context) => {
-    if (context.get("channelRole") !== "broadcaster") {
-      return context.text("Nur der Broadcaster darf diese Zustimmung erteilen.", 403);
+    const channelId = context.req.param("channelId");
+    if (context.get("session").userId !== channelId) {
+      return context.text("Nur der Kanalinhaber darf diese Zustimmung erteilen.", 403);
     }
     const module = MODULES.find((candidate) => candidate.id === context.req.param("moduleId"));
     if (module === undefined) return context.text("Modul nicht gefunden.", 404);
@@ -340,7 +351,9 @@ authRouter.get(
       nowIso(),
       scopes,
       true,
-      moduleDashboardPath(context.req.param("channelId"), module.id),
+      moduleDashboardPath(channelId, module.id),
+      false,
+      channelId,
     );
     context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
     return context.redirect(started.url, 302);
@@ -394,6 +407,12 @@ authRouter.get("/auth/twitch/callback", async (context) => {
   try {
     const tokens = await exchangeAuthorizationCode(fetch, context.env, code);
     const identity = await fetchTwitchUser(fetch, context.env, tokens.accessToken);
+
+    if (transaction.expectedUserId !== undefined && transaction.expectedUserId !== null &&
+        identity.userId !== transaction.expectedUserId) {
+      await failOAuthTransaction(context.env.DB, state.transactionId, "login_identity_user_mismatch");
+      return oauthError(context, "Die Twitch-Identität gehört nicht zum Kanalinhaber.", 403);
+    }
 
     if (state.purpose === "bot") {
       if (identity.login.toLowerCase() !== context.env.TWITCH_BOT_LOGIN.toLowerCase()) {
@@ -475,6 +494,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         state.reconcileEventSub === true,
         transaction.redirectPath ?? null,
         true,
+        transaction.expectedUserId ?? null,
       );
       context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
       return context.redirect(started.url, 302);

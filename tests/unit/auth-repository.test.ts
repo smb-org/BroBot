@@ -505,16 +505,18 @@ describe("Auth-D1-Repository", () => {
         purpose: "bot",
         expiresAt: "2026-09-18T00:05:00.000Z",
         createdAt: "2026-09-18T00:00:00.000Z",
+        expectedUserId: "user-1",
       });
 
       await expect(database.prepare(
-        "SELECT transaction_id, purpose, expires_at, created_at, used_at FROM oauth_transactions",
+        "SELECT transaction_id, purpose, expires_at, created_at, used_at, expected_user_id FROM oauth_transactions",
       ).first()).resolves.toEqual({
         transaction_id: "transaction-1",
         purpose: "bot",
         expires_at: "2026-09-18T00:05:00.000Z",
         created_at: "2026-09-18T00:00:00.000Z",
         used_at: null,
+        expected_user_id: "user-1",
       });
     } finally {
       database.close();
