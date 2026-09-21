@@ -3,9 +3,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
+import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const NOW = "2026-09-19T12:00:00.000Z";
 const ACTOR = { userId: "user-1", sessionId: "session-user-1" };
@@ -148,6 +149,91 @@ describe("Textbefehle-D1-Adapter", () => {
     await expect(database.prepare(
       "SELECT response_text, art, enabled, cooldown_seconds FROM textbefehle_commands WHERE command_name = 'hallo'",
     ).first()).resolves.toEqual({ response_text: "Antwort", art: "text", enabled: 0, cooldown_seconds: 5 });
+  });
+
+  it("verwirft veraltete Update- und Lösch-Vorzustände, aber nicht Chatnutzung", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    const baseRepository = createTextbefehlRepository(database as unknown as D1Database, authorizeModuleMutation);
+    await expect(baseRepository.anlegen({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+
+    const updateDb = {
+      prepare: database.prepare.bind(database),
+      batch: async (statements: TestPreparedStatement[]) => {
+        await database.prepare(
+          "UPDATE textbefehle_commands SET response_text = 'Neu', minimum_level = 'moderator', updated_at = ? WHERE command_name = 'hallo'",
+        ).bind("2026-09-19T12:00:30.000Z").run();
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const updateRepository = createTextbefehlRepository(
+      updateDb,
+      authorizeModuleMutation,
+      (entry, changedAt) => prepareModuleAudit(updateDb, ACTOR.userId, changedAt, entry),
+    );
+    await expect(updateRepository.aendern({
+      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Antwort", art: "text",
+      enabled: false, cooldownSekunden: 5, now: "2026-09-19T12:01:00.000Z", nurSchalter: true,
+    }, ACTOR)).resolves.toEqual({ ok: false, grund: "konflikt" });
+    await expect(database.prepare("SELECT response_text, minimum_level, enabled FROM textbefehle_commands WHERE command_name = 'hallo'").first())
+      .resolves.toEqual({ response_text: "Neu", minimum_level: "moderator", enabled: 1 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
+
+    await expect(baseRepository.anlegen({
+      channelId: "kanal-a", name: "loeschen", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+    const deleteDb = {
+      prepare: database.prepare.bind(database),
+      batch: async (statements: TestPreparedStatement[]) => {
+        await database.prepare(
+          "UPDATE textbefehle_commands SET response_text = 'Neu', minimum_level = 'vip', updated_at = ? WHERE command_name = 'loeschen'",
+        ).bind("2026-09-19T12:00:30.000Z").run();
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const deleteRepository = createTextbefehlRepository(
+      deleteDb,
+      authorizeModuleMutation,
+      (entry, changedAt) => prepareModuleAudit(deleteDb, ACTOR.userId, changedAt, entry),
+    );
+    await expect(deleteRepository.loeschen("kanal-a", "loeschen", ACTOR, "2026-09-19T12:01:00.000Z"))
+      .resolves.toEqual({ ok: false, grund: "konflikt" });
+    await expect(database.prepare("SELECT response_text, minimum_level FROM textbefehle_commands WHERE command_name = 'loeschen'").first())
+      .resolves.toEqual({ response_text: "Neu", minimum_level: "vip" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
+
+    await expect(baseRepository.anlegen({
+      channelId: "kanal-a", name: "chat", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+    const chatDb = {
+      prepare: database.prepare.bind(database),
+      batch: async (statements: TestPreparedStatement[]) => {
+        await database.prepare(
+          "UPDATE textbefehle_commands SET last_used_at = ?, updated_at = ? WHERE command_name = 'chat'",
+        ).bind("2026-09-19T12:00:30.000Z", "2026-09-19T12:00:30.000Z").run();
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const chatRepository = createTextbefehlRepository(
+      chatDb,
+      authorizeModuleMutation,
+      (entry, changedAt) => prepareModuleAudit(chatDb, ACTOR.userId, changedAt, entry),
+    );
+    await expect(chatRepository.aendern({
+      channelId: "kanal-a", name: "chat", neuerName: "chat", text: "Antwort", art: "text",
+      enabled: false, cooldownSekunden: 5, now: "2026-09-19T12:01:00.000Z", nurSchalter: true,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 1 });
+    const audit = await database.prepare("SELECT before_json, after_json FROM audit_log").first<{ before_json: string; after_json: string }>();
+    expect(JSON.parse(audit?.before_json ?? "null") as unknown).toEqual({
+      name: "chat", art: "text", enabled: true, mindeststufe: "alle", text: "Antwort", cooldownSekunden: 5,
+    });
+    expect(JSON.parse(audit?.after_json ?? "null") as unknown).toEqual({
+      name: "chat", art: "text", enabled: false, mindeststufe: "alle", text: "Antwort", cooldownSekunden: 5,
+    });
   });
 
   it("erlaubt Listen ohne Antworttext, verlangt ihn aber für Textzeilen", async () => {

@@ -243,6 +243,9 @@ components:
     textColor: "{colors.text}"
     rounded: "{rounded.control}"
     padding: "18px 16px"
+  inspektor-spalte:
+    width: "592px"
+    description: "Fließtextfeld 40 rem plus 2 × 16 px Innenabstand; Inspektor neben seiner Liste ab 1360 px Fensterbreite"
   eigenschaft:
     backgroundColor: "transparent"
     textColor: "{colors.text}"
@@ -306,14 +309,18 @@ weil Betriebsoberflächen bei gleichbleibender Auflösung gelesen werden.
 Der Blick aufs Raster sagt, was läuft: Grün leuchtet, Aus ist gezeichnet.
 Tastendruck ist die Signatur-Interaktion — die Taste sinkt (Skalierung 0,97,
 120 ms), färbt sich grün getönt, die LED blendet in 160 ms um. Jede Seite
-beginnt mit demselben Seitenkopf (56-px-Symbolkachel, Titel, Unterzeile) und
-begrenzt ihren Inhalt auf 960 px. Die Schiene links bleibt in jeder Breite ein
-Band fester 64×64-Tasten.
+beginnt mit demselben Seitenkopf (56-px-Symbolkachel, Titel, Unterzeile). Jeder
+Block — Tabelle, Formular, Zustandsliste, Eigenschaftenliste — ist höchstens
+960 px breit, weil das seine Lesebreite ist. Eine Seite darf genau zwei Blöcke
+nebeneinander stellen: eine Liste und den Inspektor ihrer gewählten Zeile. Mehr
+Breite gibt es nicht, weil kein Inhalt sie braucht. Die Schiene links bleibt in
+jeder Breite ein Band fester 64×64-Tasten.
 
 Seit Phase 2 gilt das Gerät auf allen fünf Seiten: Die Übersicht zeigt Kanäle
 als Tasten, Kanal und System sprechen in Zustandszeilen (LED + Wort + Detail +
 Aktion), Mitglieder, Audit und Ereignisse liegen in einer gemeinsamen Tabelle,
-deren gewählte Zeile ihren Sub-Inspector im Fluss darunter öffnet. Die alte
+deren gewählte Zeile ihren Sub-Inspector öffnet — neben der Tabelle, wo Platz
+ist, sonst darunter. Die alte
 Welt (232-px-Seitenleiste, Zustandskarten, Versalien-Plaketten) ist aus dem
 Stylesheet entfernt.
 
@@ -429,24 +436,25 @@ Das Gerüst ist ein Gerät mit festen Maßen:
 
 - **Kopfleiste** 56 px, Rail-Farbe, Haarlinie unten, Innenabstand 0 20 px, Spaltenraster `auto minmax(180px,1fr) auto auto auto`: Marke (18-px-Quadrat mit 2 px Marke-Text-Rand, 6 px Radius, Wortmarke 15 px/700), Kanalwahl (Select bis 280 px, 44 px hoch) mit Twitch-ID in Mono, LED mit Wort, Lebenszeichen („aktualisiert vor …“, Text-3, 12 px), Abmelden. Auf der Modulseite kommt der Hauptschalter als sechste Spalte hinzu.
 - **Schiene** 80 px breit, Rail-Farbe, Haarlinie rechts, Innenabstand 12 px 8 px. Enthält senkrecht gestapelte 64×64-Tasten mit 8 px Lücke, zentriert. Zustandspunkt 7 px oben rechts nur für Warnung/Fehler.
-- **Mitte** ist auf `--dashboard-content-width` 960 px plus 32 px Seitenabstand begrenzt (`min(1024px, 100%)`), Innenabstand 24 px 32 px 40 px; der Modul-Arbeitsbereich hebt das auf und setzt 28 px 32 px 40 px. Jede Seite beginnt mit dem Seitenkopf (56-px-Symbolkachel + Titel + Unterzeile + optionale Aktionen rechts, Haarlinie unten, 24 px Abstand). Das Tastenraster ist `repeat(4, 132px)` mit 12 px Lücke, linksbündig, nicht fluid. Zustandszeilen stapeln mit 8 px Lücke. Bereiche (`content-section`) tragen eine Bereichsüberschrift mit Haarlinie.
+- **Mitte** ist auf die Seitenbreite `--seiten-breite` 1576 px plus 32 px Seitenabstand begrenzt (`min(1640px, 100%)`), Innenabstand 24 px 32 px 40 px; der Modul-Arbeitsbereich hebt das auf und setzt 28 px 32 px 40 px. Die Seitenbreite ist 960 + 24 + 592: ein Block, eine Lücke, ein Inspektor. Jede Seite beginnt mit dem Seitenkopf (56-px-Symbolkachel + Titel + Unterzeile + optionale Aktionen rechts, Haarlinie unten über die ganze Seitenbreite, 24 px Abstand). Jeder Block darunter — Tastenraster, Zustandsliste, Eigenschaftenliste, Tabelle, Formular — bleibt auf `--dashboard-content-width` 960 px begrenzt: Das ist seine Lesebreite, nicht die Seite. 960 px war nie eine Eigenschaft der Seite, sondern immer die Breite, bei der eine Tabellenzeile, ein Formular oder eine Zustandszeile noch in einem Blick liegt; deshalb wird kein Block breiter, nur weil die Seite es ist. Das Tastenraster ist `repeat(4, 132px)` mit 12 px Lücke, linksbündig, nicht fluid. Zustandszeilen stapeln mit 8 px Lücke. Bereiche (`content-section`) tragen eine Bereichsüberschrift mit Haarlinie.
+- **Inspektorbereich** (`.inspektor-bereich`): der Bereich, in dem eine Tabelle und der Inspektor ihrer gewählten Zeile liegen. Zwei direkte Kinder, Liste zuerst. Ab 1360 px Fensterbreite ist er ein Raster `minmax(600px, 960px) 592px` mit 24 px Lücke, `align-items: start`: links die Liste, rechts der Inspektor. Die 592 px sind hergeleitet, nicht gewählt: das Fließtextfeld `config-field--breit` (40 rem = 560 px) plus 2 × 16 px Innenabstand des Inspektors — die Spalte ist genau so breit, dass das breiteste Formularfeld hineinpasst. Die Schwelle 1360 px ist ebenso hergeleitet: 1360 − 80 (Schiene) − 64 (Seitenabstand) = 1216 = 600 (Tabellenminimum) + 24 + 592. Zwischen 1360 und 1720 px wächst nur die Listenspalte von 600 auf 960; darüber steht sie fest. Unter 1360 px ist der Bereich eine Spalte mit 16 px Lücke: der Inspektor unter der Liste, im Fluss — genau das heutige Verhalten, es gibt keine dritte Form. **Die Tabelle springt beim Wählen nicht:** Sie behält in beiden Formen ihre Breite, beim Öffnen wie beim Schließen des Inspektors bricht keine Spalte um, keine Ellipse wechselt, keine Zeile wandert unter dem Zeiger. In der Spalte haftet der Inspektor 16 px unter dem oberen Fensterrand (`sticky`) und scrollt innen, wenn er höher als das Fenster ist — sonst stünde das Detail einer tiefen Zeile außer Sicht. Die Spalte blendet nicht ein und schiebt nicht: Sie ist da oder nicht.
+- **Kein rechtes Dock.** Es gibt keine dauerhafte rechte Spalte der Seite, die leer wartet. Der Inspektor gehört zu seiner Tabelle, nicht zur Seite; ohne gewählte Zeile trägt die Spalte das Anlegen-Formular des Bereichs, sofern es eines gibt, sonst nichts.
 - **Zustandszeile** ist ein Vier-Spalten-Raster `240px auto minmax(0,1fr) auto`: Etikett in fester Spalte (`--zustand-label`), LED mit Wort, Detail einzeilig mit Ellipse, Aktion rechtsbündig. Mindesthöhe 58 px, Innenabstand 16 px.
 - **Eigenschaftenliste** (`dl.eigenschaften`) ist zweispaltig; jedes Paar ist selbst ein Raster `1fr 1.3fr` mit 16 px Lücke, 10 px senkrechtem Abstand und Haarlinie unten. Werte sind einzeilig mit Ellipse.
 - **Abstandsrhythmus** 4-8-12-16-20-24-32-40-48. Bereiche trennt eine Haarlinie plus Abstand, nie ein Rahmen um alles.
 - **Formulare** stapeln ihre Felder (Lücke 14–16 px, max. 40 rem); Zahleneingaben max. 9 rem. Aktionen stehen in einer Zeile mit Hinweis rechts daneben. Der Mitglieder-Inspector setzt Suchfeld und Knopf in einer `form-row`.
-- **Kein rechtes Dock.** Der Sub-Inspector einer gewählten Tabellenzeile öffnet sich unter der Tabelle im selben Fluss (16 px Abstand).
 
 **Schmal (≤ 768 px):** Kopfleiste zweizeilig (40 px + 40 px; mit Hauptschalter dreizeilig): Marke, LED, Abmelden oben; Kanalwahl über die volle Breite darunter. Das Lebenszeichen verschwindet. Die Schiene wird zu einem waagerechten, scrollbaren Band mit denselben 64×64-Tasten (Lücke 6 px). Das Raster wird zweispaltig, die Taste bleibt 132×132. Der Seitenkopf verliert seine dritte Spalte; Aktionen rutschen linksbündig in eine eigene Zeile. Die Eigenschaftenliste wird einspaltig; `form-row` und Ergebniskasten stapeln. Unter 420 px schrumpft nur die Rasterlücke auf 8 px.
 
-**Eng (≤ 639 px):** Die Zustandszeile bricht um: Etikett über die volle Breite, darunter LED und mehrzeiliges Detail, Aktion linksbündig in eigener Zeile. Der Sub-Inspector zeigt Vorher und Nachher untereinander. Tabellen geben ihre Mindestbreite von 600 px auf und verstecken die dritte Spalte (Audit „Wer“, Ereignis „Modul“).
+**Eng (≤ 639 px):** Die Zustandszeile bricht um: Etikett über die volle Breite, darunter LED und mehrzeiliges Detail, Aktion linksbündig in eigener Zeile. Der Sub-Inspector zeigt Vorher und Nachher untereinander. Tabellen geben ihre Mindestbreite von 600 px auf und verstecken die dritte Spalte (Audit „Wer“, Ereignis „Modul“). Eng gilt je Block, nicht nur je Fenster: Der Inspektor ist ein benannter Container (`inspektor`), und seine Inhalte — Vorher/Nachher, Zustandszeile, Tabelle, Eigenschaftenliste — wenden dieselben Eng-Regeln ab 639 px *Inspektorbreite* an. In der 592-px-Spalte sind sie deshalb immer eng: Vorher und Nachher stehen untereinander, eine Zustandszeile bricht um, eine Tabelle gibt ihr 600-px-Minimum auf.
 
-**Container ≤ 640 px (Befehlstabelle):** Die Spalte „zuletzt“ verschwindet; der Wert wandert als Mono-Metazeile in den Sub-Inspector der gewählten Zeile.
+**Container ≤ 640 px (Befehlstabelle):** Die Spalte „zuletzt“ verschwindet; der Wert wandert als Mono-Metazeile in den Sub-Inspector der gewählten Zeile. Container ist die Listenspalte (`inspektor-bereich__liste`, benannt `liste`), nicht das Panel — sonst blendet das Panel bei 1216 px die Spalte ein, während die Liste nur 600 px hat.
 
 **Die Trefferflächen-Regel.** Alleinstehende Bedienelemente (Knopf, Feld, Select, Schalter, Brotkrumen-Link) sind mindestens 44 px hoch. In dichten Tabellenzeilen gelten 34 px — auch für Select und Knopf in der Aktionsspalte —, weil Dichte dort ein Feature ist. Beides liegt über der AA-Untergrenze von 24 px.
 
 ## Elevation & Depth
 
-Keine Schatten. Tiefe entsteht ausschließlich aus Tonstufen und Haarlinien: Die Rinne (#100f0e) liegt unter dem Grund (#141312), Rail (#181716), Inspektor (#1a1917) und Taste (#1e1c1a) darüber. Eine Taste wirkt erhoben, weil ihre Symbolkachel in der Rinne sitzt und ihr Rand eine Haarlinie ist. Eingabefelder und `pre`-Flächen liegen in der Rinne — man tippt und liest in eine Vertiefung. Der Sub-Inspector liegt eine halbe Stufe über dem Grund. Beim Überfahren hellt sich eine Taste um eine Stufe auf (#262321) und ihr Rand wird zur hellen Linie.
+Keine Schatten. Tiefe entsteht ausschließlich aus Tonstufen und Haarlinien: Die Rinne (#100f0e) liegt unter dem Grund (#141312), Rail (#181716), Inspektor (#1a1917) und Taste (#1e1c1a) darüber. Eine Taste wirkt erhoben, weil ihre Symbolkachel in der Rinne sitzt und ihr Rand eine Haarlinie ist. Eingabefelder und `pre`-Flächen liegen in der Rinne — man tippt und liest in eine Vertiefung. Der Sub-Inspector liegt eine halbe Stufe über dem Grund. Beim Überfahren hellt sich eine Taste um eine Stufe auf (#262321) und ihr Rand wird zur hellen Linie. Die Inspektorspalte haftet beim Scrollen; das ist keine Bewegung, sondern ein fester Ort.
 
 Bewegung ist die einzige „Tiefe“ im System: Tastendruck skaliert auf 0,97 in 120 ms (`ease`) und füllt die Taste mit 18 % Grün; LED-Punkt und LED-Wort blenden Farbe und Deckkraft in 160 ms; Schalter-Spur und -Knopf wandern in 160 ms. Unter `prefers-reduced-motion` fällt alles auf 0,01 ms.
 
@@ -514,7 +522,9 @@ Textarea, Select und Hinweistext die Welt erben; ohne diese Hülle erscheint sie
 unformatiert. Jeder fachliche Abschnitt bekommt eine Überschrift und eine
 Haarlinie über `.config-section` und `.section-heading`. Die Fläche bleibt im
 Fluss: keine Container-Karten. Die Auswahl einer Tabellenzeile öffnet den
-Bearbeiten-Teil auf der Inspektor-Fläche (`sub-inspector`) unter der Tabelle.
+Bearbeiten-Teil auf der Inspektor-Fläche (`sub-inspector`) — neben der Tabelle,
+wo die Seite breit genug ist, sonst darunter; die Tabelle und ihr Inspektor
+liegen dafür als zwei direkte Kinder in einem `inspektor-bereich`.
 
 ### Seitenkopf (`ModuleHeading`)
 Auf jeder Seite dasselbe Bauteil: Raster `56px minmax(0,1fr) auto`, 16 px Lücke, min. 56 px hoch, Haarlinie unten, 24 px Abstand darunter, Breite `min(960px, 100%)`. Links die 56-px-Symbolkachel (Tint-1, Marke-Text, Glyph 28 px) mit dem Seitensymbol aus der Schienenfamilie; Mitte Titel 22 px und Unterzeile 13 px Text-2 (Rolle, Anzahl mit Zahl in Mono, „nur lesend“, Beschreibung max. 70 ch); rechts optional Aktionen (`header-action`: Knopf, darunter rechtsbündig 11.5-px-Zeitangabe, Sperrgrund 11 px, Fehlerzeile). Auf der Modulseite steht davor die Brotkrume (44 px Trefferhöhe, 8 px Abstand).
@@ -537,11 +547,18 @@ Allgemeine Bauform für Mitglieder, Audit, Ereignisse und Befehle (ersetzt `comm
 - **Nachladen:** Container `.veraltet` (55 %), darunter der Knopf „Ältere Einträge laden“.
 
 ### Sub-Inspector
-Öffnet sich unter der Tabelle für die gewählte Audit- oder Ereigniszeile: `min(960px, 100%)`, 16 px Abstand oben, 18 px 16 px Innenabstand, Haarlinie, {rounded.control}, Fläche Inspektor. Kopf `inspector-section__heading`: Titel 13 px/600 links, Datensatz-ID in Mono Text-2 rechts.
-- **Audit:** `inspector-columns` — zwei Spalten `repeat(2, minmax(0,1fr))`, 16 px Lücke, Kopf „Vorher“/„Nachher“ 11 px/600 Text-3, darunter `pre` in der Rinne mit Haarlinie, min. 88 px, 10 px Innenabstand. Unter 640 px untereinander.
-- **Ereignis:** Eigenschaftenliste (Code, Modul, Zeitstempel) plus `event-detail-json`: formatiertes JSON als `pre` in der Rinne, 12 px Innenabstand, 16 px Abstand.
-- **Befehl:** Felder + Speichern/Löschen (Phase 1), Meta-Zeile „zuletzt“ unter 640 px Containerbreite.
-- **Mitglied:** Ergebniskasten (`inspector-result`, Taste, {rounded.container}, Avatar-Zeile + Rollenwahl + Knopf) und Bestätigungskasten (`inspector-confirmation`, 14-px-Titel) — beide im Fluss unter dem Suchformular.
+Die Fläche für die gewählte Zeile einer Tabelle: 18 px 16 px Innenabstand, Haarlinie, {rounded.control}, Fläche Inspektor. Er ist das zweite Kind eines `inspektor-bereich`; seine Position bestimmt der Bereich, nicht er selbst: ab 1360 px Fensterbreite rechts neben der Liste in einer 592-px-Spalte (`--inspektor-breite`, das 40-rem-Fließtextfeld plus Innenabstand), haftend 16 px unter dem Fensterrand mit innerem Scrollen; darunter im Fluss unter der Liste mit 16 px Abstand, `min(960px, 100%)` breit.
+- **Kopf** `inspector-section__heading`: Titel 13 px/600 links, Datensatz-ID in Mono Text-2, rechts die Schließen-Taste — 44 × 44, still (`quiet`), Symbol × aus der Familie (20 px), `aria-label` „Schließen“. Schließen hebt die Auswahl auf (`aria-selected="false"`) und gibt den Fokus an die Zeile zurück; Escape innerhalb des Inspektors tut dasselbe. Das ist die einzige Fokusregel: Beim Öffnen bleibt der Fokus auf der Zeile, damit Tastaturbedienung weiter durch die Liste laufen kann.
+- **Auswahl bleibt** beim Nachladen bestehen, solange die Zeile noch existiert; verschwindet die Zeile, schließt der Inspektor. Nie schließt er von selbst, während der Bediener liest.
+- **Inhalt ist eng:** Der Inspektor ist Container `inspektor`; seine Inhalte gelten ab 639 px Inspektorbreite als eng (siehe Layout). In der Spalte heißt das immer: Vorher und Nachher untereinander, Eigenschaftenliste einspaltig, Zustandszeile umgebrochen, Tabellen ohne Mindestbreite.
+- **Audit:** `inspector-columns` — zwei Spalten `repeat(2, minmax(0,1fr))`, 16 px Lücke, Kopf „Vorher“/„Nachher“ 11 px/600 Text-3, darunter `pre` in der Rinne mit Haarlinie, min. 88 px, 10 px Innenabstand; eng untereinander.
+- **Ereignis:** Eigenschaftenliste (Zeitstempel, Modul, Beteiligte) plus Verlauf mit `event-detail-json`: formatiertes JSON als `pre` in der Rinne, 12 px Innenabstand, 16 px Abstand.
+- **Abonnement:** Eigenschaftenliste (Typ, Version, ID, Aktualisiert, Twitch-Meldung, HTTP-Status).
+- **Befehl:** Felder + Speichern/Löschen, Meta-Zeile „zuletzt“, sobald die Listenspalte unter 640 px liegt.
+- **Betreiber-Kanal:** Zustandszeile, Zustimmungsschalter, Einladungslink, Mitgliedertabelle, Mitglied hinzufügen — der längste Inspektor im System und der Grund für das innere Scrollen.
+- **Ohne Auswahl** zeigt die Spalte das Anlegen-Formular des Bereichs (Befehl anlegen, Kanal freigeben), falls es eines gibt — dieselbe Fläche, dieselbe Kopfzeile ohne Kennung und ohne Schließen-Taste. Ein Bereich hat so nie zwei primäre Knöpfe zugleich.
+- **Scope-Listen sind keine Inspektoren.** Eine Liste fehlender Berechtigungen hat keine gewählte Zeile; sie ist ein Bereich im Fluss (`content-section` mit `section-heading` und `scope-liste`) und trägt die Klasse `sub-inspector` nicht. Wer die Inspektor-Fläche für einen Block ohne Auswahl leiht, baut ein Dock.
+- **Mitglied:** Ergebniskasten (`inspector-result`, Taste, {rounded.container}, Avatar-Zeile + Rollenwahl + Knopf) und Bestätigungskasten (`inspector-confirmation`, 14-px-Titel) sind kein Sub-Inspector; beide bleiben im Fluss unter dem Suchformular.
 
 ### Brotkrume
 13 px, Text-2; Link Marke-Text mit 44 px Trefferhöhe, Hover Text mit Unterstrich; Trenner Text-4; aktuelles Glied 600 in Marke-Text mit 20-px-Glyph davor. Nur auf der Modulseite.
@@ -562,10 +579,10 @@ Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 
 - **Do** genau zwei Radien verwenden: 12 px für Objekte, 6 px für Bedienelemente und Anzeigen.
 - **Do** alleinstehende Bedienelemente 44 px hoch machen, Tabellenzeilen und ihre Bedienelemente 34 px.
 - **Do** Werte in Plex Mono mit Tabellenziffern setzen (Twitch-ID, Sekunden, Zeitstempel, IDs, Codes, Befehlstoken).
-- **Do** die Seite auf 960 px begrenzen und Bereiche mit Haarlinie plus Abstand trennen.
+- **Do** jeden Block auf 960 px begrenzen und Bereiche mit Haarlinie plus Abstand trennen; nur Liste und Inspektor stehen nebeneinander.
 - **Do** den Sperr- oder Fehlergrund an die Wirkung schreiben (Sperrgrund unter dem Schalter oder Knopf, Hinweis neben dem gedeckten Knopf).
 - **Do** veraltete Werte mit 55 % Deckkraft stehen lassen; nur beim ersten Laden eine Ladezeile.
-- **Do** wählbare Tabellenzeilen mit `tabIndex` und `aria-selected` bauen und ihren Inspector im Fluss darunter öffnen.
+- **Do** wählbare Tabellenzeilen mit `tabIndex` und `aria-selected` bauen, Liste und Inspektor als zwei Kinder eines `inspektor-bereich` anlegen und jeden Inspektor mit Schließen-Taste und Escape wieder schließbar machen.
 - **Do** Panel-Ansichten in `.module-stack` und Konfigurationsabschnitte mit Überschrift, Haarlinie und einer benannten Feldbreite bauen.
 - **Do** Löschhandlungen dauerhaft als `danger` markieren und mit `inspector-confirmation` bestätigen lassen.
 
@@ -579,7 +596,8 @@ Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 
 - **Don't** einen dritten Radius (auch kein `9999px`), eine dritte Schrift oder eine zweite Symbolfamilie einführen; kein Emoji.
 - **Don't** eine Taste mit Absatz, Zähler oder verschachteltem Layout beladen — dann ist sie eine Karte.
 - **Don't** Schriftgrößen an den Viewport koppeln; schmal klappt das Gerüst um, nicht die Schrift.
-- **Don't** ein rechtes Dock bauen; der Inspector öffnet sich im Fluss unter der Tabelle.
+- **Don't** ein rechtes Dock bauen, das leer wartet, eine Tabelle beim Wählen umbrechen lassen oder einen Inspektor ein- und ausblenden; er ist da oder nicht.
+- **Don't** eine Zustandsliste, ein Formular oder Fließtext über 960 px ziehen, nur weil die Seite breiter ist.
 - **Don't** Zeilen ohne Inspector klickbar stylen; Zeiger und Hover gibt es nur mit `tabindex`.
 - **Don't** eine Panel-Ansicht ohne `.module-stack` oder eine Löschhandlung als `quiet` bauen.
 

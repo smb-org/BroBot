@@ -4,18 +4,42 @@ import { z } from "zod";
 import type { BotModule } from "../../src/modules/contract";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 // MODULES ist in der Registry bewusst leer (siehe src/modules/registry.ts).
 // Diese Tests brauchen ein registriertes Modul, um Aktivierung end-to-end
 // durch die Route zu prüfen — daher ein kleines Doppel statt eines echten
 // Moduls, gemockt bevor die Route es importiert.
 const testModuleSchema = z.object({ betrag: z.number() });
+let prepareEnableCommand = false;
 const testModule: BotModule<typeof testModuleSchema> = {
   id: "test-modul",
   settingsSchema: testModuleSchema,
   defaultSettings: { betrag: 42 },
   eventSubTypes: ["channel.chat.message"],
+  onEnable: ({ DB, prepareModuleAudit, now }, channelId) => {
+    if (!prepareEnableCommand || prepareModuleAudit === undefined) return;
+    const mutation = DB.prepare(
+      `INSERT INTO textbefehle_commands
+        (channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
+       SELECT ?, 'befehle', '', 'liste', 1, 'alle', 5, NULL, ?, ?
+        WHERE changes() > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM textbefehle_commands
+             WHERE channel_id = ? AND command_name = 'befehle'
+          )`,
+    ).bind(channelId, now, now, channelId);
+    return [
+      mutation,
+      prepareModuleAudit({
+        channelId,
+        moduleId: "test-modul",
+        action: "test-modul.befehl.angelegt",
+        before: null,
+        after: { name: "befehle", art: "liste", enabled: true, mindeststufe: "alle", text: "", cooldownSekunden: 5 },
+      }, now),
+    ];
+  },
 };
 
 vi.mock("../../src/modules/registry", () => ({ MODULES: [testModule] }));
@@ -133,6 +157,7 @@ describe("Modulverwaltung im Panel", () => {
   beforeEach(() => {
     database = new TestD1Database();
     environment = environmentFor(database);
+    prepareEnableCommand = false;
   });
 
   afterEach(() => {
@@ -176,6 +201,53 @@ describe("Modulverwaltung im Panel", () => {
     );
     const list = await listResponse.json<{ modules: Array<{ id: string; enabled: boolean }> }>();
     expect(list.modules).toEqual([{ id: "test-modul", enabled: true, settings: '{"betrag":42}' }]);
+  });
+
+  it("bindet die Aktivierung und den abhängigen Listenbefehl atomar", async () => {
+    prepareEnableCommand = true;
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+
+    const first = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(first.status).toBe(200);
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'").run();
+    const beforeReenable = await auditCount(database);
+    const second = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(second.status).toBe(200);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM textbefehle_commands").first())
+      .resolves.toEqual({ count: 1 });
+    await expect(auditCount(database)).resolves.toBe(beforeReenable + 1);
+
+    await insertChannel(database, "kanal-b");
+    await insertMember(database, "kanal-b", "user-1", "broadcaster");
+    const beforeFailedAudit = await auditCount(database);
+    const racingDatabase = {
+      prepare: database.prepare.bind(database),
+      batch: async (statements: TestPreparedStatement[]) => {
+        await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = 'kanal-b' AND user_id = 'user-1'").run();
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    environment.DB = racingDatabase;
+    const failed = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-b/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(failed.status).toBe(409);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM channel_modules WHERE channel_id = 'kanal-b'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM textbefehle_commands WHERE channel_id = 'kanal-b'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(auditCount(database)).resolves.toBe(beforeFailedAudit);
   });
 
   it("legt beim Aktivieren das Chat-Abo sofort an", async () => {

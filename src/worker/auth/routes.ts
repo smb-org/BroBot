@@ -138,31 +138,34 @@ const isJsonRecord = (value: unknown): value is JsonRecord =>
 interface OverlayTokenExpiry {
   valid: boolean;
   expiresAt: string | null;
+  checkedAt: string;
 }
 
 const readOverlayTokenExpiry = async (
   request: Request,
-  now: string,
 ): Promise<OverlayTokenExpiry> => {
   const body = await request.text();
-  if (body.trim().length === 0) return { valid: true, expiresAt: null };
+  const checkedAt = nowIso();
+  if (body.trim().length === 0) return { valid: true, expiresAt: null, checkedAt };
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;
   } catch {
-    return { valid: false, expiresAt: null };
+    return { valid: false, expiresAt: null, checkedAt };
   }
   if (!isJsonRecord(parsed) || parsed.expiresAt === undefined || parsed.expiresAt === null) {
-    return isJsonRecord(parsed) ? { valid: true, expiresAt: null } : { valid: false, expiresAt: null };
+    return isJsonRecord(parsed)
+      ? { valid: true, expiresAt: null, checkedAt }
+      : { valid: false, expiresAt: null, checkedAt };
   }
-  if (typeof parsed.expiresAt !== "string") return { valid: false, expiresAt: null };
+  if (typeof parsed.expiresAt !== "string") return { valid: false, expiresAt: null, checkedAt };
   const expiresTimestamp = Date.parse(parsed.expiresAt);
-  const nowTimestamp = Date.parse(now);
+  const nowTimestamp = Date.parse(checkedAt);
   if (!Number.isFinite(expiresTimestamp) || !Number.isFinite(nowTimestamp) || expiresTimestamp <= nowTimestamp) {
-    return { valid: false, expiresAt: null };
+    return { valid: false, expiresAt: null, checkedAt };
   }
-  return { valid: true, expiresAt: new Date(expiresTimestamp).toISOString() };
+  return { valid: true, expiresAt: new Date(expiresTimestamp).toISOString(), checkedAt };
 };
 
 const readRevocationReason = async (request: Request): Promise<string | null> => {
@@ -216,9 +219,9 @@ authRouter.post(
     if (!canManageOverlayTokens(context.get("channelRole"))) return overlayTokenManageDenied(context);
     const channelId = context.req.param("channelId");
 
-    const now = nowIso();
-    const expiry = await readOverlayTokenExpiry(context.req.raw, now);
+    const expiry = await readOverlayTokenExpiry(context.req.raw);
     if (!expiry.valid) return context.json({ error: "Ablaufzeit ist ungültig." }, 400);
+    const now = expiry.checkedAt;
 
     const issued = await issueOverlayToken(context.env.DB, {
       channelId,
