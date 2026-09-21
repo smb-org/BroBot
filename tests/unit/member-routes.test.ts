@@ -701,6 +701,59 @@ describe("Mitgliederverwaltung", () => {
     ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "broadcaster" });
   });
 
+  it("lässt einen Broadcaster einen Broadcaster herabstufen und entfernen, solange einer verbleibt", async () => {
+    await setupChannel(database, "broadcaster");
+    await insertMember(database, "kanal-a", "user-2", "broadcaster");
+    await insertMember(database, "kanal-a", "user-3", "broadcaster");
+
+    const changeResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter" }),
+      environment,
+    );
+    const removeResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-3", "DELETE"),
+      environment,
+    );
+
+    expect(changeResponse.status).toBe(200);
+    expect(removeResponse.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "verwalter" });
+    await expect(database.prepare(
+      "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-3").first()).resolves.toBeNull();
+  });
+
+  it("lässt einen Verwalter Verwalter und Bediener wie bisher verwalten", async () => {
+    await setupChannel(database, "verwalter");
+    await insertMember(database, "kanal-a", "user-2", "verwalter");
+    await insertMember(database, "kanal-a", "user-3", "bediener");
+
+    const lowerResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "bediener" }),
+      environment,
+    );
+    const raiseResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-3", "PATCH", { role: "verwalter" }),
+      environment,
+    );
+    const removeResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-3", "DELETE"),
+      environment,
+    );
+
+    expect(lowerResponse.status).toBe(200);
+    expect(raiseResponse.status).toBe(200);
+    expect(removeResponse.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "bediener" });
+    await expect(database.prepare(
+      "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
+    ).bind("kanal-a", "user-3").first()).resolves.toBeNull();
+  });
+
   it("legt kein Mitglied an, wenn die Session nach dem Guard widerrufen wird", async () => {
     // Der Guard prüft die Session, danach wartet der Handler auf den Body.
     // Ein Client kann ihn offen lassen, bis seine Session widerrufen ist.

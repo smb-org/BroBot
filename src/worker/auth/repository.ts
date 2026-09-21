@@ -420,8 +420,12 @@ export const channelBotConsentCondition = (channelAlias: string): string => `
              )
         )`;
 
-export const requiredActorRoles = (targetRole: ChannelMemberRecord["role"]): string =>
-  targetRole === "broadcaster" ? "'broadcaster'" : "'broadcaster', 'verwalter'";
+export const requiredActorRoles = (
+  targetRole: ChannelMemberRecord["role"] | undefined,
+  existingRole?: ChannelMemberRecord["role"],
+): string => targetRole === "broadcaster" || existingRole === "broadcaster"
+  ? "'broadcaster'"
+  : "'broadcaster', 'verwalter'";
 
 export const bindActorGuard = (actor: ActorContext, channelId: string, now: string) =>
   [actor.sessionId, actor.userId, now, channelId] as const;
