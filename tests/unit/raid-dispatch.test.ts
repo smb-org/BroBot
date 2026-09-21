@@ -4,7 +4,7 @@ import { raidModul } from "../../src/modules/raid";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { upsertBotIdentity } from "../../src/worker/auth/repository";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
-import { insertChannel } from "./fixtures";
+import { insertAppAccessToken, insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const SCHLUESSEL = JSON.stringify({
@@ -35,6 +35,13 @@ describe("Raid-Ausführung", () => {
         createdAt: "2026-09-19T00:00:00.000Z",
         updatedAt: "2026-09-19T00:00:00.000Z",
       });
+      await insertAppAccessToken(
+        database,
+        await encryptJson({ token: "app-token" }, parseKeyRing(SCHLUESSEL)),
+        "2099-09-21T00:00:00.000Z",
+        "2026-09-19T00:00:00.000Z",
+        "2026-09-19T00:00:00.000Z",
+      );
       await database.prepare(
         "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, ?)",
       ).bind("kanal-a", raidModul.id, JSON.stringify(raidModul.defaultSettings)).run();
@@ -46,6 +53,7 @@ describe("Raid-Ausführung", () => {
       await dispatchEventSubNotification({
         DB: database as unknown as D1Database,
         TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
         TOKEN_ENCRYPTION_KEYS: SCHLUESSEL,
       }, {
         channelId: "kanal-a",

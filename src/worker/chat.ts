@@ -1,6 +1,5 @@
-import { getTokenEncryptionKeys } from "./auth/crypto";
 import { getBotIdentity } from "./auth/repository";
-import { decryptStoredToken } from "./bot-maintenance";
+import { getAppAccessToken } from "./app-token";
 import { kuerzeAuf200Zeichen } from "../modules/contract";
 
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
@@ -30,6 +29,7 @@ export const sendChatMessage = async (
   environment: {
     DB: D1Database;
     TWITCH_CLIENT_ID: string;
+    TWITCH_CLIENT_SECRET: string;
     TOKEN_ENCRYPTION_KEYS?: string;
     SESSION_ENCRYPTION_KEYS?: string;
   },
@@ -43,18 +43,22 @@ export const sendChatMessage = async (
   if (identity === null) {
     return { sent: false, reason: "bot_identity_missing", detail: textDetail };
   }
-  const accessToken = await decryptStoredToken(
-    identity.accessTokenCiphertext,
-    getTokenEncryptionKeys(environment),
-  );
-  if (accessToken === null) {
-    return { sent: false, reason: "bot_token_unreadable", detail: textDetail };
+  let accessToken: string;
+  try {
+    accessToken = await getAppAccessToken(
+      environment as unknown as Env,
+      new Date().toISOString(),
+      fetcher,
+    );
+  } catch {
+    return { sent: false, reason: "app_token_unavailable", detail: textDetail };
   }
 
-  const payload: Record<string, string> = {
+  const payload: Record<string, string | boolean> = {
     broadcaster_id: channelId,
     sender_id: identity.userId,
     message: text,
+    for_source_only: false,
   };
   if (replyToMessageId !== undefined) payload.reply_parent_message_id = replyToMessageId;
 

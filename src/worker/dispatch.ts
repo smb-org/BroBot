@@ -11,6 +11,7 @@ import { authorizeModuleMutation } from "./module-authorization";
 export interface DispatchEnvironment {
   DB: D1Database;
   TWITCH_CLIENT_ID: string;
+  TWITCH_CLIENT_SECRET: string;
   TOKEN_ENCRYPTION_KEYS?: string;
   SESSION_ENCRYPTION_KEYS?: string;
   CHANNEL?: Env["CHANNEL"];

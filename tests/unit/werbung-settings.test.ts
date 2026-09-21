@@ -32,6 +32,7 @@ describe("Werbung-Einstellungsdefaults", () => {
       {
         DB: database as unknown as D1Database,
         TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
       },
       {
         channelId: "kanal-a",
