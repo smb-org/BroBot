@@ -31,6 +31,14 @@ Ereignisprotokoll nachvollziehen können, warum etwas nicht passiert ist. Er
 soll nicht ohne Rücksprache ein Modul scharf schalten, das anschließend im
 Chat schreibt.
 
+### Einzelne Befehle innerhalb eines aktiven Moduls
+
+Ein einzelner Befehl innerhalb eines bereits aktiven Moduls ist davon zu
+unterscheiden: Er wurde von jemandem angelegt, der dazu berechtigt war. Ihn
+stillzulegen nimmt nichts weg und schafft nichts Neues. Deshalb darf ein
+`bediener` einen solchen Befehl im laufenden Betrieb ein- oder ausschalten;
+Anlegen, Ändern und Löschen bleiben verwaltende Inhaltsänderungen.
+
 ## 3. Warum Lesen für alle offen ist
 
 Das Ereignisprotokoll aus Entscheidung 0004 ist Betriebsinformation, und genau

@@ -46,9 +46,10 @@ export const legeTextbefehlAn = async (
 
 export const speichereTextbefehl = async (
   channelId: string,
-  command: { oldName: string; name: string; text?: string; cooldownSekunden: number },
+  command: { oldName: string; name: string; art: "text" | "liste"; text?: string; cooldownSekunden: number },
 ): Promise<void> => mutation(channelId, "PATCH", {
   name: command.name,
+  art: command.art,
   ...(command.text === undefined ? {} : { text: command.text }),
   cooldownSekunden: command.cooldownSekunden,
 }, command.oldName);

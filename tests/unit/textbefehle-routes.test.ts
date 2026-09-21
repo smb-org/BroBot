@@ -50,10 +50,10 @@ describe("Textbefehle-Panel", () => {
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
-  it("lässt einen Bediener Befehle anlegen, bearbeiten und löschen", async () => {
+  it("lässt einen Verwalter Befehle anlegen, bearbeiten und löschen", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
     const environment = environmentFor(database);
 
     const create = await panelRouter.fetch(
@@ -168,7 +168,7 @@ describe("Textbefehle-Panel", () => {
   it("erlaubt eine Listenzeile ohne Text und verlangt Text für die Art text", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
     const environment = environmentFor(database);
 
     const liste = await panelRouter.fetch(
@@ -193,7 +193,7 @@ describe("Textbefehle-Panel", () => {
     });
   });
 
-  it("schaltet Befehle nur an der verwaltenden Schwelle und auditiert die Schaltung", async () => {
+  it("lässt einen Verwalter einen Befehl schalten und auditiert die Schaltung", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "verwalter");
@@ -226,10 +226,10 @@ describe("Textbefehle-Panel", () => {
     });
   });
 
-  it("verweigert dem Bediener das Schalten einer Befehlszeile", async () => {
+  it("lässt einen Bediener einen Befehl schalten", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
     const environment = environmentFor(database);
 
     await panelRouter.fetch(
@@ -238,6 +238,7 @@ describe("Textbefehle-Panel", () => {
       }),
       environment,
     );
+    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     const toggle = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/hallo", "PATCH", {
         enabled: false,
@@ -245,16 +246,56 @@ describe("Textbefehle-Panel", () => {
       environment,
     );
 
-    expect(toggle.status).toBe(403);
+    expect(toggle.status).toBe(200);
     await expect(database.prepare(
       "SELECT enabled FROM textbefehle_commands WHERE command_name = 'hallo'",
-    ).first()).resolves.toEqual({ enabled: 1 });
+    ).first()).resolves.toEqual({ enabled: 0 });
   });
 
-  it("verlangt für das Ändern der Mindeststufe die verwaltende Schwelle und auditiert es", async () => {
+  it("verweigert einem Bediener Anlegen, Ändern und Löschen", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    const environment = environmentFor(database);
+
+    const create = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle", "POST", {
+        name: "hallo", text: "Antwort", cooldownSekunden: 5,
+      }),
+      environment,
+    );
+    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+
+    const deniedCreate = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle", "POST", {
+        name: "neu", text: "Neue Antwort", cooldownSekunden: 5,
+      }),
+      environment,
+    );
+    const deniedEdit = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/hallo", "PATCH", {
+        text: "Geändert",
+      }),
+      environment,
+    );
+    const deniedDelete = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/hallo", "DELETE"),
+      environment,
+    );
+
+    expect(create.status).toBe(201);
+    expect(deniedCreate.status).toBe(403);
+    expect(deniedEdit.status).toBe(403);
+    expect(deniedDelete.status).toBe(403);
+    await expect(database.prepare(
+      "SELECT command_name, response_text FROM textbefehle_commands ORDER BY command_name",
+    ).all()).resolves.toMatchObject({ results: [{ command_name: "hallo", response_text: "Antwort" }] });
+  });
+
+  it("verlangt für eine gemeinsame Schalter- und Textänderung die verwaltende Schwelle", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
     const environment = environmentFor(database);
 
     await panelRouter.fetch(
@@ -263,6 +304,34 @@ describe("Textbefehle-Panel", () => {
       }),
       environment,
     );
+    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/hallo", "PATCH", {
+        enabled: false, text: "Neue Antwort",
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(database.prepare(
+      "SELECT response_text, enabled FROM textbefehle_commands WHERE command_name = 'hallo'",
+    ).first()).resolves.toEqual({ response_text: "Antwort", enabled: 1 });
+  });
+
+  it("verlangt für das Ändern der Mindeststufe die verwaltende Schwelle und auditiert es", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    const environment = environmentFor(database);
+
+    await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle", "POST", {
+        name: "hallo", text: "Antwort", cooldownSekunden: 5,
+      }),
+      environment,
+    );
+    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     const denied = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/hallo", "PATCH", {
         mindeststufe: "moderator",
