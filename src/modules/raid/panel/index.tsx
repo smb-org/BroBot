@@ -35,6 +35,7 @@ export const RaidPanel = ({
   if (settings === null) return <p className="loading-line">{error ?? labels.laden}</p>;
 
   const disabled = !canManage || busy;
+  const shoutoutSchwelleDeaktiviert = disabled || !settings.shoutoutAktiv;
   const save = async (): Promise<void> => {
     setBusy(true);
     setError(null);
@@ -54,17 +55,45 @@ export const RaidPanel = ({
       {!canManage ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
       <section className="config-section" aria-label={labels.schwelleAbschnitt}>
         <div className="section-heading"><h2>{labels.schwelleAbschnitt}</h2></div>
+        <label className="config-field config-field--breit">
+          <span>{labels.shoutoutAktiv}</span>
+          <button
+            className="switch"
+            type="button"
+            role="switch"
+            aria-label={labels.schalter(settings.shoutoutAktiv)}
+            aria-checked={settings.shoutoutAktiv}
+            aria-busy={busy}
+            disabled={disabled}
+            onClick={() => { setSettings({ ...settings, shoutoutAktiv: !settings.shoutoutAktiv }); }}
+          >
+            <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
+          </button>
+        </label>
         <label className="config-field config-field--schmal">
-          {labels.mindestZuschauer}
+          {labels.shoutoutSchwelle}
           <input
-            aria-label={labels.mindestZuschauer}
+            aria-label={labels.shoutoutSchwelle}
             type="number"
             min="0"
             max="100000"
             step="1"
-            value={settings.mindestZuschauer}
+            value={settings.shoutoutSchwelle}
+            disabled={shoutoutSchwelleDeaktiviert}
+            onChange={(event) => { setSettings({ ...settings, shoutoutSchwelle: Number(event.target.value) }); }}
+          />
+        </label>
+        <label className="config-field config-field--schmal">
+          {labels.textSchwelle}
+          <input
+            aria-label={labels.textSchwelle}
+            type="number"
+            min="0"
+            max="100000"
+            step="1"
+            value={settings.textSchwelle}
             disabled={disabled}
-            onChange={(event) => { setSettings({ ...settings, mindestZuschauer: Number(event.target.value) }); }}
+            onChange={(event) => { setSettings({ ...settings, textSchwelle: Number(event.target.value) }); }}
           />
         </label>
         <label className="config-field config-field--breit">

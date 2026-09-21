@@ -111,7 +111,7 @@ export const entscheideWerbevorwarnung = (
   const sekunden = Math.round(verbleibend / 1000);
   return {
     kind: "announce",
-    text: input.settings.vorwarnungText.replaceAll("{sekunden}", String(sekunden)),
+    text: input.settings.vorwarnungText.replaceAll("{seconds}", String(sekunden)),
     sekunden,
     terminAm: input.schedule.nextAdAt ?? new Date(nextAdAtMs).toISOString(),
   };

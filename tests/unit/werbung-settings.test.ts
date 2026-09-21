@@ -50,7 +50,7 @@ describe("Werbung-Einstellungsdefaults", () => {
       manuell: "manuell",
       vorwarnung: true,
       vorlaufSekunden: 60,
-      vorwarnungText: "Werbung in {sekunden} Sekunden. Bin gleich zurück!",
+      vorwarnungText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
     });
   });
 });

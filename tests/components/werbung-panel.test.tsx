@@ -35,8 +35,8 @@ describe("Werbung-Panel-Ansicht", () => {
     ["en-US", "Automatic announcement", "Automatic ad break", "Manual announcement", "Manually started ad break", "Actions", "Save announcements"],
   ])("rendert Felder und Abschnitte auf %s", async (browserLanguage, automaticHeading, automaticLabel, manualHeading, manualLabel, actionsHeading, saveLabel) => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
-      automatisch: "Automatisch {dauer}",
-      manuell: "Manuell {dauer}",
+      automatisch: "Automatisch {duration}",
+      manuell: "Manuell {duration}",
     } })));
     Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
 

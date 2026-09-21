@@ -51,6 +51,18 @@ describe("Dashboard-Locale", () => {
     expect(ereignisText("textbefehle.berechtigung", { name: "wiki", geforderteStufe: "moderator", vorhandeneStufe: ["zuschauer"] })).toBe("Command !wiki not executed: minimum level moderators, present viewer");
   });
 
+  it("unterscheidet abgeschalteten Shoutout von der Schwelle", () => {
+    setBrowserLanguage("de-DE");
+    expect(ereignisText("shoutout.unterdrueckt", { grund: "abgeschaltet" })).toBe("Shoutout abgeschaltet");
+    expect(ereignisText("shoutout.unterdrueckt", { grund: "unter_schwelle", zuschauer: 2, schwelle: 3 }))
+      .toBe("Shoutout unter der Schwelle (2 von 3 Zuschauern)");
+
+    setBrowserLanguage("en-US");
+    expect(ereignisText("shoutout.unterdrueckt", { grund: "abgeschaltet" })).toBe("Shoutout disabled");
+    expect(ereignisText("shoutout.unterdrueckt", { grund: "unter_schwelle", zuschauer: 2, schwelle: 3 }))
+      .toBe("Shoutout below threshold (2 of 3 viewers)");
+  });
+
   it("rendert Moderationsdetails zweisprachig mit Bedeutungston", () => {
     setBrowserLanguage("de-DE");
     expect(ereignisText("kanalereignisse.moderation.timeout", {

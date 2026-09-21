@@ -24,6 +24,11 @@ describe("Textbefehle-Domain", () => {
       .toBe("Hallo Alice in Kanal A — {unknown}");
   });
 
+  it("ersetzt keine deutschen Altname", () => {
+    expect(befehlTextMitPlatzhaltern("Hallo {nutzer} in {kanal}", "Alice", "Kanal A"))
+      .toBe("Hallo {nutzer} in {kanal}");
+  });
+
   it("liefert die verbleibende Abkühlzeit in ganzen Sekunden", () => {
     expect(cooldownRestzeit("2026-09-19T12:00:00.000Z", "2026-09-19T12:00:03.200Z", 5)).toBe(2);
     expect(cooldownRestzeit("2026-09-19T12:00:00.000Z", "2026-09-19T12:00:05.000Z", 5)).toBe(0);

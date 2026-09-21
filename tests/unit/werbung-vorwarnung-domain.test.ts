@@ -7,7 +7,7 @@ const geplanterTerminAmMs = Date.parse("2026-09-21T12:00:00.000Z");
 const einstellungen = {
   vorwarnung: true,
   vorlaufSekunden: 60,
-  vorwarnungText: "Werbung in {sekunden} Sekunden.",
+  vorwarnungText: "Werbung in {seconds} Sekunden.",
 };
 
 const eingabe = (overrides: Partial<Parameters<typeof entscheideWerbevorwarnung>[0]> = {}) => ({
@@ -39,6 +39,14 @@ describe("Werbe-Vorwarnungsentscheidung", () => {
     expect(entscheideWerbevorwarnung(eingabe({
       jetztAmMs: jetztAmMs + 1_100,
     }))).toMatchObject({ kind: "announce", sekunden: 59, text: "Werbung in 59 Sekunden." });
+  });
+
+  it("ignoriert den deutschen Altname für Sekunden", () => {
+    const result = entscheideWerbevorwarnung(eingabe({
+      settings: { ...einstellungen, vorwarnungText: "Werbung in {sekunden} Sekunden." },
+    }));
+
+    expect(result).toMatchObject({ kind: "announce", text: "Werbung in {sekunden} Sekunden." });
   });
 
   it("nennt die tatsächlich verbleibende Zeit, nicht die eingestellte Vorlaufzeit", () => {

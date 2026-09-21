@@ -3,7 +3,10 @@ import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/lo
 export interface RaidPanelTexte {
   titel: string;
   schwelleAbschnitt: string;
-  mindestZuschauer: string;
+  shoutoutAktiv: string;
+  shoutoutSchwelle: string;
+  textSchwelle: string;
+  schalter: (aktiv: boolean) => string;
   vollerText: string;
   kurzerText: string;
   platzhalterVoll: string;
@@ -19,12 +22,15 @@ export interface RaidPanelTexte {
 const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
   de: {
     titel: "Raid-Shoutout",
-    schwelleAbschnitt: "Schwelle und Nachrichten",
-    mindestZuschauer: "Mindestzuschauer",
+    schwelleAbschnitt: "Shoutout und Nachrichten",
+    shoutoutAktiv: "Helix-Shoutout automatisch senden",
+    shoutoutSchwelle: "Shoutout-Schwelle (Zuschauer)",
+    textSchwelle: "Text-Schwelle (Zuschauer)",
+    schalter: (aktiv) => `Helix-Shoutout automatisch senden: ${aktiv ? "eingeschaltet" : "ausgeschaltet"}`,
     vollerText: "Voller Raid-Text",
     kurzerText: "Kurzer Dankestext",
-    platzhalterVoll: "{kanal} und {zuschauer} werden beim Eingang ersetzt.",
-    platzhalterKlein: "{kanal} und {zuschauer} werden beim Eingang ersetzt.",
+    platzhalterVoll: "{channel} und {viewers} werden beim Eingang ersetzt.",
+    platzhalterKlein: "{channel} und {viewers} werden beim Eingang ersetzt.",
     aktionen: "Aktionen",
     speichern: "Raid-Einstellungen speichern",
     gespeichert: "Raid-Einstellungen gespeichert.",
@@ -34,12 +40,15 @@ const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
   },
   en: {
     titel: "Raid shoutout",
-    schwelleAbschnitt: "Threshold and messages",
-    mindestZuschauer: "Minimum viewers",
+    schwelleAbschnitt: "Shoutout and messages",
+    shoutoutAktiv: "Send automatic Helix shoutouts",
+    shoutoutSchwelle: "Shoutout threshold (viewers)",
+    textSchwelle: "Text threshold (viewers)",
+    schalter: (aktiv) => `Automatic Helix shoutout: ${aktiv ? "enabled" : "disabled"}`,
     vollerText: "Full raid message",
     kurzerText: "Small raid message",
-    platzhalterVoll: "{kanal} and {zuschauer} are replaced when the raid arrives.",
-    platzhalterKlein: "{kanal} and {zuschauer} are replaced when the raid arrives.",
+    platzhalterVoll: "{channel} and {viewers} are replaced when the raid arrives.",
+    platzhalterKlein: "{channel} and {viewers} are replaced when the raid arrives.",
     aktionen: "Actions",
     speichern: "Save raid settings",
     gespeichert: "Raid settings saved.",

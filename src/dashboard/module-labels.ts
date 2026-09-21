@@ -1,21 +1,33 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
-
-interface ModulNamen {
-  textbefehle: string;
-  kanalereignisse: string;
-  werbung: string;
-}
+/**
+ * Beide Kataloge sind nach Modulkennung geschlüsselt. Die Vollständigkeit
+ * sichert `tests/unit/module-labels.test.ts`, nicht der Compiler: Sie über den
+ * Typ zu erzwingen, verlangte eine heterogene Literal-Registry und damit einen
+ * bivarianten `handleEvent` — das lockerte den Modulvertrag an der Stelle, an
+ * der Schema und Handler auseinanderlaufen können.
+ */
+type ModulNamen = Record<string, string>;
 
 const modulNamen: LocaleCatalog<ModulNamen> = {
-  de: { textbefehle: "Textbefehle", kanalereignisse: "Kanalereignisse", werbung: "Werbung" },
-  en: { textbefehle: "Text commands", kanalereignisse: "Channel events", werbung: "Ad breaks" },
+  de: {
+    textbefehle: "Textbefehle",
+    kanalereignisse: "Kanalereignisse",
+    werbung: "Werbung",
+    raid: "Raid-Shoutout",
+  },
+  en: {
+    textbefehle: "Text commands",
+    kanalereignisse: "Channel events",
+    werbung: "Ad breaks",
+    raid: "Raid shoutout",
+  },
 };
 
+const modulText = (catalog: Record<string, string>, moduleId: string): string | null =>
+  catalog[moduleId] ?? null;
+
 export const moduleName = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): string => {
-  if (moduleId === "textbefehle") return modulNamen[language].textbefehle;
-  if (moduleId === "kanalereignisse") return modulNamen[language].kanalereignisse;
-  if (moduleId === "werbung") return modulNamen[language].werbung;
-  return moduleId;
+  return modulText(modulNamen[language], moduleId) ?? moduleId;
 };
 
 interface EreignisAboNamen {
@@ -87,22 +99,20 @@ export const eventSubName = (
   return subscriptionType;
 };
 
-interface ModulBeschreibungen {
-  textbefehle: string;
-  kanalereignisse: string;
-  werbung: string;
-}
+type ModulBeschreibungen = Record<string, string>;
 
 const modulBeschreibungen: LocaleCatalog<ModulBeschreibungen> = {
   de: {
     textbefehle: "Antwortet auf kurze Befehle im Chat.",
     kanalereignisse: "Protokolliert, was im Kanal geschieht.",
     werbung: "Kündigt beginnende Werbepausen im Chat an.",
+    raid: "Begrüßt eingehende Raids und löst ab einer Schwelle einen Helix-Shoutout aus.",
   },
   en: {
     textbefehle: "Replies to short commands in chat.",
     kanalereignisse: "Records what happens in the channel.",
     werbung: "Announces beginning ad breaks in chat.",
+    raid: "Greets incoming raids and sends a Helix shoutout above a threshold.",
   },
 };
 
@@ -110,10 +120,7 @@ export const moduleDescription = (
   moduleId: string,
   language: DashboardLanguage = dashboardLanguage(),
 ): string | null => {
-  if (moduleId === "textbefehle") return modulBeschreibungen[language].textbefehle;
-  if (moduleId === "kanalereignisse") return modulBeschreibungen[language].kanalereignisse;
-  if (moduleId === "werbung") return modulBeschreibungen[language].werbung;
-  return null;
+  return modulText(modulBeschreibungen[language], moduleId);
 };
 
 export type ModuleSymbol = "textbefehle" | "kanalereignisse" | "werbung" | "standard";
