@@ -22,7 +22,7 @@ import {
 } from "./api";
 import { betreiberHandlungLabel, betreiberTexte, roleLabel } from "./labels";
 import { dashboardGemeinsameTexte, formatZeitpunkt, formatZahl } from "./locale";
-import { SubInspector } from "./inspector";
+import { InspectorHeading, SubInspector } from "./inspector";
 import { useInspectorSelection } from "./inspector-selection";
 import { NavigationIcon, ZustandZeile, type ZustandsTon } from "./module-panels";
 
@@ -596,14 +596,7 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
       </header>
       <section className={`config-section inspektor-bereich${ausgewählterKanal === null && !kanalFreigabeOffen ? "" : " inspektor-bereich--offen"}`} aria-label={texte.kanalübersicht}>
         <div className="inspektor-bereich__liste">
-          <div className="section-heading">
-            <h2>{texte.kanalübersicht}</h2>
-            <button ref={kanalFreigabeButton} className="button button--quiet inspector-close" type="button" aria-label={texte.kanalFreigeben} onClick={öffneKanalFreigabe}>
-              <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-          </div>
+          <InspectorHeading level="h2" title={texte.kanalübersicht} buttonRef={kanalFreigabeButton} action={{ kind: "add", label: texte.kanalFreigeben, onClick: öffneKanalFreigabe }} />
           {übersicht.status === "loading" && übersicht.data === null ? <p className="loading-line">{texte.laden}</p> : null}
           {übersicht.error === null ? null : <p className="form-error" role="alert">{übersicht.error}</p>}
           {übersicht.data?.length === 0 ? <p className="muted">{texte.keineKanäle}</p> : null}
