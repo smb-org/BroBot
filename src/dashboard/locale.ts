@@ -643,7 +643,11 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "raid.ausgehend": (detail) => `Ausgehender Raid zu ${detailText(detail, "zielKanalId", "unbekannt")}`,
     "raid.shoutout": (detail) => `Raid über der Schwelle (${detailZahl(detail, "zuschauer", "unbekannt")} von ${detailZahl(detail, "schwelle", "unbekannt")}): Shoutout und Chatzeile`,
     "raid.ungueltig": (detail) => `Raid verworfen: ${detailText(detail, "grund", "ungültige Daten")}`,
-    "shoutout.unterdrueckt": "Shoutout unterdrückt",
+    "shoutout.unterdrueckt": (detail) => detail.grund === "abgeschaltet"
+      ? "Shoutout abgeschaltet"
+      : detail.grund === "unter_schwelle"
+        ? `Shoutout unter der Schwelle (${detailZahl(detail, "zuschauer", "unbekannt")} von ${detailZahl(detail, "schwelle", "unbekannt")} Zuschauern)`
+        : "Shoutout unterdrückt",
     "werbung.ankuendigung": (detail) => `Werbepause ${detail.automatisch === true ? "automatisch" : "manuell"} gestartet: ${detailZahl(detail, "dauer", "unbekannte Dauer")} Sekunden`,
     "werbung.uebersprungen": (detail) => `Werbepause übersprungen: ${detail.grund === "dauer_null" ? "Dauer ist null" : "Ereignisdaten sind ungültig"}`,
     "werbung.vorwarnung.angekuendigt": (detail) => `Vorwarnung: Werbung in ${detailZahl(detail, "sekunden", "unbekannter Zeit")} Sekunden`,
@@ -700,7 +704,11 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "raid.ausgehend": (detail) => `Outgoing raid to ${detailText(detail, "zielKanalId", "unknown")}`,
     "raid.shoutout": (detail) => `Raid above threshold (${detailZahl(detail, "zuschauer", "unknown")} of ${detailZahl(detail, "schwelle", "unknown")}): shoutout and chat line`,
     "raid.ungueltig": (detail) => `Raid discarded: ${detailText(detail, "grund", "invalid data")}`,
-    "shoutout.unterdrueckt": "Shoutout suppressed",
+    "shoutout.unterdrueckt": (detail) => detail.grund === "abgeschaltet"
+      ? "Shoutout disabled"
+      : detail.grund === "unter_schwelle"
+        ? `Shoutout below threshold (${detailZahl(detail, "zuschauer", "unknown")} of ${detailZahl(detail, "schwelle", "unknown")} viewers)`
+        : "Shoutout suppressed",
     "werbung.ankuendigung": (detail) => `Ad break ${detail.automatisch === true ? "automatically" : "manually"} started: ${detailZahl(detail, "dauer", "unknown duration")} seconds`,
     "werbung.uebersprungen": (detail) => `Ad break skipped: ${detail.grund === "dauer_null" ? "duration is zero" : "event data is invalid"}`,
     "werbung.vorwarnung.angekuendigt": (detail) => `Ad warning: ad in ${detailZahl(detail, "sekunden", "unknown time")} seconds`,

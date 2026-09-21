@@ -71,9 +71,25 @@ describe("Werbung-Modul", () => {
       manuell: "Pause läuft",
       vorwarnung: true,
       vorlaufSekunden: 60,
-      vorwarnungText: "Vorwarnung {sekunden}",
+      vorwarnungText: "Vorwarnung {seconds}",
     }));
 
     expect(result.actions).toEqual([{ kind: "chat", text: "Pause läuft (45 Sekunden)" }]);
+  });
+
+  it("ersetzt den englischen Platzhalter und keinen deutschen Altname", () => {
+    const result = verarbeiteWerbepause(event({
+      duration_seconds: 45,
+      started_at: "2026-09-20T10:00:00.000Z",
+      is_automatic: false,
+    }, {
+      automatisch: "auto {duration}",
+      manuell: "Pause {dauer}",
+      vorwarnung: true,
+      vorlaufSekunden: 60,
+      vorwarnungText: "Vorwarnung {seconds}",
+    }));
+
+    expect(result.actions).toEqual([{ kind: "chat", text: "Pause {dauer} (45 Sekunden)" }]);
   });
 });

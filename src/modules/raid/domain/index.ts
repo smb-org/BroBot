@@ -27,7 +27,7 @@ export const entscheideRaid = (
   payload: Readonly<Record<string, unknown>>,
   channelId: string,
   subscriptionVariant: string | undefined,
-  mindestZuschauer: number,
+  textSchwelle: number,
 ): RaidEntscheidung => {
   const fromId = textwert(payload.from_broadcaster_user_id);
   const toId = textwert(payload.to_broadcaster_user_id);
@@ -45,6 +45,6 @@ export const entscheideRaid = (
     quelleKanalId: fromId,
     quelleKanalName: textwert(payload.from_broadcaster_user_name) ?? textwert(payload.from_broadcaster_user_login) ?? fromId,
     zuschauer,
-    voll: zuschauer >= mindestZuschauer,
+    voll: zuschauer >= textSchwelle,
   };
 };

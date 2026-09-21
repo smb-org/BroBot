@@ -259,7 +259,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("columnheader", { name: "Modul" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Wer" })).toBeInTheDocument();
     expect(screen.getByText("Shoutout unterdrückt")).toBeInTheDocument();
-    expect(screen.getByText("raid")).toBeInTheDocument();
+    expect(screen.getByText("Raid-Shoutout")).toBeInTheDocument();
     expect(screen.getByText("Automatisch")).toBeInTheDocument();
     expect(screen.getByText("plugin.anderes")).toHaveClass("mono");
     expect(screen.getByText("user-2")).toHaveClass("mono");

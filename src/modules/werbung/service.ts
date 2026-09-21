@@ -26,8 +26,8 @@ const diagnosticCode = (event: ReturnType<typeof entscheideWerbepause>): string 
 
 const textMitDauer = (vorlage: string, dauerSekunden: number): string => {
   const text = vorlage.trim();
-  return text.includes("{dauer}")
-    ? text.replaceAll("{dauer}", String(dauerSekunden))
+  return text.includes("{duration}")
+    ? text.replaceAll("{duration}", String(dauerSekunden))
     : `${text} (${String(dauerSekunden)} Sekunden)`;
 };
 

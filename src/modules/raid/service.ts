@@ -4,8 +4,8 @@ import { entscheideRaid } from "./domain";
 
 const textMitRaid = (vorlage: string, kanal: string, zuschauer: number): string => vorlage
   .trim()
-  .replaceAll("{kanal}", kanal)
-  .replaceAll("{zuschauer}", String(zuschauer));
+  .replaceAll("{channel}", kanal)
+  .replaceAll("{viewers}", String(zuschauer));
 
 export const verarbeiteRaid = (
   event: ModuleEvent<RaidSettings>,
@@ -14,7 +14,7 @@ export const verarbeiteRaid = (
     event.payload,
     event.channelId,
     event.subscriptionVariant,
-    event.settings.mindestZuschauer,
+    event.settings.textSchwelle,
   );
 
   if (entscheidung.kind === "ausgehend") {
@@ -31,18 +31,21 @@ export const verarbeiteRaid = (
     return { actions: [], diagnostics: [{ code: "raid.ungueltig", detail: { grund: entscheidung.grund } }] };
   }
 
-  if (!entscheidung.voll) {
+  const chatText = textMitRaid(
+    entscheidung.voll ? event.settings.textVoll : event.settings.textKlein,
+    entscheidung.quelleKanalName,
+    entscheidung.zuschauer,
+  );
+  const shoutoutMoeglich = event.settings.shoutoutAktiv && entscheidung.zuschauer >= event.settings.shoutoutSchwelle;
+  if (!shoutoutMoeglich) {
     return {
-      actions: [{
-        kind: "chat",
-        text: textMitRaid(event.settings.textKlein, entscheidung.quelleKanalName, entscheidung.zuschauer),
-      }],
+      actions: [{ kind: "chat", text: chatText }],
       diagnostics: [{
         code: "shoutout.unterdrueckt",
         detail: {
-          grund: "unter_schwelle",
+          grund: event.settings.shoutoutAktiv ? "unter_schwelle" : "abgeschaltet",
           zuschauer: entscheidung.zuschauer,
-          schwelle: event.settings.mindestZuschauer,
+          schwelle: event.settings.shoutoutSchwelle,
         },
       }],
     };
@@ -51,17 +54,14 @@ export const verarbeiteRaid = (
   return {
     actions: [
       { kind: "shoutout", zielKanalId: entscheidung.quelleKanalId },
-      {
-        kind: "chat",
-        text: textMitRaid(event.settings.textVoll, entscheidung.quelleKanalName, entscheidung.zuschauer),
-      },
+      { kind: "chat", text: chatText },
     ],
     diagnostics: [{
       code: "raid.shoutout",
       detail: {
         quelleKanalId: entscheidung.quelleKanalId,
         zuschauer: entscheidung.zuschauer,
-        schwelle: event.settings.mindestZuschauer,
+        schwelle: event.settings.shoutoutSchwelle,
       },
     }],
   };

@@ -82,7 +82,20 @@ Beides kostet heute nichts und verbilligt die spätere Nachrüstung:
   `src/dashboard/main.tsx` und `src/dashboard/members.tsx`; beide werden bei
   der Umsetzung nachgezogen.
 
-## 6. Ausdrücklich nicht betroffen
+## 6. Platzhalter in Chattexten bleiben englisch
+
+Platzhalter in Chattexten gehören dem Kanal und werden nie je Sprache
+übersetzt. Ein gespeicherter Text gehört dem Kanal, nicht der gerade
+eingestellten Oberflächensprache; würde der Name mit der Sprache wandern,
+wäre jeder gespeicherte Text nach einem Sprachwechsel kaputt.
+
+| Modul | Platzhalter |
+|---|---|
+| `textbefehle` | `{user}`, `{channel}` |
+| `werbung` | `{duration}`, `{seconds}` |
+| `raid` | `{channel}`, `{viewers}` |
+
+## 7. Ausdrücklich nicht betroffen
 
 **Die Chat-Ausgaben des Bots.** Shoutout-Texte, Ansagen und Antworten sind
 Einstellungen je Kanal, vom Broadcaster selbst verfasst. Ein englischsprachiger
