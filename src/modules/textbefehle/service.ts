@@ -9,8 +9,6 @@ import {
 import type { TextbefehlEingabe } from "./domain";
 import type { TextbefehlRepository } from "./repository";
 
-export const TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN = 5;
-
 const recordWert = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? Reflect.get(value, key)
@@ -59,11 +57,6 @@ const antwort = (event: ModuleEvent, eingabe: Exclude<TextbefehlEingabe, { art: 
   };
 };
 
-const nichtBerechtigt = (): ModuleResult => ({
-  actions: [],
-  diagnostics: [{ code: "textbefehle.nicht_berechtigt" }],
-});
-
 export const verarbeiteTextbefehlNachricht = async (
   event: ModuleEvent,
   repository: TextbefehlRepository,
@@ -75,38 +68,6 @@ export const verarbeiteTextbefehlNachricht = async (
 
   if (eingabe.art === "unbekannt") {
     return { actions: [], diagnostics: [{ code: "textbefehle.unbekannt" }] };
-  }
-
-  if (eingabe.art === "hinzufuegen") {
-    if (event.actor?.role === null || event.actor === null) return nichtBerechtigt();
-    if (!gueltigerBefehlsname(eingabe.name) || eingabe.text.length === 0) {
-      return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
-    }
-    const angelegt = await repository.anlegen({
-      channelId: event.channelId,
-      name: eingabe.zielname,
-      text: eingabe.text,
-      cooldownSekunden: TEXTBEFEHL_DEFAULT_COOLDOWN_SEKUNDEN,
-      now: event.receivedAt,
-    }, { userId: event.actor.userId });
-    return angelegt.ok
-      ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde angelegt.`)
-      : angelegt.grund === "nicht_berechtigt"
-        ? nichtBerechtigt()
-        : { actions: [], diagnostics: [{ code: "textbefehle.bereits_vorhanden", detail: { name: eingabe.zielname } }] };
-  }
-
-  if (eingabe.art === "entfernen") {
-    if (event.actor?.role === null || event.actor === null) return nichtBerechtigt();
-    if (!gueltigerBefehlsname(eingabe.zielname)) {
-      return { actions: [], diagnostics: [{ code: "textbefehle.ungueltig" }] };
-    }
-    const entfernt = await repository.loeschen(event.channelId, eingabe.zielname, { userId: event.actor.userId }, event.receivedAt);
-    return entfernt.ok
-      ? antwort(event, eingabe, `Befehl !${eingabe.zielname} wurde entfernt.`)
-      : entfernt.grund === "nicht_berechtigt"
-        ? nichtBerechtigt()
-        : { actions: [], diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.zielname } }] };
   }
 
   if (eingabe.art === "listen") {

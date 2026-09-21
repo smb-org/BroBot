@@ -1,8 +1,6 @@
 export const BEFEHLSNAME_MUSTER = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 export type TextbefehlEingabe =
-  | { art: "hinzufuegen"; name: string; argumente?: string; zielname: string; text: string }
-  | { art: "entfernen"; name: string; argumente?: string; zielname: string }
   | { art: "listen"; name: string; argumente?: string }
   | { art: "ausgeben"; name: string; argumente?: string }
   | { art: "unbekannt" };
@@ -24,25 +22,6 @@ export const befehlAusNachricht = (message: string): TextbefehlEingabe | null =>
       : { art: "unbekannt" };
   }
 
-  const addMatch = /^!befehl\s+hinzufuegen\s+(\S+)\s+(.+)$/u.exec(trimmed);
-  if (addMatch !== null) {
-    return {
-      art: "hinzufuegen",
-      name,
-      ...(argumente === undefined || argumente.length === 0 ? {} : { argumente }),
-      zielname: addMatch[1] ?? "",
-      text: addMatch[2] ?? "",
-    };
-  }
-  const removeMatch = /^!befehl\s+entfernen\s+(\S+)$/u.exec(trimmed);
-  if (removeMatch !== null) {
-    return {
-      art: "entfernen",
-      name,
-      ...(argumente === undefined || argumente.length === 0 ? {} : { argumente }),
-      zielname: removeMatch[1] ?? "",
-    };
-  }
   return { art: "unbekannt" };
 };
 

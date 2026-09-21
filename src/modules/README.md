@@ -103,10 +103,10 @@ Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben. Panel-Ansichten erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
 
-Textbefehle verarbeiten `!befehl hinzufuegen <name> <text>`,
-`!befehl entfernen <name>` und `!befehle`. Die angelegten Befehle werden
-kanalbezogen als `!<name>` ausgelöst. `{user}` und `{channel}` werden erst bei
-der Ausgabe ersetzt. Die atomare `beanspruchen`-Mutation setzt
+Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Im Chat bleibt
+`!befehle` zum Auflisten verfügbar. Die angelegten Befehle werden kanalbezogen
+als `!<name>` ausgelöst. `{user}` und `{channel}` werden erst bei der Ausgabe
+ersetzt. Die atomare `beanspruchen`-Mutation setzt
 `last_used_at`; scheitert sie wegen der Abkühlzeit, bleibt die Chataktion leer
 und das Modul meldet `textbefehle.abgekuehlt`. Ein unbekannter
 `!`-Befehl erzeugt keine Chataktion, aber die Diagnose

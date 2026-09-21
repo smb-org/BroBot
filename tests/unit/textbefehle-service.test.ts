@@ -130,13 +130,4 @@ describe("Textbefehle-Service", () => {
     expect(result.diagnostics[0]?.code).toBe("textbefehle.abgekuehlt");
   });
 
-  it("verweigert Änderungen ohne Kanalmitgliedschaft", async () => {
-    const result = await verarbeiteTextbefehlNachricht(
-      eventFuer("!befehl hinzufuegen hallo Antwort", { userId: "fremd", login: "fremd", role: null }),
-      repositoryFuer([]),
-    );
-
-    expect(result.actions).toEqual([]);
-    expect(result.diagnostics).toEqual([{ code: "textbefehle.nicht_berechtigt" }]);
-  });
 });

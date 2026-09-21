@@ -497,6 +497,10 @@ export type EreignisCode =
   | "werbung.uebersprungen"
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
+  // Seit dem Wegfall der ändernden Chat-Befehle (#120) erzeugt niemand mehr
+  // diese beiden Kennungen. Sie bleiben, weil das Ereignisprotokoll seine
+  // Zeilen 14 Tage hält: Ohne Beschriftung wären bereits geschriebene
+  // Einträge im Panel nicht mehr lesbar.
   | "textbefehle.bereits_vorhanden"
   | "textbefehle.nicht_berechtigt"
   | "textbefehle.unbekannt"
