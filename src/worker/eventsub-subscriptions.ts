@@ -85,13 +85,19 @@ const userSubscriptionDefinition = (subscriptionType: string, version: string): 
 });
 
 /** Abo mit ausschließlicher Broadcaster-Bedingung, wie channel.ad_break.begin. */
-const broadcasterSubscriptionDefinition = (subscriptionType: string, version: string): EventSubSubscriptionDefinition => ({
+const broadcasterSubscriptionDefinition = (
+  subscriptionType: string,
+  version: string,
+  requiresConsent = true,
+): EventSubSubscriptionDefinition => ({
   subscriptionType,
   variant: "",
   version,
   buildCondition: (channelId) => ({ broadcaster_user_id: channelId }),
   channelIdFromCondition: conditionField("broadcaster_user_id"),
-  consentingIdentityFromCondition: identityFromConditionField("broadcaster_user_id", "login"),
+  consentingIdentityFromCondition: requiresConsent
+    ? identityFromConditionField("broadcaster_user_id", "login")
+    : noConsentingIdentity,
 });
 
 const noConsentingIdentity = (): null => null;
@@ -126,6 +132,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDef
   moderatorSubscriptionDefinition("automod.message.hold", "1"),
   moderatorSubscriptionDefinition("channel.suspicious_user.message", "1"),
   moderatorSubscriptionDefinition("channel.suspicious_user.update", "1"),
+  broadcasterSubscriptionDefinition("stream.online", "1", false),
   broadcasterSubscriptionDefinition("channel.ad_break.begin", "1"),
 ];
 

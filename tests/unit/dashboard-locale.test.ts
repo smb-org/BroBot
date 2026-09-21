@@ -76,7 +76,9 @@ describe("Dashboard-Locale", () => {
       "kanalereignisse.moderation.unban", "kanalereignisse.moderation.delete", "kanalereignisse.moderation.warn",
       "kanalereignisse.moderation.unbekannt", "kanalereignisse.automod.halte", "kanalereignisse.verdacht.nachricht",
       "kanalereignisse.verdacht.einstufung", "kanalereignisse.verdacht.entwarnung", "raid.ausgehend", "raid.shoutout", "raid.ungueltig", "shoutout.unterdrueckt",
-      "werbung.ankuendigung", "werbung.uebersprungen", "textbefehle.abgekuehlt", "textbefehle.ausgeloest",
+      "werbung.ankuendigung", "werbung.uebersprungen", "werbung.vorwarnung.angekuendigt", "werbung.vorwarnung.kein_termin",
+      "werbung.vorwarnung.zu_spaet", "werbung.vorwarnung.pause_begonnen", "werbung.vorwarnung.termin_verschoben",
+      "werbung.vorwarnung.scope_fehlt", "werbung.vorwarnung.zeitplan_fehler", "textbefehle.abgekuehlt", "textbefehle.ausgeloest",
       "textbefehle.deaktiviert", "textbefehle.berechtigung", "textbefehle.bereits_vorhanden",
       "textbefehle.nicht_berechtigt", "textbefehle.unbekannt", "textbefehle.ungueltig",
     ];

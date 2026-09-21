@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  verarbeiteWerbevorwarnung: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../src/worker/werbe-vorwarnung", () => mocks);
 
 import type {
   RealtimeEnvelope,
@@ -49,19 +55,47 @@ const socketFor = (principal: RealtimePanelPrincipal): SocketDouble => ({
   deserializeAttachment: vi.fn(() => principal),
 } as unknown as SocketDouble);
 
-const objectFor = (sockets: SocketDouble[]): ChannelObject => {
+type StorageDouble = {
+  values: Map<string, unknown>;
+  setAlarm: ReturnType<typeof vi.fn>;
+  deleteAlarm: ReturnType<typeof vi.fn>;
+};
+
+const storageOf = (object: ChannelObject): StorageDouble =>
+  (object as unknown as { ctx: { storage: StorageDouble } }).ctx.storage;
+
+const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObject => {
+  const values = new Map<string, unknown>();
+  const storage: StorageDouble = {
+    values,
+    setAlarm: vi.fn(),
+    deleteAlarm: vi.fn(),
+  };
+  const prepared = {
+    bind: vi.fn(() => prepared),
+    all: vi.fn().mockResolvedValue({ results: [] }),
+  };
   const state = {
     id: { name: "kanal-a" },
     getWebSockets: (tag?: string) => tag === undefined
       ? sockets
       : sockets.filter((socket) => socket.tags.includes(tag)),
     storage: {
-      setAlarm: vi.fn(),
-      deleteAlarm: vi.fn(),
+      ...storage,
+      get: vi.fn((key: string) => Promise.resolve(values.get(key))),
+      put: vi.fn((key: string, value: unknown) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+      delete: vi.fn((key: string) => {
+        values.delete(key);
+        return Promise.resolve(true);
+      }),
     },
   } as unknown as DurableObjectState;
   const object = Object.create(ChannelObject.prototype) as ChannelObject;
   (object as unknown as { ctx: DurableObjectState }).ctx = state;
+  (object as unknown as { env: Env }).env = { DB: database ?? ({ prepare: () => prepared } as unknown as D1Database) } as Env;
   return object;
 };
 
@@ -75,6 +109,11 @@ const ereignisNachricht: RealtimeEnvelope<"ereignisprotokoll.neu"> = {
 };
 
 describe("ChannelObject-Realtime-Strecke", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    mocks.verarbeiteWerbevorwarnung.mockClear();
+  });
+
   it("weist einen Aufbau ohne Prinzipal mit 403 ab", () => {
     const object = objectFor([]);
 
@@ -116,5 +155,58 @@ describe("ChannelObject-Realtime-Strecke", () => {
 
     expect(betroffener.close.mock.calls).toEqual([[4003, "Kanalzugriff widerrufen"]]);
     expect(anderer.close.mock.calls).toHaveLength(0);
+  });
+
+  it("hält zwei Fristen getrennt, arbeitet die frühere ab und behält die spätere", async () => {
+    vi.useFakeTimers();
+    const jetzt = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(jetzt);
+    const object = objectFor([]);
+    const storage = storageOf(object);
+
+    storage.values.set("sicherheitsrunde", jetzt + 2_000);
+    await object.planeWerbevorwarnung(jetzt + 4_000);
+    expect(storage.setAlarm).toHaveBeenLastCalledWith(jetzt + 2_000);
+
+    vi.setSystemTime(jetzt + 2_000);
+    await object.alarm();
+    expect(mocks.verarbeiteWerbevorwarnung).not.toHaveBeenCalled();
+    expect(storage.values.size).toBe(1);
+    expect([...storage.values.values()]).toEqual([jetzt + 4_000]);
+    expect(storage.setAlarm).toHaveBeenLastCalledWith(jetzt + 4_000);
+
+    vi.setSystemTime(jetzt + 4_000);
+    await object.alarm();
+    expect(mocks.verarbeiteWerbevorwarnung).toHaveBeenCalledTimes(1);
+    expect(storage.values.size).toBe(0);
+    expect(storage.deleteAlarm).toHaveBeenCalled();
+  });
+
+  it("führt die Sicherheitsrunde auch mit offener Vorwarnungsfrist aus", async () => {
+    vi.useFakeTimers();
+    const jetzt = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(jetzt);
+    const socket = socketFor(gueltigerPrinzipal());
+    const sockets = [socket];
+    const prepare = vi.fn(() => {
+      const statement = {
+        bind: vi.fn(() => statement),
+        all: vi.fn().mockResolvedValue({ results: [] }),
+      };
+      return statement;
+    });
+    const database = { prepare } as unknown as D1Database;
+    const object = objectFor(sockets, database);
+    const storage = storageOf(object);
+    socket.close.mockImplementation(() => { sockets.length = 0; });
+    storage.values.set("sicherheitsrunde", jetzt - 1);
+    await object.planeWerbevorwarnung(jetzt + 60_000);
+
+    await object.alarm();
+
+    expect(prepare).toHaveBeenCalled();
+    const close = Reflect.get(socket, "close") as ReturnType<typeof vi.fn>;
+    expect(close).toHaveBeenCalledWith(4003, "Berechtigung widerrufen");
+    expect([...storage.values.values()]).toEqual([jetzt + 60_000]);
   });
 });

@@ -12,7 +12,7 @@ describe("Werbung-EventSub", () => {
 
   afterEach(() => { database.close(); });
 
-  it("abonniert channel.ad_break.begin als v1 nur mit broadcaster_user_id", async () => {
+  it("abonniert stream.online und channel.ad_break.begin als v1 nur mit broadcaster_user_id", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
@@ -20,12 +20,10 @@ describe("Werbung-EventSub", () => {
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'werbung', 1, '{}')",
     ).run();
 
-    await expect(listDesiredEventSubTargets(database as unknown as D1Database)).resolves.toEqual([{
-      channelId: "kanal-a",
-      subscriptionType: "channel.ad_break.begin",
-      variant: "",
-      version: "1",
-    }]);
+    await expect(listDesiredEventSubTargets(database as unknown as D1Database)).resolves.toEqual([
+      { channelId: "kanal-a", subscriptionType: "stream.online", variant: "", version: "1" },
+      { channelId: "kanal-a", subscriptionType: "channel.ad_break.begin", variant: "", version: "1" },
+    ]);
 
     const definition = eventSubDefinitionForCondition("channel.ad_break.begin", { broadcaster_user_id: "kanal-a" });
     expect(definition?.version).toBe("1");

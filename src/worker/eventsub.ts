@@ -4,6 +4,7 @@ import { hmacSha256, parseKeyRing } from "./auth/crypto";
 import { confirmBotIdentityAuthorization } from "./bot-maintenance";
 import { confirmLoginIdentityAuthorization } from "./login-maintenance";
 import { dispatchEventSubNotification } from "./dispatch";
+import { aktualisiereWerbevorwarnung, isWerbevorwarnungsAnlass } from "./werbe-vorwarnung";
 import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
 import {
   hasEventSubMessage,
@@ -298,5 +299,12 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     payload: ziel.payload,
     receivedAt: now,
   });
+  if (isWerbevorwarnungsAnlass(ziel.subscriptionType)) {
+    try {
+      await aktualisiereWerbevorwarnung(context.env, ziel.channelId, messageId, now);
+    } catch (error: unknown) {
+      console.error("Werbe-Vorwarnung konnte nicht aktualisiert werden.", error);
+    }
+  }
   return response(null, 204);
 });

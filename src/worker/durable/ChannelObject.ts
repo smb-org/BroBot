@@ -5,9 +5,12 @@ import type {
   RealtimePrincipal,
   RealtimeRecipientKind,
 } from "../../realtime-contract";
+import { verarbeiteWerbevorwarnung } from "../werbe-vorwarnung";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
+const SECURITY_DEADLINE_KEY = "sicherheitsrunde";
+const WERBEVORWARNUNG_DEADLINE_KEY = "werbevorwarnung";
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
 
@@ -98,12 +101,48 @@ export class ChannelObject extends DurableObject<Env> {
     return typeof name === "string" && name.length > 0 ? name : null;
   }
 
-  private scheduleSecurityAlarm(): void {
-    void this.ctx.storage.setAlarm(Date.now() + SECURITY_ALARM_INTERVAL_MS);
+  private async scheduleEarliestAlarm(): Promise<void> {
+    const deadlines = await Promise.all([
+      this.ctx.storage.get(SECURITY_DEADLINE_KEY),
+      this.ctx.storage.get(WERBEVORWARNUNG_DEADLINE_KEY),
+    ]);
+    const validDeadlines = deadlines.filter((deadline): deadline is number =>
+      typeof deadline === "number" && Number.isFinite(deadline));
+    if (validDeadlines.length === 0) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    await this.ctx.storage.setAlarm(Math.min(...validDeadlines));
+  }
+
+  private async scheduleSecurityAlarm(): Promise<void> {
+    if (this.ctx.getWebSockets().length === 0) {
+      await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
+    } else {
+      await this.ctx.storage.put(SECURITY_DEADLINE_KEY, Date.now() + SECURITY_ALARM_INTERVAL_MS);
+    }
+    await this.scheduleEarliestAlarm();
   }
 
   private async stopSecurityAlarmIfIdle(): Promise<void> {
-    if (this.ctx.getWebSockets().length === 0) await this.ctx.storage.deleteAlarm();
+    if (this.ctx.getWebSockets().length === 0) {
+      await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
+      await this.scheduleEarliestAlarm();
+    }
+  }
+
+  public async planeWerbevorwarnung(faelligAmMs: number): Promise<void> {
+    if (!Number.isFinite(faelligAmMs)) {
+      await this.loescheWerbevorwarnung();
+      return;
+    }
+    await this.ctx.storage.put(WERBEVORWARNUNG_DEADLINE_KEY, faelligAmMs);
+    await this.scheduleEarliestAlarm();
+  }
+
+  public async loescheWerbevorwarnung(): Promise<void> {
+    await this.ctx.storage.delete(WERBEVORWARNUNG_DEADLINE_KEY);
+    await this.scheduleEarliestAlarm();
   }
 
   override fetch(request: Request): Response {
@@ -132,7 +171,7 @@ export class ChannelObject extends DurableObject<Env> {
     const pair = new WebSocketPair();
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
-    this.scheduleSecurityAlarm();
+    void this.scheduleSecurityAlarm();
     pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hallo")));
     return new Response(null, {
       status: 101,
@@ -194,20 +233,27 @@ export class ChannelObject extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     const webSockets = this.ctx.getWebSockets();
-    if (webSockets.length === 0) {
-      await this.ctx.storage.deleteAlarm();
-      return;
-    }
-
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
-    const principals = webSockets.map((webSocket) => ({ webSocket, principal: readAttachment(webSocket) }));
+    const [securityDeadline, warningDeadline] = await Promise.all([
+      this.ctx.storage.get(SECURITY_DEADLINE_KEY),
+      this.ctx.storage.get(WERBEVORWARNUNG_DEADLINE_KEY),
+    ]);
+    const securityDue = typeof securityDeadline === "number" && Number.isFinite(securityDeadline) && securityDeadline <= now;
+    const warningDue = typeof warningDeadline === "number" && Number.isFinite(warningDeadline) && warningDeadline <= now;
     const expired = new Set<WebSocket>();
-    for (const { webSocket, principal } of principals) {
-      if (principal === null || isExpired(principal, now)) expired.add(webSocket);
+
+    if (warningDue) await this.ctx.storage.delete(WERBEVORWARNUNG_DEADLINE_KEY);
+
+    const principals = webSockets.map((webSocket) => ({ webSocket, principal: readAttachment(webSocket) }));
+
+    if (securityDue && webSockets.length > 0) {
+      for (const { webSocket, principal } of principals) {
+        if (principal === null || isExpired(principal, now)) expired.add(webSocket);
+      }
     }
 
-    try {
+    if (securityDue && webSockets.length > 0) try {
       const ownChannelId = this.ownChannelId();
       if (ownChannelId === null) {
         for (const webSocket of webSockets) closeSocket(webSocket, SOCKET_REVOKED_CODE, "Kanal ungültig");
@@ -271,11 +317,40 @@ export class ChannelObject extends DurableObject<Env> {
     for (const webSocket of expired) {
       closeSocket(webSocket, SOCKET_REVOKED_CODE, "Berechtigung widerrufen");
     }
-    if (this.ctx.getWebSockets().length === 0) {
-      await this.ctx.storage.deleteAlarm();
-    } else {
-      this.scheduleSecurityAlarm();
+
+    if (securityDue) {
+      if (this.ctx.getWebSockets().length === 0) {
+        await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
+      } else {
+        await this.ctx.storage.put(SECURITY_DEADLINE_KEY, now + SECURITY_ALARM_INTERVAL_MS);
+      }
+    } else if (this.ctx.getWebSockets().length === 0) {
+      await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
     }
+
+    const eigenerKanal = this.ownChannelId();
+    if (warningDue && typeof warningDeadline === "number" && eigenerKanal !== null) {
+      try {
+        await verarbeiteWerbevorwarnung(
+          this.env,
+          eigenerKanal,
+          warningDeadline,
+          undefined,
+          nowIso,
+          fetch,
+          // Eigener Planer statt Stub: Ein Stub auf dieses Objekt waere aus
+          // alarm() heraus ein Selbstaufruf und kaeme nie zurueck.
+          {
+            plane: async (faelligAmMs) => { await this.planeWerbevorwarnung(faelligAmMs); },
+            loesche: async () => { await this.loescheWerbevorwarnung(); },
+          },
+        );
+      } catch (error: unknown) {
+        // Ein Ablauf- oder D1-Fehler darf die übrigen fälligen Fristen nicht verschlucken.
+        console.error("Werbe-Vorwarnung konnte im Alarm nicht verarbeitet werden.", error);
+      }
+    }
+    await this.scheduleEarliestAlarm();
   }
 
   override webSocketMessage(webSocket: WebSocket, message: string | ArrayBuffer): void {

@@ -15,8 +15,8 @@ const event = (payload: Record<string, unknown>, settings = werbungModul.default
 });
 
 describe("Werbung-Modul", () => {
-  it("deklariert channel.ad_break.begin mit Version 1 und channel:read:ads", () => {
-    expect(werbungModul.eventSubTypes).toEqual(["channel.ad_break.begin"]);
+  it("deklariert die beiden Werbe-Anlässe mit Version 1 und channel:read:ads", () => {
+    expect(werbungModul.eventSubTypes).toEqual(["stream.online", "channel.ad_break.begin"]);
     expect(werbungModul.broadcasterScopes).toEqual(["channel:read:ads"]);
   });
 
@@ -66,7 +66,13 @@ describe("Werbung-Modul", () => {
       duration_seconds: 45,
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,
-    }, { automatisch: "auto", manuell: "Pause läuft" }));
+    }, {
+      automatisch: "auto",
+      manuell: "Pause läuft",
+      vorwarnung: true,
+      vorlaufSekunden: 60,
+      vorwarnungText: "Vorwarnung {sekunden}",
+    }));
 
     expect(result.actions).toEqual([{ kind: "chat", text: "Pause läuft (45 Sekunden)" }]);
   });
