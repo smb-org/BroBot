@@ -335,4 +335,36 @@ describe("Textbefehle-Panel-Ansicht", () => {
     await screen.findByRole("option", { name: "Moderatoren", selected: true });
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ mindeststufe: "moderator" }))).toBe(true);
   });
+
+  it("ordnet Liste und Inspector als direkte Kinder des Befehlsbereichs an", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Hallo",
+          art: "text",
+          enabled: true,
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    const row = await screen.findByRole("row", { name: /!hallo/ });
+    fireEvent.click(row);
+    const bereich = row.closest(".inspektor-bereich");
+    expect(bereich).not.toBeNull();
+    expect(bereich?.children).toHaveLength(2);
+    expect(bereich?.children[0]).toHaveClass("inspektor-bereich__liste");
+    expect(bereich?.children[1]).toHaveClass("sub-inspector");
+  });
 });

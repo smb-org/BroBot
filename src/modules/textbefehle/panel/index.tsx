@@ -268,14 +268,18 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
 
   return (
     <section className="module-stack command-panel" aria-label={labels.titel}>
-      <section className="command-list config-section" aria-label={labels.liste}>
-        <div className="section-heading"><h2>{labels.liste}</h2></div>
-        {loading ? <p className="loading-line">{labels.laden}</p> : null}
-        {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-        {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
+      <section className={`inspektor-bereich${selected === null ? "" : " inspektor-bereich--offen"}`}>
+        <div className="inspektor-bereich__liste">
+          <section className="command-list config-section" aria-label={labels.liste}>
+            <div className="section-heading"><h2>{labels.liste}</h2></div>
+            {loading ? <p className="loading-line">{labels.laden}</p> : null}
+            {error === null ? null : <p className="form-error" role="alert">{error}</p>}
+            {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
+            {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
+          </section>
+        </div>
+        {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} />}
       </section>
-      {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} />}
       <form className="command-create config-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>
         <div className="section-heading"><h2>{labels.anlegen}</h2></div>
         {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}

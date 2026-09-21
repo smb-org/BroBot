@@ -2546,4 +2546,214 @@ describe("Dashboard-Grundgerüst", () => {
       expect(new Headers(logoutCall?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-token");
     });
   });
+
+  it("ordnet die Abonnementliste und ihren Inspector als direkte Bereichskinder an", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const subscriptions = [{
+      subscriptionType: "channel.chat.message",
+      variant: "",
+      version: "1",
+      subscriptionId: "chat-1",
+      status: "enabled",
+      reason: null,
+      message: null,
+      statusCode: null,
+      updatedAt: "2026-09-18T04:00:00.000Z",
+    }];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/system")) return jsonResponse({ ...system, subscriptions });
+      if (path.endsWith("/audit-log")) return jsonResponse(audit);
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText("Chat-Nachrichten")).closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLElement);
+    const bereich = screen.getByRole("region", { name: "Abonnements" });
+    expect(bereich.children).toHaveLength(2);
+    expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
+    expect(bereich.children[1]).toHaveClass("sub-inspector");
+  });
+
+  it("ordnet Audit-Liste und Inspector als direkte Bereichskinder an", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const entry = {
+      auditId: "audit-1",
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      action: "module.enabled",
+      before: "{}",
+      after: "{}",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/audit-log")) return jsonResponse({ entries: [entry], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText("module.enabled")).closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLElement);
+    const bereich = screen.getByRole("heading", { name: "Audit-Log" }).closest("section");
+    if (bereich === null) throw new Error("Audit-Bereich fehlt");
+    expect(bereich.children).toHaveLength(2);
+    expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
+    expect(bereich.children[1]).toHaveClass("sub-inspector");
+  });
+
+  it("behält die Audit-Auswahl beim erneuten Nachladen bestehen", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const entry = {
+      auditId: "audit-1",
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      action: "module.enabled",
+      before: "{\"enabled\":false}",
+      after: "{\"enabled\":true}",
+    };
+    let auditRequests = 0;
+    let resolveReload: ((response: Response) => void) | undefined;
+    const reload = new Promise<Response>((resolve) => { resolveReload = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/audit-log")) {
+        auditRequests += 1;
+        return auditRequests === 1 ? jsonResponse({ entries: [entry], nextCursor: null }) : reload;
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText("module.enabled")).closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLElement);
+    expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("link", { name: "System" }));
+    await waitFor(() => expect(auditRequests).toBe(2));
+    resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
+
+    const restoredRow = (await screen.findAllByRole("row", { name: /module.enabled/ }))[0];
+    expect(restoredRow).toBeDefined();
+    expect(restoredRow).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
+  });
+
+  it("ordnet Ereignisliste und Vorgangs-Inspector als direkte Bereichskinder an", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const entry = {
+      eventId: "event-1",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      moduleId: "textbefehle",
+      triggerId: "trigger-1",
+      code: "textbefehle.ausgeloest",
+      detail: '{"name":"wiki","antwort":"Antwort"}',
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({ entries: [entry], nextCursor: null });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText("Befehl !wiki ausgeführt")).closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLElement);
+    const bereich = screen.getByRole("heading", { name: "Ereignisprotokoll" }).closest("section");
+    if (bereich === null) throw new Error("Ereignis-Bereich fehlt");
+    expect(bereich.children).toHaveLength(2);
+    expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
+    expect(bereich.children[1]).toHaveClass("sub-inspector");
+  });
+
+  it("behält den Ereignis-Vorgang beim erneuten Nachladen bestehen", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const entry = {
+      eventId: "event-1",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      moduleId: "textbefehle",
+      triggerId: "trigger-1",
+      code: "textbefehle.ausgeloest",
+      detail: '{"name":"wiki","antwort":"Antwort"}',
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+    };
+    let eventRequests = 0;
+    let resolveReload: ((response: Response) => void) | undefined;
+    const reload = new Promise<Response>((resolve) => { resolveReload = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) {
+        eventRequests += 1;
+        return eventRequests === 1 ? jsonResponse({ entries: [entry], nextCursor: null }) : reload;
+      }
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
+      return jsonResponse({}, 404);
+    }));
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText("Befehl !wiki ausgeführt")).closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLElement);
+    expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("link", { name: "Ereignisse" }));
+    await waitFor(() => expect(eventRequests).toBe(2));
+    resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
+
+    const restoredRow = (await screen.findAllByRole("row", { name: /Befehl !wiki ausgeführt/ }))[0];
+    expect(restoredRow).toBeDefined();
+    expect(restoredRow).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
+  });
+
+  it("zeigt die beiden Scope-Listen als gewöhnliche Bereiche ohne Inspector-Klasse", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      botPermissions: { missingScopes: ["user:bot"] },
+      broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const botScopes = await screen.findByRole("region", { name: "Fehlende Bot-Berechtigungen" });
+    const broadcasterScopes = await screen.findByRole("region", { name: "Fehlende Broadcaster-Berechtigungen" });
+    expect(botScopes).not.toHaveClass("sub-inspector");
+    expect(broadcasterScopes).not.toHaveClass("sub-inspector");
+  });
 });

@@ -577,19 +577,21 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
         <div className="module-detail-heading__icon" aria-hidden="true"><NavigationIcon kind="members" className="module-heading-glyph" /></div>
         <div className="module-detail-heading__copy"><h1>{texte.titel}</h1><p>{texte.untertitel(formatZahl(übersicht.data?.length ?? 0))}</p></div>
       </header>
-      <section className="config-section" aria-label={texte.kanalübersicht}>
-        <div className="section-heading"><h2>{texte.kanalübersicht}</h2></div>
-        {übersicht.status === "loading" && übersicht.data === null ? <p className="loading-line">{texte.laden}</p> : null}
-        {übersicht.error === null ? null : <p className="form-error" role="alert">{übersicht.error}</p>}
-        {übersicht.data?.length === 0 ? <p className="muted">{texte.keineKanäle}</p> : null}
-        {übersicht.data === null ? null : übersicht.data.length === 0 ? null : (
-          <div className="tabelle-wrap">
-            <table className="tabelle tabelle--inhalt">
-              <thead><tr><th scope="col">{texte.login}</th><th scope="col">{texte.kennung}</th><th scope="col">{texte.vollzustimmung}</th><th scope="col">{texte.broadcaster}</th><th scope="col">{texte.verwalter}</th><th scope="col">{texte.bediener}</th><th scope="col">{texte.identität}</th></tr></thead>
-              <tbody>{übersicht.data.map((kanal) => <tr key={kanal.channelId} tabIndex={0} aria-selected={kanal.channelId === ausgewählterKanalId} onClick={() => { setAusgewählterKanalId(kanal.channelId); }} onKeyDown={(ereignis) => { if (ereignis.key === "Enter" || ereignis.key === " ") { ereignis.preventDefault(); setAusgewählterKanalId(kanal.channelId); } }}><th scope="row">{kanal.login}</th><td className="mono">{kanal.channelId}</td><td>{kanal.vollzustimmung ? texte.ja : texte.nein}</td><td className="zahl">{formatZahl(kanal.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(kanal.memberCounts.verwalter)}</td><td className="zahl">{formatZahl(kanal.memberCounts.bediener)}</td><td><span className="led" data-status={verbindungsTon(kanal) === "healthy" ? "green" : verbindungsTon(kanal) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{verbindungswort(kanal)}</span></span></td></tr>)}</tbody>
-            </table>
-          </div>
-        )}
+      <section className={`config-section inspektor-bereich${ausgewählterKanal === null ? "" : " inspektor-bereich--offen"}`} aria-label={texte.kanalübersicht}>
+        <div className="inspektor-bereich__liste">
+          <div className="section-heading"><h2>{texte.kanalübersicht}</h2></div>
+          {übersicht.status === "loading" && übersicht.data === null ? <p className="loading-line">{texte.laden}</p> : null}
+          {übersicht.error === null ? null : <p className="form-error" role="alert">{übersicht.error}</p>}
+          {übersicht.data?.length === 0 ? <p className="muted">{texte.keineKanäle}</p> : null}
+          {übersicht.data === null ? null : übersicht.data.length === 0 ? null : (
+            <div className="tabelle-wrap">
+              <table className="tabelle tabelle--inhalt">
+                <thead><tr><th scope="col">{texte.login}</th><th scope="col">{texte.kennung}</th><th scope="col">{texte.vollzustimmung}</th><th scope="col">{texte.broadcaster}</th><th scope="col">{texte.verwalter}</th><th scope="col">{texte.bediener}</th><th scope="col">{texte.identität}</th></tr></thead>
+                <tbody>{übersicht.data.map((kanal) => <tr key={kanal.channelId} tabIndex={0} aria-selected={kanal.channelId === ausgewählterKanalId} onClick={() => { setAusgewählterKanalId(kanal.channelId); }} onKeyDown={(ereignis) => { if (ereignis.key === "Enter" || ereignis.key === " ") { ereignis.preventDefault(); setAusgewählterKanalId(kanal.channelId); } }}><th scope="row">{kanal.login}</th><td className="mono">{kanal.channelId}</td><td>{kanal.vollzustimmung ? texte.ja : texte.nein}</td><td className="zahl">{formatZahl(kanal.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(kanal.memberCounts.verwalter)}</td><td className="zahl">{formatZahl(kanal.memberCounts.bediener)}</td><td><span className="led" data-status={verbindungsTon(kanal) === "healthy" ? "green" : verbindungsTon(kanal) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{verbindungswort(kanal)}</span></span></td></tr>)}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
         {ausgewählterKanal === null ? null : <KanalInspector key={ausgewählterKanal.channelId} kanal={ausgewählterKanal} beiAnmeldungErforderlich={beiAnmeldungErforderlich} aufÜbersichtLaden={ladeÜbersicht} />}
       </section>
       <KanalFreigabe aufÜbersichtLaden={ladeÜbersicht} beiAnmeldungErforderlich={beiAnmeldungErforderlich} />

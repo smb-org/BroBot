@@ -177,4 +177,18 @@ describe("Betreiberebene", () => {
     expect(await within(editor).findByRole("textbox", { name: "Einladungslink" })).toBeInTheDocument();
     expect(within(übersicht).getByRole("region", { name: "Einladungslink" })).toContainElement(within(editor).getByRole("textbox", { name: "Einladungslink" }));
   });
+
+  it("ordnet Kanalübersicht und Kanal-Inspector als direkte Bereichskinder an", async () => {
+    richteBetreiberEin(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const row = await screen.findByRole("row", { name: /alpha_login/ });
+    fireEvent.click(row);
+    const bereich = screen.getByRole("region", { name: "Kanalübersicht" });
+    expect(bereich.children).toHaveLength(2);
+    expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
+    expect(bereich.children[1]).toHaveClass("sub-inspector");
+  });
 });
