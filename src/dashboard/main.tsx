@@ -352,7 +352,6 @@ const loadedAtForRoute = (route: DashboardRoute, loadedAt: PageLoadedAt): number
 };
 
 const focusableSelector = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
-const MODULE_OVERVIEW_OPTION_ID = "__module-overview__";
 
 interface BreadcrumbSwitcherOption {
   id: string;
@@ -389,13 +388,14 @@ const BreadcrumbSwitcher = ({ kind, currentLabel, accessibleCurrentLabel = curre
   }, [activeIndex, open]);
 
   useEffect(() => {
+    if (!open) return;
     const closeOnOutsideClick = (event: MouseEvent): void => {
       if (switcherRef.current?.contains(event.target as Node)) return;
       onOpenChange(false);
     };
     document.addEventListener("mousedown", closeOnOutsideClick);
     return () => { document.removeEventListener("mousedown", closeOnOutsideClick); };
-  }, [onOpenChange]);
+  }, [onOpenChange, open]);
 
   const closeAndFocusButton = (): void => {
     onOpenChange(false);
@@ -422,18 +422,19 @@ const BreadcrumbSwitcher = ({ kind, currentLabel, accessibleCurrentLabel = curre
 
   if (!openable) {
     if (kind === "module") {
-      return <span className="topbar__breadcrumb-current topbar__breadcrumb-area"><span className="topbar__breadcrumb-icon" aria-hidden="true">{currentIcon}</span><span>{currentLabel}</span></span>;
+      return <span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{currentIcon}</span><span>{currentLabel}</span></span>;
     }
     return <span className="topbar__channel-segment topbar__channel-segment--static" data-channel-id={currentId}>{currentLabel}</span>;
   }
 
   return (
-    <div className="topbar__channel-switch" ref={switcherRef}>
+    <div className={`topbar__channel-switch${kind === "module" ? " topbar__breadcrumb-module" : ""}`} ref={switcherRef}>
       <button
         ref={buttonRef}
-        className={kind === "module" ? "topbar__channel-button topbar__breadcrumb-link topbar__breadcrumb-area" : "topbar__channel-button"}
+        className={kind === "module" ? "topbar__channel-button topbar__breadcrumb-link topbar__breadcrumb-module" : "topbar__channel-button"}
         type="button"
         aria-label={`${buttonLabel}: ${accessibleCurrentLabel}`}
+        aria-current={kind === "module" ? "page" : undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
@@ -582,35 +583,25 @@ const PanelTopbar = ({ route, channels, betreiber, activeChannel, moduleStates, 
       },
     };
   }) ?? [];
-  const moduleArea = route.kind === "module" && moduleStates !== null
+  const moduleArea = route.kind === "module" && areaRoute !== null && areaLabel !== null
+    ? <BreadcrumbAreaLink route={areaRoute} label={areaLabel} icon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />} onNavigate={onNavigate} />
+    : null;
+  const moduleSwitcher = route.kind === "module" && moduleStates !== null && moduleLabel !== null && moduleBreadcrumbIcon !== null
     ? <BreadcrumbSwitcher
         kind="module"
-        currentLabel={texte.navigation.module}
-        accessibleCurrentLabel={moduleLabel ?? texte.navigation.module}
+        currentLabel={moduleLabel}
         currentId={route.moduleId}
-        currentIcon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />}
-        options={[...moduleOptions, {
-          id: MODULE_OVERVIEW_OPTION_ID,
-          name: texte.module.modulUebersicht,
-          icon: <NavigationIcon kind="modules" className="topbar__channel-option-icon" />,
-        }]}
+        currentIcon={moduleBreadcrumbIcon}
+        options={moduleOptions}
         openable={moduleOptions.length > 1}
         buttonLabel={texte.navigation.modulAuswaehlen}
         listLabel={texte.navigation.modulAuswaehlen}
         listboxId="module-switcher-listbox"
         open={openSwitcher === "module"}
         onOpenChange={(open) => { setOpenSwitcher(open ? "module" : null); }}
-        onSelect={(id) => {
-          if (id === MODULE_OVERVIEW_OPTION_ID) {
-            onNavigate({ kind: "channel", channelId: route.channelId, section: "modules" });
-          } else {
-            onNavigate({ kind: "module", channelId: route.channelId, moduleId: id });
-          }
-        }}
+        onSelect={(id) => { onNavigate({ kind: "module", channelId: route.channelId, moduleId: id }); }}
       />
-    : route.kind === "module" && areaRoute !== null && areaLabel !== null
-      ? <BreadcrumbAreaLink route={areaRoute} label={areaLabel} icon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />} onNavigate={onNavigate} />
-      : null;
+    : null;
   return (
     <header className={`topbar${headerModuleLabel === null ? "" : " topbar--module-detail"}`}>
       <nav className={`topbar__breadcrumb${route.kind === "module" ? " topbar__breadcrumb--module" : ""}`} aria-label={texte.navigation.brotkrume}>
@@ -618,7 +609,7 @@ const PanelTopbar = ({ route, channels, betreiber, activeChannel, moduleStates, 
         {activeChannel === undefined ? null : <><span className="topbar__breadcrumb-separator" aria-hidden="true">›</span><ChannelSwitcher channels={channels} activeChannel={activeChannel} open={openSwitcher === "channel"} onOpenChange={(open) => { setOpenSwitcher(open ? "channel" : null); }} onNavigate={onNavigate} /></>}
         {areaRoute === null || areaLabel === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator topbar__area-separator" aria-hidden="true">›</span>{route.kind === "module" ? moduleArea : <span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind={areaRoute.section === "overview" ? "channel" : areaRoute.section} className="topbar__breadcrumb-glyph" /></span><span>{areaLabel}</span></span>}</>}
         {route.kind === "betreiber" && betreiber ? <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator" aria-hidden="true">›</span><span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind="members" className="topbar__breadcrumb-glyph" /></span><span>{betreiberTexteWerte.navigation}</span></span></> : null}
-        {moduleLabel === null || moduleBreadcrumbIcon === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-module-separator topbar__crumb-area" aria-hidden="true">›</span><span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{moduleBreadcrumbIcon}</span><span>{moduleLabel}</span></span></>}
+        {moduleLabel === null || moduleBreadcrumbIcon === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-module-separator topbar__crumb-area" aria-hidden="true">›</span>{moduleSwitcher ?? <span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{moduleBreadcrumbIcon}</span><span>{moduleLabel}</span></span>}</>}
       </nav>
       <span className="topbar__connection">{connectionLed}</span>
       {loadedAt === undefined ? null : <Datenalter seit={loadedAt} />}
