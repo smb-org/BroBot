@@ -1,9 +1,12 @@
 import { Hono } from "hono";
 
 import { hmacSha256, parseKeyRing } from "./auth/crypto";
+import { confirmBotIdentityAuthorization } from "./bot-maintenance";
+import { confirmLoginIdentityAuthorization } from "./login-maintenance";
 import { dispatchEventSubNotification } from "./dispatch";
 import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
 import {
+  hasEventSubMessage,
   rememberEventSubMessageAndRevocation,
   rememberEventSubMessage,
   type EventSubRevocationRecord,
@@ -166,6 +169,7 @@ const subscriptionRecord = (
     reason: subscription.status,
     revokedAt: now,
     updatedAt: now,
+    authorizationIdentity: definition.consentingIdentityFromCondition(subscription.condition),
   };
 };
 
@@ -195,6 +199,19 @@ const notificationZiel = (body: Record<string, unknown>): {
     subscriptionVariant: definition.variant,
     payload: isRecord(body.event) ? body.event : {},
   };
+};
+
+const confirmRevocationAuthorization = async (
+  env: Env,
+  revocation: EventSubRevocationRecord,
+  now: string,
+): Promise<boolean> => {
+  if (revocation.reason !== "authorization_revoked" || revocation.authorizationIdentity === null ||
+      revocation.authorizationIdentity === undefined) return false;
+  if (revocation.authorizationIdentity.kind === "bot") {
+    return confirmBotIdentityAuthorization(env, revocation.authorizationIdentity.userId, now);
+  }
+  return confirmLoginIdentityAuthorization(env, revocation.authorizationIdentity.userId, now);
 };
 
 export const eventSubRouter = new Hono<{ Bindings: Env }>();
@@ -251,7 +268,15 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   if (messageType === "revocation" && revocation === null) return response("Ungültiger Widerruf.", 400);
 
   if (revocation !== null) {
-    const isNew = await rememberEventSubMessageAndRevocation(context.env.DB, messageId, now, revocation);
+    if (await hasEventSubMessage(context.env.DB, messageId)) return response(null, 204);
+    const authorizationConfirmedRevoked = await confirmRevocationAuthorization(context.env, revocation, now);
+    const isNew = await rememberEventSubMessageAndRevocation(
+      context.env.DB,
+      messageId,
+      now,
+      revocation,
+      authorizationConfirmedRevoked,
+    );
     if (!isNew) return response(null, 204);
     return response(null, 204);
   }

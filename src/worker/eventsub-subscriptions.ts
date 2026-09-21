@@ -7,6 +7,7 @@ import {
   getBotIdentity,
   getBotIdentityStatus,
   listEventSubSubscriptions,
+  type EventSubAuthorizationIdentity,
   type EventSubSubscriptionStatus,
   upsertEventSubSubscription,
 } from "./auth/repository";
@@ -34,6 +35,9 @@ export interface EventSubSubscriptionDefinition {
   version: string;
   buildCondition: (channelId: string, botUserId: string) => Readonly<Record<string, string>>;
   channelIdFromCondition: (condition: Readonly<Record<string, unknown>>) => string | null;
+  consentingIdentityFromCondition: (
+    condition: Readonly<Record<string, unknown>>,
+  ) => EventSubAuthorizationIdentity | null;
 }
 
 const conditionField = (field: string): ((condition: Readonly<Record<string, unknown>>) => string | null) =>
@@ -51,6 +55,15 @@ const channelAndBotCondition = (
   [botField]: botUserId,
 });
 
+const identityFromConditionField = (
+  field: string,
+  kind: EventSubAuthorizationIdentity["kind"],
+): ((condition: Readonly<Record<string, unknown>>) => EventSubAuthorizationIdentity | null) =>
+  (condition) => {
+    const userId = conditionField(field)(condition);
+    return userId === null ? null : { kind, userId };
+  };
+
 /** Abo mit Moderator-Bedingung (`broadcaster_user_id` + `moderator_user_id`), Kanal aus `broadcaster_user_id`. */
 const moderatorSubscriptionDefinition = (subscriptionType: string, version: string): EventSubSubscriptionDefinition => ({
   subscriptionType,
@@ -58,6 +71,7 @@ const moderatorSubscriptionDefinition = (subscriptionType: string, version: stri
   version,
   buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
   channelIdFromCondition: conditionField("broadcaster_user_id"),
+  consentingIdentityFromCondition: identityFromConditionField("moderator_user_id", "bot"),
 });
 
 /** Abo mit Nutzer-Bedingung (`broadcaster_user_id` + `user_id`), Kanal aus `broadcaster_user_id`. */
@@ -67,6 +81,7 @@ const userSubscriptionDefinition = (subscriptionType: string, version: string): 
   version,
   buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "user_id", botUserId, channelId),
   channelIdFromCondition: conditionField("broadcaster_user_id"),
+  consentingIdentityFromCondition: identityFromConditionField("user_id", "bot"),
 });
 
 /** Abo mit ausschließlicher Broadcaster-Bedingung, wie channel.ad_break.begin. */
@@ -76,7 +91,10 @@ const broadcasterSubscriptionDefinition = (subscriptionType: string, version: st
   version,
   buildCondition: (channelId) => ({ broadcaster_user_id: channelId }),
   channelIdFromCondition: conditionField("broadcaster_user_id"),
+  consentingIdentityFromCondition: identityFromConditionField("broadcaster_user_id", "login"),
 });
+
+const noConsentingIdentity = (): null => null;
 
 /**
  * Die einzige Tabelle für EventSub-Bedingungen. Sie beschreibt sowohl das
@@ -91,6 +109,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDef
     version: "1",
     buildCondition: (channelId) => ({ to_broadcaster_user_id: channelId }),
     channelIdFromCondition: conditionField("to_broadcaster_user_id"),
+    consentingIdentityFromCondition: noConsentingIdentity,
   },
   {
     subscriptionType: "channel.raid",
@@ -98,6 +117,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDef
     version: "1",
     buildCondition: (channelId) => ({ from_broadcaster_user_id: channelId }),
     channelIdFromCondition: conditionField("from_broadcaster_user_id"),
+    consentingIdentityFromCondition: noConsentingIdentity,
   },
   moderatorSubscriptionDefinition("channel.shoutout.create", "1"),
   moderatorSubscriptionDefinition("channel.shoutout.receive", "1"),

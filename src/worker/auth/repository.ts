@@ -70,6 +70,10 @@ export interface AppAccessTokenRecord {
   updatedAt: string;
 }
 
+export type EventSubAuthorizationIdentity =
+  | { kind: "bot"; userId: string }
+  | { kind: "login"; userId: string };
+
 export interface EventSubRevocationRecord {
   subscriptionId: string;
   channelId: string;
@@ -81,6 +85,7 @@ export interface EventSubRevocationRecord {
   reason: string | null;
   revokedAt: string;
   updatedAt: string;
+  authorizationIdentity?: EventSubAuthorizationIdentity | null;
 }
 
 export type EventSubSubscriptionStatus = "enabled" | "missing" | "error" | "revoked";
@@ -955,6 +960,19 @@ export const rememberEventSubMessage = async (
   return result.meta.changes > 0;
 };
 
+/** Liest den Deduplizierungsstand ohne die Message-ID vorab zu verbrauchen. */
+export const hasEventSubMessage = async (
+  db: D1Database,
+  messageId: string,
+): Promise<boolean> => {
+  const row = await db.prepare(
+    `SELECT 1 AS vorhanden
+       FROM eventsub_messages
+      WHERE message_id = ?`,
+  ).bind(messageId).first<{ vorhanden: number }>();
+  return row?.vorhanden === 1;
+};
+
 export const purgeOldEventSubMessages = async (
   db: D1Database,
   cutoff: string,
@@ -989,18 +1007,6 @@ export const recordEventSubRevocation = async (
     revocation.revokedAt,
     revocation.updatedAt,
   ).run();
-  if (revocation.reason === "authorization_revoked") {
-    await db.prepare(
-      `UPDATE twitch_login_identity
-          SET status = 'revoked', reason = ?, updated_at = ?
-        WHERE user_id = ? AND status <> 'revoked'`,
-    ).bind(revocation.reason, revocation.updatedAt, revocation.channelId).run();
-    await db.prepare(
-      `UPDATE twitch_login_identity
-          SET scopes_json = '[]'
-        WHERE user_id = ? AND status = 'revoked'`,
-    ).bind(revocation.channelId).run();
-  }
   await db.prepare(
     `INSERT INTO eventsub_subscriptions
       (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, error_message, error_status, updated_at)
@@ -1032,6 +1038,7 @@ export const rememberEventSubMessageAndRevocation = async (
   messageId: string,
   receivedAt: string,
   revocation: EventSubRevocationRecord,
+  authorizationConfirmedRevoked = false,
 ): Promise<boolean> => {
   const message = db.prepare(
     `INSERT OR IGNORE INTO eventsub_messages (message_id, received_at)
@@ -1082,19 +1089,42 @@ export const rememberEventSubMessageAndRevocation = async (
     revocation.updatedAt,
     revocation.channelId,
   );
-  const revokedIdentity = db.prepare(
-    `UPDATE twitch_login_identity
-        SET status = 'revoked', reason = ?, updated_at = ?
-      WHERE user_id = ? AND status <> 'revoked'`,
-  ).bind(revocation.reason, revocation.updatedAt, revocation.channelId);
-  const clearedIdentityScopes = db.prepare(
-    `UPDATE twitch_login_identity
-        SET scopes_json = '[]'
-      WHERE user_id = ? AND status = 'revoked'`,
-  ).bind(revocation.channelId);
-  const results = await db.batch(revocation.reason === "authorization_revoked"
-    ? [message, storedRevocation, storedState, revokedIdentity, clearedIdentityScopes]
-    : [message, storedRevocation, storedState]);
+  const identity = revocation.reason === "authorization_revoked" && authorizationConfirmedRevoked
+    ? revocation.authorizationIdentity
+    : null;
+  const identityEffects = identity?.kind === "bot"
+    ? [db.prepare(
+      `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+       SELECT 1, 'revoked', ?, ?
+        WHERE changes() = 1
+          AND EXISTS (
+            SELECT 1 FROM bot_identity
+             WHERE id = 1 AND user_id = ?
+          )
+       ON CONFLICT(id) DO UPDATE SET
+         status = excluded.status,
+         reason = excluded.reason,
+         updated_at = excluded.updated_at`,
+    ).bind(revocation.reason, revocation.updatedAt, identity.userId)]
+    : identity?.kind === "login"
+      ? [
+        db.prepare(
+          `UPDATE twitch_login_identity
+              SET status = 'revoked', reason = ?, updated_at = ?
+            WHERE changes() = 1
+              AND user_id = ?
+              AND status <> 'revoked'`,
+        ).bind(revocation.reason, revocation.updatedAt, identity.userId),
+        db.prepare(
+          `UPDATE twitch_login_identity
+              SET scopes_json = '[]'
+            WHERE changes() = 1
+              AND user_id = ?
+              AND status = 'revoked'`,
+        ).bind(identity.userId),
+      ]
+      : [];
+  const results = await db.batch([message, storedRevocation, storedState, ...identityEffects]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };
 

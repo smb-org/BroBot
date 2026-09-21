@@ -324,6 +324,97 @@ const rotateBotTokensWithRetry = async (
 const isInvalidGrant = (error: unknown): boolean =>
   error instanceof TwitchApiError && error.code === "invalid_grant";
 
+export interface IdentityAuthorizationRecord {
+  userId: string;
+  accessTokenCiphertext: string;
+  refreshTokenCiphertext: string;
+  updatedAt: string;
+  status?: "connected" | "revoked" | "error";
+}
+
+/** Gemeinsamer Ablauf zur Bestätigung eines widerrufenen Identitätstokens. */
+export const confirmIdentityAuthorization = async (
+  env: Env,
+  expectedUserId: string,
+  now: string,
+  getIdentity: () => Promise<IdentityAuthorizationRecord | null>,
+  readRevokedStatus: (identity: IdentityAuthorizationRecord) => Promise<boolean> | boolean,
+  recordTokenRotation: (
+    db: D1Database,
+    identity: IdentityAuthorizationRecord,
+    accessTokenCiphertext: string,
+    refreshTokenCiphertext: string,
+    expiresAt: string,
+    updatedAt: string,
+  ) => Promise<boolean>,
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> => {
+  const identity = await getIdentity();
+  if (identity === null || identity.userId !== expectedUserId) return false;
+  if (await readRevokedStatus(identity)) return true;
+
+  const encryptionKeys = getTokenEncryptionKeys(env);
+  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
+  const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys);
+  if (accessToken === null || refreshToken === null) return false;
+
+  try {
+    await validateBotToken(fetcher, env, accessToken);
+    return false;
+  } catch (error: unknown) {
+    if (!(error instanceof TwitchApiError) || error.status !== 401) return false;
+    try {
+      const refreshed = await refreshBotToken(fetcher, env, refreshToken);
+      const accessTokenCiphertext = await encryptJson(
+        { token: refreshed.accessToken },
+        parseKeyRing(encryptionKeys),
+      );
+      const refreshTokenCiphertext = await encryptJson(
+        { token: refreshed.refreshToken },
+        parseKeyRing(encryptionKeys),
+      );
+      await recordTokenRotation(
+        env.DB,
+        identity,
+        accessTokenCiphertext,
+        refreshTokenCiphertext,
+        new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString(),
+        now,
+      );
+      return false;
+    } catch (refreshError: unknown) {
+      return isInvalidGrant(refreshError);
+    }
+  }
+};
+
+/** Bestätigt einen Bot-Widerruf, ohne den Widerrufszustand selbst zu schreiben. */
+export const confirmBotIdentityAuthorization = async (
+  env: Env,
+  expectedUserId: string,
+  now: string,
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> => {
+  return confirmIdentityAuthorization(
+    env,
+    expectedUserId,
+    now,
+    () => getBotIdentity(env.DB),
+    async () => (await getBotIdentityStatus(env.DB))?.status === "revoked",
+    (db, identity, accessTokenCiphertext, refreshTokenCiphertext, expiresAt, updatedAt) =>
+      rotateBotTokensWithRetry(
+        db,
+        identity.accessTokenCiphertext,
+        identity.refreshTokenCiphertext,
+        accessTokenCiphertext,
+        refreshTokenCiphertext,
+        expiresAt,
+        updatedAt,
+      ),
+    fetcher,
+  );
+};
+
 const refreshFailureReason = (error: unknown): string =>
   error instanceof TwitchApiError && error.code !== null ? error.code : "refresh_failed";
 

@@ -1,4 +1,5 @@
 import {
+  getLoginIdentity,
   listLoginIdentities,
   revokeLoginIdentityAndSessionsForUser,
   rotateLoginTokensForUser,
@@ -6,6 +7,7 @@ import {
 } from "./auth/repository";
 import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import {
+  confirmIdentityAuthorization,
   decryptStoredToken,
   refreshBotToken,
   shouldRefreshBotToken,
@@ -74,6 +76,35 @@ const rotateLoginTokensWithRetry = async (
 
 const isInvalidGrant = (error: unknown): boolean =>
   error instanceof TwitchApiError && error.code === "invalid_grant";
+
+/** Bestätigt einen Login-Widerruf, ohne den Widerrufszustand selbst zu schreiben. */
+export const confirmLoginIdentityAuthorization = async (
+  env: Env,
+  userId: string,
+  now: string,
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> => {
+  return confirmIdentityAuthorization(
+    env,
+    userId,
+    now,
+    () => getLoginIdentity(env.DB, userId),
+    (identity) => identity.status === "revoked",
+    (db, identity, accessTokenCiphertext, refreshTokenCiphertext, expiresAt, updatedAt) =>
+      rotateLoginTokensWithRetry(
+        db,
+        identity.userId,
+        identity.accessTokenCiphertext,
+        identity.refreshTokenCiphertext,
+        accessTokenCiphertext,
+        refreshTokenCiphertext,
+        expiresAt,
+        updatedAt,
+        identity.updatedAt,
+      ),
+    fetcher,
+  );
+};
 
 const refreshFailureReason = (error: unknown): string =>
   error instanceof TwitchApiError && error.code !== null ? error.code : "refresh_failed";
