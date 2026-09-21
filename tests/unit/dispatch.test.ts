@@ -350,4 +350,46 @@ describe("Verteilung und Ausführung", () => {
       database.close();
     }
   });
+
+  it("veröffentlicht je Auslöser genau einen Feed-Hinweis", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const publish = vi.fn().mockResolvedValue(undefined);
+      const namespace = {
+        idFromName: vi.fn((name: string) => ({ name })),
+        get: vi.fn(() => ({ publish })),
+      } as unknown as Env["CHANNEL"];
+      const environment = { ...umgebung(database), CHANNEL: namespace };
+      const moduleA = modulDoppel("modul-a", () => ({
+        actions: [],
+        diagnostics: [{ code: "modul.eins" }],
+      }));
+      const moduleB = modulDoppel("modul-b", () => ({
+        actions: [],
+        diagnostics: [{ code: "modul.zwei" }],
+      }));
+      await aktiviere(database, "kanal-a", "modul-a");
+      await aktiviere(database, "kanal-a", "modul-b");
+
+      await dispatchEventSubNotification(
+        environment,
+        {
+          channelId: "kanal-a",
+          subscriptionType: CHAT_TYP,
+          triggerId: "ausloeser-1",
+          payload: {},
+          receivedAt: JETZT,
+        },
+        fetch,
+        [moduleA, moduleB],
+      );
+
+      expect(publish).toHaveBeenCalledTimes(1);
+      const [message] = publish.mock.calls[0] as [{ payload: { entries: unknown[] } }, string];
+      expect(message.payload.entries).toHaveLength(2);
+    } finally {
+      database.close();
+    }
+  });
 });

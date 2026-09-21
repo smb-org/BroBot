@@ -50,6 +50,7 @@ import {
 } from "./overlay-token-service";
 import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
+import { revokeRealtimeSessionForUser, revokeRealtimeToken } from "../realtime";
 import { MODULES } from "../../modules/registry";
 import {
   listeAlleBroadcasterScopes,
@@ -261,6 +262,7 @@ authRouter.post(
       revokedAt: nowIso(),
     });
     if (!revoked) return context.text("Overlay-Token nicht gefunden.", 404);
+    void revokeRealtimeToken(context.env.CHANNEL, channelId, tokenId);
     context.header("Cache-Control", "no-store");
     return context.body(null, 204);
   },
@@ -574,6 +576,7 @@ authRouter.post("/auth/logout", async (context) => {
   }
   const now = nowIso();
   await revokeSession(context.env.DB, session.sessionId, now, "logout");
+  void revokeRealtimeSessionForUser(context.env.DB, context.env.CHANNEL, session.userId, session.sessionId);
   context.header("Set-Cookie", clearSessionCookie());
   context.header("Set-Cookie", serializeCsrfCookie("", 0), { append: true });
   return context.body(null, 204);

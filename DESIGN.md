@@ -463,6 +463,14 @@ Bewegung ist die einzige „Tiefe“ im System: Tastendruck skaliert auf 0,97 in
 
 **Die Kein-Skelett-Regel.** Veraltete Werte bleiben mit 55 % Deckkraft stehen (`.veraltet` um die Tabelle, sobald Audit, Ereignisse oder Mitglieder nachladen und schon Daten da sind); nichts schimmert. Beim ersten Laden ohne Daten steht eine Ladezeile in Text-2. Bewegung im Augenwinkel sieht neben einem laufenden Stream wie eine Änderung aus.
 
+**Die Zwei-Überlagerungen-Regel.** Das System kennt genau zwei Arten überlagernder Fläche, keine dritte.
+
+Die **aufklappende Liste** (`topbar__channel-list`, `position: absolute`, `z-index: 20`, `role="listbox"`) öffnet unter dem Brotkrumen-Umschalter für Kanal oder Modul. Sie ist flüchtig: an das geöffnete Bedienelement gebunden, sie schließt bei Auswahl, Escape oder Klick daneben und gibt den Fokus auf den Umschalter zurück. Davon gibt es heute zwei — Kanal und Modul —, und ein weiteres Brotkrumen-Segment, das umschaltbar wird, bekommt dieselbe Liste; sie ist ein etabliertes Bauteil, kein Sonderfall pro Umschalter.
+
+Der **meldende Hinweis** (Neue-Ereignisse-Hinweis, `position: fixed`, `z-index: 10` — unter der aufklappenden Liste, weil eine geöffnete Liste eine offene Handlung ist und Vorrang hat) meldet etwas und nimmt nichts entgegen außer der einen Handlung, die ihn zugleich ausführt und schließt (Klick springt an den Anfang und löscht ihn damit). Davon gibt es genau einen. Die Ausnahme hat einen Grund, keine Bequemlichkeit: Ein Hinweis, der nur im Fluss der Liste stünde, wäre unsichtbar genau dann, wenn er gebraucht wird — während jemand weiter unten liest, wohin nichts nachrückt.
+
+**Verboten bleibt die dritte Art:** eine überlagernde Fläche zum Bearbeiten, Bestätigen oder für ein Formular. Dafür bleibt es bei Sub-Inspector, Ergebnis- oder Bestätigungskasten im Fluss — Overlays dafür wurden ausdrücklich verworfen (Issue #130): Sie verdecken die Liste und bräuchten ein eigenes Bauteil mit Fokusfalle.
+
 ## Shapes
 
 Genau zwei Radien. **Container-Radius** ({rounded.container}) für alles, was ein Objekt ist: Modul- und Kanaltaste, Schienentaste, Symbolkacheln (44 px in der Taste, 56 px im Seitenkopf), Leer- und Fehlerkästen, Ergebnis- und Bestätigungskasten, Anmeldekarte, Schalter-Spur und Scrollbalken (bei 20 bzw. 10 px Höhe wirkt der 12-px-Radius als Pille). **Steuer-Radius** ({rounded.control}) für alles, was man bedient oder was eine Anzeige ist: Knöpfe, Felder, Selects, Fokusring, Zustandszeile, Sub-Inspector, Markenquadrat, Avatar (28 px), LED-Punkt, Schalterknopf und Schienen-Zustandspunkt (bei 7–14 px wirkt der 6-px-Radius als Kreis). Es gibt keinen `9999px`-Wert mehr.
@@ -495,6 +503,9 @@ Vor jedem Ereignistext — in der Tabelle wie im Verlauf des Sub-Inspectors — 
 - **Art-Chip (Familie):** LED-Wort-Typografie in Familienfarbe, Rand `color-mix` 45 % Familienfarbe auf Haarlinie; Stufe *voll* mit `<familie>-grund`, *gezeichnet* ohne. Wort ist die Art („Abo“, „Raid“, „Bann“), höchstens 12 Zeichen.
 - **Art-Chip (Betrieb):** immer gezeichnet; Wort ist das Zustandswort in Fehler-Text (5,70:1 auf Grund, 4,71:1 auf Tint-1), Bernstein (8,25:1 / 6,81:1) oder Text-2 (8,27:1 / 6,82:1). Die gefüllte Fehler-Variante fiele auf Tint-1 auf 4,08:1 und ist deshalb verboten.
 - Code ohne Eintrag: neutraler gezeichneter Chip „Unbekannt“, roher Code in Mono dahinter.
+
+### Neue-Ereignisse-Hinweis (`realtime-feed__notice`)
+Ein `.button` mit `position: fixed`, mittig unter der Kopfleiste (64 px von oben, `translateX(-50%)`, `z-index: 10`). Er meldet, dass neue Ereignisse eingetroffen sind, während der Bediener weiter unten im Protokoll liest — genau dort fügt die Liste sie nicht sichtbar ein, ein Zeileneinschub am unteren Bildschirmrand bliebe unbemerkt. Er trägt nur die Zahl und „neue Ereignisse“ (`aria-live="polite"`); ein Klick springt an den Anfang der Liste und ist zugleich die einzige Handlung, die ihn schließt — er löscht sich, sobald die Ereignisse eingeholt sind. Er erscheint ohne Übergang und verschwindet ohne Übergang, wie jede andere Zustandsänderung im System (siehe Kein-Skelett-Regel): Bewegung im Augenwinkel wäre neben einem laufenden Stream die teuerste Fehlinterpretation.
 
 ### Buttons
 - **Form:** {rounded.control}, 44 px hoch, 10 px 16 px, 13 px/500. In einer Tabellenzelle 34 px hoch, 6 px 12 px.
@@ -597,6 +608,7 @@ Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 
 - **Don't** eine Taste mit Absatz, Zähler oder verschachteltem Layout beladen — dann ist sie eine Karte.
 - **Don't** Schriftgrößen an den Viewport koppeln; schmal klappt das Gerüst um, nicht die Schrift.
 - **Don't** ein rechtes Dock bauen, das leer wartet, eine Tabelle beim Wählen umbrechen lassen oder einen Inspektor ein- und ausblenden; er ist da oder nicht.
+- **Don't** eine überlagernde Fläche zum Bearbeiten, Bestätigen oder für ein Formular bauen, und keine dritte Art überlagernder Fläche neben aufklappender Liste und Neue-Ereignisse-Hinweis einführen.
 - **Don't** eine Zustandsliste, ein Formular oder Fließtext über 960 px ziehen, nur weil die Seite breiter ist.
 - **Don't** Zeilen ohne Inspector klickbar stylen; Zeiger und Hover gibt es nur mit `tabindex`.
 - **Don't** eine Panel-Ansicht ohne `.module-stack` oder eine Löschhandlung als `quiet` bauen.
