@@ -6,6 +6,7 @@ import {
   listeAlleBroadcasterScopes,
   listRequiredBroadcasterScopesForUser,
   moduleBroadcasterScopeState,
+  moduleOptionalBroadcasterScopes,
   VOLLUMFANG_BROADCASTER_SCOPES,
 } from "../../src/worker/module-scopes";
 import { upsertLoginIdentity, setLoginIdentityStatus } from "../../src/worker/auth/repository";
@@ -123,5 +124,10 @@ describe("Broadcaster-Scopes", () => {
       required: ["channel:read:ads"],
       missing: [],
     });
+  });
+
+  it("kennzeichnet channel:manage:ads am Werbemodul als optionalen Scope", () => {
+    database = new TestD1Database();
+    expect(moduleOptionalBroadcasterScopes(werbungModul)).toEqual(["channel:manage:ads"]);
   });
 });

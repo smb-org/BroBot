@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getAdSchedule } from "../../src/worker/ad-schedule";
+import { getAdSchedule, snoozeNextAd } from "../../src/modules/werbung/adapters/ad-schedule";
+import { getAppAccessToken } from "../../src/worker/app-token";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -47,7 +48,7 @@ describe("Twitch-Werbezeitplan", () => {
       }],
     }), { status: 200 }));
 
-    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", fetcher)).resolves.toEqual({
+    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, fetcher)).resolves.toEqual({
       fetched: true,
       reason: null,
       detail: { status: 200, message: null },
@@ -83,7 +84,7 @@ describe("Twitch-Werbezeitplan", () => {
       }],
     }), { status: 200 }));
 
-    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", fetcher)).resolves.toMatchObject({
+    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, fetcher)).resolves.toMatchObject({
       fetched: true,
       schedule: {
         nextAdAt: null,
@@ -99,7 +100,7 @@ describe("Twitch-Werbezeitplan", () => {
   it("liefert einen leeren Termin als erfolgreichen Normalfall", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ data: [{}] }), { status: 200 }));
 
-    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", fetcher)).resolves.toMatchObject({
+    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, fetcher)).resolves.toMatchObject({
       fetched: true,
       reason: null,
       schedule: {
@@ -122,10 +123,75 @@ describe("Twitch-Werbezeitplan", () => {
       { status },
     ));
 
-    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", fetcher)).resolves.toEqual({
+    await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, fetcher)).resolves.toEqual({
       fetched: false,
       reason,
       detail: { status, message: "Twitch-Antwort" },
+      schedule: null,
+    });
+  });
+
+  it("verschiebt die nächste Werbung mit dem App-Token und liefert den neuen Zeitplan", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      data: [{
+        next_ad_at: "2026-09-21T12:05:00Z",
+        duration: 60,
+        last_ad_at: "2026-09-21T11:00:00Z",
+        preroll_free_time: 120,
+        snooze_count: 1,
+        snooze_refresh_at: "2026-09-21T11:30:00Z",
+      }],
+    }), { status: 200 }));
+
+    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, fetcher)).resolves.toEqual({
+      snoozed: true,
+      reason: null,
+      detail: { status: 200, message: null },
+      schedule: {
+        nextAdAt: "2026-09-21T12:05:00Z",
+        duration: 60,
+        lastAdAt: "2026-09-21T11:00:00Z",
+        prerollFreeTime: 120,
+        snoozeCount: 1,
+        snoozeRefreshAt: "2026-09-21T11:30:00Z",
+      },
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://api.twitch.tv/helix/channels/ads/schedule/snooze?broadcaster_id=kanal-a",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Client-ID": "client-id",
+          Authorization: "Bearer app-token",
+        },
+      }),
+    );
+  });
+
+  it("gibt eine Ratenbegrenzung als eigenen Snooze-Ausgang zurück", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Twitch-Antwort" }),
+      { status: 429 },
+    ));
+
+    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, fetcher)).resolves.toEqual({
+      snoozed: false,
+      reason: "rate_limited",
+      detail: { status: 429, message: "Twitch-Antwort" },
+      schedule: null,
+    });
+  });
+
+  it("erkennt fehlende channel:manage:ads-Zustimmung am Twitch-Ausgang", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Missing required scope: channel:manage:ads" }),
+      { status: 401 },
+    ));
+
+    await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, fetcher)).resolves.toEqual({
+      snoozed: false,
+      reason: "scope_missing",
+      detail: { status: 401, message: "Missing required scope: channel:manage:ads" },
       schedule: null,
     });
   });
