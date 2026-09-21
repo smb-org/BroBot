@@ -4,8 +4,31 @@ import {
   type ActorContext,
 } from "./repository";
 import type { ModuleLanguage } from "../../modules/contract";
+import { prepareModuleAudit } from "../module-audit";
 
 const overlayTokenRoles = "'broadcaster', 'verwalter'";
+const OVERLAY_AUDIT_MODULE_ID = null;
+
+type OverlayTokenAuditSnapshot = Pick<
+  NewOverlayTokenRecord,
+  "tokenId" | "createdAt" | "expiresAt" | "revokedAt" | "revocationReason"
+>;
+
+interface OverlayTokenAuditRow {
+  token_id: string;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  revocation_reason: string | null;
+}
+
+const overlayTokenAuditSnapshot = (token: OverlayTokenAuditSnapshot): OverlayTokenAuditSnapshot => ({
+  tokenId: token.tokenId,
+  createdAt: token.createdAt,
+  expiresAt: token.expiresAt,
+  revokedAt: token.revokedAt,
+  revocationReason: token.revocationReason,
+});
 
 export interface NewOverlayTokenRecord {
   tokenId: string;
@@ -74,11 +97,11 @@ export const createOverlayToken = async (
   token: NewOverlayTokenRecord,
   actor: ActorContext,
 ): Promise<boolean> => {
-  const result = await db.prepare(
+  const mutation = db.prepare(
     `INSERT INTO overlay_tokens
       (token_id, channel_id, token_hash, expires_at, created_at,
        revoked_at, revocation_reason, last_used_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?
       WHERE 1 = 1
       ${actorGuard(overlayTokenRoles)}`,
   ).bind(
@@ -91,8 +114,16 @@ export const createOverlayToken = async (
     token.revocationReason,
     token.lastUsedAt,
     ...bindActorGuard(actor, token.channelId, token.createdAt),
-  ).run();
-  return result.meta.changes > 0;
+  );
+  const audit = prepareModuleAudit(db, actor.userId, token.createdAt, {
+    channelId: token.channelId,
+    moduleId: OVERLAY_AUDIT_MODULE_ID,
+    action: "overlay.token.ausgestellt",
+    before: null,
+    after: overlayTokenAuditSnapshot(token),
+  });
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
 export const getUsableOverlayToken = async (
@@ -146,19 +177,46 @@ export const revokeOverlayToken = async (
   reason: string,
   actor: ActorContext,
 ): Promise<boolean> => {
-  const result = await db.prepare(
+  const beforeRow = await db.prepare(
+    `SELECT token_id, created_at, expires_at, revoked_at, revocation_reason
+       FROM overlay_tokens
+      WHERE token_id = ? AND channel_id = ?`,
+  ).bind(tokenId, channelId).first<OverlayTokenAuditRow>();
+  if (beforeRow === null) return false;
+
+  const before = overlayTokenAuditSnapshot({
+    tokenId: beforeRow.token_id,
+    createdAt: beforeRow.created_at,
+    expiresAt: beforeRow.expires_at,
+    revokedAt: beforeRow.revoked_at,
+    revocationReason: beforeRow.revocation_reason,
+  });
+  const mutation = db.prepare(
     `UPDATE overlay_tokens
         SET revoked_at = ?, revocation_reason = ?
       WHERE token_id = ?
         AND channel_id = ?
         AND revoked_at IS NULL
+        AND created_at = ?
+        AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL))
       ${actorGuard(overlayTokenRoles)}`,
   ).bind(
     revokedAt,
     reason,
     tokenId,
     channelId,
+    before.createdAt,
+    before.expiresAt,
+    before.expiresAt,
     ...bindActorGuard(actor, channelId, revokedAt),
-  ).run();
-  return result.meta.changes > 0;
+  );
+  const audit = prepareModuleAudit(db, actor.userId, revokedAt, {
+    channelId,
+    moduleId: OVERLAY_AUDIT_MODULE_ID,
+    action: "overlay.token.widerrufen",
+    before,
+    after: { ...before, revokedAt, revocationReason: reason },
+  });
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
