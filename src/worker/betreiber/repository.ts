@@ -29,6 +29,8 @@ export interface BetreiberAuditCursor {
 export interface BetreiberAuditEintrag {
   auditId: string;
   actorUserId: string;
+  actorLogin: string | null;
+  actorDisplayName: string | null;
   actorKind: "mitglied" | "betreiber";
   createdAt: string;
   channelId: string;
@@ -408,6 +410,8 @@ export const listeBetreiberAudit = async (
   const einträge = zeilen.map((zeile): BetreiberAuditEintrag => ({
     auditId: zeile.audit_id,
     actorUserId: zeile.actor_user_id,
+    actorLogin: null,
+    actorDisplayName: null,
     actorKind: zeile.actor_kind,
     createdAt: zeile.created_at,
     channelId: zeile.channel_id,

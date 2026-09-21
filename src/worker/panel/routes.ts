@@ -209,7 +209,20 @@ panelRouter.get(
       cursor: "Audit-Cursor ist ungültig.",
     });
     if (parsed instanceof Response) return parsed;
-    return context.json(await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor));
+    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor);
+    const actorIds = audit.entries.map((entry) => entry.actorUserId);
+    const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
+    return context.json({
+      ...audit,
+      entries: audit.entries.map((entry) => {
+        const actor = actors.get(entry.actorUserId);
+        return {
+          ...entry,
+          actorLogin: actor?.login ?? null,
+          actorDisplayName: actor?.displayName ?? null,
+        };
+      }),
+    });
   },
 );
 

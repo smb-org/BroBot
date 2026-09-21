@@ -59,16 +59,16 @@ export const NavigationIcon = ({ kind, className = "navigation-icon" }: { kind: 
   </svg>
 );
 
-const iconFor = (moduleId: string): ReactElement => {
+const iconFor = (moduleId: string, className = "module-glyph"): ReactElement => {
   const symbol = moduleSymbol(moduleId);
   return (
-    <svg className="module-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       {symbol === "textbefehle" ? <><circle cx="12" cy="12" r="8" /><path d="M12 7v10M8.5 10.5h7M8.5 13.5h5" /></> : symbol === "kanalereignisse" ? <><path d="M5 12h3l2-5 4 10 2-5h3" /><path d="M5 19h14" /></> : symbol === "werbung" ? <><path d="M6 8h12v8H6z" /><path d="M9 8V6h6v2M9 12h6M9 16v2h6v-2" /></> : <><rect x="5" y="5" width="14" height="14" rx="2" /><path d="M9 12h6M12 9v6" /></>}
     </svg>
   );
 };
 
-export const ModuleIcon = ({ moduleId }: { moduleId: string }): ReactElement => iconFor(moduleId);
+export const ModuleIcon = ({ moduleId, className }: { moduleId: string; className?: string }): ReactElement => iconFor(moduleId, className);
 
 export const Led = ({ status, label }: { status: LedStatus; label: string }): ReactElement => (
   <span className="led" data-status={status}>

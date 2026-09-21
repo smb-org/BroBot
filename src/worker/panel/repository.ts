@@ -4,6 +4,7 @@ import type {
   PanelAuditResponse,
   PanelBotStatus,
   PanelBotPermissions,
+  PanelBroadcasterPermissions,
   PanelChannelOverview,
   PanelChannelRole,
   PanelChannelState,
@@ -17,6 +18,7 @@ import type {
   PanelEventsResponse,
 } from "../../panel-contract";
 import { channelBotConsentCondition, listEventSubSubscriptions } from "../auth/repository";
+import { listeAlleBroadcasterScopes } from "../module-scopes";
 
 interface ChannelStateRow {
   channel_id: string;
@@ -24,6 +26,9 @@ interface ChannelStateRow {
   display_name: string;
   role: PanelChannelRole;
   broadcaster_connection: number;
+  vollzustimmung: number;
+  broadcaster_scopes_json: string | null;
+  broadcaster_status: string | null;
   channel_bot_consent: number;
   bot_status: PanelBotStatus["status"] | null;
   bot_reason: string | null;
@@ -109,6 +114,9 @@ export const decodeLogCursor = (serialized: string): LogCursor | null => {
 const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, member.role,
            CASE WHEN broadcaster_identity.status = 'connected' THEN 1 ELSE 0 END AS broadcaster_connection,
+           channel.vollzustimmung AS vollzustimmung,
+           broadcaster_identity.scopes_json AS broadcaster_scopes_json,
+           broadcaster_identity.status AS broadcaster_status,
            CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent,
            bot_status.status AS bot_status, bot_status.reason AS bot_reason,
            bot_status.updated_at AS bot_updated_at,
@@ -195,6 +203,26 @@ const mapBotPermissions = (row: ChannelStateRow): PanelBotPermissions | null => 
   }
 };
 
+const parseScopes = (serialized: string | null): string[] => {
+  if (serialized === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    return Array.isArray(parsed) && parsed.every((scope) => typeof scope === "string")
+      ? [...new Set(parsed)]
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const mapBroadcasterPermissions = (row: ChannelStateRow): PanelBroadcasterPermissions | null => {
+  if (row.vollzustimmung !== 1) return null;
+  const granted = new Set(row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : []);
+  return {
+    missingScopes: listeAlleBroadcasterScopes().filter((scope) => !granted.has(scope)),
+  };
+};
+
 const mapModerator = (row: ChannelStateRow): PanelModeratorStatus | null =>
   row.moderator_is_moderator === null || row.moderator_checked_at === null
     ? null
@@ -268,6 +296,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   channelBotConsent: row.channel_bot_consent === 1 ? "granted" : "missing",
   bot: mapBotStatus(row),
   botPermissions: mapBotPermissions(row),
+  broadcasterPermissions: mapBroadcasterPermissions(row),
   moderator: mapModerator(row),
   chatSubscription: mapEventSub(row),
   tokens: mapTokens(row),
@@ -330,6 +359,7 @@ export const getSystemOverviewForUser = async (
     broadcasterConnection: row.broadcaster_connection === 1 ? "connected" : "not_connected",
     bot: mapBotStatus(row),
     botPermissions: mapBotPermissions(row),
+    broadcasterPermissions: mapBroadcasterPermissions(row),
     chatSubscription: mapEventSub(row),
     subscriptions: subscriptions.map((subscription): PanelEventSubSubscription => ({
       subscriptionType: subscription.subscriptionType,
@@ -373,6 +403,8 @@ export const getAuditLogForChannel = async (
   const entries: PanelAuditEntry[] = rows.map((row) => ({
     auditId: row.audit_id,
     actorUserId: row.actor_user_id,
+    actorLogin: null,
+    actorDisplayName: null,
     actorKind: row.actor_kind,
     createdAt: row.created_at,
     moduleId: row.module_id,

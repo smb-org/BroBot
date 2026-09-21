@@ -10,6 +10,35 @@ export const roleLabel = (role: PanelChannelRole): string => {
   return dashboardGemeinsameTexte().rollen[role];
 };
 
+export interface KanalPanelTexte {
+  vollzustimmungFehlt: string;
+  vollzustimmungAnfordern: string;
+  vollzustimmungGesperrt: string;
+  fehlendeBroadcasterBerechtigungen: string;
+  fehlendeScopes: string;
+}
+
+const kanalPanelKatalog: LocaleCatalog<KanalPanelTexte> = {
+  de: {
+    vollzustimmungFehlt: "Vollzustimmung fehlt",
+    vollzustimmungAnfordern: "Vollzustimmung erteilen",
+    vollzustimmungGesperrt: "Nur der Broadcaster kann die Vollzustimmung erteilen.",
+    fehlendeBroadcasterBerechtigungen: "Fehlende Broadcaster-Berechtigungen",
+    fehlendeScopes: "Fehlende Scopes",
+  },
+  en: {
+    vollzustimmungFehlt: "Full consent missing",
+    vollzustimmungAnfordern: "Grant full consent",
+    vollzustimmungGesperrt: "Only the broadcaster can grant full consent.",
+    fehlendeBroadcasterBerechtigungen: "Missing broadcaster permissions",
+    fehlendeScopes: "Missing scopes",
+  },
+};
+
+export const kanalPanelTexte = (
+  language: DashboardLanguage = dashboardLanguage(),
+): KanalPanelTexte => kanalPanelKatalog[language];
+
 export type BetreiberHandlung =
   | "kanal.freigegeben"
   | "kanal.vollzustimmung_geaendert"

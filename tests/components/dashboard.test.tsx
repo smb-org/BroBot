@@ -626,6 +626,8 @@ describe("Dashboard-Grundgerüst", () => {
     const auditEntry = {
       auditId: "audit-1",
       actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
       createdAt: "2026-09-18T04:00:00.000Z",
       action: "module.enabled",
       before: "{\"enabled\":false}",
@@ -633,7 +635,9 @@ describe("Dashboard-Grundgerüst", () => {
     };
     const secondAuditEntry = {
       auditId: "audit-2",
-      actorUserId: "user-1",
+      actorUserId: "gelöscht",
+      actorLogin: null,
+      actorDisplayName: null,
       createdAt: "2026-09-18T03:00:00.000Z",
       action: "module.disabled",
       before: "{\"enabled\":true}",
@@ -651,6 +655,8 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
+    expect(await screen.findByText("Alice")).toBeInTheDocument();
+    expect(await screen.findByText("gelöscht")).toBeInTheDocument();
     const row = screen.getByText("module.enabled").closest("tr");
     expect(row).not.toBeNull();
     expect(row).toHaveAttribute("aria-selected", "false");
@@ -659,6 +665,8 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("heading", { name: "Vorher" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Nachher" })).toBeInTheDocument();
     expect(screen.getByText('{"enabled":false}')).toBeInTheDocument();
+    const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
+    expect(await within(inspector).findByText("user-1")).toBeInTheDocument();
     const secondRow = screen.getByText("module.disabled").closest("tr");
     expect(secondRow).not.toBeNull();
     fireEvent.keyDown(secondRow as HTMLElement, { key: " " });
@@ -731,6 +739,85 @@ describe("Dashboard-Grundgerüst", () => {
     // Die Autorisierung gehört zum Betreiber-Account, nicht in die kanalbezogene Panel-Rolle.
     expect(screen.queryByRole("button", { name: /autoris/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /autoris/i })).not.toBeInTheDocument();
+  });
+
+  it("zeigt markierten Kanal mit unvollständiger Vollzustimmung samt Zustandszeile, Scopes und Zustimmungslink", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      role: "broadcaster",
+      broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("article", { name: "Vollzustimmung fehlt" })).toHaveAttribute("data-status", "warning");
+    const inspector = await screen.findByRole("region", { name: "Fehlende Broadcaster-Berechtigungen" });
+    expect(within(inspector).getByText("channel:manage:broadcast")).toHaveClass("mono");
+    const consentLink = await screen.findByRole("link", { name: "Vollzustimmung erteilen" });
+    expect(consentLink).toHaveAttribute("href", "/auth/login?kanal=kanal-a");
+  });
+
+  it("zeigt für einen unmarkierten Kanal keinen Vollzustimmungszustand", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: null };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    expect(screen.queryByRole("article", { name: "Vollzustimmung fehlt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Vollzustimmung erteilen" })).not.toBeInTheDocument();
+  });
+
+  it("zeigt für einen vollständig zugestimmten Kanal keinen Vollzustimmungszustand", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: { missingScopes: [] } };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    expect(screen.queryByRole("article", { name: "Vollzustimmung fehlt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Vollzustimmung erteilen" })).not.toBeInTheDocument();
+  });
+
+  it("zeigt Verwaltern die Vollzustimmung deaktiviert mit Begründung", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      role: "verwalter",
+      broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("article", { name: "Vollzustimmung fehlt" });
+    const button = await screen.findByRole("button", { name: "Vollzustimmung erteilen" });
+    expect(button).toBeDisabled();
+    expect(screen.getAllByText("Nur der Broadcaster kann die Vollzustimmung erteilen.").length).toBeGreaterThan(0);
   });
 
   it("zeigt vollständige Bot-Berechtigungen als gesunden Zustand mit Wort", async () => {

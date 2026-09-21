@@ -302,5 +302,18 @@ betreiberRouter.get("/api/betreiber/audit", async (kontext) => {
   if (serialisierterCursor !== undefined && cursor === null) {
     return kontext.text("Audit-Cursor ist ungültig.", 400);
   }
-  return kontext.json(await listeBetreiberAudit(kontext.env.DB, limit, cursor));
+  const audit = await listeBetreiberAudit(kontext.env.DB, limit, cursor);
+  const actorIds = audit.entries.map((eintrag) => eintrag.actorUserId);
+  const akteure = await fetchTwitchUsersById(fetch, kontext.env, actorIds);
+  return kontext.json({
+    ...audit,
+    entries: audit.entries.map((eintrag) => {
+      const akteur = akteure.get(eintrag.actorUserId);
+      return {
+        ...eintrag,
+        actorLogin: akteur?.login ?? null,
+        actorDisplayName: akteur?.displayName ?? null,
+      };
+    }),
+  });
 });
