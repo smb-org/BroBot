@@ -11,6 +11,7 @@ const event = (payload: Record<string, unknown>, settings = werbungModul.default
   settings,
   receivedAt: "2026-09-20T10:00:00.000Z",
   actor: null,
+  chatStatus: null,
 });
 
 describe("Werbung-Modul", () => {

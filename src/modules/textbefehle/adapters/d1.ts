@@ -10,10 +10,11 @@ import type { TextbefehlMutationsergebnis, TextbefehlRepository } from "../repos
 
 const MODULE_ID = "textbefehle";
 
-const auditWerte = (befehl: Pick<Textbefehl, "name" | "text" | "art" | "enabled" | "cooldownSekunden">) => ({
+const auditWerte = (befehl: Pick<Textbefehl, "name" | "text" | "art" | "enabled" | "mindeststufe" | "cooldownSekunden">) => ({
   name: befehl.name,
   art: befehl.art,
   enabled: befehl.enabled,
+  mindeststufe: befehl.mindeststufe,
   text: kuerzeAuf200Zeichen(befehl.text),
   cooldownSekunden: befehl.cooldownSekunden,
 });
@@ -43,6 +44,7 @@ interface TextbefehlRow {
   response_text: string;
   art: "text" | "liste";
   enabled: number;
+  minimum_level: "alle" | "abonnent" | "vip" | "moderator" | "broadcaster";
   cooldown_seconds: number;
   last_used_at: string | null;
   created_at: string;
@@ -55,6 +57,7 @@ const mapTextbefehl = (row: TextbefehlRow): Textbefehl => ({
   text: row.response_text,
   art: row.art,
   enabled: row.enabled === 1,
+  mindeststufe: row.minimum_level,
   cooldownSekunden: row.cooldown_seconds,
   zuletztVerwendetAt: row.last_used_at,
   createdAt: row.created_at,
@@ -68,7 +71,7 @@ export const createTextbefehlRepository = (
 ): TextbefehlRepository => ({
   async auflisten(channelId: string): Promise<Textbefehl[]> {
     const result = await db.prepare(
-      `SELECT channel_id, command_name, response_text, art, enabled, cooldown_seconds,
+      `SELECT channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds,
               last_used_at, created_at, updated_at
          FROM textbefehle_commands
         WHERE channel_id = ?
@@ -79,7 +82,7 @@ export const createTextbefehlRepository = (
 
   async finden(channelId: string, name: string): Promise<Textbefehl | null> {
     const row = await db.prepare(
-      `SELECT channel_id, command_name, response_text, art, enabled, cooldown_seconds,
+      `SELECT channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds,
               last_used_at, created_at, updated_at
          FROM textbefehle_commands
         WHERE channel_id = ? AND command_name = ?`,
@@ -90,10 +93,11 @@ export const createTextbefehlRepository = (
   async anlegen(input: NeuerTextbefehl, actor: TextbefehlAkteur): Promise<TextbefehlMutationsergebnis> {
     if (await this.finden(input.channelId, input.name) !== null) return fehlgeschlagen("existiert");
     const authorization = authorizeMutation(input.channelId, actor, input.now);
+    const mindeststufe = input.mindeststufe ?? "alle";
     const mutation = db.prepare(
       `INSERT INTO textbefehle_commands
-        (channel_id, command_name, response_text, art, enabled, cooldown_seconds, last_used_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, 1, ?, NULL, ?, ?
+        (channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
+       SELECT ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM textbefehle_commands
            WHERE channel_id = ? AND command_name = ?
@@ -104,6 +108,7 @@ export const createTextbefehlRepository = (
       input.name,
       input.text,
       input.art,
+      mindeststufe,
       input.cooldownSekunden,
       input.now,
       input.now,
@@ -116,7 +121,7 @@ export const createTextbefehlRepository = (
       moduleId: MODULE_ID,
       action: "textbefehle.befehl.angelegt",
       before: null,
-      after: auditWerte({ ...input, enabled: true }),
+      after: auditWerte({ ...input, mindeststufe, enabled: true }),
     }, input.now);
     if (changes > 0) return erfolgreich();
     return fehlgeschlagen(await this.finden(input.channelId, input.name) === null ? "nicht_berechtigt" : "existiert");
@@ -129,9 +134,10 @@ export const createTextbefehlRepository = (
       return fehlgeschlagen("existiert");
     }
     const authorization = authorizeMutation(input.channelId, actor, input.now);
+    const mindeststufe = input.mindeststufe ?? before.mindeststufe;
     const mutation = db.prepare(
       `UPDATE textbefehle_commands
-          SET command_name = ?, response_text = ?, enabled = ?, cooldown_seconds = ?, updated_at = ?
+          SET command_name = ?, response_text = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?, updated_at = ?
         WHERE channel_id = ? AND command_name = ?
           AND (? = command_name OR NOT EXISTS (
             SELECT 1 FROM textbefehle_commands
@@ -142,6 +148,7 @@ export const createTextbefehlRepository = (
       input.neuerName,
       input.text,
       input.enabled ? 1 : 0,
+      mindeststufe,
       input.cooldownSekunden,
       input.now,
       input.channelId,
@@ -161,6 +168,7 @@ export const createTextbefehlRepository = (
         name: input.neuerName,
         text: input.text,
         enabled: input.enabled,
+        mindeststufe,
         cooldownSekunden: input.cooldownSekunden,
       }),
     }, input.now);
@@ -215,8 +223,8 @@ export const initialisiereListenbefehl = async (
   const authorization = authorizeMutation(channelId, actor, now);
   await db.prepare(
     `INSERT INTO textbefehle_commands
-      (channel_id, command_name, response_text, art, enabled, cooldown_seconds, last_used_at, created_at, updated_at)
-     SELECT ?, 'befehle', '', 'liste', 1, 5, NULL, ?, ?
+      (channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
+     SELECT ?, 'befehle', '', 'liste', 1, 'alle', 5, NULL, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM textbefehle_commands
          WHERE channel_id = ? AND command_name = 'befehle'

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TextbefehlePanel } from "../../src/modules/textbefehle/panel";
@@ -263,5 +263,45 @@ describe("Textbefehle-Panel-Ansicht", () => {
     const toggle = await screen.findByRole("switch", { name: "Befehl !hallo: ausgeschaltet" });
     expect(toggle).toBeDisabled();
     expect(screen.getAllByText("Nur Broadcaster und Verwalter dürfen Befehle schalten.").length).toBeGreaterThan(0);
+  });
+
+  it("zeigt die Mindeststufe als eigene Spalte und ändert sie über den Verwaltungsweg", async () => {
+    let mindeststufe = "alle";
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ befehle: [{
+          channelId: "kanal-a",
+          name: "hallo",
+          text: "Antwort",
+          art: "text",
+          enabled: true,
+          mindeststufe,
+          cooldownSekunden: 5,
+          zuletztVerwendetAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }));
+      }
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (init?.method === "PATCH") {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) as { mindeststufe?: string } : {};
+        mindeststufe = body.mindeststufe ?? mindeststufe;
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextbefehlePanel channelId="kanal-a" />);
+
+    const row = await screen.findByRole("row", { name: /!hallo/ });
+    expect(screen.getByRole("columnheader", { name: "Mindeststufe" })).toBeInTheDocument();
+    const select = within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" });
+    expect(select).toHaveValue("alle");
+    fireEvent.change(select, { target: { value: "moderator" } });
+
+    await screen.findByRole("option", { name: "Moderatoren", selected: true });
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ mindeststufe: "moderator" }))).toBe(true);
   });
 });

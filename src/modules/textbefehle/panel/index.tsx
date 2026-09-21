@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import { dashboardGemeinsameTexte, type DashboardLanguage } from "../../../dashboard/locale";
-import type { Textbefehl } from "../contracts";
-import { loescheTextbefehl, ladeTextbefehle, legeTextbefehlAn, schalteTextbefehl, speichereTextbefehl } from "./service";
+import { TEXTBEFEHL_MINDESTSTUFEN, type Textbefehl, type TextbefehlMindeststufe } from "../contracts";
+import { loescheTextbefehl, ladeTextbefehle, legeTextbefehlAn, schalteTextbefehl, setzeTextbefehlMindeststufe, speichereTextbefehl } from "./service";
 import { textbefehleTexte } from "./locale";
 
 interface TextbefehlZeileProperties {
@@ -15,9 +15,11 @@ interface TextbefehlZeileProperties {
   canManage: boolean;
   toggleBusy: boolean;
   onToggle: () => Promise<void>;
+  minimumBusy: boolean;
+  onMinimumChange: (mindeststufe: TextbefehlMindeststufe) => Promise<void>;
 }
 
-const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<TextbefehlZeileProperties, "selected" | "onSelect" | "canManage" | "toggleBusy" | "onToggle">): ReactElement => {
+const TextbefehlEditor = ({ channelId, language, initial, onChanged }: Omit<TextbefehlZeileProperties, "selected" | "onSelect" | "canManage" | "toggleBusy" | "onToggle" | "minimumBusy" | "onMinimumChange">): ReactElement => {
   const labels = textbefehleTexte(language);
   const [name, setName] = useState(initial.name);
   const [text, setText] = useState(initial.text);
@@ -124,9 +126,11 @@ const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: 
   }
 };
 
-const TextbefehlZeile = ({ initial, language, selected, onSelect, canManage, toggleBusy, onToggle }: TextbefehlZeileProperties): ReactElement => {
+const TextbefehlZeile = ({ initial, language, selected, onSelect, canManage, toggleBusy, onToggle, minimumBusy, onMinimumChange }: TextbefehlZeileProperties): ReactElement => {
   const labels = textbefehleTexte(language);
   const disabledReason = canManage ? undefined : labels.verwaltungGesperrt;
+  const minimumDisabledReason = canManage ? undefined : labels.mindeststufeGesperrt;
+  const mindeststufe = (initial as { mindeststufe?: TextbefehlMindeststufe }).mindeststufe ?? "alle";
   return (
     <tr tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
@@ -134,6 +138,19 @@ const TextbefehlZeile = ({ initial, language, selected, onSelect, canManage, tog
       <td className="tabelle__answer" title={initial.art === "text" ? initial.text : undefined}>{initial.art === "text" ? initial.text : "—"}</td>
       <td className="mono">{initial.cooldownSekunden}</td>
       <td className="tabelle__last-used">{relativeZeit(initial.zuletztVerwendetAt, labels)}</td>
+      <td>
+        <select
+          aria-label={labels.mindeststufeFuer(initial.name)}
+          value={mindeststufe}
+          disabled={!canManage || minimumBusy}
+          aria-busy={minimumBusy}
+          title={minimumDisabledReason}
+          onClick={(event) => { event.stopPropagation(); }}
+          onChange={(event) => { void onMinimumChange(event.target.value as TextbefehlMindeststufe); }}
+        >
+          {TEXTBEFEHL_MINDESTSTUFEN.map((stufe) => <option key={stufe} value={stufe}>{labels.stufen[stufe]}</option>)}
+        </select>
+      </td>
       <td>
         <button
           className="switch"
@@ -165,6 +182,7 @@ export const TextbefehlePanel = ({ channelId, language, canManage = true }: { ch
   const [art, setArt] = useState<"text" | "liste">("text");
   const [cooldownSekunden, setCooldownSekunden] = useState(5);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
+  const [minimumBusyName, setMinimumBusyName] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -226,6 +244,19 @@ export const TextbefehlePanel = ({ channelId, language, canManage = true }: { ch
     }
   };
 
+  const changeMinimum = async (befehl: Textbefehl, mindeststufe: TextbefehlMindeststufe): Promise<void> => {
+    setMinimumBusyName(befehl.name);
+    setError(null);
+    try {
+      await setzeTextbefehlMindeststufe(channelId, befehl.name, mindeststufe);
+      await load();
+    } catch {
+      setError(labels.speichernFehler);
+    } finally {
+      setMinimumBusyName(null);
+    }
+  };
+
   return (
     <section className="module-stack command-panel" aria-label={labels.titel}>
       <section className="command-list config-section" aria-label={labels.liste}>
@@ -233,7 +264,7 @@ export const TextbefehlePanel = ({ channelId, language, canManage = true }: { ch
         {loading ? <p className="loading-line">{labels.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-        {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} canManage={canManage} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} />)}</tbody></table></div> : null}
+        {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setSelectedName(befehl.name); }} onChanged={load} canManage={canManage} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
       </section>
       {selected === null ? null : <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} />}
       <form className="command-create config-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>

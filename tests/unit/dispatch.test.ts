@@ -89,6 +89,11 @@ const verteile = async (
   fetcher: typeof fetch,
   channelId = "kanal-a",
   subscriptionType = CHAT_TYP,
+  payload: Readonly<Record<string, unknown>> = {
+    message: { text: "!hallo" },
+    chatter_user_id: "user-1",
+    chatter_user_login: "alice",
+  },
 ) => {
   for (const module of registry) await aktiviere(database, channelId, module.id);
   return dispatchEventSubNotification(
@@ -97,7 +102,7 @@ const verteile = async (
     channelId,
     subscriptionType,
     triggerId: "ausloeser-1",
-    payload: { message: { text: "!hallo" }, chatter_user_id: "user-1", chatter_user_login: "alice" },
+    payload,
     receivedAt: JETZT,
   },
     fetcher,
@@ -268,6 +273,63 @@ describe("Verteilung und Ausführung", () => {
       })], gesendet());
 
       expect(akteur).toEqual({ userId: "user-1", login: "alice", role: "bediener" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reicht alle Chatstatus getrennt von der Panelrolle weiter und leert sie ohne Chatbezug", async () => {
+    const database = new TestD1Database();
+    try {
+      await mitBot(database);
+      await insertMember(database, "kanal-a", "user-1", "bediener");
+      const statusse: Array<{ role: ModuleEvent["actor"]; chatStatus: ModuleEvent["chatStatus"] }> = [];
+      const chatModul = modulDoppel("chat-modul", (event) => {
+        statusse.push({ role: event.actor, chatStatus: event.chatStatus });
+        return { actions: [], diagnostics: [] };
+      });
+      const raidModul = modulDoppel("raid-modul", (event) => {
+        statusse.push({ role: event.actor, chatStatus: event.chatStatus });
+        return { actions: [], diagnostics: [] };
+      }, ["channel.raid"]);
+
+      await verteile(database, [chatModul], gesendet());
+      await verteile(database, [raidModul], gesendet(), "kanal-a", "channel.raid");
+
+      expect(statusse).toEqual([
+        { role: { userId: "user-1", login: "alice", role: "bediener" }, chatStatus: ["zuschauer"] },
+        { role: { userId: "user-1", login: "alice", role: "bediener" }, chatStatus: null },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("übermittelt VIP und Abonnement gemeinsam aus den Chatbadges", async () => {
+    const database = new TestD1Database();
+    try {
+      await mitBot(database);
+      let chatStatus: ModuleEvent["chatStatus"] = null;
+      const chatModul = modulDoppel("chat-modul", (event) => {
+        chatStatus = event.chatStatus;
+        return { actions: [], diagnostics: [] };
+      });
+
+      await verteile(
+        database,
+        [chatModul],
+        gesendet(),
+        "kanal-a",
+        CHAT_TYP,
+        {
+          message: { text: "!hallo" },
+          chatter_user_id: "user-1",
+          chatter_user_login: "alice",
+          badges: [{ set_id: "vip" }, { set_id: "subscriber" }],
+        },
+      );
+
+      expect(chatStatus).toEqual(["vip", "abonnent"]);
     } finally {
       database.close();
     }

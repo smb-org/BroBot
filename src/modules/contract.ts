@@ -4,6 +4,9 @@ import type { z } from "zod";
 
 export { kuerzeAuf200Zeichen } from "../text";
 
+/** Aus Twitch-Badges abgeleiteter Status der chatseitig auslösenden Person. */
+export type ModuleChatStatus = "zuschauer" | "abonnent" | "vip" | "moderator" | "broadcaster";
+
 /**
  * Eine Begründung für etwas, das ein Modul getan oder bewusst nicht getan hat.
  *
@@ -14,7 +17,7 @@ export { kuerzeAuf200Zeichen } from "../text";
  */
 export interface ModuleDiagnostic {
   code: string;
-  detail?: Readonly<Record<string, string | number | boolean | null>>;
+  detail?: Readonly<Record<string, string | number | boolean | null | readonly ModuleChatStatus[]>>;
 }
 
 /** Eine vom Host auszuführende, semantisch klar benannte Modulaktion. */
@@ -141,6 +144,8 @@ export interface ModuleEvent<Settings = unknown> {
   receivedAt: string;
   /** Die Rolle stammt aus channel_members; `null` bedeutet kein Mitglied. */
   actor: ModuleActor | null;
+  /** Ereignisse ohne Chatbezug tragen hier `null`; Chatereignisse alle zutreffenden Status. */
+  chatStatus: readonly ModuleChatStatus[] | null;
 }
 
 export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {

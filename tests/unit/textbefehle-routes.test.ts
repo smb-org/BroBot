@@ -103,22 +103,22 @@ describe("Textbefehle-Panel", () => {
         module_id: "textbefehle",
         action: "textbefehle.befehl.angelegt",
         before_json: "null",
-        after_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
+        after_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "alle", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "textbefehle",
         action: "textbefehle.befehl.geändert",
-        before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
-        after_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, text: "Neue Antwort", cooldownSekunden: 10 }),
+        before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "alle", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
+        after_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "alle", text: "Neue Antwort", cooldownSekunden: 10 }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "textbefehle",
         action: "textbefehle.befehl.entfernt",
-        before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, text: "Neue Antwort", cooldownSekunden: 10 }),
+        before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "alle", text: "Neue Antwort", cooldownSekunden: 10 }),
         after_json: "null",
       }),
     ]));
@@ -221,8 +221,8 @@ describe("Textbefehle-Panel", () => {
       "SELECT action, before_json, after_json FROM audit_log WHERE action = 'textbefehle.befehl.geändert'",
     ).first()).resolves.toEqual({
       action: "textbefehle.befehl.geändert",
-      before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, text: "Antwort", cooldownSekunden: 5 }),
-      after_json: JSON.stringify({ name: "hallo", art: "text", enabled: false, text: "Antwort", cooldownSekunden: 5 }),
+      before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "alle", text: "Antwort", cooldownSekunden: 5 }),
+      after_json: JSON.stringify({ name: "hallo", art: "text", enabled: false, mindeststufe: "alle", text: "Antwort", cooldownSekunden: 5 }),
     });
   });
 
@@ -249,5 +249,45 @@ describe("Textbefehle-Panel", () => {
     await expect(database.prepare(
       "SELECT enabled FROM textbefehle_commands WHERE command_name = 'hallo'",
     ).first()).resolves.toEqual({ enabled: 1 });
+  });
+
+  it("verlangt für das Ändern der Mindeststufe die verwaltende Schwelle und auditiert es", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    const environment = environmentFor(database);
+
+    await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle", "POST", {
+        name: "hallo", text: "Antwort", cooldownSekunden: 5,
+      }),
+      environment,
+    );
+    const denied = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/hallo", "PATCH", {
+        mindeststufe: "moderator",
+      }),
+      environment,
+    );
+    expect(denied.status).toBe(403);
+
+    await database.prepare("UPDATE channel_members SET role = 'verwalter' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+    const changed = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/textbefehle/befehle/hallo", "PATCH", {
+        mindeststufe: "moderator",
+      }),
+      environment,
+    );
+
+    expect(changed.status).toBe(200);
+    await expect(database.prepare(
+      "SELECT minimum_level FROM textbefehle_commands WHERE command_name = 'hallo'",
+    ).first()).resolves.toEqual({ minimum_level: "moderator" });
+    await expect(database.prepare(
+      "SELECT before_json, after_json FROM audit_log WHERE action = 'textbefehle.befehl.geändert'",
+    ).first()).resolves.toEqual({
+      before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "alle", text: "Antwort", cooldownSekunden: 5 }),
+      after_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "moderator", text: "Antwort", cooldownSekunden: 5 }),
+    });
   });
 });

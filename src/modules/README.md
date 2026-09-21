@@ -96,8 +96,12 @@ Der Zielkanal kommt aus dem geprüften Ereignis und wird dem Modul in
 `ModuleEvent.channelId` mitgeteilt. Der Host löst außerdem den Akteur anhand
 von `channel_members` auf und übergibt `actor` mit User-ID, Login und Rolle.
 Eine Rolle `null` bedeutet, dass der Nutzer kein Mitglied dieses Kanals ist;
-`actor: null` bedeutet, dass das Ereignis keinen Nutzer enthält. Ein Modul
-kann keinen anderen Kanal angeben — die Mandantentrennung liegt beim Host.
+`actor: null` bedeutet, dass das Ereignis keinen Nutzer enthält.
+Bei `channel.chat.message` leitet der Host zusätzlich aus den Twitch-Badges
+den eigenständigen `ModuleEvent.chatStatus` ab. `founder` zählt dabei als
+`abonnent`; `moderator` und `broadcaster` erfüllen auch niedrigere Stufen.
+Ereignisse ohne Chatbezug tragen dort `null`. Ein Modul kann keinen anderen
+Kanal angeben — die Mandantentrennung liegt beim Host.
 
 Wirft `handleEvent`, hält das weder den Worker noch die übrigen Module auf. Der
 Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
@@ -105,14 +109,16 @@ Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben. Panel-Ansichten erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
 
 Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Jede Zeile hat
-eine Art (`text` oder `liste`) und einen Schalter. Die Art `liste` zählt beim
-Auslösen alle eingeschalteten Zeilen auf. Die angelegten Befehle werden
-kanalbezogen als `!<name>` ausgelöst. `{user}` und `{channel}` werden erst bei
-der Ausgabe ersetzt. Die atomare `beanspruchen`-Mutation setzt `last_used_at`;
-scheitert sie wegen der Abkühlzeit, bleibt die Chataktion leer und das Modul
-meldet `textbefehle.abgekuehlt`. Ein unbekannter oder ausgeschalteter `!`-Befehl
-erzeugt keine Chataktion, aber die Diagnose `textbefehle.unbekannt` bzw.
-`textbefehle.deaktiviert`.
+eine Art (`text` oder `liste`), einen Schalter und eine Mindeststufe
+(`alle`, `abonnent`, `vip`, `moderator` oder `broadcaster`). Die Art `liste`
+zählt beim Auslösen alle eingeschalteten Zeilen auf. Die angelegten Befehle
+werden kanalbezogen als `!<name>` ausgelöst. `{user}` und `{channel}` werden
+erst bei der Ausgabe ersetzt. Die atomare `beanspruchen`-Mutation setzt
+`last_used_at`; scheitert sie wegen der Abkühlzeit, bleibt die Chataktion leer
+und das Modul meldet `textbefehle.abgekuehlt`. Ein unbekannter, ausgeschalteter
+oder für den Chatstatus zu niedriger `!`-Befehl erzeugt keine Chataktion,
+sondern jeweils die Diagnose `textbefehle.unbekannt`,
+`textbefehle.deaktiviert` bzw. `textbefehle.berechtigung`.
 
 ## Aktionen und Begründungen melden
 
