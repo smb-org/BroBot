@@ -324,17 +324,34 @@ const rotateBotTokensWithRetry = async (
 const isInvalidGrant = (error: unknown): boolean =>
   error instanceof TwitchApiError && error.code === "invalid_grant";
 
-/** Bestätigt einen Bot-Widerruf, ohne den Widerrufszustand selbst zu schreiben. */
-export const confirmBotIdentityAuthorization = async (
+export interface IdentityAuthorizationRecord {
+  userId: string;
+  accessTokenCiphertext: string;
+  refreshTokenCiphertext: string;
+  updatedAt: string;
+  status?: "connected" | "revoked" | "error";
+}
+
+/** Gemeinsamer Ablauf zur Bestätigung eines widerrufenen Identitätstokens. */
+export const confirmIdentityAuthorization = async (
   env: Env,
   expectedUserId: string,
   now: string,
+  getIdentity: () => Promise<IdentityAuthorizationRecord | null>,
+  readRevokedStatus: (identity: IdentityAuthorizationRecord) => Promise<boolean> | boolean,
+  recordTokenRotation: (
+    db: D1Database,
+    identity: IdentityAuthorizationRecord,
+    accessTokenCiphertext: string,
+    refreshTokenCiphertext: string,
+    expiresAt: string,
+    updatedAt: string,
+  ) => Promise<boolean>,
   fetcher: typeof fetch = fetch,
 ): Promise<boolean> => {
-  const identity = await getBotIdentity(env.DB);
+  const identity = await getIdentity();
   if (identity === null || identity.userId !== expectedUserId) return false;
-  const status = await getBotIdentityStatus(env.DB);
-  if (status?.status === "revoked") return true;
+  if (await readRevokedStatus(identity)) return true;
 
   const encryptionKeys = getTokenEncryptionKeys(env);
   const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
@@ -356,10 +373,9 @@ export const confirmBotIdentityAuthorization = async (
         { token: refreshed.refreshToken },
         parseKeyRing(encryptionKeys),
       );
-      await rotateBotTokensWithRetry(
+      await recordTokenRotation(
         env.DB,
-        identity.accessTokenCiphertext,
-        identity.refreshTokenCiphertext,
+        identity,
         accessTokenCiphertext,
         refreshTokenCiphertext,
         new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString(),
@@ -370,6 +386,33 @@ export const confirmBotIdentityAuthorization = async (
       return isInvalidGrant(refreshError);
     }
   }
+};
+
+/** Bestätigt einen Bot-Widerruf, ohne den Widerrufszustand selbst zu schreiben. */
+export const confirmBotIdentityAuthorization = async (
+  env: Env,
+  expectedUserId: string,
+  now: string,
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> => {
+  return confirmIdentityAuthorization(
+    env,
+    expectedUserId,
+    now,
+    () => getBotIdentity(env.DB),
+    async () => (await getBotIdentityStatus(env.DB))?.status === "revoked",
+    (db, identity, accessTokenCiphertext, refreshTokenCiphertext, expiresAt, updatedAt) =>
+      rotateBotTokensWithRetry(
+        db,
+        identity.accessTokenCiphertext,
+        identity.refreshTokenCiphertext,
+        accessTokenCiphertext,
+        refreshTokenCiphertext,
+        expiresAt,
+        updatedAt,
+      ),
+    fetcher,
+  );
 };
 
 const refreshFailureReason = (error: unknown): string =>

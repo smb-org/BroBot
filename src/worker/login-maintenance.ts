@@ -7,6 +7,7 @@ import {
 } from "./auth/repository";
 import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import {
+  confirmIdentityAuthorization,
   decryptStoredToken,
   refreshBotToken,
   shouldRefreshBotToken,
@@ -83,45 +84,26 @@ export const confirmLoginIdentityAuthorization = async (
   now: string,
   fetcher: typeof fetch = fetch,
 ): Promise<boolean> => {
-  const identity = await getLoginIdentity(env.DB, userId);
-  if (identity === null || identity.status === "revoked") return identity?.status === "revoked";
-
-  const encryptionKeys = getTokenEncryptionKeys(env);
-  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
-  const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys);
-  if (accessToken === null || refreshToken === null) return false;
-
-  try {
-    await validateBotToken(fetcher, env, accessToken);
-    return false;
-  } catch (error: unknown) {
-    if (!(error instanceof TwitchApiError) || error.status !== 401) return false;
-    try {
-      const refreshed = await refreshBotToken(fetcher, env, refreshToken);
-      const accessTokenCiphertext = await encryptJson(
-        { token: refreshed.accessToken },
-        parseKeyRing(encryptionKeys),
-      );
-      const refreshTokenCiphertext = await encryptJson(
-        { token: refreshed.refreshToken },
-        parseKeyRing(encryptionKeys),
-      );
-      await rotateLoginTokensWithRetry(
-        env.DB,
+  return confirmIdentityAuthorization(
+    env,
+    userId,
+    now,
+    () => getLoginIdentity(env.DB, userId),
+    (identity) => identity.status === "revoked",
+    (db, identity, accessTokenCiphertext, refreshTokenCiphertext, expiresAt, updatedAt) =>
+      rotateLoginTokensWithRetry(
+        db,
         identity.userId,
         identity.accessTokenCiphertext,
         identity.refreshTokenCiphertext,
         accessTokenCiphertext,
         refreshTokenCiphertext,
-        new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString(),
-        now,
+        expiresAt,
+        updatedAt,
         identity.updatedAt,
-      );
-      return false;
-    } catch (refreshError: unknown) {
-      return isInvalidGrant(refreshError);
-    }
-  }
+      ),
+    fetcher,
+  );
 };
 
 const refreshFailureReason = (error: unknown): string =>
