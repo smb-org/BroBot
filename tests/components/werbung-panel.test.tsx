@@ -126,6 +126,9 @@ describe("Werbung-Panel-Ansicht", () => {
 
     expect(await screen.findByText("Derzeit ist keine Werbung geplant.")).toBeInTheDocument();
     expect(await screen.findByText(/90 Sekunden/)).toBeInTheDocument();
-    expect(screen.getByText(/13:00/)).toBeInTheDocument();
+    // Tests laufen in UTC (siehe package.json), damit derselbe Zeitpunkt überall
+    // gleich formatiert wird: 11:00Z bleibt 11:00 statt zur Zeitzone der Maschine
+    // zu wandern.
+    expect(screen.getByText(/11:00/)).toBeInTheDocument();
   });
 });
