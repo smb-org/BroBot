@@ -7,6 +7,7 @@ import type {
   PanelChannelsResponse,
   PanelChannelRole,
   PanelEventsResponse,
+  PanelEventFilters,
   PanelMember,
   PanelMembersResponse,
   PanelModeratorStatus,
@@ -201,9 +202,16 @@ export const fetchEvents = (
   channelId: string,
   cursor: string | null = null,
   signal?: AbortSignal,
+  filters?: PanelEventFilters,
 ): Promise<PanelEventsResponse> => {
   const params = new URLSearchParams();
   if (cursor !== null) params.set("cursor", cursor);
+  if (filters?.herkunft !== null && filters?.herkunft !== undefined) {
+    params.set("origin", filters.herkunft === "kanal" ? "channel" : "module");
+  }
+  if (filters?.modul !== null && filters?.modul !== undefined) params.set("module", filters.modul);
+  if (filters?.ton !== null && filters?.ton !== undefined) params.set("tone", filters.ton);
+  if (filters?.person !== null && filters?.person !== undefined) params.set("actor", filters.person);
   const query = params.toString();
   return requestJson<PanelEventsResponse>(
     `${channelPath(channelId, "events")}${query.length > 0 ? `?${query}` : ""}`,

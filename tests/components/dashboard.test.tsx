@@ -217,9 +217,9 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("user-2")).toHaveClass("mono");
     const sentRow = screen.getByText("Chat-Nachricht gesendet").closest("tr");
     const failedRow = screen.getByText("Aktion fehlgeschlagen").closest("tr");
-    expect(sentRow?.querySelector(".led")).toHaveAttribute("data-status", "green");
+    expect(sentRow?.querySelector(".event-chip[data-ton='info']")).toHaveTextContent("Info");
     expect(within(sentRow as HTMLElement).getByText("Info")).toBeInTheDocument();
-    expect(failedRow?.querySelector(".led")).toHaveAttribute("data-status", "red");
+    expect(failedRow?.querySelector(".event-chip[data-ton='fehler']")).toHaveTextContent("Fehler");
     expect(within(failedRow as HTMLElement).getByText("Fehler")).toBeInTheDocument();
     const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
     const unknownEventRow = screen.getByText("plugin.anderes").closest("tr");
@@ -236,7 +236,88 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
   });
 
-  it("erreicht Ereignisse über die Navigation und lädt die nächste Seite", async () => {
+  it("zeigt das Ereignis-Chip-Paar mit Familie, Stufe, Zahl und Zeit-Tooltip", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({
+        entries: [
+          { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.community_gift", detail: '{"anzahl":5}', actorUserId: null },
+          { eventId: "raid", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":21}', actorUserId: null },
+          { eventId: "untimeout", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.moderation.untimeout", detail: "{}", actorUserId: null },
+          { eventId: "sent", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "textbefehle", code: "host.chat.gesendet", detail: "{}", actorUserId: null },
+          { eventId: "unknown", createdAt: "2026-09-18T04:04:00.000Z", moduleId: "plugin", code: "plugin.anderes", detail: "kein-json", actorUserId: null },
+        ],
+        nextCursor: null,
+      });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const giftRow = (await screen.findByText("Community-Gift von unbekannt für 5 Subs")).closest("tr");
+    const raidRow = (await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).closest("tr");
+    const untimeoutRow = (await screen.findByText("unbekannt aus dem Timeout genommen von unbekannt")).closest("tr");
+    const sentRow = (await screen.findByText("Chat-Nachricht gesendet")).closest("tr");
+    const unknownRow = (await screen.findByText("plugin.anderes")).closest("tr");
+    if (giftRow === null || raidRow === null || untimeoutRow === null || sentRow === null || unknownRow === null) {
+      throw new Error("Ereigniszeile fehlt");
+    }
+
+    expect([...giftRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["5x", "Gift"]);
+    expect(giftRow.querySelector(".event-chip[data-familie='gemeinschaft'][data-stufe='voll']")).toHaveTextContent("Gift");
+    expect([...raidRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["21", "Raid"]);
+    expect(raidRow.querySelector(".event-chip[data-familie='raid'][data-stufe='voll']")).toHaveTextContent("Raid");
+    expect(untimeoutRow.querySelector(".event-chip[data-familie='moderation'][data-stufe='gezeichnet']")).toHaveTextContent("Entsperrt");
+    expect(sentRow.querySelector(".event-chip[data-ton='info'][data-stufe='gezeichnet']")).toHaveTextContent("Info");
+    expect(sentRow.querySelector(".event-chip[data-stufe='voll']")).toBeNull();
+    expect(unknownRow.querySelector(".event-chip")).toHaveTextContent("Unbekannt");
+    expect(unknownRow.querySelector(".event-label > .mono")).toHaveTextContent("plugin.anderes");
+    const firstCell = giftRow.querySelector("td");
+    if (firstCell === null) throw new Error("Zeitspalte fehlt");
+    expect(firstCell.getAttribute("title")).toBe("2026-09-18T04:00:00.000Z");
+  });
+
+  it("zeigt Abo-Stufen im Zahl-Chip als T1/T2/T3/Prime statt roh, unbekannte Werte ohne Chip", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path.endsWith("/events")) return jsonResponse({
+        entries: [
+          { eventId: "t1", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier1","stufe":"1000"}', actorUserId: null },
+          { eventId: "t2", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier2","stufe":"2000"}', actorUserId: null },
+          { eventId: "t3", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier3","stufe":"3000"}', actorUserId: null },
+          { eventId: "prime", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"primeperson","stufe":"Prime"}', actorUserId: null },
+          { eventId: "unbekannt", createdAt: "2026-09-18T04:04:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"rätselperson","stufe":"9999"}', actorUserId: null },
+        ],
+        nextCursor: null,
+      });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const t1Row = (await screen.findByText("Sub von tier1")).closest("tr");
+    const t2Row = (await screen.findByText("Sub von tier2")).closest("tr");
+    const t3Row = (await screen.findByText("Sub von tier3")).closest("tr");
+    const primeRow = (await screen.findByText("Sub von primeperson")).closest("tr");
+    const unbekanntRow = (await screen.findByText("Sub von rätselperson")).closest("tr");
+    if (t1Row === null || t2Row === null || t3Row === null || primeRow === null || unbekanntRow === null) {
+      throw new Error("Ereigniszeile fehlt");
+    }
+
+    expect([...t1Row.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["T1", "Abo"]);
+    expect([...t2Row.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["T2", "Abo"]);
+    expect([...t3Row.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["T3", "Abo"]);
+    expect([...primeRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["Prime", "Abo"]);
+    expect([...unbekanntRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["Abo"]);
+  });
+
+  it("erreicht Ereignisse über die Navigation und lädt die nächste Seite beim Scrollen", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const ersteSeite = {
       entries: [{
@@ -280,10 +361,54 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByRole("heading", { name: "Ereignisse", level: 1 })).toBeInTheDocument();
     expect(await screen.findByText("neu")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 100 });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 900 });
+    Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 1000 });
+    fireEvent.scroll(window);
     expect(await screen.findByText("alt")).toBeInTheDocument();
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ältere Ereignisse laden" })).not.toBeInTheDocument();
+  });
+
+  it("lädt am zugänglichen Feed-Ende nur einmal und zeigt das Ende ausdrücklich", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let releaseSecondPage: ((response: Response) => void) | undefined;
+    const ersteSeite = {
+      entries: [{ eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "raid", code: "neu", detail: "{}", actorUserId: null }],
+      nextCursor: "cursor-1",
+    };
+    const zweiteSeite = {
+      entries: [{ eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null }],
+      nextCursor: null,
+    };
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        return url.searchParams.has("cursor")
+          ? new Promise<Response>((resolve) => { releaseSecondPage = resolve; })
+          : Promise.resolve(jsonResponse(ersteSeite));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("neu")).toBeInTheDocument();
+    const feedEnd = screen.getByLabelText("Am Ende werden ältere Ereignisse nachgeladen.");
+    fireEvent.focus(feedEnd);
+    fireEvent.keyDown(feedEnd, { key: "Enter" });
+    const eventRequests = fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/events"));
+    expect(eventRequests).toHaveLength(2);
+    expect(await screen.findByText("Ältere Ereignisse werden geladen …")).toBeInTheDocument();
+
+    releaseSecondPage?.(jsonResponse(zweiteSeite));
+    expect(await screen.findByText("alt")).toBeInTheDocument();
+    expect(screen.getByText("Ende des Ereignisverlaufs erreicht.")).toBeInTheDocument();
   });
 
   it("gruppiert denselben Auslöser, zeigt den stärksten Ton und den chronologischen Verlauf", async () => {
@@ -390,6 +515,69 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByText("Noch keine Ereignisse protokolliert.")).toBeInTheDocument();
+  });
+
+  it("zeigt aktive Filter, kombiniert sie und meldet einen Treffer-Leerzustand", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const channelEntry = { eventId: "channel", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":21}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const moduleEntry = { eventId: "module", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "textbefehle", code: "textbefehle.ausgeloest", detail: '{"name":"hilfe"}', actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
+    const errorEntry = { eventId: "error", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "textbefehle", code: "host.chat.fehlgeschlagen", detail: "{}", actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
+        { id: "kanalereignisse", enabled: true, settings: "{}" },
+        { id: "textbefehle", enabled: true, settings: "{}" },
+        { id: "werbung", enabled: true, settings: "{}" },
+      ] }));
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        const origin = url.searchParams.get("origin");
+        const module = url.searchParams.get("module");
+        const tone = url.searchParams.get("tone");
+        const actor = url.searchParams.get("actor");
+        if (module === "werbung" && actor === "person-a") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
+        if (origin === "channel") return Promise.resolve(jsonResponse({ entries: [channelEntry], nextCursor: null }));
+        if (module === "textbefehle" && tone === "fehler") return Promise.resolve(jsonResponse({ entries: [errorEntry], nextCursor: null }));
+        if (module === "textbefehle") return Promise.resolve(jsonResponse({ entries: [errorEntry, moduleEntry], nextCursor: null }));
+        if (tone === "fehler") return Promise.resolve(jsonResponse({ entries: [errorEntry], nextCursor: null }));
+        if (actor === "person-a") return Promise.resolve(jsonResponse({ entries: [errorEntry, moduleEntry], nextCursor: null }));
+        return Promise.resolve(jsonResponse({ entries: [channelEntry, errorEntry, moduleEntry], nextCursor: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
+    const herkunft = screen.getByRole("combobox", { name: "Herkunft" });
+    const modul = screen.getByRole("combobox", { name: "Modul" });
+    const ton = screen.getByRole("combobox", { name: "Ton" });
+    const person = screen.getByRole("textbox", { name: "Person" });
+    expect(herkunft).toBeInTheDocument();
+    expect(modul).toBeInTheDocument();
+    expect(ton).toBeInTheDocument();
+    expect(person).toBeInTheDocument();
+
+    fireEvent.change(herkunft, { target: { value: "kanal" } });
+    expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
+    expect(screen.queryByText("Befehl !hilfe ausgeführt")).not.toBeInTheDocument();
+    expect(screen.getByText(/Aktive Filter:/)).toHaveTextContent("Kanalereignisse");
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter zurücksetzen" }));
+    fireEvent.change(modul, { target: { value: "textbefehle" } });
+    fireEvent.change(ton, { target: { value: "fehler" } });
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
+    expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
+    fireEvent.change(person, { target: { value: "person-a" } });
+    expect(await screen.findByText("Alice")).toBeInTheDocument();
+
+    fireEvent.change(modul, { target: { value: "werbung" } });
+    expect(await screen.findByText("Keine Ereignisse passen zu den Filtern.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Filter zurücksetzen" }));
+    expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
+    expect(screen.queryByText("Keine Ereignisse passen zu den Filtern.")).not.toBeInTheDocument();
   });
 
   it("stellt den letzten Broadcaster nicht als entziehbar dar", async () => {

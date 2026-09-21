@@ -216,6 +216,19 @@ export interface DashboardTexte {
     detail: string;
     aeltereLaden: string;
     aeltereWerdenGeladen: string;
+    filter: string;
+    herkunft: string;
+    modulFilter: string;
+    ton: string;
+    person: string;
+    alle: string;
+    kanalereignisse: string;
+    moduldiagnosen: string;
+    aktiveFilter: string;
+    filterZuruecksetzen: string;
+    keineTreffer: string;
+    nachladenAmEnde: string;
+    feedEnde: string;
   };
   anmeldung: {
     erforderlich: string;
@@ -339,6 +352,10 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       modul: "Modul", wer: "Wer", automatisch: "Automatisch", info: "Info", fehler: "Fehler", hinweis: "Hinweis", unbekannt: "Unbekannt", code: "Code", zeitstempel: "Zeitstempel", vorgang: "Vorgang", beteiligte: "Beteiligte", verlauf: "Verlauf",
       laden: "Ereignisse werden geladen …",
       keine: "Noch keine Ereignisse protokolliert.", detail: "Detail", aeltereLaden: "Ältere Ereignisse laden", aeltereWerdenGeladen: "Ältere Ereignisse werden geladen …",
+      filter: "Filter", herkunft: "Herkunft", modulFilter: "Modul", ton: "Ton", person: "Person", alle: "Alle",
+      kanalereignisse: "Kanalereignisse", moduldiagnosen: "Moduldiagnosen", aktiveFilter: "Aktive Filter:", filterZuruecksetzen: "Filter zurücksetzen",
+      keineTreffer: "Keine Ereignisse passen zu den Filtern.", nachladenAmEnde: "Am Ende werden ältere Ereignisse nachgeladen.",
+      feedEnde: "Ende des Ereignisverlaufs erreicht.",
     },
     anmeldung: {
       erforderlich: "Anmeldung erforderlich", erklaerung: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -441,6 +458,10 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       titel: "Events", anzahl: (anzahl) => `${anzahl} entries`, protokoll: "Event log", zeit: "Time", ereignis: "Event", modul: "Module",
       wer: "Who", automatisch: "Automatic", info: "Info", fehler: "Error", hinweis: "Notice", unbekannt: "Unknown", code: "Code", zeitstempel: "Timestamp", vorgang: "Operation", beteiligte: "Participants", verlauf: "History", laden: "Loading events …", keine: "No events logged yet.", detail: "Detail",
       aeltereLaden: "Load older events", aeltereWerdenGeladen: "Loading older events …",
+      filter: "Filters", herkunft: "Origin", modulFilter: "Module", ton: "Tone", person: "Person", alle: "All",
+      kanalereignisse: "Channel events", moduldiagnosen: "Module diagnostics", aktiveFilter: "Active filters:", filterZuruecksetzen: "Reset filters",
+      keineTreffer: "No events match the filters.", nachladenAmEnde: "Older events load at the end.",
+      feedEnde: "End of the event history reached.",
     },
     anmeldung: {
       erforderlich: "Sign-in required", erklaerung: "Sign in with your Twitch account to see available channels.",
@@ -656,45 +677,58 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
   },
 };
 
-export const ereignisTon: Record<EreignisCode, "red" | "amber" | "green" | "off"> = {
-  "host.aktion.fehler": "red",
-  "host.chat.fehlgeschlagen": "red",
-  "host.chat.gesendet": "green",
-  "host.modul.fehler": "red",
-  "host.modul.unbekannt": "red",
-  "host.overlay.nicht_ausgefuehrt": "red",
-  "kanalereignisse.raid.eingehend": "green",
-  "kanalereignisse.raid.ausgehend": "green",
-  "kanalereignisse.shoutout.gesendet": "green",
-  "kanalereignisse.shoutout.empfangen": "green",
-  "kanalereignisse.chat.sub": "green",
-  "kanalereignisse.chat.resub": "green",
-  "kanalereignisse.chat.gift_sub": "green",
-  "kanalereignisse.chat.community_gift": "green",
-  "kanalereignisse.chat.ankuendigung": "green",
-  "kanalereignisse.chat.unbekannt": "green",
-  "kanalereignisse.moderation.ban": "amber",
-  "kanalereignisse.moderation.timeout": "amber",
-  "kanalereignisse.moderation.untimeout": "green",
-  "kanalereignisse.moderation.unban": "green",
-  "kanalereignisse.moderation.delete": "amber",
-  "kanalereignisse.moderation.warn": "amber",
-  "kanalereignisse.moderation.unbekannt": "off",
-  "kanalereignisse.automod.halte": "amber",
-  "kanalereignisse.verdacht.nachricht": "amber",
-  "kanalereignisse.verdacht.einstufung": "amber",
-  "kanalereignisse.verdacht.entwarnung": "green",
-  "shoutout.unterdrueckt": "amber",
-  "werbung.ankuendigung": "green",
-  "werbung.uebersprungen": "amber",
-  "textbefehle.abgekuehlt": "amber",
-  "textbefehle.ausgeloest": "green",
-  "textbefehle.deaktiviert": "amber",
-  "textbefehle.berechtigung": "amber",
-  "textbefehle.bereits_vorhanden": "amber",
-  "textbefehle.nicht_berechtigt": "red",
-  "textbefehle.unbekannt": "red",
-  "textbefehle.ungueltig": "red",
+export type EreignisFamilie = "gemeinschaft" | "raid" | "moderation" | "betrieb";
+export type EreignisStufe = "voll" | "gezeichnet";
+export type EreignisZahlSchluessel = "zuschauer" | "anzahl" | "dauer" | "restSekunden" | "stufe" | null;
+export type EreignisBetriebston = "info" | "hinweis" | "fehler";
+
+export interface EreignisTon {
+  familie: EreignisFamilie;
+  stufe: EreignisStufe;
+  wort: LocaleCatalog<string>;
+  zahlSchluessel: EreignisZahlSchluessel;
+  ton?: EreignisBetriebston;
+}
+
+export const ereignisTon: Record<EreignisCode, EreignisTon> = {
+  "host.aktion.fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "host.chat.fehlgeschlagen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "host.chat.gesendet": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
+  "host.modul.fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "host.modul.unbekannt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "host.overlay.nicht_ausgefuehrt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "kanalereignisse.raid.eingehend": { familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
+  "kanalereignisse.raid.ausgehend": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
+  "kanalereignisse.shoutout.gesendet": { familie: "raid", stufe: "gezeichnet", wort: { de: "Shoutout", en: "Shoutout" }, zahlSchluessel: null },
+  "kanalereignisse.shoutout.empfangen": { familie: "raid", stufe: "voll", wort: { de: "Shoutout", en: "Shoutout" }, zahlSchluessel: "zuschauer" },
+  "kanalereignisse.chat.sub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Abo", en: "Sub" }, zahlSchluessel: "stufe" },
+  "kanalereignisse.chat.resub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Resub", en: "Resub" }, zahlSchluessel: "stufe" },
+  "kanalereignisse.chat.gift_sub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift-Sub", en: "Gift Sub" }, zahlSchluessel: "stufe" },
+  "kanalereignisse.chat.community_gift": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "anzahl" },
+  "kanalereignisse.chat.ankuendigung": { familie: "gemeinschaft", stufe: "gezeichnet", wort: { de: "Ankündigung", en: "Announcement" }, zahlSchluessel: null },
+  "kanalereignisse.chat.unbekannt": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Unbekannt", en: "Unknown" }, zahlSchluessel: null },
+  "kanalereignisse.moderation.ban": { familie: "moderation", stufe: "voll", wort: { de: "Bann", en: "Ban" }, zahlSchluessel: null },
+  "kanalereignisse.moderation.timeout": { familie: "moderation", stufe: "voll", wort: { de: "Auszeit", en: "Timeout" }, zahlSchluessel: "dauer" },
+  "kanalereignisse.moderation.untimeout": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entsperrt", en: "Untimeout" }, zahlSchluessel: null },
+  "kanalereignisse.moderation.unban": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entbannt", en: "Unbanned" }, zahlSchluessel: null },
+  "kanalereignisse.moderation.delete": { familie: "moderation", stufe: "voll", wort: { de: "Gelöscht", en: "Deleted" }, zahlSchluessel: null },
+  "kanalereignisse.moderation.warn": { familie: "moderation", stufe: "voll", wort: { de: "Verwarnung", en: "Warning" }, zahlSchluessel: null },
+  "kanalereignisse.moderation.unbekannt": { familie: "moderation", stufe: "voll", wort: { de: "Unbekannt", en: "Unknown" }, zahlSchluessel: null },
+  "kanalereignisse.automod.halte": { familie: "moderation", stufe: "voll", wort: { de: "AutoMod", en: "AutoMod" }, zahlSchluessel: null },
+  "kanalereignisse.verdacht.nachricht": { familie: "moderation", stufe: "voll", wort: { de: "Verdacht", en: "Suspicious" }, zahlSchluessel: null },
+  "kanalereignisse.verdacht.einstufung": { familie: "moderation", stufe: "voll", wort: { de: "Einstufung", en: "Classified" }, zahlSchluessel: null },
+  "kanalereignisse.verdacht.entwarnung": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entwarnt", en: "Cleared" }, zahlSchluessel: null },
+  "shoutout.unterdrueckt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "werbung.ankuendigung": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: "dauer", ton: "info" },
+  "werbung.uebersprungen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "textbefehle.abgekuehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: "restSekunden", ton: "hinweis" },
+  "textbefehle.ausgeloest": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
+  "textbefehle.deaktiviert": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
+  "textbefehle.berechtigung": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "textbefehle.bereits_vorhanden": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "textbefehle.nicht_berechtigt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "textbefehle.unbekannt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "textbefehle.ungueltig": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
 };
 
 export function ereignisText(code: string, language?: DashboardLanguage): string;

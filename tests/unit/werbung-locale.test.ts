@@ -18,7 +18,7 @@ describe("Werbung-Lokalisierung", () => {
   });
 
   it("ordnet Ansage und Überspringen getrennten Tönen zu", () => {
-    expect(ereignisTon["werbung.ankuendigung"]).toBe("green");
-    expect(ereignisTon["werbung.uebersprungen"]).toBe("amber");
+    expect(ereignisTon["werbung.ankuendigung"]).toMatchObject({ familie: "betrieb", stufe: "gezeichnet", ton: "info", zahlSchluessel: "dauer" });
+    expect(ereignisTon["werbung.uebersprungen"]).toMatchObject({ familie: "betrieb", stufe: "gezeichnet", ton: "hinweis", zahlSchluessel: null });
   });
 });

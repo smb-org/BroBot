@@ -15,8 +15,10 @@ import type {
   PanelEventSubSubscription,
   PanelTokenStatus,
   PanelEventEntry,
+  PanelEventFilters,
   PanelEventsResponse,
 } from "../../panel-contract";
+import { ereignisTon } from "../../dashboard/locale";
 import { channelBotConsentCondition, listEventSubSubscriptions } from "../auth/repository";
 import { listeAlleBroadcasterScopes } from "../module-scopes";
 
@@ -88,6 +90,21 @@ export interface LogCursor {
   createdAt: string;
   id: string;
 }
+
+const ereignisCodesForHerkunft = (herkunft: PanelEventFilters["herkunft"]): string[] => {
+  if (herkunft === null) return [];
+  const betrieb = herkunft === "modul";
+  return Object.entries(ereignisTon)
+    .filter(([, metadata]) => (metadata.familie === "betrieb") === betrieb)
+    .map(([code]) => code);
+};
+
+const ereignisCodesForTon = (ton: PanelEventFilters["ton"]): string[] => {
+  if (ton === null) return [];
+  return Object.entries(ereignisTon)
+    .filter(([, metadata]) => metadata.ton === ton)
+    .map(([code]) => code);
+};
 
 const encodeCursor = (cursor: LogCursor): string => {
   const serialized = JSON.stringify(cursor);
@@ -426,22 +443,50 @@ export const getEventLogForChannel = async (
   channelId: string,
   limit: number,
   cursor: LogCursor | null,
+  filters: PanelEventFilters = { herkunft: null, modul: null, ton: null, person: null },
 ): Promise<PanelEventsResponse> => {
+  const where = ["channel_id = ?"];
+  const filterValues: (string | number)[] = [channelId];
+  if (filters.herkunft !== null) {
+    const codes = ereignisCodesForHerkunft(filters.herkunft);
+    if (codes.length === 0) where.push("1 = 0");
+    else {
+      where.push(`code IN (${codes.map(() => "?").join(", ")})`);
+      filterValues.push(...codes);
+    }
+  }
+  if (filters.modul !== null) {
+    where.push("module_id = ?");
+    filterValues.push(filters.modul);
+  }
+  if (filters.ton !== null) {
+    const codes = ereignisCodesForTon(filters.ton);
+    if (codes.length === 0) where.push("1 = 0");
+    else {
+      where.push(`code IN (${codes.map(() => "?").join(", ")})`);
+      filterValues.push(...codes);
+    }
+  }
+  if (filters.person !== null) {
+    where.push("actor_user_id = ?");
+    filterValues.push(filters.person);
+  }
+  const whereClause = where.join("\n          AND ");
   const query = cursor === null
     ? `SELECT event_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id
          FROM event_log
-        WHERE channel_id = ?
+        WHERE ${whereClause}
         ORDER BY created_at DESC, event_id DESC
         LIMIT ?`
     : `SELECT event_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id
          FROM event_log
-        WHERE channel_id = ?
+        WHERE ${whereClause}
           AND (created_at < ? OR (created_at = ? AND event_id < ?))
         ORDER BY created_at DESC, event_id DESC
         LIMIT ?`;
   const values = cursor === null
-    ? [channelId, limit + 1]
-    : [channelId, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
+    ? [...filterValues, limit + 1]
+    : [...filterValues, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
   const result = await db.prepare(query).bind(...values).all<EventLogRow>();
   const hasNextPage = result.results.length > limit;
   const rows = result.results.slice(0, limit);

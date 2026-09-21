@@ -30,6 +30,12 @@ colors:
   fehler: "#e2564d"
   fehler-text: "#e8655d"
   fehler-grund: "rgba(226, 86, 77, 0.09)"
+  gemeinschaft: "#c4a3f5"
+  gemeinschaft-grund: "rgba(196, 163, 245, 0.12)"
+  raid: "#f4a2d3"
+  raid-grund: "rgba(244, 162, 211, 0.12)"
+  moderation: "#5cc9c4"
+  moderation-grund: "rgba(92, 201, 196, 0.12)"
 typography:
   grundgroesse:
     fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
@@ -248,6 +254,29 @@ components:
     rounded: "{rounded.container}"
     width: "56px"
     height: "56px"
+  chip:
+    backgroundColor: "transparent"
+    textColor: "{colors.text-2}"
+    typography: "{typography.led-wort}"
+    rounded: "{rounded.control}"
+    padding: "0 8px"
+    height: "20px"
+  chip-zahl:
+    backgroundColor: "{colors.rinne}"
+    textColor: "{colors.text}"
+    typography: "{typography.zahl}"
+    rounded: "{rounded.control}"
+    padding: "0 8px"
+    height: "20px"
+  chip-gemeinschaft:
+    backgroundColor: "{colors.gemeinschaft-grund}"
+    textColor: "{colors.gemeinschaft}"
+  chip-raid:
+    backgroundColor: "{colors.raid-grund}"
+    textColor: "{colors.raid}"
+  chip-moderation:
+    backgroundColor: "{colors.moderation-grund}"
+    textColor: "{colors.moderation}"
 ---
 
 # Design System: BroBot Panel
@@ -296,7 +325,7 @@ Bedieners.
 **Key Characteristics:**
 - Mattschwarz (#141312) mit warmen Graustufen; vier Textstufen, kein Verlauf, kein Schatten.
 - Tasten sind Objekte mit 12 px Radius in dunklen Rinnen; Steuerelemente haben 6 px. Es gibt keinen dritten Radius.
-- Zustand spricht in Grün, Bernstein, Rot — immer als LED mit Wort, nie Farbe allein. Aus ist neutral gezeichnet.
+- Zustand spricht in Grün, Bernstein, Rot — immer als LED mit Wort, nie Farbe allein. Aus ist neutral gezeichnet. Herkunft spricht in Violett, Magenta, Türkis — nur im Art-Chip des Ereignisprotokolls.
 - Marke (Blau) markiert ausschließlich den Ort des Bedieners, nie Wichtigkeit.
 - Archivo für alles; IBM Plex Mono mit Tabellenziffern nur für Zahlen, Zeitstempel, IDs und Befehlstoken.
 - Eine Symbolfamilie: 24er-Viewbox, Strich 1,5, runde Enden, `fill: none`. Kein Emoji, keine zweite Familie.
@@ -305,7 +334,8 @@ Bedieners.
 ## Colors
 
 Ein warmer, mattschwarzer Grundton in acht Abstufungen, eine Markenfarbe für den
-Ort des Bedieners, drei Zustandsfarben. Sonst nichts.
+Ort des Bedieners, drei Zustandsfarben, drei Herkunftsfarben für das
+Ereignisprotokoll. Sonst nichts.
 
 ### Primary
 - **Marke** ({colors.marke}, Hover {colors.marke-hover}, Druck {colors.marke-press}): primäre Aktion, gewählte Taste im Raster (Rand), aktive Schienentaste (Rand), gewählte Tabellenzeile (2 px Innenkante links). Blau statt Twitch-Violett, damit BroBot als eigenes Werkzeug erkennbar bleibt.
@@ -315,10 +345,39 @@ Ort des Bedieners, drei Zustandsfarben. Sonst nichts.
 - **Tint-1 / Tint-2** ({colors.tint-1} / {colors.tint-2}): Markenfarbe als Material — so entsättigt, dass niemand sie Farbe nennt. Tint-1 füllt das Seitenkopf-Symbol, die gewählte Tabellenzeile und die Textauswahl; Tint-2 die aktive Schienentaste, die gewählte Modultaste und Tabellenköpfe.
 
 ### Secondary (Zustand)
-- **Grün** ({colors.gruen}, Fläche {colors.gruen-grund}): läuft, verbunden, gesendet, gesund. LED-Punkt und LED-Wort, Symbolkachel einer eingeschalteten Taste, Schalter-Spur „an“, Ereignis-LED „Info“ für `host.chat.gesendet`. Grün steht nie ohne Wort daneben.
-- **Bernstein** ({colors.warn}, Fläche {colors.warn-grund}): unbekannt oder nicht aktiv — Verbindung unklar, Modul ohne Zustand, Zustandszeile `warning`, Ereignis-LED „Hinweis“ (abgekühlt, unterdrückt, bereits vorhanden). **Nicht** für „ausgeschaltet“.
+- **Grün** ({colors.gruen}, Fläche {colors.gruen-grund}): läuft, verbunden, gesendet, gesund. LED-Punkt und LED-Wort, Symbolkachel einer eingeschalteten Taste, Schalter-Spur „an“. Grün steht nie ohne Wort daneben und kommt im Ereignisprotokoll nicht vor.
+- **Bernstein** ({colors.warn}, Fläche {colors.warn-grund}): unbekannt oder nicht aktiv — Verbindung unklar, Modul ohne Zustand, Zustandszeile `warning`, Betrieb-Chip „Hinweis“ im Ereignisprotokoll (abgekühlt, unterdrückt, bereits vorhanden). **Nicht** für „ausgeschaltet“.
 - **Rot** ({colors.fehler}, Fläche {colors.fehler-grund}): Fehler, Löschen. LED-Punkt, Zustandszeile `error`, Fehlerkasten und Formularfehler mit vorangestelltem ×. Die Löschhandlung trägt dauerhaft die Gefahr-Variante.
-- **Fehler-Text** ({colors.fehler-text}): ausschließlich das LED-Wort bei rotem Punkt. Eine Stufe heller als Rot, weil das 12-px-Wort auf Tint-1 (gewählte Zeile) sonst unter AA fällt: 4,71:1 auf Tint-1, 5,70:1 auf Grund. Für Flächen, Ränder und Punkte bleibt {colors.fehler}.
+- **Fehler-Text** ({colors.fehler-text}): das LED-Wort bei rotem Punkt und das Wort des Betrieb-Chips „Fehler“. Eine Stufe heller als Rot, weil das 12-px-Wort auf Tint-1 (gewählte Zeile) sonst unter AA fällt: 4,71:1 auf Tint-1, 5,70:1 auf Grund. Für Flächen, Ränder und Punkte bleibt {colors.fehler}.
+
+### Herkunft (Ereignisfamilien)
+
+Jedes Ereignis im Protokoll gehört zu einer von vier Familien. Drei tragen eine
+eigene Farbe, die vierte spricht in Zustand. Die Farbe erscheint ausschließlich
+im Art-Chip der Ereigniszeile — nie auf Tasten, LEDs, Zustandszeilen oder
+Knöpfen.
+
+- **Gemeinschaft** ({colors.gemeinschaft}, Fläche {colors.gemeinschaft-grund}): Abo, Resub, Gift, Community-Gift, Ankündigung. Violett, weil Twitch Abos so färbt und Bediener die Zuordnung mitbringen. Als Wort auf gefülltem Chip 7,15:1 über Grund, 6,17:1 über Tint-2, 5,73:1 über Tint-1, 5,86:1 über Taste-Hover; gezeichnet 8,75:1 über Grund, 7,23:1 über Tint-1.
+- **Raid** ({colors.raid}, Fläche {colors.raid-grund}): Raid und Shoutout, herein wie hinaus. Magenta — die hellste und lauteste der drei, weil ein Raid das seltenste Ereignis im Feed ist. Gefüllt 7,80:1 über Grund, 6,75:1 über Tint-2, 6,27:1 über Tint-1, 6,37:1 über Taste-Hover; gezeichnet 9,68:1 über Grund, 7,99:1 über Tint-1.
+- **Moderation** ({colors.moderation}, Fläche {colors.moderation-grund}): Bann, Auszeit, Löschung, Verwarnung, AutoMod-Halt, Verdacht und ihre Aufhebungen. Türkis, eine Stufe dunkler als die anderen beiden, weil Moderation in einem vollen Chat häufig ist und nicht rufen darf. Nie Rot: Ein Bann ist kein Fehler. Gefüllt 7,58:1 über Grund, 6,56:1 über Tint-2, 6,03:1 über Tint-1, 6,22:1 über Taste-Hover; gezeichnet 9,37:1 über Grund, 7,74:1 über Tint-1.
+- **Betrieb** (kein Token): alles, was der Bot tat oder nicht tat — Host-Meldungen, Moduldiagnosen, Befehle, Werbung. Spricht in Zustand: Fehler-Text „Fehler“, Bernstein „Hinweis“, Text-2 „Info“. Immer gezeichnet, nie gefüllt; Grün kommt im Protokoll nicht vor.
+
+Innerhalb einer Familie gibt es genau zwei Stufen. **Voll** (Fläche 12 %, Rand
+`color-mix` 45 % Familienfarbe auf Haarlinie, Wort in Familienfarbe) ist das
+Tun: Abo, Raid herein, Bann. **Gezeichnet** (kein Grund, derselbe Rand,
+dasselbe Wort) ist die Gegenrichtung: Ankündigung, Raid hinaus, Entbannt. Die
+Art selbst steht als Wort im Chip. Farbton sagt Familie, Füllung sagt Richtung,
+Wort sagt Art. Eine dritte Stufe trägt die Farbe nicht — auf Tint-1 und beim
+Überfahren wäre sie von der gezeichneten nicht mehr sicher zu trennen.
+
+Die Familien sitzen bei 177°, 264° und 324° zwischen den vergebenen Tönen 4°
+(Rot), 39° (Bernstein), 147° (Grün) und 211° (Marke); der engste Abstand ist
+Moderation–Grün mit 30°. **Eine vierte farbige Familie gibt es nicht** — der
+Farbkreis ist voll. Ein neues Modul sortiert seine Ereignisse in Gemeinschaft,
+Raid oder Moderation ein oder meldet Betrieb. Für Deuteranope werden Raid und
+Moderation zu demselben hellen Grau-Blau (Kontrast zueinander 1,15:1),
+Gemeinschaft bleibt satt-blau; die Familie ist deshalb immer auch am Wort
+ablesbar, nie an der Farbe allein.
 
 ### Neutral
 - **Grund** ({colors.grund}): Seitenhintergrund und Arbeitsfläche der Mitte.
@@ -330,13 +389,13 @@ Ort des Bedieners, drei Zustandsfarben. Sonst nichts.
 - **Text** ({colors.text}): Namen, Werte, Überschriften, Zustands-Etikett, Eigenschaftswerte, Zeilenkopf in Tabellen. **Text-2** ({colors.text-2}): Beschreibungen, Feldnamen, Tabellenantworten, Zustandsdetail, Seitenkopf-Unterzeile, LED-Wort ohne Zustand (8,27:1 auf Grund). **Text-3** ({colors.text-3}): Metadaten, Spaltenköpfe, Schienenetikett, Eigenschaftsnamen, Vorher/Nachher-Kopf, Login-Hinweis unter dem Mitgliedsnamen, ausgeschaltete Taste, Platzhalter (5,08:1 auf Grund, 4,65:1 auf Taste). **Text-4** ({colors.text-4}): Trenner, Datenalter, LED-Punkt und Schalter-Spur im Ruhezustand — nie für Fließtext.
 
 ### Named Rules
-**Die Zwei-Rollen-Regel.** Marke markiert den Ort des Bedieners (Auswahl, Fokus, primäre Aktion, Verknüpfung). Zustand spricht in Grün, Bernstein, Rot. Das System spricht nie in Markenfarbe, und Zustand nie in Marke — die Rollen kollidieren strukturell nicht, nicht nur farbmetrisch.
+**Die Drei-Rollen-Regel.** Marke markiert den Ort des Bedieners (Auswahl, Fokus, primäre Aktion, Verknüpfung). Zustand spricht in Grün, Bernstein, Rot. Herkunft spricht in Violett, Magenta, Türkis — und nur im Art-Chip des Ereignisprotokolls. Keine Rolle leiht sich die Farbe einer anderen: Ein Bann ist nicht rot, ein Abo nicht grün, ein Raid nicht blau. Die Rollen kollidieren strukturell nicht, nicht nur farbmetrisch.
 
 **Die LED-mit-Wort-Regel.** Wo Zustand steht, steht eine LED (8 px Punkt) und ein Wort: „Läuft“, „Aus“, „Verbunden“, „Fehler“, „Hinweis“, „Info“. Farbe allein informiert nie. Grün ohne Wort ist ein Fehler, kein Stil.
 
 **Die Aus-ist-neutral-Regel.** Ein ausgeschaltetes Modul ist kein Problem. Es bekommt eine gezeichnete LED (Rinne mit Text-4-Rand), Text-3 und keine Farbe. Bernstein bedeutet ausschließlich „unbekannt“ oder „nicht aktiv, obwohl es sollte“.
 
-**Die Ereignis-je-Code-Regel.** Die Farbe eines Ereignisses steht in `ereignisTon` (locale.ts) pro Ereigniscode — nie wird sie aus einem Namensmuster geraten („…fehler“ → rot). Ein Code ohne Eintrag bekommt die gezeichnete LED „Unbekannt“ und seinen rohen Code in Mono. Grün ist dabei nur „läuft / verbunden / gesendet“; alles Erwartbar-Unerwünschte (abgekühlt, unterdrückt, bereits vorhanden) ist Bernstein „Hinweis“, alles Gescheiterte Rot „Fehler“.
+**Die Ereignis-je-Code-Regel.** Familie, Stufe, Chip-Wort und Zahl eines Ereignisses stehen in `ereignisTon` (locale.ts) pro Ereigniscode — nie werden sie aus einem Namensmuster geraten („moderation.*“ → Moderation, „…fehler“ → rot). Ein Code ohne Eintrag bekommt den neutralen gezeichneten Chip „Unbekannt“ und seinen rohen Code in Mono. Sortierregel für neue Codes: Was im Kanal geschah, hat eine Familie; was der Bot tat oder nicht tat, ist Betrieb. Tun ist voll, Aufheben und Ausgehendes sind gezeichnet. Betrieb spricht in Zustand: Erwartbar-Unerwünschtes (abgekühlt, unterdrückt, bereits vorhanden) ist Bernstein „Hinweis“, Gescheitertes Fehler-Text „Fehler“, Gelungenes Text-2 „Info“. Grün ist kein Ereigniston mehr.
 
 ## Typography
 
@@ -354,10 +413,10 @@ Ort des Bedieners, drei Zustandsfarben. Sonst nichts.
 - **Tastenname** (600, 13 px, eine Zeile, Ellipse): Name auf der Modul- und Kanaltaste.
 - **Body** (400, 13 px, 1.5): Beschreibungen (max. 70 ch), Seitenkopf-Unterzeile, Eigenschaftswerte, Brotkrume, Knopftext, Leerzustand.
 - **Feldname** (500, 12 px, Text-2): Beschriftung über Feldern; Hinweis darunter 12 px, 400, Text-3. Auch Zustandsdetail, Eigenschaftsnamen und Login-Hinweis stehen in 12 px.
-- **LED-Wort** (600, 12 px): das Wort neben dem LED-Punkt, in Zustandsfarbe (bei Rot in Fehler-Text).
+- **LED-Wort** (600, 12 px): das Wort neben dem LED-Punkt, in Zustandsfarbe (bei Rot in Fehler-Text); auch das Wort im Art-Chip der Ereigniszeile, dort in Familienfarbe.
 - **Schienenetikett** (400, 11 px, 1.1, Ellipse): Wort unter dem Symbol in der 64er-Taste; Modul-ID unter dem Modultitel; Sperrgrund unter dem Schalter; Vorher/Nachher-Kopf im Sub-Inspector (600, Text-3).
 - **Spaltenkopf** (600, 10 px, 0.06 em, Versalien, Text-3, auf Tint-2): einziger Versalien-Einsatz im System.
-- **Zahl** (Plex Mono 400, 12 px, Tabellenziffern): Twitch-ID in der Kopfleiste, Abkühlzeit, Befehlstoken `!name`, Meta-Zeile „zuletzt“, Zeitstempel und Nutzer-IDs in Audit und Ereignissen, Audit-Aktion, Audit-/Ereignis-ID, rohe Ereignis- und Modulcodes, Zähler neben Bereichstiteln.
+- **Zahl** (Plex Mono 400, 12 px, Tabellenziffern): Twitch-ID in der Kopfleiste, Abkühlzeit, Befehlstoken `!name`, Meta-Zeile „zuletzt“, Zeitstempel und Nutzer-IDs in Audit und Ereignissen, Audit-Aktion, Audit-/Ereignis-ID, rohe Ereignis- und Modulcodes, Zähler neben Bereichstiteln, der Zahl-Chip der Ereigniszeile.
 
 ### Named Rules
 **Die Mono-für-Zahlen-Regel.** Plex Mono ist die Schrift für Werte, die man abliest, vergleicht oder wörtlich eintippt: Twitch-ID, Sekunden, Zeitstempel, Befehlstoken (`!name`), Aktions- und Ereigniscodes, Datensatz-IDs. Ein Ereignis oder Modul, für das es ein lesbares Wort gibt, steht in Archivo; erst der unbekannte Code fällt auf Mono zurück. Für Namen, Beschreibungen und Etiketten ist Mono verboten.
@@ -420,10 +479,14 @@ Dieselbe `ModuleTaste`-Bauform auf der Übersicht, eine Taste pro freigegebenem 
 64×64, {rounded.container}, Symbol 20 px über Etikett 11 px (Zeilen 20 px + Rest, Lücke 4 px). Ruhe Text-3 auf Rail, Hover Text auf Taste-Hover, aktiv Marke-Text auf Tint-2 mit Markenrand, Druck wie Modultaste. Zustandspunkt 7 px oben rechts mit 1 px Rail-Rand, nur Bernstein/Rot.
 
 ### LED
-`inline-flex`, Punkt 8 px + Wort 12 px/600, Lücke 7 px, min. 20 px hoch. Zustände `green`, `amber`, `red`, `off`. Aus: Punkt in Rinne mit Text-4-Rand, Wort Text-3. Rot: Punkt Fehler, Wort Fehler-Text. Übergang 160 ms auf Punkt und Wort. Auch die Verbindungs-LED in der Kopfleiste, die LED der Zustandszeile und das Ereignis-LED-Wort sind diese Bauform.
+`inline-flex`, Punkt 8 px + Wort 12 px/600, Lücke 7 px, min. 20 px hoch. Zustände `green`, `amber`, `red`, `off`. Aus: Punkt in Rinne mit Text-4-Rand, Wort Text-3. Rot: Punkt Fehler, Wort Fehler-Text. Übergang 160 ms auf Punkt und Wort. Auch die Verbindungs-LED in der Kopfleiste und die LED der Zustandszeile sind diese Bauform. Die Ereigniszeile trägt keine LED mehr, sondern das Chip-Paar.
 
-### Ereignis-LED-Wort
-In der Ereignistabelle steht vor jedem Ereignistext eine LED mit Wort, das aus `ereignisTon` folgt: rot „Fehler“, bernstein „Hinweis“, grün „Info“, kein Eintrag → gezeichnet „Unbekannt“ und der rohe Code in Mono. `event-label` ist `flex` mit 10 px Lücke; der Text dahinter ist einzeilig mit Ellipse.
+### Ereignis-Chip-Paar
+Vor jedem Ereignistext — in der Tabelle wie im Verlauf des Sub-Inspectors — stehen bis zu zwei Chips: links die Zahl, rechts die Art. Beide 20 px hoch, 0 8 px Innenabstand, 1 px Rand, {rounded.control} — Anzeigen, keine Objekte. Lücke im Paar 4 px, zum Text 10 px (`event-label` bleibt `flex`; der Text dahinter einzeilig mit Ellipse). Kein Übergang, kein Zeiger, keine Hover-Regel; die Fläche ist Alpha und komponiert sich über Hover und gewählte Zeile.
+- **Zahl-Chip:** Rinne, Haarlinie, Plex Mono 12 px mit Tabellenziffern in Text (16,71:1). Dauern mit Einheit („120 s“). Steht nur, wenn das Ereignis eine Zahl trägt — nie „0“, nie „—“. Ohne Zahl ist das Paar ein einzelner Chip.
+- **Art-Chip (Familie):** LED-Wort-Typografie in Familienfarbe, Rand `color-mix` 45 % Familienfarbe auf Haarlinie; Stufe *voll* mit `<familie>-grund`, *gezeichnet* ohne. Wort ist die Art („Abo“, „Raid“, „Bann“), höchstens 12 Zeichen.
+- **Art-Chip (Betrieb):** immer gezeichnet; Wort ist das Zustandswort in Fehler-Text (5,70:1 auf Grund, 4,71:1 auf Tint-1), Bernstein (8,25:1 / 6,81:1) oder Text-2 (8,27:1 / 6,82:1). Die gefüllte Fehler-Variante fiele auf Tint-1 auf 4,08:1 und ist deshalb verboten.
+- Code ohne Eintrag: neutraler gezeichneter Chip „Unbekannt“, roher Code in Mono dahinter.
 
 ### Buttons
 - **Form:** {rounded.control}, 44 px hoch, 10 px 16 px, 13 px/500. In einer Tabellenzelle 34 px hoch, 6 px 12 px.
@@ -492,10 +555,10 @@ Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** jede Zustandsanzeige als LED mit Wort bauen; Grün nur mit „Läuft“/„Verbunden“/„Info (gesendet)“ daneben.
+- **Do** jede Zustandsanzeige als LED mit Wort bauen; Grün nur mit „Läuft“/„Verbunden“ daneben.
 - **Do** neue Module und Kanäle als Taste ins Raster stellen: Symbol aus der Familie, Name, LED. Nichts weiter auf der Taste.
 - **Do** jede Seite mit dem Seitenkopf beginnen und Zustand in Zustandszeilen, lesende Werte in der Eigenschaftenliste zeigen.
-- **Do** Ereignisfarben pro Code in `ereignisTon` eintragen; ein neuer Code ohne Eintrag bleibt „Unbekannt“.
+- **Do** ein neues Ereignis in eine der vier Familien einsortieren und Familie, Stufe, Wort und Zahl-Schlüssel pro Code in `ereignisTon` eintragen; ein Code ohne Eintrag bleibt „Unbekannt“, Betrieb bleibt gezeichnet.
 - **Do** genau zwei Radien verwenden: 12 px für Objekte, 6 px für Bedienelemente und Anzeigen.
 - **Do** alleinstehende Bedienelemente 44 px hoch machen, Tabellenzeilen und ihre Bedienelemente 34 px.
 - **Do** Werte in Plex Mono mit Tabellenziffern setzen (Twitch-ID, Sekunden, Zeitstempel, IDs, Codes, Befehlstoken).
@@ -509,7 +572,8 @@ Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 
 ### Don't:
 - **Don't** ein ausgeschaltetes Modul bernstein färben. Aus ist neutral; Bernstein heißt unbekannt oder Hinweis.
 - **Don't** eine gesunde Zustandszeile grün hinterlegen; nur Warnung und Fehler bekommen Fläche und Rand.
-- **Don't** Ereignisfarben aus dem Codenamen raten oder Grün für etwas anderes als läuft/verbunden/gesendet vergeben.
+- **Don't** Ereignisfamilien aus dem Codenamen raten oder Grün für etwas anderes als läuft/verbunden vergeben.
+- **Don't** eine vierte Familienfarbe erfinden, Familienfarbe außerhalb des Art-Chips verwenden, eine Familie in Zustandsfarbe färben oder einen Betrieb-Chip füllen.
 - **Don't** Markenfarbe für Zustand oder Wichtigkeit verwenden, und Zustandsfarbe für Auswahl.
 - **Don't** Schatten, Verläufe oder Skelett-Schimmer einsetzen.
 - **Don't** einen dritten Radius (auch kein `9999px`), eine dritte Schrift oder eine zweite Symbolfamilie einführen; kein Emoji.

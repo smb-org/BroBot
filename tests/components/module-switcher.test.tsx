@@ -24,6 +24,8 @@ const channel = {
   lastError: null,
 };
 
+const secondChannel = { ...channel, channelId: "kanal-b", login: "kanal-b", displayName: "Beta" };
+
 const moduleStates = [
   { id: "textbefehle", enabled: true, settings: "{}" },
   { id: "kanalereignisse", enabled: false, settings: "{}" },
@@ -41,10 +43,10 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   headers: { "Content-Type": "application/json" },
 });
 
-const renderModulePage = (modules = moduleStates): void => {
+const renderModulePage = (modules = moduleStates, channels = [channel]): void => {
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
     const path = requestUrl(input).pathname;
-    if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+    if (path === "/api/channels") return jsonResponse({ channels });
     if (path === "/api/channels/kanal-a/overview") return jsonResponse({ ...channel, activeModules: [] });
     if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules });
     return jsonResponse({}, 404);
@@ -67,31 +69,34 @@ describe("Modulumschalter in der Brotkrume", () => {
     fireEvent.click(button);
 
     const listbox = screen.getByRole("listbox", { name: "Modul auswählen" });
-    expect(within(listbox).getAllByRole("option")).toHaveLength(4);
+    expect(within(listbox).getAllByRole("option")).toHaveLength(3);
     expect(within(listbox).getByRole("option", { name: /Textbefehle/ })).toHaveTextContent("Läuft");
     expect(within(listbox).getByRole("option", { name: /Kanalereignisse/ })).toHaveTextContent("Aus");
     expect(within(listbox).getByRole("option", { name: /Werbung/ })).toHaveTextContent("Läuft");
-    expect(within(listbox).getByRole("option", { name: "Modulübersicht" }).querySelector("svg")).toBeInTheDocument();
+    expect(within(listbox).queryByRole("option", { name: "Modulübersicht" })).not.toBeInTheDocument();
     expect(within(listbox).getByRole("option", { name: /Textbefehle/ }).querySelector("svg")).toBeInTheDocument();
   });
 
   it("wechselt aus der Liste direkt auf die gewählte Moduldetailseite", async () => {
-    renderModulePage();
+    renderModulePage(moduleStates, [channel, secondChannel]);
 
     await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
     fireEvent.click(screen.getByRole("button", { name: "Modul auswählen: Textbefehle" }));
-    fireEvent.click(screen.getByRole("option", { name: /Kanalereignisse/ }));
+    const option = screen.getByRole("option", { name: /Kanalereignisse/ });
+    fireEvent.mouseDown(option);
+    fireEvent.click(option);
 
     expect(await screen.findByRole("heading", { name: "Kanalereignisse", level: 1 })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/kanalereignisse");
   });
 
-  it("führt über den letzten Eintrag zur Modulübersicht", async () => {
+  it("führt das Segment Module zur Modulübersicht", async () => {
     renderModulePage();
 
     await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
-    fireEvent.click(screen.getByRole("button", { name: "Modul auswählen: Textbefehle" }));
-    fireEvent.click(screen.getByRole("option", { name: "Modulübersicht" }));
+    const moduleLink = within(screen.getByRole("navigation", { name: "Brotkrume" })).getByRole("link", { name: "Module" });
+    expect(moduleLink).toHaveAttribute("href", "/channels/kanal-a/modules");
+    fireEvent.click(moduleLink);
 
     expect(await screen.findByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/channels/kanal-a/modules");
@@ -102,7 +107,8 @@ describe("Modulumschalter in der Brotkrume", () => {
 
     await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
     expect(screen.queryByRole("button", { name: /Modul auswählen/ })).not.toBeInTheDocument();
-    expect(document.querySelector(".topbar__breadcrumb-area")).toHaveTextContent("Module");
+    expect(within(screen.getByRole("navigation", { name: "Brotkrume" })).getByRole("link", { name: "Module" })).toBeInTheDocument();
+    expect(document.querySelector(".topbar__breadcrumb-module")).toHaveTextContent("Textbefehle");
     expect(document.querySelector(".topbar__channel-chevron")).not.toBeInTheDocument();
   });
 

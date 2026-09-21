@@ -31,6 +31,7 @@ import {
 } from "./repository";
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
+import type { PanelEventFilters, PanelEventOrigin, PanelEventTone } from "../../panel-contract";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -52,6 +53,22 @@ interface LogQuery {
   limit: number;
   cursor: LogCursor | null;
 }
+
+const parseEventFilters = (
+  context: Context<PanelEnvironment>,
+): PanelEventFilters | Response => {
+  const origin = context.req.query("origin");
+  const tone = context.req.query("tone");
+  const moduleId = context.req.query("module");
+  const actor = context.req.query("actor");
+  if (origin !== undefined && origin !== "channel" && origin !== "module") return context.text("Ereignis-Herkunft ist ungültig.", 400);
+  if (tone !== undefined && tone !== "info" && tone !== "hinweis" && tone !== "fehler") return context.text("Ereignis-Ton ist ungültig.", 400);
+  const herkunft: PanelEventOrigin | null = origin === "channel" ? "kanal" : origin === "module" ? "modul" : null;
+  const ton: PanelEventTone | null = tone === undefined ? null : tone;
+  const modul = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
+  const person = actor === undefined || actor.length === 0 ? null : actor;
+  return { herkunft, modul, ton, person };
+};
 
 // Teilt sich nur die Parse-/Fehlermechanik zwischen Audit- und Ereignisprotokoll.
 // Beide Protokolle haben absichtlich unterschiedliche Leseberechtigungen und
@@ -236,7 +253,9 @@ panelRouter.get(
       cursor: "Ereignis-Cursor ist ungültig.",
     });
     if (parsed instanceof Response) return parsed;
-    const events = await getEventLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor);
+    const filters = parseEventFilters(context);
+    if (filters instanceof Response) return filters;
+    const events = await getEventLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, filters);
     const actorIds = events.entries.flatMap((entry) => entry.actorUserId === null ? [] : [entry.actorUserId]);
     const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
     return context.json({
