@@ -226,6 +226,16 @@ export interface PanelEventEntry {
   actorDisplayName: string | null;
 }
 
+export type PanelEventOrigin = "kanal" | "modul";
+export type PanelEventTone = "info" | "hinweis" | "fehler";
+
+export interface PanelEventFilters {
+  herkunft: PanelEventOrigin | null;
+  modul: string | null;
+  ton: PanelEventTone | null;
+  person: string | null;
+}
+
 export interface PanelEventsResponse {
   entries: PanelEventEntry[];
   nextCursor: string | null;

@@ -216,6 +216,19 @@ export interface DashboardTexte {
     detail: string;
     aeltereLaden: string;
     aeltereWerdenGeladen: string;
+    filter: string;
+    herkunft: string;
+    modulFilter: string;
+    ton: string;
+    person: string;
+    alle: string;
+    kanalereignisse: string;
+    moduldiagnosen: string;
+    aktiveFilter: string;
+    filterZuruecksetzen: string;
+    keineTreffer: string;
+    nachladenAmEnde: string;
+    feedEnde: string;
   };
   anmeldung: {
     erforderlich: string;
@@ -339,6 +352,10 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       modul: "Modul", wer: "Wer", automatisch: "Automatisch", info: "Info", fehler: "Fehler", hinweis: "Hinweis", unbekannt: "Unbekannt", code: "Code", zeitstempel: "Zeitstempel", vorgang: "Vorgang", beteiligte: "Beteiligte", verlauf: "Verlauf",
       laden: "Ereignisse werden geladen …",
       keine: "Noch keine Ereignisse protokolliert.", detail: "Detail", aeltereLaden: "Ältere Ereignisse laden", aeltereWerdenGeladen: "Ältere Ereignisse werden geladen …",
+      filter: "Filter", herkunft: "Herkunft", modulFilter: "Modul", ton: "Ton", person: "Person", alle: "Alle",
+      kanalereignisse: "Kanalereignisse", moduldiagnosen: "Moduldiagnosen", aktiveFilter: "Aktive Filter:", filterZuruecksetzen: "Filter zurücksetzen",
+      keineTreffer: "Keine Ereignisse passen zu den Filtern.", nachladenAmEnde: "Am Ende werden ältere Ereignisse nachgeladen.",
+      feedEnde: "Ende des Ereignisverlaufs erreicht.",
     },
     anmeldung: {
       erforderlich: "Anmeldung erforderlich", erklaerung: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -441,6 +458,10 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       titel: "Events", anzahl: (anzahl) => `${anzahl} entries`, protokoll: "Event log", zeit: "Time", ereignis: "Event", modul: "Module",
       wer: "Who", automatisch: "Automatic", info: "Info", fehler: "Error", hinweis: "Notice", unbekannt: "Unknown", code: "Code", zeitstempel: "Timestamp", vorgang: "Operation", beteiligte: "Participants", verlauf: "History", laden: "Loading events …", keine: "No events logged yet.", detail: "Detail",
       aeltereLaden: "Load older events", aeltereWerdenGeladen: "Loading older events …",
+      filter: "Filters", herkunft: "Origin", modulFilter: "Module", ton: "Tone", person: "Person", alle: "All",
+      kanalereignisse: "Channel events", moduldiagnosen: "Module diagnostics", aktiveFilter: "Active filters:", filterZuruecksetzen: "Reset filters",
+      keineTreffer: "No events match the filters.", nachladenAmEnde: "Older events load at the end.",
+      feedEnde: "End of the event history reached.",
     },
     anmeldung: {
       erforderlich: "Sign-in required", erklaerung: "Sign in with your Twitch account to see available channels.",

@@ -10,6 +10,7 @@ import type {
   PanelChannelOverview,
   PanelChannelState,
   PanelEventEntry,
+  PanelEventFilters,
   PanelEventsResponse,
   PanelEventSubSubscription,
   PanelLastError,
@@ -67,6 +68,18 @@ interface MembersRequestState {
   controller: AbortController | null;
   generation: number;
 }
+
+interface EventsRequestState {
+  controller: AbortController | null;
+  generation: number;
+}
+
+const leereEreignisFilter: PanelEventFilters = {
+  herkunft: null,
+  modul: null,
+  ton: null,
+  person: null,
+};
 
 const idleModeratorCheck = (): ModeratorCheckState => ({
   status: "idle",
@@ -1134,7 +1147,104 @@ const formatEventDetail = (detail: string): string => {
   }
 };
 
-const EventsPage = ({ eventsState, onNextPage, loadingNextPage }: { eventsState: LoadState<PanelEventsResponse>; onNextPage: () => void; loadingNextPage: boolean }): ReactElement => {
+const eventFilterIsActive = (filters: PanelEventFilters): boolean =>
+  filters.herkunft !== null || filters.modul !== null || filters.ton !== null || filters.person !== null;
+
+const EventFilterBar = ({
+  filters,
+  moduleOptions,
+  onChange,
+}: {
+  filters: PanelEventFilters;
+  moduleOptions: readonly PanelModuleState[];
+  onChange: (filters: PanelEventFilters) => void;
+}): ReactElement => {
+  const texte = dashboardTexte();
+  const aktiveFilter: string[] = [];
+  if (filters.herkunft === "kanal") aktiveFilter.push(texte.ereignisse.kanalereignisse);
+  if (filters.herkunft === "modul") aktiveFilter.push(texte.ereignisse.moduldiagnosen);
+  if (filters.modul !== null) aktiveFilter.push(moduleName(filters.modul));
+  if (filters.ton !== null) aktiveFilter.push(filters.ton === "info" ? texte.ereignisse.info : filters.ton === "hinweis" ? texte.ereignisse.hinweis : texte.ereignisse.fehler);
+  if (filters.person !== null) aktiveFilter.push(filters.person);
+  return <div className="ereignis-filter" aria-label={texte.ereignisse.filter}>
+    <div className="ereignis-filter__controls">
+      <label>{texte.ereignisse.herkunft}<select aria-label={texte.ereignisse.herkunft} value={filters.herkunft ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, herkunft: value === "kanal" || value === "modul" ? value : null }); }}>
+        <option value="">{texte.ereignisse.alle}</option><option value="kanal">{texte.ereignisse.kanalereignisse}</option><option value="modul">{texte.ereignisse.moduldiagnosen}</option>
+      </select></label>
+      <label>{texte.ereignisse.modulFilter}<select aria-label={texte.ereignisse.modulFilter} value={filters.modul ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, modul: value.length === 0 ? null : value }); }}>
+        <option value="">{texte.ereignisse.alle}</option>{moduleOptions.map((module) => <option key={module.id} value={module.id}>{moduleName(module.id)}</option>)}
+      </select></label>
+      <label>{texte.ereignisse.ton}<select aria-label={texte.ereignisse.ton} value={filters.ton ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, ton: value === "info" || value === "hinweis" || value === "fehler" ? value : null }); }}>
+        <option value="">{texte.ereignisse.alle}</option><option value="info">{texte.ereignisse.info}</option><option value="hinweis">{texte.ereignisse.hinweis}</option><option value="fehler">{texte.ereignisse.fehler}</option>
+      </select></label>
+      <label>{texte.ereignisse.person}<input aria-label={texte.ereignisse.person} value={filters.person ?? ""} onChange={(event) => { const value = event.target.value.trim(); onChange({ ...filters, person: value.length === 0 ? null : value }); }} /></label>
+    </div>
+    {aktiveFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texte.ereignisse.aktiveFilter} {aktiveFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { onChange(leereEreignisFilter); }}>{texte.ereignisse.filterZuruecksetzen}</button></div>}
+  </div>;
+};
+
+const EventFeedEnd = ({
+  nextCursor,
+  loadingNextPage,
+  onNextPage,
+}: {
+  nextCursor: string | null;
+  loadingNextPage: boolean;
+  onNextPage: () => void;
+}): ReactElement => {
+  const texte = dashboardTexte();
+  const feedEndRef = useRef<HTMLDivElement | null>(null);
+  const loadNextPage = useCallback((): void => {
+    if (nextCursor !== null && !loadingNextPage) onNextPage();
+  }, [loadingNextPage, nextCursor, onNextPage]);
+  useEffect(() => {
+    if (nextCursor === null) return;
+    const onScroll = (): void => {
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 1) loadNextPage();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    const end = feedEndRef.current;
+    if (end !== null && "IntersectionObserver" in window) {
+      const observer = new IntersectionObserver(([entry]) => {
+        if (entry?.isIntersecting) loadNextPage();
+      });
+      observer.observe(end);
+      return () => { observer.disconnect(); window.removeEventListener("scroll", onScroll); };
+    }
+    return () => { window.removeEventListener("scroll", onScroll); };
+  }, [loadNextPage, nextCursor]);
+  return <div
+    ref={feedEndRef}
+    className="ereignis-feed__end"
+    tabIndex={nextCursor === null ? -1 : 0}
+    aria-label={nextCursor === null ? undefined : texte.ereignisse.nachladenAmEnde}
+    onFocus={loadNextPage}
+    onKeyDown={(event) => {
+      if (event.key === "End" || event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        loadNextPage();
+      }
+    }}
+  >
+    {loadingNextPage ? <p className="loading-line" role="status">{texte.ereignisse.aeltereWerdenGeladen}</p> : nextCursor === null ? <p className="empty-state">{texte.ereignisse.feedEnde}</p> : <p className="muted">{texte.ereignisse.nachladenAmEnde}</p>}
+  </div>;
+};
+
+const EventsPage = ({
+  eventsState,
+  filters,
+  moduleOptions,
+  onFiltersChange,
+  onNextPage,
+  loadingNextPage,
+}: {
+  eventsState: LoadState<PanelEventsResponse>;
+  filters: PanelEventFilters;
+  moduleOptions: readonly PanelModuleState[];
+  onFiltersChange: (filters: PanelEventFilters) => void;
+  onNextPage: () => void;
+  loadingNextPage: boolean;
+}): ReactElement => {
   const texte = dashboardTexte();
   const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
   const eventsWereLoading = useRef(eventsState.status === "loading");
@@ -1145,33 +1255,37 @@ const EventsPage = ({ eventsState, onNextPage, loadingNextPage }: { eventsState:
   const groups = eventsState.data === null ? [] : eventGroups(eventsState.data.entries);
   const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
   const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronologisch);
+  const eventEntries = eventsState.data?.entries ?? [];
   return (
     <>
       <ModuleHeading kind="events" title={texte.ereignisse.titel} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texte.ereignisse.anzahl} />} />
       <section className="content-section"><div className="section-heading"><h2>{texte.ereignisse.protokoll}</h2></div>
+        <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
         {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texte.ereignisse.laden}</p> : null}
         {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
-        {eventsState.data !== null && eventsState.data.entries.length === 0 ? <p className="empty-state">{texte.ereignisse.keine}</p> : null}
-        {eventsState.data !== null && eventsState.data.entries.length > 0 ? <>
-          <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
-            <table className="tabelle ereignis-tabelle">
-              <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.modul}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
-              <tbody>{groups.map((group) => {
-                const entry = group.representative;
-                const eventLabel = ereignisText(entry.code, eventDetail(entry.detail));
-                return <tr key={group.key} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { setSelectedGroupKey(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedGroupKey(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
-              })}</tbody>
-            </table>
-          </div>
-          {selectedGroup === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.ereignisse.detail}>
-            <div className="inspector-section__heading"><h3>{texte.ereignisse.vorgang}</h3><span className="mono muted">{selectedGroup.representative.triggerId || selectedGroup.representative.eventId}</span></div>
-            <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
-            <div className="inspector-section__heading"><h3>{texte.ereignisse.verlauf}</h3></div>
-            <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
-              return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
-            })}</ol>
-          </section>}
-          {eventsState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texte.ereignisse.aeltereWerdenGeladen : texte.ereignisse.aeltereLaden}</button>}
+        {eventsState.data !== null && eventEntries.length === 0 ? <p className="empty-state">{eventFilterIsActive(filters) ? texte.ereignisse.keineTreffer : texte.ereignisse.keine}</p> : null}
+        {eventsState.data !== null ? <>
+          {eventEntries.length === 0 ? null : <>
+            <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
+              <table className="tabelle ereignis-tabelle">
+                <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.modul}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
+                <tbody>{groups.map((group) => {
+                  const entry = group.representative;
+                  const eventLabel = ereignisText(entry.code, eventDetail(entry.detail));
+                  return <tr key={group.key} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { setSelectedGroupKey(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedGroupKey(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
+                })}</tbody>
+              </table>
+            </div>
+            {selectedGroup === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.ereignisse.detail}>
+              <div className="inspector-section__heading"><h3>{texte.ereignisse.vorgang}</h3><span className="mono muted">{selectedGroup.representative.triggerId || selectedGroup.representative.eventId}</span></div>
+              <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
+              <div className="inspector-section__heading"><h3>{texte.ereignisse.verlauf}</h3></div>
+              <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
+                return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
+              })}</ol>
+            </section>}
+          </>}
+          <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
         </> : null}
       </section>
     </>
@@ -1200,7 +1314,7 @@ export const DashboardApp = (): ReactElement => {
   const [loadingNextAuditPage, setLoadingNextAuditPage] = useState(false);
   const auditPageController = useRef<AbortController | null>(null);
   const [loadingNextEventsPage, setLoadingNextEventsPage] = useState(false);
-  const eventsPageController = useRef<AbortController | null>(null);
+  const eventsRequest = useRef<EventsRequestState>({ controller: null, generation: 0 });
   const [loadingNextMembersPage, setLoadingNextMembersPage] = useState(false);
   const membersRequest = useRef<MembersRequestState>({ controller: null, generation: 0 });
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
@@ -1229,11 +1343,31 @@ export const DashboardApp = (): ReactElement => {
     membersRequest.current = { controller: null, generation: membersRequest.current.generation + 1 };
   }, []);
 
+  const startEventsRequest = useCallback((): { controller: AbortController; generation: number } => {
+    eventsRequest.current.controller?.abort();
+    const request = {
+      controller: new AbortController(),
+      generation: eventsRequest.current.generation + 1,
+    };
+    eventsRequest.current = request;
+    return request;
+  }, []);
+
+  const isCurrentEventsRequest = useCallback((generation: number): boolean => eventsRequest.current.generation === generation, []);
+
+  const finishEventsRequest = useCallback((generation: number): void => {
+    if (isCurrentEventsRequest(generation)) eventsRequest.current.controller = null;
+  }, [isCurrentEventsRequest]);
+
+  const cancelEventsRequest = useCallback((): void => {
+    eventsRequest.current.controller?.abort();
+    eventsRequest.current = { controller: null, generation: eventsRequest.current.generation + 1 };
+  }, []);
+
   const clearProtectedState = (): void => {
     auditPageController.current?.abort();
     auditPageController.current = null;
-    eventsPageController.current?.abort();
-    eventsPageController.current = null;
+    cancelEventsRequest();
     cancelMembersRequest();
     setChannels({ status: "success", data: [], error: null });
     setIstBetreiber(false);
@@ -1289,8 +1423,7 @@ export const DashboardApp = (): ReactElement => {
     auditPageController.current?.abort();
     auditPageController.current = null;
     setLoadingNextAuditPage(false);
-    eventsPageController.current?.abort();
-    eventsPageController.current = null;
+    cancelEventsRequest();
     setLoadingNextEventsPage(false);
     cancelMembersRequest();
     setLoadingNextMembersPage(false);
@@ -1309,8 +1442,7 @@ export const DashboardApp = (): ReactElement => {
       controller.abort();
       auditPageController.current?.abort();
       auditPageController.current = null;
-      eventsPageController.current?.abort();
-      eventsPageController.current = null;
+      cancelEventsRequest();
       cancelMembersRequest();
       setLoadingNextMembersPage(false);
     };
@@ -1382,16 +1514,29 @@ export const DashboardApp = (): ReactElement => {
       if (route.section === "events") {
         setEvents(loadingState());
         setEventsChannelId(route.channelId);
+        setModules(loadingState());
+        const request = startEventsRequest();
+        const filters = route.filters ?? leereEreignisFilter;
         try {
-          const response = await fetchEvents(route.channelId, null, controller.signal);
-          if (!cancelled && !controller.signal.aborted) {
+          const response = await fetchEvents(route.channelId, null, request.controller.signal, filters);
+          if (!cancelled && isCurrentEventsRequest(request.generation) && !request.controller.signal.aborted) {
             setEvents(loadedState(response));
             setEventsChannelId(route.channelId);
           }
         } catch (error) {
-          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+          if (!cancelled && isCurrentEventsRequest(request.generation) && !request.controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
             setEvents({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+          }
+        } finally {
+          finishEventsRequest(request.generation);
+        }
+        try {
+          const response = await fetchModules(route.channelId, controller.signal);
+          if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
+        } catch (error) {
+          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+            setModules({ status: "error", data: null, error: errorMessage(error) });
           }
         }
         return;
@@ -1434,7 +1579,7 @@ export const DashboardApp = (): ReactElement => {
     };
     void load();
     return cleanup;
-  }, [cancelMembersRequest, finishMembersRequest, isCurrentMembersRequest, route, startMembersRequest]);
+  }, [cancelEventsRequest, cancelMembersRequest, finishEventsRequest, finishMembersRequest, isCurrentEventsRequest, isCurrentMembersRequest, route, startEventsRequest, startMembersRequest]);
 
   const handleModeratorStatusCheck = async (): Promise<void> => {
     if (route.kind !== "channel" || route.section !== "overview") return;
@@ -1631,16 +1776,15 @@ export const DashboardApp = (): ReactElement => {
 
   const loadNextEventsPage = async (): Promise<void> => {
     if (route.kind !== "channel" || route.section !== "events" || loadingNextEventsPage ||
-        events.data?.nextCursor === null || events.data?.nextCursor === undefined) return;
+        eventsRequest.current.controller !== null || events.data?.nextCursor === null || events.data?.nextCursor === undefined) return;
     const channelId = route.channelId;
     const cursor = events.data.nextCursor;
     const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "events" });
-    const controller = new AbortController();
-    eventsPageController.current = controller;
+    const request = startEventsRequest();
     setLoadingNextEventsPage(true);
     try {
-      const nextPage = await fetchEvents(channelId, cursor, controller.signal);
-      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      const nextPage = await fetchEvents(channelId, cursor, request.controller.signal, route.filters ?? leereEreignisFilter);
+      if (!isCurrentEventsRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
       setEvents((current) => {
         if (current.data === null || current.data.nextCursor !== cursor) return current;
         return {
@@ -1651,16 +1795,28 @@ export const DashboardApp = (): ReactElement => {
         };
       });
     } catch (error) {
-      if (controller.signal.aborted || window.location.pathname !== routePath) return;
+      if (!isCurrentEventsRequest(request.generation) || request.controller.signal.aborted || window.location.pathname !== routePath) return;
       setEvents((current) => ({ ...current, status: "error", error: errorMessage(error) }));
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {
-      if (eventsPageController.current === controller) {
-        eventsPageController.current = null;
+      if (isCurrentEventsRequest(request.generation)) {
+        finishEventsRequest(request.generation);
         setLoadingNextEventsPage(false);
       }
     }
   };
+
+  const updateEventFilters = (filters: PanelEventFilters): void => {
+    if (route.kind !== "channel" || route.section !== "events") return;
+    const nextRoute: DashboardRoute = {
+      kind: "channel",
+      channelId: route.channelId,
+      section: "events",
+      ...(eventFilterIsActive(filters) ? { filters } : {}),
+    };
+    navigate(nextRoute);
+  };
+  const eventFilters = route.kind === "channel" && route.section === "events" ? route.filters ?? leereEreignisFilter : leereEreignisFilter;
 
   if (authenticationRequired) {
     const texte = dashboardTexte();
@@ -1687,7 +1843,7 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
         {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} /> : null}
         {route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
-        {route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} eventsState={events} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
+        {route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
         </main>
       </div>
     </div>

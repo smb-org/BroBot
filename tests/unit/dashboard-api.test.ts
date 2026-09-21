@@ -120,6 +120,33 @@ describe("Dashboard-API-Requestgrenze", () => {
     );
   });
 
+  it("überträgt alle Ereignisfilter zusammen mit Cursor und Abbruchsignal", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse({ entries: [], nextCursor: null }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const fetchEventsWithFilters = fetchEvents as unknown as (
+      channelId: string,
+      cursor: string | null,
+      signal: AbortSignal,
+      filters: { herkunft: "kanal" | "modul" | null; modul: string | null; ton: "info" | "hinweis" | "fehler" | null; person: string | null },
+    ) => Promise<unknown>;
+    await fetchEventsWithFilters("kanal-a", "cursor /?#&", controller.signal, {
+      herkunft: "modul",
+      modul: "textbefehle",
+      ton: "fehler",
+      person: "person /?#&",
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL(
+        "/api/channels/kanal-a/events?cursor=cursor+%2F%3F%23%26&origin=module&module=textbefehle&tone=fehler&actor=person+%2F%3F%23%26",
+        window.location.origin,
+      ),
+      { credentials: "same-origin", signal: controller.signal },
+    );
+  });
+
   it("holt vor jeder Mitgliederänderung CSRF und sendet die passende Mutation", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ token: "csrf-token" }))

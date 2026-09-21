@@ -28,6 +28,22 @@ const insertEvent = async (
   ).bind(eventId, channelId, createdAt, actorUserId, triggerId).run();
 };
 
+const insertCustomEvent = async (
+  database: TestD1Database,
+  eventId: string,
+  channelId: string,
+  moduleId: string,
+  code: string,
+  actorUserId: string | null = null,
+  createdAt = "2026-09-18T04:00:00.000Z",
+): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO event_log
+      (event_id, channel_id, created_at, module_id, code, detail_json, actor_user_id, trigger_id)
+     VALUES (?, ?, ?, ?, ?, '{}', ?, ?)`,
+  ).bind(eventId, channelId, createdAt, moduleId, code, actorUserId, eventId).run();
+};
+
 const insertBotIdentity = async (database: TestD1Database): Promise<void> => {
   const accessTokenCiphertext = await encryptJson(
     { token: "access-token" },
@@ -346,6 +362,51 @@ describe("Ereignisprotokoll", () => {
       actorLogin: null,
       actorDisplayName: null,
     }));
+  });
+
+  it("filtert Herkunft, Modul, Ton und Person in der kanalgebundenen Abfrage", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "viewer-1");
+    await insertMember(database, "kanal-a", "viewer-1", "bediener");
+    await insertCustomEvent(database, "channel-event", "kanal-a", "kanalereignisse", "kanalereignisse.raid.eingehend");
+    await insertCustomEvent(database, "module-event", "kanal-a", "textbefehle", "textbefehle.ausgeloest", "person-a");
+    await insertCustomEvent(database, "error-event", "kanal-a", "textbefehle", "host.chat.fehlgeschlagen", "person-a");
+    await insertCustomEvent(database, "info-event", "kanal-a", "textbefehle", "host.chat.gesendet", "person-b");
+    await insertCustomEvent(database, "other-channel-event", "kanal-b", "kanalereignisse", "kanalereignisse.raid.eingehend");
+
+    const request = async (query: string) => panelRouter.fetch(
+      await makeRequest("viewer-1", `/api/channels/kanal-a/events?${query}`),
+      makeEnvironment(database),
+    );
+    const eventIds = async (query: string): Promise<string[]> => {
+      const response = await request(query);
+      const body = await response.json<{ entries: Array<{ eventId: string }> }>();
+      expect(response.status).toBe(200);
+      return body.entries.map((entry) => entry.eventId);
+    };
+
+    await expect(eventIds("origin=channel")).resolves.toEqual(["channel-event"]);
+    await expect(eventIds("module=textbefehle")).resolves.toEqual(["module-event", "info-event", "error-event"]);
+    await expect(eventIds("tone=fehler")).resolves.toEqual(["error-event"]);
+    await expect(eventIds("actor=person-a")).resolves.toEqual(["module-event", "error-event"]);
+    await expect(eventIds("module=textbefehle&tone=fehler")).resolves.toEqual(["error-event"]);
+    await expect(eventIds("module=werbung&actor=person-a")).resolves.toEqual([]);
+  });
+
+  it("hält auch eine gefilterte Ereignisabfrage strikt im angeforderten Kanal", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertCustomEvent(database, "fremd", "kanal-b", "textbefehle", "host.chat.gesendet", "person-a");
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-b/events?origin=module&actor=person-a"),
+      makeEnvironment(database),
+    );
+
+    expect(response.status).toBe(403);
   });
 
   it("verweigert Ereignisse aus einem fremden Kanal mit 403", async () => {
