@@ -42,19 +42,22 @@ Eine Tabelle mit wählbaren Zeilen und der Inspektor ihrer gewählten Zeile
 liegen zusammen in einem `.config-section.inspektor-bereich` mit genau zwei
 direkten Kindern: zuerst `.inspektor-bereich__liste` (Überschrift, Tabelle,
 Nachladen-Knopf, Fehler- und Leerzeile), dann der `.sub-inspector` — oder,
-solange nichts gewählt ist, das Anlegen-Formular des Bereichs auf derselben
-Fläche. Wo die Fläche neben oder unter der Liste steht, entscheidet der Host
+solange dessen Anlegen-Formular über den Plus-Knopf an der Überschrift
+geöffnet ist, das Formular auf derselben Fläche. Ohne Auswahl und ohne
+geöffnetes Formular bleibt die Fläche leer; beides schließt sich gegenseitig
+aus. Wo die Fläche neben oder unter der Liste steht, entscheidet der Host
 nach Fensterbreite (ab 1360 px daneben, darunter wie bisher im Fluss); die
 Ansicht legt nur die Reihenfolge fest und bleibt selbst höchstens 960 px
-breit. Der Inspektor beginnt mit `.inspector-section__heading` (Titel, Kennung
-in Mono, Schließen-Taste) und ruft bei Schließen und Escape den vom Host
-gereichten Rückruf, der die Auswahl aufhebt und den Fokus an die Zeile
-zurückgibt. Die Auswahl bleibt beim Nachladen bestehen, solange die Zeile noch
-existiert. Zerstörende Handlungen verwenden `button--danger`, stehen vom
-primären Knopf abgesetzt und fragen mit `.inspector-confirmation` an Ort und
-Stelle nach. Eine Ansicht ohne `.inspektor-bereich` bleibt einspaltig; sie
-bricht nicht, sie nutzt nur die Breite nicht. Eine Liste fehlender
-Berechtigungen ist kein Inspektor und trägt `.sub-inspector` nicht.
+breit. Inspektor wie Anlegen-Formular beginnen mit `.inspector-section__heading`
+(Titel, Kennung in Mono, Schließen-Taste) und rufen bei Schließen und Escape
+den vom Host gereichten Rückruf: Der Inspektor hebt die Auswahl auf und gibt
+den Fokus an die Zeile zurück, das Formular schließt sich. Die Auswahl bleibt
+beim Nachladen bestehen, solange die Zeile noch existiert. Zerstörende
+Handlungen verwenden `button--danger`, stehen vom primären Knopf abgesetzt und
+fragen mit `.inspector-confirmation` an Ort und Stelle nach. Eine Ansicht ohne
+`.inspektor-bereich` bleibt einspaltig; sie bricht nicht, sie nutzt nur die
+Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
+`.sub-inspector` nicht.
 
 ## Registrierung
 
