@@ -81,21 +81,22 @@ const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
 const canManageMembers = (role: ChannelMemberRole): boolean => role !== "bediener";
 
 /**
- * Nur ein Broadcaster darf die Rolle `broadcaster` vergeben. Sonst koennte ein
- * Verwalter ein Zweitkonto zum Broadcaster machen und danach den urspruenglichen
- * Broadcaster entfernen — der Schutz des letzten Broadcasters greift dann nicht,
- * weil zwischenzeitlich zwei existieren.
+ * Nur ein Broadcaster darf die Rolle `broadcaster` vergeben oder entziehen.
+ * Sonst könnte ein Verwalter ein Zweitkonto zum Broadcaster machen und danach
+ * den ursprünglichen Broadcaster entfernen — der Schutz des letzten
+ * Broadcasters greift dann nicht, weil zwischenzeitlich zwei existieren.
  *
- * Diese Pruefung liefert nur die verstaendliche Fehlermeldung; verbindlich
+ * Diese Prüfung liefert nur die verständliche Fehlermeldung; verbindlich
  * durchgesetzt wird die Regel in der Mutation selbst.
  */
 const mayAssignRole = (
   actorRole: ChannelMemberRole,
-  targetRole: ChannelMemberRole,
-): boolean => targetRole !== "broadcaster" || actorRole === "broadcaster";
+  targetRole: ChannelMemberRole | undefined,
+  existingRole?: ChannelMemberRole,
+): boolean => (targetRole !== "broadcaster" && existingRole !== "broadcaster") || actorRole === "broadcaster";
 
-const assignDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
-  context.text("Nur ein Broadcaster darf die Rolle Broadcaster vergeben.", 403);
+const broadcasterRoleDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
+  context.text("Nur ein Broadcaster darf die Rolle Broadcaster vergeben oder entziehen.", 403);
 
 export const actorOf = (context: { get: (key: "session") => { userId: string; sessionId: string } }) => ({
   userId: context.get("session").userId,
@@ -292,7 +293,7 @@ memberRouter.post("/api/channels/:channelId/members", async (context) => {
   if (userId === context.get("session").userId) {
     return context.text("Du kannst deine eigene Mitgliedschaft nicht per POST anlegen.", 403);
   }
-  if (!mayAssignRole(channelRole, role)) return assignDenied(context);
+  if (!mayAssignRole(channelRole, role)) return broadcasterRoleDenied(context);
   const existing = await getChannelMemberForChannel(context.env.DB, channelId, userId);
   if (existing !== null) return context.text("Dieses Mitglied ist bereits freigegeben.", 409);
 
@@ -332,7 +333,7 @@ memberRouter.patch("/api/channels/:channelId/members/:userId", async (context) =
   if (userId === context.get("session").userId && roleRank[role] > roleRank[existing.role]) {
     return context.text("Du kannst deine eigene Rolle nicht erhöhen.", 403);
   }
-  if (!mayAssignRole(channelRole, role)) return assignDenied(context);
+  if (!mayAssignRole(channelRole, role, existing.role)) return broadcasterRoleDenied(context);
   if (await lastBroadcaster(context.env.DB, channelId, existing.role, role)) {
     return context.text("Der letzte Broadcaster kann nicht herabgestuft werden.", 409);
   }
@@ -345,7 +346,7 @@ memberRouter.patch("/api/channels/:channelId/members/:userId", async (context) =
     member,
     "mitglied.rolle_geändert",
     now,
-    actorGuard(requiredActorRoles(member.role)),
+    actorGuard(requiredActorRoles(member.role, existing.role)),
   );
   if (!changed) return context.text("Mitglied wurde inzwischen geändert.", 409);
   return context.json({ member: memberResponse(member) });
@@ -359,6 +360,7 @@ memberRouter.delete("/api/channels/:channelId/members/:userId", async (context) 
   const userId = context.req.param("userId");
   const existing = await getChannelMemberForChannel(context.env.DB, channelId, userId);
   if (existing === null) return context.text("Mitglied nicht gefunden.", 404);
+  if (!mayAssignRole(channelRole, undefined, existing.role)) return broadcasterRoleDenied(context);
   if (await lastBroadcaster(context.env.DB, channelId, existing.role)) {
     return context.text("Der letzte Broadcaster kann nicht entfernt werden.", 409);
   }
@@ -370,7 +372,7 @@ memberRouter.delete("/api/channels/:channelId/members/:userId", async (context) 
     userId,
     "mitglied.entfernt",
     nowIso(),
-    actorGuard("'broadcaster', 'verwalter'"),
+    actorGuard(requiredActorRoles(undefined, existing.role)),
   );
   if (!changed) return context.text("Mitglied wurde inzwischen geändert.", 409);
   return context.body(null, 204);
