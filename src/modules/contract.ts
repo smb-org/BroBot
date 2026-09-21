@@ -23,6 +23,7 @@ export interface ModuleDiagnostic {
 /** Eine vom Host auszuführende, semantisch klar benannte Modulaktion. */
 export type ModuleAction =
   | { kind: "chat"; text: string; replyToMessageId?: string }
+  | { kind: "shoutout"; zielKanalId: string }
   | { kind: "overlay"; type: string; payload: Readonly<Record<string, unknown>> };
 
 /**

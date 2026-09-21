@@ -68,14 +68,14 @@ describe("Dashboard-Locale", () => {
   it("führt für jeden bekannten Ereigniscode Familie, Stufe, Wort und Zahl-Schlüssel", () => {
     const codes: EreignisCode[] = [
       "host.aktion.fehler", "host.chat.fehlgeschlagen", "host.chat.gesendet", "host.modul.fehler",
-      "host.modul.unbekannt", "host.overlay.nicht_ausgefuehrt", "kanalereignisse.raid.eingehend",
+      "host.modul.unbekannt", "host.overlay.nicht_ausgefuehrt", "host.shoutout.fehlgeschlagen", "host.shoutout.gesendet", "kanalereignisse.raid.eingehend",
       "kanalereignisse.raid.ausgehend", "kanalereignisse.shoutout.gesendet", "kanalereignisse.shoutout.empfangen",
       "kanalereignisse.chat.sub", "kanalereignisse.chat.resub", "kanalereignisse.chat.gift_sub",
       "kanalereignisse.chat.community_gift", "kanalereignisse.chat.ankuendigung", "kanalereignisse.chat.unbekannt",
       "kanalereignisse.moderation.ban", "kanalereignisse.moderation.timeout", "kanalereignisse.moderation.untimeout",
       "kanalereignisse.moderation.unban", "kanalereignisse.moderation.delete", "kanalereignisse.moderation.warn",
       "kanalereignisse.moderation.unbekannt", "kanalereignisse.automod.halte", "kanalereignisse.verdacht.nachricht",
-      "kanalereignisse.verdacht.einstufung", "kanalereignisse.verdacht.entwarnung", "shoutout.unterdrueckt",
+      "kanalereignisse.verdacht.einstufung", "kanalereignisse.verdacht.entwarnung", "raid.ausgehend", "raid.shoutout", "raid.ungueltig", "shoutout.unterdrueckt",
       "werbung.ankuendigung", "werbung.uebersprungen", "textbefehle.abgekuehlt", "textbefehle.ausgeloest",
       "textbefehle.deaktiviert", "textbefehle.berechtigung", "textbefehle.bereits_vorhanden",
       "textbefehle.nicht_berechtigt", "textbefehle.unbekannt", "textbefehle.ungueltig",
