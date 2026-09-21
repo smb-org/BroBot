@@ -22,6 +22,7 @@
 
 - Branch-Name enthält die Issue-Nummer, zum Beispiel `42-poll-queue`.
 - Der Pull Request referenziert das Issue mit `Closes #42`, damit es beim Merge automatisch schließt. Issues werden nicht von Hand geschlossen, wenn Code sie erledigt.
+  - **Das Schlüsselwort bleibt englisch**, auch wenn Commit-Messages und Beschreibung sonst deutsch sind. GitHub erkennt ausschließlich `close`/`closes`/`closed`, `fix`/`fixes`/`fixed` und `resolve`/`resolves`/`resolved`. Ein übersetztes „Schließt #42" schließt nichts — der Merge läuft durch, das Issue bleibt offen, und es fällt erst Wochen später auf. Am 20. September 2026 ist genau das mit #115 passiert.
 - Ein Spike schließt mit einem Kommentar, der die getroffene Entscheidung festhält — das Ergebnis eines Spikes ist eine Entscheidung, kein Merge.
 
 **Öffentliches Repo.** Das Repo ist öffentlich. Issues, Kommentare und Titel sind für jeden lesbar. Interne Einschätzungen, Zuschauerzahlen, Bewertungen fremder Dienste und persönliche Anekdoten gehören nicht hinein, sondern bleiben in den nicht versionierten Notizen unter [docs/input/](./input/). Issues beschreiben Anforderung, Akzeptanzkriterien und Technik.
