@@ -847,8 +847,8 @@ const BotPermissionsInspector = ({ permissions }: { permissions: PanelBotPermiss
   const texte = dashboardTexte();
   if (permissions === null || permissions === undefined || permissions.missingScopes.length === 0) return null;
   return (
-    <section className="command-inspector sub-inspector" aria-label={texte.system.botBerechtigungenInspector}>
-      <div className="inspector-section__heading"><h3>{texte.system.botBerechtigungenInspector}</h3><span className="mono muted">{formatZahl(permissions.missingScopes.length)}</span></div>
+    <section className="content-section" aria-label={texte.system.botBerechtigungenInspector}>
+      <div className="section-heading"><h2>{texte.system.botBerechtigungenInspector}</h2><span className="mono muted">{formatZahl(permissions.missingScopes.length)}</span></div>
       <h4>{texte.system.fehlendeScopes}</h4>
       <ul className="scope-liste">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
     </section>
@@ -859,8 +859,8 @@ const BroadcasterPermissionsInspector = ({ permissions }: { permissions: PanelBr
   const texte = kanalPanelTexte();
   if (!broadcasterConsentMissing(permissions)) return null;
   return (
-    <section className="command-inspector sub-inspector" aria-label={texte.fehlendeBroadcasterBerechtigungen}>
-      <div className="inspector-section__heading"><h3>{texte.fehlendeBroadcasterBerechtigungen}</h3><span className="mono muted">{formatZahl(permissions.missingScopes.length)}</span></div>
+    <section className="content-section" aria-label={texte.fehlendeBroadcasterBerechtigungen}>
+      <div className="section-heading"><h2>{texte.fehlendeBroadcasterBerechtigungen}</h2><span className="mono muted">{formatZahl(permissions.missingScopes.length)}</span></div>
       <h4>{texte.fehlendeScopes}</h4>
       <ul className="scope-liste">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
     </section>
@@ -879,43 +879,45 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selected = subscriptions.find((subscription) => subscriptionKey(subscription) === selectedKey) ?? null;
   return (
-    <section className="content-section" aria-label={texte.system.abonnements}>
-      <div className="section-heading"><h2>{texte.system.abonnements}</h2><span className="muted zahl">{formatZahl(subscriptions.length)}</span></div>
-      {subscriptions.length === 0 ? <p className="empty-state">{texte.system.keineAbonnements}</p> : <>
-        <div className="tabelle-wrap">
-          <table className="tabelle abonnements-tabelle">
-            <thead><tr><th scope="col">{texte.system.abo}</th><th scope="col">{texte.system.zustand}</th><th scope="col">{texte.system.grund}</th></tr></thead>
-            <tbody>{subscriptions.map((subscription) => {
-              const key = subscriptionKey(subscription);
-              const name = subscriptionDisplayName(subscription);
-              const unknown = name === subscription.subscriptionType;
-              const tone = subscriptionTone(subscription.status);
-              return <tr
-                key={key}
-                tabIndex={0}
-                aria-selected={selectedKey === key}
-                onClick={() => { setSelectedKey(key); }}
-                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedKey(key); } }}
-              >
-                <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
-                <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status)} /></td>
-                <td>{subscription.reason ?? leer}</td>
-              </tr>;
-            })}</tbody>
-          </table>
-        </div>
-        {selected === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.system.aboInspector}>
-          <div className="inspector-section__heading"><h3>{subscriptionDisplayName(selected)}</h3><span className="mono muted">{selected.subscriptionId ?? leer}</span></div>
-          <dl className="eigenschaften">
-            <div><dt>{texte.system.aboTyp}</dt><dd className="mono">{selected.subscriptionType}</dd></div>
-            <div><dt>{texte.system.aboVersion}</dt><dd className="mono">{selected.version}</dd></div>
-            <div><dt>{texte.system.aboId}</dt><dd className="mono">{selected.subscriptionId ?? leer}</dd></div>
-            <div><dt>{texte.system.aboAktualisiert}</dt><dd className="mono">{formatTimestamp(selected.updatedAt)}</dd></div>
-            <div><dt>{texte.system.twitchMeldung}</dt><dd>{selected.message ?? leer}</dd></div>
-            <div><dt>{texte.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? leer : String(selected.statusCode)}</dd></div>
-          </dl>
-        </section>}
-      </>}
+    <section className={`content-section inspektor-bereich${selected === null ? "" : " inspektor-bereich--offen"}`} aria-label={texte.system.abonnements}>
+      <div className="inspektor-bereich__liste">
+        <div className="section-heading"><h2>{texte.system.abonnements}</h2><span className="muted zahl">{formatZahl(subscriptions.length)}</span></div>
+        {subscriptions.length === 0 ? <p className="empty-state">{texte.system.keineAbonnements}</p> : (
+          <div className="tabelle-wrap">
+            <table className="tabelle abonnements-tabelle">
+              <thead><tr><th scope="col">{texte.system.abo}</th><th scope="col">{texte.system.zustand}</th><th scope="col">{texte.system.grund}</th></tr></thead>
+              <tbody>{subscriptions.map((subscription) => {
+                const key = subscriptionKey(subscription);
+                const name = subscriptionDisplayName(subscription);
+                const unknown = name === subscription.subscriptionType;
+                const tone = subscriptionTone(subscription.status);
+                return <tr
+                  key={key}
+                  tabIndex={0}
+                  aria-selected={selectedKey === key}
+                  onClick={() => { setSelectedKey(key); }}
+                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedKey(key); } }}
+                >
+                  <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
+                  <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status)} /></td>
+                  <td>{subscription.reason ?? leer}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {selected === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.system.aboInspector}>
+        <div className="inspector-section__heading"><h3>{subscriptionDisplayName(selected)}</h3><span className="mono muted">{selected.subscriptionId ?? leer}</span></div>
+        <dl className="eigenschaften">
+          <div><dt>{texte.system.aboTyp}</dt><dd className="mono">{selected.subscriptionType}</dd></div>
+          <div><dt>{texte.system.aboVersion}</dt><dd className="mono">{selected.version}</dd></div>
+          <div><dt>{texte.system.aboId}</dt><dd className="mono">{selected.subscriptionId ?? leer}</dd></div>
+          <div><dt>{texte.system.aboAktualisiert}</dt><dd className="mono">{formatTimestamp(selected.updatedAt)}</dd></div>
+          <div><dt>{texte.system.twitchMeldung}</dt><dd>{selected.message ?? leer}</dd></div>
+          <div><dt>{texte.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? leer : String(selected.statusCode)}</dd></div>
+        </dl>
+      </section>}
     </section>
   );
 };
@@ -967,11 +969,6 @@ interface SystemPageProperties {
 const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPage }: SystemPageProperties): ReactElement => {
   const texte = dashboardTexte();
   const [selectedAuditId, setSelectedAuditId] = useState<string | null>(null);
-  const auditWasLoading = useRef(auditState.status === "loading");
-  useEffect(() => {
-    if (auditState.status === "loading" && !auditWasLoading.current) setSelectedAuditId(null);
-    auditWasLoading.current = auditState.status === "loading";
-  }, [auditState.status]);
   const selectedAudit = auditState.data?.entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   return (
     <>
@@ -985,24 +982,26 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
         <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
         <SystemProperties system={system} />
       </>}
-      <section className="content-section"><div className="section-heading"><h2>{texte.system.auditLog}</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{formatZahl(auditState.data.entries.length)}</span> {texte.system.eintraege}</span>}</div>
-        {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texte.system.auditLaden}</p> : null}
-        {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
-        {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="empty-state">{texte.system.keineAuditEintraege}</p> : null}
-        {auditState.data !== null && auditState.data.entries.length > 0 ? <>
-          <div className={auditState.status === "loading" ? "veraltet" : undefined}>
-            <table className="tabelle audit-tabelle">
-              <thead><tr><th scope="col">{texte.system.zeit}</th><th scope="col">{texte.system.aktion}</th><th scope="col">{texte.system.wer}</th></tr></thead>
-              <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { setSelectedAuditId(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedAuditId(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
-            </table>
-          </div>
-          {selectedAudit === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.system.aenderungsdaten}>
-            <div className="inspector-section__heading"><h3>{selectedAudit.action}</h3><span className="mono muted">{selectedAudit.auditId}</span></div>
-            <dl className="eigenschaften"><div><dt>{texte.system.wer}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
-            <div className="inspector-columns"><div><h4>{texte.system.vorher}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texte.system.nachher}</h4><pre>{selectedAudit.after}</pre></div></div>
-          </section>}
-          {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texte.system.aeltereEintraegeLaden : texte.system.aeltereEintraege}</button>}
-        </> : null}
+      <section className={`content-section inspektor-bereich${selectedAudit === null ? "" : " inspektor-bereich--offen"}`}><div className="inspektor-bereich__liste">
+        <div className="section-heading"><h2>{texte.system.auditLog}</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{formatZahl(auditState.data.entries.length)}</span> {texte.system.eintraege}</span>}</div>
+          {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texte.system.auditLaden}</p> : null}
+          {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
+          {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="empty-state">{texte.system.keineAuditEintraege}</p> : null}
+          {auditState.data !== null && auditState.data.entries.length > 0 ? <>
+            <div className={auditState.status === "loading" ? "veraltet" : undefined}>
+              <table className="tabelle audit-tabelle">
+                <thead><tr><th scope="col">{texte.system.zeit}</th><th scope="col">{texte.system.aktion}</th><th scope="col">{texte.system.wer}</th></tr></thead>
+                <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { setSelectedAuditId(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedAuditId(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
+              </table>
+            </div>
+            {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texte.system.aeltereEintraegeLaden : texte.system.aeltereEintraege}</button>}
+          </> : null}
+        </div>
+        {selectedAudit === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.system.aenderungsdaten}>
+          <div className="inspector-section__heading"><h3>{selectedAudit.action}</h3><span className="mono muted">{selectedAudit.auditId}</span></div>
+          <dl className="eigenschaften"><div><dt>{texte.system.wer}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
+          <div className="inspector-columns"><div><h4>{texte.system.vorher}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texte.system.nachher}</h4><pre>{selectedAudit.after}</pre></div></div>
+        </section>}
       </section>
     </>
   );
@@ -1288,11 +1287,6 @@ const EventsPage = ({
     scrollToBeginning,
   });
   const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
-  const eventsWereLoading = useRef(eventsState.status === "loading");
-  useEffect(() => {
-    if (eventsState.status === "loading" && !eventsWereLoading.current) setSelectedGroupKey(null);
-    eventsWereLoading.current = eventsState.status === "loading";
-  }, [eventsState.status]);
   const groups = eventsState.data === null ? [] : eventGroups(eventsState.data.entries);
   const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
   const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronologisch);
@@ -1300,15 +1294,15 @@ const EventsPage = ({
   return (
     <>
       <ModuleHeading kind="events" title={texte.ereignisse.titel} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texte.ereignisse.anzahl} />} />
-      <section className="content-section"><div className="section-heading"><h2>{texte.ereignisse.protokoll}</h2><RealtimeFeedStatus status={realtime.status} /></div>
-        <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
-        {realtime.pendingCount === 0 ? null : <button className="button realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite">{texte.ereignisse.realtimeNeue(formatZahl(realtime.pendingCount))}</button>}
-        {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texte.ereignisse.laden}</p> : null}
-        {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
-        {eventsState.data !== null && eventEntries.length === 0 ? <p className="empty-state">{eventFilterIsActive(filters) ? texte.ereignisse.keineTreffer : texte.ereignisse.keine}</p> : null}
-        {eventsState.data !== null ? <>
-          {eventEntries.length === 0 ? null : <>
-            <div ref={feedRef} className="ereignis-feed">
+      <section className={`content-section inspektor-bereich${selectedGroup === null ? "" : " inspektor-bereich--offen"}`}><div className="inspektor-bereich__liste">
+        <div className="section-heading"><h2>{texte.ereignisse.protokoll}</h2><RealtimeFeedStatus status={realtime.status} /></div>
+          <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
+          {realtime.pendingCount === 0 ? null : <button className="button realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite">{texte.ereignisse.realtimeNeue(formatZahl(realtime.pendingCount))}</button>}
+          {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texte.ereignisse.laden}</p> : null}
+          {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
+          {eventsState.data !== null && eventEntries.length === 0 ? <p className="empty-state">{eventFilterIsActive(filters) ? texte.ereignisse.keineTreffer : texte.ereignisse.keine}</p> : null}
+          {eventsState.data !== null ? <>
+            {eventEntries.length === 0 ? null : <div ref={feedRef} className="ereignis-feed">
               <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
                 <table className="tabelle ereignis-tabelle">
                   <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.modul}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
@@ -1319,18 +1313,18 @@ const EventsPage = ({
                   })}</tbody>
                 </table>
               </div>
-            </div>
-            {selectedGroup === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.ereignisse.detail}>
-              <div className="inspector-section__heading"><h3>{texte.ereignisse.vorgang}</h3><span className="mono muted">{selectedGroup.representative.triggerId || selectedGroup.representative.eventId}</span></div>
-              <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
-              <div className="inspector-section__heading"><h3>{texte.ereignisse.verlauf}</h3></div>
-              <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
-                return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
-              })}</ol>
-            </section>}
-          </>}
-          <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
-        </> : null}
+            </div>}
+            <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
+          </> : null}
+        </div>
+        {selectedGroup === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.ereignisse.detail}>
+          <div className="inspector-section__heading"><h3>{texte.ereignisse.vorgang}</h3><span className="mono muted">{selectedGroup.representative.triggerId || selectedGroup.representative.eventId}</span></div>
+          <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
+          <div className="inspector-section__heading"><h3>{texte.ereignisse.verlauf}</h3></div>
+          <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
+            return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
+          })}</ol>
+        </section>}
       </section>
     </>
   );
