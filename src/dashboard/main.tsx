@@ -44,6 +44,7 @@ import { BetreiberSeite } from "./betreiber";
 import { betreiberTexte, kanalPanelTexte, roleLabel } from "./labels";
 import { dashboardLanguage, dashboardTexte, ereignisText, ereignisTon, formatZeitpunkt, formatZahl, type EreignisCode, type EreignisDetail, type EreignisZahlSchluessel } from "./locale";
 import { disabledStatusWord, eventSubName, moduleName, statusWord } from "./module-labels";
+import { useRealtimeEventFeed, type RealtimeFeedStatus } from "./realtime";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import { kuerzeAuf200Zeichen } from "../text";
 import "./styles.css";
@@ -1089,6 +1090,16 @@ const moduleLabel = (entry: PanelEventEntry): string => moduleName(entry.moduleI
 const chronologisch = (left: PanelEventEntry, right: PanelEventEntry): number =>
   left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId);
 
+const mergeEventEntries = (
+  current: readonly PanelEventEntry[],
+  incoming: readonly PanelEventEntry[],
+): PanelEventEntry[] => {
+  const byId = new Map<string, PanelEventEntry>();
+  for (const entry of current) byId.set(entry.eventId, entry);
+  for (const entry of incoming) byId.set(entry.eventId, entry);
+  return Array.from(byId.values()).sort((left, right) => chronologisch(right, left));
+};
+
 const eventDetail = (detail: string): EreignisDetail => {
   try {
     const parsed: unknown = JSON.parse(detail);
@@ -1221,22 +1232,61 @@ const EventFeedEnd = ({
   </div>;
 };
 
+const realtimeLedStatus = (status: RealtimeFeedStatus): LedStatus =>
+  status === "connected" ? "green" : status === "renew" ? "red" : status === "offline" ? "off" : "amber";
+
+const RealtimeFeedStatus = ({ status }: { status: RealtimeFeedStatus }): ReactElement => {
+  const texte = dashboardTexte();
+  const label = status === "connected"
+    ? texte.ereignisse.realtimeVerbunden
+    : status === "connecting"
+      ? texte.ereignisse.realtimeVerbindet
+      : status === "reconnecting"
+        ? texte.ereignisse.realtimeWiederverbindung
+        : status === "renew" ? texte.ereignisse.realtimeSitzungErneuern : texte.ereignisse.realtimeOffline;
+  return <span className="realtime-status" aria-live="polite"><Led status={realtimeLedStatus(status)} label={label} />{status === "renew" ? <a className="profile-link" href="/auth/login">{texte.ereignisse.realtimeSitzungErneuern}</a> : null}</span>;
+};
+
 const EventsPage = ({
+  channelId,
   eventsState,
   filters,
   moduleOptions,
   onFiltersChange,
+  onRefreshFirstPage,
   onNextPage,
   loadingNextPage,
 }: {
+  channelId: string;
   eventsState: LoadState<PanelEventsResponse>;
   filters: PanelEventFilters;
   moduleOptions: readonly PanelModuleState[];
   onFiltersChange: (filters: PanelEventFilters) => void;
+  onRefreshFirstPage: (channelId: string, filters: PanelEventFilters) => Promise<void>;
   onNextPage: () => void;
   loadingNextPage: boolean;
 }): ReactElement => {
   const texte = dashboardTexte();
+  const feedRef = useRef<HTMLDivElement | null>(null);
+  const atBeginning = useCallback((): boolean => {
+    const feed = feedRef.current;
+    if (feed === null) return true;
+    const feedStart = feed.getBoundingClientRect().top + window.scrollY;
+    return window.scrollY <= feedStart + 8;
+  }, []);
+  const scrollToBeginning = useCallback((): void => {
+    const feed = feedRef.current;
+    if (feed === null) return;
+    const feedStart = feed.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
+  }, []);
+  const realtime = useRealtimeEventFeed({
+    channelId,
+    filters,
+    atBeginning,
+    refreshFirstPage: () => onRefreshFirstPage(channelId, filters),
+    scrollToBeginning,
+  });
   const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
   const eventsWereLoading = useRef(eventsState.status === "loading");
   useEffect(() => {
@@ -1250,22 +1300,25 @@ const EventsPage = ({
   return (
     <>
       <ModuleHeading kind="events" title={texte.ereignisse.titel} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texte.ereignisse.anzahl} />} />
-      <section className="content-section"><div className="section-heading"><h2>{texte.ereignisse.protokoll}</h2></div>
+      <section className="content-section"><div className="section-heading"><h2>{texte.ereignisse.protokoll}</h2><RealtimeFeedStatus status={realtime.status} /></div>
         <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
+        {realtime.pendingCount === 0 ? null : <button className="button realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite">{texte.ereignisse.realtimeNeue(formatZahl(realtime.pendingCount))}</button>}
         {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texte.ereignisse.laden}</p> : null}
         {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
         {eventsState.data !== null && eventEntries.length === 0 ? <p className="empty-state">{eventFilterIsActive(filters) ? texte.ereignisse.keineTreffer : texte.ereignisse.keine}</p> : null}
         {eventsState.data !== null ? <>
           {eventEntries.length === 0 ? null : <>
-            <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
-              <table className="tabelle ereignis-tabelle">
-                <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.modul}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
-                <tbody>{groups.map((group) => {
-                  const entry = group.representative;
-                  const eventLabel = ereignisText(entry.code, eventDetail(entry.detail));
-                  return <tr key={group.key} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { setSelectedGroupKey(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedGroupKey(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
-                })}</tbody>
-              </table>
+            <div ref={feedRef} className="ereignis-feed">
+              <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
+                <table className="tabelle ereignis-tabelle">
+                  <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.modul}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
+                  <tbody>{groups.map((group) => {
+                    const entry = group.representative;
+                    const eventLabel = ereignisText(entry.code, eventDetail(entry.detail));
+                    return <tr key={group.key} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { setSelectedGroupKey(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedGroupKey(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texte)}</td></tr>;
+                  })}</tbody>
+                </table>
+              </div>
             </div>
             {selectedGroup === null ? null : <section className="command-inspector sub-inspector" aria-label={texte.ereignisse.detail}>
               <div className="inspector-section__heading"><h3>{texte.ereignisse.vorgang}</h3><span className="mono muted">{selectedGroup.representative.triggerId || selectedGroup.representative.eventId}</span></div>
@@ -1354,6 +1407,32 @@ export const DashboardApp = (): ReactElement => {
     eventsRequest.current.controller?.abort();
     eventsRequest.current = { controller: null, generation: eventsRequest.current.generation + 1 };
   }, []);
+
+  const reloadFirstEventsPage = useCallback(async (channelId: string, filters: PanelEventFilters): Promise<void> => {
+    const routePath = dashboardRoutePath({
+      kind: "channel",
+      channelId,
+      section: "events",
+      ...(eventFilterIsActive(filters) ? { filters } : {}),
+    });
+    const request = startEventsRequest();
+    setEvents((current) => loadingState(current));
+    try {
+      const response = await fetchEvents(channelId, null, request.controller.signal, filters);
+      if (!isCurrentEventsRequest(request.generation) || request.controller.signal.aborted || window.location.pathname + window.location.search !== routePath) return;
+      setEvents((current) => loadedState({
+        entries: mergeEventEntries(current.data?.entries ?? [], response.entries),
+        nextCursor: current.data === null ? response.nextCursor : current.data.nextCursor,
+      }));
+      setEventsChannelId(channelId);
+    } catch (error) {
+      if (!isCurrentEventsRequest(request.generation) || request.controller.signal.aborted || window.location.pathname + window.location.search !== routePath || (error instanceof DOMException && error.name === "AbortError")) return;
+      setEvents((current) => ({ ...current, status: "error", error: errorMessage(error) }));
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    } finally {
+      finishEventsRequest(request.generation);
+    }
+  }, [finishEventsRequest, isCurrentEventsRequest, startEventsRequest]);
 
   const clearProtectedState = (): void => {
     auditPageController.current?.abort();
@@ -1834,7 +1913,7 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
         {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} /> : null}
         {route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
-        {route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
+        {route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
         </main>
       </div>
     </div>

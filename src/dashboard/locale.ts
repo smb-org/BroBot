@@ -229,6 +229,12 @@ export interface DashboardTexte {
     keineTreffer: string;
     nachladenAmEnde: string;
     feedEnde: string;
+    realtimeVerbindet: string;
+    realtimeVerbunden: string;
+    realtimeWiederverbindung: string;
+    realtimeOffline: string;
+    realtimeSitzungErneuern: string;
+    realtimeNeue: (anzahl: string) => string;
   };
   anmeldung: {
     erforderlich: string;
@@ -356,6 +362,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       kanalereignisse: "Kanalereignisse", moduldiagnosen: "Moduldiagnosen", aktiveFilter: "Aktive Filter:", filterZuruecksetzen: "Filter zurücksetzen",
       keineTreffer: "Keine Ereignisse passen zu den Filtern.", nachladenAmEnde: "Am Ende werden ältere Ereignisse nachgeladen.",
       feedEnde: "Ende des Ereignisverlaufs erreicht.",
+      realtimeVerbindet: "Verbindet …", realtimeVerbunden: "Verbunden", realtimeWiederverbindung: "Verbindet neu …",
+      realtimeOffline: "Offline", realtimeSitzungErneuern: "Sitzung erneuern", realtimeNeue: (anzahl) => `${anzahl} neue Ereignisse`,
     },
     anmeldung: {
       erforderlich: "Anmeldung erforderlich", erklaerung: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -462,6 +470,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       kanalereignisse: "Channel events", moduldiagnosen: "Module diagnostics", aktiveFilter: "Active filters:", filterZuruecksetzen: "Reset filters",
       keineTreffer: "No events match the filters.", nachladenAmEnde: "Older events load at the end.",
       feedEnde: "End of the event history reached.",
+      realtimeVerbindet: "Connecting …", realtimeVerbunden: "Connected", realtimeWiederverbindung: "Reconnecting …",
+      realtimeOffline: "Offline", realtimeSitzungErneuern: "Renew session", realtimeNeue: (anzahl) => `${anzahl} new events`,
     },
     anmeldung: {
       erforderlich: "Sign-in required", erklaerung: "Sign in with your Twitch account to see available channels.",

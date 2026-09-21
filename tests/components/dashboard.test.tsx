@@ -96,14 +96,62 @@ const requestUrl = (input: RequestInfo | URL): URL => {
   return new URL(input, window.location.origin);
 };
 
+class TestWebSocket {
+  static instances: TestWebSocket[] = [];
+  readonly url: string;
+  readonly protocols: string | string[];
+  readyState = 0;
+  private readonly listeners = new Map<string, Set<(event: Event) => void>>();
+
+  constructor(url: string, protocols: string | string[]) {
+    this.url = url;
+    this.protocols = protocols;
+    TestWebSocket.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    if (typeof listener !== "function") return;
+    const callbacks = this.listeners.get(type) ?? new Set<(event: Event) => void>();
+    callbacks.add(listener);
+    this.listeners.set(type, callbacks);
+  }
+
+  private emit(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+
+  open(): void {
+    this.readyState = 1;
+    this.emit("open", new Event("open"));
+  }
+
+  receive(data: string): void {
+    this.emit("message", new MessageEvent("message", { data }));
+  }
+
+  close(code = 1000, reason = ""): void {
+    if (this.readyState === 3) return;
+    this.readyState = 3;
+    this.emit("close", new CloseEvent("close", { code, reason, wasClean: true }));
+  }
+
+  static reset(): void {
+    TestWebSocket.instances = [];
+  }
+}
+
 describe("Dashboard-Grundgerüst", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+    TestWebSocket.reset();
   });
 
   afterEach(() => {
     cleanup();
+    TestWebSocket.reset();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("erkennt die kanalgebundene Systemroute", () => {
@@ -369,6 +417,228 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ältere Ereignisse laden" })).not.toBeInTheDocument();
+  });
+
+  it("lädt neue Ereignisse am Anfang nach und mischt sie ein", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":7}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    let ersteSeite = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        ersteSeite += 1;
+        return jsonResponse({ entries: ersteSeite === 1 ? [alt] : [neu, alt], nextCursor: null });
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("alt")).toBeInTheDocument();
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.receive(JSON.stringify({ version: 1, id: "message-1", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "ereignisprotokoll.neu", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
+
+    expect(await screen.findByText("Raid von unbekannt mit 7 Zuschauern")).toBeInTheDocument();
+    expect(ersteSeite).toBe(2);
+  });
+
+  it("hält die Liste weiter unten an und zeigt nur den Hinweis", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":8}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    let eventRequests = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        eventRequests += 1;
+        return jsonResponse({ entries: [alt], nextCursor: null });
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("alt")).toBeInTheDocument();
+    const feed = document.querySelector(".ereignis-feed");
+    if (feed === null) throw new Error("Ereignis-Feed fehlt");
+    Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "ereignisprotokoll.neu", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
+
+    expect(await screen.findByRole("button", { name: "1 neue Ereignisse" })).toBeInTheDocument();
+    expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
+    expect(eventRequests).toBe(1);
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+  });
+
+  it("springt mit dem Hinweis an den Anfang und lädt dann nach", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":9}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    let eventRequests = 0;
+    const scrollTo = vi.fn();
+    Object.defineProperty(window, "scrollTo", { configurable: true, value: scrollTo });
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        eventRequests += 1;
+        return jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null });
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("alt")).toBeInTheDocument();
+    const feed = document.querySelector(".ereignis-feed");
+    if (feed === null) throw new Error("Ereignis-Feed fehlt");
+    Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.receive(JSON.stringify({ version: 1, id: "message-jump", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "ereignisprotokoll.neu", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "1 neue Ereignisse" }));
+    expect(await screen.findByText("Raid von unbekannt mit 9 Zuschauern")).toBeInTheDocument();
+    expect(eventRequests).toBe(2);
+    expect(scrollTo).toHaveBeenCalledOnce();
+  });
+
+  it("verarbeitet eine doppelte Nachricht nur einmal", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":10}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    let eventRequests = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        eventRequests += 1;
+        return jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null });
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("alt")).toBeInTheDocument();
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    const message = JSON.stringify({ version: 1, id: "message-dupe", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "ereignisprotokoll.neu", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } });
+    socket.receive(message);
+    socket.receive(message);
+
+    expect(await screen.findByText("Raid von unbekannt mit 10 Zuschauern")).toBeInTheDocument();
+    expect(eventRequests).toBe(2);
+  });
+
+  it("ignoriert unbekannte Nachrichtenarten", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let eventRequests = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        eventRequests += 1;
+        return jsonResponse({ entries: [], nextCursor: null });
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Noch keine Ereignisse protokolliert.")).toBeInTheDocument();
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.receive(JSON.stringify({ version: 1, id: "message-unbekannt", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "neues.modul", payload: { entries: [{ eventId: "ignored", createdAt: "2026-09-18T04:00:01.000Z", moduleId: "raid", code: "neu", actorUserId: null }] } }));
+
+    expect(eventRequests).toBe(1);
+    expect(screen.queryByRole("button", { name: /neue Ereignisse/ })).not.toBeInTheDocument();
+  });
+
+  it("schließt bei einem Hinweis aus einem fremden Kanal", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Noch keine Ereignisse protokolliert.")).toBeInTheDocument();
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.receive(JSON.stringify({ version: 1, id: "message-fremd", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-b", type: "ereignisprotokoll.neu", payload: { entries: [] } }));
+
+    expect(socket.readyState).toBe(3);
+    expect(await screen.findByText("Offline")).toBeInTheDocument();
+  });
+
+  it("lädt Seite 1 nach einem Wiederaufbau neu", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":11}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    let eventRequests = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        eventRequests += 1;
+        return Promise.resolve(jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("alt")).toBeInTheDocument();
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.close(1006, "Abbruch");
+    await act(async () => { await new Promise<void>((resolve) => { setTimeout(resolve, 300); }); });
+    const rebuiltSocket = TestWebSocket.instances[1];
+    if (rebuiltSocket === undefined) throw new Error("Reconnect-Socket fehlt");
+    rebuiltSocket.open();
+
+    expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
+    expect(eventRequests).toBe(2);
   });
 
   it("lädt am zugänglichen Feed-Ende nur einmal und zeigt das Ende ausdrücklich", async () => {
