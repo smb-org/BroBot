@@ -11,15 +11,22 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import type { ChannelMemberRole } from "../auth/authorization";
+import type { ModuleRouteVariables } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState } from "../module-scopes";
 import { actorOf, readJsonBody } from "./member-routes";
+import { broadcasterHasScope } from "../broadcaster-scope";
+import { getAppAccessToken } from "../app-token";
+import { writeModuleDiagnostics } from "../event-log";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
-  Variables: ChannelAuthorizationVariables;
+  Variables: ChannelAuthorizationVariables & Pick<
+    ModuleRouteVariables,
+    "writeModuleDiagnostics" | "broadcasterHasScope" | "getAppAccessToken"
+  >;
 }
 
 const nowIso = (): string => new Date().toISOString();
@@ -60,6 +67,13 @@ export const moduleRouter = new Hono<ModuleRouteEnvironment>();
 
 moduleRouter.use("/api/channels/:channelId/modules", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/modules/*", requireChannelAuthorization());
+
+moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
+  context.set("writeModuleDiagnostics", writeModuleDiagnostics);
+  context.set("broadcasterHasScope", broadcasterHasScope);
+  context.set("getAppAccessToken", getAppAccessToken);
+  return next();
+});
 
 moduleRouter.get("/api/channels/:channelId/modules", async (context) => {
   const channelId = context.req.param("channelId");

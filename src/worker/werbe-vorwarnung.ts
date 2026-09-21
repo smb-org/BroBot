@@ -5,7 +5,8 @@ import { getChannelModuleForChannel, type ChannelModuleRecord } from "./auth/rep
 import { moduleBroadcasterScopeState } from "./module-scopes";
 import { sendChatMessage } from "./chat";
 import { writeModuleDiagnostics } from "./event-log";
-import { getAdSchedule, type AdScheduleResult } from "./ad-schedule";
+import { getAppAccessToken } from "./app-token";
+import { getAdSchedule, type AdScheduleResult } from "../modules/werbung/adapters/ad-schedule";
 
 const MODULE_ID = "werbung";
 const WARNING_SCOPE = "channel:read:ads";
@@ -106,9 +107,12 @@ const scopeMissing = async (
   triggerId: string,
   now: string,
   planer: Werbeplaner | null,
+  diagnosenSchreiben = true,
 ): Promise<void> => {
   await clear(planer);
-  await writeOne(environment, channelId, triggerId, now, "werbung.vorwarnung.scope_fehlt", { scope: WARNING_SCOPE });
+  if (diagnosenSchreiben) {
+    await writeOne(environment, channelId, triggerId, now, "werbung.vorwarnung.scope_fehlt", { scope: WARNING_SCOPE });
+  }
 };
 
 const scheduleFailureDiagnostic = (result: AdScheduleResult): ModuleDiagnostic => ({
@@ -124,13 +128,14 @@ const settingRecord = async (
   triggerId: string,
   now: string,
   planer: Werbeplaner | null,
+  diagnosenSchreiben = true,
 ): Promise<{ record: ChannelModuleRecord; settings: NonNullable<ReturnType<typeof moduleSettings>> } | null> => {
   const record = await getChannelModuleForChannel(environment.DB, channelId, MODULE_ID);
   const settings = moduleSettings(record);
   if (record === null || !record.enabled || settings === null) return null;
   const scopeState = await moduleBroadcasterScopeState(environment.DB, channelId, werbungModul);
   if (scopeState.missing.length > 0) {
-    await scopeMissing(environment, channelId, triggerId, now, planer);
+    await scopeMissing(environment, channelId, triggerId, now, planer, diagnosenSchreiben);
     return null;
   }
   return { record, settings };
@@ -165,26 +170,38 @@ export const aktualisiereWerbevorwarnung = async (
   triggerId: string,
   now: string,
   fetcher: typeof fetch = fetch,
+  bereitsGelesenerZeitplan?: AdScheduleResult,
+  diagnosenSchreiben = true,
 ): Promise<void> => {
   const planer = planerFuer(environment, channelId);
-  const configured = await settingRecord(environment, channelId, triggerId, now, planer);
+  const configured = await settingRecord(environment, channelId, triggerId, now, planer, diagnosenSchreiben);
   if (configured === null || !configured.settings.vorwarnung) {
     await clear(planer);
     return;
   }
 
-  const result = await getAdSchedule(environment, channelId, now, fetcher);
+  const result = bereitsGelesenerZeitplan ?? await getAdSchedule(
+    environment as unknown as Env,
+    channelId,
+    now,
+    getAppAccessToken,
+    fetcher,
+  );
   if (!result.fetched || result.schedule === null) {
     if (result.reason === "unauthorized") {
-      await scopeMissing(environment, channelId, triggerId, now, planer);
+      await scopeMissing(environment, channelId, triggerId, now, planer, diagnosenSchreiben);
     } else {
-      await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
+      if (diagnosenSchreiben) {
+        await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
+      }
     }
     return;
   }
   if (result.schedule.nextAdAt === null) {
     await clear(planer);
-    await writeOne(environment, channelId, triggerId, now, "werbung.vorwarnung.kein_termin");
+    if (diagnosenSchreiben) {
+      await writeOne(environment, channelId, triggerId, now, "werbung.vorwarnung.kein_termin");
+    }
     return;
   }
 
@@ -205,7 +222,13 @@ export const verarbeiteWerbevorwarnung = async (
   const configured = await settingRecord(environment, channelId, triggerId, now, planer);
   if (configured === null || !configured.settings.vorwarnung) return;
 
-  const result = await getAdSchedule(environment, channelId, now, fetcher);
+  const result = await getAdSchedule(
+    environment as unknown as Env,
+    channelId,
+    now,
+    getAppAccessToken,
+    fetcher,
+  );
   if (!result.fetched || result.schedule === null) {
     if (result.reason === "unauthorized") {
       await scopeMissing(environment, channelId, triggerId, now, planer);

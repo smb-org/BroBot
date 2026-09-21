@@ -124,6 +124,17 @@ export interface ModuleRouteVariables {
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
   prepareModuleAudit: PrepareModuleAudit;
+  writeModuleDiagnostics: (
+    db: D1Database,
+    channelId: string,
+    moduleId: string,
+    triggerId: string,
+    actorUserId: string | null,
+    diagnostics: readonly ModuleDiagnostic[],
+    now: string,
+  ) => Promise<unknown>;
+  broadcasterHasScope: (db: D1Database, channelId: string, scope: string) => Promise<boolean>;
+  getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
 }
 
 export interface ModuleRouteEnvironment {

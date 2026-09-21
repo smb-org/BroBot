@@ -541,6 +541,7 @@ export type EreignisCode =
   | "werbung.vorwarnung.termin_verschoben"
   | "werbung.vorwarnung.scope_fehlt"
   | "werbung.vorwarnung.zeitplan_fehler"
+  | "werbung.snooze"
   | "textbefehle.abgekuehlt"
   | "textbefehle.ausgeloest"
   | "textbefehle.deaktiviert"
@@ -657,6 +658,7 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "werbung.vorwarnung.termin_verschoben": "Werbe-Vorwarnung unterdrückt: Termin wurde verschoben",
     "werbung.vorwarnung.scope_fehlt": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
     "werbung.vorwarnung.zeitplan_fehler": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "grund", "unbekannter Fehler")}`,
+    "werbung.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "grund", "unbekannter Fehler")}`,
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
@@ -718,6 +720,7 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "werbung.vorwarnung.termin_verschoben": "Ad warning suppressed: schedule changed",
     "werbung.vorwarnung.scope_fehlt": "Ad warning suppressed: channel:read:ads is missing",
     "werbung.vorwarnung.zeitplan_fehler": (detail) => `Ad schedule could not be read: ${detailText(detail, "grund", "unknown error")}`,
+    "werbung.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "grund", "unknown error")}`,
     "textbefehle.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
@@ -790,6 +793,7 @@ export const ereignisTon: Record<EreignisCode, EreignisTon> = {
   "werbung.vorwarnung.termin_verschoben": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
   "werbung.vorwarnung.scope_fehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
   "werbung.vorwarnung.zeitplan_fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "werbung.snooze": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Snooze", en: "Snooze" }, zahlSchluessel: null, ton: "info" },
   "textbefehle.abgekuehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: "restSekunden", ton: "hinweis" },
   "textbefehle.ausgeloest": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
   "textbefehle.deaktiviert": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },

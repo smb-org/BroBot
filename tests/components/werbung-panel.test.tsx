@@ -62,4 +62,73 @@ describe("Werbung-Panel-Ansicht", () => {
       expect(textarea.compareDocumentPosition(hint as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
   });
+
+  it("zeigt Snooze ohne Scope sichtbar, deaktiviert und mit Zähler sowie Aufladezeitpunkt", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
+      const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (path.endsWith("/zeitplan")) {
+        return Promise.resolve(jsonResponse({
+          schedule: {
+            nextAdAt: "2026-09-21T12:00:00Z",
+            duration: 60,
+            lastAdAt: null,
+            prerollFreeTime: 120,
+            snoozeCount: 0,
+            snoozeRefreshAt: "2026-09-21T12:30:00Z",
+          },
+          snoozeScopeVorhanden: false,
+          letzteWerbepausen: [],
+        }));
+      }
+      return Promise.resolve(jsonResponse({ settings: {
+        automatisch: "auto {duration}",
+        manuell: "manuell {duration}",
+        vorwarnung: true,
+        vorlaufSekunden: 60,
+        vorwarnungText: "gleich {seconds}",
+      } }));
+    }));
+
+    render(<WerbungPanel channelId="kanal-a" language="de" />);
+
+    const button = await screen.findByRole("button", { name: /Snooze.*0.*Aufladung/ });
+    expect(button).toBeDisabled();
+    expect(screen.getByText(/channel:manage:ads fehlt/)).toBeInTheDocument();
+  });
+
+  it("zeigt einen leeren Zeitplan ruhig und listet die letzten Werbepausen", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
+      const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (path.endsWith("/zeitplan")) {
+        return Promise.resolve(jsonResponse({
+          schedule: {
+            nextAdAt: null,
+            duration: null,
+            lastAdAt: null,
+            prerollFreeTime: null,
+            snoozeCount: null,
+            snoozeRefreshAt: null,
+          },
+          snoozeScopeVorhanden: true,
+          letzteWerbepausen: [{ zeitpunkt: "2026-09-21T11:00:00Z", dauerSekunden: 90 }],
+        }));
+      }
+      return Promise.resolve(jsonResponse({ settings: {
+        automatisch: "auto {duration}",
+        manuell: "manuell {duration}",
+        vorwarnung: true,
+        vorlaufSekunden: 60,
+        vorwarnungText: "gleich {seconds}",
+      } }));
+    }));
+
+    render(<WerbungPanel channelId="kanal-a" language="de" />);
+
+    expect(await screen.findByText("Derzeit ist keine Werbung geplant.")).toBeInTheDocument();
+    expect(await screen.findByText(/90 Sekunden/)).toBeInTheDocument();
+    // Tests laufen in UTC (siehe package.json), damit derselbe Zeitpunkt überall
+    // gleich formatiert wird: 11:00Z bleibt 11:00 statt zur Zeitzone der Maschine
+    // zu wandern.
+    expect(screen.getByText(/11:00/)).toBeInTheDocument();
+  });
 });

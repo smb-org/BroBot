@@ -30,6 +30,9 @@ export default defineConfig({
     }),
   ],
   test: {
+    // Wie in vitest.config.ts: Tests laufen in UTC, damit ein formatierter
+    // Zeitpunkt überall dasselbe ergibt.
+    env: { TZ: "UTC" },
     include: ["tests/worker/**/*.test.ts"],
     testTimeout: 30_000,
     inspector: { enabled: false },
