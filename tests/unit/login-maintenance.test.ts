@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { setLoginIdentityStatus } from "../../src/worker/auth/repository";
-import { maintainLoginIdentities } from "../../src/worker/login-maintenance";
+import { setLoginIdentityStatus, upsertLoginIdentity } from "../../src/worker/auth/repository";
+import { confirmLoginIdentityAuthorization, maintainLoginIdentities } from "../../src/worker/login-maintenance";
 import { TestD1Database } from "./test-d1";
 
 const keyRingSerialized = JSON.stringify({
@@ -29,6 +29,7 @@ const makeEnvironment = async (
     user_id: "user-1",
     login: "tester",
     scopes_json: "[\"user:read:moderated_channels\"]",
+    token_scopes_json: "[]",
     access_token_ciphertext: initialAccessTokenCiphertext,
     refresh_token_ciphertext: initialRefreshTokenCiphertext,
     expires_at: expiresAt,
@@ -56,6 +57,12 @@ const makeEnvironment = async (
       all: vi.fn().mockImplementation(() =>
         sql.includes("FROM twitch_login_identity") ? { results: [row] } : { results: [] }),
       run: vi.fn().mockImplementation(async () => {
+        if (sql.includes("UPDATE twitch_login_identity") && sql.includes("SET token_scopes_json")) {
+          const [scopesJson, updatedAt, userId] = values;
+          if (row.user_id !== userId) return { success: true, meta: { changes: 0 } };
+          row = { ...row, token_scopes_json: String(scopesJson), updated_at: String(updatedAt) };
+          return { success: true, meta: { changes: 1 } };
+        }
         if (sql.includes("UPDATE twitch_login_identity") && sql.includes("SET access_token_ciphertext")) {
           tokenWriteAttempts += 1;
           if (options.failTokenWriteOnce && tokenWriteAttempts === 1) throw new Error("D1 write failed");
@@ -173,6 +180,93 @@ const makeEnvironment = async (
 };
 
 describe("Login-Token-Wartung", () => {
+  it("schreibt auch im Widerrufs-Bestätigungspfad die Scopes des erfolgreichen Refreshs", async () => {
+    const database = new TestD1Database();
+    try {
+      const keys = parseKeyRing(keyRingSerialized);
+      await upsertLoginIdentity(database as unknown as D1Database, {
+        userId: "user-1",
+        login: "tester",
+        scopesJson: "[\"channel:read:ads\"]",
+        tokenScopesJson: "[\"channel:bot\"]",
+        accessTokenCiphertext: await encryptJson({ token: "access-alt" }, keys),
+        refreshTokenCiphertext: await encryptJson({ token: "refresh-alt" }, keys),
+        expiresAt: "2026-09-18T02:00:00.000Z",
+        status: "connected",
+        reason: null,
+        createdAt: "2026-09-18T00:00:00.000Z",
+        updatedAt: "2026-09-18T00:00:00.000Z",
+      });
+      const fetcher = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          access_token: "access-neu",
+          refresh_token: "refresh-neu",
+          expires_in: 7200,
+          scope: ["channel:read:ads"],
+        }), { status: 200 }));
+
+      await expect(confirmLoginIdentityAuthorization(
+        {
+          DB: database as unknown as D1Database,
+          TWITCH_CLIENT_ID: "client-id",
+          TWITCH_CLIENT_SECRET: "client-secret",
+          SESSION_ENCRYPTION_KEYS: keyRingSerialized,
+        } as unknown as Env,
+        "user-1",
+        "2026-09-18T00:00:00.000Z",
+        fetcher,
+      )).resolves.toBe(false);
+
+      await expect(database.prepare(
+        "SELECT token_scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'",
+      ).first()).resolves.toEqual({ token_scopes_json: '["channel:read:ads"]' });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("schreibt die Scopes aus einer erfolgreichen Validate-Antwort in den Token-Umfang", async () => {
+    const { environment, read } = await makeEnvironment("2026-09-18T02:00:01.000Z");
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        user_id: "user-1",
+        login: "tester",
+        expires_in: 7200,
+        scopes: ["channel:read:ads"],
+      }),
+      { status: 200 },
+    ));
+    vi.stubGlobal("fetch", fetcher);
+
+    await maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
+
+    expect(read().token_scopes_json).toBe('["channel:read:ads"]');
+  });
+
+  it("schreibt die Scopes aus einem erfolgreichen Wartungs-Refresh in den Token-Umfang", async () => {
+    const { environment, read } = await makeEnvironment("2026-09-18T00:59:59.000Z");
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 3599 }),
+        { status: 200 },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          access_token: "access-neu",
+          refresh_token: "refresh-neu",
+          expires_in: 7200,
+          scope: ["channel:read:ads"],
+        }),
+        { status: 200 },
+      ));
+    vi.stubGlobal("fetch", fetcher);
+
+    await maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
+
+    expect(read().token_scopes_json).toBe('["channel:read:ads"]');
+  });
+
   it("validiert weit entfernte Login-Tokens, erneuert sie aber noch nicht", async () => {
     const { environment } = await makeEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn().mockResolvedValue(new Response(

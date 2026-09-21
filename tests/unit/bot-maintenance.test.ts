@@ -231,6 +231,7 @@ describe("Bot-Wartung", () => {
       userId: "bot-user",
       login: "brobot",
       expiresIn: 3600,
+      scopes: [],
     });
   });
 

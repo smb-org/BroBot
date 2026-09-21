@@ -512,6 +512,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       userId: identity.userId,
       login: identity.login,
       scopesJson: JSON.stringify(tokens.scopes),
+      tokenScopesJson: JSON.stringify(tokens.scopes),
       accessTokenCiphertext: await encryptJson(
         { token: tokens.accessToken },
         parseKeyRing(encryptionKeys),

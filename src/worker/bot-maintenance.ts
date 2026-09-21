@@ -29,6 +29,7 @@ export interface ValidatedBotToken {
   userId: string;
   login: string;
   expiresIn: number;
+  scopes: string[];
 }
 
 export class TwitchApiError extends Error {
@@ -189,7 +190,10 @@ export const validateBotToken = async (
   if (typeof body.client_id === "string" && body.client_id !== environment.TWITCH_CLIENT_ID) {
     throw new TwitchApiError("Twitch-Token gehört zu einer anderen Anwendung.", 502);
   }
-  return { userId: body.user_id, login: body.login, expiresIn: body.expires_in };
+  const scopes = Array.isArray(body.scopes)
+    ? body.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  return { userId: body.user_id, login: body.login, expiresIn: body.expires_in, scopes };
 };
 
 interface ModeratedChannelsPage {
@@ -346,6 +350,7 @@ export const confirmIdentityAuthorization = async (
     refreshTokenCiphertext: string,
     expiresAt: string,
     updatedAt: string,
+    scopes: readonly string[],
   ) => Promise<boolean>,
   fetcher: typeof fetch = fetch,
 ): Promise<boolean> => {
@@ -380,6 +385,7 @@ export const confirmIdentityAuthorization = async (
         refreshTokenCiphertext,
         new Date(Date.parse(now) + refreshed.expiresIn * 1000).toISOString(),
         now,
+        refreshed.scopes,
       );
       return false;
     } catch (refreshError: unknown) {
@@ -468,7 +474,7 @@ const maintainBotIdentityInternal = async (
     currentStatus = await validateBotToken(fetcher, env, accessToken);
   } catch (error: unknown) {
     if (error instanceof TwitchApiError && error.status === 401) {
-      currentStatus = { userId: identity.userId, login: identity.login, expiresIn: 0 };
+      currentStatus = { userId: identity.userId, login: identity.login, expiresIn: 0, scopes: [] };
       validateReturned401 = true;
     } else {
       logMaintenanceError({ channelId: "global", subscriptionType: "bot-identity", variant: "validation" }, error, "validate_failed");

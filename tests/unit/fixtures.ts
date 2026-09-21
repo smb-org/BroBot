@@ -24,12 +24,13 @@ export const insertLoginIdentityAndSession = async (
 ): Promise<void> => {
   await database.prepare(
     `INSERT INTO twitch_login_identity
-      (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+      (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext, refresh_token_ciphertext,
        expires_at, status, reason, created_at, updated_at)
-     VALUES (?, ?, ?, 'access', 'refresh', ?, 'connected', NULL, ?, ?)`,
+     VALUES (?, ?, ?, ?, 'access', 'refresh', ?, 'connected', NULL, ?, ?)`,
   ).bind(
     userId,
     userId,
+    JSON.stringify(scopes),
     JSON.stringify(scopes),
     "2099-09-19T00:00:00.000Z",
     "2026-09-18T00:00:00.000Z",
