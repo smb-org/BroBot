@@ -5,6 +5,7 @@ import { betreiberRouter } from "./betreiber/routes";
 import { getHealthStatus } from "./config";
 import { eventSubRouter } from "./eventsub";
 import { panelRouter } from "./panel/routes";
+import { realtimeRouter } from "./realtime";
 import { scheduled } from "./scheduled";
 
 export { ChannelObject } from "./durable/ChannelObject";
@@ -15,6 +16,7 @@ app.route("/", authRouter);
 app.route("/", betreiberRouter);
 app.route("/", panelRouter);
 app.route("/", eventSubRouter);
+app.route("/", realtimeRouter);
 
 app.get("/healthz", async (context) => {
   const health = await getHealthStatus(context.env);

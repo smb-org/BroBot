@@ -1,8 +1,10 @@
 import type { BotModule, ModuleAction, ModuleActor, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleResult } from "../modules/contract";
+import type { RealtimeEnvelope } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
 import { getChannelMemberForChannel, listChannelModulesForChannel } from "./auth/repository";
 import { sendChatMessage } from "./chat";
-import { writeModuleDiagnostics } from "./event-log";
+import { publishRealtimeMessage } from "./realtime";
+import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
 
 export interface DispatchEnvironment {
@@ -10,6 +12,7 @@ export interface DispatchEnvironment {
   TWITCH_CLIENT_ID: string;
   TOKEN_ENCRYPTION_KEYS?: string;
   SESSION_ENCRYPTION_KEYS?: string;
+  CHANNEL?: Env["CHANNEL"];
 }
 
 /** Der Host protokolliert Handeln und dessen Ausgang; Module begründen Nicht-Handeln. */
@@ -147,9 +150,10 @@ export const dispatchEventSubNotification = async (
   const aktivierungen = await listChannelModulesForChannel(environment.DB, event.channelId);
   const { treffer, unbekannt } = selectModulesForEvent(aktivierungen, event.subscriptionType, registry);
   const actor = await akteurFuerEreignis(environment.DB, event.channelId, event.payload);
+  const neueEinträge: WrittenModuleDiagnostic[] = [];
 
   for (const moduleId of unbekannt) {
-    await writeModuleDiagnostics(
+    neueEinträge.push(...await writeModuleDiagnostics(
       environment.DB,
       event.channelId,
       HOST_MODULE_ID,
@@ -157,7 +161,7 @@ export const dispatchEventSubNotification = async (
       null,
       [{ code: "host.modul.unbekannt", detail: { modulId: moduleId } }],
       event.receivedAt,
-    );
+    ));
   }
 
   for (const { module, settings } of treffer) {
@@ -198,7 +202,7 @@ export const dispatchEventSubNotification = async (
       }
     }
 
-    await writeModuleDiagnostics(
+    neueEinträge.push(...await writeModuleDiagnostics(
       environment.DB,
       event.channelId,
       module.id,
@@ -206,6 +210,31 @@ export const dispatchEventSubNotification = async (
       actor?.userId ?? null,
       diagnostics,
       event.receivedAt,
-    );
+    ));
+  }
+
+  if (neueEinträge.length === 0) return;
+  const realtimeMessage: RealtimeEnvelope<"ereignisprotokoll.neu"> = {
+    version: 1,
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    channelId: event.channelId,
+    type: "ereignisprotokoll.neu",
+    payload: {
+      entries: neueEinträge.map(({ eventId, createdAt, moduleId, code, actorUserId }) => ({
+        eventId,
+        createdAt,
+        moduleId,
+        code,
+        actorUserId,
+      })),
+    },
+  };
+  try {
+    await publishRealtimeMessage(environment.CHANNEL, realtimeMessage);
+  } catch (error: unknown) {
+    // Der Feed ist ein Hinweis; D1 bleibt der verbindliche Stand und die
+    // Ereignisverarbeitung darf nicht an einem geschlossenen Socket scheitern.
+    console.warn("Realtime-Hinweis konnte nicht gesendet werden.", error);
   }
 };
