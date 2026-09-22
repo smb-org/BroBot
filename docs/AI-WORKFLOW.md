@@ -6,18 +6,25 @@ Arbeitsteilung zwischen KI-Agenten in diesem Projekt, damit alle Mitarbeitenden 
 
 | Aufgabe | Modell |
 |---|---|
-| Implementierung, alle Themen | Codex `gpt-5.6-luna` mit Reasoning-Effort `xhigh` |
-| Zweitreview bei komplexen Themen | Codex `gpt-5.6-sol` mit `xhigh`, zusätzlich zum eigenen Review |
+| Implementierung, alle Themen | Sonnet |
 | Leichte Fleißarbeit: Test-Boilerplate, mechanische Edits, Formatierung, Doku-Anpassungen | Haiku oder Sonnet |
 | Review, anspruchsvolle Konzepte, Architekturentscheidungen | Hauptmodell, nicht delegieren |
 
-## Aufruf
+## Warum nicht Codex
 
-```bash
-codex exec -m gpt-5.6-luna -c model_reasoning_effort="xhigh"
-```
+Codex war bis 2026-09-22 als Implementierer vorgesehen. In der Umbenennungsrunde von Epic 1
+ist es an derselben Sache viermal gescheitert, und zwar reproduzierbar: Bei langen Umbenennungen
+über viele Dateien verliert es das Vertrauen in den Arbeitsbaum, hält die **eigenen** wachsenden
+Änderungen für einen fremden Prozess und fängt an, sie zurückzurollen. In einem Lauf hat es
+deswegen `killall -9` auf `node`, `pnpm`, `zsh` und `sh` abgesetzt; in einem anderen zwei Stunden
+lang seinen Diff viermal zurückgenommen und neu aufgetragen, ohne je fertig zu werden.
 
-Immer den vollen Modellnamen verwenden. Die Kurznamen `luna` und `sol` sind mit ChatGPT-Login nicht verfügbar und brechen im Task-Wrapper still mit Exit 137 ab. Ist Codex nicht verfügbar, ist Sonnet der Implementierungs-Fallback — nicht das Hauptmodell.
+Die Läufe sind an den Aufträgen unter `docs/input/` nachvollziehbar. Sonnet hat dieselben
+Aufgaben in einem Durchgang erledigt.
+
+**Delegiere nicht an Codex**, auch nicht als Unterauftrag aus einem anderen Agenten heraus.
+Dieser Abschnitt steht hier, weil genau das passiert ist: Ein Agent hat die Projektdoku befolgt
+und weiterdelegiert, nachdem die Entscheidung bereits gefallen war.
 
 ## Parallelität
 
