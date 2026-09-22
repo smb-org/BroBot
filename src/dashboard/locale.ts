@@ -84,7 +84,6 @@ export interface DashboardTexts {
   };
   navigation: {
     mainNavigation: string;
-    breadcrumb: string;
     overview: string;
     channel: string;
     system: string;
@@ -97,6 +96,12 @@ export interface DashboardTexts {
     twitchAccount: string;
     signingOut: string;
     signOut: string;
+    /** Sidebar section heading; the "what you open during an incident" group. */
+    operationSection: string;
+    collapseSidebar: string;
+    expandSidebar: string;
+    openSidebar: string;
+    closeSidebar: string;
   };
   overview: {
     oneChannelAvailable: string;
@@ -296,11 +301,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} fehlen`,
     },
     navigation: {
-      mainNavigation: "Hauptnavigation", breadcrumb: "Brotkrume", overview: "Übersicht", channel: "Kanal", system: "System",
+      mainNavigation: "Hauptnavigation", overview: "Übersicht", channel: "Kanal", system: "System",
       members: "Mitglieder", module: "Module", events: "Ereignisse", selectChannel: "Kanal auswählen",
       selectModule: "Modul auswählen",
       signInWithTwitch: "Mit Twitch anmelden", twitchAccount: "Twitch-Konto",
       signingOut: "Abmeldung …", signOut: "Abmelden",
+      operationSection: "Betrieb",
+      collapseSidebar: "Seitenleiste einklappen", expandSidebar: "Seitenleiste ausklappen",
+      openSidebar: "Seitenleiste öffnen", closeSidebar: "Seitenleiste schließen",
     },
     overview: {
       oneChannelAvailable: "1 Kanal freigegeben",
@@ -412,11 +420,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} missing`,
     },
     navigation: {
-      mainNavigation: "Main navigation", breadcrumb: "Breadcrumb", overview: "Overview", channel: "Channel", system: "System",
+      mainNavigation: "Main navigation", overview: "Overview", channel: "Channel", system: "System",
       members: "Members", module: "Modules", events: "Events", selectChannel: "Select channel",
       selectModule: "Select module",
       signInWithTwitch: "Sign in with Twitch", twitchAccount: "Twitch account",
       signingOut: "Signing out …", signOut: "Sign out",
+      operationSection: "Operation",
+      collapseSidebar: "Collapse sidebar", expandSidebar: "Expand sidebar",
+      openSidebar: "Open sidebar", closeSidebar: "Close sidebar",
     },
     overview: {
       oneChannelAvailable: "1 channel available",

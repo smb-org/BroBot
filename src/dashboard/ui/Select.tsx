@@ -9,6 +9,10 @@ export interface SelectOption {
 
 export interface SelectProps {
   label?: string;
+  /** Accessible name when the field carries no visible caption above it --
+   *  e.g. the header's channel select, which sits in a 56px row with no
+   *  room for one. Ignored once `label` is set. */
+  ariaLabel?: string;
   hint?: string;
   error?: string;
   value: string | null;
@@ -29,6 +33,7 @@ export interface SelectProps {
  */
 export function Select({
   label,
+  ariaLabel,
   hint,
   error,
   value,
@@ -43,6 +48,7 @@ export function Select({
   return (
     <MantineSelect
       label={label}
+      aria-label={label ? undefined : ariaLabel}
       description={hint}
       error={error ? `× ${error}` : undefined}
       value={value}

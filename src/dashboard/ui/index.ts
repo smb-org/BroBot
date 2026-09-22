@@ -8,6 +8,12 @@ export type { StateToken, FamilyToken } from "./theme";
 
 export { Stack, Group, Grid } from "./Layout";
 
+export { Shell } from "./Shell";
+export type { ShellProps, ShellNavContext } from "./Shell";
+
+export { Sidebar } from "./Sidebar";
+export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } from "./Sidebar";
+
 export { Field } from "./Field";
 export type { FieldProps } from "./Field";
 

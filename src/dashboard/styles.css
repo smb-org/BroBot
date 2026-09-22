@@ -301,77 +301,45 @@ pre {
    künftige Inspektoren. Jede alleinstehende Bedienung bleibt mindestens
    44px hoch; dichte Tabellenzeilen bleiben bei 34px. */
 
-.app-shell { display: block; min-height: 100vh; background: var(--grund); }
-.app-body { display: grid; grid-template-columns: 80px minmax(0, 1fr); min-height: calc(100vh - 56px); }
-.topbar {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center;
-  gap: 16px; height: 56px; padding: 0 20px; border-bottom: 1px solid var(--linie);
-  position: relative; background: var(--rail);
-}
-.topbar__breadcrumb {
-  display: flex; align-items: center; justify-content: flex-start; gap: 10px; min-width: 0; white-space: nowrap;
-  /* Die Segmente bleiben mit flex-grow: 0 direkt beieinander, auch auf breiten Kopfleisten. */
-}
 .brand-mark { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; min-width: 44px; min-height: 44px; flex: none; color: var(--text); text-decoration: none; font-size: 15px; font-weight: 700; cursor: pointer; }
 .brand-mark__dot { width: 18px; height: 18px; border: 2px solid var(--marke-text); border-radius: var(--r-control); background: transparent; }
-.topbar__breadcrumb-separator { flex: none; color: var(--text-4); }
-.topbar__breadcrumb-link,
-.topbar__breadcrumb-current { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; flex: 0 1 auto; min-width: 0; color: var(--marke-text); font-size: 13px; text-decoration: none; }
-.topbar__breadcrumb-link:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
-.topbar__breadcrumb-current { font-weight: 600; }
-.topbar__breadcrumb-current > span:last-child,
-.topbar__breadcrumb-link > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.topbar__breadcrumb-icon { display: inline-grid; place-items: center; flex: none; }
-.topbar__breadcrumb-glyph { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.topbar__channel-switch { position: relative; z-index: 20; display: flex; min-width: 0; max-width: 100%; transform: translateY(.5px); flex: 0 1 auto; }
-.topbar__channel-button,
-.topbar__channel-segment { display: inline-flex; align-items: center; min-width: 0; min-height: 44px; color: var(--marke-text); font-size: 13px; font-weight: 600; white-space: nowrap; }
-.topbar__channel-button { gap: 7px; max-width: 100%; padding: 0 4px; border: 0; border-radius: var(--r-control); background: transparent; cursor: pointer; }
-.topbar__channel-button:hover { color: var(--text); }
-.topbar__channel-segment { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
-.topbar__channel-segment--static { max-width: 100%; }
-.topbar__channel-chevron { flex: none; color: var(--text-2); line-height: 1; }
-/* Direkte Brotkrumen-Kinder dürfen ihre freie Breite niemals als Abstand verteilen. */
-.topbar__breadcrumb > * { flex-grow: 0; }
-.topbar__channel-list { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; display: grid; width: min(520px, calc(100vw - 24px)); min-width: 0; max-width: calc(100vw - 24px); max-height: min(60vh, 420px); overflow: auto; padding: 6px; border: 1px solid var(--linie); border-radius: var(--r-container); background: var(--taste); }
-.topbar__channel-option { display: grid; grid-template-columns: 20px minmax(0, 1fr) 150px; grid-template-rows: minmax(20px, auto); align-items: center; gap: 0 8px; min-height: 52px; padding: 6px 8px; border-radius: var(--r-control); color: var(--text); cursor: pointer; }
-.topbar__channel-option:hover { background: var(--taste-hover); }
-.topbar__channel-option:focus-visible { outline: 2px solid var(--marke-text); outline-offset: -2px; }
-.topbar__channel-option-icon { grid-row: 1 / -1; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.topbar__channel-option-copy { display: grid; gap: 2px; grid-column: 2; min-width: 0; }
-.topbar__channel-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-.topbar__channel-option-id { min-width: 0; overflow: hidden; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.topbar__channel-option .led { grid-column: 3; grid-row: 1 / -1; justify-self: start; }
-.topbar__connection { justify-self: end; }
-.topbar__logout { min-height: 44px; }
-/* Auf der Detailseite kommt der Modulschalter als fuenfte Spalte hinzu. */
-.topbar--module-detail { grid-template-columns: minmax(0, 1fr) auto auto auto auto; }
 .datenalter { color: var(--text-3); font-size: 12px; white-space: nowrap; }
 
-.rail {
-  display: block; padding: 12px 8px; background: var(--rail); border-right: 1px solid var(--linie);
+/* Kopfleiste: siehe "Layout" in docs/input/DESIGN-neu.md. Mantine's
+   `AppShell`/`Burger` liefern das Gerüst aus `ui/Shell`; dieser Block
+   ordnet nur, was der Aufrufer als `header`-Inhalt hineinreicht. */
+.dashboard-header {
+  display: grid; grid-template-columns: auto minmax(0, 280px) 1fr auto auto auto;
+  grid-template-areas: "brand channel . status switch logout";
+  align-items: center; gap: 16px; height: 100%; min-width: 0;
 }
-.primary-nav { display: grid; gap: 8px; }
-.nav-link {
-  /* Eine Spalte, die den ganzen Kasten spannt: Sonst misst sich die Zelle am
-     Etikett, und Symbol wie Etikett zentrieren sich auf dessen Breite statt
-     auf den Kasten — die Symbole standen dadurch bei 26 bis 38px statt 40. */
-  position: relative; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; place-content: center;
-  width: 64px; height: 64px; min-width: 64px; min-height: 64px; padding: 7px 3px;
-  border: 1px solid transparent; border-radius: var(--r-container); color: var(--text-3); text-decoration: none; text-align: center;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-.rail .nav-link { justify-self: center; }
-.nav-link:hover { color: var(--text); background: #262321; }
-.nav-link--active { color: var(--marke-text); background: var(--tint-2); border-color: var(--marke); }
-.nav-link:active { transform: scale(.97); border-color: color-mix(in srgb, var(--gruen) 18%, transparent); background: color-mix(in srgb, var(--gruen) 18%, transparent); }
-.module-navigation .nav-link { width: auto; height: auto; min-width: 0; min-height: 40px; padding: 8px 12px; place-items: initial; text-align: left; }
-.rail-link__content { display: grid; grid-template-rows: 20px 1fr; place-items: center; gap: 4px; width: 100%; min-width: 0; font-size: 11px; line-height: 1.1; }
-.rail-link__content > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail-link__icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.nav-dot { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border: 1px solid var(--rail); border-radius: var(--r-control); }
-.nav-dot[data-status="warning"] { background: var(--warn); }
-.nav-dot[data-status="error"] { background: var(--fehler); }
+.dashboard-header__brand { grid-area: brand; }
+.dashboard-header__channel { grid-area: channel; min-width: 0; }
+.dashboard-header__status { grid-area: status; display: flex; align-items: center; gap: 16px; }
+.dashboard-header__switch { grid-area: switch; }
+.dashboard-header__logout { grid-area: logout; min-height: 44px; }
+
+/* Seitenleiste: siehe "Seitenleiste" in docs/input/DESIGN-neu.md. Ersetzt
+   Schiene (`.rail`) und Brotkrumen-Umschalter. */
+.sidebar { display: flex; flex-direction: column; height: 100%; padding: 12px 8px; gap: 4px; }
+.sidebar__scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.sidebar__group { display: flex; flex-direction: column; gap: 2px; }
+.sidebar__group--platform { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--linie); }
+.sidebar__heading { padding: 12px 10px 4px; font-size: 13px; font-weight: 600; color: var(--text-3); }
+.sidebar-nav-link { min-height: 44px; border-radius: var(--r-control); border-left: 2px solid transparent; color: var(--text-2); }
+.sidebar .sidebar-nav-link:hover { color: var(--text); background: var(--taste-hover); }
+.sidebar .sidebar-nav-link[data-active] { color: var(--marke-text); background: var(--tint-2); border-left-color: var(--marke); font-weight: 600; }
+.sidebar-nav-icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.sidebar__collapse-toggle { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-top: 4px; border: 0; border-radius: var(--r-control); color: var(--text-3); background: transparent; cursor: pointer; }
+.sidebar__collapse-toggle:hover { color: var(--text); background: var(--taste-hover); }
+.sidebar[data-collapsed] .sidebar-nav-link { justify-content: center; }
+.sidebar[data-collapsed] .sidebar__collapse-toggle { margin-inline: auto; }
+
+/* Kompatibilitäts-Bauteil für ältere Modul-Tests (`ModuleNavigation`); die
+   Seiten selbst nutzen die Kachelliste, nicht diese Klasse. */
+.module-navigation .nav-link { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 12px; border-radius: var(--r-container); color: var(--text-3); text-decoration: none; }
+.module-navigation .nav-link:hover { color: var(--text); background: var(--taste-hover); }
+
 /* 32px Seitenabstand je Seite: Die Seite umfasst Block und Inspektor; jeder
    einzelne Block bleibt auf seiner Lesebreite begrenzt. */
 .main-content { width: min(calc(var(--seiten-breite) + 64px), 100%); max-width: calc(var(--seiten-breite) + 64px); min-width: 0; padding: 24px 32px 40px; }
@@ -463,10 +431,6 @@ pre {
 .switch[aria-checked="true"] .switch__thumb { transform: translateX(16px); }
 .switch:disabled { cursor: not-allowed; opacity: .45; }
 .switch:focus-visible { outline: 2px solid var(--marke-text); outline-offset: 2px; }
-.topbar__module-switch-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.topbar__module-switch-wrap .sperrgrund { margin-top: 0; }
-.topbar__module-switch { display: flex; align-items: center; justify-content: space-between; width: auto; min-width: 0; height: 44px; min-height: 44px; gap: 8px; padding: 0 10px; color: var(--text-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.topbar__module-switch-label { overflow: hidden; text-overflow: ellipsis; }
 input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacity: .55; }
 .button--danger { color: var(--fehler); border-color: transparent; background: transparent; }
 .button--danger:hover { color: var(--text); border-color: var(--fehler); background: var(--fehler); }
@@ -499,17 +463,19 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .form-actions--create { align-items: center; }
 .form-hint { color: var(--text-3); font-size: 12px; }
 @media (max-width: 768px) {
-  .topbar { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: 56px; gap: 0 8px; height: auto; min-height: 56px; padding: 0 12px; }
-  .topbar--module-detail { grid-template-rows: 56px 40px; min-height: 96px; }
-  .topbar__breadcrumb { grid-column: 1; grid-row: 1; gap: 6px; }
-  .topbar__connection { grid-column: 2; grid-row: 1; justify-self: end; }
-  .topbar--module-detail .topbar__module-switch-wrap { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
-  .topbar .datenalter { display: none; }
-  .topbar__logout { grid-column: 3; grid-row: 1; display: inline-flex; justify-self: end; }
-  .app-body { grid-template-columns: 1fr; min-height: auto; }
-.rail { padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--linie); overflow-x: auto; }
-  .primary-nav { grid-auto-flow: column; grid-auto-columns: 64px; width: max-content; min-width: max-content; gap: 6px; }
-  .rail .nav-link { width: 64px; height: 64px; min-width: 64px; min-height: 64px; padding: 7px 3px; }
+  /* "Schmal (≤768px)" in docs/input/DESIGN-neu.md: the header becomes two
+     rows (brand, LED, sign-out on top; the channel select full width
+     below) and the life-sign disappears. */
+  .dashboard-header {
+    grid-template-columns: auto auto 1fr auto;
+    grid-template-rows: 56px 40px;
+    grid-template-areas:
+      "brand status switch logout"
+      "channel channel channel channel";
+    height: auto;
+  }
+  .dashboard-header__channel { min-width: 0; }
+  .dashboard-header__status .datenalter { display: none; }
   .main-content { padding: 16px; }
   .module-workspace { min-height: auto; margin: -16px -16px -40px; }
   .module-workspace__main { padding: 20px 16px 28px; }
@@ -517,22 +483,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 }
 
 @media (max-width: 420px) {
-  .topbar,
-  .topbar--module-detail { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 56px; height: 56px; min-height: 56px; }
   .brand-mark__word { display: none; }
-  .topbar__breadcrumb-area,
-  .topbar__breadcrumb-area-separator,
-  .topbar__breadcrumb-module,
-  .topbar__breadcrumb-module-separator,
-  .topbar__connection,
-  .topbar__module-switch-wrap { display: none; }
-  .topbar__breadcrumb { grid-column: 1; grid-row: 1; }
-  .topbar__channel-switch { position: static; transform: none; }
-  .topbar__channel-list { left: 12px; right: 12px; width: auto; max-width: none; }
-  .topbar__channel-option { grid-template-columns: 20px minmax(0, 1fr); grid-template-rows: minmax(20px, auto) minmax(20px, auto); }
-  .topbar__channel-option-copy { grid-column: 2; grid-row: 1; }
-  .topbar__channel-option .led { grid-column: 2; grid-row: 2; justify-self: start; }
-  .topbar__logout { grid-column: 2; grid-row: 1; }
   .module-grid { gap: 8px; }
   .module-taste { width: 132px; height: 132px; }
 }

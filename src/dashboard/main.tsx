@@ -46,10 +46,11 @@ import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
 import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, eventToneEntries, formatTimestamp as formatTimestampBase, formatNumber, type EventCode, type EventDetail, type EventNumberKey } from "./locale";
-import { disabledStatusWord, eventSubName, moduleName, statusWord } from "./module-labels";
+import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus } from "./realtime";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
+import { Select as UiSelect, Shell, Sidebar, Switch as UiSwitch, UiProvider, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import "./styles.css";
 
 interface LoadState<T> {
@@ -252,45 +253,6 @@ const mergeModeratorStatus = <T extends { moderator: PanelModeratorStatus | null
   lastError: current.lastError?.source === "moderator" ? moderatorLastError(moderator) : current.lastError,
 });
 
-interface LinkProperties {
-  route: DashboardRoute;
-  current: DashboardRoute;
-  children: ReactNode;
-  onNavigate: (route: DashboardRoute) => void;
-  className?: string;
-}
-
-const RouteLink = ({ route, current, children, onNavigate, className = "nav-link" }: LinkProperties): ReactElement => {
-  const isCurrent = (route.kind === "overview" && current.kind === "overview") ||
-    (route.kind === "betreiber" && current.kind === "betreiber") ||
-    (route.kind === "channel" && current.kind === "channel" &&
-      route.channelId === current.channelId && route.section === current.section) ||
-    (route.kind === "channel" && current.kind === "module" &&
-      route.channelId === current.channelId && route.section === "modules");
-  return (
-    <a
-      className={isCurrent ? `${className} ${className}--active` : className}
-      href={dashboardRoutePath(route)}
-      aria-current={isCurrent ? "page" : undefined}
-      onClick={(event) => {
-        event.preventDefault();
-        onNavigate(route);
-      }}
-    >
-      {children}
-    </a>
-  );
-};
-
-/**
- * The status dot in the navigation shows a problem before you click.
- * The text next to it is for assistive tech: color never informs alone.
- */
-const NavDot = ({ tone }: { tone: "healthy" | "warning" | "error" }): ReactElement | null =>
-  tone === "healthy" ? null : (
-    <span className="nav-dot" data-status={tone} role="img" aria-label={tone === "error" ? dashboardTexts().errors.title : dashboardTexts().errors.warning} />
-  );
-
 const formatTimestamp = (value: string): string => formatTimestampBase(value);
 
 const ErrorPanel = ({ message }: { message: string }): ReactElement => (
@@ -299,54 +261,6 @@ const ErrorPanel = ({ message }: { message: string }): ReactElement => (
     <p>{message}</p>
   </section>
 );
-
-interface SidebarProperties {
-  route: DashboardRoute;
-  channels: PanelChannelState[];
-  platformAdmin: boolean;
-  onNavigate: (route: DashboardRoute) => void;
-}
-
-const Rail = ({ route, channels, platformAdmin: platform, onNavigate }: SidebarProperties): ReactElement => {
-  const texts = dashboardTexts();
-  const platformTextsValues = platformTexts();
-  const activeChannel = route.kind === "channel" || route.kind === "module"
-    ? channels.find((channel) => channel.channelId === route.channelId)
-    : undefined;
-  const navigationChannelId = route.kind === "channel" || route.kind === "module"
-    ? route.channelId
-    : channels[0]?.channelId ?? "";
-  return (
-    <aside className="rail">
-      <nav className="primary-nav" aria-label={texts.navigation.mainNavigation}>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "overview" }} current={route} onNavigate={onNavigate}>
-          <span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="channel" /><span>{texts.navigation.channel}</span></span>
-          {activeChannel === undefined ? null : <NavDot tone={channelStatus(activeChannel)} />}
-        </RouteLink>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "system" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="system" /><span>{texts.navigation.system}</span></span></RouteLink>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "members" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="members" /><span>{texts.navigation.members}</span></span></RouteLink>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "modules" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="modules" /><span>{texts.navigation.module}</span></span></RouteLink>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "events" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="events" /><span>{texts.navigation.events}</span></span></RouteLink>
-        {platform ? <RouteLink route={{ kind: "betreiber" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="members" /><span>{platformTextsValues.navigation}</span></span></RouteLink> : null}
-      </nav>
-    </aside>
-  );
-};
-
-interface PanelTopbarProperties {
-  route: DashboardRoute;
-  channels: PanelChannelState[];
-  platformAdmin: boolean;
-  activeChannel: PanelChannelState | undefined;
-  moduleStates: PanelModuleState[] | null;
-  loadedAt: number | undefined;
-  headerModule: { id: string; enabled: boolean } | undefined;
-  headerModuleBusy: boolean;
-  onToggleHeaderModule: () => void;
-  onNavigate: (route: DashboardRoute) => void;
-  onLogout: () => void;
-  loggingOut: boolean;
-}
 
 type PageLoadedAt = Record<"overview" | "system" | "members" | "modules" | "events", number | undefined>;
 
@@ -357,271 +271,183 @@ const loadedAtForRoute = (route: DashboardRoute, loadedAt: PageLoadedAt): number
   return loadedAt[route.section];
 };
 
-const focusableSelector = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
-
-interface BreadcrumbSwitcherOption {
-  id: string;
-  name: string;
-  icon: ReactNode;
-  secondary?: string;
-  status?: { status: LedStatus; label: string };
+interface PanelSidebarProperties {
+  route: DashboardRoute;
+  channels: PanelChannelState[];
+  platformAdmin: boolean;
+  moduleStates: PanelModuleState[] | null;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  onEntryNavigate: () => void;
+  onNavigate: (route: DashboardRoute) => void;
 }
 
-const BreadcrumbSwitcher = ({ kind, currentLabel, accessibleCurrentLabel = currentLabel, currentId, currentIcon, options, openable, buttonLabel, listLabel, listboxId, open, onOpenChange, onSelect }: {
-  kind: "channel" | "module";
-  currentLabel: string;
-  accessibleCurrentLabel?: string;
-  currentId: string;
-  currentIcon?: ReactNode;
-  options: BreadcrumbSwitcherOption[];
-  openable: boolean;
-  buttonLabel: string;
-  listLabel: string;
-  listboxId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSelect: (id: string) => void;
-}): ReactElement => {
-  const switcherRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const optionRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const selectedIndex = Math.max(0, options.findIndex((option) => option.id === currentId));
-  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+/**
+ * "Seitenleiste" (docs/input/DESIGN-neu.md): four groups, built from the
+ * seam's `Sidebar`. Replaces `Rail` and the breadcrumb switchers.
+ */
+const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, collapsed, onToggleCollapsed, onEntryNavigate, onNavigate }: PanelSidebarProperties): ReactElement => {
+  const texts = dashboardTexts();
+  const platformTextsValues = platformTexts();
+  const navigationChannelId = route.kind === "channel" || route.kind === "module"
+    ? route.channelId
+    : channels[0]?.channelId ?? "";
 
-  useEffect(() => {
-    if (!open) return;
-    optionRefs.current[activeIndex]?.focus();
-  }, [activeIndex, open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsideClick = (event: MouseEvent): void => {
-      if (switcherRef.current?.contains(event.target as Node)) return;
-      onOpenChange(false);
+  const sectionEntry = (section: "overview" | "system" | "members" | "events", label: string, iconKind: string): SidebarEntry => {
+    const entryRoute: DashboardRoute = { kind: "channel", channelId: navigationChannelId, section };
+    return {
+      id: section,
+      label,
+      icon: <NavigationIcon kind={iconKind} className="sidebar-nav-icon" />,
+      href: dashboardRoutePath(entryRoute),
+      active: route.kind === "channel" && route.section === section,
+      onNavigate: () => { onNavigate(entryRoute); },
     };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    return () => { document.removeEventListener("mousedown", closeOnOutsideClick); };
-  }, [onOpenChange, open]);
-
-  const closeAndFocusButton = (): void => {
-    onOpenChange(false);
-    buttonRef.current?.focus();
   };
 
-  const selectOption = (id: string): void => {
-    closeAndFocusButton();
-    onSelect(id);
+  const operationGroup: SidebarGroup = {
+    id: "operation",
+    heading: texts.navigation.operationSection,
+    entries: [sectionEntry("events", texts.navigation.events, "events")],
+  };
+  const channelGroup: SidebarGroup = {
+    id: "channel",
+    heading: texts.navigation.channel,
+    entries: [
+      sectionEntry("overview", texts.navigation.channel, "channel"),
+      sectionEntry("system", texts.navigation.system, "system"),
+      sectionEntry("members", texts.navigation.members, "members"),
+    ],
   };
 
-  const focusNextControl = (): void => {
-    const button = buttonRef.current;
-    if (button === null) return;
-    const controls = Array.from(document.querySelectorAll<HTMLElement>(focusableSelector));
-    const index = controls.indexOf(button);
-    controls[index + 1]?.focus();
+  // "jedes aktive Modul als Eintrag" -- only modules that are actually on
+  // (enabled, and not held back by a missing broadcaster scope) appear
+  // here; everything else lives in the module list only.
+  const activeModuleEntries: SidebarEntry[] = (moduleStates ?? [])
+    .filter((module) => module.enabled && (module.missingBroadcasterScopes?.length ?? 0) === 0)
+    .map((module) => {
+      const moduleRoute: DashboardRoute = { kind: "module", channelId: navigationChannelId, moduleId: module.id };
+      return {
+        id: module.id,
+        label: moduleName(module.id),
+        icon: <ModuleIcon moduleId={module.id} className="sidebar-nav-icon" />,
+        href: dashboardRoutePath(moduleRoute),
+        active: route.kind === "module" && route.moduleId === module.id,
+        onNavigate: () => { onNavigate(moduleRoute); },
+        led: { status: "green" as const, word: statusWord(true) },
+      };
+    });
+  const allModulesRoute: DashboardRoute = { kind: "channel", channelId: navigationChannelId, section: "modules" };
+  const modulesGroup: SidebarModulesGroup = {
+    heading: texts.navigation.module,
+    icon: <NavigationIcon kind="modules" className="sidebar-nav-icon" />,
+    label: texts.navigation.module,
+    active: route.kind === "module" || (route.kind === "channel" && route.section === "modules"),
+    entries: activeModuleEntries,
+    allEntry: {
+      id: "all-modules",
+      label: texts.module.moduleOverview,
+      icon: <NavigationIcon kind="modules" className="sidebar-nav-icon" />,
+      href: dashboardRoutePath(allModulesRoute),
+      active: route.kind === "channel" && route.section === "modules",
+      onNavigate: () => { onNavigate(allModulesRoute); },
+    },
   };
 
-  const openList = (): void => {
-    setActiveIndex(selectedIndex);
-    onOpenChange(true);
-  };
-
-  if (!openable) {
-    if (kind === "module") {
-      return <span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{currentIcon}</span><span>{currentLabel}</span></span>;
-    }
-    return <span className="topbar__channel-segment topbar__channel-segment--static" data-channel-id={currentId}>{currentLabel}</span>;
-  }
+  const platformGroup: SidebarGroup | undefined = platform ? {
+    id: "platform",
+    heading: platformTextsValues.navigation,
+    entries: [{
+      id: "platform",
+      label: platformTextsValues.navigation,
+      icon: <NavigationIcon kind="members" className="sidebar-nav-icon" />,
+      href: dashboardRoutePath({ kind: "betreiber" }),
+      active: route.kind === "betreiber",
+      onNavigate: () => { onNavigate({ kind: "betreiber" }); },
+    }],
+  } : undefined;
 
   return (
-    <div className={`topbar__channel-switch${kind === "module" ? " topbar__breadcrumb-module" : ""}`} ref={switcherRef}>
-      <button
-        ref={buttonRef}
-        className={kind === "module" ? "topbar__channel-button topbar__breadcrumb-link topbar__breadcrumb-module" : "topbar__channel-button"}
-        type="button"
-        aria-label={`${buttonLabel}: ${accessibleCurrentLabel}`}
-        aria-current={kind === "module" ? "page" : undefined}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listboxId}
-        onClick={() => { if (open) closeAndFocusButton(); else openList(); }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            openList();
-          }
-        }}
-      >
-        {kind === "module" ? <span className="topbar__breadcrumb-icon" aria-hidden="true">{currentIcon}</span> : null}
-        <span className="topbar__channel-segment">{currentLabel}</span>
-        <svg className="topbar__breadcrumb-glyph topbar__channel-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" /></svg>
-      </button>
-      {open ? <div id={listboxId} className="topbar__channel-list" role="listbox" aria-label={listLabel}>
-        {options.map((option, index) => {
-          return <div
-            key={option.id}
-            ref={(element) => { optionRefs.current[index] = element; }}
-            className="topbar__channel-option"
-            role="option"
-            aria-selected={index === activeIndex}
-            tabIndex={index === activeIndex ? 0 : -1}
-            onClick={() => { selectOption(option.id); }}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setActiveIndex(Math.min(options.length - 1, activeIndex + 1));
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setActiveIndex(Math.max(0, activeIndex - 1));
-              } else if (event.key === "Home") {
-                event.preventDefault();
-                setActiveIndex(0);
-              } else if (event.key === "End") {
-                event.preventDefault();
-                setActiveIndex(options.length - 1);
-              } else if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                selectOption(options[activeIndex]?.id ?? option.id);
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                closeAndFocusButton();
-              } else if (event.key === "Tab") {
-                event.preventDefault();
-                onOpenChange(false);
-                window.setTimeout(focusNextControl, 0);
-              }
-            }}
-          >
-            {option.icon}
-            <span className="topbar__channel-option-copy">
-              <span className="topbar__channel-option-name">{option.name}</span>
-              {option.secondary === undefined ? null : <span className="topbar__channel-option-id mono">{option.secondary}</span>}
-            </span>
-            {option.status === undefined ? null : <Led status={option.status.status} label={option.status.label} />}
-          </div>;
-        })}
-      </div> : null}
-    </div>
+    <Sidebar
+      groups={[operationGroup, channelGroup]}
+      modules={modulesGroup}
+      platform={platformGroup}
+      collapsed={collapsed}
+      onToggleCollapsed={onToggleCollapsed}
+      onEntryNavigate={onEntryNavigate}
+      collapseLabel={texts.navigation.collapseSidebar}
+      expandLabel={texts.navigation.expandSidebar}
+    />
   );
 };
 
-const ChannelSwitcher = ({ channels, activeChannel, open, onOpenChange, onNavigate }: {
+interface DashboardHeaderProperties {
+  route: DashboardRoute;
   channels: PanelChannelState[];
   activeChannel: PanelChannelState | undefined;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  loadedAt: number | undefined;
+  headerModule: { id: string; enabled: boolean } | undefined;
+  headerModuleBusy: boolean;
+  onToggleHeaderModule: () => void;
   onNavigate: (route: DashboardRoute) => void;
-}): ReactElement | null => {
-  const texts = dashboardTexts();
-  if (activeChannel === undefined) return null;
-  return <BreadcrumbSwitcher
-    kind="channel"
-    currentLabel={activeChannel.displayName}
-    currentId={activeChannel.channelId}
-    options={channels.map((channel) => ({
-      id: channel.channelId,
-      name: channel.displayName,
-      icon: <NavigationIcon className="topbar__channel-option-icon" kind="channel" />,
-      secondary: channel.channelId,
-      status: {
-        status: channelToneToLedStatus(channelStatus(channel)),
-        label: statusText(channel),
-      },
-    }))}
-    openable={channels.length > 1}
-    buttonLabel={texts.navigation.selectChannel}
-    listLabel={texts.navigation.selectChannel}
-    listboxId="channel-switcher-listbox"
-    open={open}
-    onOpenChange={onOpenChange}
-    onSelect={(channelId) => { onNavigate({ kind: "channel", channelId, section: "overview" }); }}
-  />;
-};
+  onLogout: () => void;
+  loggingOut: boolean;
+}
 
-const BreadcrumbAreaLink = ({ route, label, icon, onNavigate }: {
-  route: DashboardRoute;
-  label: string;
-  icon: ReactNode;
-  onNavigate: (route: DashboardRoute) => void;
-}): ReactElement => (
-  <a
-    className="topbar__breadcrumb-link topbar__breadcrumb-area"
-    href={dashboardRoutePath(route)}
-    onClick={(event) => { event.preventDefault(); onNavigate(route); }}
-  >
-    <span className="topbar__breadcrumb-icon" aria-hidden="true">{icon}</span>
-    <span>{label}</span>
-  </a>
-);
-
-const PanelTopbar = ({ route, channels, platformAdmin: platform, activeChannel, moduleStates, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: PanelTopbarProperties): ReactElement => {
+/**
+ * "Kopfleiste" (docs/input/DESIGN-neu.md): brand, channel `Select` up to
+ * 280px with the Twitch id, connection LED, life-sign, and (on a module
+ * page) the module's main switch -- `ui/Switch`, the same component the
+ * future module list row uses. Sign-out closes it out.
+ *
+ * The channel `Select`'s options carry the Twitch id as plain text next to
+ * the name rather than in a monospace secondary line: `ui/Select` only
+ * renders a flat label per option, and extending it for a two-line,
+ * icon-plus-LED option render is a separate, larger seam change.
+ * ponytail: functional parity (the id stays visible and searchable), not
+ * pixel parity. Upgrade path: a richer `SelectOption` shape in `ui/Select`
+ * if the plain label stops being legible enough.
+ */
+const DashboardHeader = ({ route, channels, activeChannel, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: DashboardHeaderProperties): ReactElement => {
   const texts = dashboardTexts();
-  const platformTextsValues = platformTexts();
-  const [openSwitcher, setOpenSwitcher] = useState<"channel" | "module" | null>(null);
   const tone = activeChannel === undefined ? "neutral" : channelStatus(activeChannel);
   const connectionLabel = activeChannel === undefined
     ? null
     : tone === "healthy" ? texts.header.connectionRunning : statusText(activeChannel);
-  const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
-  const headerSwitch = headerModuleLabel === null ? null : <span className="topbar__module-switch-wrap"><button className="switch topbar__module-switch" type="button" role="switch" aria-label={headerModuleLabel} aria-checked={headerModule?.enabled} aria-busy={headerModuleBusy} disabled={activeChannel?.role === "operator" || headerModuleBusy} title={activeChannel?.role === "operator" ? texts.module.managementLocked : undefined} onClick={onToggleHeaderModule}><span className="topbar__module-switch-label">{headerModuleLabel}</span><span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span></button>{activeChannel?.role === "operator" ? <span className="sperrgrund">{texts.module.managementLocked}</span> : null}</span>;
   const connectionLed = connectionLabel === null ? null : <span className="led" data-status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : "red"}><span className="led__dot" aria-hidden="true" /><span>{connectionLabel}</span></span>;
-  const areaRoute = route.kind === "channel"
-    ? { kind: "channel" as const, channelId: route.channelId, section: route.section }
-    : route.kind === "module"
-      ? { kind: "channel" as const, channelId: route.channelId, section: "modules" as const }
-      : null;
-  const areaLabel = areaRoute === null ? null : areaRoute.section === "overview" ? texts.navigation.channel
-    : areaRoute.section === "system" ? texts.navigation.system
-      : areaRoute.section === "members" ? texts.navigation.members
-        : areaRoute.section === "modules" ? texts.navigation.module : texts.navigation.events;
-  const moduleLabel = route.kind === "module" ? moduleName(route.moduleId) : null;
-  const moduleBreadcrumbIcon = route.kind === "module" ? <ModuleIcon moduleId={route.moduleId} /> : null;
-  const moduleOptions = moduleStates?.map((module): BreadcrumbSwitcherOption => {
-    const missingScopes = module.missingBroadcasterScopes ?? [];
-    const effectiveEnabled = module.enabled && missingScopes.length === 0;
-    return {
-      id: module.id,
-      name: moduleName(module.id),
-      icon: <ModuleIcon moduleId={module.id} className="topbar__channel-option-icon" />,
-      status: {
-        status: missingScopes.length > 0 ? "amber" : effectiveEnabled ? "green" : "off",
-        label: missingScopes.length > 0 ? disabledStatusWord() : statusWord(effectiveEnabled),
-      },
-    };
-  }) ?? [];
-  const moduleArea = route.kind === "module" && areaRoute !== null && areaLabel !== null
-    ? <BreadcrumbAreaLink route={areaRoute} label={areaLabel} icon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />} onNavigate={onNavigate} />
-    : null;
-  const moduleSwitcher = route.kind === "module" && moduleStates !== null && moduleLabel !== null && moduleBreadcrumbIcon !== null
-    ? <BreadcrumbSwitcher
-        kind="module"
-        currentLabel={moduleLabel}
-        currentId={route.moduleId}
-        currentIcon={moduleBreadcrumbIcon}
-        options={moduleOptions}
-        openable={moduleOptions.length > 1}
-        buttonLabel={texts.navigation.selectModule}
-        listLabel={texts.navigation.selectModule}
-        listboxId="module-switcher-listbox"
-        open={openSwitcher === "module"}
-        onOpenChange={(open) => { setOpenSwitcher(open ? "module" : null); }}
-        onSelect={(id) => { onNavigate({ kind: "module", channelId: route.channelId, moduleId: id }); }}
-      />
-    : null;
+  const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
+  const managementLocked = activeChannel?.role === "operator";
   return (
-    <header className={`topbar${headerModuleLabel === null ? "" : " topbar--module-detail"}`}>
-      <nav className={`topbar__breadcrumb${route.kind === "module" ? " topbar__breadcrumb--module" : ""}`} aria-label={texts.navigation.breadcrumb}>
-        <a className="brand-mark" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
-        {activeChannel === undefined ? null : <><span className="topbar__breadcrumb-separator" aria-hidden="true">›</span><ChannelSwitcher channels={channels} activeChannel={activeChannel} open={openSwitcher === "channel"} onOpenChange={(open) => { setOpenSwitcher(open ? "channel" : null); }} onNavigate={onNavigate} /></>}
-        {areaRoute === null || areaLabel === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator topbar__area-separator" aria-hidden="true">›</span>{route.kind === "module" ? moduleArea : <span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind={areaRoute.section === "overview" ? "channel" : areaRoute.section} className="topbar__breadcrumb-glyph" /></span><span>{areaLabel}</span></span>}</>}
-        {route.kind === "betreiber" && platform ? <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator" aria-hidden="true">›</span><span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind="members" className="topbar__breadcrumb-glyph" /></span><span>{platformTextsValues.navigation}</span></span></> : null}
-        {moduleLabel === null || moduleBreadcrumbIcon === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-module-separator topbar__crumb-area" aria-hidden="true">›</span>{moduleSwitcher ?? <span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{moduleBreadcrumbIcon}</span><span>{moduleLabel}</span></span>}</>}
-      </nav>
-      <span className="topbar__connection">{connectionLed}</span>
-      {loadedAt === undefined ? null : <Datenalter seit={loadedAt} />}
-      {headerSwitch}
-      <button className="button button--quiet topbar__logout" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}</button>
-    </header>
+    <div className="dashboard-header">
+      <a className="brand-mark dashboard-header__brand" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
+      {activeChannel === undefined ? null : (
+        <div className="dashboard-header__channel">
+          <UiSelect
+            value={activeChannel.channelId}
+            onChange={(channelId) => { if (channelId !== null) onNavigate({ kind: "channel", channelId, section: "overview" }); }}
+            options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}` }))}
+            ariaLabel={texts.navigation.selectChannel}
+            id="dashboard-channel-select"
+          />
+        </div>
+      )}
+      <div className="dashboard-header__status">
+        {connectionLed}
+        {loadedAt === undefined ? null : <Datenalter seit={loadedAt} />}
+      </div>
+      {headerModule === undefined || headerModuleLabel === null ? null : (
+        <div className="dashboard-header__switch">
+          <UiSwitch
+            label={headerModuleLabel}
+            checked={headerModule.enabled}
+            onChange={onToggleHeaderModule}
+            pending={headerModuleBusy}
+            {...(managementLocked ? { lockedReason: texts.module.managementLocked } : {})}
+          />
+        </div>
+      )}
+      <button className="button button--quiet dashboard-header__logout" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}</button>
+    </div>
   );
 };
 
@@ -1538,11 +1364,29 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "channel" && route.kind !== "module") return cleanup;
     const expectedOverviewPath = dashboardRoutePath(route);
 
+    // The sidebar's Modules group lists the active modules on every
+    // channel/module route, not only the ones that already fetch this for
+    // their own page (the module detail page, the module list, the event
+    // filters) -- one fetch here covers all of them; those keep their own
+    // fetch removed below instead of doing it twice.
+    const loadSidebarModules = async (): Promise<void> => {
+      setModules(loadingState());
+      try {
+        const response = await fetchModules(route.channelId, controller.signal);
+        if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
+      } catch (error) {
+        if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+          setModules({ status: "error", data: null, error: errorMessage(error) });
+          if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+        }
+      }
+    };
+    void loadSidebarModules();
+
     const load = async (): Promise<void> => {
       // The module page shows the same channel header as the overview and
       // therefore needs the same data.
       if (route.kind === "module" || route.section === "overview") {
-        if (route.kind === "module") setModules(loadingState());
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
           if (!cancelled) {
@@ -1553,17 +1397,6 @@ export const DashboardApp = (): ReactElement => {
           if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
             setOverview({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        }
-        if (route.kind === "module") {
-          try {
-            const response = await fetchModules(route.channelId, controller.signal);
-            if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
-          } catch (error) {
-            if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-              setModules({ status: "error", data: null, error: errorMessage(error) });
-              if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-            }
           }
         }
         return;
@@ -1588,22 +1421,11 @@ export const DashboardApp = (): ReactElement => {
         return;
       }
       if (route.section === "modules") {
-        setModules(loadingState());
-        try {
-          const response = await fetchModules(route.channelId, controller.signal);
-          if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
-        } catch (error) {
-          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-            setModules({ status: "error", data: null, error: errorMessage(error) });
-            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        }
         return;
       }
       if (route.section === "events") {
         setEvents(loadingState());
         setEventsChannelId(route.channelId);
-        setModules(loadingState());
         const request = startEventsRequest();
         const filters = route.filters ?? emptyEventFilter;
         try {
@@ -1619,14 +1441,6 @@ export const DashboardApp = (): ReactElement => {
           }
         } finally {
           finishEventsRequest(request.generation);
-        }
-        try {
-          const response = await fetchModules(route.channelId, controller.signal);
-          if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
-        } catch (error) {
-          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-            setModules({ status: "error", data: null, error: errorMessage(error) });
-          }
         }
         return;
       }
@@ -1909,15 +1723,21 @@ export const DashboardApp = (): ReactElement => {
 
   if (authenticationRequired) {
     const texts = dashboardTexts();
-    return <main className="auth-screen"><div className="auth-card"><h1>{texts.signIn.required}</h1><p>{texts.signIn.explanation}</p><a className="button" href="/auth/login">{texts.signIn.signInWithTwitch}</a></div></main>;
+    return <UiProvider><main className="auth-screen"><div className="auth-card"><h1>{texts.signIn.required}</h1><p>{texts.signIn.explanation}</p><a className="button" href="/auth/login">{texts.signIn.signInWithTwitch}</a></div></main></UiProvider>;
   }
 
+  const sidebarModuleStates = route.kind === "channel" || route.kind === "module" ? modules.data?.modules ?? null : null;
+
   return (
-    <div className="app-shell">
-      <PanelTopbar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} activeChannel={selectedChannel ?? undefined} moduleStates={route.kind === "module" ? modules.data?.modules ?? null : null} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
-      <div className="app-body">
-        <Rail route={route} channels={channels.data ?? []} platformAdmin={isPlatform} onNavigate={navigate} />
-        <main className="main-content">
+    <UiProvider>
+      <Shell
+        header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />}
+        navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
+        navLabel={dashboardTexts().navigation.mainNavigation}
+        openSidebarLabel={dashboardTexts().navigation.openSidebar}
+        closeSidebarLabel={dashboardTexts().navigation.closeSidebar}
+      >
+        <div className="main-content">
         {channels.status === "loading" ? <p className="loading-line">{dashboardTexts().signIn.checkChannelAccess}</p> : null}
         {channels.error !== null ? <ErrorPanel message={channels.error} /> : null}
         {route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} onNavigate={navigate} /> : null}
@@ -1933,9 +1753,9 @@ export const DashboardApp = (): ReactElement => {
         {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} /> : null}
         {route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
-        </main>
-      </div>
-    </div>
+        </div>
+      </Shell>
+    </UiProvider>
   );
 };
 

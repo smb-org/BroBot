@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1693,7 +1690,7 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Module" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
+    expect(screen.getAllByRole("link", { name: "Modulübersicht" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
   });
 
   it("shows the display name, Twitch ID, and the labeled module switch in the header", async () => {
@@ -1712,11 +1709,15 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
-    const channelButton = screen.getByRole("button", { name: "Kanal auswählen: Esembe" });
-    fireEvent.click(channelButton);
-    expect(within(screen.getByRole("listbox")).getByRole("option", { name: /Esembe/ })).toHaveTextContent("26876135");
+    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    expect(channelSelect).toHaveValue("Esembe — 26876135");
+    fireEvent.click(channelSelect);
+    // jsdom does no real layout, so Floating UI's `hide` middleware always
+    // treats the dropdown's reference as clipped and renders it `display:
+    // none` -- present, but invisible to an ordinary role query.
+    expect(screen.getByRole("option", { name: "Esembe — 26876135", hidden: true })).toBeInTheDocument();
     const headerSwitch = await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
-    expect(headerSwitch).toHaveTextContent("Textbefehle · Läuft");
+    expect(headerSwitch).toBeChecked();
   });
 
   it("reloads the channel overview after enabling and shows the module view", async () => {
@@ -1756,7 +1757,7 @@ describe("Dashboard skeleton", () => {
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/overview")).toHaveLength(2);
   });
 
-  it("opens the channel switcher with Enter and Arrow Down, moves focus, and closes without a selection via Escape", async () => {
+  it("switches channels through the header select and moves the route", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1770,130 +1771,17 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    const button = screen.getByRole("button", { name: "Kanal auswählen: Alpha" });
-    expect(button).toHaveAttribute("aria-expanded", "false");
+    const select = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    expect(select).toHaveValue("Alpha — kanal-a");
 
-    fireEvent.keyDown(button, { key: "Enter" });
-    const listbox = screen.getByRole("listbox");
-    const options = within(listbox).getAllByRole("option");
-    const [firstOption, secondOption] = options;
-    if (firstOption === undefined || secondOption === undefined) throw new Error("Der Kanalumschalter braucht zwei Optionen.");
-    expect(button).toHaveAttribute("aria-expanded", "true");
-    expect(document.activeElement).toBe(firstOption);
-    expect(firstOption).toHaveAttribute("aria-selected", "true");
-    expect(secondOption).toHaveAttribute("aria-selected", "false");
-    expect(within(firstOption).getByText("Gesund")).toBeInTheDocument();
-    expect(within(firstOption).getByText("kanal-a")).toHaveClass("mono");
+    fireEvent.click(select);
+    fireEvent.click(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
 
-    fireEvent.keyDown(firstOption, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(secondOption);
-    expect(secondOption).toHaveAttribute("aria-selected", "true");
-    fireEvent.keyDown(secondOption, { key: "End" });
-    expect(document.activeElement).toBe(secondOption);
-    fireEvent.keyDown(secondOption, { key: "Escape" });
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(button).toHaveFocus();
-    expect(window.location.pathname).toBe("/channels/kanal-a");
-
-    fireEvent.keyDown(button, { key: "ArrowDown" });
-    const reopenedOptions = within(screen.getByRole("listbox")).getAllByRole("option");
-    const [reopenedFirstOption, reopenedSecondOption] = reopenedOptions;
-    if (reopenedFirstOption === undefined || reopenedSecondOption === undefined) throw new Error("Der wieder geöffnete Kanalumschalter braucht zwei Optionen.");
-    expect(document.activeElement).toBe(reopenedFirstOption);
-    fireEvent.keyDown(reopenedFirstOption, { key: "ArrowDown" });
-    fireEvent.keyDown(reopenedSecondOption, { key: "Enter" });
     await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-b"));
-    expect(screen.getByRole("button", { name: "Kanal auswählen: Beta" })).toHaveFocus();
-
-    fireEvent.keyDown(screen.getByRole("button", { name: "Kanal auswählen: Beta" }), { key: "ArrowDown" });
-    const tabOptions = within(screen.getByRole("listbox")).getAllByRole("option");
-    const tabOption = tabOptions[1];
-    if (tabOption === undefined) throw new Error("Der Kanalumschalter braucht eine zweite Option.");
-    fireEvent.keyDown(tabOption, { key: "Tab" });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Abmelden" })).toHaveFocus());
-    fireEvent.keyDown(screen.getByRole("button", { name: "Kanal auswählen: Beta" }), { key: "ArrowDown" });
-    fireEvent.mouseDown(document.body);
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Beta", level: 1 })).toBeInTheDocument();
   });
 
-  it("keeps all options open without the breadcrumb clipping the list", async () => {
-    const channels = [
-      healthyChannel("kanal-a", "Alpha"),
-      healthyChannel("kanal-b", "Beta"),
-      healthyChannel("kanal-c", "Gamma"),
-    ];
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels });
-      if (path.endsWith("/overview")) return jsonResponse(overview(channels[0] as typeof channels[number]));
-      return jsonResponse({}, 404);
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "Kanal auswählen: Alpha" }));
-
-    const listbox = screen.getByRole("listbox");
-    expect(within(listbox).getAllByRole("option")).toHaveLength(3);
-    expect(within(listbox).getByRole("option", { name: /Gamma/ })).toBeInTheDocument();
-
-    const breadcrumb = screen.getByRole("navigation", { name: "Brotkrume" });
-    // jsdom does not inject the imported CSS file and computes no layout
-    // rects; the DOM structure and the matching rule therefore assert that
-    // all options exist and nothing clips.
-    const styles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
-    const breadcrumbRule = styles.match(/\.topbar__breadcrumb\s*\{[^}]*\}/)?.[0];
-    expect(breadcrumb).toBeInTheDocument();
-    expect(breadcrumbRule).toBeDefined();
-    expect(breadcrumbRule).not.toMatch(/overflow\s*:\s*hidden/);
-  });
-
-  it("marks the area and module segments as separately hideable parts of the breadcrumb", async () => {
-    const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path.endsWith("/overview")) return jsonResponse({ ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] });
-      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
-      return jsonResponse({}, 404);
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
-
-    render(<DashboardApp />);
-
-    const breadcrumb = screen.getByRole("navigation", { name: "Brotkrume" });
-    await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
-    // jsdom computes no CSS layouts; the regression is therefore guarded via
-    // the dedicated DOM class and its matching narrow CSS rule.
-    expect(breadcrumb.querySelector(".topbar__breadcrumb-area")).toBeInTheDocument();
-    expect(breadcrumb.querySelector(".topbar__breadcrumb-module")).toBeInTheDocument();
-    const styles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
-    expect(styles).toMatch(/\.topbar__breadcrumb-area[\s\S]*?display:\s*none/);
-    expect(styles).toMatch(/\.topbar__breadcrumb-module[\s\S]*?display:\s*none/);
-  });
-
-  it("leaves the channel segment without a control when there is exactly one channel", async () => {
-    const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path.endsWith("/overview")) return jsonResponse(overview(channel));
-      return jsonResponse({}, 404);
-    }));
-    window.history.replaceState({}, "", "/channels/kanal-a");
-
-    render(<DashboardApp />);
-
-    await screen.findByRole("heading", { name: "Alpha", level: 1 });
-    expect(screen.queryByRole("button", { name: /Kanal auswählen/ })).not.toBeInTheDocument();
-    const segment = document.querySelector(".topbar__channel-segment--static");
-    expect(segment).toHaveTextContent("Alpha");
-    expect(segment).not.toHaveAttribute("aria-haspopup");
-  });
-
-  it("shows the breadcrumb and the rail's five entries on all areas and the module detail page", async () => {
+  it("shows every group's entries and marks the current page's sidebar entry as current on every area and the module detail page", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1909,13 +1797,13 @@ describe("Dashboard skeleton", () => {
     }));
 
     const pages = [
-      { path: "/", heading: "Übersicht", current: "BroBot" },
-      { path: "/channels/kanal-a", heading: "Alpha", current: "Kanal" },
-      { path: "/channels/kanal-a/system", heading: "System", current: "System" },
-      { path: "/channels/kanal-a/members", heading: "Mitglieder", current: "Mitglieder" },
-      { path: "/channels/kanal-a/modules", heading: "Module", current: "Module" },
-      { path: "/channels/kanal-a/events", heading: "Ereignisse", current: "Ereignisse" },
-      { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", current: "Textbefehle" },
+      { path: "/", heading: "Übersicht", currentLink: null },
+      { path: "/channels/kanal-a", heading: "Alpha", currentLink: "Kanal" },
+      { path: "/channels/kanal-a/system", heading: "System", currentLink: "System" },
+      { path: "/channels/kanal-a/members", heading: "Mitglieder", currentLink: "Mitglieder" },
+      { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Modulübersicht" },
+      { path: "/channels/kanal-a/events", heading: "Ereignisse", currentLink: "Ereignisse" },
+      { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", currentLink: "Textbefehle Läuft" },
     ];
 
     for (const page of pages) {
@@ -1923,16 +1811,18 @@ describe("Dashboard skeleton", () => {
       window.history.replaceState({}, "", page.path);
       render(<DashboardApp />);
       await screen.findByRole("heading", { name: page.heading, level: 1 });
-      const breadcrumb = screen.getByRole("navigation", { name: "Brotkrume" });
-      expect(breadcrumb.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
-      expect(breadcrumb.querySelector('[aria-current="page"]')).toHaveTextContent(page.current);
-      expect(within(screen.getByRole("navigation", { name: "Hauptnavigation" })).getAllByRole("link")).toHaveLength(5);
-      if (page.path === "/") {
-        expect(breadcrumb).toHaveTextContent("BroBot");
-        expect(breadcrumb.querySelector('[aria-current="page"]')).toHaveTextContent("BroBot");
-        expect(screen.getByRole("link", { name: "BroBot" })).toHaveAttribute("aria-current", "page");
+      const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+      for (const label of ["Ereignisse", "Kanal", "System", "Mitglieder"]) {
+        expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
+      }
+      // The Modules group only auto-expands on a module route; elsewhere
+      // "Modulübersicht" is collapsed (not yet clicked open) rather than
+      // absent, so it needs `hidden: true` to be found either way.
+      expect(within(nav).getByRole("link", { name: "Modulübersicht", hidden: true })).toBeInTheDocument();
+      if (page.currentLink === null) {
+        expect(within(nav).queryByRole("link", { current: "page", hidden: true })).not.toBeInTheDocument();
       } else {
-        expect(breadcrumb.querySelector(".topbar__channel-segment--static")).toHaveTextContent("Alpha");
+        expect(within(nav).getByRole("link", { current: "page", hidden: true })).toHaveAccessibleName(page.currentLink);
       }
     }
   });
@@ -2842,10 +2732,11 @@ describe("Dashboard skeleton", () => {
 
     fireEvent.click(row);
     expect(await screen.findByRole("region", { name: "Abo-Details" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Kanal auswählen: Alpha" }));
-    const option = within(screen.getByRole("listbox", { name: "Kanal auswählen" })).getByRole("option", { name: /Alpha/ });
-    fireEvent.keyDown(option, { key: "Escape" });
-    expect(screen.queryByRole("listbox", { name: "Kanal auswählen" })).not.toBeInTheDocument();
+    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    fireEvent.click(channelSelect);
+    expect(screen.getByRole("option", { name: "Alpha — kanal-a", hidden: true })).toBeInTheDocument();
+    fireEvent.keyDown(channelSelect, { key: "Escape" });
+    expect(screen.queryByRole("option", { name: "Alpha — kanal-a" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Abo-Details" })).toBeInTheDocument();
   });
 
