@@ -264,7 +264,21 @@ const ModuleWorkspaceRow = ({
   );
 };
 
-export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onChanged }: ModuleWorkspaceProperties): ReactElement => {
+interface ModuleToggleListProperties {
+  channelId: string;
+  ownRole: ChannelRole;
+  modules: PanelModuleState[];
+  onNavigate: (route: DashboardRoute) => void;
+  /** Reloads `modules` after a successful toggle. */
+  onChanged: () => Promise<void>;
+}
+
+/**
+ * Just the switchable rows -- no page heading, so the Stream Manager can
+ * embed it next to the immediate actions and the event feed. `ModuleWorkspace`
+ * below wraps this with the full "Module" page's own heading and error line.
+ */
+export const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onChanged }: ModuleToggleListProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = canManageModules(ownRole);
   // Holds the clicked value only while the request is in flight; afterwards
@@ -299,6 +313,33 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
   };
 
   return (
+    <>
+      {toggleError === null ? null : <p className="form-error" role="alert">{toggleError}</p>}
+      <div className="state-list">
+        {MODULES.map((module) => {
+          const state = modules.find((candidate) => candidate.id === module.id);
+          const rawEnabled = pendingEnabled[module.id] ?? state?.enabled === true;
+          return (
+            <ModuleWorkspaceRow
+              key={module.id}
+              channelId={channelId}
+              moduleId={module.id}
+              rawEnabled={rawEnabled}
+              missingScopes={state?.missingBroadcasterScopes ?? []}
+              manageable={manageable}
+              busy={busyModuleId === module.id}
+              onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
+              onNavigate={onNavigate}
+            />
+          );
+        })}
+      </div>
+    </>
+  );
+};
+
+export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onChanged }: ModuleWorkspaceProperties): ReactElement => {
+  return (
     <section className="module-workspace" aria-label={dashboardTexts().navigation.module}>
       <div className="module-workspace__main">
         <header className="module-workspace__heading">
@@ -306,26 +347,7 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
           {loading ? <span className="muted">{dashboardTexts().module.load}</span> : null}
         </header>
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        {toggleError === null ? null : <p className="form-error" role="alert">{toggleError}</p>}
-        <div className="state-list">
-          {MODULES.map((module) => {
-            const state = modules.find((candidate) => candidate.id === module.id);
-            const rawEnabled = pendingEnabled[module.id] ?? state?.enabled === true;
-            return (
-              <ModuleWorkspaceRow
-                key={module.id}
-                channelId={channelId}
-                moduleId={module.id}
-                rawEnabled={rawEnabled}
-                missingScopes={state?.missingBroadcasterScopes ?? []}
-                manageable={manageable}
-                busy={busyModuleId === module.id}
-                onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
-                onNavigate={onNavigate}
-              />
-            );
-          })}
-        </div>
+        <ModuleToggleList channelId={channelId} ownRole={ownRole} modules={modules} onNavigate={onNavigate} onChanged={onChanged} />
       </div>
     </section>
   );

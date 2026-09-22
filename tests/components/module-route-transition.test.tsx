@@ -52,6 +52,9 @@ describe("Module route during client-side navigation", () => {
         overviewAufrufe += 1;
         return overviewAufrufe === 1 ? response(activeState) : secondResponse;
       }
+      if (path === "/api/channels/kanal-a/modules") {
+        return response({ modules: [{ id: "aktiv", enabled: true, settings: "{}" }] });
+      }
       return response({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");

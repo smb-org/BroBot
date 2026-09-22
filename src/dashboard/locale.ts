@@ -284,6 +284,24 @@ export interface DashboardTexts {
     scopeMissing: string;
     scopeGranted: string;
   };
+  /** Stream Manager: the immediate-action row and the warnings/errors feed
+   *  on the channel overview -- each action reports success/failure at
+   *  itself, never a global toast (see docs/input/umbau-plan.md Epic 4). */
+  streamManager: {
+    immediateActions: string;
+    adLength: string;
+    runAd: (length: string) => string;
+    adStarted: (length: string) => string;
+    adCooldown: (seconds: string) => string;
+    shoutoutLogin: string;
+    sendShoutout: string;
+    shoutoutSent: (login: string) => string;
+    createClip: string;
+    clipCreated: string;
+    openClip: string;
+    feedTitle: string;
+    feedEmpty: string;
+  };
   /** Full-page states from #159: they replace page content (navigation
    *  stays usable) instead of stacking another red box on a normal page. */
   blocking: {
@@ -421,6 +439,21 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeGranted: "Erteilt",
       unknown: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     },
+    streamManager: {
+      immediateActions: "Sofortaktionen",
+      adLength: "Werbedauer",
+      runAd: (length) => `Werbung jetzt (${length}s)`,
+      adStarted: (length) => `Werbung gestartet (${length}s)`,
+      adCooldown: (seconds) => `Wartezeit: ${seconds}s`,
+      shoutoutLogin: "Twitch-Name",
+      sendShoutout: "Shoutout senden",
+      shoutoutSent: (login) => `Shoutout an ${login} gesendet`,
+      createClip: "Clip erstellen",
+      clipCreated: "Clip erstellt",
+      openClip: "Clip öffnen",
+      feedTitle: "Warnungen und Fehler",
+      feedEmpty: "Keine Warnungen oder Fehler.",
+    },
     blocking: {
       botTitle: "Der Bot ist nicht angemeldet",
       botDescriptionAdmin: "Ohne Bot-Identität empfängt kein Kanal Ereignisse: EventSub, Chat, Shoutouts und die Mitgliedersuche funktionieren nirgends. Melde den Bot an, um alles wieder in Betrieb zu setzen.",
@@ -544,6 +577,21 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeList: "Required broadcaster permissions",
       scopeMissing: "Missing",
       scopeGranted: "Granted",
+    },
+    streamManager: {
+      immediateActions: "Immediate actions",
+      adLength: "Ad length",
+      runAd: (length) => `Run ad now (${length}s)`,
+      adStarted: (length) => `Ad started (${length}s)`,
+      adCooldown: (seconds) => `Cooldown: ${seconds}s`,
+      shoutoutLogin: "Twitch login",
+      sendShoutout: "Send shoutout",
+      shoutoutSent: (login) => `Shoutout sent to ${login}`,
+      createClip: "Create clip",
+      clipCreated: "Clip created",
+      openClip: "Open clip",
+      feedTitle: "Warnings and errors",
+      feedEmpty: "No warnings or errors.",
     },
     blocking: {
       botTitle: "The bot is not signed in",
@@ -902,6 +950,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     commercial_length_invalid: "Die Werbedauer ist ungültig.",
     commercial_start_failed: "Die Werbeeinblendung konnte nicht gestartet werden.",
     clip_create_failed: "Der Clip konnte nicht erstellt werden.",
+    shoutout_send_failed: "Der Shoutout konnte nicht gesendet werden.",
     overlay_token_manage_denied: "Nur Broadcaster und Verwalter dürfen Overlay-Token verwalten.",
     overlay_expiry_invalid: "Ablaufzeit ist ungültig.",
     overlay_revocation_reason_invalid: "Widerrufsgrund fehlt oder ist ungültig.",
@@ -967,6 +1016,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     commercial_length_invalid: "The commercial length is invalid.",
     commercial_start_failed: "The commercial could not be started.",
     clip_create_failed: "The clip could not be created.",
+    shoutout_send_failed: "The shoutout could not be sent.",
     overlay_token_manage_denied: "Only broadcasters and managers may manage overlay tokens.",
     overlay_expiry_invalid: "Expiry is invalid.",
     overlay_revocation_reason_invalid: "Revocation reason missing or invalid.",

@@ -1761,7 +1761,7 @@ describe("Dashboard skeleton", () => {
     expect(fetcher.mock.calls.at(-1)?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("shows a sensible empty module area when the module registry is empty", async () => {
+  it("lists every registered module as a switchable row on the overview, even with none active", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1769,13 +1769,15 @@ describe("Dashboard skeleton", () => {
       if (path.endsWith("/overview")) return jsonResponse(overview(channel));
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
       return jsonResponse({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
 
-    expect(await screen.findByText("Keine Module aktiv.")).toBeInTheDocument();
+    expect(await screen.findByRole("switch", { name: "Textbefehle: Aus" })).not.toBeChecked();
+    expect(screen.queryByText("Keine Module aktiv.")).not.toBeInTheDocument();
   });
 
   it("links to active modules in the channel overview instead of embedding their forms", async () => {
@@ -1932,6 +1934,48 @@ describe("Dashboard skeleton", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(screen.getByRole("switch", { name: "Raid-Shoutout: Läuft" })).toBeChecked();
+  });
+
+  it("is the Stream Manager after sign-in: module toggle, immediate actions, and the warnings feed together, no page change", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "manager" as const };
+    let modulesCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        return jsonResponse({
+          entries: [{ eventId: "1", createdAt: relativeIso(0), moduleId: "ads", triggerId: "t1", code: "ads.commercial.failed", detail: "{\"reason\":\"rate_limited\"}", actorUserId: null, actorLogin: null, actorDisplayName: null }],
+          nextCursor: null,
+        });
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
+        modulesCalls += 1;
+        return jsonResponse({ modules: [{ id: "text_commands", enabled: modulesCalls > 1, settings: "{}" }] });
+      }
+      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    // Module toggle, without navigating away from the overview.
+    const moduleSwitch = await screen.findByRole("switch", { name: "Textbefehle: Aus" });
+    fireEvent.click(moduleSwitch);
+    await waitFor(() => { expect(screen.getByRole("switch", { name: "Textbefehle: Läuft" })).toBeChecked(); });
+    expect(window.location.pathname).toBe("/channels/kanal-a");
+
+    // Immediate actions section is present and reachable.
+    expect(screen.getByRole("button", { name: "Clip erstellen" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Shoutout senden" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Werbung jetzt/ })).toBeInTheDocument();
+
+    // Warnings/errors feed needs no interaction to show.
+    expect(await screen.findByText("Werbeeinblendung nicht gestartet: rate_limited")).toBeInTheDocument();
   });
 
   it("switches channels through the header select and moves the route", async () => {

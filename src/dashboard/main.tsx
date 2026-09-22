@@ -38,7 +38,8 @@ import {
   refreshModeratorStatus,
   setChannelModuleEnabled,
 } from "./api";
-import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
@@ -731,9 +732,12 @@ interface ChannelOverviewPageProperties {
   moderatorCheck: ModeratorCheckState;
   onCheckModeratorStatus: () => void;
   onNavigate: (route: DashboardRoute) => void;
+  /** Stream Manager: every module, switchable without a page change. */
+  modules: PanelModuleState[];
+  onModulesChanged: () => Promise<void>;
 }
 
-const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus, onNavigate }: ChannelOverviewPageProperties): ReactElement => {
+const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged }: ChannelOverviewPageProperties): ReactElement => {
   const entries = sortBySeverity([
     broadcasterRow(overview.broadcasterConnection),
     channelBotConsentRow(overview.channelBotConsent),
@@ -757,7 +761,12 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
       <div className="state-list">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
       <BotPermissionsInspector permissions={overview.botPermissions} />
       <BroadcasterPermissionsInspector permissions={overview.broadcasterPermissions} />
-      <section className="content-section"><div className="section-heading"><h2>{dashboardTexts().overview.activeModules}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>{overview.activeModules.length === 0 ? <p className="empty-state">{dashboardTexts().module.noneActive}</p> : <div className="module-grid">{overview.activeModules.map(({ moduleId }) => <ModuleTile key={moduleId} channelId={overview.channelId} moduleId={moduleId} enabled onNavigate={onNavigate} />)}</div>}</section>
+      <ImmediateActions channelId={overview.channelId} />
+      <section className="content-section" aria-label={dashboardTexts().navigation.module}>
+        <div className="section-heading"><h2>{dashboardTexts().navigation.module}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>
+        <ModuleToggleList channelId={overview.channelId} ownRole={overview.role} modules={modules} onNavigate={onNavigate} onChanged={onModulesChanged} />
+      </section>
+      <WarningsAndErrorsFeed key={overview.channelId} channelId={overview.channelId} />
     </>
   );
 };
@@ -1239,7 +1248,7 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const reloadModules = async (): Promise<void> => {
-    if (route.kind !== "module" && (route.kind !== "channel" || route.section !== "modules")) return;
+    if (route.kind !== "module" && (route.kind !== "channel" || (route.section !== "modules" && route.section !== "overview"))) return;
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
     const generation = modulesRequestGeneration.current + 1;
@@ -1471,7 +1480,7 @@ export const DashboardApp = (): ReactElement => {
         /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}

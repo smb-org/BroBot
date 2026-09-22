@@ -222,6 +222,7 @@ export const API_ERROR_CODES = [
   "commercial_length_invalid",
   "commercial_start_failed",
   "clip_create_failed",
+  "shoutout_send_failed",
   "overlay_token_manage_denied",
   "overlay_expiry_invalid",
   "overlay_revocation_reason_invalid",

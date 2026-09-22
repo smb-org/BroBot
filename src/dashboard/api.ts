@@ -245,7 +245,7 @@ export const searchTwitchUser = async (
 const requestMutation = <T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
-  body?: Record<string, string | boolean>,
+  body?: Record<string, string | boolean | number>,
 ): Promise<T> => requestJson<{ token: string }>("/api/csrf").then(({ token }) => requestJson<T>(path, {
   method,
   headers: {
@@ -292,6 +292,31 @@ export const refreshModeratorStatus = (
   channelId: string,
 ): Promise<{ moderator: PanelModeratorStatus; nextAllowedAt: string }> => requestMutation(
   channelPath(channelId, "moderator-status"),
+  "POST",
+);
+
+export const startCommercial = (
+  channelId: string,
+  length: number,
+): Promise<{ length: number | null; message: string | null; retryAfter: number | null }> => requestMutation(
+  `${modulePath(channelId, "ads")}/commercial`,
+  "POST",
+  { length },
+);
+
+export const sendManualShoutout = (
+  channelId: string,
+  login: string,
+): Promise<{ sent: true }> => requestMutation(
+  channelPath(channelId, "shoutout"),
+  "POST",
+  { login },
+);
+
+export const createClip = (
+  channelId: string,
+): Promise<{ clipId: string | null; editUrl: string | null }> => requestMutation(
+  channelPath(channelId, "clips"),
   "POST",
 );
 
