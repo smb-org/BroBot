@@ -24,7 +24,7 @@ const scheduleFailureDiagnostic = (result: AdScheduleResult): {
 const statusFor = (reason: string | null): 403 | 429 | 502 | 503 => {
   if (reason === "scope_missing" || reason === "unauthorized") return 403;
   if (reason === "rate_limited") return 429;
-  if (reason === "network_error" || reason === "app_token_error") return 503;
+  if (reason === "network_error" || reason === "app_token_unavailable") return 503;
   return 502;
 };
 

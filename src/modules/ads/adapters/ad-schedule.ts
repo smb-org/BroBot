@@ -95,10 +95,10 @@ export const getAdSchedule = async (
   } catch (error: unknown) {
     const status = twitchErrorStatus(error);
     if (status !== null) {
-      const reason = status === 429 ? "rate_limited" : status === 401 ? "unauthorized" : "app_token_error";
+      const reason = status === 429 ? "rate_limited" : status === 401 ? "unauthorized" : "app_token_unavailable";
       return failure(reason, { status, message: error instanceof Error ? error.message : String(error) });
     }
-    return failure("app_token_error", { status: null, message: error instanceof Error ? error.message : String(error) });
+    return failure("app_token_unavailable", { status: null, message: error instanceof Error ? error.message : String(error) });
   }
 
   const url = new URL(AD_SCHEDULE_URL);
@@ -146,10 +146,10 @@ export const snoozeNextAd = async (
   } catch (error: unknown) {
     const status = twitchErrorStatus(error);
     if (status !== null) {
-      const reason = status === 429 ? "rate_limited" : status === 401 ? "unauthorized" : "app_token_error";
+      const reason = status === 429 ? "rate_limited" : status === 401 ? "unauthorized" : "app_token_unavailable";
       return snoozeFailure(reason, { status, message: error instanceof Error ? error.message : String(error) });
     }
-    return snoozeFailure("app_token_error", { status: null, message: error instanceof Error ? error.message : String(error) });
+    return snoozeFailure("app_token_unavailable", { status: null, message: error instanceof Error ? error.message : String(error) });
   }
 
   const url = new URL(SNOOZE_NEXT_AD_URL);

@@ -5,6 +5,13 @@ import { getAppAccessToken } from "./app-token";
 
 const SHOUTOUT_URL = "https://api.twitch.tv/helix/chat/shoutouts";
 
+/**
+ * Twitch erwartet auf den EventSub-Webhook eine Antwort in zehn Sekunden, und
+ * dieser Aufruf wird dort abgewartet (`dispatch.ts`). Ohne Zeitlimit kostet ein
+ * haengender Helix-Aufruf das Abo. Faellt weg, sobald der Helix-Wrapper kommt.
+ */
+const HELIX_REQUEST_TIMEOUT_MS = 5_000;
+
 export interface ShoutoutSendResult {
   sent: boolean;
   /** Maschinenlesbarer Grund, wenn der Versuch nicht erfolgreich war. */
@@ -70,9 +77,11 @@ export const sendShoutout = async (
         "Client-ID": environment.TWITCH_CLIENT_ID,
         Authorization: `Bearer ${accessToken}`,
       },
+      signal: AbortSignal.timeout(HELIX_REQUEST_TIMEOUT_MS),
     });
-  } catch {
-    return { sent: false, reason: "network_error", detail };
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    return { sent: false, reason: timedOut ? "timeout" : "network_error", detail };
   }
 
   const body = await responseBody(response);

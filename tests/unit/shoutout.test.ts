@@ -20,7 +20,7 @@ const environment = (database: TestD1Database, keys = SCHLUESSEL) => ({
   TOKEN_ENCRYPTION_KEYS: keys,
 });
 
-const botEinrichten = async (database: TestD1Database, ciphertext = "lesbar"): Promise<void> => {
+const seedBot = async (database: TestD1Database, ciphertext = "lesbar"): Promise<void> => {
   await insertChannel(database, "kanal-a");
   await upsertBotIdentity(database as unknown as D1Database, {
     id: 1,
@@ -49,7 +49,7 @@ describe("Helix-Shoutout", () => {
   it("sendet einen Shoutout mit App-Token, Bot-ID und Zielparametern", async () => {
     const database = new TestD1Database();
     try {
-      await botEinrichten(database, "unlesbare-bot-chiffre");
+      await seedBot(database, "unlesbare-bot-chiffre");
       await setUpAppToken(database);
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
 
@@ -75,7 +75,7 @@ describe("Helix-Shoutout", () => {
   it("meldet die Twitch-Sperre als rate_limited", async () => {
     const database = new TestD1Database();
     try {
-      await botEinrichten(database, await encryptJson({ token: "bot-token" }, parseKeyRing(SCHLUESSEL)));
+      await seedBot(database, await encryptJson({ token: "bot-token" }, parseKeyRing(SCHLUESSEL)));
       await setUpAppToken(database);
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
 
@@ -92,7 +92,7 @@ describe("Helix-Shoutout", () => {
   it("meldet ein nicht beschaffbares App-Token ohne Helix-Aufruf", async () => {
     const database = new TestD1Database();
     try {
-      await botEinrichten(database, "unlesbare-bot-chiffre");
+      await seedBot(database, "unlesbare-bot-chiffre");
       const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("App-Token nicht erreichbar"));
 
       await expect(sendShoutout(environment(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
@@ -100,6 +100,25 @@ describe("Helix-Shoutout", () => {
         reason: "app_token_unavailable",
       });
       expect(fetcher).toHaveBeenCalledWith("https://id.twitch.tv/oauth2/token", expect.anything());
+    } finally {
+      database.close();
+    }
+  });
+
+  /** Wie beim Chat: der Aufruf wird im Webhook abgewartet, Twitch gibt zehn Sekunden. */
+  it("gibt dem Helix-Aufruf ein Zeitlimit mit und meldet es getrennt vom Netzfehler", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedBot(database, "unlesbare-bot-chiffre");
+      await setUpAppToken(database);
+      const timeoutError = Object.assign(new Error("abgelaufen"), { name: "TimeoutError" });
+      const fetcher = vi.fn<typeof fetch>().mockRejectedValue(timeoutError);
+
+      await expect(sendShoutout(environment(database), "kanal-a", "ziel-1", fetcher))
+        .resolves.toMatchObject({ sent: false, reason: "timeout" });
+
+      const [, init] = fetcher.mock.calls[0] ?? [];
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
     } finally {
       database.close();
     }
