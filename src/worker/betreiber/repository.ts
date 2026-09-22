@@ -78,7 +78,7 @@ interface AuditZeile {
   after_json: string;
 }
 
-const betreiberRollenSql = "'verwalter', 'bediener'";
+export const betreiberRollenSql = "'verwalter', 'bediener'";
 
 const auditId = (): string => crypto.randomUUID();
 

@@ -128,7 +128,7 @@ export const decodeLogCursor = (serialized: string): LogCursor | null => {
   }
 };
 
-const channelStateQuery = `
+export const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, member.role,
            CASE WHEN broadcaster_identity.status = 'connected' THEN 1 ELSE 0 END AS broadcaster_connection,
            channel.vollzustimmung AS vollzustimmung,

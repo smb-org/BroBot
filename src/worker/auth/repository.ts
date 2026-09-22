@@ -445,13 +445,13 @@ const soleBroadcasterPredicate = `
              WHERE channel_id = ? AND role = 'broadcaster'
           ) <= 1`;
 
-const lastBroadcasterGuard = `
+export const lastBroadcasterGuard = `
         AND NOT (
           role = 'broadcaster'
           ${soleBroadcasterPredicate}
         )`;
 
-const lastBroadcasterRoleChangeGuard = `
+export const lastBroadcasterRoleChangeGuard = `
         AND NOT (
           role = 'broadcaster'
           AND ? <> 'broadcaster'
