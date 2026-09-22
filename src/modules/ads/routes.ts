@@ -3,12 +3,14 @@ import { Hono, type Context } from "hono";
 import type { EventCode } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { getAdSchedule, type AdScheduleResult, snoozeNextAd, type SnoozeNextAdResult } from "./adapters/ad-schedule";
+import { COMMERCIAL_LENGTHS, startCommercial, type CommercialLength, type CommercialResult } from "./adapters/commercial";
 import { refreshAdPrewarningAlarm } from "./adapters/prewarning-alarm";
 import { ADS_OPTIONAL_BROADCASTER_SCOPES } from "./contracts";
 import type { AdsScheduleResponse } from "./contracts";
 import { listLastAdBreaks } from "./repository";
 
 const MANAGE_ADS_SCOPE = ADS_OPTIONAL_BROADCASTER_SCOPES[0];
+const COMMERCIAL_SCOPE = "channel:edit:commercial";
 
 type AdDetail = Readonly<Record<string, string | number | boolean | null>>;
 
@@ -63,6 +65,25 @@ const snoozeOutcome = (result: SnoozeNextAdResult): AdDetail => ({
   reason: result.reason,
   ...result.detail,
 });
+
+const commercialOutcome = (result: CommercialResult): AdDetail => ({
+  outcome: result.started ? "success" : "failed",
+  reason: result.reason,
+  ...result.detail,
+});
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isCommercialLength = (value: unknown): value is CommercialLength =>
+  typeof value === "number" && (COMMERCIAL_LENGTHS as readonly number[]).includes(value);
+
+const commercialStatusFor = (reason: string | null): 400 | 403 | 429 | 502 | 503 => {
+  if (reason === "scope_missing") return 403;
+  if (reason === "rate_limited") return 429;
+  if (reason === "network_error" || reason === "app_token_unavailable") return 503;
+  return 502;
+};
 
 export const adsRoutes = new Hono<ModuleRouteEnvironment>();
 
@@ -134,4 +155,57 @@ adsRoutes.post("/snooze", async (context) => {
     context.get("broadcasterHasScope"),
   );
   return context.json(await responseFor(context.env.DB, channelId, result.schedule, scopeAvailable));
+});
+
+/**
+ * Immediate action, open to any channel member (0006's "Betrieblich" tier):
+ * running a commercial doesn't reconfigure the channel, so an operator may
+ * trigger it the same as ads snooze above, which has never gated on role.
+ */
+adsRoutes.post("/commercial", async (context) => {
+  const channelId = context.req.param("channelId") ?? "";
+  const now = nowIso();
+  const triggerId = `commercial:${crypto.randomUUID()}`;
+  const body: unknown = await context.req.json().catch(() => null);
+  const length = isRecord(body) ? body.length : undefined;
+  if (!isCommercialLength(length)) return context.json({ error: "commercial_length_invalid" }, 400);
+
+  const scopeAvailable = await context.get("broadcasterHasScope")(context.env.DB, channelId, COMMERCIAL_SCOPE);
+  const result: CommercialResult = scopeAvailable
+    ? await startCommercial(
+      context.env,
+      channelId,
+      length,
+      now,
+      context.get("getAppAccessToken"),
+      context.get("helixRequest"),
+      fetch,
+    )
+    : {
+      started: false,
+      reason: "scope_missing",
+      detail: { scope: COMMERCIAL_SCOPE, status: null, message: null },
+      length: null,
+      message: null,
+      retryAfter: null,
+    };
+
+  if (!result.started) {
+    await log(context, channelId, triggerId, "ads.commercial.failed", commercialOutcome(result));
+    return context.json({
+      error: "commercial_start_failed",
+      reason: result.reason,
+      detail: result.detail,
+    }, commercialStatusFor(result.reason));
+  }
+
+  await context.get("writeModuleAudit")({
+    channelId,
+    moduleId: "ads",
+    action: "ads.commercial_started",
+    before: null,
+    after: { length: result.length ?? length, retryAfter: result.retryAfter },
+  }, now);
+
+  return context.json({ length: result.length, message: result.message, retryAfter: result.retryAfter });
 });

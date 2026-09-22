@@ -102,6 +102,17 @@ export type PrepareModuleAudit = (
   changedAt: string,
 ) => D1PreparedStatement;
 
+/**
+ * Writes an audit entry immediately, for an action with no accompanying D1
+ * mutation to batch it with -- an external Twitch call (start a commercial,
+ * create a clip), not a row change here. `PrepareModuleAudit` above stays
+ * for the batched case.
+ */
+export type WriteModuleAudit = (
+  entry: ModuleAuditEntry,
+  changedAt: string,
+) => Promise<void>;
+
 export type AuthorizeModuleMutation = (
   channelId: string,
   actor: ModuleMutationActor,
@@ -188,6 +199,7 @@ export interface ModuleRouteVariables {
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
   prepareModuleAudit: PrepareModuleAudit;
+  writeModuleAudit: WriteModuleAudit;
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,

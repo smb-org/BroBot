@@ -109,6 +109,8 @@ export const EVENT_CODES = [
   "ads.prewarning.scope_missing",
   "ads.prewarning.schedule_error",
   "ads.snooze",
+  "ads.commercial.failed",
+  "host.clip.failed",
   "text_commands.cooldown",
   "text_commands.triggered",
   "text_commands.disabled",
@@ -145,6 +147,8 @@ export const AUDIT_ACTIONS = [
   "text_commands.command.created",
   "text_commands.command.updated",
   "text_commands.command.removed",
+  "ads.commercial_started",
+  "clip.created",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -215,6 +219,9 @@ export const API_ERROR_CODES = [
   "command_delete_denied",
   "ad_schedule_read_failed",
   "ad_snooze_failed",
+  "commercial_length_invalid",
+  "commercial_start_failed",
+  "clip_create_failed",
   "overlay_token_manage_denied",
   "overlay_expiry_invalid",
   "overlay_revocation_reason_invalid",

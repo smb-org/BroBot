@@ -80,7 +80,7 @@ describe("dashboard locale", () => {
   it("carries family, tier, word, and number key for every known event code", () => {
     const codes: EventCode[] = [
       "host.action.failed", "host.chat.failed", "host.chat.sent", "host.module.error",
-      "host.module.unknown", "host.overlay.not_executed", "host.shoutout.failed", "host.shoutout.sent", "channel_events.raid.incoming",
+      "host.module.unknown", "host.overlay.not_executed", "host.shoutout.failed", "host.shoutout.sent", "host.clip.failed", "channel_events.raid.incoming",
       "channel_events.raid.outgoing", "channel_events.shoutout.sent", "channel_events.shoutout.received",
       "channel_events.chat.sub", "channel_events.chat.resub", "channel_events.chat.gift_sub",
       "channel_events.chat.community_gift", "channel_events.chat.announcement", "channel_events.chat.unknown",
@@ -90,7 +90,7 @@ describe("dashboard locale", () => {
       "channel_events.suspicious.classified", "channel_events.suspicious.cleared", "raid.outgoing", "raid.shoutout", "raid.invalid", "shoutout.suppressed",
       "ads.announcement", "ads.skipped", "ads.prewarning.announced", "ads.prewarning.no_schedule",
       "ads.prewarning.too_late", "ads.prewarning.break_started", "ads.prewarning.rescheduled",
-      "ads.prewarning.scope_missing", "ads.prewarning.schedule_error", "ads.snooze", "text_commands.cooldown", "text_commands.triggered",
+      "ads.prewarning.scope_missing", "ads.prewarning.schedule_error", "ads.snooze", "ads.commercial.failed", "text_commands.cooldown", "text_commands.triggered",
       "text_commands.disabled", "text_commands.permission_denied", "text_commands.already_exists",
       "text_commands.not_authorized", "text_commands.unknown", "text_commands.invalid",
     ];

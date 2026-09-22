@@ -12,6 +12,7 @@ import { sqlRole } from "./db/guards";
 export const VOLLUMFANG_BROADCASTER_SCOPES = [
   "channel:read:ads",
   "channel:manage:ads",
+  "channel:edit:commercial",
   "channel:manage:polls",
   "channel:manage:predictions",
   "channel:read:redemptions",

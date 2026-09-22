@@ -34,8 +34,11 @@ import {
 } from "./repository";
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
-import { EVENT_TONES, canManage, type EventTone } from "../../contracts/values";
+import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
+import { createClip, type CreateClipResult } from "../clip";
+import { writeModuleAudit } from "../module-audit";
+import { writeModuleDiagnostics } from "../event-log";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -101,6 +104,14 @@ const readBotCredentials = async (environment: Env): Promise<{ userId: string; a
   if (identity === null) return null;
   const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(environment));
   return accessToken === null ? null : { userId: identity.userId, accessToken };
+};
+
+const clipStatusFor = (reason: string | null): 400 | 401 | 429 | 502 | 503 => {
+  if (reason === "not_live") return 400;
+  if (reason === "scope_missing" || reason === "bot_identity_missing") return 401;
+  if (reason === "rate_limited") return 429;
+  if (reason === "network_error") return 503;
+  return 502;
 };
 
 export const panelRouter = new Hono<PanelEnvironment>();
@@ -210,6 +221,47 @@ panelRouter.post(
         : 503;
       return context.json({ error: "moderator_status_check_failed" }, status);
     }
+  },
+);
+
+/**
+ * Immediate action, open to any channel member (0006's "Betrieblich" tier,
+ * same reasoning as ads commercial/snooze): creating a clip doesn't
+ * reconfigure the channel. Host-level, not a module route -- the bot's own
+ * identity already carries `clips:edit`, no broadcaster consent needed.
+ */
+panelRouter.post(
+  "/api/channels/:channelId/clips",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    const triggerId = `clip:${crypto.randomUUID()}`;
+    const now = nowIso();
+    const credentials = await readBotCredentials(context.env);
+    const result: CreateClipResult = credentials === null
+      ? { created: false, reason: "bot_identity_missing", detail: {}, clipId: null, editUrl: null }
+      : await createClip(context.env, credentials.accessToken, channelId, fetch);
+
+    if (!result.created) {
+      await writeModuleDiagnostics(context.env.DB, channelId, "host", triggerId, context.get("actor").userId, [
+        { code: "host.clip.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } },
+      ], now);
+      return context.json({
+        error: "clip_create_failed",
+        reason: result.reason,
+        detail: result.detail,
+      }, clipStatusFor(result.reason));
+    }
+
+    await writeModuleAudit(context.env.DB, context.get("actor").userId, now, {
+      channelId,
+      moduleId: null,
+      action: "clip.created",
+      before: null,
+      after: { clipId: result.clipId },
+    });
+
+    return context.json({ clipId: result.clipId, editUrl: result.editUrl });
   },
 );
 

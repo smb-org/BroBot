@@ -631,6 +631,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.overlay.not_executed": "Overlay nicht ausgeführt",
     "host.shoutout.failed": "Shoutout fehlgeschlagen",
     "host.shoutout.sent": "Shoutout gesendet",
+    "host.clip.failed": "Clip fehlgeschlagen",
     "channel_events.raid.incoming": (detail) => `Raid von ${detailText(detail, "source", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
     "channel_events.raid.outgoing": (detail) => `Raid zu ${detailText(detail, "target", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
     "channel_events.shoutout.sent": (detail) => `Shoutout an ${detailText(detail, "target", "unbekannt")}`,
@@ -670,6 +671,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.prewarning.scope_missing": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
     "ads.prewarning.schedule_error": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "reason", "unbekannter Fehler")}`,
     "ads.snooze": (detail) => detail.outcome === "success" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "reason", "unbekannter Fehler")}`,
+    "ads.commercial.failed": (detail) => `Werbeeinblendung nicht gestartet: ${detailText(detail, "reason", "unbekannter Fehler")}`,
     "text_commands.cooldown": (detail) => {
       const name = textCommandName(detail);
       return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
@@ -693,6 +695,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.overlay.not_executed": "Overlay not executed",
     "host.shoutout.failed": "Shoutout failed",
     "host.shoutout.sent": "Shoutout sent",
+    "host.clip.failed": "Clip failed",
     "channel_events.raid.incoming": (detail) => `Raid from ${detailText(detail, "source", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
     "channel_events.raid.outgoing": (detail) => `Raid to ${detailText(detail, "target", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
     "channel_events.shoutout.sent": (detail) => `Shoutout sent to ${detailText(detail, "target", "unknown")}`,
@@ -732,6 +735,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.prewarning.scope_missing": "Ad warning suppressed: channel:read:ads is missing",
     "ads.prewarning.schedule_error": (detail) => `Ad schedule could not be read: ${detailText(detail, "reason", "unknown error")}`,
     "ads.snooze": (detail) => detail.outcome === "success" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "reason", "unknown error")}`,
+    "ads.commercial.failed": (detail) => `Commercial not started: ${detailText(detail, "reason", "unknown error")}`,
     "text_commands.cooldown": (detail) => {
       const name = textCommandName(detail);
       return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
@@ -803,6 +807,8 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "ads.prewarning.scope_missing": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "ads.prewarning.schedule_error": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "ads.snooze": { family: "betrieb", tier: "gezeichnet", word: { de: "Snooze", en: "Snooze" }, numberKey: null, tone: "info" },
+  "ads.commercial.failed": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.clip.failed": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "text_commands.cooldown": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: "remainingSeconds", tone: "warning" },
   "text_commands.triggered": { family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.disabled": { family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
@@ -893,6 +899,9 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     command_delete_denied: "Der Befehl darf nicht gelöscht werden.",
     ad_schedule_read_failed: "Der Werbezeitplan konnte nicht gelesen werden.",
     ad_snooze_failed: "Die nächste Werbepause konnte nicht verschoben werden.",
+    commercial_length_invalid: "Die Werbedauer ist ungültig.",
+    commercial_start_failed: "Die Werbeeinblendung konnte nicht gestartet werden.",
+    clip_create_failed: "Der Clip konnte nicht erstellt werden.",
     overlay_token_manage_denied: "Nur Broadcaster und Verwalter dürfen Overlay-Token verwalten.",
     overlay_expiry_invalid: "Ablaufzeit ist ungültig.",
     overlay_revocation_reason_invalid: "Widerrufsgrund fehlt oder ist ungültig.",
@@ -955,6 +964,9 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     command_delete_denied: "This command may not be removed.",
     ad_schedule_read_failed: "The ad schedule could not be read.",
     ad_snooze_failed: "The next ad break could not be postponed.",
+    commercial_length_invalid: "The commercial length is invalid.",
+    commercial_start_failed: "The commercial could not be started.",
+    clip_create_failed: "The clip could not be created.",
     overlay_token_manage_denied: "Only broadcasters and managers may manage overlay tokens.",
     overlay_expiry_invalid: "Expiry is invalid.",
     overlay_revocation_reason_invalid: "Revocation reason missing or invalid.",
