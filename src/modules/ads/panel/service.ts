@@ -1,4 +1,5 @@
 import type { AdsSettings, AdsScheduleResponse } from "../contracts";
+import { DEFAULT_PREWARNING_TEXT } from "../contracts/chat-defaults";
 import { PanelApiError } from "../../../contracts/panel-error";
 
 const emptySettings: AdsSettings = {
@@ -6,7 +7,7 @@ const emptySettings: AdsSettings = {
   manual: "",
   prewarning: true,
   leadSeconds: 60,
-  prewarningText: "Ads in {seconds} seconds. Be right back!",
+  prewarningText: DEFAULT_PREWARNING_TEXT,
 };
 
 const emptySchedule: AdsScheduleResponse = {

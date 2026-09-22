@@ -9,6 +9,7 @@ import {
 } from "./domain";
 import type { TextCommandInput } from "./domain";
 import type { TextCommandRepository } from "./repository";
+import { NO_COMMANDS_REPLY, commandListReply } from "./contracts/chat-defaults";
 
 const recordValue = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -122,8 +123,8 @@ export const processTextCommandMessage = async (
       .filter((command) => command.enabled)
       .sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0
-      ? "No text commands set up."
-      : `Commands: ${commands.map((command) => `!${command.name}`).join(", ")}`;
+      ? NO_COMMANDS_REPLY
+      : commandListReply(commands.map((command) => command.name));
     return response(event, input, list);
   }
 

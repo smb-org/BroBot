@@ -159,7 +159,7 @@ describe("Text commands service", () => {
 
     expect(result.actions).toEqual([{
       kind: "chat",
-      text: "Commands: !aktiv, !befehle",
+      text: "Befehle: !aktiv, !befehle",
       replyToMessageId: "twitch-message-1",
     }]);
   });

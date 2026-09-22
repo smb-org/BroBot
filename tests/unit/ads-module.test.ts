@@ -33,8 +33,8 @@ describe("ads module", () => {
       is_automatic: false,
     }));
 
-    expect(automatic.actions).toEqual([{ kind: "chat", text: "Automatic ad break: 30 seconds. Be right back!" }]);
-    expect(manual.actions).toEqual([{ kind: "chat", text: "Ad break: 90 seconds. Be right back!" }]);
+    expect(automatic.actions).toEqual([{ kind: "chat", text: "Automatische Werbepause: 30 Sekunden. Bin gleich zurück!" }]);
+    expect(manual.actions).toEqual([{ kind: "chat", text: "Werbepause: 90 Sekunden. Bin gleich zurück!" }]);
     expect(automatic.diagnostics[0]).toEqual({
       code: "ads.announcement",
       detail: {
