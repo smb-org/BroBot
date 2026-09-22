@@ -80,7 +80,9 @@ const insertSessionCookie = async (userId: string): Promise<string> => createSes
 const makeEnvironment = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
   ...environmentKeys,
-} as Env);
+  TWITCH_BOT_LOGIN: "brobot",
+  PLATFORM_USER_IDS: JSON.stringify(["4711"]),
+} as unknown as Env);
 
 const makeRequest = async (
   userId: string | null,
@@ -287,13 +289,39 @@ describe("Panel read endpoints", () => {
       await makeRequest("user-1", "/api/channels"),
       environment,
     );
-    const body = await response.json<{ channels: Array<{ channelId: string; role: string }> }>();
+    const body = await response.json<{
+      channels: Array<{ channelId: string; role: string }>;
+      viewerIsBot: boolean;
+      botLogin?: string;
+    }>();
 
     expect(response.status).toBe(200);
     expect(body.channels).toEqual([
       expect.objectContaining({ channelId: "kanal-a", role: "manager" }),
       expect.objectContaining({ channelId: "kanal-c", role: "operator" }),
     ]);
+    expect(body.viewerIsBot).toBe(false);
+    expect(body).not.toHaveProperty("botLogin");
+  });
+
+  it("returns the bot login to platform admins and identifies bot-account viewers", async () => {
+    await insertLoginIdentityAndSession(database, "4711");
+    const adminResponse = await panelRouter.fetch(await makeRequest("4711", "/api/channels"), environment);
+    const adminBody = await adminResponse.json<{ platformAdmin: boolean; viewerIsBot: boolean; botLogin?: string }>();
+
+    expect(adminBody.platformAdmin).toBe(true);
+    expect(adminBody.viewerIsBot).toBe(false);
+    expect(adminBody.botLogin).toBe("brobot");
+
+    await insertLoginIdentityAndSession(database, "bot-user");
+    await database.prepare("UPDATE auth_sessions SET login = ? WHERE user_id = ?").bind("BROBOT", "bot-user").run();
+    await insertBotIdentity(database);
+    const botResponse = await panelRouter.fetch(await makeRequest("bot-user", "/api/channels"), environment);
+    const botBody = await botResponse.json<{ platformAdmin: boolean; viewerIsBot: boolean; botLogin?: string }>();
+
+    expect(botBody.platformAdmin).toBe(false);
+    expect(botBody.viewerIsBot).toBe(true);
+    expect(botBody.botLogin).toBe("brobot");
   });
 
   it("reports the installation's bot status even with zero released channels (#159)", async () => {

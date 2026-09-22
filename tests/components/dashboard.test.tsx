@@ -3076,19 +3076,38 @@ describe("Dashboard skeleton", () => {
   });
 
   describe("blocking states (#159)", () => {
-    it("blocks a channel page and offers the sign-in action to a platform admin when the bot is not signed in", async () => {
+    it("asks a platform admin to switch to the bot account without offering bot consent", async () => {
       const channel = { ...healthyChannel("kanal-a", "Alpha"), bot: { status: "revoked", reason: "authorization_revoked", updatedAt: relativeIso(0) } };
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot, platformAdmin: true });
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot, platformAdmin: true, viewerIsBot: false, botLogin: "brobot" });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a");
+
+      const { container } = render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Mit Bot-Account anmelden" })).toBeInTheDocument();
+      expect(screen.getByText(/@brobot/)).toBeInTheDocument();
+      expect(screen.getByText(/nicht dein eigenes Konto/)).toBeInTheDocument();
+      expect(container.querySelector('a[href="/auth/bot/login"]')).toBeNull();
+      expect(screen.queryByText("Wende dich an den Betreiber der Installation.")).not.toBeInTheDocument();
+    });
+
+    it("lets the bot viewer connect itself", async () => {
+      const channel = { ...healthyChannel("kanal-a", "Alpha"), bot: null };
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: null, platformAdmin: false, viewerIsBot: true, botLogin: "brobot" });
         return jsonResponse({}, 404);
       }));
       window.history.replaceState({}, "", "/channels/kanal-a");
 
       render(<DashboardApp />);
 
-      expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Bot anmelden" })).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: "Bot verbinden" })).toBeInTheDocument();
+      expect(screen.getByText(/als Bot-Konto angemeldet/)).toBeInTheDocument();
       expect(screen.queryByText("Wende dich an den Betreiber der Installation.")).not.toBeInTheDocument();
     });
 
@@ -3104,7 +3123,8 @@ describe("Dashboard skeleton", () => {
       render(<DashboardApp />);
 
       expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Bot anmelden" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Bot verbinden" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Mit Bot-Account anmelden" })).not.toBeInTheDocument();
       expect(screen.getByText("Wende dich an den Betreiber der Installation.")).toBeInTheDocument();
     });
 
@@ -3141,10 +3161,10 @@ describe("Dashboard skeleton", () => {
       expect(screen.queryByRole("heading", { name: "Der Bot ist nicht angemeldet" })).not.toBeInTheDocument();
     });
 
-  it("shows the bot state with the sign-in action on the overview of a fresh, zero-channel installation for a platform admin", async () => {
+  it("shows the bot account switch action on a fresh, zero-channel installation for a platform admin", async () => {
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [], bot: null, platformAdmin: true });
+        if (path === "/api/channels") return jsonResponse({ channels: [], bot: null, platformAdmin: true, viewerIsBot: false, botLogin: "brobot" });
         return jsonResponse({}, 404);
       }));
       window.history.replaceState({}, "", "/");
@@ -3152,7 +3172,7 @@ describe("Dashboard skeleton", () => {
       render(<DashboardApp />);
 
       expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Bot anmelden" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Mit Bot-Account anmelden" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Übersicht" })).not.toBeInTheDocument();
     });
 
@@ -3167,8 +3187,29 @@ describe("Dashboard skeleton", () => {
       render(<DashboardApp />);
 
       expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Bot anmelden" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Bot verbinden" })).not.toBeInTheDocument();
       expect(screen.getByText("Wende dich an den Betreiber der Installation.")).toBeInTheDocument();
+    });
+
+    it("shows the empty overview after the bot account connects without channel membership", async () => {
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({
+          channels: [],
+          bot: { status: "connected", reason: null, updatedAt: relativeIso(0) },
+          platformAdmin: false,
+          viewerIsBot: true,
+          botLogin: "brobot",
+        });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/");
+
+      render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "Übersicht", level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Noch kein Kanal freigegeben", level: 2 })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Der Bot ist nicht angemeldet" })).not.toBeInTheDocument();
     });
 
     it("lets the bot state win over channel-not-released -- installation-wide beats per-viewer", async () => {

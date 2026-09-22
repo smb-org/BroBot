@@ -146,6 +146,7 @@ export const startOAuthAuthorization = async (
   redirectPath: string | null = null,
   fullConsentSecondAttempt = false,
   expectedUserId: string | null = null,
+  forceVerify = false,
 ): Promise<OAuthStart> => {
   const transactionId = randomToken(24);
   const stateNonce = randomToken(24);
@@ -178,7 +179,7 @@ export const startOAuthAuthorization = async (
   const baseScopes = purpose === "login" ? LOGIN_SCOPES : BOT_SCOPES;
   const scopes = [...new Set([...baseScopes, ...additionalScopes])];
   url.searchParams.set("scope", scopes.join(" "));
-  if (purpose === "bot") url.searchParams.set("force_verify", "true");
+  if (purpose === "bot" || forceVerify) url.searchParams.set("force_verify", "true");
   url.searchParams.set("state", state);
   return { url: url.toString(), state, transactionId, stateNonce };
 };

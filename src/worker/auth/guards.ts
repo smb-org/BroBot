@@ -1,6 +1,8 @@
 import { createMiddleware } from "hono/factory";
 
 import { getPlatformUserIds } from "../config";
+import { getBotIdentity } from "../db/bot-identity";
+import { canConnectBot } from "./bot-authorization";
 import { oauthError } from "./oauth-error-texts";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../module-authorization";
 import type { AuthorizeModuleMutation, PrepareModuleAudit, WriteModuleAudit } from "../../modules/contract";
@@ -137,6 +139,23 @@ export const requireBrowserChannelAuthorization = () => requireChannelAuthorizat
 
 export const requirePlatform = () => requirePlatformAuthorizationFor(false);
 export const requireBrowserPlatformAuthorization = () => requirePlatformAuthorizationFor(true);
+
+export const requireBrowserBotAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
+  async (context, next) => {
+    const session = await getSessionFromRequest(context.req.raw, context.env);
+    if (session === null) {
+      return context.redirect(loginRedirectForRequest(context.req.raw), 302);
+    }
+
+    const botIdentity = await getBotIdentity(context.env.DB);
+    if (!canConnectBot(session, context.env, botIdentity)) {
+      return oauthError(context, "bot_account_only_connects_itself", 403);
+    }
+
+    context.set("session", session);
+    await next();
+  },
+);
 
 export const requireSessionAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
   async (context, next) => {

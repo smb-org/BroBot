@@ -331,9 +331,12 @@ export interface DashboardTexts {
    *  stays usable) instead of stacking another red box on a normal page. */
   blocking: {
     botTitle: string;
-    botDescriptionAdmin: string;
+    botDescriptionAdmin: (botLogin: string) => string;
+    botDescriptionBot: string;
     botDescriptionViewer: string;
     botAction: string;
+    botSwitchAction: string;
+    botSwitching: string;
     botContact: string;
     channelTitle: string;
     channelDescription: string;
@@ -495,9 +498,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     blocking: {
       botTitle: "Der Bot ist nicht angemeldet",
-      botDescriptionAdmin: "Ohne Bot-Identität empfängt kein Kanal Ereignisse: EventSub, Chat, Shoutouts und die Mitgliedersuche funktionieren nirgends. Melde den Bot an, um alles wieder in Betrieb zu setzen.",
+      botDescriptionAdmin: (botLogin) => `Das Bot-Konto @${botLogin} muss die Verbindung herstellen. Melde dich mit diesem Konto an. Verwende dafür nicht dein eigenes Konto.`,
+      botDescriptionBot: "Du bist als Bot-Konto angemeldet. Verbinde es, damit BroBot in den freigegebenen Kanälen funktioniert.",
       botDescriptionViewer: "Der Bot ist nicht verbunden. Das betrifft jeden Kanal: EventSub, Chat, Shoutouts und die Mitgliedersuche funktionieren nirgends. Das kann nur der Betreiber der Installation beheben.",
-      botAction: "Bot anmelden",
+      botAction: "Bot verbinden",
+      botSwitchAction: "Mit Bot-Account anmelden",
+      botSwitching: "Abmelden …",
       botContact: "Wende dich an den Betreiber der Installation.",
       channelTitle: "Kanal nicht freigegeben",
       channelDescription: "Dieser Kanal ist für dein Konto nicht freigegeben. Andere Kanäle sind davon nicht betroffen.",
@@ -648,9 +654,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     blocking: {
       botTitle: "The bot is not signed in",
-      botDescriptionAdmin: "Without a bot identity no channel receives events: EventSub, chat, shoutouts, and member search all fail everywhere. Sign the bot in to bring everything back.",
+      botDescriptionAdmin: (botLogin) => `The bot account @${botLogin} must connect. Sign in with that account. Do not use your own account.`,
+      botDescriptionBot: "You're signed in as the bot account. Connect it so BroBot works in the released channels.",
       botDescriptionViewer: "The bot is not connected. This affects every channel: EventSub, chat, shoutouts, and member search fail everywhere. Only the installation's operator can fix this.",
-      botAction: "Sign in the bot",
+      botAction: "Connect bot",
+      botSwitchAction: "Sign in with bot account",
+      botSwitching: "Signing out …",
       botContact: "Contact the installation's operator.",
       channelTitle: "Channel not released",
       channelDescription: "This channel is not released to your account. Other channels are not affected.",

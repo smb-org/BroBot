@@ -31,6 +31,10 @@ export const OAUTH_ERROR_TEXTS = {
     de: "Der Twitch-Login gehört nicht zur hinterlegten Bot-Identität.",
     en: "This Twitch login does not belong to the stored bot identity.",
   },
+  bot_account_only_connects_itself: {
+    de: "Nur das Bot-Konto darf sich selbst verbinden.",
+    en: "Only the bot account can connect itself.",
+  },
   full_consent_second_attempt_incomplete: {
     de: "Die vollständige Zustimmung für diesen Kanal wurde nicht erteilt.",
     en: "Full consent for this channel was not granted.",

@@ -869,6 +869,8 @@ export const DashboardApp = (): ReactElement => {
   const [route, navigate] = useDashboardRoute();
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
   const [isPlatform, setIsPlatform] = useState(false);
+  const [viewerIsBot, setViewerIsBot] = useState(false);
+  const [botLogin, setBotLogin] = useState<string | null>(null);
   // The installation's single bot identity, independent of which channels
   // this viewer can see -- present even with zero released channels (#159).
   const [installationBot, setInstallationBot] = useState<PanelBotStatus | null>(null);
@@ -977,6 +979,8 @@ export const DashboardApp = (): ReactElement => {
     cancelMembersRequest();
     setChannels({ status: "success", data: [], error: null });
     setIsPlatform(false);
+    setViewerIsBot(false);
+    setBotLogin(null);
     setInstallationBot(null);
     setOverview(idleState());
     setOverviewRoutePath(null);
@@ -1005,6 +1009,8 @@ export const DashboardApp = (): ReactElement => {
         if (!cancelled) {
           setChannels({ status: "success", data: response.channels, error: null });
           setIsPlatform(response.platformAdmin);
+          setViewerIsBot(response.viewerIsBot);
+          setBotLogin(response.botLogin ?? null);
           setInstallationBot(response.bot);
           setAuthenticationRequired(false);
         }
@@ -1361,6 +1367,22 @@ export const DashboardApp = (): ReactElement => {
     }
   };
 
+  const handleBotAccountSwitch = async (): Promise<void> => {
+    setLoggingOut(true);
+    try {
+      await logout();
+      window.location.href = "/auth/login?switch=1&returnTo=%2F";
+    } catch (error) {
+      if (error instanceof PanelApiError && error.status === 401) {
+        window.location.href = "/auth/login?switch=1&returnTo=%2F";
+        return;
+      }
+      setChannels((current) => ({ ...current, error: errorMessage(error), status: "error" }));
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
   const loadNextAuditPage = async (): Promise<void> => {
     if (route.kind !== "channel" || route.section !== "system" || loadingNextAuditPage ||
         audit.data?.nextCursor === null || audit.data?.nextCursor === undefined) return;
@@ -1485,10 +1507,16 @@ export const DashboardApp = (): ReactElement => {
         {showBotBlocking ? <BlockingState
           tone="error"
           title={dashboardTexts().blocking.botTitle}
-          description={isPlatform ? dashboardTexts().blocking.botDescriptionAdmin : dashboardTexts().blocking.botDescriptionViewer}
-          {...(isPlatform
+          description={viewerIsBot
+            ? dashboardTexts().blocking.botDescriptionBot
+            : isPlatform
+              ? dashboardTexts().blocking.botDescriptionAdmin(botLogin ?? "")
+              : dashboardTexts().blocking.botDescriptionViewer}
+          {...(viewerIsBot
             ? { action: { label: dashboardTexts().blocking.botAction, onClick: () => { window.location.href = "/auth/bot/login"; } } }
-            : { contact: dashboardTexts().blocking.botContact })}
+            : isPlatform
+              ? { action: { label: loggingOut ? dashboardTexts().blocking.botSwitching : dashboardTexts().blocking.botSwitchAction, onClick: () => { void handleBotAccountSwitch(); } } }
+              : { contact: dashboardTexts().blocking.botContact })}
         /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}

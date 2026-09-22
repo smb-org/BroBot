@@ -7,6 +7,7 @@ import {
 } from "../bot-maintenance";
 import { getTokenEncryptionKeys } from "../auth/crypto";
 import { getPlatformUserIds } from "../config";
+import { canConnectBot } from "../auth/bot-authorization";
 import {
   requireChannelAuthorization,
   requireSessionAuthorization,
@@ -122,10 +123,13 @@ panelRouter.route("/", moduleRouter);
 
 panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) => {
   const session = context.get("session");
-  const [channels, bot] = await Promise.all([
+  const [channels, bot, botIdentity] = await Promise.all([
     listChannelsForUser(context.env.DB, session.userId),
     getBotIdentityStatus(context.env.DB),
+    getBotIdentity(context.env.DB),
   ]);
+  const platformAdmin = getPlatformUserIds(context.env).has(session.userId);
+  const viewerIsBot = canConnectBot(session, context.env, botIdentity);
   return context.json({
     channels,
     // The installation's single bot identity (`bot_identity_status`, id=1),
@@ -133,7 +137,9 @@ panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) 
     // installation with zero released channels still needs to tell a
     // platform admin the bot isn't signed in (#159).
     bot,
-    platformAdmin: getPlatformUserIds(context.env).has(session.userId),
+    platformAdmin,
+    viewerIsBot,
+    ...((platformAdmin || viewerIsBot) ? { botLogin: context.env.TWITCH_BOT_LOGIN } : {}),
   });
 });
 
