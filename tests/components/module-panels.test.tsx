@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -84,13 +84,23 @@ describe("Module panel loader", () => {
 
   it("toggles a module and reloads the caller's list afterwards", async () => {
     const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } })));
-    const onChanged = vi.fn(() => Promise.resolve());
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={onChanged} />);
+    const onNavigate = vi.fn();
+    const Harness = (): ReactElement => {
+      const [modules, setModules] = useState([{ id: "aktiv", enabled: true, settings: "{}" }]);
+      const onChanged = (): Promise<void> => {
+        setModules([{ id: "aktiv", enabled: false, settings: "{}" }]);
+        return Promise.resolve();
+      };
+      return <ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={modules} onNavigate={onNavigate} onChanged={onChanged} />;
+    };
+    renderWithMantine(<Harness />);
 
-    fireEvent.click(screen.getByRole("switch", { name: /aktiv/i }));
+    const toggle = screen.getByRole("switch", { name: /aktiv/i });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
 
-    await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
+    await waitFor(() => { expect(screen.getByRole("switch", { name: /aktiv/i })).not.toBeChecked(); });
     const [url, init] = fetcher.mock.calls.find(([, requestInit]) => requestInit?.method === "PATCH") ?? [];
     expect(url instanceof URL ? url.pathname : url).toBe("/api/channels/kanal-a/modules/aktiv");
     expect(init?.body).toBe(JSON.stringify({ enabled: false }));

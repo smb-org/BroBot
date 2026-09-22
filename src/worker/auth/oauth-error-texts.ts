@@ -47,6 +47,14 @@ export const OAUTH_ERROR_TEXTS = {
     de: "Nur der Kanalinhaber darf diese Zustimmung nachfordern.",
     en: "Only the channel owner can re-request this consent.",
   },
+  channel_access_denied: {
+    de: "Du hast keinen Zugriff auf diesen Kanal.",
+    en: "You do not have access to this channel.",
+  },
+  platform_access_denied: {
+    de: "Diese Seite ist nur für Betreiber zugänglich.",
+    en: "This page is only available to operators.",
+  },
   channel_owner_only_scope_grant: {
     de: "Nur der Kanalinhaber darf diese Zustimmung erteilen.",
     en: "Only the channel owner can grant this consent.",

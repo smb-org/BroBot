@@ -129,12 +129,10 @@ export type EventCode = (typeof EVENT_CODES)[number];
 /**
  * The `audit_log.action` vocabulary, closed for the same reason as
  * `EVENT_CODES` above. `channel.*`/`member.*` are also `PlatformAction` in
- * `worker/platform/repository.ts` and `dashboard/labels.ts` -- the subset a
- * platform admin's audit view labels; the rest only ever reach the raw,
- * per-channel system audit log, which shows `action` unlabelled. A module's
- * own settings change writes `` `${moduleId}.settings_changed` ``: module
- * ids are already English identifiers, so no catalogue entry is needed for
- * that half.
+ * `worker/platform/repository.ts`; every fixed action is localized in the
+ * dashboard audit labels. A module-specific `${moduleId}.settings_changed`
+ * action keeps its identifier in the per-channel log. `AuditWriteAction`
+ * below keeps both forms checked at the D1 writer.
  */
 export const AUDIT_ACTIONS = [
   "channel.released",
@@ -149,8 +147,12 @@ export const AUDIT_ACTIONS = [
   "text_commands.command.removed",
   "ads.commercial_started",
   "clip.created",
+  "overlay.token.issued",
+  "overlay.token.revoked",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+export type ModuleSettingsChangedAction = `${string}.settings_changed`;
+export type AuditWriteAction = AuditAction | ModuleSettingsChangedAction;
 
 /**
  * The closed vocabulary of `{ "error": "<code>" }` responses the worker
@@ -166,6 +168,8 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
  */
 export const API_ERROR_CODES = [
   "session_missing",
+  "websocket_origin_invalid",
+  "realtime_protocol_unsupported",
   "csrf_invalid",
   "channel_missing",
   "channel_access_denied",

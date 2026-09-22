@@ -16,7 +16,7 @@ export const eventFilterIsActive = (filters: PanelEventFilters): boolean =>
   filters.origin !== null || filters.module !== null || filters.tone !== null || filters.person !== null;
 
 export const eventMetadata = (code: string) =>
-  Object.prototype.hasOwnProperty.call(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
+  Object.hasOwn(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
 
 export const eventTone = (code: string): EventTone | null =>
   eventMetadata(code)?.tone ?? null;

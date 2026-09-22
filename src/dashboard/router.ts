@@ -88,6 +88,11 @@ export const navigateToDashboardRoute = (route: DashboardRoute): void => {
   window.dispatchEvent(new PopStateEvent("popstate"));
 };
 
+export const replaceDashboardRoute = (route: DashboardRoute): void => {
+  window.history.replaceState({}, "", dashboardRoutePath(route));
+  window.dispatchEvent(new PopStateEvent("popstate"));
+};
+
 export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute) => void] => {
   const [route, setRoute] = useState<DashboardRoute>(() => parseDashboardRoute(window.location.pathname, window.location.search));
 

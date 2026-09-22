@@ -119,7 +119,7 @@ export const createOverlayToken = async (
   const audit = prepareModuleAudit(db, actor.userId, token.createdAt, {
     channelId: token.channelId,
     moduleId: OVERLAY_AUDIT_MODULE_ID,
-    action: "overlay.token.ausgestellt",
+    action: "overlay.token.issued",
     before: null,
     after: overlayTokenAuditSnapshot(token),
   });
@@ -214,7 +214,7 @@ export const revokeOverlayToken = async (
   const audit = prepareModuleAudit(db, actor.userId, revokedAt, {
     channelId,
     moduleId: OVERLAY_AUDIT_MODULE_ID,
-    action: "overlay.token.widerrufen",
+    action: "overlay.token.revoked",
     before,
     after: { ...before, revokedAt, revocationReason: reason },
   });

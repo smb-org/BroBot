@@ -17,6 +17,8 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 :root {
+  /* Shell is 100; inspectors sit above it, modals/drawers start at 200, and Spotlight is at 9999. */
+  --layer-overlay: 120;
   /* Ein Grundton, kein Verlauf. Dunkel, weil das Panel nachts neben OBS steht. */
   --grund: #141312;
   --rail: #181716;
@@ -536,11 +538,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 
 @media (max-width: 1023px) {
   .list-detail--open .list-detail__backdrop {
-    display: block; position: fixed; inset: 0; z-index: 20; border: 0; padding: 0; margin: 0;
+    display: block; position: fixed; inset: 0; z-index: var(--layer-overlay); border: 0; padding: 0; margin: 0;
     background: color-mix(in srgb, var(--tiefe) 60%, transparent); cursor: default;
   }
   .list-detail--open .list-detail__inspector {
-    position: fixed; top: 0; right: 0; bottom: 0; z-index: 21; width: min(480px, 100%); overflow-y: auto;
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--layer-overlay); width: min(480px, 100%); overflow-y: auto;
   }
   .list-detail--open .list-detail__inspector > .sub-inspector { min-height: 100%; border-radius: 0; box-shadow: var(--mantine-shadow-xs); }
 }
@@ -598,7 +600,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .event-label { display: flex; align-items: center; gap: 10px; max-width: 100%; min-width: 0; }
 .event-label > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .realtime-status { display: inline-flex; align-items: center; gap: var(--s2); color: var(--text-3); font-size: 12px; font-weight: 400; }
-.realtime-feed__notice { position: fixed; top: calc(56px + var(--s2)); left: 50%; z-index: 10; transform: translateX(-50%); }
+.realtime-feed__notice { position: fixed; top: calc(56px + var(--s2)); left: 50%; z-index: var(--layer-overlay); transform: translateX(-50%); }
 .event-feed { min-width: 0; }
 .event-filter { margin-bottom: var(--s4); }
 .event-filter__controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); }

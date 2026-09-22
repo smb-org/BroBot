@@ -1,5 +1,5 @@
 import type { ChannelRole } from "../contracts/values";
-import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { auditActionLabel, catalogString, dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 
 /**
  * Roles are lowercase in the data model. The UI shows the term,
@@ -252,9 +252,7 @@ export const platformActionLabel = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
   const texts = platformCatalog[language];
-  return Object.prototype.hasOwnProperty.call(texts.actionLabel, action)
-    ? texts.actionLabel[action as PlatformAction]
-    : action;
+  return catalogString(texts.actionLabel, action) ?? auditActionLabel(action, language);
 };
 
 export interface MembersTexts {

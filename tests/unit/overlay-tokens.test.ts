@@ -206,7 +206,7 @@ describe("Overlay token service", () => {
         actor_user_id: TEST_ACTOR.userId,
         channel_id: "kanal-a",
         module_id: null,
-        action: "overlay.token.ausgestellt",
+        action: "overlay.token.issued",
         before_json: "null",
         after_json: JSON.stringify({
           tokenId: issued.tokenId,
@@ -233,7 +233,7 @@ describe("Overlay token service", () => {
           actor_user_id: TEST_ACTOR.userId,
           channel_id: "kanal-a",
           module_id: null,
-          action: "overlay.token.widerrufen",
+          action: "overlay.token.revoked",
           before_json: JSON.stringify({
             tokenId: issued.tokenId,
             createdAt: "2026-09-18T00:00:00.000Z",

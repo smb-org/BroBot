@@ -60,6 +60,21 @@ describe("broadcaster scope route", () => {
     ).first()).resolves.toEqual({ redirect_path: "/channels/kanal-a/modules/ads" });
   });
 
+  it("renders a localized forbidden page for a signed-in user without channel access", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "viewer");
+    const request = await requestForPath("viewer", "/auth/channels/kanal-a/channel-bot");
+    const headers = new Headers(request.headers);
+    headers.set("Accept-Language", "en-US,en;q=0.9");
+
+    const response = await authRouter.fetch(new Request(request, { headers }), environment(database));
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    await expect(response.text()).resolves.toContain("You do not have access to this channel.");
+  });
+
   it("doesn't pull scopes from other channels into the consent dialog", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");

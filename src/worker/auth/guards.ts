@@ -1,6 +1,7 @@
 import { createMiddleware } from "hono/factory";
 
 import { getPlatformUserIds } from "../config";
+import { oauthError } from "./oauth-error-texts";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../module-authorization";
 import type { AuthorizeModuleMutation, PrepareModuleAudit, WriteModuleAudit } from "../../modules/contract";
 import { prepareModuleAudit, writeModuleAudit } from "../module-audit";
@@ -53,10 +54,20 @@ const csrfExemptMethods = new Set(["GET", "HEAD", "OPTIONS"]);
 
 const nowIso = (): string => new Date().toISOString();
 
-export const requireChannelAuthorization = () => createMiddleware<ChannelAuthorizationEnvironment>(
+const loginRedirectForRequest = (request: Request): string => {
+  const url = new URL(request.url);
+  const returnTo = `${url.pathname}${url.search}`;
+  return `/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
+};
+
+const requireChannelAuthorizationFor = (browserEntry: boolean) => createMiddleware<ChannelAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
-    if (session === null) return context.json({ error: "session_missing" }, 401);
+    if (session === null) {
+      return browserEntry
+        ? context.redirect(loginRedirectForRequest(context.req.raw), 302)
+        : context.json({ error: "session_missing" }, 401);
+    }
 
     if (!csrfExemptMethods.has(context.req.method) && !await verifyCsrfRequest(
       context.req.raw,
@@ -72,7 +83,11 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
       return context.json({ error: "channel_missing" }, 400);
     }
     const role = await authorizeChannelAccess(context.env.DB, session, channelId);
-    if (role === null) return context.json({ error: "channel_access_denied" }, 403);
+    if (role === null) {
+      return browserEntry
+        ? oauthError(context, "channel_access_denied", 403)
+        : context.json({ error: "channel_access_denied" }, 403);
+    }
 
     context.set("session", session);
     context.set("channelRole", role);
@@ -87,10 +102,14 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
   },
 );
 
-export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvironment>(
+const requirePlatformAuthorizationFor = (browserEntry: boolean) => createMiddleware<PlatformAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
-    if (session === null) return context.json({ error: "session_missing" }, 401);
+    if (session === null) {
+      return browserEntry
+        ? context.redirect(loginRedirectForRequest(context.req.raw), 302)
+        : context.json({ error: "session_missing" }, 401);
+    }
 
     if (!csrfExemptMethods.has(context.req.method) && !await verifyCsrfRequest(
       context.req.raw,
@@ -102,7 +121,9 @@ export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvir
     }
 
     if (!getPlatformUserIds(context.env).has(session.userId)) {
-      return context.json({ error: "platform_access_denied" }, 403);
+      return browserEntry
+        ? oauthError(context, "platform_access_denied", 403)
+        : context.json({ error: "platform_access_denied" }, 403);
     }
 
     context.set("session", session);
@@ -110,6 +131,12 @@ export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvir
     await next();
   },
 );
+
+export const requireChannelAuthorization = () => requireChannelAuthorizationFor(false);
+export const requireBrowserChannelAuthorization = () => requireChannelAuthorizationFor(true);
+
+export const requirePlatform = () => requirePlatformAuthorizationFor(false);
+export const requireBrowserPlatformAuthorization = () => requirePlatformAuthorizationFor(true);
 
 export const requireSessionAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
   async (context, next) => {

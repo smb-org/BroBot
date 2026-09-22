@@ -34,7 +34,7 @@ const testModule: BotModule<typeof testModuleSchema> = {
       prepareModuleAudit({
         channelId,
         moduleId: "test-modul",
-        action: "test-modul.befehl.angelegt",
+        action: "test-modul.settings_changed",
         before: null,
         after: { name: "befehle", kind: "list", enabled: true, minimumTier: "everyone", text: "", cooldownSeconds: 5 },
       }, now),

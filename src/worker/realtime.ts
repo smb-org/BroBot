@@ -9,6 +9,7 @@ import {
   listChannelIdsForUser,
 } from "./db/channels";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "./realtime-protocol";
+import type { ApiErrorCode } from "../contracts/values";
 
 interface RealtimeRouteEnvironment {
   Bindings: Env;
@@ -67,10 +68,10 @@ realtimeRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     if (!hasExpectedOrigin(context.req.raw, context.env.PUBLIC_ORIGIN)) {
-      return context.json({ error: "websocket_origin_invalid" }, 403);
+      return context.json({ error: "websocket_origin_invalid" satisfies ApiErrorCode }, 403);
     }
     if (!protocolOffered(context.req.raw.headers.get("Sec-WebSocket-Protocol"))) {
-      return context.json({ error: "realtime_protocol_unsupported" }, 426);
+      return context.json({ error: "realtime_protocol_unsupported" satisfies ApiErrorCode }, 426);
     }
 
     const channelId = context.req.param("channelId");

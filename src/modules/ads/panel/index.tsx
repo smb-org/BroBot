@@ -43,6 +43,7 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [snoozeBusy, setSnoozeBusy] = useState(false);
+  const [snoozeOutcome, setSnoozeOutcome] = useState<"success" | "error" | null>(null);
   const [leadSecondsError, setLeadSecondsError] = useState(false);
 
   const change = (next: Partial<AdsPanelSettings>): void => {
@@ -86,11 +87,12 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
       : snoozeCount <= 0 ? labels.snoozeNone : null;
   const snooze = async (): Promise<void> => {
     setSnoozeBusy(true);
-    setError(undefined);
+    setSnoozeOutcome(null);
     try {
       onScheduleChange(await snoozeAds(channelId));
+      setSnoozeOutcome("success");
     } catch {
-      setError(labels.error);
+      setSnoozeOutcome("error");
     } finally {
       setSnoozeBusy(false);
     }
@@ -186,6 +188,8 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
             {snoozeLabel}
           </button>
         </div>
+        {snoozeOutcome === "success" ? <p className="form-success" role="status">{labels.snoozeSuccess}</p> : null}
+        {snoozeOutcome === "error" ? <p className="form-error" role="alert">{labels.snoozeError}</p> : null}
         {snoozeReason === null ? null : <p className="lock-reason">{snoozeReason}</p>}
       </section>
 

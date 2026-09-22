@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
-import type { ChannelRole } from "../contracts/values";
+import type { AuditWriteAction, ChannelRole } from "../contracts/values";
 
 export { truncateTo200Chars } from "../text";
 
@@ -91,7 +91,7 @@ export type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
 export interface ModuleAuditEntry {
   channelId: string;
   moduleId: string | null;
-  action: string;
+  action: AuditWriteAction;
   before: ModuleAuditSnapshot | null;
   after: ModuleAuditSnapshot | null;
 }

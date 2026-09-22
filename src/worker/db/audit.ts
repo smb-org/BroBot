@@ -1,4 +1,4 @@
-import type { AuditActorKind } from "../../contracts/values";
+import type { AuditActorKind, AuditWriteAction } from "../../contracts/values";
 
 const auditId = (): string => crypto.randomUUID();
 
@@ -18,7 +18,7 @@ export const recordAudit = async (
   changedAt: string,
   channelId: string,
   moduleId: string | null,
-  action: string,
+  action: AuditWriteAction,
   before: object | null,
   after: object | null,
   actorKind: AuditActorKind = "member",
@@ -36,7 +36,7 @@ export const prepareAudit = (
   changedAt: string,
   channelId: string,
   moduleId: string | null,
-  action: string,
+  action: AuditWriteAction,
   before: object | null,
   after: object | null,
   actorKind: AuditActorKind = "member",

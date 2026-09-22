@@ -976,16 +976,47 @@ describe("auth routes", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("requires a session to start the bot connection", async () => {
+  it("redirects an unauthenticated browser to sign-in with a return path for the bot connection", async () => {
     // Otherwise anyone unauthenticated could decide which Twitch account the bot uses.
-    const { environment } = makeEnvironment();
+    const { environment, statement } = makeEnvironment();
     const response = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login"),
       environment,
     );
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "/", "https://brobot.example");
+    expect(location.pathname).toBe("/auth/login");
+    expect(location.searchParams.get("returnTo")).toBe("/auth/bot/login");
+    await authRouter.fetch(new Request(`https://brobot.example${location.pathname}${location.search}`), environment);
+    expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("/auth/bot/login"))).toBe(true);
+  });
+
+  it.each([
+    "/auth/channels/kanal-a/channel-bot?source=dashboard",
+    "/auth/channels/kanal-a/broadcaster-scopes/ads",
+  ])("redirects an unauthenticated browser to sign-in from %s", async (path) => {
+    const { environment } = makeEnvironment();
+    const response = await authRouter.fetch(new Request(`https://brobot.example${path}`), environment);
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "/", "https://brobot.example");
+    expect(location.pathname).toBe("/auth/login");
+    expect(location.searchParams.get("returnTo")).toBe(path);
+  });
+
+  it("renders a localized 403 page when a signed-in viewer cannot start bot authorization", async () => {
+    const { environment } = makeEnvironment(null, sessionRowFor("user-1"));
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/bot/login", {
+        headers: { Cookie: await sessionCookieHeaderFor("user-1"), "Accept-Language": "en-US,en;q=0.9" },
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    await expect(response.text()).resolves.toContain("This page is only available to operators.");
   });
 
   it("doesn't let a manager start the channel:bot consent on behalf of the broadcaster", async () => {
@@ -995,13 +1026,14 @@ describe("auth routes", () => {
     );
     const response = await authRouter.fetch(
       new Request("https://brobot.example/auth/channels/kanal-a/channel-bot", {
-        headers: { Cookie: await sessionCookieHeaderFor("verwalter") },
+        headers: { Cookie: await sessionCookieHeaderFor("verwalter"), "Accept-Language": "en-US" },
       }),
       environment,
     );
 
     expect(response.status).toBe(403);
     expect(response.headers.get("location")).toBeNull();
+    await expect(response.text()).resolves.toContain("Only the channel owner can re-request this consent.");
   });
 
   it("starts the channel:bot follow-up request for the channel's broadcaster", async () => {

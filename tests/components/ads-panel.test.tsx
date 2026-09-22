@@ -104,6 +104,35 @@ describe("Ad panel view", () => {
     expect(screen.getByText(/channel:manage:ads fehlt/)).toBeInTheDocument();
   });
 
+  it("shows a rejected snooze beside its action while the settings draft is unchanged", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request
+        ? new URL(input.url)
+        : new URL(input instanceof URL ? input.toString() : input, window.location.origin);
+      if (url.pathname.endsWith("/schedule")) return Promise.resolve(jsonResponse({
+        schedule: { nextAdAt: "2026-09-21T12:00:00Z", duration: 60, lastAdAt: null, prerollFreeTime: 120, snoozeCount: 2, snoozeRefreshAt: null },
+        snoozeScopeAvailable: true,
+        recentAdBreaks: [],
+      }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings: {
+        automatic: "auto {duration}", manual: "manual {duration}", prewarning: true, leadSeconds: 60, prewarningText: "soon {seconds}",
+      } }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse({ error: "ad_snooze_failed" }, 500));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    renderPanel(<AdsPanel channelId="kanal-a" language="en" />);
+
+    const snoozeButton = await screen.findByRole("button", { name: /Snooze · 2 available/ });
+    expect(screen.queryByRole("button", { name: "Save announcements" })).not.toBeInTheDocument();
+    fireEvent.click(snoozeButton);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The next ad break could not be postponed.");
+    expect(screen.queryByRole("button", { name: "Save announcements" })).not.toBeInTheDocument();
+  });
+
   it("shows an empty schedule calmly and lists recent ad breaks", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;

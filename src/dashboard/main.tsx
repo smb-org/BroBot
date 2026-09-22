@@ -44,10 +44,10 @@ import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
+import { apiErrorText, auditActionLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { canManage } from "../contracts/values";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
-import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
+import { dashboardRoutePath, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
 import { BlockingState, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, Switch as UiSwitch, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
@@ -808,7 +808,7 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
               <div className={auditState.status === "loading" ? "stale" : undefined}>
                 <table className="table audit-table">
                   <thead><tr><th scope="col">{texts.system.time}</th><th scope="col">{texts.system.action}</th><th scope="col">{texts.system.who}</th></tr></thead>
-                  <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
+                  <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row">{auditActionLabel(entry.action)}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
                 </table>
               </div>
               {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.system.loadingOlderEntries : texts.system.olderEntries}</button>}
@@ -1024,6 +1024,13 @@ export const DashboardApp = (): ReactElement => {
       navigate({ kind: "overview" });
     }
   }, [channels.status, isPlatform, navigate, route.kind]);
+
+  useEffect(() => {
+    if (route.kind !== "overview" || channels.status !== "success" || channels.data?.length !== 1) return;
+    const channel = channels.data[0];
+    if (channel === undefined) return;
+    replaceDashboardRoute({ kind: "channel", channelId: channel.channelId, section: "overview" });
+  }, [channels, route.kind]);
 
   useEffect(() => {
     let cancelled = false;

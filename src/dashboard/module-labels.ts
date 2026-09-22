@@ -1,5 +1,5 @@
 import type { EventSubSubscriptionType } from "../contracts/values";
-import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { catalogString, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 /**
  * Both catalogs are keyed by module id. Completeness is enforced by
  * `tests/unit/module-labels.test.ts`, not by the compiler: enforcing it through the
@@ -25,7 +25,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
 };
 
 const moduleText = (catalog: Record<string, string>, moduleId: string): string | null =>
-  catalog[moduleId] ?? null;
+  catalogString(catalog, moduleId) ?? null;
 
 export const moduleName = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): string => {
   return moduleText(moduleNames[language], moduleId) ?? moduleId;

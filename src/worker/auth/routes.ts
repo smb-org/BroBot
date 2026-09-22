@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 
 import {
+  requireBrowserChannelAuthorization,
+  requireBrowserPlatformAuthorization,
   requireChannelAuthorization,
-  requirePlatform,
   type ChannelAuthorizationVariables,
 } from "./guards";
 import { oauthError } from "./oauth-error-texts";
@@ -95,15 +96,23 @@ const isEncodedPathSegment = (segment: string): boolean => {
   }
 };
 
-const isSafeModuleRedirectPath = (path: string | null | undefined): path is string => {
+const isSafeLoginRedirectPath = (path: string | null | undefined): path is string => {
   if (path === undefined || path === null || path.startsWith("//") || !path.startsWith("/")) return false;
-  const segments = path.split("/");
-  return segments.length === 5 && segments[1] === "channels" && segments[3] === "modules" &&
+  const pathOnly = path.split(/[?#]/, 1)[0] ?? path;
+  const segments = pathOnly.split("/");
+  const safeModulePath = segments.length === 5 && segments[1] === "channels" && segments[3] === "modules" &&
     isEncodedPathSegment(segments[2] ?? "") && isEncodedPathSegment(segments[4] ?? "");
+  const safeBotLoginPath = segments.length === 4 && segments[1] === "auth" && segments[2] === "bot" && segments[3] === "login";
+  const safeChannelBotPath = segments.length === 5 && segments[1] === "auth" && segments[2] === "channels" &&
+    isEncodedPathSegment(segments[3] ?? "") && segments[4] === "channel-bot";
+  const safeBroadcasterScopePath = segments.length === 6 && segments[1] === "auth" && segments[2] === "channels" &&
+    isEncodedPathSegment(segments[3] ?? "") && segments[4] === "broadcaster-scopes" &&
+    isEncodedPathSegment(segments[5] ?? "");
+  return safeModulePath || safeBotLoginPath || safeChannelBotPath || safeBroadcasterScopePath;
 };
 
 const redirectAfterLogin = (origin: string, path: string | null | undefined): string =>
-  isSafeModuleRedirectPath(path) ? `${origin.replace(/\/+$/, "")}${path}` : redirectHome(origin);
+  isSafeLoginRedirectPath(path) ? `${origin.replace(/\/+$/, "")}${path}` : redirectHome(origin);
 
 const maintainAfterBotAuthorization = async (env: Env, now: string): Promise<void> => {
   try {
@@ -286,6 +295,7 @@ authRouter.get("/api/overlay/status", async (context) => {
 
 authRouter.get("/auth/login", async (context) => {
   const channelLogin = context.req.query("channel");
+  const returnTo = context.req.query("returnTo");
   const fullConsent = channelLogin !== undefined && channelLogin.length > 0 &&
     await hasFullConsentForChannelLogin(context.env.DB, channelLogin);
   const scopes = fullConsent ? listAllBroadcasterScopes() : [];
@@ -295,6 +305,8 @@ authRouter.get("/auth/login", async (context) => {
     "login",
     nowIso(),
     scopes,
+    false,
+    isSafeLoginRedirectPath(returnTo) ? returnTo : null,
   );
   context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);
@@ -307,7 +319,7 @@ authRouter.get("/auth/login", async (context) => {
  */
 authRouter.get(
   "/auth/channels/:channelId/channel-bot",
-  requireChannelAuthorization(),
+  requireBrowserChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
     if (context.get("session").userId !== channelId) {
@@ -336,7 +348,7 @@ authRouter.get(
  */
 authRouter.get(
   "/auth/channels/:channelId/broadcaster-scopes/:moduleId",
-  requireChannelAuthorization(),
+  requireBrowserChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
     if (context.get("session").userId !== channelId) {
@@ -374,7 +386,7 @@ authRouter.get(
  * so this guard is not what stops a takeover -- it stops the flow from being
  * reachable by the wrong person in the first place.
  */
-authRouter.get("/auth/bot/login", requirePlatform(), async (context) => {
+authRouter.get("/auth/bot/login", requireBrowserPlatformAuthorization(), async (context) => {
   const started = await startOAuthAuthorization(context.env.DB, context.env, "bot", nowIso());
   context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);

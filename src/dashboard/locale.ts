@@ -1,8 +1,14 @@
-import type { ApiErrorCode, ChannelRole, EventCode, EventTone } from "../contracts/values";
+import type { ApiErrorCode, AuditAction, ChannelRole, EventCode, EventTone } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 
 export type DashboardLanguage = ModuleLanguage;
 export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
+
+export const catalogString = (catalog: object, key: string): string | undefined => {
+  if (!Object.hasOwn(catalog, key)) return undefined;
+  const value = (catalog as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+};
 
 export interface DashboardCommonTexts {
   cancel: string;
@@ -227,6 +233,7 @@ export interface DashboardTexts {
     filter: string;
     origin: string;
     moduleFilter: string;
+    allModules: string;
     tone: string;
     person: string;
     all: string;
@@ -426,7 +433,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       module: "Modul", who: "Wer", automatic: "Automatisch", info: "Info", error: "Fehler", notice: "Hinweis", unknown: "Unbekannt", code: "Code", timestamp: "Zeitstempel", operation: "Vorgang", participants: "Beteiligte", history: "Verlauf",
       load: "Ereignisse werden geladen …",
       none: "Noch keine Ereignisse protokolliert.", detail: "Detail", loadOlder: "Ältere Ereignisse laden", loadingOlder: "Ältere Ereignisse werden geladen …",
-      filter: "Filter", origin: "Herkunft", moduleFilter: "Modul", tone: "Ton", person: "Person", all: "Alle",
+      filter: "Filter", origin: "Herkunft", moduleFilter: "Modul", allModules: "Alle Module", tone: "Ton", person: "Person", all: "Alle",
       channelEvents: "Kanalereignisse", moduleDiagnostics: "Moduldiagnosen", activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen",
       noMatches: "Keine Ereignisse passen zu den Filtern.", loadMoreAtEnd: "Am Ende werden ältere Ereignisse nachgeladen.",
       feedEnd: "Ende des Ereignisverlaufs erreicht.",
@@ -581,7 +588,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       title: "Events", count: (count) => `${count} entries`, log: "Event log", time: "Time", event: "Event", module: "Module",
       who: "Who", automatic: "Automatic", info: "Info", error: "Error", notice: "Notice", unknown: "Unknown", code: "Code", timestamp: "Timestamp", operation: "Operation", participants: "Participants", history: "History", load: "Loading events …", none: "No events logged yet.", detail: "Detail",
       loadOlder: "Load older events", loadingOlder: "Loading older events …",
-      filter: "Filters", origin: "Origin", moduleFilter: "Module", tone: "Tone", person: "Person", all: "All",
+      filter: "Filters", origin: "Origin", moduleFilter: "Module", allModules: "All modules", tone: "Tone", person: "Person", all: "All",
       channelEvents: "Channel events", moduleDiagnostics: "Module diagnostics", activeFilters: "Active filters:", resetFilters: "Reset filters",
       noMatches: "No events match the filters.", loadMoreAtEnd: "Older events load at the end.",
       feedEnd: "End of the event history reached.",
@@ -687,7 +694,7 @@ const textCommandTier = (detail: EventDetail, key: string, fallback: string, lan
   const labeledValues = values.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
   return labeledValues.length === 0
     ? fallback
-    : labeledValues.map((entry) => labels[entry] ?? entry).join(", ");
+    : labeledValues.map((entry) => catalogString(labels, entry) ?? entry).join(", ");
 };
 
 const detailNumber = (detail: EventDetail, key: string, fallback: string): string =>
@@ -926,10 +933,51 @@ export function eventText(
     : language ?? dashboardLanguage();
   if (Object.prototype.hasOwnProperty.call(eventTexts[resolvedLanguage], code)) {
     const text = eventTexts[resolvedLanguage][code as EventCode];
-    return typeof text === "function" ? text(detail) : text;
+    if (typeof text === "function") return text(detail);
+    if (typeof text === "string") return text;
   }
   return code;
 }
+
+const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
+  de: {
+    "channel.released": "Kanal freigegeben",
+    "channel.full_consent_changed": "Vollzustimmung geändert",
+    "member.added": "Mitglied hinzugefügt",
+    "member.role_changed": "Mitgliedsrolle geändert",
+    "member.removed": "Mitglied entfernt",
+    "module.enabled": "Modul aktiviert",
+    "module.disabled": "Modul deaktiviert",
+    "text_commands.command.created": "Textbefehl erstellt",
+    "text_commands.command.updated": "Textbefehl aktualisiert",
+    "text_commands.command.removed": "Textbefehl entfernt",
+    "ads.commercial_started": "Werbung gestartet",
+    "clip.created": "Clip erstellt",
+    "overlay.token.issued": "Overlay-Token ausgestellt",
+    "overlay.token.revoked": "Overlay-Token widerrufen",
+  },
+  en: {
+    "channel.released": "Channel released",
+    "channel.full_consent_changed": "Full consent changed",
+    "member.added": "Member added",
+    "member.role_changed": "Member role changed",
+    "member.removed": "Member removed",
+    "module.enabled": "Module enabled",
+    "module.disabled": "Module disabled",
+    "text_commands.command.created": "Text command created",
+    "text_commands.command.updated": "Text command updated",
+    "text_commands.command.removed": "Text command removed",
+    "ads.commercial_started": "Commercial started",
+    "clip.created": "Clip created",
+    "overlay.token.issued": "Overlay token issued",
+    "overlay.token.revoked": "Overlay token revoked",
+  },
+};
+
+export const auditActionLabel = (
+  action: string,
+  language: DashboardLanguage = dashboardLanguage(),
+): string => catalogString(auditActionTexts[language], action) ?? action;
 
 /**
  * DE/EN text for every `ApiErrorCode` the worker (or the dashboard's own
@@ -940,6 +988,8 @@ export function eventText(
 export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
   de: {
     session_missing: "Sitzung fehlt.",
+    websocket_origin_invalid: "Die WebSocket-Anfrage stammt nicht von dieser Website.",
+    realtime_protocol_unsupported: "Das Echtzeitprotokoll wird nicht unterstützt.",
     csrf_invalid: "CSRF-Token fehlt oder ist ungültig.",
     channel_missing: "Kanal fehlt.",
     channel_access_denied: "Kanalzugriff verweigert.",
@@ -1006,6 +1056,8 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
   },
   en: {
     session_missing: "Session missing.",
+    websocket_origin_invalid: "The WebSocket request did not come from this website.",
+    realtime_protocol_unsupported: "The realtime protocol is not supported.",
     csrf_invalid: "CSRF token missing or invalid.",
     channel_missing: "Channel missing.",
     channel_access_denied: "Channel access denied.",
@@ -1084,7 +1136,7 @@ export const apiErrorText = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
   const catalog: Record<string, string> = apiErrorTexts[language];
-  return (code !== null ? catalog[code] : undefined) ?? fallback;
+  return (code === null ? undefined : catalogString(catalog, code)) ?? fallback;
 };
 
 /**
@@ -1128,7 +1180,7 @@ export const maintenanceReasonText = (
 ): string | null => {
   if (code === null || code === undefined) return null;
   const catalog: Record<string, string> = maintenanceReasonTexts[language];
-  return catalog[code] ?? code;
+  return catalogString(catalog, code) ?? code;
 };
 
 export const dashboardTexts = (): DashboardTexts => dashboardTextsCatalog[dashboardLanguage()];

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { AUDIT_ACTIONS } from "../../src/contracts/values";
 import { platformTexts } from "../../src/dashboard/labels";
+import { auditActionLabel } from "../../src/dashboard/locale";
 
 /**
  * `AUDIT_ACTIONS` is `audit_log.action`'s closed vocabulary -- see the type's
@@ -22,5 +23,26 @@ describe("audit actions", () => {
       expect(platformTexts("de").actionLabel[action], action).toBeDefined();
       expect(platformTexts("en").actionLabel[action], action).toBeDefined();
     }
+  });
+
+  it("labels the overlay token actions in both languages", () => {
+    expect(auditActionLabel("overlay.token.issued", "de")).toBe("Overlay-Token ausgestellt");
+    expect(auditActionLabel("overlay.token.issued", "en")).toBe("Overlay token issued");
+    expect(auditActionLabel("overlay.token.revoked", "de")).toBe("Overlay-Token widerrufen");
+    expect(auditActionLabel("overlay.token.revoked", "en")).toBe("Overlay token revoked");
+  });
+
+  it("labels every closed audit action in both languages", () => {
+    for (const action of AUDIT_ACTIONS) {
+      expect(auditActionLabel(action, "de"), action).not.toBe(action);
+      expect(auditActionLabel(action, "en"), action).not.toBe(action);
+    }
+  });
+
+  it("uses the audit writer action type as the writer call-site guard", () => {
+    // `recordAudit` and `prepareAudit` accept `AuditWriteAction`; module audit
+    // entries use that same type, so undeclared writer actions fail typecheck.
+    expect(AUDIT_ACTIONS).toContain("overlay.token.issued");
+    expect(AUDIT_ACTIONS).toContain("overlay.token.revoked");
   });
 });

@@ -1539,7 +1539,7 @@ describe("auth D1 repository", () => {
         database as unknown as D1Database,
         actor,
         memberFor("kanal-a", "target-user", "manager"),
-        "operator.member.added",
+        "member.added",
         jetzt,
         platformSessionGuard(actor, jetzt),
         "platform_admin",
@@ -1548,7 +1548,7 @@ describe("auth D1 repository", () => {
       expect(changed).toBe(true);
       await expect(database.prepare(
         "SELECT actor_kind FROM audit_log WHERE action = ?",
-      ).bind("operator.member.added").first()).resolves.toEqual({ actor_kind: "platform_admin" });
+      ).bind("member.added").first()).resolves.toEqual({ actor_kind: "platform_admin" });
     } finally {
       database.close();
     }

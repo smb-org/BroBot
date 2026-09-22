@@ -118,10 +118,9 @@ const EventFilterBar = ({
       />
       <UiSelect
         label={texts.events.moduleFilter}
-        value={filters.module}
-        onChange={(value) => { onChange({ ...filters, module: value }); }}
-        options={moduleSelectOptions}
-        placeholder={texts.events.all}
+        value={filters.module ?? ""}
+        onChange={(value) => { onChange({ ...filters, module: value === "" ? null : value }); }}
+        options={[{ value: "", label: texts.events.allModules }, ...moduleSelectOptions]}
       />
       <Field
         label={texts.events.person}

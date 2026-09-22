@@ -633,7 +633,7 @@ describe("atomic member change and audit", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:00:00.000Z",
       },
-      "member.updated",
+      "member.role_changed",
       "2026-09-18T00:01:00.000Z",
       actorGuard(MANAGING_ROLES),
     )).rejects.toThrow();

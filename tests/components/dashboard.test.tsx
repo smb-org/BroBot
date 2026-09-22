@@ -956,6 +956,16 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Werbung", hidden: true }));
     expect(await screen.findByText("Keine Ereignisse passen zu den Filtern.")).toBeInTheDocument();
+    await waitFor(() => { expect(screen.getByRole("option", { name: "Alle Module", hidden: true })).toBeInTheDocument(); });
+    fireEvent.click(module);
+    fireEvent.click(screen.getByRole("option", { name: "Alle Module", hidden: true }));
+    await waitFor(() => {
+      const filters = new URLSearchParams(window.location.search);
+      expect(filters.has("module")).toBe(false);
+      expect(filters.get("tone")).toBe("error");
+      expect(filters.get("actor")).toBe("person-a");
+    });
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Filter zurücksetzen" })[0] as HTMLElement);
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.queryByText("Keine Ereignisse passen zu den Filtern.")).not.toBeInTheDocument();
@@ -1265,7 +1275,7 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("columnheader", { name: "Zeit" })).toBeInTheDocument();
     expect(await screen.findByText("Alice")).toBeInTheDocument();
     expect(await screen.findByText("gelöscht")).toBeInTheDocument();
-    const row = screen.getByText("module.enabled").closest("tr");
+    const row = screen.getByText("Modul aktiviert").closest("tr");
     expect(row).not.toBeNull();
     expect(row).toHaveAttribute("aria-selected", "false");
     fireEvent.keyDown(row as HTMLElement, { key: "Enter" });
@@ -1275,7 +1285,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText('{"enabled":false}')).toBeInTheDocument();
     const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
     expect(await within(inspector).findByText("user-1")).toBeInTheDocument();
-    const secondRow = screen.getByText("module.disabled").closest("tr");
+    const secondRow = screen.getByText("Modul deaktiviert").closest("tr");
     expect(secondRow).not.toBeNull();
     fireEvent.keyDown(secondRow as HTMLElement, { key: " " });
     expect(secondRow).toHaveAttribute("aria-selected", "true");
@@ -2004,10 +2014,11 @@ describe("Dashboard skeleton", () => {
 
   it("shows every group's entries and marks the current page's sidebar entry as current on every area and the module detail page", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
+    const secondChannel = healthyChannel("kanal-b", "Beta");
     const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel, secondChannel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse(path.includes("modules/text_commands") ? activeModuleOverview : overview(channel));
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
@@ -2050,9 +2061,10 @@ describe("Dashboard skeleton", () => {
 
   it("the brand acts as a focusable link to the channel list", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
+    const secondChannel = healthyChannel("kanal-b", "Beta");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel, secondChannel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse(overview(channel));
       return jsonResponse({}, 404);
     }));
@@ -2128,9 +2140,10 @@ describe("Dashboard skeleton", () => {
 
   it("shows a channel without broadcaster OAuth neutrally and reaches its overview and system pages", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterConnection: "not_connected" };
+    const secondChannel = healthyChannel("kanal-b", "Beta");
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel, secondChannel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse({ ...overview(channel), broadcasterConnection: "not_connected" });
       if (path === "/api/channels/kanal-a/system") return jsonResponse({ ...system, broadcasterConnection: "not_connected" });
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
@@ -2141,7 +2154,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     const channelTaste = await screen.findByRole("link", { name: /Alpha/ });
-    expect(screen.getByText("1 Kanal freigegeben")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Beta/ })).toBeInTheDocument();
     expect(screen.queryByText("Keine Verbindung")).not.toBeInTheDocument();
     expect(channelTaste).toHaveAccessibleName(/Alpha ·/);
     expect(channelTaste).toHaveAttribute("data-status", "green");
@@ -2410,9 +2423,10 @@ describe("Dashboard skeleton", () => {
 
   it("shows a working channel with three hours remaining as healthy", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
+    const secondChannel = healthyChannel("kanal-b", "Beta");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel, secondChannel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2448,9 +2462,10 @@ describe("Dashboard skeleton", () => {
         loginExpiresAt: relativeIso(30 * 60 * 1000),
       },
     };
+    const secondChannel = healthyChannel("kanal-b", "Beta");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel, secondChannel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2476,9 +2491,10 @@ describe("Dashboard skeleton", () => {
         loginExpiresAt: relativeIso(30 * 60 * 1000),
       },
     };
+    const secondChannel = healthyChannel("kanal-b", "Beta");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel, secondChannel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2496,9 +2512,10 @@ describe("Dashboard skeleton", () => {
       ...healthyChannel("kanal-a", "Alpha"),
       bot: { status: "connected", reason: null, updatedAt: relativeIso(-(60 * 60 * 1000 + 1)) },
     };
+    const secondChannel = healthyChannel("kanal-b", "Beta");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel, secondChannel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2657,8 +2674,9 @@ describe("Dashboard skeleton", () => {
       return jsonResponse({}, 404);
     }));
 
+    window.history.replaceState({}, "", "/channels/kanal-a");
     render(<DashboardApp />);
-    await screen.findByRole("heading", { name: "Übersicht", level: 1 });
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
     fireEvent.click(screen.getByRole("button", { name: "Abmelden" }));
 
     await waitFor(() => {
@@ -2666,7 +2684,7 @@ describe("Dashboard skeleton", () => {
     });
     expect(screen.queryByRole("heading", { name: "Anmeldung erforderlich", level: 1 }))
       .not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Übersicht", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
   });
 
   it("fetches the CSRF token before logout and sends it in the header", async () => {
@@ -2752,7 +2770,7 @@ describe("Dashboard skeleton", () => {
     const list = await screen.findByRole("region", { name: "Audit-Log" });
     expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
 
-    const row = (await screen.findByText("module.enabled")).closest("tr");
+    const row = (await screen.findByText("Modul aktiviert")).closest("tr");
     expect(row).not.toBeNull();
     fireEvent.click(row as HTMLElement);
 
@@ -2789,7 +2807,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = (await screen.findByText("module.enabled")).closest("tr");
+    const row = (await screen.findByText("Modul aktiviert")).closest("tr");
     expect(row).not.toBeNull();
     fireEvent.click(row as HTMLElement);
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
@@ -2797,7 +2815,7 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(auditRequests).toBe(2));
     resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
 
-    const restoredRow = (await screen.findAllByRole("row", { name: /module.enabled/ }))[0];
+    const restoredRow = (await screen.findAllByRole("row", { name: /Modul aktiviert/ }))[0];
     expect(restoredRow).toBeDefined();
     expect(restoredRow).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
@@ -2986,7 +3004,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const row = (await screen.findByText("module.enabled")).closest("tr");
+    const row = (await screen.findByText("Modul aktiviert")).closest("tr");
     if (row === null) throw new Error("Audit-Zeile fehlt");
     row.focus();
     fireEvent.click(row);
@@ -3123,7 +3141,7 @@ describe("Dashboard skeleton", () => {
       expect(screen.queryByRole("heading", { name: "Der Bot ist nicht angemeldet" })).not.toBeInTheDocument();
     });
 
-    it("shows the bot state with the sign-in action on the overview of a fresh, zero-channel installation for a platform admin", async () => {
+  it("shows the bot state with the sign-in action on the overview of a fresh, zero-channel installation for a platform admin", async () => {
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
         if (path === "/api/channels") return jsonResponse({ channels: [], bot: null, platformAdmin: true });
@@ -3167,5 +3185,45 @@ describe("Dashboard skeleton", () => {
       expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Kanal nicht freigegeben" })).not.toBeInTheDocument();
     });
+  });
+
+  it("replaces the landing route with the only accessible channel overview", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      return jsonResponse({}, 404);
+    }));
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/channels/kanal-a");
+    expect(replaceState).toHaveBeenCalledWith({}, "", "/channels/kanal-a");
+    replaceState.mockRestore();
+  });
+
+  it("keeps the channel list at the landing route when several channels are accessible", async () => {
+    const alpha = healthyChannel("kanal-a", "Alpha");
+    const beta = healthyChannel("kanal-b", "Beta");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta], bot: alpha.bot });
+      return jsonResponse({}, 404);
+    }));
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    window.history.replaceState({}, "", "/");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("link", { name: /Alpha/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Beta/ })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/");
+    expect(replaceState).not.toHaveBeenCalledWith({}, "", expect.stringMatching(/^\/channels\//));
+    replaceState.mockRestore();
   });
 });

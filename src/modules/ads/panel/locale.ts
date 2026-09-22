@@ -16,6 +16,8 @@ export interface AdsPanelTexts {
   snoozeScopeMissing: string;
   snoozeNone: string;
   snoozeUnknown: string;
+  snoozeSuccess: string;
+  snoozeError: string;
   recentSection: string;
   noRecent: string;
   recentDuration: (duration: string) => string;
@@ -52,6 +54,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     snoozeScopeMissing: "Snooze ist deaktiviert: channel:manage:ads fehlt.",
     snoozeNone: "Snooze ist deaktiviert: keine Verschiebung mehr verfügbar.",
     snoozeUnknown: "Snooze ist deaktiviert: der Twitch-Zähler ist nicht verfügbar.",
+    snoozeSuccess: "Die nächste Werbepause wurde verschoben.",
+    snoozeError: "Die nächste Werbepause konnte nicht verschoben werden.",
     recentSection: "Letzte Werbepausen",
     noRecent: "Noch keine Werbepausen im Ereignisprotokoll.",
     recentDuration: (duration) => `${duration} Sekunden`,
@@ -86,6 +90,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     snoozeScopeMissing: "Snooze is disabled: channel:manage:ads is missing.",
     snoozeNone: "Snooze is disabled: no postponements remain.",
     snoozeUnknown: "Snooze is disabled: Twitch did not provide a counter.",
+    snoozeSuccess: "The next ad break was postponed.",
+    snoozeError: "The next ad break could not be postponed.",
     recentSection: "Recent ad breaks",
     noRecent: "No ad breaks are in the event log yet.",
     recentDuration: (duration) => `${duration} seconds`,
