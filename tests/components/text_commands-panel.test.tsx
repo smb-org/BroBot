@@ -599,4 +599,23 @@ describe("Text commands panel view", () => {
 
     expect(onCloseInspector).toHaveBeenCalledOnce();
   });
+
+  it("pre-selects the command Spotlight named, once the list has loaded (#164)", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ commands: [
+          { channelId: "kanal-a", name: "clip", text: "Clip!", kind: "text", enabled: true, cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z" },
+          { channelId: "kanal-a", name: "hallo", text: "Hallo", kind: "text", enabled: true, cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z" },
+        ] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextCommandsPanel channelId="kanal-a" initialSelection="clip" />);
+
+    expect(await screen.findByDisplayValue("Clip!")).toBeInTheDocument();
+  });
 });

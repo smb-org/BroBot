@@ -115,6 +115,9 @@ importers:
       '@mantine/hooks':
         specifier: ^9.6.2
         version: 9.6.2(react@19.2.8)
+      '@mantine/spotlight':
+        specifier: 9.6.2
+        version: 9.6.2(@mantine/core@9.6.2(@mantine/hooks@9.6.2(react@19.2.8))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@mantine/hooks@9.6.2(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       hono:
         specifier: ^4.13.1
         version: 4.13.1
@@ -835,6 +838,19 @@ packages:
 
   '@mantine/hooks@9.6.2':
     resolution: {integrity: sha512-SfNY0FvYi8vMytZbioQVx5JyX0dmLUQEmbgbQQXqe4iOto0QZ896XwhgMQ6g/FCWkvc9JHeHp7iPu4msqQFIEw==}
+    peerDependencies:
+      react: ^19.2.0
+
+  '@mantine/spotlight@9.6.2':
+    resolution: {integrity: sha512-JGCeGxrDRqfYlT/njbq/3OgroiVsnt888Wm2mulWZ9E1z4c1jiGmu4DZK4T0bcL8Jqq0rVFMLGhL0KgoaeVaoQ==}
+    peerDependencies:
+      '@mantine/core': 9.6.2
+      '@mantine/hooks': 9.6.2
+      react: ^19.2.0
+      react-dom: ^19.2.0
+
+  '@mantine/store@9.6.2':
+    resolution: {integrity: sha512-fxHsXtlw7PsAGt+RDBmPuEC5DIle+acj4aiZC4SYzKU0A43dhXW311UPqWJVPJTm2WWQEkL5FhI4t+r+FpQmaw==}
     peerDependencies:
       react: ^19.2.0
 
@@ -2689,6 +2705,18 @@ snapshots:
       - '@types/react'
 
   '@mantine/hooks@9.6.2(react@19.2.8)':
+    dependencies:
+      react: 19.2.8
+
+  '@mantine/spotlight@9.6.2(@mantine/core@9.6.2(@mantine/hooks@9.6.2(react@19.2.8))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@mantine/hooks@9.6.2(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@mantine/core': 9.6.2(@mantine/hooks@9.6.2(react@19.2.8))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@mantine/hooks': 9.6.2(react@19.2.8)
+      '@mantine/store': 9.6.2(react@19.2.8)
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+
+  '@mantine/store@9.6.2(react@19.2.8)':
     dependencies:
       react: 19.2.8
 

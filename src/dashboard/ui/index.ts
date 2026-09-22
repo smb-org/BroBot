@@ -68,3 +68,6 @@ export type { UseDraftGuardResult } from "./useDraftGuard";
 
 export { ListDetail } from "./ListDetail";
 export type { ListDetailProps } from "./ListDetail";
+
+export { Spotlight } from "./Spotlight";
+export type { SpotlightItem, SpotlightProps } from "./Spotlight";

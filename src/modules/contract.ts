@@ -144,6 +144,11 @@ export interface ModulePanelProperties {
   canManage?: boolean;
   /** Called by the host when an inspector is closed. */
   onCloseInspector?: () => void;
+  /** Deep-link target set by the host (Spotlight, #164) -- a module reads
+   *  its own identifier out of this if it wants to pre-select something on
+   *  mount (e.g. text_commands selects the command by name); most modules
+   *  ignore it. */
+  initialSelection?: string;
 }
 
 export type ModuleLanguage = "de" | "en";

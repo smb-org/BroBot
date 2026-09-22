@@ -170,9 +170,11 @@ interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
   canManage?: boolean;
+  /** Deep-link target from Spotlight (#164); passed through to the panel unchanged. */
+  initialSelection?: string;
 }
 
-export const ModulePanelMount = ({ channelId, activeModules, canManage = true }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, canManage = true, initialSelection }: ModulePanelMountProperties): ReactElement => {
   const registeredPanels = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -192,7 +194,7 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true }:
   return (
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
       <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
-        {registeredPanels.map(({ id, Panel }) => <Panel key={id} channelId={channelId} language={dashboardLanguage()} canManage={canManage} />)}
+        {registeredPanels.map(({ id, Panel }) => <Panel key={id} channelId={channelId} language={dashboardLanguage()} canManage={canManage} {...(initialSelection === undefined ? {} : { initialSelection })} />)}
       </Suspense>
     </section>
   );
@@ -380,9 +382,11 @@ interface ModulePageProperties {
   busy?: boolean;
   onNavigate: (route: DashboardRoute) => void;
   onToggle: () => void;
+  /** Deep-link target from Spotlight (#164), e.g. a text command name. */
+  initialSelection?: string;
 }
 
-export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, loading = false, error = null, busy = false, onNavigate, onToggle }: ModulePageProperties): ReactElement => {
+export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, loading = false, error = null, busy = false, onNavigate, onToggle, initialSelection }: ModulePageProperties): ReactElement => {
   const texts = dashboardTexts();
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
@@ -453,7 +457,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {stateMessage === null ? (
           registered?.panel === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} />
+              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} {...(initialSelection === undefined ? {} : { initialSelection })} />
             </section>
           )
         ) : (

@@ -194,7 +194,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
   );
 };
 
-export const TextCommandsPanel = ({ channelId, language, canManage: canManageContent = true, onCloseInspector }: { channelId: string; language?: DashboardLanguage; canManage?: boolean; onCloseInspector?: () => void }): ReactElement => {
+export const TextCommandsPanel = ({ channelId, language, canManage: canManageContent = true, onCloseInspector, initialSelection }: { channelId: string; language?: DashboardLanguage; canManage?: boolean; onCloseInspector?: () => void; initialSelection?: string }): ReactElement => {
   const labels = textCommandsTexts(language);
   const [commands, setCommands] = useState<TextCommand[]>([]);
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useInspectorSelection<string>();
@@ -238,6 +238,12 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
     });
     return () => { active = false; };
   }, [channelId, labels.error]);
+
+  // Spotlight deep link (#164): select the command it named, once it's loaded.
+  useEffect(() => {
+    if (initialSelection === undefined) return;
+    if (commands.some((command) => command.name === initialSelection)) selectName(initialSelection);
+  }, [commands, initialSelection, selectName]);
 
   const selected = useMemo(() => commands.find((command) => command.name === selectedName) ?? null, [commands, selectedName]);
   const closeInspector = useCallback((): void => {

@@ -302,6 +302,24 @@ export interface DashboardTexts {
     feedTitle: string;
     feedEmpty: string;
   };
+  /** ⌘K/Ctrl+K (#164): jumps to an entity, explicitly not a navigation
+   *  replacement -- "raid" opens the module, "!clip" opens that text
+   *  command, "max" opens the member, "ads off"/"clip"/"shoutout &lt;login&gt;"
+   *  run a registered action. */
+  spotlight: {
+    placeholder: string;
+    empty: string;
+    groupModules: string;
+    groupCommands: string;
+    groupMembers: string;
+    groupActions: string;
+    adOff: string;
+    adOn: string;
+    shoutoutHint: string;
+    shoutoutMissingLogin: string;
+    openCommand: (name: string) => string;
+    openMember: string;
+  };
   /** Full-page states from #159: they replace page content (navigation
    *  stays usable) instead of stacking another red box on a normal page. */
   blocking: {
@@ -454,6 +472,20 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedTitle: "Warnungen und Fehler",
       feedEmpty: "Keine Warnungen oder Fehler.",
     },
+    spotlight: {
+      placeholder: "Suchen oder Aktion ausführen …",
+      empty: "Keine Treffer.",
+      groupModules: "Module",
+      groupCommands: "Textbefehle",
+      groupMembers: "Mitglieder",
+      groupActions: "Aktionen",
+      adOff: "Werbung aus",
+      adOn: "Werbung an",
+      shoutoutHint: "shoutout <Twitch-Name>",
+      shoutoutMissingLogin: "Twitch-Name nach „shoutout“ eingeben.",
+      openCommand: (name) => `Befehl !${name} öffnen`,
+      openMember: "Mitglied öffnen",
+    },
     blocking: {
       botTitle: "Der Bot ist nicht angemeldet",
       botDescriptionAdmin: "Ohne Bot-Identität empfängt kein Kanal Ereignisse: EventSub, Chat, Shoutouts und die Mitgliedersuche funktionieren nirgends. Melde den Bot an, um alles wieder in Betrieb zu setzen.",
@@ -592,6 +624,20 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       openClip: "Open clip",
       feedTitle: "Warnings and errors",
       feedEmpty: "No warnings or errors.",
+    },
+    spotlight: {
+      placeholder: "Search or run an action …",
+      empty: "No matches.",
+      groupModules: "Modules",
+      groupCommands: "Text commands",
+      groupMembers: "Members",
+      groupActions: "Actions",
+      adOff: "Ads off",
+      adOn: "Ads on",
+      shoutoutHint: "shoutout <Twitch login>",
+      shoutoutMissingLogin: "Type a Twitch login after “shoutout”.",
+      openCommand: (name) => `Open command !${name}`,
+      openMember: "Open member",
     },
     blocking: {
       botTitle: "The bot is not signed in",
