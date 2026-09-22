@@ -139,7 +139,7 @@ describe("Werbung-Panel-Ansicht", () => {
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
         snoozeScopeVorhanden: true, letzteWerbepausen: [],
       }));
-      if (path.endsWith("/einstellungen") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
+      if (path.endsWith("/settings") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
         automatisch: "auto {duration}", manuell: "manuell {duration}", vorwarnung: true, vorlaufSekunden: 60, vorwarnungText: "gleich {seconds}",
       } }));
       return Promise.resolve(jsonResponse({}));

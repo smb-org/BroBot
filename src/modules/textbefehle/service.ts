@@ -34,7 +34,7 @@ const diagnoseAusgeloest = (
 ) => {
   const argumente = eingabe.argumente;
   return {
-    code: "textbefehle.ausgeloest",
+    code: "text_commands.ausgeloest",
     detail: {
       name: eingabe.name,
       ...(argumente === undefined || argumente.length === 0
@@ -67,27 +67,27 @@ export const verarbeiteTextbefehlNachricht = async (
   if (eingabe === null) return { actions: [], diagnostics: [] };
 
   if (eingabe.art === "unbekannt") {
-    return { actions: [], diagnostics: [{ code: "textbefehle.unbekannt" }] };
+    return { actions: [], diagnostics: [{ code: "text_commands.unbekannt" }] };
   }
 
   const befehl = await repository.finden(event.channelId, eingabe.name);
   if (befehl === null) {
     return {
       actions: [],
-      diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.name } }],
+      diagnostics: [{ code: "text_commands.unbekannt", detail: { name: eingabe.name } }],
     };
   }
   if (!befehl.enabled) {
     return {
       actions: [],
-      diagnostics: [{ code: "textbefehle.deaktiviert", detail: { name: eingabe.name } }],
+      diagnostics: [{ code: "text_commands.deaktiviert", detail: { name: eingabe.name } }],
     };
   }
   if (!chatStatusErfuelltStufe(event.chatStatus, befehl.mindeststufe)) {
     return {
       actions: [],
       diagnostics: [{
-        code: "textbefehle.berechtigung",
+        code: "text_commands.berechtigung",
         detail: {
           name: eingabe.name,
           geforderteStufe: befehl.mindeststufe,
@@ -101,7 +101,7 @@ export const verarbeiteTextbefehlNachricht = async (
   if (beanspruchung === null) {
     return {
       actions: [],
-      diagnostics: [{ code: "textbefehle.unbekannt", detail: { name: eingabe.name } }],
+      diagnostics: [{ code: "text_commands.unbekannt", detail: { name: eingabe.name } }],
     };
   }
   if (!beanspruchung.beansprucht) {
@@ -112,11 +112,11 @@ export const verarbeiteTextbefehlNachricht = async (
     );
     return {
       actions: [],
-      diagnostics: [{ code: "textbefehle.abgekuehlt", detail: { name: eingabe.name, restSekunden } }],
+      diagnostics: [{ code: "text_commands.abgekuehlt", detail: { name: eingabe.name, restSekunden } }],
     };
   }
 
-  if (beanspruchung.befehl.art === "liste") {
+  if (beanspruchung.befehl.art === "list") {
     const befehle = (await repository.auflisten(event.channelId))
       .filter((befehl) => befehl.enabled)
       .sort((left, right) => left.name.localeCompare(right.name));

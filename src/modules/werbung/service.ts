@@ -22,7 +22,7 @@ const diagnoseDetail = (
 };
 
 const diagnosticCode = (event: ReturnType<typeof entscheideWerbepause>): string =>
-  event.kind === "announce" ? "werbung.ankuendigung" : "werbung.uebersprungen";
+  event.kind === "announce" ? "ads.ankuendigung" : "ads.uebersprungen";
 
 const textMitDauer = (vorlage: string, dauerSekunden: number): string => {
   const text = vorlage.trim();

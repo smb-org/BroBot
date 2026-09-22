@@ -23,7 +23,7 @@ const leererZeitplan: WerbungZeitplanAntwort = {
 };
 
 const pathFor = (channelId: string): string =>
-  `/api/channels/${encodeURIComponent(channelId)}/modules/werbung/einstellungen`;
+  `/api/channels/${encodeURIComponent(channelId)}/modules/ads/settings`;
 
 const json = async <T>(response: Response): Promise<T> => {
   const body: unknown = await response.json().catch(() => null);
@@ -44,7 +44,7 @@ export const ladeWerbungseinstellungen = async (channelId: string): Promise<Werb
 };
 
 const zeitplanPathFor = (channelId: string): string =>
-  `/api/channels/${encodeURIComponent(channelId)}/modules/werbung/zeitplan`;
+  `/api/channels/${encodeURIComponent(channelId)}/modules/ads/zeitplan`;
 
 export const ladeWerbungZeitplan = async (channelId: string): Promise<WerbungZeitplanAntwort> => {
   const response = await fetch(zeitplanPathFor(channelId));
@@ -74,7 +74,7 @@ export const speichereWerbungseinstellungen = async (
 export const snoozeWerbung = async (channelId: string): Promise<WerbungZeitplanAntwort> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
-  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/werbung/snooze`, {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/ads/snooze`, {
     method: "POST",
     headers: { "X-CSRF-Token": csrf.token },
   });

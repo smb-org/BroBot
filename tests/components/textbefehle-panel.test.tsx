@@ -17,7 +17,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it("listet Befehle und bietet Bearbeiten und Löschen an", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",
@@ -83,7 +83,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     const createFinished = new Promise<Response>((resolve) => { resolveCreate = resolve; });
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "POST") return createFinished;
       return Promise.resolve(jsonResponse({}));
@@ -146,7 +146,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     let deleteRequestCount = 0;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: exists ? [{
           channelId: "kanal-a",
           name: "hallo",
@@ -195,7 +195,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     let created = false;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "POST") {
         created = true;
@@ -224,7 +224,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it("ordnet die drei Feldbreiten nach Inhaltsart zu", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",
@@ -266,7 +266,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   ])("zeigt für einen Löschfehler den passenden Text (%s)", async (browserLanguage, expected) => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",
@@ -315,7 +315,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     let createdBody: Record<string, unknown> | null = null;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "POST") {
         createdBody = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : null;
@@ -330,20 +330,20 @@ describe("Textbefehle-Panel-Ansicht", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
     const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
     const art = await screen.findByRole("combobox", { name: "Art" });
-    fireEvent.change(art, { target: { value: "liste" } });
+    fireEvent.change(art, { target: { value: "list" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "befehle" } });
     expect(screen.queryByLabelText("Antworttext")).not.toBeInTheDocument();
     const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
     expect(add).toBeEnabled();
     fireEvent.click(add);
-    await waitFor(() => expect(createdBody).toEqual({ name: "befehle", art: "liste", cooldownSekunden: 5 }));
+    await waitFor(() => expect(createdBody).toEqual({ name: "befehle", art: "list", cooldownSekunden: 5 }));
   });
 
   it("zeigt Bedienern den Schalter offen und Inhaltsaktionen sichtbar, aber gesperrt", async () => {
     let enabled = false;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",
@@ -396,10 +396,10 @@ describe("Textbefehle-Panel-Ansicht", () => {
   });
 
   it("zeigt die Mindeststufe als eigene Spalte und ändert sie über den Verwaltungsweg", async () => {
-    let mindeststufe = "alle";
+    let mindeststufe = "everyone";
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",
@@ -428,7 +428,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     const row = await screen.findByRole("row", { name: /!hallo/ });
     expect(screen.getByRole("columnheader", { name: "Mindeststufe" })).toBeInTheDocument();
     const select = within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" });
-    expect(select).toHaveValue("alle");
+    expect(select).toHaveValue("everyone");
     fireEvent.change(select, { target: { value: "moderator" } });
 
     await screen.findByRole("option", { name: "Moderatoren", selected: true });
@@ -438,7 +438,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it("ordnet Liste und Inspector als direkte Kinder des Befehlsbereichs an", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",
@@ -470,7 +470,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it("schließt den Befehls-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",
@@ -519,7 +519,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it("öffnet das Anlegen in der Inspektorspalte und wechselt ohne Doppelbelegung", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",
@@ -572,7 +572,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it("reicht den Schließen-Weg des Modul-Contracts an den Host weiter", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/befehle") && init?.method === undefined) {
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
         return Promise.resolve(jsonResponse({ befehle: [{
           channelId: "kanal-a",
           name: "hallo",

@@ -13,7 +13,7 @@ const channel = {
   channelId: "kanal-a",
   login: "kanal-a",
   displayName: "Alpha",
-  role: "verwalter",
+  role: "manager",
   broadcasterConnection: "connected",
   channelBotConsent: "granted",
   bot: { status: "connected", reason: null, updatedAt: "2026-09-19T12:00:00.000Z" },

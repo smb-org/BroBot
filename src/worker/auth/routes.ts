@@ -66,7 +66,7 @@ import {
 const nowIso = (): string => new Date().toISOString();
 
 const canManageOverlayTokens = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
-  role === "broadcaster" || role === "verwalter";
+  role === "broadcaster" || role === "manager";
 
 const overlayTokenManageDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
   context.text("Nur Broadcaster und Verwalter dürfen Overlay-Token verwalten.", 403);

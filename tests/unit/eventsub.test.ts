@@ -372,7 +372,7 @@ describe("EventSub-Eingang", () => {
     await insertLoginIdentityAndSession(database, "200", ["channel:read:ads"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('200', 'werbung', 1, '{}')`,
+       VALUES ('200', 'ads', 1, '{}')`,
     ).run();
     await insertBotIdentity(database);
     vi.stubGlobal("fetch", invalidTokenFetcher());
@@ -464,7 +464,7 @@ describe("EventSub-Eingang", () => {
     await insertChannel(database, "channel-condition");
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('channel-condition', 'kanalereignisse', 1, '{}')`,
+       VALUES ('channel-condition', 'channel_events', 1, '{}')`,
     ).run();
     const body = JSON.stringify({
       subscription: {
@@ -491,8 +491,8 @@ describe("EventSub-Eingang", () => {
          FROM event_log`,
     ).first()).resolves.toEqual({
       channel_id: "channel-condition",
-      module_id: "kanalereignisse",
-      code: "kanalereignisse.raid.eingehend",
+      module_id: "channel_events",
+      code: "channel_events.raid.incoming",
       detail_json: JSON.stringify({ quelle: "Quelle", zuschauer: 23 }),
     });
   });

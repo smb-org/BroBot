@@ -36,12 +36,12 @@ describe("Textbefehle-Domain", () => {
 
   it("bildet die nicht-lineare Stufenleiter ausdrücklich ab", () => {
     expect(chatStatusErfuelltStufe(["moderator"], "moderator")).toBe(true);
-    expect(chatStatusErfuelltStufe(["moderator"], "abonnent")).toBe(true);
+    expect(chatStatusErfuelltStufe(["moderator"], "subscriber")).toBe(true);
     expect(chatStatusErfuelltStufe(["moderator"], "vip")).toBe(true);
-    expect(chatStatusErfuelltStufe(["zuschauer"], "moderator")).toBe(false);
-    expect(chatStatusErfuelltStufe(["vip"], "abonnent")).toBe(false);
-    expect(chatStatusErfuelltStufe(["vip", "abonnent"], "abonnent")).toBe(true);
-    expect(chatStatusErfuelltStufe(["abonnent"], "abonnent")).toBe(true);
-    expect(chatStatusErfuelltStufe(null, "alle")).toBe(true);
+    expect(chatStatusErfuelltStufe(["viewer"], "moderator")).toBe(false);
+    expect(chatStatusErfuelltStufe(["vip"], "subscriber")).toBe(false);
+    expect(chatStatusErfuelltStufe(["vip", "subscriber"], "subscriber")).toBe(true);
+    expect(chatStatusErfuelltStufe(["subscriber"], "subscriber")).toBe(true);
+    expect(chatStatusErfuelltStufe(null, "everyone")).toBe(true);
   });
 });

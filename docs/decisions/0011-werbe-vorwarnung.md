@@ -2,7 +2,7 @@
 
 **Stand:** 21. September 2026
 **Status:** entschieden
-**Betrifft:** Modul `werbung`, `ChannelObject`, EventSub-Abos, App-Token
+**Betrifft:** Modul `ads`, `ChannelObject`, EventSub-Abos, App-Token
 **Beitrag zu:** [#22](https://github.com/smb-org/BroBot/issues/22)
 
 ## Kurzfazit
@@ -139,9 +139,9 @@ Termin. Das Panel zeigt beide; ein Knopf, der nur beim Drücken verrät, dass
 kein Snooze mehr übrig ist, ist eine Falle.
 
 Die Rollenschwelle: Snooze **wirkt im Stream** und ist damit eine Bedienung,
-keine Konfiguration — `bediener` darf sie auslösen, wie er auch ein Modul ein-
+keine Konfiguration — `operator` darf sie auslösen, wie er auch ein Modul ein-
 und ausschalten darf. Die Vorlaufzeit und die Texte zu ändern, bleibt
-`verwalter` und `broadcaster` vorbehalten.
+`manager` und `broadcaster` vorbehalten.
 
 ## 7. Was nicht sicher ist
 

@@ -64,17 +64,17 @@ const raidDiagnose = (
   variant: string | undefined,
 ): KanalereignisDiagnose => {
   const fromId = stringWert(feld(payload, "from_broadcaster_user_id"));
-  const outgoing = variant === "ausgehend" || (variant !== "eingehend" && fromId === channelId);
+  const outgoing = variant === "outgoing" || (variant !== "incoming" && fromId === channelId);
   return outgoing
     ? {
-      code: "kanalereignisse.raid.ausgehend",
+      code: "channel_events.raid.outgoing",
       detail: detail({
         ziel: person(payload, "to_broadcaster"),
         zuschauer: zahlWert(feld(payload, "viewers")),
       }),
     }
     : {
-      code: "kanalereignisse.raid.eingehend",
+      code: "channel_events.raid.incoming",
       detail: detail({
         quelle: person(payload, "from_broadcaster"),
         zuschauer: zahlWert(feld(payload, "viewers")),
@@ -87,11 +87,11 @@ const shoutoutDiagnose = (
   payload: Readonly<Record<string, unknown>>,
 ): KanalereignisDiagnose => subscriptionType === "channel.shoutout.create"
   ? {
-    code: "kanalereignisse.shoutout.gesendet",
+    code: "channel_events.shoutout.gesendet",
     detail: detail({ ziel: person(payload, "to_broadcaster") }),
   }
   : {
-    code: "kanalereignisse.shoutout.empfangen",
+    code: "channel_events.shoutout.empfangen",
     detail: detail({
       quelle: person(payload, "from_broadcaster"),
       ...(zahlWert(feld(payload, "viewer_count")) === null
@@ -109,19 +109,19 @@ const chatNotificationDiagnose = (
   const tier = textWert(nestedFeld(payload, typ, "sub_tier"));
   if (typ === "sub") {
     return {
-      code: "kanalereignisse.chat.sub",
+      code: "channel_events.chat.sub",
       detail: detail({ person: chatter, stufe: tier }),
     };
   }
   if (typ === "resub") {
     return {
-      code: "kanalereignisse.chat.resub",
+      code: "channel_events.chat.resub",
       detail: detail({ person: chatter, stufe: tier }),
     };
   }
   if (typ === "sub_gift") {
     return {
-      code: "kanalereignisse.chat.gift_sub",
+      code: "channel_events.chat.gift_sub",
       detail: detail({
         spender: person(payload, "gifter"),
         empfaenger: person(payload, "recipient"),
@@ -131,7 +131,7 @@ const chatNotificationDiagnose = (
   }
   if (typ === "community_sub_gift") {
     return {
-      code: "kanalereignisse.chat.community_gift",
+      code: "channel_events.chat.community_gift",
       detail: detail({
         spender: person(payload, "gifter"),
         anzahl: zahlWert(nestedFeld(payload, typ, "total")),
@@ -142,12 +142,12 @@ const chatNotificationDiagnose = (
   if (typ === "announcement") {
     const message = isRecord(payload.message) ? textWert(payload.message.text) : textWert(payload.message);
     return {
-      code: "kanalereignisse.chat.ankuendigung",
+      code: "channel_events.chat.ankuendigung",
       detail: detail({ person: chatter, text: message }),
     };
   }
   return {
-    code: "kanalereignisse.chat.unbekannt",
+    code: "channel_events.chat.unbekannt",
     detail: detail({ art: kuerzeAuf200Zeichen(typ) }),
   };
 };
@@ -173,32 +173,32 @@ const moderationDiagnose = (
   const common = { person: beteiligt, moderator, grund };
 
   if (actionName === "ban") {
-    return { code: "kanalereignisse.moderation.ban", detail: detail(common) };
+    return { code: "channel_events.moderation.ban", detail: detail(common) };
   }
   if (actionName === "timeout") {
     const ende = textWert(actionData.ends_at);
     return {
-      code: "kanalereignisse.moderation.timeout",
+      code: "channel_events.moderation.timeout",
       detail: detail({ ...common, ende, dauer: dauerInSekunden(ende, ereigniszeit) }),
     };
   }
   if (actionName === "untimeout") {
-    return { code: "kanalereignisse.moderation.untimeout", detail: detail({ person: beteiligt, moderator }) };
+    return { code: "channel_events.moderation.untimeout", detail: detail({ person: beteiligt, moderator }) };
   }
   if (actionName === "unban") {
-    return { code: "kanalereignisse.moderation.unban", detail: detail({ person: beteiligt, moderator }) };
+    return { code: "channel_events.moderation.unban", detail: detail({ person: beteiligt, moderator }) };
   }
   if (actionName === "delete") {
     return {
-      code: "kanalereignisse.moderation.delete",
+      code: "channel_events.moderation.delete",
       detail: detail({ person: beteiligt, moderator, text: textWert(actionData.message_body) }),
     };
   }
   if (actionName === "warn") {
-    return { code: "kanalereignisse.moderation.warn", detail: detail(common) };
+    return { code: "channel_events.moderation.warn", detail: detail(common) };
   }
   return {
-    code: "kanalereignisse.moderation.unbekannt",
+    code: "channel_events.moderation.unbekannt",
     detail: detail({ aktion: actionName }),
   };
 };
@@ -241,7 +241,7 @@ const suspiciousEinstufung = (payload: Readonly<Record<string, unknown>>): strin
 };
 
 const automodDiagnose = (payload: Readonly<Record<string, unknown>>): KanalereignisDiagnose => ({
-  code: "kanalereignisse.automod.halte",
+  code: "channel_events.automod.halte",
   detail: detail({
     ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
     ...optionaleTextDetail("grund", textWert(feld(payload, "category"))),
@@ -250,7 +250,7 @@ const automodDiagnose = (payload: Readonly<Record<string, unknown>>): Kanalereig
 });
 
 const suspiciousMessageDiagnose = (payload: Readonly<Record<string, unknown>>): KanalereignisDiagnose => ({
-  code: "kanalereignisse.verdacht.nachricht",
+  code: "channel_events.verdacht.nachricht",
   detail: detail({
     ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
     ...optionaleTextDetail("einstufung", suspiciousEinstufung(payload)),
@@ -262,8 +262,8 @@ const suspiciousUpdateDiagnose = (payload: Readonly<Record<string, unknown>>): K
   const status = lowTrustStatus(payload);
   return {
     code: status === "none"
-      ? "kanalereignisse.verdacht.entwarnung"
-      : "kanalereignisse.verdacht.einstufung",
+      ? "channel_events.verdacht.entwarnung"
+      : "channel_events.verdacht.einstufung",
     detail: detail({
       ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
       ...optionaleTextDetail("einstufung", status),

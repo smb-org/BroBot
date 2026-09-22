@@ -107,13 +107,13 @@ const mutationFehlgeschlagen = (kontext: { text: (text: string, status: 409) => 
 
 export const betreiberRouter = new Hono<BetreiberUmgebung>();
 
-betreiberRouter.use("/api/betreiber", requireBetreiber());
-betreiberRouter.use("/api/betreiber/*", requireBetreiber());
+betreiberRouter.use("/api/platform", requireBetreiber());
+betreiberRouter.use("/api/platform/*", requireBetreiber());
 
-betreiberRouter.get("/api/betreiber", async (kontext) =>
+betreiberRouter.get("/api/platform", async (kontext) =>
   kontext.json({ channels: await listeBetreiberKanäle(kontext.env.DB) }));
 
-betreiberRouter.get("/api/betreiber/nutzer", async (kontext) => {
+betreiberRouter.get("/api/platform/users", async (kontext) => {
   const login = leseLogin(kontext.req.query("login"));
   if (login === null) return kontext.text("Twitch-Name fehlt oder ist ungültig.", 400);
   try {
@@ -127,7 +127,7 @@ betreiberRouter.get("/api/betreiber/nutzer", async (kontext) => {
   }
 });
 
-betreiberRouter.post("/api/betreiber/kanaele", async (kontext) => {
+betreiberRouter.post("/api/platform/channels", async (kontext) => {
   const rumpf = await leseJson(kontext.req.raw);
   const login = typeof rumpf?.login === "string" ? leseLogin(rumpf.login) : null;
   const vollzustimmung = leseBoolean(rumpf?.vollzustimmung);
@@ -166,7 +166,7 @@ betreiberRouter.post("/api/betreiber/kanaele", async (kontext) => {
   }, 201);
 });
 
-betreiberRouter.patch("/api/betreiber/kanaele/:channelId", async (kontext) => {
+betreiberRouter.patch("/api/platform/channels/:channelId", async (kontext) => {
   const rumpf = await leseJson(kontext.req.raw);
   const vollzustimmung = leseBoolean(rumpf?.vollzustimmung);
   if (vollzustimmung === null) return kontext.text("Vollzustimmung ist ungültig.", 400);
@@ -188,7 +188,7 @@ betreiberRouter.patch("/api/betreiber/kanaele/:channelId", async (kontext) => {
   return kontext.json({ channel: { ...kanal, vollzustimmung } });
 });
 
-betreiberRouter.get("/api/betreiber/kanaele/:channelId/mitglieder", async (kontext) => {
+betreiberRouter.get("/api/platform/channels/:channelId/members", async (kontext) => {
   const limit = leseLimit(kontext.req.query("limit"), standardMitgliederLimit, maximaleMitgliederLimit);
   if (limit === null) return kontext.text("Mitglieder-Begrenzung ist ungültig.", 400);
   const serialisierterCursor = kontext.req.query("cursor");
@@ -210,7 +210,7 @@ betreiberRouter.get("/api/betreiber/kanaele/:channelId/mitglieder", async (konte
   });
 });
 
-betreiberRouter.post("/api/betreiber/kanaele/:channelId/mitglieder", async (kontext) => {
+betreiberRouter.post("/api/platform/channels/:channelId/members", async (kontext) => {
   const rumpf = await leseJson(kontext.req.raw);
   const userId = leseUserId(rumpf?.userId);
   const rolle = leseRolle(rumpf?.role);
@@ -246,7 +246,7 @@ betreiberRouter.post("/api/betreiber/kanaele/:channelId/mitglieder", async (kont
   return kontext.json({ member: mitgliedAntwort(mitglied) }, 201);
 });
 
-betreiberRouter.patch("/api/betreiber/kanaele/:channelId/mitglieder/:userId", async (kontext) => {
+betreiberRouter.patch("/api/platform/channels/:channelId/members/:userId", async (kontext) => {
   const rumpf = await leseJson(kontext.req.raw);
   const rolle = leseBetreiberRolle(rumpf?.role);
   if (rolle === null) {
@@ -276,7 +276,7 @@ betreiberRouter.patch("/api/betreiber/kanaele/:channelId/mitglieder/:userId", as
   });
 });
 
-betreiberRouter.delete("/api/betreiber/kanaele/:channelId/mitglieder/:userId", async (kontext) => {
+betreiberRouter.delete("/api/platform/channels/:channelId/members/:userId", async (kontext) => {
   const kanalId = kontext.req.param("channelId");
   const userId = kontext.req.param("userId");
   const vorhanden = await getChannelMemberForChannel(kontext.env.DB, kanalId, userId);
@@ -293,7 +293,7 @@ betreiberRouter.delete("/api/betreiber/kanaele/:channelId/mitglieder/:userId", a
   return kontext.body(null, 204);
 });
 
-betreiberRouter.get("/api/betreiber/audit", async (kontext) => {
+betreiberRouter.get("/api/platform/audit", async (kontext) => {
   const limit = leseLimit(kontext.req.query("limit"), standardAuditLimit, maximaleAuditLimit);
   if (limit === null) return kontext.text("Audit-Begrenzung ist ungültig.", 400);
   const serialisierterCursor = kontext.req.query("cursor");

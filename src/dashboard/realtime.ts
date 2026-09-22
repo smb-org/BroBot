@@ -54,7 +54,7 @@ const isKnownEnvelope = (value: Record<string, unknown>): value is Record<string
   typeof value.id === "string" && value.id.length > 0 &&
   typeof value.createdAt === "string" && value.createdAt.length > 0 &&
   typeof value.channelId === "string" && value.channelId.length > 0 &&
-  (value.type === "system.hallo" || value.type === "ereignisprotokoll.neu");
+  (value.type === "system.hello" || value.type === "event_log.new");
 
 export const parseRealtimeMessage = (raw: string, channelId: string): RealtimeParseResult => {
   let parsed: unknown;
@@ -68,14 +68,14 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
     return { kind: "foreign-channel" };
   }
   if (!isKnownEnvelope(parsed)) return { kind: "ignored" };
-  if (parsed.type === "system.hallo") {
+  if (parsed.type === "system.hello") {
     return parsed.payload !== null && isRecord(parsed.payload) && Object.keys(parsed.payload).length === 0
-      ? { kind: "message", message: parsed as RealtimeEnvelope<"system.hallo"> }
+      ? { kind: "message", message: parsed as RealtimeEnvelope<"system.hello"> }
       : { kind: "ignored" };
   }
   if (!isRecord(parsed.payload) || !Array.isArray(parsed.payload.entries) ||
       !parsed.payload.entries.every(isHint)) return { kind: "ignored" };
-  return { kind: "message", message: parsed as RealtimeEnvelope<"ereignisprotokoll.neu"> };
+  return { kind: "message", message: parsed as RealtimeEnvelope<"event_log.new"> };
 };
 
 const eventMetadata = (code: string) =>
@@ -272,7 +272,7 @@ export const useRealtimeEventFeed = ({
       }
       if (parsed.kind !== "message" || seenMessageIdsRef.current.has(parsed.message.id)) return;
       seenMessageIdsRef.current.add(parsed.message.id);
-      if (parsed.message.type !== "ereignisprotokoll.neu") return;
+      if (parsed.message.type !== "event_log.new") return;
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
       for (const hint of hints) pendingEventIdsRef.current.add(hint.eventId);
       if (hints.length > 0) {

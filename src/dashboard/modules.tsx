@@ -56,7 +56,7 @@ const errorMessage = (error: unknown): string => {
   return modulesTexte().aenderungFehlgeschlagen;
 };
 
-const canManageModules = (role: ChannelRole): boolean => role !== "bediener";
+const canManageModules = (role: ChannelRole): boolean => role !== "operator";
 
 // Legacy-only file: the component intentionally is no longer exported.
 // eslint-disable-next-line react-refresh/only-export-components

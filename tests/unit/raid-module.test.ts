@@ -7,7 +7,7 @@ import type { ModuleEvent } from "../../src/modules/contract";
 const event = (
   payload: Record<string, unknown>,
   settings = raidModul.defaultSettings,
-  subscriptionVariant = "eingehend",
+  subscriptionVariant = "incoming",
 ): ModuleEvent<typeof settings> => ({
   channelId: "kanal-a",
   subscriptionType: "channel.raid",
@@ -121,11 +121,11 @@ describe("Raid-Modul", () => {
       from_broadcaster_user_id: "kanal-a",
       to_broadcaster_user_id: "ziel-1",
       viewers: 20,
-    }, raidModul.defaultSettings, "ausgehend"));
+    }, raidModul.defaultSettings, "outgoing"));
 
     expect(result.actions).toEqual([]);
     expect(result.diagnostics).toEqual([{
-      code: "raid.ausgehend",
+      code: "raid.outgoing",
       detail: { zielKanalId: "ziel-1", zuschauer: 20 },
     }]);
   });

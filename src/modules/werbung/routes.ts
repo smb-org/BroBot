@@ -17,7 +17,7 @@ const scheduleFailureDiagnostic = (result: AdScheduleResult): {
   code: string;
   detail: Readonly<Record<string, string | number | boolean | null>>;
 } => ({
-  code: result.reason === "unauthorized" ? "werbung.vorwarnung.scope_fehlt" : "werbung.vorwarnung.zeitplan_fehler",
+  code: result.reason === "unauthorized" ? "ads.vorwarnung.scope_fehlt" : "ads.vorwarnung.zeitplan_fehler",
   detail: { grund: result.reason, ...result.detail },
 });
 
@@ -49,7 +49,7 @@ const log = async (
   await context.get("writeModuleDiagnostics")(
     context.env.DB,
     channelId,
-    "werbung",
+    "ads",
     triggerId,
     context.get("actor").userId,
     [{ code, detail }],
@@ -102,7 +102,7 @@ werbungRoutes.post("/snooze", async (context) => {
       detail: { scope: MANAGE_ADS_SCOPE, status: null, message: null },
       schedule: null,
     };
-  await log(context, channelId, triggerId, "werbung.snooze", snoozeOutcome(result));
+  await log(context, channelId, triggerId, "ads.snooze", snoozeOutcome(result));
 
   if (!result.snoozed || result.schedule === null) {
     return context.json({

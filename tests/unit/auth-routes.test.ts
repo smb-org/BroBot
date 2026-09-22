@@ -143,7 +143,7 @@ const umgebungFürDatenbank = (datenbank: TestD1Database) => {
 
 const setzeVollzustimmung = async (datenbank: TestD1Database, kanalId: string): Promise<void> => {
   await datenbank.prepare(
-    "UPDATE channels SET vollzustimmung = 1 WHERE channel_id = ?",
+    "UPDATE channels SET full_consent = 1 WHERE channel_id = ?",
   ).bind(kanalId).run();
 };
 
@@ -385,7 +385,7 @@ describe("Auth-Routen", () => {
       purpose: "login",
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
-      redirect_path: "/channels/kanal-a/modules/werbung",
+      redirect_path: "/channels/kanal-a/modules/ads",
     };
     const { environment } = makeEnvironment(transaction);
     const login = await authRouter.fetch(new Request("https://brobot.example/auth/login"), environment);
@@ -397,7 +397,7 @@ describe("Auth-Routen", () => {
     const response = await authRouter.fetch(callbackRequest(login), environment);
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe("https://brobot.example/channels/kanal-a/modules/werbung");
+    expect(response.headers.get("location")).toBe("https://brobot.example/channels/kanal-a/modules/ads");
   });
 
   it("ignoriert ein nicht einfaches hinterlegtes Rückwegziel", async () => {
@@ -985,7 +985,7 @@ describe("Auth-Routen", () => {
 
   it("lässt einen Verwalter die channel:bot-Zustimmung nicht für den Broadcaster starten", async () => {
     const { environment } = makeEnvironment(
-      { role: "verwalter" },
+      { role: "manager" },
       sessionRowFor("verwalter"),
     );
     const response = await authRouter.fetch(
@@ -1032,7 +1032,7 @@ describe("Auth-Routen", () => {
       const environment = umgebungFürDatenbank(database);
 
       const login = await authRouter.fetch(
-        new Request("https://brobot.example/auth/channels/kanal-a/broadcaster-scopes/werbung", {
+        new Request("https://brobot.example/auth/channels/kanal-a/broadcaster-scopes/ads", {
           headers: { Cookie: await sessionCookieHeaderFor("kanal-a") },
         }),
         environment,

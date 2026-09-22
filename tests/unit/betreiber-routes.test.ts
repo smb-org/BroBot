@@ -110,7 +110,7 @@ describe("Betreiberebene", () => {
     await insertLoginIdentityAndSession(datenbank, "kein-betreiber");
 
     const antwort = await betreiberRouter.fetch(
-      await anfrageFür("kein-betreiber", "/api/betreiber"),
+      await anfrageFür("kein-betreiber", "/api/platform"),
       umgebung,
     );
 
@@ -123,10 +123,10 @@ describe("Betreiberebene", () => {
     await insertChannel(datenbank, "kanal-a", "Alpha");
     await insertChannel(datenbank, "kanal-b", "Beta");
     await insertMember(datenbank, "kanal-a", "kanal-a", "broadcaster");
-    await insertMember(datenbank, "kanal-a", "verwalter-1", "verwalter");
-    await insertMember(datenbank, "kanal-a", "bediener-1", "bediener");
+    await insertMember(datenbank, "kanal-a", "verwalter-1", "manager");
+    await insertMember(datenbank, "kanal-a", "bediener-1", "operator");
     await insertMember(datenbank, "kanal-b", "kanal-b", "broadcaster");
-    await datenbank.prepare("UPDATE channels SET vollzustimmung = 1 WHERE channel_id = ?").bind("kanal-a").run();
+    await datenbank.prepare("UPDATE channels SET full_consent = 1 WHERE channel_id = ?").bind("kanal-a").run();
     await insertLoginIdentityAndSession(datenbank, "kanal-a");
     await setzeBotIdentität(datenbank);
     vi.mocked(fetch).mockResolvedValueOnce(antwortVonHelix([
@@ -134,14 +134,14 @@ describe("Betreiberebene", () => {
     ]));
 
     const übersichtAntwort = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber"),
+      await anfrageFür(betreiberId, "/api/platform"),
       umgebung,
     );
     const übersicht = await übersichtAntwort.json<{
       channels: Array<Record<string, unknown>>;
     }>();
     const suchAntwort = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/nutzer?login=neuerkanal"),
+      await anfrageFür(betreiberId, "/api/platform/users?login=neuerkanal"),
       umgebung,
     );
 
@@ -178,26 +178,26 @@ describe("Betreiberebene", () => {
     ]));
 
     const antwort = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele", "POST", {
+      await anfrageFür(betreiberId, "/api/platform/channels", "POST", {
         login: "kanal-sieben",
         vollzustimmung: true,
       }),
       umgebung,
     );
     const kanal = await datenbank.prepare(
-      "SELECT channel_id, login, vollzustimmung FROM channels WHERE channel_id = ?",
+      "SELECT channel_id, login, full_consent FROM channels WHERE channel_id = ?",
     ).bind("kanal-7").first();
     const mitglied = await datenbank.prepare(
       "SELECT channel_id, user_id, role FROM channel_members WHERE channel_id = ?",
     ).bind("kanal-7").first();
 
     expect(antwort.status).toBe(201);
-    expect(kanal).toEqual({ channel_id: "kanal-7", login: "kanal-sieben", vollzustimmung: 1 });
+    expect(kanal).toEqual({ channel_id: "kanal-7", login: "kanal-sieben", full_consent: 1 });
     expect(mitglied).toEqual({ channel_id: "kanal-7", user_id: "kanal-7", role: "broadcaster" });
     await expect(leseAudit(datenbank)).resolves.toEqual([
       {
         actor_user_id: betreiberId,
-        actor_kind: "betreiber",
+        actor_kind: "platform_admin",
         action: "kanal.freigegeben",
         channel_id: "kanal-7",
       },
@@ -210,20 +210,20 @@ describe("Betreiberebene", () => {
     await insertMember(datenbank, "kanal-a", "kanal-a", "broadcaster");
 
     const hinzufügen = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a/mitglieder", "POST", {
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a/members", "POST", {
         userId: "user-2",
-        role: "bediener",
+        role: "operator",
       }),
       umgebung,
     );
     const ändern = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a/mitglieder/user-2", "PATCH", {
-        role: "verwalter",
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a/members/user-2", "PATCH", {
+        role: "manager",
       }),
       umgebung,
     );
     const entfernen = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a/mitglieder/user-2", "DELETE"),
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a/members/user-2", "DELETE"),
       umgebung,
     );
 
@@ -231,9 +231,9 @@ describe("Betreiberebene", () => {
     expect(ändern.status).toBe(200);
     expect(entfernen.status).toBe(204);
     await expect(leseAudit(datenbank)).resolves.toEqual(expect.arrayContaining([
-      { actor_user_id: betreiberId, actor_kind: "betreiber", action: "mitglied.hinzugefuegt", channel_id: "kanal-a" },
-      { actor_user_id: betreiberId, actor_kind: "betreiber", action: "mitglied.rolle_geaendert", channel_id: "kanal-a" },
-      { actor_user_id: betreiberId, actor_kind: "betreiber", action: "mitglied.entfernt", channel_id: "kanal-a" },
+      { actor_user_id: betreiberId, actor_kind: "platform_admin", action: "mitglied.hinzugefuegt", channel_id: "kanal-a" },
+      { actor_user_id: betreiberId, actor_kind: "platform_admin", action: "mitglied.rolle_geaendert", channel_id: "kanal-a" },
+      { actor_user_id: betreiberId, actor_kind: "platform_admin", action: "mitglied.entfernt", channel_id: "kanal-a" },
     ]));
     await expect(leseAudit(datenbank)).resolves.toHaveLength(3);
   });
@@ -243,21 +243,21 @@ describe("Betreiberebene", () => {
     await insertChannel(datenbank, "kanal-a");
 
     const setzen = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a", "PATCH", { vollzustimmung: true }),
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a", "PATCH", { vollzustimmung: true }),
       umgebung,
     );
     const lösen = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a", "PATCH", { vollzustimmung: false }),
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a", "PATCH", { vollzustimmung: false }),
       umgebung,
     );
 
     expect(setzen.status).toBe(200);
     expect(lösen.status).toBe(200);
     await expect(datenbank.prepare(
-      "SELECT vollzustimmung FROM channels WHERE channel_id = ?",
-    ).bind("kanal-a").first()).resolves.toEqual({ vollzustimmung: 0 });
+      "SELECT full_consent FROM channels WHERE channel_id = ?",
+    ).bind("kanal-a").first()).resolves.toEqual({ full_consent: 0 });
     await expect(leseAudit(datenbank)).resolves.toEqual(expect.arrayContaining([
-      { actor_user_id: betreiberId, actor_kind: "betreiber", action: "kanal.vollzustimmung_geaendert", channel_id: "kanal-a" },
+      { actor_user_id: betreiberId, actor_kind: "platform_admin", action: "kanal.vollzustimmung_geaendert", channel_id: "kanal-a" },
     ]));
     await expect(leseAudit(datenbank)).resolves.toHaveLength(2);
   });
@@ -268,20 +268,20 @@ describe("Betreiberebene", () => {
     await insertMember(datenbank, "kanal-a", "kanal-a", "broadcaster");
 
     const setzen = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a/mitglieder", "POST", {
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a/members", "POST", {
         userId: "user-2",
         role: "broadcaster",
       }),
       umgebung,
     );
     const ändern = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a/mitglieder/kanal-a", "PATCH", {
-        role: "bediener",
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a/members/kanal-a", "PATCH", {
+        role: "operator",
       }),
       umgebung,
     );
     const löschen = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a/mitglieder/kanal-a", "DELETE"),
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a/members/kanal-a", "DELETE"),
       umgebung,
     );
 
@@ -298,7 +298,7 @@ describe("Betreiberebene", () => {
     await setzeBetreiber(datenbank);
     await insertChannel(datenbank, "kanal-a");
     await insertMember(datenbank, "kanal-a", "kanal-a", "broadcaster");
-    await insertMember(datenbank, "kanal-a", "user-2", "bediener");
+    await insertMember(datenbank, "kanal-a", "user-2", "operator");
     const akteur = { userId: betreiberId, sessionId: `session-${betreiberId}` };
     const zeitpunkt = "2026-09-18T00:30:00.000Z";
 
@@ -314,7 +314,7 @@ describe("Betreiberebene", () => {
     ).bind("kanal-a", "user-2").first<{
       channel_id: string;
       user_id: string;
-      role: "broadcaster" | "verwalter" | "bediener";
+      role: "broadcaster" | "manager" | "operator";
       created_at: string;
       updated_at: string;
     }>();
@@ -357,7 +357,7 @@ describe("Betreiberebene", () => {
     await setzeBetreiber(datenbank);
     await insertChannel(datenbank, "kanal-a");
     await insertMember(datenbank, "kanal-a", "kanal-a", "broadcaster");
-    await insertMember(datenbank, "kanal-a", "user-2", "bediener");
+    await insertMember(datenbank, "kanal-a", "user-2", "operator");
     const grundlage = datenbank as unknown as D1Database;
     const rennendeDatenbank = {
       prepare: grundlage.prepare.bind(grundlage),
@@ -371,8 +371,8 @@ describe("Betreiberebene", () => {
     umgebung = { ...umgebung, DB: rennendeDatenbank };
 
     const antwort = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a/mitglieder/user-2", "PATCH", {
-        role: "verwalter",
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a/members/user-2", "PATCH", {
+        role: "manager",
       }),
       umgebung,
     );
@@ -381,14 +381,14 @@ describe("Betreiberebene", () => {
     await expect(leseAudit(datenbank)).resolves.toEqual([]);
     await expect(datenbank.prepare(
       "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
-    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "bediener" });
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "operator" });
   });
 
   it("löst Mitgliedernamen über die vorhandene Helix-Auflösung auf", async () => {
     await setzeBetreiber(datenbank);
     await insertChannel(datenbank, "kanal-a");
     await insertMember(datenbank, "kanal-a", "kanal-a", "broadcaster");
-    await insertMember(datenbank, "kanal-a", "user-2", "bediener");
+    await insertMember(datenbank, "kanal-a", "user-2", "operator");
     await setzeBotIdentität(datenbank);
     vi.mocked(fetch).mockResolvedValueOnce(antwortVonHelix([
       { id: "kanal-a", login: "alpha", display_name: "Alpha" },
@@ -396,7 +396,7 @@ describe("Betreiberebene", () => {
     ]));
 
     const antwort = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/kanaele/kanal-a/mitglieder"),
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a/members"),
       umgebung,
     );
     const körper = await antwort.json<{ members: Array<Record<string, unknown>> }>();
@@ -404,7 +404,7 @@ describe("Betreiberebene", () => {
     expect(antwort.status).toBe(200);
     expect(körper.members).toEqual([
       { userId: "kanal-a", login: "alpha", displayName: "Alpha", profileImageUrl: null, role: "broadcaster", joinedAt: "2026-09-18T00:00:00.000Z" },
-      { userId: "user-2", login: "helfer", displayName: "Helfer", profileImageUrl: "https://cdn.example/helfer.png", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" },
+      { userId: "user-2", login: "helfer", displayName: "Helfer", profileImageUrl: "https://cdn.example/helfer.png", role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" },
     ]);
   });
 
@@ -412,39 +412,39 @@ describe("Betreiberebene", () => {
     await setzeBetreiber(datenbank);
     await insertChannel(datenbank, "kanal-a");
     await insertMember(datenbank, "kanal-a", "kanal-a", "broadcaster");
-    await insertMember(datenbank, "kanal-a", "user-2", "bediener");
+    await insertMember(datenbank, "kanal-a", "user-2", "operator");
     await datenbank.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
-    ).bind("audit-mitglied", "mitglied", "2026-09-18T00:00:01.000Z", "kanal-a", "mitglied.entfernt", "mitglied").run();
+    ).bind("audit-mitglied", "mitglied", "2026-09-18T00:00:01.000Z", "kanal-a", "mitglied.entfernt", "member").run();
     await datenbank.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
-    ).bind("audit-betreiber-1", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "mitglied.hinzugefuegt", "betreiber").run();
+    ).bind("audit-betreiber-1", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "mitglied.hinzugefuegt", "platform_admin").run();
     await datenbank.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
-    ).bind("audit-betreiber-2", "betreiber", "2026-09-18T00:00:03.000Z", "kanal-a", "kanal.vollzustimmung_geaendert", "betreiber").run();
+    ).bind("audit-betreiber-2", "betreiber", "2026-09-18T00:00:03.000Z", "kanal-a", "kanal.vollzustimmung_geaendert", "platform_admin").run();
 
     const ersteAntwort = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/audit?limit=1"),
+      await anfrageFür(betreiberId, "/api/platform/audit?limit=1"),
       umgebung,
     );
     const ersteSeite = await ersteAntwort.json<{ entries: Array<Record<string, unknown>>; nextCursor: string | null }>();
     const zweiteAntwort = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, `/api/betreiber/audit?limit=1&cursor=${encodeURIComponent(ersteSeite.nextCursor ?? "")}`),
+      await anfrageFür(betreiberId, `/api/platform/audit?limit=1&cursor=${encodeURIComponent(ersteSeite.nextCursor ?? "")}`),
       umgebung,
     );
     const zweiteSeite = await zweiteAntwort.json<{ entries: Array<Record<string, unknown>>; nextCursor: string | null }>();
 
     expect(ersteSeite.entries).toHaveLength(1);
-    expect(ersteSeite.entries[0]).toMatchObject({ auditId: "audit-betreiber-2", actorKind: "betreiber", channelId: "kanal-a" });
+    expect(ersteSeite.entries[0]).toMatchObject({ auditId: "audit-betreiber-2", actorKind: "platform_admin", channelId: "kanal-a" });
     expect(ersteSeite.nextCursor).toEqual(expect.any(String));
     expect(zweiteSeite.entries).toHaveLength(1);
-    expect(zweiteSeite.entries[0]).toMatchObject({ auditId: "audit-betreiber-1", actorKind: "betreiber" });
+    expect(zweiteSeite.entries[0]).toMatchObject({ auditId: "audit-betreiber-1", actorKind: "platform_admin" });
     expect(zweiteSeite.nextCursor).toBeNull();
   });
 
@@ -458,8 +458,8 @@ describe("Betreiberebene", () => {
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?), (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
     ).bind(
-      "audit-aufgelöst", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "kanal.freigegeben", "betreiber",
-      "audit-ungelöst", "gelöscht", "2026-09-18T00:00:01.000Z", "kanal-a", "kanal.vollzustimmung_geaendert", "betreiber",
+      "audit-aufgelöst", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "kanal.freigegeben", "platform_admin",
+      "audit-ungelöst", "gelöscht", "2026-09-18T00:00:01.000Z", "kanal-a", "kanal.vollzustimmung_geaendert", "platform_admin",
     ).run();
     const twitch = vi.fn((input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
@@ -470,7 +470,7 @@ describe("Betreiberebene", () => {
     vi.stubGlobal("fetch", twitch);
 
     const antwort = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/betreiber/audit"),
+      await anfrageFür(betreiberId, "/api/platform/audit"),
       umgebung,
     );
     const körper = await antwort.json<{ entries: Array<Record<string, unknown>> }>();
@@ -478,8 +478,8 @@ describe("Betreiberebene", () => {
     expect(antwort.status).toBe(200);
     expect(twitch).toHaveBeenCalledTimes(1);
     expect(körper.entries).toEqual([
-      expect.objectContaining({ actorUserId: "betreiber", actorLogin: "esembe", actorDisplayName: "Esembe", actorKind: "betreiber" }),
-      expect.objectContaining({ actorUserId: "gelöscht", actorLogin: null, actorDisplayName: null, actorKind: "betreiber" }),
+      expect.objectContaining({ actorUserId: "betreiber", actorLogin: "esembe", actorDisplayName: "Esembe", actorKind: "platform_admin" }),
+      expect.objectContaining({ actorUserId: "gelöscht", actorLogin: null, actorDisplayName: null, actorKind: "platform_admin" }),
     ]);
   });
 });

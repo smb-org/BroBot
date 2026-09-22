@@ -62,7 +62,7 @@ const prepareMemberAudit = (
   action: string,
   before: ChannelMemberRecord | null,
   after: ChannelMemberRecord | null,
-  actorKind: AuditActorKind = "mitglied",
+  actorKind: AuditActorKind = "member",
 ): D1PreparedStatement => prepareAudit(
   db,
   actorUserId,
@@ -156,7 +156,7 @@ export const createChannelMemberWithAudit = async (
   action: string,
   changedAt: string,
   guard: string | MutationGuard,
-  actorKind: AuditActorKind = "mitglied",
+  actorKind: AuditActorKind = "member",
 ): Promise<boolean> => {
   const guardParts = mutationGuardParts(guard, actor, member.channelId, changedAt);
   const mutation = db.prepare(
@@ -198,7 +198,7 @@ export const updateChannelMemberWithAudit = async (
   action: string,
   changedAt: string,
   guard: string | MutationGuard,
-  actorKind: AuditActorKind = "mitglied",
+  actorKind: AuditActorKind = "member",
 ): Promise<boolean> => {
   const before = await getChannelMember(db, member.channelId, member.userId);
   if (before === null) return false;
@@ -247,7 +247,7 @@ export const deleteChannelMemberWithAudit = async (
   action: string,
   changedAt: string,
   guard: string | MutationGuard,
-  actorKind: AuditActorKind = "mitglied",
+  actorKind: AuditActorKind = "member",
 ): Promise<boolean> => {
   const before = await getChannelMember(db, channelId, userId);
   if (before === null) return false;

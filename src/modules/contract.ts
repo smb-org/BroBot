@@ -6,7 +6,7 @@ import type { ChannelRole } from "../contracts/values";
 export { kuerzeAuf200Zeichen } from "../text";
 
 /** Aus Twitch-Badges abgeleiteter Status der chatseitig auslösenden Person. */
-export type ModuleChatStatus = "zuschauer" | "abonnent" | "vip" | "moderator" | "broadcaster";
+export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";
 
 /**
  * Eine Begründung für etwas, das ein Modul getan oder bewusst nicht getan hat.

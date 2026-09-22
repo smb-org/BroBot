@@ -49,13 +49,13 @@ const chatStatusFuer = (
     : [];
   // Mehrere Badges sind gleichzeitig möglich. VIP und Abonnent bleiben daher
   // getrennte Status; `founder` zählt weiterhin als Abonnent. Ohne besondere
-  // Badges bleibt die Liste für jedes Chatereignis mit `zuschauer` nicht leer.
+  // Badges bleibt die Liste für jedes Chatereignis mit `viewer` nicht leer.
   const statusse: ModuleChatStatus[] = [];
   if (badgeIds.includes("broadcaster")) statusse.push("broadcaster");
   if (badgeIds.includes("moderator")) statusse.push("moderator");
   if (badgeIds.includes("vip")) statusse.push("vip");
-  if (badgeIds.includes("subscriber") || badgeIds.includes("founder")) statusse.push("abonnent");
-  return statusse.length === 0 ? ["zuschauer"] : statusse;
+  if (badgeIds.includes("subscriber") || badgeIds.includes("founder")) statusse.push("subscriber");
+  return statusse.length === 0 ? ["viewer"] : statusse;
 };
 
 const akteurFuerEreignis = async (
@@ -234,12 +234,12 @@ export const dispatchEventSubNotification = async (
   }
 
   if (neueEinträge.length === 0) return;
-  const realtimeMessage: RealtimeEnvelope<"ereignisprotokoll.neu"> = {
+  const realtimeMessage: RealtimeEnvelope<"event_log.new"> = {
     version: 1,
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     channelId: event.channelId,
-    type: "ereignisprotokoll.neu",
+    type: "event_log.new",
     payload: {
       entries: neueEinträge.map(({ eventId, createdAt, moduleId, code, actorUserId }) => ({
         eventId,

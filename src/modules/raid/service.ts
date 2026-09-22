@@ -17,11 +17,11 @@ export const verarbeiteRaid = (
     event.settings.textSchwelle,
   );
 
-  if (entscheidung.kind === "ausgehend") {
+  if (entscheidung.kind === "outgoing") {
     return {
       actions: [],
       diagnostics: [{
-        code: "raid.ausgehend",
+        code: "raid.outgoing",
         detail: { zielKanalId: entscheidung.zielKanalId, zuschauer: entscheidung.zuschauer },
       }],
     };

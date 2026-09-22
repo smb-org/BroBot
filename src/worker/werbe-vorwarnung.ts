@@ -11,7 +11,7 @@ import { writeModuleDiagnostics } from "./event-log";
 import { getAppAccessToken } from "./app-token";
 import { getAdSchedule, type AdScheduleResult } from "../modules/werbung/adapters/ad-schedule";
 
-const MODULE_ID = "werbung";
+const MODULE_ID = "ads";
 const WARNING_SCOPE = "channel:read:ads";
 const SCHEDULE_TRIGGER_TYPES = new Set(["stream.online", "channel.ad_break.begin"]);
 
@@ -114,14 +114,14 @@ const scopeMissing = async (
 ): Promise<void> => {
   await clear(planer);
   if (diagnosenSchreiben) {
-    await writeOne(environment, channelId, triggerId, now, "werbung.vorwarnung.scope_fehlt", { scope: WARNING_SCOPE });
+    await writeOne(environment, channelId, triggerId, now, "ads.vorwarnung.scope_fehlt", { scope: WARNING_SCOPE });
   }
 };
 
 const scheduleFailureDiagnostic = (result: AdScheduleResult): ModuleDiagnostic => ({
   code: result.reason === "unauthorized"
-    ? "werbung.vorwarnung.scope_fehlt"
-    : "werbung.vorwarnung.zeitplan_fehler",
+    ? "ads.vorwarnung.scope_fehlt"
+    : "ads.vorwarnung.zeitplan_fehler",
   detail: { grund: result.reason, ...result.detail },
 });
 
@@ -145,7 +145,7 @@ const settingRecord = async (
 };
 
 const decisionCode = (decision: WerbevorwarnungsEntscheidung): string =>
-  decision.kind === "announce" ? "werbung.vorwarnung.angekuendigt" : `werbung.vorwarnung.${decision.reason}`;
+  decision.kind === "announce" ? "ads.vorwarnung.angekuendigt" : `ads.vorwarnung.${decision.reason}`;
 
 const decisionDetail = (decision: WerbevorwarnungsEntscheidung): Readonly<Record<string, string | number | boolean | null>> => {
   if (decision.kind === "announce") return { sekunden: decision.sekunden, termin: decision.terminAm };
@@ -203,7 +203,7 @@ export const aktualisiereWerbevorwarnung = async (
   if (result.schedule.nextAdAt === null) {
     await clear(planer);
     if (diagnosenSchreiben) {
-      await writeOne(environment, channelId, triggerId, now, "werbung.vorwarnung.kein_termin");
+      await writeOne(environment, channelId, triggerId, now, "ads.vorwarnung.kein_termin");
     }
     return;
   }

@@ -43,8 +43,8 @@ export interface TwitchUser {
 
 const roles = CHANNEL_ROLES;
 const roleRank: Record<ChannelRole, number> = {
-  bediener: 0,
-  verwalter: 1,
+  operator: 0,
+  manager: 1,
   broadcaster: 2,
 };
 
@@ -83,7 +83,7 @@ const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
   joinedAt: member.createdAt,
 });
 
-const canManageMembers = (role: ChannelRole): boolean => role !== "bediener";
+const canManageMembers = (role: ChannelRole): boolean => role !== "operator";
 
 /**
  * Nur ein Broadcaster darf die Rolle `broadcaster` vergeben oder entziehen.

@@ -11,8 +11,8 @@
 Über den Kanälen steht eine **Betreiberebene**. Sie erkennt sich an einer
 Allowlist von Twitch-User-IDs in einem Cloudflare-Secret, nicht an einem
 zweiten Anmeldemittel. Sie darf drei Dinge: einen Kanal freigeben, ihn zur
-**Vollzustimmung** markieren und `verwalter` oder `bediener` zuweisen. Für
-alles Weitere macht sich der Betreiber sichtbar zum `verwalter` des Kanals.
+**Vollzustimmung** markieren und `manager` oder `operator` zuweisen. Für
+alles Weitere macht sich der Betreiber sichtbar zum `manager` des Kanals.
 
 Ein markierter Kanal erteilt beim ersten Anmelden **alle** Broadcaster-Scopes
 auf einmal. Wer den Dialog abbricht, bekommt keine Sitzung.
@@ -69,11 +69,11 @@ Mitgliedszeile, also antworten ihm alle Routen unter
 `if (istBetreiber) return next()` — das wäre genau die Hintertür, die diese
 Entscheidung vermeiden will.
 
-Stattdessen ein eigener, schmaler Router `/api/betreiber/*` hinter einem
+Stattdessen ein eigener, schmaler Router `/api/platform/*` hinter einem
 eigenen Guard. Er bietet ausschließlich die Handlungen aus Abschnitt 4 und
 mountet keine Modulrouten.
 
-**Will der Betreiber mehr, wird er Mitglied.** Er weist sich selbst `verwalter`
+**Will der Betreiber mehr, wird er Mitglied.** Er weist sich selbst `manager`
 zu — eine protokollierte Handlung, die in der Mitgliederliste steht und die der
 Broadcaster jederzeit rückgängig machen kann. Die Anwesenheit eines Betreibers
 in einem fremden Kanal ist damit **immer eine sichtbare Zeile**, nie ein
@@ -85,7 +85,7 @@ unsichtbarer Durchgang.
 |---|---|
 | Kanal freigeben | Die Broadcaster-Zeile wird aus der Kanal-ID abgeleitet, nie frei gewählt |
 | Vollzustimmung setzen oder lösen | — |
-| `verwalter`/`bediener` hinzufügen, ändern, entfernen | Die Zielrolle `broadcaster` ist ausgeschlossen, auch im SQL |
+| `manager`/`operator` hinzufügen, ändern, entfernen | Die Zielrolle `broadcaster` ist ausgeschlossen, auch im SQL |
 | Kanalübergreifende Übersicht lesen | — |
 | Betreiberhandlungen aller Kanäle lesen | Das Werkzeug für den Schadensfall |
 
@@ -98,7 +98,7 @@ Nicht dabei: Module schalten, Overlay-Token, Moduleinstellungen.
 
 ## 5. Sichtbar für den Broadcaster
 
-`audit_log` bekommt eine Spalte `actor_kind` (`mitglied` oder `betreiber`).
+`audit_log` bekommt eine Spalte `actor_kind` (`member` oder `platform_admin`).
 Jede Betreiberhandlung schreibt in den `audit_log` **des betroffenen Kanals**,
 mit der echten Twitch-ID des Betreibers.
 

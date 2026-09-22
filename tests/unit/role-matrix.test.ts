@@ -29,10 +29,10 @@ import {
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-type Kanalrolle = "broadcaster" | "verwalter" | "bediener";
+type Kanalrolle = "broadcaster" | "manager" | "operator";
 type Zeile = Kanalrolle | "kein Mitglied";
 
-const rollen: readonly Zeile[] = ["broadcaster", "verwalter", "bediener", "kein Mitglied"];
+const rollen: readonly Zeile[] = ["broadcaster", "manager", "operator", "kein Mitglied"];
 const zeitpunkt = "2026-09-18T00:00:00.000Z";
 const akteur: ActorContext = { userId: "actor", sessionId: "session-actor" };
 
@@ -43,8 +43,8 @@ const erlaubt = (
   keinMitglied: boolean,
 ): Record<Zeile, boolean> => ({
   broadcaster,
-  verwalter,
-  bediener,
+  manager: verwalter,
+  operator: bediener,
   "kein Mitglied": keinMitglied,
 });
 
@@ -62,9 +62,9 @@ const aktionsMitglied = (
 });
 
 const textbefehlZeile = (name = "hallo", enabled = true): string =>
-  `INSERT INTO textbefehle_commands
-    (channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
-   VALUES ('kanal-a', '${name}', 'Hallo {user}', 'text', ${enabled ? "1" : "0"}, 'alle', 5, NULL, '${zeitpunkt}', '${zeitpunkt}')`;
+  `INSERT INTO text_commands
+    (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
+   VALUES ('kanal-a', '${name}', 'Hallo {user}', 'text', ${enabled ? "1" : "0"}, 'everyone', 5, NULL, '${zeitpunkt}', '${zeitpunkt}')`;
 
 const overlayTokenZeile = (tokenId: string): string =>
   `INSERT INTO overlay_tokens
@@ -86,10 +86,10 @@ const aktionen: readonly Rollenaktion[] = [
     ausführen: (database) => createChannelMemberWithAudit(
       database as unknown as D1Database,
       akteur,
-      aktionsMitglied("target", "bediener"),
+      aktionsMitglied("target", "operator"),
       "mitglied.hinzugefügt",
       zeitpunkt,
-      actorGuard(requiredActorRoles("bediener")),
+      actorGuard(requiredActorRoles("operator")),
     ),
   },
   {
@@ -110,14 +110,14 @@ const aktionen: readonly Rollenaktion[] = [
     quelle: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
     erwartet: erlaubt(true, true, false, false),
     ausführen: async (database) => {
-      await insertMember(database, "kanal-a", "target", "bediener");
+      await insertMember(database, "kanal-a", "target", "operator");
       return updateChannelMemberWithAudit(
         database as unknown as D1Database,
         akteur,
-        aktionsMitglied("target", "verwalter"),
+        aktionsMitglied("target", "manager"),
         "mitglied.rolle_geändert",
         zeitpunkt,
-        actorGuard(requiredActorRoles("verwalter", "bediener")),
+        actorGuard(requiredActorRoles("manager", "operator")),
       );
     },
   },
@@ -127,7 +127,7 @@ const aktionen: readonly Rollenaktion[] = [
     erwartet: erlaubt(true, false, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "broadcaster");
-      const member = aktionsMitglied("target", "verwalter");
+      const member = aktionsMitglied("target", "manager");
       return updateChannelMemberWithAudit(
         database as unknown as D1Database,
         akteur,
@@ -148,20 +148,20 @@ const aktionen: readonly Rollenaktion[] = [
         return updateChannelMemberWithAudit(
           database as unknown as D1Database,
           akteur,
-          aktionsMitglied("actor", "verwalter"),
+          aktionsMitglied("actor", "manager"),
           "mitglied.rolle_geändert",
           zeitpunkt,
-          actorGuard(requiredActorRoles("verwalter", "broadcaster")),
+          actorGuard(requiredActorRoles("manager", "broadcaster")),
         );
       }
       await insertMember(database, "kanal-a", target, "broadcaster");
       return updateChannelMemberWithAudit(
         database as unknown as D1Database,
         akteur,
-        aktionsMitglied(target, "verwalter"),
+        aktionsMitglied(target, "manager"),
         "mitglied.rolle_geändert",
         zeitpunkt,
-        actorGuard(requiredActorRoles("verwalter", "broadcaster")),
+        actorGuard(requiredActorRoles("manager", "broadcaster")),
       );
     },
   },
@@ -170,7 +170,7 @@ const aktionen: readonly Rollenaktion[] = [
     quelle: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:actorGuard + db/guards.ts:lastBroadcasterGuard",
     erwartet: erlaubt(true, true, false, false),
     ausführen: async (database) => {
-      await insertMember(database, "kanal-a", "target", "bediener");
+      await insertMember(database, "kanal-a", "target", "operator");
       return deleteChannelMemberWithAudit(
         database as unknown as D1Database,
         akteur,
@@ -178,7 +178,7 @@ const aktionen: readonly Rollenaktion[] = [
         "target",
         "mitglied.entfernt",
         zeitpunkt,
-        actorGuard(requiredActorRoles(undefined, "bediener")),
+        actorGuard(requiredActorRoles(undefined, "operator")),
       );
     },
   },
@@ -290,7 +290,7 @@ const aktionen: readonly Rollenaktion[] = [
         art: "text",
         enabled: true,
         cooldownSekunden: 5,
-        mindeststufe: "alle",
+        mindeststufe: "everyone",
         now: zeitpunkt,
       }, akteur);
       return result.ok;
@@ -381,7 +381,7 @@ const aktionen: readonly Rollenaktion[] = [
     erwartet: erlaubt(true, true, true, true),
     ausführen: async (database) => {
       await insertChannel(database, "kanal-b");
-      await database.prepare("UPDATE channels SET vollzustimmung = 1 WHERE channel_id = 'kanal-b'").run();
+      await database.prepare("UPDATE channels SET full_consent = 1 WHERE channel_id = 'kanal-b'").run();
       const channel: BetreiberKanal = {
         channelId: "kanal-b",
         login: "kanal-b",
@@ -400,7 +400,7 @@ const aktionen: readonly Rollenaktion[] = [
       return fügeBetreiberMitgliedHinzu(
         database as unknown as D1Database,
         akteur,
-        { channelId: "kanal-b", userId: "target", role: "verwalter", createdAt: zeitpunkt, updatedAt: zeitpunkt },
+        { channelId: "kanal-b", userId: "target", role: "manager", createdAt: zeitpunkt, updatedAt: zeitpunkt },
         zeitpunkt,
       );
     },
@@ -413,13 +413,13 @@ const aktionen: readonly Rollenaktion[] = [
       await insertChannel(database, "kanal-b");
       await database.prepare(
         `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-         VALUES ('kanal-b', 'target', 'verwalter', ?, ?)`,
+         VALUES ('kanal-b', 'target', 'manager', ?, ?)`,
       ).bind(zeitpunkt, zeitpunkt).run();
       return ändereBetreiberMitglied(
         database as unknown as D1Database,
         akteur,
-        { channelId: "kanal-b", userId: "target", role: "verwalter", createdAt: zeitpunkt, updatedAt: zeitpunkt },
-        { channelId: "kanal-b", userId: "target", role: "bediener", createdAt: zeitpunkt, updatedAt: "2026-09-18T00:01:00.000Z" },
+        { channelId: "kanal-b", userId: "target", role: "manager", createdAt: zeitpunkt, updatedAt: zeitpunkt },
+        { channelId: "kanal-b", userId: "target", role: "operator", createdAt: zeitpunkt, updatedAt: "2026-09-18T00:01:00.000Z" },
         "2026-09-18T00:01:00.000Z",
       );
     },
@@ -432,12 +432,12 @@ const aktionen: readonly Rollenaktion[] = [
       await insertChannel(database, "kanal-b");
       await database.prepare(
         `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-         VALUES ('kanal-b', 'target', 'bediener', ?, ?)`,
+         VALUES ('kanal-b', 'target', 'operator', ?, ?)`,
       ).bind(zeitpunkt, zeitpunkt).run();
       return entferneBetreiberMitglied(
         database as unknown as D1Database,
         akteur,
-        { channelId: "kanal-b", userId: "target", role: "bediener", createdAt: zeitpunkt, updatedAt: zeitpunkt },
+        { channelId: "kanal-b", userId: "target", role: "operator", createdAt: zeitpunkt, updatedAt: zeitpunkt },
         "2026-09-18T00:01:00.000Z",
       );
     },

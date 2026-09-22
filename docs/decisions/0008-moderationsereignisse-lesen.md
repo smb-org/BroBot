@@ -2,7 +2,7 @@
 
 **Stand:** 20. September 2026
 **Status:** entschieden
-**Betrifft:** Bot-Token, EventSub, Modul `kanalereignisse`
+**Betrifft:** Bot-Token, EventSub, Modul `channel_events`
 **Löst ab:** den Absatz „Bewusst nicht: die gesamte Moderationsfläche" aus
 [0002](0002-twitch-scopes-und-token-handling.md)
 
@@ -116,7 +116,7 @@ Schaden wächst von „ärgerlich" auf „sichtbar für die Zuschauerschaft".
 
 Die Sichtbarkeit dieser Daten im Panel bleibt bewusst bei allen
 Kanalmitgliedern; [0004](0004-ereignisprotokoll.md) gilt unverändert. Dadurch
-wird die Rolle `bediener` gewichtiger: Bediener können die gelesenen
+wird die Rolle `operator` gewichtiger: Bediener können die gelesenen
 Moderations- und Verdachtsereignisse im Betriebsalltag einsehen, ohne selbst
 eine Moderationsaktion auszulösen.
 
@@ -134,7 +134,7 @@ passieren.
 
 [#5](https://github.com/smb-org/BroBot/issues/5) hält fest, dass Moderation
 beim vorhandenen Bot bleibt. Das gilt weiter: **kein Modul in diesem Projekt
-löst eine Moderationsaktion aus.** Das Modul `kanalereignisse` gibt bei jeder
+löst eine Moderationsaktion aus.** Das Modul `channel_events` gibt bei jeder
 Ereignisart eine leere Aktionsliste zurück; ein Test sichert das ab.
 
 Was sich verschiebt, ist die Lesefläche — und die Fähigkeit im Token. Soll ein

@@ -18,8 +18,8 @@ const gemeinsameTexte: LocaleCatalog<DashboardCommonTexte> = {
     speichern: "Speichern",
     rollen: {
       broadcaster: "Broadcaster",
-      verwalter: "Verwalter",
-      bediener: "Bediener",
+      manager: "Verwalter",
+      operator: "Bediener",
     },
   },
   en: {
@@ -28,8 +28,8 @@ const gemeinsameTexte: LocaleCatalog<DashboardCommonTexte> = {
     speichern: "Save",
     rollen: {
       broadcaster: "Broadcaster",
-      verwalter: "Manager",
-      bediener: "Operator",
+      manager: "Manager",
+      operator: "Operator",
     },
   },
 };
@@ -507,53 +507,53 @@ export type EreignisCode =
   | "host.overlay.nicht_ausgefuehrt"
   | "host.shoutout.fehlgeschlagen"
   | "host.shoutout.gesendet"
-  | "kanalereignisse.raid.eingehend"
-  | "kanalereignisse.raid.ausgehend"
-  | "kanalereignisse.shoutout.gesendet"
-  | "kanalereignisse.shoutout.empfangen"
-  | "kanalereignisse.chat.sub"
-  | "kanalereignisse.chat.resub"
-  | "kanalereignisse.chat.gift_sub"
-  | "kanalereignisse.chat.community_gift"
-  | "kanalereignisse.chat.ankuendigung"
-  | "kanalereignisse.chat.unbekannt"
-  | "kanalereignisse.moderation.ban"
-  | "kanalereignisse.moderation.timeout"
-  | "kanalereignisse.moderation.untimeout"
-  | "kanalereignisse.moderation.unban"
-  | "kanalereignisse.moderation.delete"
-  | "kanalereignisse.moderation.warn"
-  | "kanalereignisse.moderation.unbekannt"
-  | "kanalereignisse.automod.halte"
-  | "kanalereignisse.verdacht.nachricht"
-  | "kanalereignisse.verdacht.einstufung"
-  | "kanalereignisse.verdacht.entwarnung"
-  | "raid.ausgehend"
+  | "channel_events.raid.incoming"
+  | "channel_events.raid.outgoing"
+  | "channel_events.shoutout.gesendet"
+  | "channel_events.shoutout.empfangen"
+  | "channel_events.chat.sub"
+  | "channel_events.chat.resub"
+  | "channel_events.chat.gift_sub"
+  | "channel_events.chat.community_gift"
+  | "channel_events.chat.ankuendigung"
+  | "channel_events.chat.unbekannt"
+  | "channel_events.moderation.ban"
+  | "channel_events.moderation.timeout"
+  | "channel_events.moderation.untimeout"
+  | "channel_events.moderation.unban"
+  | "channel_events.moderation.delete"
+  | "channel_events.moderation.warn"
+  | "channel_events.moderation.unbekannt"
+  | "channel_events.automod.halte"
+  | "channel_events.verdacht.nachricht"
+  | "channel_events.verdacht.einstufung"
+  | "channel_events.verdacht.entwarnung"
+  | "raid.outgoing"
   | "raid.shoutout"
   | "raid.ungueltig"
   | "shoutout.unterdrueckt"
-  | "werbung.ankuendigung"
-  | "werbung.uebersprungen"
-  | "werbung.vorwarnung.angekuendigt"
-  | "werbung.vorwarnung.kein_termin"
-  | "werbung.vorwarnung.zu_spaet"
-  | "werbung.vorwarnung.pause_begonnen"
-  | "werbung.vorwarnung.termin_verschoben"
-  | "werbung.vorwarnung.scope_fehlt"
-  | "werbung.vorwarnung.zeitplan_fehler"
-  | "werbung.snooze"
-  | "textbefehle.abgekuehlt"
-  | "textbefehle.ausgeloest"
-  | "textbefehle.deaktiviert"
-  | "textbefehle.berechtigung"
+  | "ads.ankuendigung"
+  | "ads.uebersprungen"
+  | "ads.vorwarnung.angekuendigt"
+  | "ads.vorwarnung.kein_termin"
+  | "ads.vorwarnung.zu_spaet"
+  | "ads.vorwarnung.pause_begonnen"
+  | "ads.vorwarnung.termin_verschoben"
+  | "ads.vorwarnung.scope_fehlt"
+  | "ads.vorwarnung.zeitplan_fehler"
+  | "ads.snooze"
+  | "text_commands.abgekuehlt"
+  | "text_commands.ausgeloest"
+  | "text_commands.deaktiviert"
+  | "text_commands.berechtigung"
   // Seit dem Wegfall der ändernden Chat-Befehle (#120) erzeugt niemand mehr
   // diese beiden Kennungen. Sie bleiben, weil das Ereignisprotokoll seine
   // Zeilen 14 Tage hält: Ohne Beschriftung wären bereits geschriebene
   // Einträge im Panel nicht mehr lesbar.
-  | "textbefehle.bereits_vorhanden"
-  | "textbefehle.nicht_berechtigt"
-  | "textbefehle.unbekannt"
-  | "textbefehle.ungueltig";
+  | "text_commands.bereits_vorhanden"
+  | "text_commands.nicht_berechtigt"
+  | "text_commands.unbekannt"
+  | "text_commands.ungueltig";
 
 export type EreignisDetail = Readonly<Record<string, unknown>>;
 export type EreignisText = string | ((detail: EreignisDetail) => string);
@@ -576,8 +576,8 @@ const detailText = (detail: EreignisDetail, key: string, fallback: string): stri
 const textbefehlStufe = (detail: EreignisDetail, key: string, fallback: string, language: DashboardLanguage): string => {
   const value = detail[key];
   const labels: Record<string, string> = language === "de"
-    ? { alle: "alle", abonnent: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster", zuschauer: "Zuschauer" }
-    : { alle: "everyone", abonnent: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcaster", zuschauer: "viewer" };
+    ? { everyone: "alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster", viewer: "Zuschauer" }
+    : { everyone: "everyone", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcaster", viewer: "viewer" };
   const werte = Array.isArray(value) ? value : [value];
   const beschrifteteWerte = werte.filter((eintrag): eintrag is string => typeof eintrag === "string" && eintrag.length > 0);
   return beschrifteteWerte.length === 0
@@ -620,28 +620,28 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "host.overlay.nicht_ausgefuehrt": "Overlay nicht ausgeführt",
     "host.shoutout.fehlgeschlagen": "Shoutout fehlgeschlagen",
     "host.shoutout.gesendet": "Shoutout gesendet",
-    "kanalereignisse.raid.eingehend": (detail) => `Raid von ${detailText(detail, "quelle", "unbekannt")} mit ${detailZahl(detail, "zuschauer", "unbekannter Anzahl")} Zuschauern`,
-    "kanalereignisse.raid.ausgehend": (detail) => `Raid zu ${detailText(detail, "ziel", "unbekannt")} mit ${detailZahl(detail, "zuschauer", "unbekannter Anzahl")} Zuschauern`,
-    "kanalereignisse.shoutout.gesendet": (detail) => `Shoutout an ${detailText(detail, "ziel", "unbekannt")}`,
-    "kanalereignisse.shoutout.empfangen": (detail) => `Shoutout von ${detailText(detail, "quelle", "unbekannt")}${typeof detail.zuschauer === "number" && Number.isFinite(detail.zuschauer) ? ` mit ${String(detail.zuschauer)} Zuschauern` : ""}`,
-    "kanalereignisse.chat.sub": (detail) => `Sub von ${detailText(detail, "person", "unbekannt")}`,
-    "kanalereignisse.chat.resub": (detail) => `Resub von ${detailText(detail, "person", "unbekannt")}`,
-    "kanalereignisse.chat.gift_sub": (detail) => `Gift-Sub von ${detailText(detail, "spender", "unbekannt")} an ${detailText(detail, "empfaenger", "unbekannt")}`,
-    "kanalereignisse.chat.community_gift": (detail) => `Community-Gift von ${detailText(detail, "spender", "unbekannt")} für ${detailZahl(detail, "anzahl", "unbekannte Anzahl")} Subs`,
-    "kanalereignisse.chat.ankuendigung": (detail) => `Ankündigung von ${detailText(detail, "person", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
-    "kanalereignisse.chat.unbekannt": (detail) => `Unbekannte Chat-Benachrichtigung: ${detailText(detail, "art", "unbekannt")}`,
-    "kanalereignisse.moderation.ban": (detail) => `${detailText(detail, "person", "unbekannt")} gebannt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
-    "kanalereignisse.moderation.timeout": (detail) => `${detailText(detail, "person", "unbekannt")} für ${detailDauer(detail, "Sekunden", "unbekannte Dauer")} getimeoutet von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
-    "kanalereignisse.moderation.untimeout": (detail) => `${detailText(detail, "person", "unbekannt")} aus dem Timeout genommen von ${detailText(detail, "moderator", "unbekannt")}`,
-    "kanalereignisse.moderation.unban": (detail) => `${detailText(detail, "person", "unbekannt")} entbannt von ${detailText(detail, "moderator", "unbekannt")}`,
-    "kanalereignisse.moderation.delete": (detail) => `Nachricht von ${detailText(detail, "person", "unbekannt")} gelöscht von ${detailText(detail, "moderator", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
-    "kanalereignisse.moderation.warn": (detail) => `${detailText(detail, "person", "unbekannt")} verwarnt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
-    "kanalereignisse.moderation.unbekannt": (detail) => `Unbekannte Moderationsaktion: ${detailText(detail, "aktion", "unbekannt")}`,
-    "kanalereignisse.automod.halte": (detail) => `AutoMod hielt die Nachricht von ${detailText(detail, "person", "unbekannt")}${detailGrundMit(detail, "wegen")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
-    "kanalereignisse.verdacht.nachricht": (detail) => `Nachricht von auffälligem Nutzer ${detailText(detail, "person", "unbekannt")} (${detailEinstufung(detail, "unbekannte Einstufung")}): ${detailText(detail, "text", "ohne Text")}`,
-    "kanalereignisse.verdacht.einstufung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} verschärft${detailModerator(detail, "")}: ${detailEinstufung(detail, "unbekannt")}`,
-    "kanalereignisse.verdacht.entwarnung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} aufgehoben${detailModerator(detail, "")}`,
-    "raid.ausgehend": (detail) => `Ausgehender Raid zu ${detailText(detail, "zielKanalId", "unbekannt")}`,
+    "channel_events.raid.incoming": (detail) => `Raid von ${detailText(detail, "quelle", "unbekannt")} mit ${detailZahl(detail, "zuschauer", "unbekannter Anzahl")} Zuschauern`,
+    "channel_events.raid.outgoing": (detail) => `Raid zu ${detailText(detail, "ziel", "unbekannt")} mit ${detailZahl(detail, "zuschauer", "unbekannter Anzahl")} Zuschauern`,
+    "channel_events.shoutout.gesendet": (detail) => `Shoutout an ${detailText(detail, "ziel", "unbekannt")}`,
+    "channel_events.shoutout.empfangen": (detail) => `Shoutout von ${detailText(detail, "quelle", "unbekannt")}${typeof detail.zuschauer === "number" && Number.isFinite(detail.zuschauer) ? ` mit ${String(detail.zuschauer)} Zuschauern` : ""}`,
+    "channel_events.chat.sub": (detail) => `Sub von ${detailText(detail, "person", "unbekannt")}`,
+    "channel_events.chat.resub": (detail) => `Resub von ${detailText(detail, "person", "unbekannt")}`,
+    "channel_events.chat.gift_sub": (detail) => `Gift-Sub von ${detailText(detail, "spender", "unbekannt")} an ${detailText(detail, "empfaenger", "unbekannt")}`,
+    "channel_events.chat.community_gift": (detail) => `Community-Gift von ${detailText(detail, "spender", "unbekannt")} für ${detailZahl(detail, "anzahl", "unbekannte Anzahl")} Subs`,
+    "channel_events.chat.ankuendigung": (detail) => `Ankündigung von ${detailText(detail, "person", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
+    "channel_events.chat.unbekannt": (detail) => `Unbekannte Chat-Benachrichtigung: ${detailText(detail, "art", "unbekannt")}`,
+    "channel_events.moderation.ban": (detail) => `${detailText(detail, "person", "unbekannt")} gebannt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
+    "channel_events.moderation.timeout": (detail) => `${detailText(detail, "person", "unbekannt")} für ${detailDauer(detail, "Sekunden", "unbekannte Dauer")} getimeoutet von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
+    "channel_events.moderation.untimeout": (detail) => `${detailText(detail, "person", "unbekannt")} aus dem Timeout genommen von ${detailText(detail, "moderator", "unbekannt")}`,
+    "channel_events.moderation.unban": (detail) => `${detailText(detail, "person", "unbekannt")} entbannt von ${detailText(detail, "moderator", "unbekannt")}`,
+    "channel_events.moderation.delete": (detail) => `Nachricht von ${detailText(detail, "person", "unbekannt")} gelöscht von ${detailText(detail, "moderator", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
+    "channel_events.moderation.warn": (detail) => `${detailText(detail, "person", "unbekannt")} verwarnt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
+    "channel_events.moderation.unbekannt": (detail) => `Unbekannte Moderationsaktion: ${detailText(detail, "aktion", "unbekannt")}`,
+    "channel_events.automod.halte": (detail) => `AutoMod hielt die Nachricht von ${detailText(detail, "person", "unbekannt")}${detailGrundMit(detail, "wegen")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
+    "channel_events.verdacht.nachricht": (detail) => `Nachricht von auffälligem Nutzer ${detailText(detail, "person", "unbekannt")} (${detailEinstufung(detail, "unbekannte Einstufung")}): ${detailText(detail, "text", "ohne Text")}`,
+    "channel_events.verdacht.einstufung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} verschärft${detailModerator(detail, "")}: ${detailEinstufung(detail, "unbekannt")}`,
+    "channel_events.verdacht.entwarnung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} aufgehoben${detailModerator(detail, "")}`,
+    "raid.outgoing": (detail) => `Ausgehender Raid zu ${detailText(detail, "zielKanalId", "unbekannt")}`,
     "raid.shoutout": (detail) => `Raid über der Schwelle (${detailZahl(detail, "zuschauer", "unbekannt")} von ${detailZahl(detail, "schwelle", "unbekannt")}): Shoutout und Chatzeile`,
     "raid.ungueltig": (detail) => `Raid verworfen: ${detailText(detail, "grund", "ungültige Daten")}`,
     "shoutout.unterdrueckt": (detail) => detail.grund === "abgeschaltet"
@@ -649,29 +649,29 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
       : detail.grund === "unter_schwelle"
         ? `Shoutout unter der Schwelle (${detailZahl(detail, "zuschauer", "unbekannt")} von ${detailZahl(detail, "schwelle", "unbekannt")} Zuschauern)`
         : "Shoutout unterdrückt",
-    "werbung.ankuendigung": (detail) => `Werbepause ${detail.automatisch === true ? "automatisch" : "manuell"} gestartet: ${detailZahl(detail, "dauer", "unbekannte Dauer")} Sekunden`,
-    "werbung.uebersprungen": (detail) => `Werbepause übersprungen: ${detail.grund === "dauer_null" ? "Dauer ist null" : "Ereignisdaten sind ungültig"}`,
-    "werbung.vorwarnung.angekuendigt": (detail) => `Vorwarnung: Werbung in ${detailZahl(detail, "sekunden", "unbekannter Zeit")} Sekunden`,
-    "werbung.vorwarnung.kein_termin": "Keine nächste Werbepause geplant",
-    "werbung.vorwarnung.zu_spaet": "Werbe-Vorwarnung unterdrückt: Termin zu nah",
-    "werbung.vorwarnung.pause_begonnen": "Werbe-Vorwarnung unterdrückt: Werbepause hat begonnen",
-    "werbung.vorwarnung.termin_verschoben": "Werbe-Vorwarnung unterdrückt: Termin wurde verschoben",
-    "werbung.vorwarnung.scope_fehlt": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
-    "werbung.vorwarnung.zeitplan_fehler": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "grund", "unbekannter Fehler")}`,
-    "werbung.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "grund", "unbekannter Fehler")}`,
-    "textbefehle.abgekuehlt": (detail) => {
+    "ads.ankuendigung": (detail) => `Werbepause ${detail.automatisch === true ? "automatisch" : "manuell"} gestartet: ${detailZahl(detail, "dauer", "unbekannte Dauer")} Sekunden`,
+    "ads.uebersprungen": (detail) => `Werbepause übersprungen: ${detail.grund === "dauer_null" ? "Dauer ist null" : "Ereignisdaten sind ungültig"}`,
+    "ads.vorwarnung.angekuendigt": (detail) => `Vorwarnung: Werbung in ${detailZahl(detail, "sekunden", "unbekannter Zeit")} Sekunden`,
+    "ads.vorwarnung.kein_termin": "Keine nächste Werbepause geplant",
+    "ads.vorwarnung.zu_spaet": "Werbe-Vorwarnung unterdrückt: Termin zu nah",
+    "ads.vorwarnung.pause_begonnen": "Werbe-Vorwarnung unterdrückt: Werbepause hat begonnen",
+    "ads.vorwarnung.termin_verschoben": "Werbe-Vorwarnung unterdrückt: Termin wurde verschoben",
+    "ads.vorwarnung.scope_fehlt": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
+    "ads.vorwarnung.zeitplan_fehler": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "grund", "unbekannter Fehler")}`,
+    "ads.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "grund", "unbekannter Fehler")}`,
+    "text_commands.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
         ? "Textbefehl abgekühlt"
         : `Befehl !${name} abgekühlt, noch ${String(detail.restSekunden)} s`;
     },
-    "textbefehle.ausgeloest": (detail) => ereignisTextMitName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
-    "textbefehle.deaktiviert": (detail) => ereignisTextMitName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
-    "textbefehle.berechtigung": (detail) => ereignisTextMitName(detail, "Textbefehl nicht berechtigt", (name) => `Befehl !${name} nicht ausgelöst: Mindeststufe ${textbefehlStufe(detail, "geforderteStufe", "unbekannt", "de")}, vorhanden ${textbefehlStufe(detail, "vorhandeneStufe", "kein Chat-Status", "de")}`),
-    "textbefehle.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Textbefehl bereits vorhanden", (name) => `Textbefehl !${name} bereits vorhanden`),
-    "textbefehle.nicht_berechtigt": "Textbefehl nicht berechtigt",
-    "textbefehle.unbekannt": (detail) => ereignisTextMitName(detail, "Textbefehl unbekannt", (name) => `Textbefehl !${name} unbekannt`),
-    "textbefehle.ungueltig": "Textbefehl ungültig",
+    "text_commands.ausgeloest": (detail) => ereignisTextMitName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
+    "text_commands.deaktiviert": (detail) => ereignisTextMitName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
+    "text_commands.berechtigung": (detail) => ereignisTextMitName(detail, "Textbefehl nicht berechtigt", (name) => `Befehl !${name} nicht ausgelöst: Mindeststufe ${textbefehlStufe(detail, "geforderteStufe", "unbekannt", "de")}, vorhanden ${textbefehlStufe(detail, "vorhandeneStufe", "kein Chat-Status", "de")}`),
+    "text_commands.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Textbefehl bereits vorhanden", (name) => `Textbefehl !${name} bereits vorhanden`),
+    "text_commands.nicht_berechtigt": "Textbefehl nicht berechtigt",
+    "text_commands.unbekannt": (detail) => ereignisTextMitName(detail, "Textbefehl unbekannt", (name) => `Textbefehl !${name} unbekannt`),
+    "text_commands.ungueltig": "Textbefehl ungültig",
   },
   en: {
     "host.aktion.fehler": "Action failed",
@@ -682,28 +682,28 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "host.overlay.nicht_ausgefuehrt": "Overlay not executed",
     "host.shoutout.fehlgeschlagen": "Shoutout failed",
     "host.shoutout.gesendet": "Shoutout sent",
-    "kanalereignisse.raid.eingehend": (detail) => `Raid from ${detailText(detail, "quelle", "unknown")} with ${detailZahl(detail, "zuschauer", "unknown number")} viewers`,
-    "kanalereignisse.raid.ausgehend": (detail) => `Raid to ${detailText(detail, "ziel", "unknown")} with ${detailZahl(detail, "zuschauer", "unknown number")} viewers`,
-    "kanalereignisse.shoutout.gesendet": (detail) => `Shoutout sent to ${detailText(detail, "ziel", "unknown")}`,
-    "kanalereignisse.shoutout.empfangen": (detail) => `Shoutout received from ${detailText(detail, "quelle", "unknown")}${typeof detail.zuschauer === "number" && Number.isFinite(detail.zuschauer) ? ` with ${String(detail.zuschauer)} viewers` : ""}`,
-    "kanalereignisse.chat.sub": (detail) => `Sub from ${detailText(detail, "person", "unknown")}`,
-    "kanalereignisse.chat.resub": (detail) => `Resub from ${detailText(detail, "person", "unknown")}`,
-    "kanalereignisse.chat.gift_sub": (detail) => `Gift sub from ${detailText(detail, "spender", "unknown")} to ${detailText(detail, "empfaenger", "unknown")}`,
-    "kanalereignisse.chat.community_gift": (detail) => `Community gift from ${detailText(detail, "spender", "unknown")} for ${detailZahl(detail, "anzahl", "unknown number")} subs`,
-    "kanalereignisse.chat.ankuendigung": (detail) => `Announcement from ${detailText(detail, "person", "unknown")}: ${detailText(detail, "text", "no text")}`,
-    "kanalereignisse.chat.unbekannt": (detail) => `Unknown chat notification: ${detailText(detail, "art", "unknown")}`,
-    "kanalereignisse.moderation.ban": (detail) => `${detailText(detail, "person", "unknown")} banned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
-    "kanalereignisse.moderation.timeout": (detail) => `${detailText(detail, "person", "unknown")} timed out for ${detailDauer(detail, "seconds", "unknown duration")} by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
-    "kanalereignisse.moderation.untimeout": (detail) => `${detailText(detail, "person", "unknown")} removed from timeout by ${detailText(detail, "moderator", "unknown")}`,
-    "kanalereignisse.moderation.unban": (detail) => `${detailText(detail, "person", "unknown")} unbanned by ${detailText(detail, "moderator", "unknown")}`,
-    "kanalereignisse.moderation.delete": (detail) => `Message from ${detailText(detail, "person", "unknown")} deleted by ${detailText(detail, "moderator", "unknown")}: ${detailText(detail, "text", "no text")}`,
-    "kanalereignisse.moderation.warn": (detail) => `${detailText(detail, "person", "unknown")} warned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
-    "kanalereignisse.moderation.unbekannt": (detail) => `Unknown moderation action: ${detailText(detail, "aktion", "unknown")}`,
-    "kanalereignisse.automod.halte": (detail) => `AutoMod held a message from ${detailText(detail, "person", "unknown")}${detailGrundMit(detail, "for")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
-    "kanalereignisse.verdacht.nachricht": (detail) => `Message from suspicious user ${detailText(detail, "person", "unknown")} (${detailEinstufung(detail, "unknown classification")}): ${detailText(detail, "text", "no text")}`,
-    "kanalereignisse.verdacht.einstufung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} tightened${detailModeratorEn(detail, "")}: ${detailEinstufung(detail, "unknown")}`,
-    "kanalereignisse.verdacht.entwarnung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} cleared${detailModeratorEn(detail, "")}`,
-    "raid.ausgehend": (detail) => `Outgoing raid to ${detailText(detail, "zielKanalId", "unknown")}`,
+    "channel_events.raid.incoming": (detail) => `Raid from ${detailText(detail, "quelle", "unknown")} with ${detailZahl(detail, "zuschauer", "unknown number")} viewers`,
+    "channel_events.raid.outgoing": (detail) => `Raid to ${detailText(detail, "ziel", "unknown")} with ${detailZahl(detail, "zuschauer", "unknown number")} viewers`,
+    "channel_events.shoutout.gesendet": (detail) => `Shoutout sent to ${detailText(detail, "ziel", "unknown")}`,
+    "channel_events.shoutout.empfangen": (detail) => `Shoutout received from ${detailText(detail, "quelle", "unknown")}${typeof detail.zuschauer === "number" && Number.isFinite(detail.zuschauer) ? ` with ${String(detail.zuschauer)} viewers` : ""}`,
+    "channel_events.chat.sub": (detail) => `Sub from ${detailText(detail, "person", "unknown")}`,
+    "channel_events.chat.resub": (detail) => `Resub from ${detailText(detail, "person", "unknown")}`,
+    "channel_events.chat.gift_sub": (detail) => `Gift sub from ${detailText(detail, "spender", "unknown")} to ${detailText(detail, "empfaenger", "unknown")}`,
+    "channel_events.chat.community_gift": (detail) => `Community gift from ${detailText(detail, "spender", "unknown")} for ${detailZahl(detail, "anzahl", "unknown number")} subs`,
+    "channel_events.chat.ankuendigung": (detail) => `Announcement from ${detailText(detail, "person", "unknown")}: ${detailText(detail, "text", "no text")}`,
+    "channel_events.chat.unbekannt": (detail) => `Unknown chat notification: ${detailText(detail, "art", "unknown")}`,
+    "channel_events.moderation.ban": (detail) => `${detailText(detail, "person", "unknown")} banned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
+    "channel_events.moderation.timeout": (detail) => `${detailText(detail, "person", "unknown")} timed out for ${detailDauer(detail, "seconds", "unknown duration")} by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
+    "channel_events.moderation.untimeout": (detail) => `${detailText(detail, "person", "unknown")} removed from timeout by ${detailText(detail, "moderator", "unknown")}`,
+    "channel_events.moderation.unban": (detail) => `${detailText(detail, "person", "unknown")} unbanned by ${detailText(detail, "moderator", "unknown")}`,
+    "channel_events.moderation.delete": (detail) => `Message from ${detailText(detail, "person", "unknown")} deleted by ${detailText(detail, "moderator", "unknown")}: ${detailText(detail, "text", "no text")}`,
+    "channel_events.moderation.warn": (detail) => `${detailText(detail, "person", "unknown")} warned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
+    "channel_events.moderation.unbekannt": (detail) => `Unknown moderation action: ${detailText(detail, "aktion", "unknown")}`,
+    "channel_events.automod.halte": (detail) => `AutoMod held a message from ${detailText(detail, "person", "unknown")}${detailGrundMit(detail, "for")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
+    "channel_events.verdacht.nachricht": (detail) => `Message from suspicious user ${detailText(detail, "person", "unknown")} (${detailEinstufung(detail, "unknown classification")}): ${detailText(detail, "text", "no text")}`,
+    "channel_events.verdacht.einstufung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} tightened${detailModeratorEn(detail, "")}: ${detailEinstufung(detail, "unknown")}`,
+    "channel_events.verdacht.entwarnung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} cleared${detailModeratorEn(detail, "")}`,
+    "raid.outgoing": (detail) => `Outgoing raid to ${detailText(detail, "zielKanalId", "unknown")}`,
     "raid.shoutout": (detail) => `Raid above threshold (${detailZahl(detail, "zuschauer", "unknown")} of ${detailZahl(detail, "schwelle", "unknown")}): shoutout and chat line`,
     "raid.ungueltig": (detail) => `Raid discarded: ${detailText(detail, "grund", "invalid data")}`,
     "shoutout.unterdrueckt": (detail) => detail.grund === "abgeschaltet"
@@ -711,29 +711,29 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
       : detail.grund === "unter_schwelle"
         ? `Shoutout below threshold (${detailZahl(detail, "zuschauer", "unknown")} of ${detailZahl(detail, "schwelle", "unknown")} viewers)`
         : "Shoutout suppressed",
-    "werbung.ankuendigung": (detail) => `Ad break ${detail.automatisch === true ? "automatically" : "manually"} started: ${detailZahl(detail, "dauer", "unknown duration")} seconds`,
-    "werbung.uebersprungen": (detail) => `Ad break skipped: ${detail.grund === "dauer_null" ? "duration is zero" : "event data is invalid"}`,
-    "werbung.vorwarnung.angekuendigt": (detail) => `Ad warning: ad in ${detailZahl(detail, "sekunden", "unknown time")} seconds`,
-    "werbung.vorwarnung.kein_termin": "No next ad break scheduled",
-    "werbung.vorwarnung.zu_spaet": "Ad warning suppressed: ad is too close",
-    "werbung.vorwarnung.pause_begonnen": "Ad warning suppressed: ad break has started",
-    "werbung.vorwarnung.termin_verschoben": "Ad warning suppressed: schedule changed",
-    "werbung.vorwarnung.scope_fehlt": "Ad warning suppressed: channel:read:ads is missing",
-    "werbung.vorwarnung.zeitplan_fehler": (detail) => `Ad schedule could not be read: ${detailText(detail, "grund", "unknown error")}`,
-    "werbung.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "grund", "unknown error")}`,
-    "textbefehle.abgekuehlt": (detail) => {
+    "ads.ankuendigung": (detail) => `Ad break ${detail.automatisch === true ? "automatically" : "manually"} started: ${detailZahl(detail, "dauer", "unknown duration")} seconds`,
+    "ads.uebersprungen": (detail) => `Ad break skipped: ${detail.grund === "dauer_null" ? "duration is zero" : "event data is invalid"}`,
+    "ads.vorwarnung.angekuendigt": (detail) => `Ad warning: ad in ${detailZahl(detail, "sekunden", "unknown time")} seconds`,
+    "ads.vorwarnung.kein_termin": "No next ad break scheduled",
+    "ads.vorwarnung.zu_spaet": "Ad warning suppressed: ad is too close",
+    "ads.vorwarnung.pause_begonnen": "Ad warning suppressed: ad break has started",
+    "ads.vorwarnung.termin_verschoben": "Ad warning suppressed: schedule changed",
+    "ads.vorwarnung.scope_fehlt": "Ad warning suppressed: channel:read:ads is missing",
+    "ads.vorwarnung.zeitplan_fehler": (detail) => `Ad schedule could not be read: ${detailText(detail, "grund", "unknown error")}`,
+    "ads.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "grund", "unknown error")}`,
+    "text_commands.abgekuehlt": (detail) => {
       const name = textbefehlName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
         ? "Text command on cooldown"
         : `Command !${name} on cooldown, ${String(detail.restSekunden)}s left`;
     },
-    "textbefehle.ausgeloest": (detail) => ereignisTextMitName(detail, "Command executed", (name) => `Command !${name} executed`),
-    "textbefehle.deaktiviert": (detail) => ereignisTextMitName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
-    "textbefehle.berechtigung": (detail) => ereignisTextMitName(detail, "Text command not authorized", (name) => `Command !${name} not executed: minimum level ${textbefehlStufe(detail, "geforderteStufe", "unknown", "en")}, present ${textbefehlStufe(detail, "vorhandeneStufe", "no chat status", "en")}`),
-    "textbefehle.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Text command already exists", (name) => `Text command !${name} already exists`),
-    "textbefehle.nicht_berechtigt": "Text command not authorized",
-    "textbefehle.unbekannt": (detail) => ereignisTextMitName(detail, "Unknown text command", (name) => `Unknown text command !${name}`),
-    "textbefehle.ungueltig": "Invalid text command",
+    "text_commands.ausgeloest": (detail) => ereignisTextMitName(detail, "Command executed", (name) => `Command !${name} executed`),
+    "text_commands.deaktiviert": (detail) => ereignisTextMitName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
+    "text_commands.berechtigung": (detail) => ereignisTextMitName(detail, "Text command not authorized", (name) => `Command !${name} not executed: minimum level ${textbefehlStufe(detail, "geforderteStufe", "unknown", "en")}, present ${textbefehlStufe(detail, "vorhandeneStufe", "no chat status", "en")}`),
+    "text_commands.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Text command already exists", (name) => `Text command !${name} already exists`),
+    "text_commands.nicht_berechtigt": "Text command not authorized",
+    "text_commands.unbekannt": (detail) => ereignisTextMitName(detail, "Unknown text command", (name) => `Unknown text command !${name}`),
+    "text_commands.ungueltig": "Invalid text command",
   },
 };
 
@@ -749,57 +749,57 @@ export interface EreignisTon {
 }
 
 export const ereignisTon: Record<EreignisCode, EreignisTon> = {
-  "host.aktion.fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
-  "host.chat.fehlgeschlagen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "host.aktion.fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "error" },
+  "host.chat.fehlgeschlagen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "error" },
   "host.chat.gesendet": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
-  "host.modul.fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
-  "host.modul.unbekannt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "host.overlay.nicht_ausgefuehrt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
-  "host.shoutout.fehlgeschlagen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
+  "host.modul.fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "error" },
+  "host.modul.unbekannt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "host.overlay.nicht_ausgefuehrt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "error" },
+  "host.shoutout.fehlgeschlagen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "error" },
   "host.shoutout.gesendet": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
-  "kanalereignisse.raid.eingehend": { familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
-  "kanalereignisse.raid.ausgehend": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
-  "kanalereignisse.shoutout.gesendet": { familie: "raid", stufe: "gezeichnet", wort: { de: "Shoutout", en: "Shoutout" }, zahlSchluessel: null },
-  "kanalereignisse.shoutout.empfangen": { familie: "raid", stufe: "voll", wort: { de: "Shoutout", en: "Shoutout" }, zahlSchluessel: "zuschauer" },
-  "kanalereignisse.chat.sub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Abo", en: "Sub" }, zahlSchluessel: "stufe" },
-  "kanalereignisse.chat.resub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Resub", en: "Resub" }, zahlSchluessel: "stufe" },
-  "kanalereignisse.chat.gift_sub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift-Sub", en: "Gift Sub" }, zahlSchluessel: "stufe" },
-  "kanalereignisse.chat.community_gift": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "anzahl" },
-  "kanalereignisse.chat.ankuendigung": { familie: "gemeinschaft", stufe: "gezeichnet", wort: { de: "Ankündigung", en: "Announcement" }, zahlSchluessel: null },
-  "kanalereignisse.chat.unbekannt": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Unbekannt", en: "Unknown" }, zahlSchluessel: null },
-  "kanalereignisse.moderation.ban": { familie: "moderation", stufe: "voll", wort: { de: "Bann", en: "Ban" }, zahlSchluessel: null },
-  "kanalereignisse.moderation.timeout": { familie: "moderation", stufe: "voll", wort: { de: "Auszeit", en: "Timeout" }, zahlSchluessel: "dauer" },
-  "kanalereignisse.moderation.untimeout": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entsperrt", en: "Untimeout" }, zahlSchluessel: null },
-  "kanalereignisse.moderation.unban": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entbannt", en: "Unbanned" }, zahlSchluessel: null },
-  "kanalereignisse.moderation.delete": { familie: "moderation", stufe: "voll", wort: { de: "Gelöscht", en: "Deleted" }, zahlSchluessel: null },
-  "kanalereignisse.moderation.warn": { familie: "moderation", stufe: "voll", wort: { de: "Verwarnung", en: "Warning" }, zahlSchluessel: null },
-  "kanalereignisse.moderation.unbekannt": { familie: "moderation", stufe: "voll", wort: { de: "Unbekannt", en: "Unknown" }, zahlSchluessel: null },
-  "kanalereignisse.automod.halte": { familie: "moderation", stufe: "voll", wort: { de: "AutoMod", en: "AutoMod" }, zahlSchluessel: null },
-  "kanalereignisse.verdacht.nachricht": { familie: "moderation", stufe: "voll", wort: { de: "Verdacht", en: "Suspicious" }, zahlSchluessel: null },
-  "kanalereignisse.verdacht.einstufung": { familie: "moderation", stufe: "voll", wort: { de: "Einstufung", en: "Classified" }, zahlSchluessel: null },
-  "kanalereignisse.verdacht.entwarnung": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entwarnt", en: "Cleared" }, zahlSchluessel: null },
-  "raid.ausgehend": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer", ton: "hinweis" },
+  "channel_events.raid.incoming": { familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
+  "channel_events.raid.outgoing": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
+  "channel_events.shoutout.gesendet": { familie: "raid", stufe: "gezeichnet", wort: { de: "Shoutout", en: "Shoutout" }, zahlSchluessel: null },
+  "channel_events.shoutout.empfangen": { familie: "raid", stufe: "voll", wort: { de: "Shoutout", en: "Shoutout" }, zahlSchluessel: "zuschauer" },
+  "channel_events.chat.sub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Abo", en: "Sub" }, zahlSchluessel: "stufe" },
+  "channel_events.chat.resub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Resub", en: "Resub" }, zahlSchluessel: "stufe" },
+  "channel_events.chat.gift_sub": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift-Sub", en: "Gift Sub" }, zahlSchluessel: "stufe" },
+  "channel_events.chat.community_gift": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "anzahl" },
+  "channel_events.chat.ankuendigung": { familie: "gemeinschaft", stufe: "gezeichnet", wort: { de: "Ankündigung", en: "Announcement" }, zahlSchluessel: null },
+  "channel_events.chat.unbekannt": { familie: "gemeinschaft", stufe: "voll", wort: { de: "Unbekannt", en: "Unknown" }, zahlSchluessel: null },
+  "channel_events.moderation.ban": { familie: "moderation", stufe: "voll", wort: { de: "Bann", en: "Ban" }, zahlSchluessel: null },
+  "channel_events.moderation.timeout": { familie: "moderation", stufe: "voll", wort: { de: "Auszeit", en: "Timeout" }, zahlSchluessel: "dauer" },
+  "channel_events.moderation.untimeout": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entsperrt", en: "Untimeout" }, zahlSchluessel: null },
+  "channel_events.moderation.unban": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entbannt", en: "Unbanned" }, zahlSchluessel: null },
+  "channel_events.moderation.delete": { familie: "moderation", stufe: "voll", wort: { de: "Gelöscht", en: "Deleted" }, zahlSchluessel: null },
+  "channel_events.moderation.warn": { familie: "moderation", stufe: "voll", wort: { de: "Verwarnung", en: "Warning" }, zahlSchluessel: null },
+  "channel_events.moderation.unbekannt": { familie: "moderation", stufe: "voll", wort: { de: "Unbekannt", en: "Unknown" }, zahlSchluessel: null },
+  "channel_events.automod.halte": { familie: "moderation", stufe: "voll", wort: { de: "AutoMod", en: "AutoMod" }, zahlSchluessel: null },
+  "channel_events.verdacht.nachricht": { familie: "moderation", stufe: "voll", wort: { de: "Verdacht", en: "Suspicious" }, zahlSchluessel: null },
+  "channel_events.verdacht.einstufung": { familie: "moderation", stufe: "voll", wort: { de: "Einstufung", en: "Classified" }, zahlSchluessel: null },
+  "channel_events.verdacht.entwarnung": { familie: "moderation", stufe: "gezeichnet", wort: { de: "Entwarnt", en: "Cleared" }, zahlSchluessel: null },
+  "raid.outgoing": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer", ton: "warning" },
   "raid.shoutout": { familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer" },
-  "raid.ungueltig": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: null, ton: "hinweis" },
-  "shoutout.unterdrueckt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "werbung.ankuendigung": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: "dauer", ton: "info" },
-  "werbung.uebersprungen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "werbung.vorwarnung.angekuendigt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
-  "werbung.vorwarnung.kein_termin": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "werbung.vorwarnung.zu_spaet": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "werbung.vorwarnung.pause_begonnen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "werbung.vorwarnung.termin_verschoben": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "werbung.vorwarnung.scope_fehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "werbung.vorwarnung.zeitplan_fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "fehler" },
-  "werbung.snooze": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Snooze", en: "Snooze" }, zahlSchluessel: null, ton: "info" },
-  "textbefehle.abgekuehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: "restSekunden", ton: "hinweis" },
-  "textbefehle.ausgeloest": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
-  "textbefehle.deaktiviert": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
-  "textbefehle.berechtigung": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "textbefehle.bereits_vorhanden": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "textbefehle.nicht_berechtigt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "textbefehle.unbekannt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
-  "textbefehle.ungueltig": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "hinweis" },
+  "raid.ungueltig": { familie: "raid", stufe: "gezeichnet", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: null, ton: "warning" },
+  "shoutout.unterdrueckt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "ads.ankuendigung": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: "dauer", ton: "info" },
+  "ads.uebersprungen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "ads.vorwarnung.angekuendigt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
+  "ads.vorwarnung.kein_termin": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "ads.vorwarnung.zu_spaet": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "ads.vorwarnung.pause_begonnen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "ads.vorwarnung.termin_verschoben": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "ads.vorwarnung.scope_fehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "ads.vorwarnung.zeitplan_fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, ton: "error" },
+  "ads.snooze": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Snooze", en: "Snooze" }, zahlSchluessel: null, ton: "info" },
+  "text_commands.abgekuehlt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: "restSekunden", ton: "warning" },
+  "text_commands.ausgeloest": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
+  "text_commands.deaktiviert": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info" },
+  "text_commands.berechtigung": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "text_commands.bereits_vorhanden": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "text_commands.nicht_berechtigt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "text_commands.unbekannt": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
+  "text_commands.ungueltig": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, ton: "warning" },
 };
 
 export function ereignisText(code: string, language?: DashboardLanguage): string;

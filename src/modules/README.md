@@ -67,14 +67,14 @@ Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
 4. Prüfen: `pnpm run check`.
 
 Das erste Modul ist `src/modules/textbefehle/`. Es ist in der Registry als
-`textbefehle` eingetragen, abonniert `channel.chat.message` und besitzt die
+`text_commands` eingetragen, abonniert `channel.chat.message` und besitzt die
 zentrale Migration `migrations/0010_modul_textbefehle.sql`. Die Tabelle
-`textbefehle_commands` ist kanalgebunden; der D1-Adapter dieses Moduls liest
+`text_commands` ist kanalgebunden; der D1-Adapter dieses Moduls liest
 und schreibt ausschließlich diese Tabelle.
 
 Der Host mountet registrierte Modulrouten kanalbezogen unter
 `/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die
-CRUD-Routen unter `/befehle` bereit. Die Host-Middleware prüft Session,
+CRUD-Routen unter `/commands` bereit. Die Host-Middleware prüft Session,
 CSRF und Mitgliedschaft und gibt dem Modul anschließend den Akteur, eine
 SQL-gebundene Mutationsautorisierung und eine vorbereitete Audit-Funktion für
 Moduldatenänderungen weiter. Das Modul entscheidet selbst, ob es diese
@@ -86,7 +86,7 @@ Ein Modul wird pro Kanal über das Panel aktiviert, nicht per Hand-SQL: Ein Broa
 oder Verwalter des Kanals ruft `GET /api/channels/:channelId/modules` auf, um die
 Registry mit dem gespeicherten Zustand jedes Moduls zu sehen, und schaltet es über
 `PATCH /api/channels/:channelId/modules/:moduleId` mit `{ "enabled": true }` ein oder
-aus. Ein `bediener` darf die Liste lesen, aber nicht schreiben. Beim Einschalten
+aus. Ein `operator` darf die Liste lesen, aber nicht schreiben. Beim Einschalten
 schreibt der Worker `defaultSettings` des Moduls in `channel_modules.settings`; eine
 eigene Route zum Bearbeiten von Einstellungen gibt es bewusst nicht — dafür ist
 `module.panel` aus dem Contract vorgesehen, sobald ein Modul eigene Einstellungen
@@ -116,7 +116,7 @@ Eine Rolle `null` bedeutet, dass der Nutzer kein Mitglied dieses Kanals ist;
 `actor: null` bedeutet, dass das Ereignis keinen Nutzer enthält.
 Bei `channel.chat.message` leitet der Host zusätzlich aus den Twitch-Badges
 den eigenständigen `ModuleEvent.chatStatus` ab. `founder` zählt dabei als
-`abonnent`; `moderator` und `broadcaster` erfüllen auch niedrigere Stufen.
+`subscriber`; `moderator` und `broadcaster` erfüllen auch niedrigere Stufen.
 Ereignisse ohne Chatbezug tragen dort `null`. Ein Modul kann keinen anderen
 Kanal angeben — die Mandantentrennung liegt beim Host.
 
@@ -126,16 +126,16 @@ Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben. Panel-Ansichten erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
 
 Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Jede Zeile hat
-eine Art (`text` oder `liste`), einen Schalter und eine Mindeststufe
-(`alle`, `abonnent`, `vip`, `moderator` oder `broadcaster`). Die Art `liste`
+eine Art (`text` oder `list`), einen Schalter und eine Mindeststufe
+(`everyone`, `subscriber`, `vip`, `moderator` oder `broadcaster`). Die Art `list`
 zählt beim Auslösen alle eingeschalteten Zeilen auf. Die angelegten Befehle
 werden kanalbezogen als `!<name>` ausgelöst. `{user}` und `{channel}` werden
 erst bei der Ausgabe ersetzt. Die atomare `beanspruchen`-Mutation setzt
 `last_used_at`; scheitert sie wegen der Abkühlzeit, bleibt die Chataktion leer
-und das Modul meldet `textbefehle.abgekuehlt`. Ein unbekannter, ausgeschalteter
+und das Modul meldet `text_commands.abgekuehlt`. Ein unbekannter, ausgeschalteter
 oder für den Chatstatus zu niedriger `!`-Befehl erzeugt keine Chataktion,
-sondern jeweils die Diagnose `textbefehle.unbekannt`,
-`textbefehle.deaktiviert` bzw. `textbefehle.berechtigung`.
+sondern jeweils die Diagnose `text_commands.unbekannt`,
+`text_commands.deaktiviert` bzw. `text_commands.berechtigung`.
 
 ## Aktionen und Begründungen melden
 

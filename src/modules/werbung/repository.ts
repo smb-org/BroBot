@@ -20,8 +20,8 @@ export const listeLetzteWerbepausen = async (
     `SELECT created_at, detail_json
        FROM event_log
       WHERE channel_id = ?
-        AND module_id = 'werbung'
-        AND code = 'werbung.ankuendigung'
+        AND module_id = 'ads'
+        AND code = 'ads.ankuendigung'
       ORDER BY created_at DESC, event_id DESC
       LIMIT ?`,
   ).bind(channelId, limit).all<WerbeereignisZeile>();

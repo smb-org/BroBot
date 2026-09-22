@@ -6,7 +6,7 @@ import {
 import type { ModuleLanguage } from "../../modules/contract";
 import { prepareModuleAudit } from "../module-audit";
 
-export const overlayTokenRoles = "'broadcaster', 'verwalter'";
+export const overlayTokenRoles = "'broadcaster', 'manager'";
 const OVERLAY_AUDIT_MODULE_ID = null;
 
 type OverlayTokenAuditSnapshot = Pick<

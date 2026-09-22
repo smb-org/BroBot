@@ -96,24 +96,24 @@ describe("Werbung-Routen", () => {
     vi.unstubAllGlobals();
   });
 
-  const setup = async (role: "broadcaster" | "verwalter" | "bediener", scopes: string[] = ["channel:read:ads", "channel:manage:ads"]): Promise<Env> => {
+  const setup = async (role: "broadcaster" | "manager" | "operator", scopes: string[] = ["channel:read:ads", "channel:manage:ads"]): Promise<Env> => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", scopes);
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", role);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'werbung', 1, '{"automatisch":"auto","manuell":"manuell","vorwarnung":true,"vorlaufSekunden":60,"vorwarnungText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatisch":"auto","manuell":"manuell","vorwarnung":true,"vorlaufSekunden":60,"vorwarnungText":"gleich {seconds}"}')`,
     ).run();
     return environmentFor(database, plane as unknown as () => void, loesche as unknown as () => void);
   };
 
   it("lässt einen Bediener snoozen und schreibt den Ausgang ins Ereignisprotokoll", async () => {
-    const environment = await setup("bediener");
+    const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody(), { status: 200 })));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/werbung/snooze", "POST"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/snooze", "POST"),
       environment,
     );
 
@@ -121,14 +121,14 @@ describe("Werbung-Routen", () => {
     await expect(response.json()).resolves.toMatchObject({ schedule: { nextAdAt: "2026-09-21T12:05:00Z", snoozeCount: 1 } });
     await expect(database.prepare(
       "SELECT code, actor_user_id FROM event_log WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ code: "werbung.snooze", actor_user_id: "user-1" });
+    ).first()).resolves.toEqual({ code: "ads.snooze", actor_user_id: "user-1" });
     expect(plane).toHaveBeenCalled();
   });
 
   it("trennt Snooze-Bedienung von der verwaltenden Einstellungsschwelle", async () => {
-    const environment = await setup("bediener");
+    const environment = await setup("operator");
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/werbung/einstellungen", "PATCH"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/settings", "PATCH"),
       environment,
     );
 
@@ -136,11 +136,11 @@ describe("Werbung-Routen", () => {
   });
 
   it("stellt beim erfolgreichen Zeitplanabruf den Vorwarnungswecker neu und schreibt kein Ereignis", async () => {
-    const environment = await setup("bediener");
+    const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody("2026-09-21T12:00:00Z"), { status: 200 })));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/werbung/zeitplan"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/zeitplan"),
       environment,
     );
 
@@ -150,29 +150,29 @@ describe("Werbung-Routen", () => {
   });
 
   it("protokolliert einen gescheiterten Zeitplanabruf", async () => {
-    const environment = await setup("bediener");
+    const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "Twitch nicht erreichbar" }),
       { status: 429 },
     )));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/werbung/zeitplan"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/zeitplan"),
       environment,
     );
 
     expect(response.status).toBe(429);
     await expect(database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ code: "werbung.vorwarnung.zeitplan_fehler" });
+    ).first()).resolves.toEqual({ code: "ads.vorwarnung.zeitplan_fehler" });
   });
 
   it("behandelt einen leeren erfolgreichen Zeitplan ohne Ereignis", async () => {
-    const environment = await setup("bediener");
+    const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody(null), { status: 200 })));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/werbung/zeitplan"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/zeitplan"),
       environment,
     );
 

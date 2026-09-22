@@ -38,7 +38,7 @@ interface ChannelStateRow {
   display_name: string;
   role: ChannelRole;
   broadcaster_connection: number;
-  vollzustimmung: number;
+  full_consent: number;
   broadcaster_scopes_json: string | null;
   broadcaster_status: string | null;
   channel_bot_consent: number;
@@ -128,7 +128,7 @@ export const decodeLogCursor = (serialized: string): LogCursor | null => decodeC
 export const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, member.role,
            CASE WHEN broadcaster_identity.status = 'connected' THEN 1 ELSE 0 END AS broadcaster_connection,
-           channel.vollzustimmung AS vollzustimmung,
+           channel.full_consent AS full_consent,
            broadcaster_identity.scopes_json AS broadcaster_scopes_json,
            broadcaster_identity.status AS broadcaster_status,
            CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent,
@@ -230,7 +230,7 @@ const parseScopes = (serialized: string | null): string[] => {
 };
 
 const mapBroadcasterPermissions = (row: ChannelStateRow): PanelBroadcasterPermissions | null => {
-  if (row.vollzustimmung !== 1) return null;
+  if (row.full_consent !== 1) return null;
   const granted = new Set(row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : []);
   return {
     missingScopes: listeAlleBroadcasterScopes().filter((scope) => !granted.has(scope)),

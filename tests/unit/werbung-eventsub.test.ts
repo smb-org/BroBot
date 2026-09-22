@@ -17,7 +17,7 @@ describe("Werbung-EventSub", () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'werbung', 1, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'ads', 1, '{}')",
     ).run();
 
     await expect(listDesiredEventSubTargets(database as unknown as D1Database)).resolves.toEqual([
@@ -35,7 +35,7 @@ describe("Werbung-EventSub", () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'werbung', 1, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'ads', 1, '{}')",
     ).run();
 
     await expect(listDesiredEventSubTargets(database as unknown as D1Database)).resolves.toEqual([]);

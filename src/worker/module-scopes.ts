@@ -126,6 +126,6 @@ export const moduleScopeRequirement = (module: BotModule): string[] => declaredS
 
 /** Scopes, die ein Modul für optionale Bedienhandlungen kennt. */
 export const moduleOptionalBroadcasterScopes = (module: BotModule): string[] =>
-  module.id === "werbung" ? [...WERBUNG_OPTIONALE_BROADCASTER_SCOPES] : [];
+  module.id === "ads" ? [...WERBUNG_OPTIONALE_BROADCASTER_SCOPES] : [];
 
 export { broadcasterHasScope } from "./broadcaster-scope";

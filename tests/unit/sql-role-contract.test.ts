@@ -14,7 +14,7 @@ describe("SQL-Vertrag für Kanalrollen", () => {
     try {
       database.exec(generateBaseline());
       database.prepare(
-        "INSERT INTO channels (channel_id, login, display_name, created_at, updated_at, language, vollzustimmung) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO channels (channel_id, login, display_name, created_at, updated_at, language, full_consent) VALUES (?, ?, ?, ?, ?, ?, ?)",
       ).run("kanal-vertrag", "kanal-vertrag", "Kanal Vertrag", "2026-01-01", "2026-01-01", "de", 0);
       const insert = database.prepare(
         "INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",

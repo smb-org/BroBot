@@ -55,7 +55,7 @@ const insertSession = async (database: TestD1Database): Promise<void> => {
 const insertMember = async (database: TestD1Database, channelId = "kanal-a"): Promise<void> => {
   await database.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-     VALUES (?, 'user-1', 'verwalter', ?, ?)`,
+     VALUES (?, 'user-1', 'manager', ?, ?)`,
   ).bind(channelId, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
 };
 
@@ -194,7 +194,7 @@ describe("Overlay-Routen", () => {
 
     expect(issue.status).toBe(201);
     const issued = await issue.json<{ tokenId: string }>();
-    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = ? AND user_id = ?")
+    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
       .bind("kanal-a", "user-1").run();
     const revoke = await authRouter.fetch(new Request(revokePath("kanal-a", issued.tokenId), {
       method: "POST",

@@ -6,14 +6,14 @@ const zuschauerwert = (value: unknown): number | null =>
 
 export type RaidEntscheidung =
   | {
-    kind: "eingehend";
+    kind: "incoming";
     quelleKanalId: string;
     quelleKanalName: string;
     zuschauer: number;
     voll: boolean;
   }
   | {
-    kind: "ausgehend";
+    kind: "outgoing";
     zielKanalId: string | null;
     zuschauer: number | null;
   }
@@ -32,16 +32,16 @@ export const entscheideRaid = (
   const fromId = textwert(payload.from_broadcaster_user_id);
   const toId = textwert(payload.to_broadcaster_user_id);
   const zuschauer = zuschauerwert(payload.viewers);
-  const outgoing = subscriptionVariant === "ausgehend" ||
-    (subscriptionVariant !== "eingehend" && fromId === channelId);
+  const outgoing = subscriptionVariant === "outgoing" ||
+    (subscriptionVariant !== "incoming" && fromId === channelId);
 
-  if (outgoing) return { kind: "ausgehend", zielKanalId: toId, zuschauer };
+  if (outgoing) return { kind: "outgoing", zielKanalId: toId, zuschauer };
   if (toId !== channelId) return { kind: "ungueltig", grund: "ziel_ungueltig" };
   if (fromId === null) return { kind: "ungueltig", grund: "quelle_ungueltig" };
   if (zuschauer === null) return { kind: "ungueltig", grund: "zuschauer_ungueltig" };
 
   return {
-    kind: "eingehend",
+    kind: "incoming",
     quelleKanalId: fromId,
     quelleKanalName: textwert(payload.from_broadcaster_user_name) ?? textwert(payload.from_broadcaster_user_login) ?? fromId,
     zuschauer,

@@ -11,15 +11,15 @@ type ModulNamen = Record<string, string>;
 
 const modulNamen: LocaleCatalog<ModulNamen> = {
   de: {
-    textbefehle: "Textbefehle",
-    kanalereignisse: "Kanalereignisse",
-    werbung: "Werbung",
+    text_commands: "Textbefehle",
+    channel_events: "Kanalereignisse",
+    ads: "Werbung",
     raid: "Raid-Shoutout",
   },
   en: {
-    textbefehle: "Text commands",
-    kanalereignisse: "Channel events",
-    werbung: "Ad breaks",
+    text_commands: "Text commands",
+    channel_events: "Channel events",
+    ads: "Ad breaks",
     raid: "Raid shoutout",
   },
 };
@@ -86,8 +86,8 @@ export const eventSubName = (
   if (subscriptionType === "channel.chat.message") return texte.chatNachrichten;
   if (subscriptionType === "channel.chat.notification") return texte.chatBenachrichtigungen;
   if (subscriptionType === "channel.raid") {
-    if (variant === "eingehend") return texte.raidEingehend;
-    if (variant === "ausgehend") return texte.raidAusgehend;
+    if (variant === "incoming") return texte.raidEingehend;
+    if (variant === "outgoing") return texte.raidAusgehend;
     return texte.raids;
   }
   if (subscriptionType === "channel.shoutout.create") return texte.shoutoutsGesendet;
@@ -104,15 +104,15 @@ type ModulBeschreibungen = Record<string, string>;
 
 const modulBeschreibungen: LocaleCatalog<ModulBeschreibungen> = {
   de: {
-    textbefehle: "Antwortet auf kurze Befehle im Chat.",
-    kanalereignisse: "Protokolliert, was im Kanal geschieht.",
-    werbung: "Kündigt beginnende Werbepausen im Chat an.",
+    text_commands: "Antwortet auf kurze Befehle im Chat.",
+    channel_events: "Protokolliert, was im Kanal geschieht.",
+    ads: "Kündigt beginnende Werbepausen im Chat an.",
     raid: "Begrüßt eingehende Raids und löst ab einer Schwelle einen Helix-Shoutout aus.",
   },
   en: {
-    textbefehle: "Replies to short commands in chat.",
-    kanalereignisse: "Records what happens in the channel.",
-    werbung: "Announces beginning ad breaks in chat.",
+    text_commands: "Replies to short commands in chat.",
+    channel_events: "Records what happens in the channel.",
+    ads: "Announces beginning ad breaks in chat.",
     raid: "Greets incoming raids and sends a Helix shoutout above a threshold.",
   },
 };
@@ -124,12 +124,12 @@ export const moduleDescription = (
   return modulText(modulBeschreibungen[language], moduleId);
 };
 
-export type ModuleSymbol = "textbefehle" | "kanalereignisse" | "werbung" | "standard";
+export type ModuleSymbol = "text_commands" | "channel_events" | "ads" | "standard";
 
 export const moduleSymbol = (moduleId: string): ModuleSymbol => {
-  if (moduleId === "textbefehle") return "textbefehle";
-  if (moduleId === "kanalereignisse") return "kanalereignisse";
-  if (moduleId === "werbung") return "werbung";
+  if (moduleId === "text_commands") return "text_commands";
+  if (moduleId === "channel_events") return "channel_events";
+  if (moduleId === "ads") return "ads";
   return "standard";
 };
 
@@ -138,7 +138,7 @@ export const moduleScopePurpose = (
   scope: string,
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
-  if (moduleId === "werbung" && scope === "channel:read:ads") {
+  if (moduleId === "ads" && scope === "channel:read:ads") {
     return language === "de" ? "Werbepausen erkennen" : "Detect ad breaks";
   }
   return language === "de" ? "wird vom Modul benötigt" : "required by this module";

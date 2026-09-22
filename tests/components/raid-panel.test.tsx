@@ -76,14 +76,14 @@ describe("Raid-Panel-Ansicht", () => {
   it("blendet die Erfolgsmeldung nach einer weiteren Änderung in beiden Panels aus", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/raid/einstellungen")) return Promise.resolve(jsonResponse({ settings: {
+      if (url.pathname.endsWith("/raid/settings")) return Promise.resolve(jsonResponse({ settings: {
         shoutoutAktiv: true, shoutoutSchwelle: 3, textSchwelle: 3, textVoll: "voll", textKlein: "klein",
       } }));
-      if (url.pathname.endsWith("/werbung/zeitplan")) return Promise.resolve(jsonResponse({
+      if (url.pathname.endsWith("/ads/zeitplan")) return Promise.resolve(jsonResponse({
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
         snoozeScopeVorhanden: true, letzteWerbepausen: [],
       }));
-      if (url.pathname.endsWith("/werbung/einstellungen")) return Promise.resolve(jsonResponse({ settings: {
+      if (url.pathname.endsWith("/ads/settings")) return Promise.resolve(jsonResponse({ settings: {
         automatisch: "auto {duration}", manuell: "manuell {duration}", vorwarnung: true, vorlaufSekunden: 60, vorwarnungText: "gleich {seconds}",
       } }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
@@ -112,7 +112,7 @@ describe("Raid-Panel-Ansicht", () => {
   it("behandelt ein geleertes Raid-Zahlenfeld als Feldfehler statt als null", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/raid/einstellungen") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
+      if (url.pathname.endsWith("/raid/settings") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
         shoutoutAktiv: true, shoutoutSchwelle: 3, textSchwelle: 3, textVoll: "voll", textKlein: "klein",
       } }));
       return Promise.resolve(jsonResponse({}));

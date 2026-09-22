@@ -12,7 +12,7 @@ const befehl = (name: string, text: string, zuletztVerwendetAt: string | null = 
   text,
   art: "text",
   enabled: true,
-  mindeststufe: "alle",
+  mindeststufe: "everyone",
   cooldownSekunden: 5,
   zuletztVerwendetAt,
   createdAt: JETZT,
@@ -32,7 +32,7 @@ const repositoryFuer = (befehle: Textbefehl[]): TextbefehlRepository => ({
 });
 
 const eventFuer = (text: string, actor: ModuleEvent["actor"] = {
-  userId: "user-1", login: "alice", role: "bediener",
+  userId: "user-1", login: "alice", role: "operator",
 }): ModuleEvent => ({
   channelId: "kanal-a",
   subscriptionType: "channel.chat.message",
@@ -45,7 +45,7 @@ const eventFuer = (text: string, actor: ModuleEvent["actor"] = {
   settings: {},
   receivedAt: JETZT,
   actor,
-  chatStatus: ["zuschauer"],
+  chatStatus: ["viewer"],
 });
 
 describe("Textbefehle-Service", () => {
@@ -61,7 +61,7 @@ describe("Textbefehle-Service", () => {
       replyToMessageId: "twitch-message-1",
     }]);
     expect(result.diagnostics).toEqual([{
-      code: "textbefehle.ausgeloest",
+      code: "text_commands.ausgeloest",
       detail: { name: "hallo", antwort: "Hallo alice in kanal-a-login" },
     }]);
   });
@@ -73,7 +73,7 @@ describe("Textbefehle-Service", () => {
     );
 
     expect(result.diagnostics).toEqual([{
-      code: "textbefehle.ausgeloest",
+      code: "text_commands.ausgeloest",
       detail: { name: "hallo", argumente: "erster   zweiter", antwort: "Antwort für alice" },
     }]);
   });
@@ -85,7 +85,7 @@ describe("Textbefehle-Service", () => {
     );
 
     expect(result.diagnostics).toEqual([{
-      code: "textbefehle.ausgeloest",
+      code: "text_commands.ausgeloest",
       detail: { name: "wiki", argumente: "foo bar", antwort: "Antwort" },
     }]);
   });
@@ -114,14 +114,14 @@ describe("Textbefehle-Service", () => {
     const result = await verarbeiteTextbefehlNachricht(eventFuer("!gibt-es-nicht"), repositoryFuer([]));
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics).toEqual([{ code: "textbefehle.unbekannt", detail: { name: "gibt-es-nicht" } }]);
+    expect(result.diagnostics).toEqual([{ code: "text_commands.unbekannt", detail: { name: "gibt-es-nicht" } }]);
   });
 
   it("schweigt bei einer unbekannten Befehlsform und begründet das", async () => {
     const result = await verarbeiteTextbefehlNachricht(eventFuer("!befehl unbekannt"), repositoryFuer([]));
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics).toEqual([{ code: "textbefehle.unbekannt", detail: { name: "befehl" } }]);
+    expect(result.diagnostics).toEqual([{ code: "text_commands.unbekannt", detail: { name: "befehl" } }]);
   });
 
   it("schweigt während der Abkühlzeit und meldet die Restzeit", async () => {
@@ -131,7 +131,7 @@ describe("Textbefehle-Service", () => {
     );
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics[0]?.code).toBe("textbefehle.abgekuehlt");
+    expect(result.diagnostics[0]?.code).toBe("text_commands.abgekuehlt");
   });
 
   it("schweigt bei einem ausgeschalteten Befehl und begründet das separat", async () => {
@@ -142,7 +142,7 @@ describe("Textbefehle-Service", () => {
 
     expect(result.actions).toEqual([]);
     expect(result.diagnostics).toEqual([{
-      code: "textbefehle.deaktiviert",
+      code: "text_commands.deaktiviert",
       detail: { name: "hallo" },
     }]);
   });
@@ -151,7 +151,7 @@ describe("Textbefehle-Service", () => {
     const result = await verarbeiteTextbefehlNachricht(
       eventFuer("!befehle"),
       repositoryFuer([
-        { ...befehl("befehle", ""), art: "liste" },
+        { ...befehl("befehle", ""), art: "list" },
         { ...befehl("aktiv", "Antwort") },
         { ...befehl("aus", "Antwort"), enabled: false },
       ]),
@@ -167,11 +167,11 @@ describe("Textbefehle-Service", () => {
   it("wendet die Abkühlzeit auch auf Listenzeilen an", async () => {
     const result = await verarbeiteTextbefehlNachricht(
       eventFuer("!befehle"),
-      repositoryFuer([{ ...befehl("befehle", "", JETZT), art: "liste" }]),
+      repositoryFuer([{ ...befehl("befehle", "", JETZT), art: "list" }]),
     );
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics[0]?.code).toBe("textbefehle.abgekuehlt");
+    expect(result.diagnostics[0]?.code).toBe("text_commands.abgekuehlt");
   });
 
 });

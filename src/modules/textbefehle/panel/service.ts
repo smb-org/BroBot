@@ -2,7 +2,7 @@ import type { Textbefehl, TextbefehlMindeststufe } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 
 const pathFor = (channelId: string, name?: string): string =>
-  `/api/channels/${encodeURIComponent(channelId)}/modules/textbefehle/befehle${name === undefined ? "" : `/${encodeURIComponent(name)}`}`;
+  `/api/channels/${encodeURIComponent(channelId)}/modules/text_commands/commands${name === undefined ? "" : `/${encodeURIComponent(name)}`}`;
 
 const json = async <T>(response: Response): Promise<T> => {
   const body: unknown = await response.json().catch(() => null);
@@ -42,12 +42,12 @@ const mutation = async (
 
 export const legeTextbefehlAn = async (
   channelId: string,
-  command: { name: string; art: "text" | "liste"; text?: string; cooldownSekunden: number },
+  command: { name: string; art: "text" | "list"; text?: string; cooldownSekunden: number },
 ): Promise<void> => mutation(channelId, "POST", command);
 
 export const speichereTextbefehl = async (
   channelId: string,
-  command: { oldName: string; name: string; art: "text" | "liste"; text?: string; cooldownSekunden: number },
+  command: { oldName: string; name: string; art: "text" | "list"; text?: string; cooldownSekunden: number },
 ): Promise<void> => mutation(channelId, "PATCH", {
   name: command.name,
   art: command.art,

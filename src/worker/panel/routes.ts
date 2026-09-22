@@ -95,7 +95,7 @@ const laterIso = (now: string, milliseconds: number): string =>
   new Date(Date.parse(now) + milliseconds).toISOString();
 
 const canCheckModeratorStatus = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
-  role !== "bediener";
+  role !== "operator";
 
 const readBotCredentials = async (environment: Env): Promise<{ userId: string; accessToken: string } | null> => {
   const identity = await getBotIdentity(environment.DB);

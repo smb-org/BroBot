@@ -1,5 +1,5 @@
-export type TextbefehlArt = "text" | "liste";
-export const TEXTBEFEHL_MINDESTSTUFEN = ["alle", "abonnent", "vip", "moderator", "broadcaster"] as const;
+export type TextbefehlArt = "text" | "list";
+export const TEXTBEFEHL_MINDESTSTUFEN = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
 export type TextbefehlMindeststufe = (typeof TEXTBEFEHL_MINDESTSTUFEN)[number];
 
 export interface Textbefehl {

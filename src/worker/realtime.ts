@@ -90,7 +90,7 @@ const channelObject = (namespace: Env["CHANNEL"] | undefined, channelId: string)
 
 export const publishRealtimeMessage = async (
   namespace: Env["CHANNEL"] | undefined,
-  message: RealtimeEnvelope<"ereignisprotokoll.neu">,
+  message: RealtimeEnvelope<"event_log.new">,
 ): Promise<void> => {
   const object = channelObject(namespace, message.channelId);
   if (object === null) return;

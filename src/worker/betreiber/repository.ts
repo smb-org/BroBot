@@ -61,7 +61,7 @@ interface BetreiberKanalZeile {
   channel_id: string;
   login: string;
   display_name: string;
-  vollzustimmung: number;
+  full_consent: number;
 }
 
 interface BetreiberKanalÜbersichtZeile extends BetreiberKanalZeile {
@@ -83,7 +83,7 @@ interface AuditZeile {
   after_json: string;
 }
 
-export const betreiberRollenSql = "'verwalter', 'bediener'";
+export const betreiberRollenSql = "'manager', 'operator'";
 
 const mutationsschutz = (akteur: ActorContext, zeitpunkt: string): MutationGuard =>
   betreiberSessionGuard(akteur, zeitpunkt);
@@ -105,14 +105,14 @@ const vorbereiteAudit = (
   aktion,
   vorher,
   nachher,
-  "betreiber",
+  "platform_admin",
 );
 
 const mapKanal = (zeile: BetreiberKanalZeile): BetreiberKanal => ({
   channelId: zeile.channel_id,
   login: zeile.login,
   displayName: zeile.display_name,
-  vollzustimmung: zeile.vollzustimmung === 1,
+  vollzustimmung: zeile.full_consent === 1,
 });
 
 export const decodeBetreiberAuditCursor = (serialized: string): BetreiberAuditCursor | null => decodeCursor(serialized, (value) => {
@@ -128,10 +128,10 @@ export const listeBetreiberKanäle = async (
   db: D1Database,
 ): Promise<BetreiberKanalÜbersicht[]> => {
   const result = await db.prepare(
-    `SELECT channel.channel_id, channel.login, channel.display_name, channel.vollzustimmung,
+    `SELECT channel.channel_id, channel.login, channel.display_name, channel.full_consent,
             COUNT(CASE WHEN member.role = 'broadcaster' THEN 1 END) AS broadcaster_count,
-            COUNT(CASE WHEN member.role = 'verwalter' THEN 1 END) AS verwalter_count,
-            COUNT(CASE WHEN member.role = 'bediener' THEN 1 END) AS bediener_count,
+            COUNT(CASE WHEN member.role = 'manager' THEN 1 END) AS verwalter_count,
+            COUNT(CASE WHEN member.role = 'operator' THEN 1 END) AS bediener_count,
             CASE WHEN EXISTS (
               SELECT 1
                 FROM twitch_login_identity AS identity
@@ -140,7 +140,7 @@ export const listeBetreiberKanäle = async (
             ) THEN 1 ELSE 0 END AS broadcaster_connected
        FROM channels AS channel
        LEFT JOIN channel_members AS member ON member.channel_id = channel.channel_id
-      GROUP BY channel.channel_id, channel.login, channel.display_name, channel.vollzustimmung
+      GROUP BY channel.channel_id, channel.login, channel.display_name, channel.full_consent
       ORDER BY channel.login, channel.channel_id`,
   ).all<BetreiberKanalÜbersichtZeile>();
   return result.results.map((zeile) => ({
@@ -159,7 +159,7 @@ export const holeBetreiberKanal = async (
   kanalId: string,
 ): Promise<BetreiberKanal | null> => {
   const zeile = await db.prepare(
-    `SELECT channel_id, login, display_name, vollzustimmung
+    `SELECT channel_id, login, display_name, full_consent
        FROM channels
       WHERE channel_id = ?`,
   ).bind(kanalId).first<BetreiberKanalZeile>();
@@ -176,7 +176,7 @@ export const freigebenBetreiberKanal = async (
   const schutz = mutationsschutz(akteur, zeitpunkt);
   const kanalMutation = db.prepare(
     `INSERT INTO channels
-      (channel_id, login, display_name, created_at, updated_at, vollzustimmung)
+      (channel_id, login, display_name, created_at, updated_at, full_consent)
      SELECT ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM channels WHERE channel_id = ?
@@ -230,9 +230,9 @@ export const ändereVollzustimmung = async (
   const nachher: BetreiberKanal = { ...kanal, vollzustimmung };
   const mutation = db.prepare(
     `UPDATE channels
-        SET vollzustimmung = ?, updated_at = ?
+        SET full_consent = ?, updated_at = ?
       WHERE channel_id = ?
-        AND vollzustimmung <> ?
+        AND full_consent <> ?
         ${schutz.sql}`,
   ).bind(
     vollzustimmung ? 1 : 0,
@@ -378,12 +378,12 @@ export const listeBetreiberAudit = async (
   const query = cursor === null
     ? `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
-        WHERE actor_kind = 'betreiber'
+        WHERE actor_kind = 'platform_admin'
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`
     : `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
-        WHERE actor_kind = 'betreiber'
+        WHERE actor_kind = 'platform_admin'
           AND (created_at < ? OR (created_at = ? AND audit_id < ?))
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`;

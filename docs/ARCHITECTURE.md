@@ -50,7 +50,7 @@ ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service
 
 Das Admin- und Mod-Panel ist die primäre Bedienoberfläche. Sein Grundgerüst gehört dem Host; die konkrete Ansicht kommt pro Modul optional über den `BotModule`-Contract hinzu. Overlay- und Panel-Ansichten werden lazy geladen, damit ein deaktiviertes Modul in keinem der beiden Bundles Gewicht trägt.
 
-Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach. Das Textbefehle-Panel lädt und mutiert seine Liste über `/api/channels/:channelId/modules/textbefehle/befehle`; die Ansicht bleibt lazy und führt keinen Worker-, Repository- oder Adaptercode aus.
+Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach. Das Textbefehle-Panel lädt und mutiert seine Liste über `/api/channels/:channelId/modules/text_commands/commands`; die Ansicht bleibt lazy und führt keinen Worker-, Repository- oder Adaptercode aus.
 
 Sichtbare Panel-Texte eines Moduls stehen gesammelt in dessen Panel-Locale.
 Die gemeinsame Sprachauflösung und Datumsformatierung liegt in

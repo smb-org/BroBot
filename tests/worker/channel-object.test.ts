@@ -21,7 +21,7 @@ const gueltigerPrinzipal = (
   channelId: "kanal-a",
   userId: "user-1",
   sessionId: "session-1",
-  role: "bediener",
+  role: "operator",
   expiresAt: "2099-09-19T00:00:00.000Z",
   ...overrides,
 });
@@ -99,12 +99,12 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   return object;
 };
 
-const ereignisNachricht: RealtimeEnvelope<"ereignisprotokoll.neu"> = {
+const ereignisNachricht: RealtimeEnvelope<"event_log.new"> = {
   version: 1,
   id: "nachricht-1",
   createdAt: "2026-09-21T12:00:00.000Z",
   channelId: "kanal-a",
-  type: "ereignisprotokoll.neu",
+  type: "event_log.new",
   payload: { entries: [] },
 };
 
@@ -164,7 +164,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     const object = objectFor([]);
     const storage = storageOf(object);
 
-    storage.values.set("sicherheitsrunde", jetzt + 2_000);
+    storage.values.set("security_round", jetzt + 2_000);
     await object.planeWerbevorwarnung(jetzt + 4_000);
     expect(storage.setAlarm).toHaveBeenLastCalledWith(jetzt + 2_000);
 
@@ -199,7 +199,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     const object = objectFor(sockets, database);
     const storage = storageOf(object);
     socket.close.mockImplementation(() => { sockets.length = 0; });
-    storage.values.set("sicherheitsrunde", jetzt - 1);
+    storage.values.set("security_round", jetzt - 1);
     await object.planeWerbevorwarnung(jetzt + 60_000);
 
     await object.alarm();

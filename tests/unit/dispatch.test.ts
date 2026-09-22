@@ -275,14 +275,14 @@ describe("Verteilung und Ausführung", () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
-      await insertMember(database, "kanal-a", "user-1", "bediener");
+      await insertMember(database, "kanal-a", "user-1", "operator");
       let akteur: ModuleEvent["actor"] = null;
       await verteile(database, [modulDoppel("modul-a", (event) => {
         akteur = event.actor;
         return { actions: [], diagnostics: [] };
       })], gesendet());
 
-      expect(akteur).toEqual({ userId: "user-1", login: "alice", role: "bediener" });
+      expect(akteur).toEqual({ userId: "user-1", login: "alice", role: "operator" });
     } finally {
       database.close();
     }
@@ -292,7 +292,7 @@ describe("Verteilung und Ausführung", () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
-      await insertMember(database, "kanal-a", "user-1", "bediener");
+      await insertMember(database, "kanal-a", "user-1", "operator");
       const statusse: Array<{ role: ModuleEvent["actor"]; chatStatus: ModuleEvent["chatStatus"] }> = [];
       const chatModul = modulDoppel("chat-modul", (event) => {
         statusse.push({ role: event.actor, chatStatus: event.chatStatus });
@@ -307,8 +307,8 @@ describe("Verteilung und Ausführung", () => {
       await verteile(database, [raidModul], gesendet(), "kanal-a", "channel.raid");
 
       expect(statusse).toEqual([
-        { role: { userId: "user-1", login: "alice", role: "bediener" }, chatStatus: ["zuschauer"] },
-        { role: { userId: "user-1", login: "alice", role: "bediener" }, chatStatus: null },
+        { role: { userId: "user-1", login: "alice", role: "operator" }, chatStatus: ["viewer"] },
+        { role: { userId: "user-1", login: "alice", role: "operator" }, chatStatus: null },
       ]);
     } finally {
       database.close();
@@ -339,7 +339,7 @@ describe("Verteilung und Ausführung", () => {
         },
       );
 
-      expect(chatStatus).toEqual(["vip", "abonnent"]);
+      expect(chatStatus).toEqual(["vip", "subscriber"]);
     } finally {
       database.close();
     }

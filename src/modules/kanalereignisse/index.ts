@@ -20,7 +20,7 @@ const eventSubTypes = [
 ] as const satisfies readonly EventSubSubscriptionType[];
 
 export const kanalereignisseModul: BotModule<typeof settingsSchema> = {
-  id: "kanalereignisse",
+  id: "channel_events",
   settingsSchema,
   defaultSettings: {},
   eventSubTypes,

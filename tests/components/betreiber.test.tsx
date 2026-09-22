@@ -26,7 +26,7 @@ const kanal = {
 const mitglieder = {
   members: [
     { userId: "123", login: "alpha_login", displayName: "Alpha", profileImageUrl: null, role: "broadcaster", joinedAt: "2026-09-19T12:00:00.000Z" },
-    { userId: "456", login: "helfer", displayName: "Helfer", profileImageUrl: null, role: "verwalter", joinedAt: "2026-09-19T13:00:00.000Z" },
+    { userId: "456", login: "helfer", displayName: "Helfer", profileImageUrl: null, role: "manager", joinedAt: "2026-09-19T13:00:00.000Z" },
   ],
   nextCursor: null,
   broadcasterCount: 1,
@@ -40,9 +40,9 @@ const richteBetreiberEin = (
   const fetcher = vi.fn<typeof fetch>((input) => {
     const url = anfrageUrl(input);
     if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], betreiber }));
-    if (url.pathname === "/api/betreiber") return Promise.resolve(antwort({ channels: [kanal] }));
-    if (url.pathname === "/api/betreiber/audit") return Promise.resolve(antwort(audit));
-    if (url.pathname === "/api/betreiber/kanaele/123/mitglieder") return Promise.resolve(antwort(mitglieder));
+    if (url.pathname === "/api/platform") return Promise.resolve(antwort({ channels: [kanal] }));
+    if (url.pathname === "/api/platform/audit") return Promise.resolve(antwort(audit));
+    if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(antwort(mitglieder));
     return Promise.resolve(antwort({}, 404));
   });
   vi.stubGlobal("fetch", fetcher);
@@ -94,7 +94,7 @@ describe("Betreiberebene", () => {
     fireEvent.click(entfernen);
 
     expect(await screen.findByRole("alertdialog", { name: /Zugriff für Helfer wirklich entfernen/ })).toBeInTheDocument();
-    expect(fetcher.mock.calls.some(([input, init]) => anfrageUrl(input).pathname.endsWith("/mitglieder/456") && init?.method === "DELETE")).toBe(false);
+    expect(fetcher.mock.calls.some(([input, init]) => anfrageUrl(input).pathname.endsWith("/members/456") && init?.method === "DELETE")).toBe(false);
   });
 
   it("zeigt den Entfernen-Knopf der Broadcaster-Zeile deaktiviert mit Begründung", async () => {
@@ -131,7 +131,7 @@ describe("Betreiberebene", () => {
         actorUserId: "26876135",
         actorLogin: "esembe",
         actorDisplayName: "Esembe",
-        actorKind: "betreiber",
+        actorKind: "platform_admin",
         createdAt: "2026-09-18T00:00:00.000Z",
         channelId: "123",
         moduleId: null,
@@ -143,7 +143,7 @@ describe("Betreiberebene", () => {
         actorUserId: "gelöscht",
         actorLogin: null,
         actorDisplayName: null,
-        actorKind: "betreiber",
+        actorKind: "platform_admin",
         createdAt: "2026-09-18T00:00:01.000Z",
         channelId: "123",
         moduleId: null,
@@ -261,12 +261,12 @@ describe("Betreiberebene", () => {
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const url = anfrageUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], betreiber: true }));
-      if (url.pathname === "/api/betreiber") return Promise.resolve(antwort({ channels: [freigegeben] }));
-      if (url.pathname === "/api/betreiber/audit") return Promise.resolve(antwort({ entries: [], nextCursor: null }));
-      if (url.pathname === "/api/betreiber/kanaele/123/mitglieder") return Promise.resolve(antwort(mitglieder));
-      if (url.pathname === "/api/betreiber/nutzer") return Promise.resolve(antwort({ user: { userId: "789", login: "beta_login", displayName: "Beta" } }));
+      if (url.pathname === "/api/platform") return Promise.resolve(antwort({ channels: [freigegeben] }));
+      if (url.pathname === "/api/platform/audit") return Promise.resolve(antwort({ entries: [], nextCursor: null }));
+      if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(antwort(mitglieder));
+      if (url.pathname === "/api/platform/users") return Promise.resolve(antwort({ user: { userId: "789", login: "beta_login", displayName: "Beta" } }));
       if (url.pathname === "/api/csrf") return Promise.resolve(antwort({ token: "csrf" }));
-      if (url.pathname === "/api/betreiber/kanaele" && init?.method === "POST") return Promise.resolve(antwort({ channel: freigegeben }));
+      if (url.pathname === "/api/platform/channels" && init?.method === "POST") return Promise.resolve(antwort({ channel: freigegeben }));
       return Promise.resolve(antwort({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -283,6 +283,6 @@ describe("Betreiberebene", () => {
     fireEvent.click(within(freigabe).getByRole("button", { name: "Kanal freigeben" }));
     fireEvent.click(await within(freigabe).findByRole("button", { name: "Endgültig freigeben" }));
 
-    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => anfrageUrl(input).pathname === "/api/betreiber/kanaele" && init?.method === "POST")).toBe(true));
+    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => anfrageUrl(input).pathname === "/api/platform/channels" && init?.method === "POST")).toBe(true));
   });
 });

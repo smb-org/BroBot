@@ -62,7 +62,7 @@ const sqlHoleFixtures = new Map<string, string>([
   ["guardParts.sql", betreiberSessionGuard(actor, now).sql],
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],
   ["lastBroadcasterGuard", lastBroadcasterGuard],
-  ["actorGuard(\"'broadcaster', 'verwalter'\")", actorGuard("'broadcaster', 'verwalter'")],
+  ["actorGuard(\"'broadcaster', 'manager'\")", actorGuard("'broadcaster', 'manager'")],
   ["schutz.sql", betreiberSessionGuard(actor, now).sql],
   ["betreiberRollenSql", betreiberRollenSql],
   ["placeholders", "?, ?, ?"],

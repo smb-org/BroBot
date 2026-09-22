@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [{
-    id: "werbung",
+    id: "ads",
     settingsSchema: {},
     defaultSettings: {},
     broadcasterScopes: ["channel:read:ads"],
@@ -19,7 +19,7 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
   });
 
   const modules = [{
-    id: "werbung",
+    id: "ads",
     enabled: true,
     settings: "{}",
     requiredBroadcasterScopes: ["channel:read:ads"],
@@ -29,10 +29,10 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
   it("zeigt dem Broadcaster die aktiven Zustimmungsschaltfläche und Begründung", () => {
     render(<ModulePage
       channelId="kanal-a"
-      moduleId="werbung"
+      moduleId="ads"
       ownRole="broadcaster"
       modules={modules}
-      activeModules={[{ moduleId: "werbung", settings: "{}" }]}
+      activeModules={[{ moduleId: "ads", settings: "{}" }]}
       onNavigate={vi.fn()}
       onToggle={vi.fn()}
     />);
@@ -41,17 +41,17 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
     expect(screen.getByText("channel:read:ads")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Broadcaster-Berechtigungen erteilen" })).toHaveAttribute(
       "href",
-      "/auth/channels/kanal-a/broadcaster-scopes/werbung",
+      "/auth/channels/kanal-a/broadcaster-scopes/ads",
     );
   });
 
-  it.each(["verwalter", "bediener"] as const)("zeigt %s denselben Bedarf, aber keinen auslösbaren Knopf", (ownRole) => {
+  it.each(["manager", "operator"] as const)("zeigt %s denselben Bedarf, aber keinen auslösbaren Knopf", (ownRole) => {
     render(<ModulePage
       channelId="kanal-a"
-      moduleId="werbung"
+      moduleId="ads"
       ownRole={ownRole}
       modules={modules}
-      activeModules={[{ moduleId: "werbung", settings: "{}" }]}
+      activeModules={[{ moduleId: "ads", settings: "{}" }]}
       onNavigate={vi.fn()}
       onToggle={vi.fn()}
     />);
@@ -67,16 +67,16 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
     Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
     render(<ModulePage
       channelId="kanal-a"
-      moduleId="werbung"
+      moduleId="ads"
       ownRole="broadcaster"
       modules={[{
-        id: "werbung",
+        id: "ads",
         enabled: true,
         settings: "{}",
         requiredBroadcasterScopes: ["channel:read:ads", "channel:manage:ads"],
         missingBroadcasterScopes: ["channel:read:ads"],
       }]}
-      activeModules={[{ moduleId: "werbung", settings: "{}" }]}
+      activeModules={[{ moduleId: "ads", settings: "{}" }]}
       onNavigate={vi.fn()}
       onToggle={vi.fn()}
     />);
@@ -96,16 +96,16 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
   it("blendet die Zustimmungsfläche aus, wenn alle Berechtigungen erteilt sind", async () => {
     render(<ModulePage
       channelId="kanal-a"
-      moduleId="werbung"
+      moduleId="ads"
       ownRole="broadcaster"
       modules={[{
-        id: "werbung",
+        id: "ads",
         enabled: true,
         settings: "{}",
         requiredBroadcasterScopes: ["channel:read:ads"],
         missingBroadcasterScopes: [],
       }]}
-      activeModules={[{ moduleId: "werbung", settings: "{}" }]}
+      activeModules={[{ moduleId: "ads", settings: "{}" }]}
       onNavigate={vi.fn()}
       onToggle={vi.fn()}
     />);

@@ -45,7 +45,7 @@ export const aktualisiereWerbevorwarnungswecker = async (
   const row = await environment.DB.prepare(
     `SELECT enabled, settings
        FROM channel_modules
-      WHERE channel_id = ? AND module_id = 'werbung'`,
+      WHERE channel_id = ? AND module_id = 'ads'`,
   ).bind(channelId).first<ChannelModuleSettingsRow>();
   if (row === null || row.enabled !== 1) {
     await loesche(planer);

@@ -39,7 +39,7 @@ const expectDeniedCreate = async (
   database: TestD1Database,
   options: {
     memberChannelId: string;
-    role: "broadcaster" | "verwalter" | "bediener";
+    role: "broadcaster" | "manager" | "operator";
     targetChannelId: string;
     extraChannelIds?: string[];
   },
@@ -92,7 +92,7 @@ describe("Modulaktivierung im Repository", () => {
   it("verweigert die Aktivierung durch einen Bediener und legt keine Zeile an", async () => {
     await expectDeniedCreate(database, {
       memberChannelId: "kanal-a",
-      role: "bediener",
+      role: "operator",
       targetChannelId: "kanal-a",
     });
   });
@@ -109,7 +109,7 @@ describe("Modulaktivierung im Repository", () => {
   it("deaktiviert ein bestehendes Modul für einen Verwalter mit genau einem weiteren Audit-Eintrag", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     await createChannelModuleWithAudit(
       asD1(database),
       actorFor("user-1"),
@@ -147,7 +147,7 @@ describe("Modulaktivierung im Repository", () => {
       NOW,
     );
     await insertLoginIdentityAndSession(database, "user-2");
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await insertMember(database, "kanal-a", "user-2", "operator");
 
     const changed = await updateChannelModuleWithAudit(
       asD1(database),

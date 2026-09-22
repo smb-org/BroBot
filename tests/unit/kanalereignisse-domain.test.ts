@@ -16,16 +16,16 @@ describe("Kanalereignisse-Domain", () => {
       from_broadcaster_user_name: "Quelle Name",
       from_broadcaster_user_login: "quelle_login",
       viewers: 42,
-    }, "eingehend")).toEqual([{
-      code: "kanalereignisse.raid.eingehend",
+    }, "incoming")).toEqual([{
+      code: "channel_events.raid.incoming",
       detail: { quelle: "Quelle Name (@quelle_login)", zuschauer: 42 },
     }]);
     expect(diagnose("channel.raid", {
       to_broadcaster_user_name: "Ziel Name",
       to_broadcaster_user_login: "ziel_login",
       viewers: 17,
-    }, "ausgehend")).toEqual([{
-      code: "kanalereignisse.raid.ausgehend",
+    }, "outgoing")).toEqual([{
+      code: "channel_events.raid.outgoing",
       detail: { ziel: "Ziel Name (@ziel_login)", zuschauer: 17 },
     }]);
   });
@@ -35,7 +35,7 @@ describe("Kanalereignisse-Domain", () => {
       to_broadcaster_user_name: "Ziel",
       to_broadcaster_user_login: "ziel",
     })).toEqual([{
-      code: "kanalereignisse.shoutout.gesendet",
+      code: "channel_events.shoutout.gesendet",
       detail: { ziel: "Ziel (@ziel)" },
     }]);
     expect(diagnose("channel.shoutout.receive", {
@@ -43,14 +43,14 @@ describe("Kanalereignisse-Domain", () => {
       from_broadcaster_user_login: "quelle",
       viewer_count: 12,
     })).toEqual([{
-      code: "kanalereignisse.shoutout.empfangen",
+      code: "channel_events.shoutout.empfangen",
       detail: { quelle: "Quelle (@quelle)", zuschauer: 12 },
     }]);
   });
 
   it.each([
-    ["sub", "kanalereignisse.chat.sub"],
-    ["resub", "kanalereignisse.chat.resub"],
+    ["sub", "channel_events.chat.sub"],
+    ["resub", "channel_events.chat.resub"],
   ])("bildet %s mit der beteiligten Person ab", (noticeType, code) => {
     expect(diagnose("channel.chat.notification", {
       notice_type: noticeType,
@@ -70,7 +70,7 @@ describe("Kanalereignisse-Domain", () => {
       recipient_user_name: "Empfänger",
       sub_gift: { sub_tier: "1000" },
     })[0]).toEqual({
-      code: "kanalereignisse.chat.gift_sub",
+      code: "channel_events.chat.gift_sub",
       detail: { spender: "Giftperson", empfaenger: "Empfänger", stufe: "1000" },
     });
     expect(diagnose("channel.chat.notification", {
@@ -78,7 +78,7 @@ describe("Kanalereignisse-Domain", () => {
       gifter_user_name: "Giftperson",
       community_sub_gift: { total: 5, sub_tier: "prime" },
     })[0]).toEqual({
-      code: "kanalereignisse.chat.community_gift",
+      code: "channel_events.chat.community_gift",
       detail: { spender: "Giftperson", anzahl: 5, stufe: "prime" },
     });
     expect(diagnose("channel.chat.notification", {
@@ -86,7 +86,7 @@ describe("Kanalereignisse-Domain", () => {
       chatter_user_name: "Mod",
       message: { text: "Wichtige Ansage" },
     })[0]).toEqual({
-      code: "kanalereignisse.chat.ankuendigung",
+      code: "channel_events.chat.ankuendigung",
       detail: { person: "Mod", text: "Wichtige Ansage" },
     });
   });
@@ -94,14 +94,14 @@ describe("Kanalereignisse-Domain", () => {
   it("meldet unbekannte notice_type genau einmal und kürzt fremden Text", () => {
     const noticeType = "x".repeat(240);
     expect(diagnose("channel.chat.notification", { notice_type: noticeType })).toEqual([{
-      code: "kanalereignisse.chat.unbekannt",
+      code: "channel_events.chat.unbekannt",
       detail: { art: `${"x".repeat(199)}…` },
     }]);
   });
 
   it.each([
-    ["ban", "kanalereignisse.moderation.ban"],
-    ["warn", "kanalereignisse.moderation.warn"],
+    ["ban", "channel_events.moderation.ban"],
+    ["warn", "channel_events.moderation.warn"],
   ])("bildet %s mit betroffener und ausführender Person sowie Grund ab", (action, code) => {
     expect(diagnose("channel.moderate", {
       action,
@@ -132,7 +132,7 @@ describe("Kanalereignisse-Domain", () => {
         reason: "Zu viele Nachrichten",
       },
     }, undefined, "2026-09-20T10:00:00.000Z")).toEqual([{
-      code: "kanalereignisse.moderation.timeout",
+      code: "channel_events.moderation.timeout",
       detail: {
         person: "Betroffene Person",
         moderator: "Moderation",
@@ -147,12 +147,12 @@ describe("Kanalereignisse-Domain", () => {
     expect(diagnose("channel.moderate", {
       action: "ban",
       ban: { user_name: "Betroffene Person", ends_at: "2026-09-20T10:05:00.000Z" },
-    }, undefined, "2026-09-20T10:00:00.000Z")[0]?.code).toBe("kanalereignisse.moderation.ban");
+    }, undefined, "2026-09-20T10:00:00.000Z")[0]?.code).toBe("channel_events.moderation.ban");
   });
 
   it.each([
-    ["untimeout", "kanalereignisse.moderation.untimeout"],
-    ["unban", "kanalereignisse.moderation.unban"],
+    ["untimeout", "channel_events.moderation.untimeout"],
+    ["unban", "channel_events.moderation.unban"],
   ])("bildet %s ohne Grund als Rücknahme ab", (action, code) => {
     expect(diagnose("channel.moderate", {
       action,
@@ -173,7 +173,7 @@ describe("Kanalereignisse-Domain", () => {
         message_body: "x".repeat(240),
       },
     })).toEqual([{
-      code: "kanalereignisse.moderation.delete",
+      code: "channel_events.moderation.delete",
       detail: {
         person: "Betroffene Person",
         moderator: "Moderation",
@@ -184,7 +184,7 @@ describe("Kanalereignisse-Domain", () => {
 
   it("meldet shared_chat_ban als genau eine unbekannte Moderationsaktion", () => {
     expect(diagnose("channel.moderate", { action: "shared_chat_ban" })).toEqual([{
-      code: "kanalereignisse.moderation.unbekannt",
+      code: "channel_events.moderation.unbekannt",
       detail: { aktion: "shared_chat_ban" },
     }]);
   });
@@ -196,7 +196,7 @@ describe("Kanalereignisse-Domain", () => {
       category: "aggressive",
       message: { text: "Das ist eine zurückgehaltene Nachricht." },
     })).toEqual([{
-      code: "kanalereignisse.automod.halte",
+      code: "channel_events.automod.halte",
       detail: {
         person: "TwitchDev (@twitchdev)",
         grund: "aggressive",
@@ -214,7 +214,7 @@ describe("Kanalereignisse-Domain", () => {
       ban_evasion_evaluation: "possible",
       message: { text: "Eine auffällige Nachricht." },
     })).toEqual([{
-      code: "kanalereignisse.verdacht.nachricht",
+      code: "channel_events.verdacht.nachricht",
       detail: {
         person: "Xemdo (@xemdo)",
         einstufung: "active_monitoring / ban_evader / possible",
@@ -231,7 +231,7 @@ describe("Kanalereignisse-Domain", () => {
       moderator_user_name: "BlueLava",
       moderator_user_login: "bluelava",
     })).toEqual([{
-      code: "kanalereignisse.verdacht.einstufung",
+      code: "channel_events.verdacht.einstufung",
       detail: {
         person: "Xemdo (@xemdo)",
         einstufung: "restricted",
@@ -243,7 +243,7 @@ describe("Kanalereignisse-Domain", () => {
       low_trust_status: "none",
       moderator_user_name: "BlueLava",
     })).toEqual([{
-      code: "kanalereignisse.verdacht.entwarnung",
+      code: "channel_events.verdacht.entwarnung",
       detail: {
         person: "Xemdo",
         einstufung: "none",
@@ -254,7 +254,7 @@ describe("Kanalereignisse-Domain", () => {
 
   it("lässt unbekannte oder fehlende Verdachtsfelder weg", () => {
     expect(diagnose("automod.message.hold", {})).toEqual([{
-      code: "kanalereignisse.automod.halte",
+      code: "channel_events.automod.halte",
       detail: {},
     }]);
     expect(diagnose("channel.suspicious_user.message", {
@@ -263,14 +263,14 @@ describe("Kanalereignisse-Domain", () => {
       ban_evasion_evaluation: "unbekannt",
       message: { text: 42 },
     })).toEqual([{
-      code: "kanalereignisse.verdacht.nachricht",
+      code: "channel_events.verdacht.nachricht",
       detail: {},
     }]);
     expect(diagnose("channel.suspicious_user.update", {
       low_trust_status: "unbekannt",
       moderator_user_name: 42,
     })).toEqual([{
-      code: "kanalereignisse.verdacht.einstufung",
+      code: "channel_events.verdacht.einstufung",
       detail: {},
     }]);
   });
@@ -280,7 +280,7 @@ describe("Kanalereignisse-Domain", () => {
       user_name: "Person",
       message: "x".repeat(240),
     })).toEqual([{
-      code: "kanalereignisse.automod.halte",
+      code: "channel_events.automod.halte",
       detail: { person: "Person", text: `${"x".repeat(199)}…` },
     }]);
   });

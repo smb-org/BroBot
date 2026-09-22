@@ -95,9 +95,9 @@ describe("Broadcaster-Scopes", () => {
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
-    await insertMember(database, "kanal-b", "kanal-a", "verwalter");
+    await insertMember(database, "kanal-b", "kanal-a", "manager");
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'werbung', 1, '{}'), ('kanal-b', 'werbung', 1, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'ads', 1, '{}'), ('kanal-b', 'ads', 1, '{}')",
     ).run();
 
     await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual(["channel:read:ads"]);
@@ -110,7 +110,7 @@ describe("Broadcaster-Scopes", () => {
     await insertLoginIdentityAndSession(database, "kanal-a");
     await insertMember(database, "kanal-b", "kanal-a", "broadcaster");
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-b', 'werbung', 1, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-b', 'ads', 1, '{}')",
     ).run();
 
     await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual([]);

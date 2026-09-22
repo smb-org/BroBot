@@ -52,7 +52,7 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'werbung', 1, '{"automatisch":"a","manuell":"m","vorwarnung":true,"vorlaufSekunden":60,"vorwarnungText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatisch":"a","manuell":"m","vorwarnung":true,"vorlaufSekunden":60,"vorwarnungText":"gleich {seconds}"}')`,
     ).run();
 
     const planer = planerAttrappe();
@@ -72,7 +72,7 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
     const zeilen = await database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a' ORDER BY rowid",
     ).all<{ code: string }>();
-    expect(zeilen.results.map((zeile) => zeile.code)).toEqual(["werbung.vorwarnung.scope_fehlt"]);
+    expect(zeilen.results.map((zeile) => zeile.code)).toEqual(["ads.vorwarnung.scope_fehlt"]);
   });
 
   it("rührt die Kanalbindung auch dann nicht an, wenn das Modul abgeschaltet ist", async () => {
@@ -81,7 +81,7 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'werbung', 0, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'ads', 0, '{}')",
     ).run();
 
     await verarbeiteWerbevorwarnung(

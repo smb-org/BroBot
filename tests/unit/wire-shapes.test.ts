@@ -137,7 +137,7 @@ const panelChannelState: PanelChannelState = {
   channelId: "kanal-a",
   login: "kanal-a",
   displayName: "Kanal A",
-  role: "verwalter",
+  role: "manager",
   broadcasterConnection: "connected",
   channelBotConsent: "granted",
   bot: panelBotStatus,
@@ -161,7 +161,7 @@ const panelChannelOverview: PanelChannelOverview = {
 };
 
 const panelModuleState: PanelModuleState = {
-  id: "werbung",
+  id: "ads",
   enabled: true,
   settings: JSON.stringify(werbungModul.defaultSettings),
   requiredBroadcasterScopes: ["channel:read:ads"],
@@ -173,7 +173,7 @@ const panelMember: PanelMember = {
   login: "person",
   displayName: "Person",
   profileImageUrl: null,
-  role: "bediener",
+  role: "operator",
   joinedAt: "2026-09-18T00:00:00.000Z",
 };
 
@@ -189,7 +189,7 @@ const panelAuditEntry: PanelAuditEntry = {
   actorUserId: "user-1",
   actorLogin: "person",
   actorDisplayName: "Person",
-  actorKind: "mitglied",
+  actorKind: "member",
   createdAt: "2026-09-18T00:00:00.000Z",
   moduleId: "raid",
   action: "modul.aktiviert",
@@ -220,7 +220,7 @@ const panelBetreiberKanal: PanelBetreiberKanalÜbersicht = {
 
 const panelBetreiberAuditEntry: PanelBetreiberAuditEntry = {
   ...panelAuditEntry,
-  actorKind: "betreiber",
+  actorKind: "platform_admin",
   channelId: "kanal-a",
 };
 
@@ -276,7 +276,7 @@ const panelForms = {
 const moduleActions: readonly ModuleAction[] = [
   { kind: "chat", text: "Hallo", replyToMessageId: "message-1" },
   { kind: "shoutout", zielKanalId: "kanal-b" },
-  { kind: "overlay", type: "hinweis", payload: { text: "Hallo" } },
+  { kind: "overlay", type: "warning", payload: { text: "Hallo" } },
 ];
 
 const moduleDiagnostic: ModuleDiagnostic = {
@@ -284,17 +284,17 @@ const moduleDiagnostic: ModuleDiagnostic = {
   detail: { grund: "raid_erkannt", zuschauer: 5, erlaubt: true, fehlend: null },
 };
 
-const moduleActor: ModuleActor = { userId: "user-1", login: "person", role: "verwalter" };
+const moduleActor: ModuleActor = { userId: "user-1", login: "person", role: "manager" };
 const moduleEvent: ModuleEvent = {
   channelId: "kanal-a",
   subscriptionType: "channel.chat.message",
-  subscriptionVariant: "eingehend",
+  subscriptionVariant: "incoming",
   triggerId: "trigger-1",
   payload: { message_id: "message-1" },
   settings: {},
   receivedAt: "2026-09-18T00:00:00.000Z",
   actor: moduleActor,
-  chatStatus: ["moderator", "abonnent"],
+  chatStatus: ["moderator", "subscriber"],
 };
 
 const moduleForms = {
@@ -328,17 +328,17 @@ const realtimeForms = {
     id: "message-1",
     createdAt: "2026-09-18T00:00:00.000Z",
     channelId: "kanal-a",
-    type: "system.hallo",
+    type: "system.hello",
     payload: {},
-  } satisfies RealtimeEnvelope<"system.hallo">,
+  } satisfies RealtimeEnvelope<"system.hello">,
   eventLog: {
     version: 1,
     id: "message-2",
     createdAt: "2026-09-18T00:00:00.000Z",
     channelId: "kanal-a",
-    type: "ereignisprotokoll.neu",
+    type: "event_log.new",
     payload: { entries: [realtimeEventLogHint] },
-  } satisfies RealtimeEnvelope<"ereignisprotokoll.neu">,
+  } satisfies RealtimeEnvelope<"event_log.new">,
   overlayPrincipal: {
     v: 1,
     kind: "overlay",
@@ -349,7 +349,7 @@ const realtimeForms = {
 };
 
 const expectedModuleSettings = {
-  kanalereignisse: {},
+  channel_events: {},
   raid: {
     shoutoutAktiv: true,
     shoutoutSchwelle: 3,
@@ -357,8 +357,8 @@ const expectedModuleSettings = {
     textVoll: "Willkommen {channel}! Danke für den Raid mit {viewers} Zuschauern — schaut gerne vorbei!",
     textKlein: "Danke für den Raid, {channel}, mit {viewers} Zuschauern!",
   },
-  textbefehle: {},
-  werbung: {
+  text_commands: {},
+  ads: {
     automatisch: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",
     manuell: "Werbepause: {duration} Sekunden. Bin gleich zurück!",
     vorwarnung: true,
@@ -401,15 +401,15 @@ const requestForRealtime = async (userId: string): Promise<Request> => {
 // Erschoepfungskarten: `Record<Union, true>` verlangt vom Compiler jedes Glied
 // genau einmal. Fehlt eines, ist es zuviel oder heisst es anders, bricht der
 // Typecheck -- lange bevor ein Client den geaenderten Wert auf der Leitung sieht.
-const alleRollen: Record<ChannelRole, true> = { broadcaster: true, verwalter: true, bediener: true };
-const alleNachrichtentypen: Record<RealtimeMessageType, true> = { "system.hallo": true, "ereignisprotokoll.neu": true };
+const alleRollen: Record<ChannelRole, true> = { broadcaster: true, manager: true, operator: true };
+const alleNachrichtentypen: Record<RealtimeMessageType, true> = { "system.hello": true, "event_log.new": true };
 const alleEmpfaengerarten: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
-const alleChatStatus: Record<ModuleChatStatus, true> = { zuschauer: true, abonnent: true, vip: true, moderator: true, broadcaster: true };
+const alleChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
 const alleAktionsarten: Record<ModuleAction["kind"], true> = { chat: true, shoutout: true, overlay: true };
 const alleSprachen: Record<ModuleLanguage, true> = { de: true, en: true };
-const alleTextbefehlArten: Record<TextbefehlArt, true> = { text: true, liste: true };
+const alleTextbefehlArten: Record<TextbefehlArt, true> = { text: true, list: true };
 const alleEreignisherkuenfte: Record<PanelEventOrigin, true> = { kanal: true, modul: true };
-const alleTonlagen: Record<EventTone, true> = { info: true, hinweis: true, fehler: true };
+const alleTonlagen: Record<EventTone, true> = { info: true, warning: true, error: true };
 
 describe("serialisierte Vertragsformen", () => {
   it("friert Schlüssel, Werte und Durable-Object-Schlüssel ein", async () => {
@@ -418,7 +418,7 @@ describe("serialisierte Vertragsformen", () => {
     try {
       await insertChannel(principalDatabase, "kanal-a");
       await insertLoginIdentityAndSession(principalDatabase, "user-1");
-      await insertMember(principalDatabase, "kanal-a", "user-1", "verwalter");
+      await insertMember(principalDatabase, "kanal-a", "user-1", "manager");
 
       let panelPrincipal: RealtimePanelPrincipal | null = null;
       const realtimeResponse = await realtimeRouter.fetch(
@@ -431,7 +431,7 @@ describe("serialisierte Vertragsformen", () => {
       expect(panelPrincipal).not.toBeNull();
 
       await insertChannel(eventDatabase, "kanal-a");
-      let eventEnvelope: RealtimeEnvelope<"ereignisprotokoll.neu"> | null = null;
+      let eventEnvelope: RealtimeEnvelope<"event_log.new"> | null = null;
       await eventDatabase.prepare(
         `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
          VALUES ('kanal-a', 'probe', 1, '{}')`,
@@ -446,7 +446,7 @@ describe("serialisierte Vertragsformen", () => {
             idFromName: () => "channel-object-id",
             get: () => ({
               publish: (message: RealtimeEnvelope) => {
-                eventEnvelope = message as RealtimeEnvelope<"ereignisprotokoll.neu">;
+                eventEnvelope = message as RealtimeEnvelope<"event_log.new">;
                 return Promise.resolve();
               },
             }),
@@ -584,30 +584,30 @@ describe("serialisierte Vertragsformen", () => {
         "$.realtime.systemHello: channelId,createdAt,id,payload,type,version",
         "$.realtime.systemHello.payload: ",
       ]);
-      expect(durableObjectKeys).toEqual(["sicherheitsrunde", "werbevorwarnung"]);
+      expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
       expect(MODULES.map((module) => module.id).sort()).toEqual([
-        "kanalereignisse",
+        "ads",
+        "channel_events",
         "raid",
-        "textbefehle",
-        "werbung",
+        "text_commands",
       ]);
       expect(Object.fromEntries(MODULES.map((module) => [module.id, JSON.parse(JSON.stringify(module.defaultSettings))]))).toEqual(expectedModuleSettings);
-      expect([...TEXTBEFEHL_MINDESTSTUFEN].sort()).toEqual(["abonnent", "alle", "broadcaster", "moderator", "vip"]);
+      expect([...TEXTBEFEHL_MINDESTSTUFEN].sort()).toEqual(["broadcaster", "everyone", "moderator", "subscriber", "vip"]);
       // Die geschlossenen Wertemengen sind reine TypeScript-Unions und haben zur
       // Laufzeit keinen Wert, den man auslesen koennte. Ein Literal gegen dasselbe
       // Literal zu pruefen waere eine Tautologie. Stattdessen zwingt ein
       // `Record<Union, true>` den Compiler, jedes Glied genau einmal zu verlangen:
       // ein neues, entferntes oder umbenanntes Glied bricht `pnpm run typecheck`,
       // und die Zusicherung darunter friert die Schreibweise ein.
-      expect(Object.keys(alleRollen).sort()).toEqual(["bediener", "broadcaster", "verwalter"]);
-      expect(Object.keys(alleNachrichtentypen).sort()).toEqual(["ereignisprotokoll.neu", "system.hallo"]);
+      expect(Object.keys(alleRollen).sort()).toEqual(["broadcaster", "manager", "operator"]);
+      expect(Object.keys(alleNachrichtentypen).sort()).toEqual(["event_log.new", "system.hello"]);
       expect(Object.keys(alleEmpfaengerarten).sort()).toEqual(["overlay", "panel"]);
-      expect(Object.keys(alleChatStatus).sort()).toEqual(["abonnent", "broadcaster", "moderator", "vip", "zuschauer"]);
+      expect(Object.keys(alleChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
       expect(Object.keys(alleAktionsarten).sort()).toEqual(["chat", "overlay", "shoutout"]);
       expect(Object.keys(alleSprachen).sort()).toEqual(["de", "en"]);
-      expect(Object.keys(alleTextbefehlArten).sort()).toEqual(["liste", "text"]);
+      expect(Object.keys(alleTextbefehlArten).sort()).toEqual(["list", "text"]);
       expect(Object.keys(alleEreignisherkuenfte).sort()).toEqual(["kanal", "modul"]);
-      expect(Object.keys(alleTonlagen).sort()).toEqual(["fehler", "hinweis", "info"]);
+      expect(Object.keys(alleTonlagen).sort()).toEqual(["error", "info", "warning"]);
     } finally {
       principalDatabase.close();
       eventDatabase.close();

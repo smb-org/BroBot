@@ -76,7 +76,7 @@ const MitgliederTabelle = ({
 }: {
   mitglieder: PanelMember[];
   angefragteEntfernung: string | null;
-  aufRolleÄndern: (mitglied: PanelMember, rolle: "verwalter" | "bediener") => void;
+  aufRolleÄndern: (mitglied: PanelMember, rolle: "manager" | "operator") => void;
   aufEntfernen: (mitglied: PanelMember) => void;
   aufEntfernungBestätigen: (mitglied: PanelMember) => void;
   aufEntfernungAbbrechen: () => void;
@@ -109,7 +109,7 @@ const MitgliederTabelle = ({
                     <select
                       aria-label={texte.rolle + ": " + mitgliedsname(mitglied)}
                       value={mitglied.role}
-                      onChange={(ereignis) => { aufRolleÄndern(mitglied, ereignis.target.value as "verwalter" | "bediener"); }}
+                      onChange={(ereignis) => { aufRolleÄndern(mitglied, ereignis.target.value as "manager" | "operator"); }}
                     >
                       {rollenOptionen()}
                     </select>
@@ -179,7 +179,7 @@ const KanalInspector = ({
   const [suchLogin, setSuchLogin] = useState("");
   const [suchfehler, setSuchfehler] = useState<string | null>(null);
   const [sucheLäuft, setSucheLäuft] = useState(false);
-  const [neueRolle, setNeueRolle] = useState<"verwalter" | "bediener">("bediener");
+  const [neueRolle, setNeueRolle] = useState<"manager" | "operator">("operator");
   const [beschäftigteUserId, setBeschäftigteUserId] = useState<string | null>(null);
   const [angefragteEntfernung, setAngefragteEntfernung] = useState<string | null>(null);
   const [aktionsfehler, setAktionsfehler] = useState<string | null>(null);
@@ -263,7 +263,7 @@ const KanalInspector = ({
     }
   };
 
-  const ändereRolle = async (mitglied: PanelMember, rolle: "verwalter" | "bediener"): Promise<void> => {
+  const ändereRolle = async (mitglied: PanelMember, rolle: "manager" | "operator"): Promise<void> => {
     setBeschäftigteUserId(mitglied.userId);
     setAktionsfehler(null);
     try {
@@ -344,7 +344,7 @@ const KanalInspector = ({
               <span>@{gefundenesMitglied.login} · {texte.twitchId(gefundenesMitglied.userId)}</span>
             </div>
             <label className="config-field config-field--mittel">{texte.rolle}
-              <select aria-label={texte.neueRolle} value={neueRolle} onChange={(ereignis) => { setNeueRolle(ereignis.target.value as "verwalter" | "bediener"); }}>
+              <select aria-label={texte.neueRolle} value={neueRolle} onChange={(ereignis) => { setNeueRolle(ereignis.target.value as "manager" | "operator"); }}>
                 {rollenOptionen()}
               </select>
             </label>
@@ -498,7 +498,7 @@ const BetreiberAudit = ({
   const akteurName = (eintrag: PanelBetreiberAuditEntry): string =>
     eintrag.actorDisplayName ?? (eintrag.actorLogin == null ? eintrag.actorUserId : `@${eintrag.actorLogin}`);
   const akteur = (eintrag: PanelBetreiberAuditEntry): string =>
-    (eintrag.actorKind === "betreiber" ? texte.betreiber : texte.mitglied) + " · " + akteurName(eintrag);
+    (eintrag.actorKind === "platform_admin" ? texte.betreiber : texte.mitglied) + " · " + akteurName(eintrag);
   return (
     <section className="config-section" aria-label={texte.audit}>
       <div className="section-heading"><h2>{texte.audit}</h2></div>

@@ -8,15 +8,15 @@ import { gueltigerBefehlsname } from "./domain";
 
 const bodySchema = z.object({
   name: z.string(),
-  art: z.enum(["text", "liste"]).default("text"),
-  mindeststufe: z.enum(TEXTBEFEHL_MINDESTSTUFEN).default("alle"),
+  art: z.enum(["text", "list"]).default("text"),
+  mindeststufe: z.enum(TEXTBEFEHL_MINDESTSTUFEN).default("everyone"),
   text: z.string().optional(),
   cooldownSekunden: z.number().int().min(0).max(86400),
 });
 const editBodySchema = z.object({
   name: z.string().optional(),
   text: z.string().optional(),
-  art: z.enum(["text", "liste"]).optional(),
+  art: z.enum(["text", "list"]).optional(),
   cooldownSekunden: z.number().int().min(0).max(86400).optional(),
   mindeststufe: z.enum(TEXTBEFEHL_MINDESTSTUFEN).optional(),
   enabled: z.boolean().optional(),
@@ -36,7 +36,7 @@ const validBody = async (request: Request): Promise<z.infer<typeof bodySchema> |
   const parsed = bodySchema.safeParse(await readBody(request));
   if (!parsed.success || !gueltigerBefehlsname(parsed.data.name)) return null;
   if (parsed.data.art === "text" && (parsed.data.text === undefined || parsed.data.text.trim().length === 0)) return null;
-  return { ...parsed.data, text: parsed.data.art === "liste" ? "" : parsed.data.text ?? "" };
+  return { ...parsed.data, text: parsed.data.art === "list" ? "" : parsed.data.text ?? "" };
 };
 
 const validEditBody = async (request: Request): Promise<z.infer<typeof editBodySchema> | null> => {
@@ -53,15 +53,15 @@ export const textbefehlRoutes = new Hono<ModuleRouteEnvironment>();
 const param = (context: { req: { param: (name: string) => string | undefined } }, name: string): string =>
   context.req.param(name) ?? "";
 
-textbefehlRoutes.get("/befehle", async (context) => {
+textbefehlRoutes.get("/commands", async (context) => {
   const repository = createTextbefehlRepository(context.env.DB, context.get("authorizeMutation"));
   return context.json({ befehle: await repository.auflisten(param(context, "channelId")) });
 });
 
-textbefehlRoutes.post("/befehle", async (context) => {
+textbefehlRoutes.post("/commands", async (context) => {
   const body = await validBody(context.req.raw);
   if (body === null) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
-  if (context.get("channelRole") === "bediener") return managementDenied(context);
+  if (context.get("channelRole") === "operator") return managementDenied(context);
   const repository = createTextbefehlRepository(
     context.env.DB,
     context.get("authorizeManagementMutation"),
@@ -75,7 +75,7 @@ textbefehlRoutes.post("/befehle", async (context) => {
     : context.json({ error: "Der Befehl darf nicht angelegt werden." }, 403);
 });
 
-textbefehlRoutes.patch("/befehle/:name", async (context) => {
+textbefehlRoutes.patch("/commands/:name", async (context) => {
   const body = await validEditBody(context.req.raw);
   if (body === null) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
   const repository = createTextbefehlRepository(
@@ -90,9 +90,9 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
   const newName = body.name ?? before.name;
   if (!gueltigerBefehlsname(newName)) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
   const contentChanged = Object.keys(body).some((key) => key !== "enabled");
-  if (contentChanged && context.get("channelRole") === "bediener") return managementDenied(context);
+  if (contentChanged && context.get("channelRole") === "operator") return managementDenied(context);
   const art = body.art ?? before.art;
-  const text = art === "liste" ? "" : body.text ?? before.text;
+  const text = art === "list" ? "" : body.text ?? before.text;
   if (art === "text" && text.trim().length === 0) {
     return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
   }
@@ -124,7 +124,7 @@ textbefehlRoutes.patch("/befehle/:name", async (context) => {
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });
 
-textbefehlRoutes.delete("/befehle/:name", async (context) => {
+textbefehlRoutes.delete("/commands/:name", async (context) => {
   const repository = createTextbefehlRepository(
     context.env.DB,
     context.get("authorizeManagementMutation"),
@@ -133,7 +133,7 @@ textbefehlRoutes.delete("/befehle/:name", async (context) => {
   const channelId = param(context, "channelId");
   const name = param(context, "name");
   if (await repository.finden(channelId, name) === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
-  if (context.get("channelRole") === "bediener") return managementDenied(context);
+  if (context.get("channelRole") === "operator") return managementDenied(context);
   const geloescht = await repository.loeschen(channelId, name, context.get("actor"), nowIso());
   if (geloescht.ok) return new Response(null, { status: 204 });
   if (geloescht.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);

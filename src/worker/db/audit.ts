@@ -15,7 +15,7 @@ export const prepareAudit = (
   action: string,
   before: object | null,
   after: object | null,
-  actorKind: AuditActorKind = "mitglied",
+  actorKind: AuditActorKind = "member",
 ): D1PreparedStatement => db.prepare(
   `INSERT INTO audit_log
     (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)

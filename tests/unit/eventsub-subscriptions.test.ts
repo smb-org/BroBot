@@ -12,7 +12,7 @@ import { TestD1Database } from "./test-d1";
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     { id: "chat", eventSubTypes: ["channel.chat.message"] },
-    { id: "kanalereignisse", eventSubTypes: ["channel.shoutout.create"] },
+    { id: "channel_events", eventSubTypes: ["channel.shoutout.create"] },
     { id: "moderation", eventSubTypes: ["channel.moderate"] },
     { id: "aus", eventSubTypes: ["channel.follow"] },
   ],
@@ -294,7 +294,7 @@ describe("EventSub-Abgleich", () => {
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'kanalereignisse', 1, '{}')`,
+       VALUES ('kanal-a', 'channel_events', 1, '{}')`,
     ).run();
     await database.prepare(
       `INSERT INTO bot_identity

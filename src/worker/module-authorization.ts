@@ -26,14 +26,14 @@ export const authorizeModuleMutation: AuthorizeModuleMutation = (channelId, acto
 export const authorizeModuleManagementMutation: AuthorizeModuleMutation = (channelId, actor, now) => {
   if (actor.sessionId !== undefined) {
     const context: ActorContext = { userId: actor.userId, sessionId: actor.sessionId };
-    return { sql: actorGuard("'broadcaster', 'verwalter'"), values: bindActorGuard(context, channelId, now) };
+    return { sql: actorGuard("'broadcaster', 'manager'"), values: bindActorGuard(context, channelId, now) };
   }
   return {
     sql: `
           AND EXISTS (
             SELECT 1 FROM channel_members
              WHERE channel_id = ? AND user_id = ?
-               AND role IN ('broadcaster', 'verwalter')
+               AND role IN ('broadcaster', 'manager')
           )`,
     values: [channelId, actor.userId],
   };

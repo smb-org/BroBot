@@ -88,7 +88,7 @@ export const hatVollzustimmungFürKanalId = async (
   const zeile = await db.prepare(
     `SELECT 1 AS vorhanden
        FROM channels
-      WHERE channel_id = ? AND vollzustimmung = 1`,
+      WHERE channel_id = ? AND full_consent = 1`,
   ).bind(kanalId).first<VollzustimmungsKanalZeile>();
   return zeile?.vorhanden === 1;
 };
@@ -100,7 +100,7 @@ export const hatVollzustimmungFürKanalLogin = async (
   const zeile = await db.prepare(
     `SELECT 1 AS vorhanden
        FROM channels
-      WHERE login = ? COLLATE NOCASE AND vollzustimmung = 1`,
+      WHERE login = ? COLLATE NOCASE AND full_consent = 1`,
   ).bind(kanalLogin).first<VollzustimmungsKanalZeile>();
   return zeile?.vorhanden === 1;
 };

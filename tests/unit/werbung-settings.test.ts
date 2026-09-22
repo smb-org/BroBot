@@ -16,7 +16,7 @@ describe("Werbung-Einstellungsdefaults", () => {
     await insertChannel(database, "kanal-a");
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'werbung', 1, '{"automatisch":"auto","manuell":"manuell"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatisch":"auto","manuell":"manuell"}')`,
     ).run();
 
     let geleseneEinstellungen: unknown;

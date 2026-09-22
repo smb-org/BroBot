@@ -110,7 +110,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS = [
   userSubscriptionDefinition("channel.chat.message", "1"),
   {
     subscriptionType: "channel.raid",
-    variant: "eingehend",
+    variant: "incoming",
     version: "1",
     buildCondition: (channelId: string, botUserId: string) => {
       void botUserId;
@@ -121,7 +121,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS = [
   },
   {
     subscriptionType: "channel.raid",
-    variant: "ausgehend",
+    variant: "outgoing",
     version: "1",
     buildCondition: (channelId: string, botUserId: string) => {
       void botUserId;

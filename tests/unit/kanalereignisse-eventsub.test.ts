@@ -12,13 +12,13 @@ import { TestD1Database } from "./test-d1";
 describe("Kanalereignisse-EventSub-Ziele", () => {
   it("erzeugt für jeden Typ die vollständige Twitch-Bedingung", () => {
     const raid = EVENTSUB_SUBSCRIPTION_DEFINITIONS.filter((definition) => definition.subscriptionType === "channel.raid");
-    expect(raid.map((definition) => definition.variant)).toEqual(["eingehend", "ausgehend"]);
+    expect(raid.map((definition) => definition.variant)).toEqual(["incoming", "outgoing"]);
     expect(raid.map((definition) => definition.buildCondition("kanal-a", "bot-1"))).toEqual([
       { to_broadcaster_user_id: "kanal-a" },
       { from_broadcaster_user_id: "kanal-a" },
     ]);
-    expect(eventSubDefinitionForCondition("channel.raid", { to_broadcaster_user_id: "kanal-a" })?.variant).toBe("eingehend");
-    expect(eventSubDefinitionForCondition("channel.raid", { from_broadcaster_user_id: "kanal-a" })?.variant).toBe("ausgehend");
+    expect(eventSubDefinitionForCondition("channel.raid", { to_broadcaster_user_id: "kanal-a" })?.variant).toBe("incoming");
+    expect(eventSubDefinitionForCondition("channel.raid", { from_broadcaster_user_id: "kanal-a" })?.variant).toBe("outgoing");
 
     expect(EVENTSUB_SUBSCRIPTION_DEFINITIONS
       .filter((definition) => definition.subscriptionType !== "channel.raid")
@@ -77,7 +77,7 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
       await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
       await database.prepare(
         `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-         VALUES ('kanal-a', 'kanalereignisse', 0, '{}')`,
+         VALUES ('kanal-a', 'channel_events', 0, '{}')`,
       ).run();
 
       await expect(listDesiredEventSubTargets(database as unknown as D1Database, "kanal-a")).resolves.toEqual([]);
@@ -93,13 +93,13 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
       await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
       await database.prepare(
         `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-         VALUES ('kanal-a', 'kanalereignisse', 1, '{}')`,
+         VALUES ('kanal-a', 'channel_events', 1, '{}')`,
       ).run();
 
       const targets = await listDesiredEventSubTargets(database as unknown as D1Database, "kanal-a");
       expect(targets.filter((target) => target.subscriptionType === "channel.raid")).toEqual([
-        { channelId: "kanal-a", subscriptionType: "channel.raid", variant: "eingehend", version: "1" },
-        { channelId: "kanal-a", subscriptionType: "channel.raid", variant: "ausgehend", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.raid", variant: "incoming", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.raid", variant: "outgoing", version: "1" },
       ]);
       expect(targets.filter((target) => target.subscriptionType !== "channel.raid")).toEqual([
         { channelId: "kanal-a", subscriptionType: "channel.shoutout.create", variant: "", version: "1" },
@@ -122,7 +122,7 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
       await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
       await database.prepare(
         `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-         VALUES ('kanal-a', 'kanalereignisse', 0, '{}')`,
+         VALUES ('kanal-a', 'channel_events', 0, '{}')`,
       ).run();
 
       const targets = await listDesiredEventSubTargets(database as unknown as D1Database, "kanal-a");

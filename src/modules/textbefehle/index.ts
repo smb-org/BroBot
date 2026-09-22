@@ -20,7 +20,7 @@ import { verarbeiteTextbefehlNachricht } from "./service";
 const settingsSchema = z.object({});
 
 export const textbefehlModul: BotModule<typeof settingsSchema> = {
-  id: "textbefehle",
+  id: "text_commands",
   settingsSchema,
   defaultSettings: {},
   eventSubTypes: ["channel.chat.message"],

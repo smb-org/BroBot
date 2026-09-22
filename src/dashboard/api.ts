@@ -37,8 +37,8 @@ const hasParentPathSegment = (input: string): boolean => {
 const isAllowedRequestPath = (pathname: string): boolean =>
   pathname === "/api/channels" ||
   pathname.startsWith("/api/channels/") ||
-  pathname === "/api/betreiber" ||
-  pathname.startsWith("/api/betreiber/") ||
+  pathname === "/api/platform" ||
+  pathname.startsWith("/api/platform/") ||
   pathname === "/api/csrf" ||
   pathname === "/auth/logout";
 
@@ -94,16 +94,16 @@ export const fetchChannels = (signal?: AbortSignal): Promise<PanelChannelsRespon
   requestJson<PanelChannelsResponse>("/api/channels", requestOptions(signal));
 
 export const holeBetreiberÜbersicht = (): Promise<PanelBetreiberÜbersichtResponse> =>
-  requestJson<PanelBetreiberÜbersichtResponse>("/api/betreiber");
+  requestJson<PanelBetreiberÜbersichtResponse>("/api/platform");
 
 export const sucheBetreiberNutzer = (login: string): Promise<{ user: PanelTwitchUser }> =>
-  requestJson<{ user: PanelTwitchUser }>(`/api/betreiber/nutzer?${new URLSearchParams({ login }).toString()}`);
+  requestJson<{ user: PanelTwitchUser }>(`/api/platform/users?${new URLSearchParams({ login }).toString()}`);
 
 export const gibBetreiberKanalFrei = (
   login: string,
   vollzustimmung: boolean,
 ): Promise<{ channel: PanelBetreiberÜbersichtResponse["channels"][number] }> => requestMutation(
-  "/api/betreiber/kanaele",
+  "/api/platform/channels",
   "POST",
   { login, vollzustimmung },
 );
@@ -112,7 +112,7 @@ export const setzeBetreiberVollzustimmung = (
   channelId: string,
   vollzustimmung: boolean,
 ): Promise<{ channel: PanelBetreiberÜbersichtResponse["channels"][number] }> => requestMutation(
-  `/api/betreiber/kanaele/${encodeURIComponent(channelId)}`,
+  `/api/platform/channels/${encodeURIComponent(channelId)}`,
   "PATCH",
   { vollzustimmung },
 );
@@ -125,16 +125,16 @@ export const holeBetreiberMitglieder = (
   if (cursor !== null) parameter.set("cursor", cursor);
   const query = parameter.toString();
   return requestJson<PanelBetreiberMitgliederResponse>(
-    `/api/betreiber/kanaele/${encodeURIComponent(channelId)}/mitglieder${query.length > 0 ? `?${query}` : ""}`,
+    `/api/platform/channels/${encodeURIComponent(channelId)}/members${query.length > 0 ? `?${query}` : ""}`,
   );
 };
 
 export const fügeBetreiberMitgliedHinzu = (
   channelId: string,
   userId: string,
-  role: "verwalter" | "bediener",
+  role: "manager" | "operator",
 ): Promise<{ member: PanelBetreiberMitgliederResponse["members"][number] }> => requestMutation(
-  `/api/betreiber/kanaele/${encodeURIComponent(channelId)}/mitglieder`,
+  `/api/platform/channels/${encodeURIComponent(channelId)}/members`,
   "POST",
   { userId, role },
 );
@@ -142,16 +142,16 @@ export const fügeBetreiberMitgliedHinzu = (
 export const ändereBetreiberMitglied = (
   channelId: string,
   userId: string,
-  role: "verwalter" | "bediener",
+  role: "manager" | "operator",
 ): Promise<{ member: PanelBetreiberMitgliederResponse["members"][number] }> => requestMutation(
-  `/api/betreiber/kanaele/${encodeURIComponent(channelId)}/mitglieder/${encodeURIComponent(userId)}`,
+  `/api/platform/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}`,
   "PATCH",
   { role },
 );
 
 export const entferneBetreiberMitglied = (channelId: string, userId: string): Promise<undefined> =>
   requestMutation<undefined>(
-    `/api/betreiber/kanaele/${encodeURIComponent(channelId)}/mitglieder/${encodeURIComponent(userId)}`,
+    `/api/platform/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}`,
     "DELETE",
   );
 
@@ -159,7 +159,7 @@ export const holeBetreiberAudit = (cursor: string | null = null): Promise<PanelB
   const parameter = new URLSearchParams();
   if (cursor !== null) parameter.set("cursor", cursor);
   const query = parameter.toString();
-  return requestJson<PanelBetreiberAuditResponse>(`/api/betreiber/audit${query.length > 0 ? `?${query}` : ""}`);
+  return requestJson<PanelBetreiberAuditResponse>(`/api/platform/audit${query.length > 0 ? `?${query}` : ""}`);
 };
 
 export const fetchChannelOverview = (

@@ -8,7 +8,7 @@ import type {
 import { kuerzeAuf200Zeichen, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
 import type { TextbefehlMutationsergebnis, TextbefehlRepository } from "../repository";
 
-const MODULE_ID = "textbefehle";
+const MODULE_ID = "text_commands";
 
 const auditWerte = (befehl: Pick<Textbefehl, "name" | "text" | "art" | "enabled" | "mindeststufe" | "cooldownSekunden">) => ({
   name: befehl.name,
@@ -52,9 +52,9 @@ interface TextbefehlRow {
   channel_id: string;
   command_name: string;
   response_text: string;
-  art: "text" | "liste";
+  kind: "text" | "list";
   enabled: number;
-  minimum_level: "alle" | "abonnent" | "vip" | "moderator" | "broadcaster";
+  minimum_level: "everyone" | "subscriber" | "vip" | "moderator" | "broadcaster";
   cooldown_seconds: number;
   last_used_at: string | null;
   created_at: string;
@@ -65,7 +65,7 @@ const mapTextbefehl = (row: TextbefehlRow): Textbefehl => ({
   channelId: row.channel_id,
   name: row.command_name,
   text: row.response_text,
-  art: row.art,
+  art: row.kind,
   enabled: row.enabled === 1,
   mindeststufe: row.minimum_level,
   cooldownSekunden: row.cooldown_seconds,
@@ -81,9 +81,9 @@ export const createTextbefehlRepository = (
 ): TextbefehlRepository => ({
   async auflisten(channelId: string): Promise<Textbefehl[]> {
     const result = await db.prepare(
-      `SELECT channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds,
+      `SELECT channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
               last_used_at, created_at, updated_at
-         FROM textbefehle_commands
+         FROM text_commands
         WHERE channel_id = ?
         ORDER BY command_name`,
     ).bind(channelId).all<TextbefehlRow>();
@@ -92,9 +92,9 @@ export const createTextbefehlRepository = (
 
   async finden(channelId: string, name: string): Promise<Textbefehl | null> {
     const row = await db.prepare(
-      `SELECT channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds,
+      `SELECT channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
               last_used_at, created_at, updated_at
-         FROM textbefehle_commands
+         FROM text_commands
         WHERE channel_id = ? AND command_name = ?`,
     ).bind(channelId, name).first<TextbefehlRow>();
     return row === null ? null : mapTextbefehl(row);
@@ -103,13 +103,13 @@ export const createTextbefehlRepository = (
   async anlegen(input: NeuerTextbefehl, actor: TextbefehlAkteur): Promise<TextbefehlMutationsergebnis> {
     if (await this.finden(input.channelId, input.name) !== null) return fehlgeschlagen("existiert");
     const authorization = authorizeMutation(input.channelId, actor, input.now);
-    const mindeststufe = input.mindeststufe ?? "alle";
+    const mindeststufe = input.mindeststufe ?? "everyone";
     const mutation = db.prepare(
-      `INSERT INTO textbefehle_commands
-        (channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
+      `INSERT INTO text_commands
+        (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
        SELECT ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?
         WHERE NOT EXISTS (
-          SELECT 1 FROM textbefehle_commands
+          SELECT 1 FROM text_commands
            WHERE channel_id = ? AND command_name = ?
         )
         ${authorization.sql}`,
@@ -129,7 +129,7 @@ export const createTextbefehlRepository = (
     const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
-      action: "textbefehle.befehl.angelegt",
+      action: "text_commands.befehl.angelegt",
       before: null,
       after: auditWerte({ ...input, mindeststufe, enabled: true }),
     }, input.now);
@@ -148,10 +148,10 @@ export const createTextbefehlRepository = (
     const mindeststufe = input.mindeststufe ?? beforeMindeststufe;
     const mutation = input.nurSchalter === true
       ? db.prepare(
-        `UPDATE textbefehle_commands
+        `UPDATE text_commands
             SET enabled = ?, updated_at = ?
           WHERE channel_id = ? AND command_name = ?
-            AND response_text = ? AND art = ? AND enabled = ?
+            AND response_text = ? AND kind = ? AND enabled = ?
             AND minimum_level = ? AND cooldown_seconds = ?
             ${authorization.sql}`,
       ).bind(
@@ -167,13 +167,13 @@ export const createTextbefehlRepository = (
         ...authorization.values,
       )
       : db.prepare(
-        `UPDATE textbefehle_commands
-          SET command_name = ?, response_text = ?, art = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?, updated_at = ?
+        `UPDATE text_commands
+          SET command_name = ?, response_text = ?, kind = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?, updated_at = ?
           WHERE channel_id = ? AND command_name = ?
-            AND response_text = ? AND art = ? AND enabled = ?
+            AND response_text = ? AND kind = ? AND enabled = ?
             AND minimum_level = ? AND cooldown_seconds = ?
             AND (? = command_name OR NOT EXISTS (
-              SELECT 1 FROM textbefehle_commands
+              SELECT 1 FROM text_commands
                WHERE channel_id = ? AND command_name = ?
             ))
             ${authorization.sql}`,
@@ -211,7 +211,7 @@ export const createTextbefehlRepository = (
     const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
-      action: "textbefehle.befehl.geändert",
+      action: "text_commands.befehl.geändert",
       before: auditWerte(before),
       after: auditWerte(after),
     }, input.now);
@@ -229,9 +229,9 @@ export const createTextbefehlRepository = (
     if (before === null) return fehlgeschlagen("nicht_gefunden");
     const authorization = authorizeMutation(channelId, actor, now);
     const mutation = db.prepare(
-      `DELETE FROM textbefehle_commands
+      `DELETE FROM text_commands
         WHERE channel_id = ? AND command_name = ?
-          AND response_text = ? AND art = ? AND enabled = ?
+          AND response_text = ? AND kind = ? AND enabled = ?
           AND minimum_level = ? AND cooldown_seconds = ?
           ${authorization.sql}`,
     ).bind(
@@ -247,7 +247,7 @@ export const createTextbefehlRepository = (
     const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
       channelId,
       moduleId: MODULE_ID,
-      action: "textbefehle.befehl.entfernt",
+      action: "text_commands.befehl.entfernt",
       before: auditWerte(before),
       after: null,
     }, now);
@@ -259,7 +259,7 @@ export const createTextbefehlRepository = (
 
   async beanspruchen(channelId: string, name: string, now: string): Promise<TextbefehlBeanspruchung | null> {
     const result = await db.prepare(
-      `UPDATE textbefehle_commands
+      `UPDATE text_commands
           SET last_used_at = ?, updated_at = ?
         WHERE channel_id = ? AND command_name = ?
           AND enabled = 1
@@ -281,11 +281,11 @@ export const initialisiereListenbefehl = async (
 ): Promise<readonly D1PreparedStatement[] | undefined> => {
   const authorization = authorizeMutation(channelId, actor, now);
   const mutation = db.prepare(
-    `INSERT INTO textbefehle_commands
-      (channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
-     SELECT ?, 'befehle', '', 'liste', 1, 'alle', 5, NULL, ?, ?
+    `INSERT INTO text_commands
+      (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
+     SELECT ?, 'befehle', '', 'list', 1, 'everyone', 5, NULL, ?, ?
       WHERE NOT EXISTS (
-        SELECT 1 FROM textbefehle_commands
+        SELECT 1 FROM text_commands
          WHERE channel_id = ? AND command_name = 'befehle'
       )
       ${prepareModuleAudit === undefined ? "" : "AND changes() > 0"}
@@ -306,9 +306,9 @@ export const initialisiereListenbefehl = async (
     prepareModuleAudit({
       channelId,
       moduleId: MODULE_ID,
-      action: "textbefehle.befehl.angelegt",
+      action: "text_commands.befehl.angelegt",
       before: null,
-      after: { name: "befehle", art: "liste", enabled: true, mindeststufe: "alle", text: "", cooldownSekunden: 5 },
+      after: { name: "befehle", art: "list", enabled: true, mindeststufe: "everyone", text: "", cooldownSekunden: 5 },
     }, now),
   ];
 };

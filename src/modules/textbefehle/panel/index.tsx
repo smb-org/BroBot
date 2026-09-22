@@ -149,9 +149,9 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
       </label>
       <label className="config-field config-field--schmal">
         {labels.art}
-        <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "liste"); }} disabled={!canManageContent || busy}>
+        <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "list"); }} disabled={!canManageContent || busy}>
           <option value="text">{labels.artText}</option>
-          <option value="liste">{labels.artListe}</option>
+          <option value="list">{labels.artListe}</option>
         </select>
       </label>
       {art === "text" ? <label className="config-field config-field--breit">
@@ -212,7 +212,7 @@ const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: 
 const TextbefehlZeile = ({ initial, language, selected, onSelect, rowRef, canManageContent, toggleBusy, onToggle, minimumBusy, onMinimumChange }: TextbefehlZeileProperties): ReactElement => {
   const labels = textbefehleTexte(language);
   const minimumDisabledReason = canManageContent ? undefined : labels.mindeststufeGesperrt;
-  const mindeststufe = (initial as { mindeststufe?: TextbefehlMindeststufe }).mindeststufe ?? "alle";
+  const mindeststufe = (initial as { mindeststufe?: TextbefehlMindeststufe }).mindeststufe ?? "everyone";
   return (
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
@@ -261,7 +261,7 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [text, setText] = useState("");
-  const [art, setArt] = useState<"text" | "liste">("text");
+  const [art, setArt] = useState<"text" | "list">("text");
   const [cooldownSekunden, setCooldownSekunden] = useState<number | "">(5);
   const [cooldownError, setCooldownError] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -311,7 +311,7 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
     anlegenButton.current?.focus();
   };
   const nameValid = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name.trim());
-  const canCreate = nameValid && (art === "liste" || text.trim().length > 0);
+  const canCreate = nameValid && (art === "list" || text.trim().length > 0);
 
   const create = async (): Promise<void> => {
     if (!canManageContent || !canCreate || creating) return;
@@ -393,9 +393,9 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
               </label>
               <label className="config-field config-field--schmal">
                 {labels.art}
-                <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "liste"); }} disabled={!canManageContent}>
+                <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
                   <option value="text">{labels.artText}</option>
-                  <option value="liste">{labels.artListe}</option>
+                  <option value="list">{labels.artListe}</option>
                 </select>
               </label>
               {art === "text" ? <label className="config-field config-field--breit">

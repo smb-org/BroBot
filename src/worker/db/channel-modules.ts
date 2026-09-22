@@ -73,7 +73,7 @@ export const createChannelModuleWithAudit = async (
         SELECT 1 FROM channel_modules
          WHERE channel_id = ? AND module_id = ?
       )
-      ${actorGuard("'broadcaster', 'verwalter'")}`,
+      ${actorGuard("'broadcaster', 'manager'")}`,
   ).bind(
     module.channelId,
     module.moduleId,
@@ -114,7 +114,7 @@ export const updateChannelModuleWithAudit = async (
       WHERE channel_id = ? AND module_id = ?
         AND enabled = ?
         AND settings = ?
-      ${actorGuard("'broadcaster', 'verwalter'")}`,
+      ${actorGuard("'broadcaster', 'manager'")}`,
   ).bind(
     after.enabled ? 1 : 0,
     after.settings,

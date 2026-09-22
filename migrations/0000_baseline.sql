@@ -16,8 +16,8 @@ CREATE TABLE audit_log (
   before_json TEXT NOT NULL,
   after_json TEXT NOT NULL,
   module_id TEXT,
-  actor_kind TEXT NOT NULL DEFAULT 'mitglied'
-  CHECK (actor_kind IN ('mitglied', 'betreiber')),
+  actor_kind TEXT NOT NULL DEFAULT 'member'
+  CHECK (actor_kind IN ('member', 'platform_admin')),
   FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE
 );
 
@@ -83,7 +83,7 @@ CREATE TABLE bot_identity_status (
 CREATE TABLE "channel_members" (
   channel_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('broadcaster', 'verwalter', 'bediener')),
+  role TEXT NOT NULL CHECK (role IN ('broadcaster', 'manager', 'operator')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (channel_id, user_id),
@@ -114,8 +114,8 @@ CREATE TABLE channels (
 ,
   language TEXT NOT NULL DEFAULT 'de'
   CHECK (language IN ('de', 'en')),
-  vollzustimmung INTEGER NOT NULL DEFAULT 0
-  CHECK (vollzustimmung IN (0, 1)));
+  full_consent INTEGER NOT NULL DEFAULT 0
+  CHECK (full_consent IN (0, 1)));
 
 CREATE TABLE event_log (
   event_id TEXT PRIMARY KEY,
@@ -208,7 +208,7 @@ CREATE TABLE overlay_tokens (
 
 CREATE INDEX overlay_tokens_channel_idx ON overlay_tokens(channel_id);
 
-CREATE TABLE textbefehle_commands (
+CREATE TABLE text_commands (
   channel_id TEXT NOT NULL,
   command_name TEXT NOT NULL,
   response_text TEXT NOT NULL,
@@ -216,17 +216,17 @@ CREATE TABLE textbefehle_commands (
   last_used_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  art TEXT NOT NULL DEFAULT 'text' CHECK (art IN ('text', 'liste')),
+  kind TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'list')),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-  minimum_level TEXT NOT NULL DEFAULT 'alle'
-  CHECK (minimum_level IN ('alle', 'abonnent', 'vip', 'moderator', 'broadcaster')),
+  minimum_level TEXT NOT NULL DEFAULT 'everyone'
+  CHECK (minimum_level IN ('everyone', 'subscriber', 'vip', 'moderator', 'broadcaster')),
   PRIMARY KEY (channel_id, command_name),
   FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE,
-  CHECK (art = 'liste' OR length(trim(response_text)) > 0)
+  CHECK (kind = 'list' OR length(trim(response_text)) > 0)
 );
 
-CREATE INDEX textbefehle_commands_channel_idx
-  ON textbefehle_commands(channel_id, command_name);
+CREATE INDEX text_commands_channel_idx
+  ON text_commands(channel_id, command_name);
 
 CREATE TABLE twitch_app_access_token (
   id INTEGER PRIMARY KEY CHECK (id = 1),

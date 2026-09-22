@@ -108,7 +108,7 @@ const errorMessage = (error: unknown): string => {
   return membersTexte().aenderungFehlgeschlagen;
 };
 
-const canManage = (role: ChannelRole): boolean => role !== "bediener";
+const canManage = (role: ChannelRole): boolean => role !== "operator";
 
 /**
  * Was der Worker ablehnen würde, bietet die Oberfläche nicht als Möglichkeit
@@ -140,7 +140,7 @@ const waehlbareRollen = (
 ): readonly ChannelRole[] => {
   if (letzterBroadcaster(member, broadcasterCount)) return [member.role];
   if (member.userId !== eigeneUserId) return manageableRoles;
-  const rang: Record<ChannelRole, number> = { bediener: 0, verwalter: 1, broadcaster: 2 };
+  const rang: Record<ChannelRole, number> = { operator: 0, manager: 1, broadcaster: 2 };
   return manageableRoles.filter((rolle) => rang[rolle] <= rang[member.role]);
 };
 
@@ -261,7 +261,7 @@ export const MembersPage = ({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [foundUser, setFoundUser] = useState<PanelTwitchUser | null>(null);
-  const [newRole, setNewRole] = useState<ChannelRole>("bediener");
+  const [newRole, setNewRole] = useState<ChannelRole>("operator");
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmingAdd, setConfirmingAdd] = useState(false);

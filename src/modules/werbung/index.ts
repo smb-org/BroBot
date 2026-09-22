@@ -10,7 +10,7 @@ export type { LetzteWerbepause, WerbungZeitplan, WerbungZeitplanAntwort } from "
 export { WERBUNG_OPTIONALE_BROADCASTER_SCOPES } from "./contracts";
 
 export const werbungModul: BotModule<typeof werbungSettingsSchema> = {
-  id: "werbung",
+  id: "ads",
   settingsSchema: werbungSettingsSchema,
   defaultSettings: {
     automatisch: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",

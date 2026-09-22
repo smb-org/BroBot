@@ -10,8 +10,11 @@ import { verarbeiteWerbevorwarnung } from "../werbe-vorwarnung";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
-const SECURITY_DEADLINE_KEY = "sicherheitsrunde";
-const WERBEVORWARNUNG_DEADLINE_KEY = "werbevorwarnung";
+// Beim Reset wird die Durable-Object-Klasse verworfen; deshalb sind neue Schlüssel
+// sicher. Ohne diesen Reset fände scheduleEarliestAlarm() alte Fristen nicht,
+// löschte den Wecker lautlos, und Sicherheitsrunde sowie Werbevorwarnung fielen aus.
+const SECURITY_DEADLINE_KEY = "security_round";
+const WERBEVORWARNUNG_DEADLINE_KEY = "ad_prewarning";
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
 
@@ -73,8 +76,8 @@ const tagsFor = (principal: RealtimePrincipal): string[] => principal.kind === "
 
 const envelopeFor = (
   channelId: string,
-  type: "system.hallo",
-): RealtimeEnvelope<"system.hallo"> => ({
+  type: "system.hello",
+): RealtimeEnvelope<"system.hello"> => ({
   version: 1,
   id: crypto.randomUUID(),
   createdAt: new Date().toISOString(),
@@ -171,7 +174,7 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
     void this.scheduleSecurityAlarm();
-    pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hallo")));
+    pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
     return new Response(null, {
       status: 101,
       headers: { "Sec-WebSocket-Protocol": REALTIME_PROTOCOL },

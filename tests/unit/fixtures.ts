@@ -68,7 +68,7 @@ export const insertMember = async (
   database: TestD1Database,
   channelId: string,
   userId: string,
-  role: "broadcaster" | "verwalter" | "bediener",
+  role: "broadcaster" | "manager" | "operator",
 ): Promise<void> => {
   await database.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)

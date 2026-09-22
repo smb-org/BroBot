@@ -18,8 +18,8 @@ const event = (subscriptionType: string, payload: Record<string, unknown>, subsc
 describe("Kanalereignisse-Modul", () => {
   it("gibt für alle Ereignisarten niemals Aktionen zurück", async () => {
     const events = [
-      event("channel.raid", { viewers: 4 }, "eingehend"),
-      event("channel.raid", { viewers: 4 }, "ausgehend"),
+      event("channel.raid", { viewers: 4 }, "incoming"),
+      event("channel.raid", { viewers: 4 }, "outgoing"),
       event("channel.shoutout.create", {}),
       event("channel.shoutout.receive", {}),
       event("channel.chat.notification", { notice_type: "sub" }),

@@ -13,7 +13,7 @@ export const prepareModuleAudit = (
   actorUserId: string,
   changedAt: string,
   entry: ModuleAuditEntry,
-  actorKind: AuditActorKind = "mitglied",
+  actorKind: AuditActorKind = "member",
 ): D1PreparedStatement => prepareAudit(
   db,
   actorUserId,

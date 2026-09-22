@@ -36,7 +36,7 @@ describe("Werbung-Modul", () => {
     expect(automatisch.actions).toEqual([{ kind: "chat", text: "Automatische Werbepause: 30 Sekunden. Bin gleich zurück!" }]);
     expect(manuell.actions).toEqual([{ kind: "chat", text: "Werbepause: 90 Sekunden. Bin gleich zurück!" }]);
     expect(automatisch.diagnostics[0]).toEqual({
-      code: "werbung.ankuendigung",
+      code: "ads.ankuendigung",
       detail: {
         dauer: 30,
         automatisch: true,
@@ -55,7 +55,7 @@ describe("Werbung-Modul", () => {
     }))).toEqual({
       actions: [],
       diagnostics: [{
-        code: "werbung.uebersprungen",
+        code: "ads.uebersprungen",
         detail: { grund: "dauer_null", dauer: 0, automatisch: false },
       }],
     });

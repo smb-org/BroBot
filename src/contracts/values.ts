@@ -1,10 +1,10 @@
-export const CHANNEL_ROLES = ["broadcaster", "verwalter", "bediener"] as const;
+export const CHANNEL_ROLES = ["broadcaster", "manager", "operator"] as const;
 export type ChannelRole = (typeof CHANNEL_ROLES)[number];
 
-export const AUDIT_ACTOR_KINDS = ["mitglied", "betreiber"] as const;
+export const AUDIT_ACTOR_KINDS = ["member", "platform_admin"] as const;
 export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
 
-export const EVENT_TONES = ["info", "hinweis", "fehler"] as const;
+export const EVENT_TONES = ["info", "warning", "error"] as const;
 export type EventTone = (typeof EVENT_TONES)[number];
 
 export const IDENTITY_STATUSES = ["connected", "revoked", "error"] as const;

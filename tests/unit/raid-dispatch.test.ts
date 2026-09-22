@@ -60,7 +60,7 @@ describe("Raid-Ausführung", () => {
       }, {
         channelId: "kanal-a",
         subscriptionType: "channel.raid",
-        subscriptionVariant: "eingehend",
+        subscriptionVariant: "incoming",
         triggerId: "raid-trigger",
         payload: {
           from_broadcaster_user_id: "quelle-1",

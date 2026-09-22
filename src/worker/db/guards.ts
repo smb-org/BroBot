@@ -68,7 +68,7 @@ export const betreiberSessionGuard = (
  * Handler, damit sie auch dann gilt, wenn sich die Rolle zwischen Guard und
  * Mutation aendert.
  */
-export const ANY_MEMBER_ROLES = "'broadcaster', 'verwalter', 'bediener'";
+export const ANY_MEMBER_ROLES = "'broadcaster', 'manager', 'operator'";
 
 /** Gemeinsame SQL-Prüfung der Broadcaster-Zustimmung für channel:bot. */
 export const channelBotConsentCondition = (channelAlias: string): string => `
@@ -89,7 +89,7 @@ export const requiredActorRoles = (
   existingRole?: ChannelMemberRecord["role"],
 ): string => targetRole === "broadcaster" || existingRole === "broadcaster"
   ? "'broadcaster'"
-  : "'broadcaster', 'verwalter'";
+  : "'broadcaster', 'manager'";
 
 export const bindActorGuard = (actor: ActorContext, channelId: string, now: string) =>
   [actor.sessionId, actor.userId, now, channelId] as const;

@@ -563,7 +563,7 @@ const PanelTopbar = ({ route, channels, betreiber, activeChannel, moduleStates, 
     ? null
     : tone === "healthy" ? texte.kopf.verbindungLaeuft : statusText(activeChannel);
   const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
-  const headerSwitch = headerModuleLabel === null ? null : <span className="topbar__module-switch-wrap"><button className="switch topbar__module-switch" type="button" role="switch" aria-label={headerModuleLabel} aria-checked={headerModule?.enabled} aria-busy={headerModuleBusy} disabled={activeChannel?.role === "bediener" || headerModuleBusy} title={activeChannel?.role === "bediener" ? texte.module.verwaltungGesperrt : undefined} onClick={onToggleHeaderModule}><span className="topbar__module-switch-label">{headerModuleLabel}</span><span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span></button>{activeChannel?.role === "bediener" ? <span className="sperrgrund">{texte.module.verwaltungGesperrt}</span> : null}</span>;
+  const headerSwitch = headerModuleLabel === null ? null : <span className="topbar__module-switch-wrap"><button className="switch topbar__module-switch" type="button" role="switch" aria-label={headerModuleLabel} aria-checked={headerModule?.enabled} aria-busy={headerModuleBusy} disabled={activeChannel?.role === "operator" || headerModuleBusy} title={activeChannel?.role === "operator" ? texte.module.verwaltungGesperrt : undefined} onClick={onToggleHeaderModule}><span className="topbar__module-switch-label">{headerModuleLabel}</span><span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span></button>{activeChannel?.role === "operator" ? <span className="sperrgrund">{texte.module.verwaltungGesperrt}</span> : null}</span>;
   const connectionLed = connectionLabel === null ? null : <span className="led" data-status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : "red"}><span className="led__dot" aria-hidden="true" /><span>{connectionLabel}</span></span>;
   const areaRoute = route.kind === "channel"
     ? { kind: "channel" as const, channelId: route.channelId, section: route.section }
@@ -953,7 +953,7 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
         kind="channel"
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
-        actions={<><ModeratorCheckAction canCheck={overview.role !== "bediener"} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
+        actions={<><ModeratorCheckAction canCheck={overview.role !== "operator"} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
       />
       <div className="zustand-liste">{eintraege.map((eintrag) => <Fragment key={eintrag.key}>{eintrag.node}</Fragment>)}</div>
       <BotPermissionsInspector permissions={overview.botPermissions} />
@@ -1040,7 +1040,7 @@ const eventTone = (code: string): EventTone | null =>
   eventMetadata(code)?.ton ?? null;
 
 const eventToneRang = (tone: EventTone | null): number =>
-  tone === "fehler" ? 3 : tone === "hinweis" ? 2 : tone === "info" ? 1 : 0;
+  tone === "error" ? 3 : tone === "warning" ? 2 : tone === "info" ? 1 : 0;
 
 const eventToneFromValue = (value: string): EventTone | null =>
   EVENT_TONES.includes(value as EventTone) ? value as EventTone : null;
@@ -1191,7 +1191,7 @@ const EventFilterBar = ({
   if (filters.herkunft === "kanal") aktiveFilter.push(texte.ereignisse.kanalereignisse);
   if (filters.herkunft === "modul") aktiveFilter.push(texte.ereignisse.moduldiagnosen);
   if (filters.modul !== null) aktiveFilter.push(moduleName(filters.modul));
-  if (filters.ton !== null) aktiveFilter.push(filters.ton === "info" ? texte.ereignisse.info : filters.ton === "hinweis" ? texte.ereignisse.hinweis : texte.ereignisse.fehler);
+  if (filters.ton !== null) aktiveFilter.push(filters.ton === "info" ? texte.ereignisse.info : filters.ton === "warning" ? texte.ereignisse.hinweis : texte.ereignisse.fehler);
   if (filters.person !== null) aktiveFilter.push(filters.person);
   return <div className="ereignis-filter" aria-label={texte.ereignisse.filter}>
     <div className="ereignis-filter__controls">
@@ -1202,7 +1202,7 @@ const EventFilterBar = ({
         <option value="">{texte.ereignisse.alle}</option>{moduleOptions.map((module) => <option key={module.id} value={module.id}>{moduleName(module.id)}</option>)}
       </select></label>
       <label>{texte.ereignisse.ton}<select aria-label={texte.ereignisse.ton} value={filters.ton ?? ""} onChange={(event) => { onChange({ ...filters, ton: eventToneFromValue(event.target.value) }); }}>
-        <option value="">{texte.ereignisse.alle}</option><option value="info">{texte.ereignisse.info}</option><option value="hinweis">{texte.ereignisse.hinweis}</option><option value="fehler">{texte.ereignisse.fehler}</option>
+        <option value="">{texte.ereignisse.alle}</option><option value="info">{texte.ereignisse.info}</option><option value="warning">{texte.ereignisse.hinweis}</option><option value="error">{texte.ereignisse.fehler}</option>
       </select></label>
       <label>{texte.ereignisse.person}<input aria-label={texte.ereignisse.person} value={personDraft} onChange={(event) => { setPersonDraft(event.target.value); }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }} /></label>
     </div>
@@ -1755,7 +1755,7 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" || modules.data === null) return;
     const targetModuleId = route.moduleId;
     const state = modules.data.modules.find((module) => module.id === targetModuleId);
-    if (state === undefined || selectedChannel?.role === "bediener" || headerModuleBusy) return;
+    if (state === undefined || selectedChannel?.role === "operator" || headerModuleBusy) return;
     setHeaderModuleBusy(true);
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);

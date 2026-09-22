@@ -39,8 +39,8 @@ export const cooldownRestzeit = (zuletztVerwendet: string | null, jetzt: string,
  * „VIP“, ein VIP aber nicht „Abonnent“.
  */
 const statusFuerStufe: Record<TextbefehlMindeststufe, readonly ModuleChatStatus[]> = {
-  alle: ["zuschauer", "abonnent", "vip", "moderator", "broadcaster"],
-  abonnent: ["abonnent", "moderator", "broadcaster"],
+  everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
+  subscriber: ["subscriber", "moderator", "broadcaster"],
   vip: ["vip", "moderator", "broadcaster"],
   moderator: ["moderator", "broadcaster"],
   broadcaster: ["broadcaster"],
@@ -49,5 +49,5 @@ const statusFuerStufe: Record<TextbefehlMindeststufe, readonly ModuleChatStatus[
 export const chatStatusErfuelltStufe = (
   status: readonly ModuleChatStatus[] | null,
   mindeststufe: TextbefehlMindeststufe,
-): boolean => mindeststufe === "alle"
+): boolean => mindeststufe === "everyone"
   || (status !== null && status.some((eintrag) => statusFuerStufe[mindeststufe].includes(eintrag)));
