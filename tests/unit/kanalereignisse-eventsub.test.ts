@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -138,56 +136,5 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
     }
   });
 
-  it("übernimmt bestehende Abo-Zustände in die leere Standardvariante", async () => {
-    const database = new TestD1Database(12);
-    try {
-      await insertChannel(database, "kanal-a");
-      await database.prepare(
-        `INSERT INTO eventsub_subscriptions
-          (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
-         VALUES ('kanal-a', 'channel.chat.message', 'abo-1', 'secret-1', 'enabled', NULL, ?)`,
-      ).bind("2026-09-20T00:00:00.000Z").run();
-      database.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0012_eventsub_abo_varianten.sql"), "utf8"));
 
-      await expect(database.prepare(
-        "SELECT channel_id, subscription_type, variant, subscription_id FROM eventsub_subscriptions",
-      ).first()).resolves.toEqual({
-        channel_id: "kanal-a",
-        subscription_type: "channel.chat.message",
-        variant: "",
-        subscription_id: "abo-1",
-      });
-    } finally {
-      database.close();
-    }
-  });
-
-  it("übernimmt alte Abo-Zustände als v1 und hält v2 separat", async () => {
-    const database = new TestD1Database(13);
-    try {
-      await insertChannel(database, "kanal-a");
-      await database.prepare(
-        `INSERT INTO eventsub_subscriptions
-          (channel_id, subscription_type, variant, subscription_id, secret_id, status, reason, updated_at)
-         VALUES ('kanal-a', 'channel.chat.message', '', 'abo-1', 'secret-1', 'enabled', NULL, ?)`,
-      ).bind("2026-09-20T00:00:00.000Z").run();
-      database.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0013_eventsub_abo_versionen.sql"), "utf8"));
-      await database.prepare(
-        `INSERT INTO eventsub_subscriptions
-          (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
-         VALUES ('kanal-a', 'channel.moderate', '', '2', 'abo-2', 'secret-1', 'enabled', NULL, ?)`,
-      ).bind("2026-09-20T00:00:00.000Z").run();
-
-      await expect(database.prepare(
-        "SELECT subscription_type, variant, version, subscription_id FROM eventsub_subscriptions ORDER BY subscription_type",
-      ).all()).resolves.toMatchObject({
-        results: [
-          { subscription_type: "channel.chat.message", variant: "", version: "1", subscription_id: "abo-1" },
-          { subscription_type: "channel.moderate", variant: "", version: "2", subscription_id: "abo-2" },
-        ],
-      });
-    } finally {
-      database.close();
-    }
-  });
 });

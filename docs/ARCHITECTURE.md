@@ -118,7 +118,8 @@ Bild oder einer im Overlay-Bundle fest eingetragenen Versionszeichenkette.
 5. **`channel_members` existiert ab Tag 1.** Autorisierung fragt immer, ob ein User in genau diesem Kanal zugelassen ist. Eine globale Rolle außerhalb des Kanalmandanten gibt es nicht.
 
 6. **Administrative Mitgliedsänderungen werden atomar auditiert.** Die
-   Migration `0002_autorisierung.sql` begrenzt die Rollen per SQLite-`CHECK`.
+   Schema-Baseline `0000_baseline.sql` begrenzt die Rollen per SQLite-`CHECK`;
+   `tests/unit/sql-role-contract.test.ts` hält den Constraint an `CHANNEL_ROLES`.
    Eine Änderung an `channel_members` und ihr Eintrag in `audit_log` werden in
    einem D1-Batch ausgeführt; ohne erfolgreiche Änderung gibt es keinen Audit-
    Eintrag.

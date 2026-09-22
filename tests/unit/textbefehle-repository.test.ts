@@ -1,6 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
@@ -255,26 +253,4 @@ describe("Textbefehle-D1-Adapter", () => {
     ).run()).toThrow();
   });
 
-  it("übernimmt für bestehende Zeilen Art text und enabled 1", () => {
-    const legacy = new TestD1Database(20);
-    try {
-      legacy.sqlite.prepare(
-        `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
-         VALUES ('kanal-a', 'kanal-a', 'Kanal A', '${NOW}', '${NOW}')`,
-      ).run();
-      legacy.sqlite.prepare(
-        `INSERT INTO textbefehle_commands
-          (channel_id, command_name, response_text, cooldown_seconds, created_at, updated_at)
-         VALUES ('kanal-a', 'alt', 'Antwort', 5, '${NOW}', '${NOW}')`,
-      ).run();
-      legacy.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0020_textbefehle_art_enabled.sql"), "utf8"));
-      legacy.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0021_textbefehle_mindeststufe.sql"), "utf8"));
-
-      expect(legacy.sqlite.prepare(
-        "SELECT art, enabled, minimum_level FROM textbefehle_commands WHERE command_name = 'alt'",
-      ).get()).toEqual({ art: "text", enabled: 1, minimum_level: "alle" });
-    } finally {
-      legacy.close();
-    }
-  });
 });

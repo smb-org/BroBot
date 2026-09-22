@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -239,61 +237,7 @@ describe("kanalgebundene Autorisierung", () => {
       .resolves.toBeNull();
   });
 
-  it("übernimmt die vorhandene Broadcaster-Zeile unverändert in die neue Tabelle", async () => {
-    const migrationDatabase = new TestD1Database(2);
-    migrationDatabase.prepare(
-      `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind("kanal-a", "kanal-a", "kanal-a", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").runSync();
-    migrationDatabase.prepare(
-      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind("kanal-a", "user-1", "broadcaster", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").runSync();
 
-    migrationDatabase.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0002_autorisierung.sql"), "utf8"));
-
-    await expect(migrationDatabase.prepare(
-      `SELECT channel_id, user_id, role, created_at, updated_at
-         FROM channel_members
-        WHERE channel_id = ? AND user_id = ?`,
-    ).bind("kanal-a", "user-1").first()).resolves.toEqual({
-      channel_id: "kanal-a",
-      user_id: "user-1",
-      role: "broadcaster",
-      created_at: "2026-09-18T00:00:00.000Z",
-      updated_at: "2026-09-18T00:00:00.000Z",
-    });
-    migrationDatabase.close();
-  });
-
-  it("bricht die Migration bei einem ungültigen Altrollenwert ab und erhält die alte Tabelle", () => {
-    const migrationDatabase = new TestD1Database(2);
-    migrationDatabase.prepare(
-      `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind("kanal-a", "kanal-a", "kanal-a", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").runSync();
-    migrationDatabase.prepare(
-      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind("kanal-a", "user-1", "administrator", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").runSync();
-
-    expect(() => {
-      migrationDatabase.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0002_autorisierung.sql"), "utf8"));
-    }).toThrow();
-    expect(migrationDatabase.sqlite.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'channel_members'",
-    ).get()).toEqual({ name: "channel_members" });
-    expect(migrationDatabase.sqlite.prepare(
-      `SELECT channel_id, user_id, role
-         FROM channel_members
-        WHERE channel_id = ? AND user_id = ?`,
-    ).get("kanal-a", "user-1")).toEqual({
-      channel_id: "kanal-a",
-      user_id: "user-1",
-      role: "administrator",
-    });
-    migrationDatabase.close();
-  });
 
   it("stellt beide fachlichen channel_members-Indizes nach der Migration wieder her", () => {
     const migrationDatabase = new TestD1Database();

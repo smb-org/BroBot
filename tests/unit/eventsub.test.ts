@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
-import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -669,16 +667,6 @@ describe("EventSub-Eingang", () => {
     expect(details).not.toContain("SCAN eventsub_messages");
   });
 
-  it("wendet die EventSub-Migration idempotent erneut an", () => {
-    const migration = readFileSync(
-      resolve(import.meta.dirname, "../../migrations/0008_eventsub_eingang.sql"),
-      "utf8",
-    );
-
-    expect(() => {
-      database.sqlite.exec(migration);
-    }).not.toThrow();
-  });
 
   it("räumt alte Message-IDs im stündlichen Cron auf", async () => {
     await database.prepare(
