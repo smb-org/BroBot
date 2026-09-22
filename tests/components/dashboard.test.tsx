@@ -468,7 +468,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByText("alt")).toBeInTheDocument();
-    const feed = document.querySelector(".ereignis-feed");
+    const feed = document.querySelector(".event-feed");
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
@@ -506,7 +506,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByText("alt")).toBeInTheDocument();
-    const feed = document.querySelector(".ereignis-feed");
+    const feed = document.querySelector(".event-feed");
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: -200 }) });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 400 });
@@ -2505,7 +2505,7 @@ describe("Dashboard skeleton", () => {
     expect(bereich.children[1]).toHaveClass("sub-inspector");
   });
 
-  it("arranges the audit log list and inspector as direct region children", async () => {
+  it("shows the audit inspector only once an entry is selected, alongside the list", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       auditId: "audit-1",
@@ -2528,14 +2528,15 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
+    const list = await screen.findByRole("region", { name: "Audit-Log" });
+    expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
+
     const row = (await screen.findByText("module.enabled")).closest("tr");
     expect(row).not.toBeNull();
     fireEvent.click(row as HTMLElement);
-    const bereich = screen.getByRole("heading", { name: "Audit-Log" }).closest("section");
-    if (bereich === null) throw new Error("Audit-Bereich fehlt");
-    expect(bereich.children).toHaveLength(2);
-    expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
-    expect(bereich.children[1]).toHaveClass("sub-inspector");
+
+    expect(list).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
   });
 
   it("keeps the audit selection intact across a reload", async () => {
@@ -2581,7 +2582,7 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
   });
 
-  it("arranges the events list and the incident inspector as direct region children", async () => {
+  it("shows the incident inspector only once an event is selected, alongside the list", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       eventId: "event-1",
@@ -2605,14 +2606,15 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
+    const list = await screen.findByRole("region", { name: "Ereignisprotokoll" });
+    expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
+
     const row = (await screen.findByText("Befehl !wiki ausgeführt")).closest("tr");
     expect(row).not.toBeNull();
     fireEvent.click(row as HTMLElement);
-    const bereich = screen.getByRole("heading", { name: "Ereignisprotokoll" }).closest("section");
-    if (bereich === null) throw new Error("Ereignis-Bereich fehlt");
-    expect(bereich.children).toHaveLength(2);
-    expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
-    expect(bereich.children[1]).toHaveClass("sub-inspector");
+
+    expect(list).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
   });
 
   it("keeps the event incident intact across a reload", async () => {
