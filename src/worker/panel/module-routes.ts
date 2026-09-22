@@ -10,7 +10,7 @@ import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
-import type { ChannelRole } from "../../contracts/values";
+import type { AuditAction, ChannelRole } from "../../contracts/values";
 import type { ModuleRouteVariables } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
@@ -123,7 +123,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     module.id,
     stored.enabled,
     JSON.stringify(settings.data),
-    `${module.id}.einstellungen_geaendert`,
+    `${module.id}.settings_changed`,
     nowIso(),
   );
   if (!changed) return context.text("Moduleinstellungen wurden inzwischen geändert.", 409);
@@ -144,7 +144,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const channelId = context.req.param("channelId");
   const defaultSettingsJson = JSON.stringify(module.defaultSettings);
   const now = nowIso();
-  const action = enabled ? "modul.aktiviert" : "modul.deaktiviert";
+  const action: AuditAction = enabled ? "module.enabled" : "module.disabled";
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);

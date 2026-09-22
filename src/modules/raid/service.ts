@@ -1,3 +1,4 @@
+import type { EventCode } from "../../contracts/values";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import type { RaidSettings } from "./contracts";
 import { decideRaid } from "./domain";
@@ -21,14 +22,14 @@ export const processRaid = (
     return {
       actions: [],
       diagnostics: [{
-        code: "raid.outgoing",
+        code: "raid.outgoing" satisfies EventCode,
         detail: { targetChannelId: decision.targetChannelId, viewers: decision.viewers },
       }],
     };
   }
 
   if (decision.kind === "invalid") {
-    return { actions: [], diagnostics: [{ code: "raid.ungueltig", detail: { reason: decision.reason } }] };
+    return { actions: [], diagnostics: [{ code: "raid.invalid" satisfies EventCode, detail: { reason: decision.reason } }] };
   }
 
   const chatText = textWithRaid(
@@ -41,7 +42,7 @@ export const processRaid = (
     return {
       actions: [{ kind: "chat", text: chatText }],
       diagnostics: [{
-        code: "shoutout.unterdrueckt",
+        code: "shoutout.suppressed" satisfies EventCode,
         detail: {
           reason: event.settings.shoutoutEnabled ? "unter_schwelle" : "abgeschaltet",
           viewers: decision.viewers,
@@ -57,7 +58,7 @@ export const processRaid = (
       { kind: "chat", text: chatText },
     ],
     diagnostics: [{
-      code: "raid.shoutout",
+      code: "raid.shoutout" satisfies EventCode,
       detail: {
         sourceChannelId: decision.sourceChannelId,
         viewers: decision.viewers,

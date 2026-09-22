@@ -87,7 +87,7 @@ const actions: readonly RoleAction[] = [
       database as unknown as D1Database,
       actor,
       actionMember("target", "operator"),
-      "mitglied.hinzugefügt",
+      "member.added",
       timestamp,
       actorGuard(requiredActorRoles("operator")),
     ),
@@ -100,7 +100,7 @@ const actions: readonly RoleAction[] = [
       database as unknown as D1Database,
       actor,
       actionMember("target", "broadcaster"),
-      "mitglied.hinzugefügt",
+      "member.added",
       timestamp,
       actorGuard(requiredActorRoles("broadcaster")),
     ),
@@ -115,7 +115,7 @@ const actions: readonly RoleAction[] = [
         database as unknown as D1Database,
         actor,
         actionMember("target", "manager"),
-        "mitglied.rolle_geändert",
+        "member.role_changed",
         timestamp,
         actorGuard(requiredActorRoles("manager", "operator")),
       );
@@ -132,7 +132,7 @@ const actions: readonly RoleAction[] = [
         database as unknown as D1Database,
         actor,
         member,
-        "mitglied.rolle_geändert",
+        "member.role_changed",
         timestamp,
         actorGuard(requiredActorRoles(member.role, "broadcaster")),
       );
@@ -149,7 +149,7 @@ const actions: readonly RoleAction[] = [
           database as unknown as D1Database,
           actor,
           actionMember("actor", "manager"),
-          "mitglied.rolle_geändert",
+          "member.role_changed",
           timestamp,
           actorGuard(requiredActorRoles("manager", "broadcaster")),
         );
@@ -159,7 +159,7 @@ const actions: readonly RoleAction[] = [
         database as unknown as D1Database,
         actor,
         actionMember(target, "manager"),
-        "mitglied.rolle_geändert",
+        "member.role_changed",
         timestamp,
         actorGuard(requiredActorRoles("manager", "broadcaster")),
       );
@@ -176,7 +176,7 @@ const actions: readonly RoleAction[] = [
         actor,
         "kanal-a",
         "target",
-        "mitglied.entfernt",
+        "member.removed",
         timestamp,
         actorGuard(requiredActorRoles(undefined, "operator")),
       );
@@ -193,7 +193,7 @@ const actions: readonly RoleAction[] = [
         actor,
         "kanal-a",
         "target",
-        "mitglied.entfernt",
+        "member.removed",
         timestamp,
         actorGuard(requiredActorRoles(undefined, "broadcaster")),
       );
@@ -211,7 +211,7 @@ const actions: readonly RoleAction[] = [
         actor,
         "kanal-a",
         target,
-        "mitglied.entfernt",
+        "member.removed",
         timestamp,
         actorGuard(requiredActorRoles(undefined, "broadcaster")),
       );
@@ -225,7 +225,7 @@ const actions: readonly RoleAction[] = [
       database as unknown as D1Database,
       actor,
       { channelId: "kanal-a", moduleId: "raid", enabled: true, settings: "{}" },
-      "modul.aktiviert",
+      "module.enabled",
       timestamp,
     ),
   },
@@ -245,7 +245,7 @@ const actions: readonly RoleAction[] = [
         "raid",
         true,
         '{"textSchwelle":5}',
-        "raid.einstellungen_geaendert",
+        "raid.settings_changed",
         timestamp,
       );
     },

@@ -164,7 +164,7 @@ describe("ad routes", () => {
     expect(response.status).toBe(429);
     await expect(database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ code: "ads.vorwarnung.zeitplan_fehler" });
+    ).first()).resolves.toEqual({ code: "ads.prewarning.schedule_error" });
   });
 
   it("handles an empty successful schedule without an event", async () => {

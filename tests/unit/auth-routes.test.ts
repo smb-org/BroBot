@@ -309,8 +309,8 @@ describe("auth routes", () => {
       expect(await countRows(database, "auth_sessions")).toBe(0);
       await expect(database.prepare(
         "SELECT failure_reason FROM oauth_transactions WHERE failure_reason = ?",
-      ).bind("vollzustimmung_zweiter_versuch_unvollständig").all()).resolves.toMatchObject({
-        results: [{ failure_reason: "vollzustimmung_zweiter_versuch_unvollständig" }],
+      ).bind("full_consent_second_attempt_incomplete").all()).resolves.toMatchObject({
+        results: [{ failure_reason: "full_consent_second_attempt_incomplete" }],
       });
       expect(fetcher).toHaveBeenCalledTimes(4);
     } finally {

@@ -75,7 +75,7 @@ describe("Raid module", () => {
       { kind: "chat", text: "Voll quelle 8" },
     ]);
     expect(result.diagnostics).toEqual([{
-      code: "shoutout.unterdrueckt",
+      code: "shoutout.suppressed",
       detail: { reason: "abgeschaltet", viewers: 8, threshold: 3 },
     }]);
   });
@@ -93,7 +93,7 @@ describe("Raid module", () => {
       { kind: "chat", text: "Danke quelle für 2!" },
     ]);
     expect(result.diagnostics).toEqual([{
-      code: "shoutout.unterdrueckt",
+      code: "shoutout.suppressed",
       detail: { reason: "unter_schwelle", viewers: 2, threshold: 3 },
     }]);
   });
@@ -111,7 +111,7 @@ describe("Raid module", () => {
       { kind: "chat", text: "Voll quelle 10" },
     ]);
     expect(result.diagnostics).toEqual([{
-      code: "shoutout.unterdrueckt",
+      code: "shoutout.suppressed",
       detail: { reason: "unter_schwelle", viewers: 10, threshold: 50 },
     }]);
   });
@@ -155,7 +155,7 @@ describe("Raid module", () => {
     }));
 
     expect(result.diagnostics).toEqual([{
-      code: "shoutout.unterdrueckt",
+      code: "shoutout.suppressed",
       detail: { reason: "unter_schwelle", viewers: 2, threshold: 3 },
     }]);
   });

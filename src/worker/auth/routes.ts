@@ -486,7 +486,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         await failOAuthTransaction(
           context.env.DB,
           state.transactionId,
-          "vollzustimmung_zweiter_versuch_unvollständig",
+          "full_consent_second_attempt_incomplete",
         );
         return oauthError(
           context,
@@ -498,7 +498,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       await failOAuthTransaction(
         context.env.DB,
         state.transactionId,
-        "vollzustimmung_unvollständig",
+        "full_consent_incomplete",
       );
       const started = await startOAuthAuthorization(
         context.env.DB,

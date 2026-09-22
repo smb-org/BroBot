@@ -40,11 +40,11 @@ export const channelPanelTexts = (
 ): ChannelPanelTexts => channelPanelCatalog[language];
 
 export type PlatformAction =
-  | "kanal.freigegeben"
-  | "kanal.vollzustimmung_geaendert"
-  | "mitglied.hinzugefuegt"
-  | "mitglied.rolle_geaendert"
-  | "mitglied.entfernt";
+  | "channel.released"
+  | "channel.full_consent_changed"
+  | "member.added"
+  | "member.role_changed"
+  | "member.removed";
 
 export interface PlatformTexts {
   title: string;
@@ -169,11 +169,11 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     platformAdmin: "Betreiber",
     member: "Mitglied",
     actionLabel: {
-      "kanal.freigegeben": "Kanal freigegeben",
-      "kanal.vollzustimmung_geaendert": "Vollzustimmung geändert",
-      "mitglied.hinzugefuegt": "Mitglied hinzugefügt",
-      "mitglied.rolle_geaendert": "Mitgliedsrolle geändert",
-      "mitglied.entfernt": "Mitglied entfernt",
+      "channel.released": "Kanal freigegeben",
+      "channel.full_consent_changed": "Vollzustimmung geändert",
+      "member.added": "Mitglied hinzugefügt",
+      "member.role_changed": "Mitgliedsrolle geändert",
+      "member.removed": "Mitglied entfernt",
     },
   },
   en: {
@@ -236,11 +236,11 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     platformAdmin: "Operator",
     member: "Member",
     actionLabel: {
-      "kanal.freigegeben": "Channel released",
-      "kanal.vollzustimmung_geaendert": "Full consent changed",
-      "mitglied.hinzugefuegt": "Member added",
-      "mitglied.rolle_geaendert": "Member role changed",
-      "mitglied.entfernt": "Member removed",
+      "channel.released": "Channel released",
+      "channel.full_consent_changed": "Full consent changed",
+      "member.added": "Member added",
+      "member.role_changed": "Member role changed",
+      "member.removed": "Member removed",
     },
   },
 };

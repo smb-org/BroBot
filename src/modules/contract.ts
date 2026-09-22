@@ -11,7 +11,7 @@ export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "
 /**
  * A justification for something a module did, or deliberately did not do.
  *
- * `code` is machine-readable and stable (`shoutout.unterdrueckt`), `detail`
+ * `code` is machine-readable and stable (`shoutout.suppressed`), `detail`
  * carries the numbers that explain the case. Together they answer the
  * question that today goes unanswered everywhere: "Raid detected, why was
  * there no shoutout?"

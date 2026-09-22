@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 
+import type { EventCode } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import { getAdSchedule, type AdScheduleResult, snoozeNextAd, type SnoozeNextAdResult } from "./adapters/ad-schedule";
 import { refreshAdPrewarningAlarm } from "./adapters/prewarning-alarm";
@@ -14,10 +15,10 @@ type AdDetail = Readonly<Record<string, string | number | boolean | null>>;
 const nowIso = (): string => new Date().toISOString();
 
 const scheduleFailureDiagnostic = (result: AdScheduleResult): {
-  code: string;
+  code: EventCode;
   detail: Readonly<Record<string, string | number | boolean | null>>;
 } => ({
-  code: result.reason === "unauthorized" ? "ads.vorwarnung.scope_fehlt" : "ads.vorwarnung.zeitplan_fehler",
+  code: result.reason === "unauthorized" ? "ads.prewarning.scope_missing" : "ads.prewarning.schedule_error",
   detail: { reason: result.reason, ...result.detail },
 });
 
@@ -43,7 +44,7 @@ const log = async (
   context: Context<ModuleRouteEnvironment>,
   channelId: string,
   triggerId: string,
-  code: string,
+  code: EventCode,
   detail: AdDetail,
 ): Promise<void> => {
   await context.get("writeModuleDiagnostics")(

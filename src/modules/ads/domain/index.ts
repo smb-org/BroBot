@@ -55,7 +55,7 @@ export interface AdPrewarningInput {
 }
 
 export type AdPrewarningDecision =
-  | { kind: "skip"; reason: "vorwarnung_aus" | "scope_fehlt" | "kein_termin" | "zu_spaet" | "pause_begonnen" | "termin_verschoben"; detail: Readonly<Record<string, string | number | boolean | null>> }
+  | { kind: "skip"; reason: "disabled" | "scope_missing" | "no_schedule" | "too_late" | "break_started" | "rescheduled"; detail: Readonly<Record<string, string | number | boolean | null>> }
   | { kind: "announce"; text: string; seconds: number; scheduledAt: string };
 
 const dateMs = (value: string | null): number | null => {
@@ -83,18 +83,18 @@ const skip = (
 export const decideAdPrewarning = (
   input: AdPrewarningInput,
 ): AdPrewarningDecision => {
-  if (!input.settings.prewarning) return skip("vorwarnung_aus");
-  if (!input.scopeAvailable) return skip("scope_fehlt", { scope: "channel:read:ads" });
+  if (!input.settings.prewarning) return skip("disabled");
+  if (!input.scopeAvailable) return skip("scope_missing", { scope: "channel:read:ads" });
 
   const nextAdAtMs = dateMs(input.schedule.nextAdAt);
-  if (nextAdAtMs === null) return skip("kein_termin");
+  if (nextAdAtMs === null) return skip("no_schedule");
 
   const lastAdAtMs = dateMs(input.schedule.lastAdAt);
   if (lastAdAtMs !== null && lastAdAtMs >= input.plannedAtMs) {
-    return skip("pause_begonnen", { lastAdBreakAt: input.schedule.lastAdAt });
+    return skip("break_started", { lastAdBreakAt: input.schedule.lastAdAt });
   }
   if (Math.abs(nextAdAtMs - input.plannedAtMs) > SCHEDULE_TOLERANCE_MS) {
-    return skip("termin_verschoben", {
+    return skip("rescheduled", {
       scheduledFor: new Date(input.plannedAtMs).toISOString(),
       current: input.schedule.nextAdAt,
     });
@@ -102,7 +102,7 @@ export const decideAdPrewarning = (
 
   const remainingMs = nextAdAtMs - input.nowAtMs;
   if (remainingMs < MINIMUM_LEAD_MS) {
-    return skip("zu_spaet", { remainingSeconds: Math.max(0, Math.round(remainingMs / 1000)) });
+    return skip("too_late", { remainingSeconds: Math.max(0, Math.round(remainingMs / 1000)) });
   }
 
   // The announcement uses the actually remaining time, not the configured

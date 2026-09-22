@@ -107,7 +107,7 @@ describe("event log", () => {
       "trigger-raid-1",
       null,
       [{
-        code: "shoutout.unterdrueckt",
+        code: "shoutout.suppressed",
         detail: { reason: "raid_erkannt", viewers: 8, threshold: 10 },
       }],
       "2026-09-18T04:00:00.000Z",
@@ -127,7 +127,7 @@ describe("event log", () => {
 
     expect(row).toEqual({
       module_id: "raid",
-      code: "shoutout.unterdrueckt",
+      code: "shoutout.suppressed",
       detail_json: '{"reason":"raid_erkannt","viewers":8,"threshold":10}',
       actor_user_id: null,
       trigger_id: "trigger-raid-1",
@@ -370,9 +370,9 @@ describe("event log", () => {
     await insertLoginIdentityAndSession(database, "viewer-1");
     await insertMember(database, "kanal-a", "viewer-1", "operator");
     await insertCustomEvent(database, "channel-event", "kanal-a", "channel_events", "channel_events.raid.incoming");
-    await insertCustomEvent(database, "module-event", "kanal-a", "text_commands", "text_commands.ausgeloest", "person-a");
-    await insertCustomEvent(database, "error-event", "kanal-a", "text_commands", "host.chat.fehlgeschlagen", "person-a");
-    await insertCustomEvent(database, "info-event", "kanal-a", "text_commands", "host.chat.gesendet", "person-b");
+    await insertCustomEvent(database, "module-event", "kanal-a", "text_commands", "text_commands.triggered", "person-a");
+    await insertCustomEvent(database, "error-event", "kanal-a", "text_commands", "host.chat.failed", "person-a");
+    await insertCustomEvent(database, "info-event", "kanal-a", "text_commands", "host.chat.sent", "person-b");
     await insertCustomEvent(database, "other-channel-event", "kanal-b", "channel_events", "channel_events.raid.incoming");
 
     const request = async (query: string) => panelRouter.fetch(
@@ -399,7 +399,7 @@ describe("event log", () => {
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
-    await insertCustomEvent(database, "fremd", "kanal-b", "text_commands", "host.chat.gesendet", "person-a");
+    await insertCustomEvent(database, "fremd", "kanal-b", "text_commands", "host.chat.sent", "person-a");
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-b/events?origin=module&actor=person-a"),

@@ -21,7 +21,7 @@ export const listLastAdBreaks = async (
        FROM event_log
       WHERE channel_id = ?
         AND module_id = 'ads'
-        AND code = 'ads.ankuendigung'
+        AND code = 'ads.announcement'
       ORDER BY created_at DESC, event_id DESC
       LIMIT ?`,
   ).bind(channelId, limit).all<AdEventRow>();
@@ -37,7 +37,7 @@ export const listLastAdBreaks = async (
     const duration = toDuration(parsed.duration);
     if (duration === null) return [];
     // "gestartet" stays: it is the literal wire key ads/service.ts writes into
-    // event_log.detail_json for ads.ankuendigung (built via a helper, so it
+    // event_log.detail_json for ads.announcement (built via a helper, so it
     // evades the automated frozen-key detector) -- renaming it would orphan
     // the field already stored in production rows.
     const startedAt = typeof parsed.startedAt === "string" && parsed.startedAt.length > 0

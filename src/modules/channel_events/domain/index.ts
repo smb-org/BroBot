@@ -87,11 +87,11 @@ const shoutoutDiagnostic = (
   payload: Readonly<Record<string, unknown>>,
 ): ChannelEventDiagnostic => subscriptionType === "channel.shoutout.create"
   ? {
-    code: "channel_events.shoutout.gesendet",
+    code: "channel_events.shoutout.sent",
     detail: detail({ target: person(payload, "to_broadcaster") }),
   }
   : {
-    code: "channel_events.shoutout.empfangen",
+    code: "channel_events.shoutout.received",
     detail: detail({
       source: person(payload, "from_broadcaster"),
       ...(numberValue(field(payload, "viewer_count")) === null
@@ -142,12 +142,12 @@ const chatNotificationDiagnostic = (
   if (type === "announcement") {
     const message = isRecord(payload.message) ? textValue(payload.message.text) : textValue(payload.message);
     return {
-      code: "channel_events.chat.ankuendigung",
+      code: "channel_events.chat.announcement",
       detail: detail({ person: chatter, text: message }),
     };
   }
   return {
-    code: "channel_events.chat.unbekannt",
+    code: "channel_events.chat.unknown",
     detail: detail({ kind: truncateTo200Chars(type) }),
   };
 };
@@ -198,7 +198,7 @@ const moderationDiagnostic = (
     return { code: "channel_events.moderation.warn", detail: detail(common) };
   }
   return {
-    code: "channel_events.moderation.unbekannt",
+    code: "channel_events.moderation.unknown",
     detail: detail({ action: actionName }),
   };
 };
@@ -241,7 +241,7 @@ const suspiciousClassification = (payload: Readonly<Record<string, unknown>>): s
 };
 
 const automodDiagnostic = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => ({
-  code: "channel_events.automod.halte",
+  code: "channel_events.automod.held",
   detail: detail({
     ...optionaleTextDetail("person", personFromObject(payload, "user")),
     ...optionaleTextDetail("reason", textValue(field(payload, "category"))),
@@ -250,7 +250,7 @@ const automodDiagnostic = (payload: Readonly<Record<string, unknown>>): ChannelE
 });
 
 const suspiciousMessageDiagnostic = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => ({
-  code: "channel_events.verdacht.message",
+  code: "channel_events.suspicious.message",
   detail: detail({
     ...optionaleTextDetail("person", personFromObject(payload, "user")),
     ...optionaleTextDetail("einstufung", suspiciousClassification(payload)),
@@ -262,8 +262,8 @@ const suspiciousUpdateDiagnostic = (payload: Readonly<Record<string, unknown>>):
   const status = lowTrustStatus(payload);
   return {
     code: status === "none"
-      ? "channel_events.verdacht.entwarnung"
-      : "channel_events.verdacht.einstufung",
+      ? "channel_events.suspicious.cleared"
+      : "channel_events.suspicious.classified",
     detail: detail({
       ...optionaleTextDetail("person", personFromObject(payload, "user")),
       ...optionaleTextDetail("einstufung", status),

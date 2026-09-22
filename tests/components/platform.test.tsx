@@ -135,7 +135,7 @@ describe("Platform level", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         channelId: "123",
         moduleId: null,
-        action: "kanal.freigegeben",
+        action: "channel.released",
         before: "{}",
         after: "{}",
       }, {
@@ -147,7 +147,7 @@ describe("Platform level", () => {
         createdAt: "2026-09-18T00:00:01.000Z",
         channelId: "123",
         moduleId: null,
-        action: "kanal.vollzustimmung_geaendert",
+        action: "channel.full_consent_changed",
         before: "{}",
         after: "{}",
       }],

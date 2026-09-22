@@ -56,7 +56,7 @@ const expectDeniedCreate = async (
     asD1(database),
     actorFor("user-1"),
     record(options.targetChannelId, "test-modul", true),
-    "modul.aktiviert",
+    "module.enabled",
     NOW,
   );
 
@@ -80,7 +80,7 @@ describe("module activation in the repository", () => {
       asD1(database),
       actorFor("user-1"),
       record("kanal-a", "test-modul", true),
-      "modul.aktiviert",
+      "module.enabled",
       NOW,
     );
 
@@ -115,7 +115,7 @@ describe("module activation in the repository", () => {
       asD1(database),
       actorFor("user-1"),
       record("kanal-a", "test-modul", true),
-      "modul.aktiviert",
+      "module.enabled",
       NOW,
     );
 
@@ -126,7 +126,7 @@ describe("module activation in the repository", () => {
       "test-modul",
       false,
       SETTINGS,
-      "modul.deaktiviert",
+      "module.disabled",
       NOW,
     );
 
@@ -144,7 +144,7 @@ describe("module activation in the repository", () => {
       asD1(database),
       actorFor("user-1"),
       record("kanal-a", "test-modul", true),
-      "modul.aktiviert",
+      "module.enabled",
       NOW,
     );
     await insertLoginIdentityAndSession(database, "user-2");
@@ -157,7 +157,7 @@ describe("module activation in the repository", () => {
       "test-modul",
       false,
       SETTINGS,
-      "modul.deaktiviert",
+      "module.disabled",
       NOW,
     );
 
@@ -178,7 +178,7 @@ describe("module activation in the repository", () => {
       asD1(database),
       actorFor("user-2"),
       record("kanal-b", "test-modul", true),
-      "modul.aktiviert",
+      "module.enabled",
       NOW,
     );
 
@@ -189,7 +189,7 @@ describe("module activation in the repository", () => {
       "test-modul",
       false,
       SETTINGS,
-      "modul.deaktiviert",
+      "module.disabled",
       NOW,
     );
 

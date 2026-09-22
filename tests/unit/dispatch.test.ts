@@ -165,7 +165,7 @@ describe("dispatch and execution", () => {
         reply_parent_message_id: "nachricht-0",
       });
       const rows = await eventLog(database);
-      expect(rows.map((row) => row.code)).toEqual(["modul.geantwortet", "host.chat.gesendet"]);
+      expect(rows.map((row) => row.code)).toEqual(["modul.geantwortet", "host.chat.sent"]);
       expect(JSON.parse(rows[1]?.detail_json ?? "{}" )).toEqual({ messageId: "nachricht-1", text: "hallo" });
     } finally {
       database.close();
@@ -186,7 +186,7 @@ describe("dispatch and execution", () => {
       }))], fetcher);
 
       const rows = await eventLog(database);
-      expect(rows.map((row) => row.code)).toEqual(["host.chat.fehlgeschlagen"]);
+      expect(rows.map((row) => row.code)).toEqual(["host.chat.failed"]);
       expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({ reason: "automod_held", text: "hallo" });
     } finally {
       database.close();
@@ -226,8 +226,8 @@ describe("dispatch and execution", () => {
       expect(fetcher).toHaveBeenCalledTimes(1);
       const rows = await eventLog(database);
       expect(rows.map((row) => `${row.module_id}:${row.code}`)).toEqual([
-        "modul-kaputt:host.modul.fehler",
-        "modul-heil:host.chat.gesendet",
+        "modul-kaputt:host.module.error",
+        "modul-heil:host.chat.sent",
       ]);
     } finally {
       database.close();
@@ -246,7 +246,7 @@ describe("dispatch and execution", () => {
 
       expect(fetcher).not.toHaveBeenCalled();
       const rows = await eventLog(database);
-      expect(rows.map((row) => row.code)).toEqual(["host.overlay.nicht_ausgefuehrt"]);
+      expect(rows.map((row) => row.code)).toEqual(["host.overlay.not_executed"]);
     } finally {
       database.close();
     }
@@ -355,7 +355,7 @@ describe("dispatch and execution", () => {
       await runDispatch(database, [], sent());
 
       const rows = await eventLog(database);
-      expect(rows.map((row) => row.code)).toEqual(["host.modul.unbekannt"]);
+      expect(rows.map((row) => row.code)).toEqual(["host.module.unknown"]);
     } finally {
       database.close();
     }

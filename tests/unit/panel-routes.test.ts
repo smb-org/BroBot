@@ -485,8 +485,8 @@ describe("Panel read endpoints", () => {
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
        VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      "audit-1", "user-1", "2026-09-18T03:00:00.000Z", "kanal-a", "mitglied.geändert", "{}", "{}",
-      "audit-2", "user-1", "2026-09-18T02:00:00.000Z", "kanal-a", "mitglied.hinzugefügt", "null", "{}",
+      "audit-1", "user-1", "2026-09-18T03:00:00.000Z", "kanal-a", "member.updated", "{}", "{}",
+      "audit-2", "user-1", "2026-09-18T02:00:00.000Z", "kanal-a", "member.added", "null", "{}",
     ).run();
 
     const response = await panelRouter.fetch(

@@ -1,3 +1,4 @@
+import type { EventCode } from "../contracts/values";
 import type { BotModule, ModuleAction, ModuleActor, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleResult } from "../modules/contract";
 import type { RealtimeEnvelope } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
@@ -123,27 +124,27 @@ const runActions = async (
           fetcher,
         );
         diagnostics.push(result.sent
-          ? { code: "host.chat.gesendet", detail: result.detail }
-          : { code: "host.chat.fehlgeschlagen", detail: { reason: result.reason, ...result.detail } });
+          ? { code: "host.chat.sent" satisfies EventCode, detail: result.detail }
+          : { code: "host.chat.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } });
         continue;
       }
       if (action.kind === "shoutout") {
         const result = await sendShoutout(environment, channelId, action.targetChannelId, fetcher);
         diagnostics.push(result.sent
-          ? { code: "host.shoutout.gesendet", detail: result.detail }
-          : { code: "host.shoutout.fehlgeschlagen", detail: { cause: result.reason, ...result.detail } });
+          ? { code: "host.shoutout.sent" satisfies EventCode, detail: result.detail }
+          : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } });
         continue;
       }
       // The realtime path is #7. Until then, an overlay action doesn't
       // silently vanish — it's logged as not executed.
       diagnostics.push({
-        code: "host.overlay.nicht_ausgefuehrt",
+        code: "host.overlay.not_executed" satisfies EventCode,
         detail: { type: action.type },
       });
     } catch (error: unknown) {
       // A failed action must not suppress the subsequent ordered actions,
       // e.g. the chat message after a shoutout.
-      diagnostics.push({ code: "host.aktion.fehler", detail: { message: errorMessage(error) } });
+      diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
     }
   }
   return diagnostics;
@@ -181,7 +182,7 @@ export const dispatchEventSubNotification = async (
       HOST_MODULE_ID,
       event.triggerId,
       null,
-      [{ code: "host.modul.unbekannt", detail: { moduleId: moduleId } }],
+      [{ code: "host.module.unknown" satisfies EventCode, detail: { moduleId: moduleId } }],
       event.receivedAt,
     ));
   }
@@ -212,7 +213,7 @@ export const dispatchEventSubNotification = async (
     } catch (error: unknown) {
       // A module that throws doesn't take down the worker or the other
       // modules with it. The error becomes visible, not swallowed.
-      diagnostics.push({ code: "host.modul.fehler", detail: { message: errorMessage(error) } });
+      diagnostics.push({ code: "host.module.error" satisfies EventCode, detail: { message: errorMessage(error) } });
     }
 
     if (result !== null) {
@@ -220,7 +221,7 @@ export const dispatchEventSubNotification = async (
       try {
         diagnostics.push(...await runActions(environment, event.channelId, result.actions, fetcher));
       } catch (error: unknown) {
-        diagnostics.push({ code: "host.aktion.fehler", detail: { message: errorMessage(error) } });
+        diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }
     }
 

@@ -196,7 +196,7 @@ const panelAuditEntry: PanelAuditEntry = {
   actorKind: "member",
   createdAt: "2026-09-18T00:00:00.000Z",
   moduleId: "raid",
-  action: "modul.aktiviert",
+  action: "module.enabled",
   before: "null",
   after: "{}",
 };
@@ -311,7 +311,7 @@ const moduleForms = {
   auditEntry: {
     channelId: "kanal-a",
     moduleId: "raid",
-    action: "modul.aktiviert",
+    action: "module.enabled",
     before: null,
     after: { enabled: true, count: 1, name: "raid" },
   },

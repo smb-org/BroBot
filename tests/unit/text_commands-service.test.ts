@@ -61,7 +61,7 @@ describe("Text commands service", () => {
       replyToMessageId: "twitch-message-1",
     }]);
     expect(result.diagnostics).toEqual([{
-      code: "text_commands.ausgeloest",
+      code: "text_commands.triggered",
       detail: { name: "hallo", response: "Hallo alice in kanal-a-login" },
     }]);
   });
@@ -73,7 +73,7 @@ describe("Text commands service", () => {
     );
 
     expect(result.diagnostics).toEqual([{
-      code: "text_commands.ausgeloest",
+      code: "text_commands.triggered",
       detail: { name: "hallo", arguments: "erster   zweiter", response: "Antwort für alice" },
     }]);
   });
@@ -85,7 +85,7 @@ describe("Text commands service", () => {
     );
 
     expect(result.diagnostics).toEqual([{
-      code: "text_commands.ausgeloest",
+      code: "text_commands.triggered",
       detail: { name: "wiki", arguments: "foo bar", response: "Antwort" },
     }]);
   });
@@ -114,14 +114,14 @@ describe("Text commands service", () => {
     const result = await processTextCommandMessage(eventFor("!gibt-es-nicht"), repositoryFor([]));
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics).toEqual([{ code: "text_commands.unbekannt", detail: { name: "gibt-es-nicht" } }]);
+    expect(result.diagnostics).toEqual([{ code: "text_commands.unknown", detail: { name: "gibt-es-nicht" } }]);
   });
 
   it("stays silent for an unrecognized command shape and gives a reason", async () => {
     const result = await processTextCommandMessage(eventFor("!befehl unbekannt"), repositoryFor([]));
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics).toEqual([{ code: "text_commands.unbekannt", detail: { name: "befehl" } }]);
+    expect(result.diagnostics).toEqual([{ code: "text_commands.unknown", detail: { name: "befehl" } }]);
   });
 
   it("stays silent during the cooldown and reports the remaining time", async () => {
@@ -131,7 +131,7 @@ describe("Text commands service", () => {
     );
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics[0]?.code).toBe("text_commands.abgekuehlt");
+    expect(result.diagnostics[0]?.code).toBe("text_commands.cooldown");
   });
 
   it("stays silent for a disabled command and gives a separate reason", async () => {
@@ -142,7 +142,7 @@ describe("Text commands service", () => {
 
     expect(result.actions).toEqual([]);
     expect(result.diagnostics).toEqual([{
-      code: "text_commands.deaktiviert",
+      code: "text_commands.disabled",
       detail: { name: "hallo" },
     }]);
   });
@@ -171,7 +171,7 @@ describe("Text commands service", () => {
     );
 
     expect(result.actions).toEqual([]);
-    expect(result.diagnostics[0]?.code).toBe("text_commands.abgekuehlt");
+    expect(result.diagnostics[0]?.code).toBe("text_commands.cooldown");
   });
 
 });

@@ -1,3 +1,4 @@
+import type { EventCode } from "../../contracts/values";
 import { truncateTo200Chars } from "../contract";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import {
@@ -34,7 +35,7 @@ const diagnosticTriggered = (
 ) => {
   const argumente = input.arguments;
   return {
-    code: "text_commands.ausgeloest",
+    code: "text_commands.triggered" satisfies EventCode,
     detail: {
       name: input.name,
       ...(argumente === undefined || argumente.length === 0
@@ -67,27 +68,27 @@ export const processTextCommandMessage = async (
   if (input === null) return { actions: [], diagnostics: [] };
 
   if (input.kind === "unknown") {
-    return { actions: [], diagnostics: [{ code: "text_commands.unbekannt" }] };
+    return { actions: [], diagnostics: [{ code: "text_commands.unknown" satisfies EventCode }] };
   }
 
   const command = await repository.find(event.channelId, input.name);
   if (command === null) {
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.unbekannt", detail: { name: input.name } }],
+      diagnostics: [{ code: "text_commands.unknown" satisfies EventCode, detail: { name: input.name } }],
     };
   }
   if (!command.enabled) {
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.deaktiviert", detail: { name: input.name } }],
+      diagnostics: [{ code: "text_commands.disabled" satisfies EventCode, detail: { name: input.name } }],
     };
   }
   if (!chatStatusMeetsTier(event.chatStatus, command.minimumTier)) {
     return {
       actions: [],
       diagnostics: [{
-        code: "text_commands.berechtigung",
+        code: "text_commands.permission_denied" satisfies EventCode,
         detail: {
           name: input.name,
           requiredTier: command.minimumTier,
@@ -101,7 +102,7 @@ export const processTextCommandMessage = async (
   if (claim === null) {
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.unbekannt", detail: { name: input.name } }],
+      diagnostics: [{ code: "text_commands.unknown" satisfies EventCode, detail: { name: input.name } }],
     };
   }
   if (!claim.claimed) {
@@ -112,7 +113,7 @@ export const processTextCommandMessage = async (
     );
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.abgekuehlt", detail: { name: input.name, remainingSeconds } }],
+      diagnostics: [{ code: "text_commands.cooldown" satisfies EventCode, detail: { name: input.name, remainingSeconds } }],
     };
   }
 

@@ -51,11 +51,11 @@ export interface PlatformAuditPage {
 }
 
 export type PlatformAction =
-  | "kanal.freigegeben"
-  | "kanal.vollzustimmung_geaendert"
-  | "mitglied.hinzugefuegt"
-  | "mitglied.rolle_geaendert"
-  | "mitglied.entfernt";
+  | "channel.released"
+  | "channel.full_consent_changed"
+  | "member.added"
+  | "member.role_changed"
+  | "member.removed";
 
 interface PlatformChannelRow {
   channel_id: string;
@@ -210,7 +210,7 @@ export const releasePlatformChannel = async (
     actor.userId,
     timestamp,
     channel.userId,
-    "kanal.freigegeben",
+    "channel.released",
     null,
     after,
   );
@@ -246,7 +246,7 @@ export const changeFullConsent = async (
     actor.userId,
     timestamp,
     channel.channelId,
-    "kanal.vollzustimmung_geaendert",
+    "channel.full_consent_changed",
     before,
     after,
   );
@@ -288,7 +288,7 @@ export const addPlatformMember = async (
     actor.userId,
     timestamp,
     member.channelId,
-    "mitglied.hinzugefuegt",
+    "member.added",
     null,
     member,
   );
@@ -328,7 +328,7 @@ export const changePlatformMember = async (
     actor.userId,
     timestamp,
     after.channelId,
-    "mitglied.rolle_geaendert",
+    "member.role_changed",
     before,
     after,
   );
@@ -362,7 +362,7 @@ export const removePlatformMember = async (
     actor.userId,
     timestamp,
     member.channelId,
-    "mitglied.entfernt",
+    "member.removed",
     member,
     null,
   );

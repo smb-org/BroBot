@@ -114,7 +114,7 @@ describe("Text commands module", () => {
       expect(fetcher).not.toHaveBeenCalled();
       await expect(database.prepare("SELECT COUNT(*) AS count FROM text_commands").first<{ count: number }>())
         .resolves.toEqual({ count: 0 });
-      await expect(eventCodes(database)).resolves.toEqual(["text_commands.unbekannt", "text_commands.unbekannt"]);
+      await expect(eventCodes(database)).resolves.toEqual(["text_commands.unknown", "text_commands.unknown"]);
     } finally {
       database.close();
     }
@@ -137,7 +137,7 @@ describe("Text commands module", () => {
 
       expect(fetcher).toHaveBeenCalledTimes(1);
       expect(body(fetcher, 0).message).toBe("Hallo alice");
-      await expect(eventCodes(database)).resolves.toContain("text_commands.unbekannt");
+      await expect(eventCodes(database)).resolves.toContain("text_commands.unknown");
     } finally {
       database.close();
     }
@@ -155,7 +155,7 @@ describe("Text commands module", () => {
       await dispatchEventSubNotification(environment(database), eventFor("!unbekannt"), fetcher, [textCommandModule]);
 
       expect(fetcher).not.toHaveBeenCalled();
-      await expect(eventCodes(database)).resolves.toEqual(["text_commands.unbekannt"]);
+      await expect(eventCodes(database)).resolves.toEqual(["text_commands.unknown"]);
     } finally {
       database.close();
     }
@@ -175,7 +175,7 @@ describe("Text commands module", () => {
       await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", "2026-09-19T12:00:01.000Z", "trigger-3"), fetcher, [textCommandModule]);
 
       expect(fetcher).toHaveBeenCalledTimes(1);
-      await expect(eventCodes(database)).resolves.toContain("text_commands.abgekuehlt");
+      await expect(eventCodes(database)).resolves.toContain("text_commands.cooldown");
     } finally {
       database.close();
     }
@@ -218,7 +218,7 @@ describe("Text commands module", () => {
       await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", NOW, "trigger-disabled-broadcaster", [{ set_id: "broadcaster" }]), fetcher, [textCommandModule]);
 
       expect(fetcher).not.toHaveBeenCalled();
-      await expect(eventCodes(database)).resolves.toEqual(["text_commands.deaktiviert"]);
+      await expect(eventCodes(database)).resolves.toEqual(["text_commands.disabled"]);
     } finally {
       database.close();
     }
@@ -239,9 +239,9 @@ describe("Text commands module", () => {
 
       expect(fetcher).toHaveBeenCalledTimes(1);
       const denied = await database.prepare(
-        "SELECT code, detail_json FROM event_log WHERE code = 'text_commands.berechtigung'",
+        "SELECT code, detail_json FROM event_log WHERE code = 'text_commands.permission_denied'",
       ).first<{ code: string; detail_json: string }>();
-      expect(denied?.code).toBe("text_commands.berechtigung");
+      expect(denied?.code).toBe("text_commands.permission_denied");
       expect(JSON.parse(denied?.detail_json ?? "{}" )).toEqual({
         name: "hallo", requiredTier: "moderator", currentTier: ["viewer"],
       });

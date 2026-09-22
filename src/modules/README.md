@@ -152,7 +152,7 @@ Host erklären, warum eine Aktion bewusst unterblieben ist.
 return {
   actions: [{ kind: "chat", text: "Danke für den Raid!" }],
   diagnostics: [{
-    code: "shoutout.unterdrueckt",
+    code: "shoutout.suppressed",
     detail: { grund: "raid_erkannt", zuschauer: 8, schwelle: 10 },
   }],
 };

@@ -1,3 +1,4 @@
+import type { EventCode } from "../contracts/values";
 import type { ModuleDiagnostic } from "../modules/contract";
 import { adsModule } from "../modules/ads";
 import { decideAdPrewarning, type AdPrewarningDecision } from "../modules/ads/domain";
@@ -100,7 +101,7 @@ const writeOne = async (
   channelId: string,
   triggerId: string,
   now: string,
-  code: string,
+  code: EventCode,
   detail: Readonly<Record<string, string | number | boolean | null>> = {},
 ): Promise<void> => writeDiagnostics(environment, channelId, triggerId, now, [{ code, detail }]);
 
@@ -114,14 +115,14 @@ const scopeMissing = async (
 ): Promise<void> => {
   await clear(scheduler);
   if (shouldWriteDiagnostics) {
-    await writeOne(environment, channelId, triggerId, now, "ads.vorwarnung.scope_fehlt", { scope: WARNING_SCOPE });
+    await writeOne(environment, channelId, triggerId, now, "ads.prewarning.scope_missing", { scope: WARNING_SCOPE });
   }
 };
 
 const scheduleFailureDiagnostic = (result: AdScheduleResult): ModuleDiagnostic => ({
-  code: result.reason === "unauthorized"
-    ? "ads.vorwarnung.scope_fehlt"
-    : "ads.vorwarnung.zeitplan_fehler",
+  code: (result.reason === "unauthorized"
+    ? "ads.prewarning.scope_missing"
+    : "ads.prewarning.schedule_error") satisfies EventCode,
   detail: { reason: result.reason, ...result.detail },
 });
 
@@ -144,8 +145,14 @@ const settingRecord = async (
   return { record, settings };
 };
 
+// Not typed `EventCode`: `decision.reason` includes `"disabled"`, which the
+// caller always guards against before `decideAdPrewarning` runs (see
+// `settingRecord`'s `!configured.settings.prewarning` checks below), so
+// `ads.prewarning.disabled` is unreachable and was never a real code. The
+// five reachable suffixes are each in `EVENT_CODES`, checked by
+// `tests/unit/event-codes.test.ts` matching this function's real outputs.
 const decisionCode = (decision: AdPrewarningDecision): string =>
-  decision.kind === "announce" ? "ads.vorwarnung.angekuendigt" : `ads.vorwarnung.${decision.reason}`;
+  decision.kind === "announce" ? ("ads.prewarning.announced" satisfies EventCode) : `ads.prewarning.${decision.reason}`;
 
 const decisionDetail = (decision: AdPrewarningDecision): Readonly<Record<string, string | number | boolean | null>> => {
   if (decision.kind === "announce") return { seconds: decision.seconds, scheduledAt: decision.scheduledAt };
@@ -153,7 +160,7 @@ const decisionDetail = (decision: AdPrewarningDecision): Readonly<Record<string,
 };
 
 const shouldReplan = (decision: AdPrewarningDecision): boolean =>
-  decision.kind === "skip" && (decision.reason === "termin_verschoben" || decision.reason === "pause_begonnen");
+  decision.kind === "skip" && (decision.reason === "rescheduled" || decision.reason === "break_started");
 
 const replanFromSchedule = async (
   scheduler: AdScheduler | null,
@@ -203,7 +210,7 @@ export const refreshAdPrewarning = async (
   if (result.schedule.nextAdAt === null) {
     await clear(scheduler);
     if (shouldWriteDiagnostics) {
-      await writeOne(environment, channelId, triggerId, now, "ads.vorwarnung.kein_termin");
+      await writeOne(environment, channelId, triggerId, now, "ads.prewarning.no_schedule");
     }
     return;
   }
@@ -259,8 +266,8 @@ export const processAdPrewarning = async (
   if (decision.kind === "announce") {
     const sent = await sendChatMessage(environment, channelId, decision.text, undefined, fetcher);
     diagnostics.push(sent.sent
-      ? { code: "host.chat.gesendet", detail: sent.detail }
-      : { code: "host.chat.fehlgeschlagen", detail: { reason: sent.reason, ...sent.detail } });
+      ? { code: "host.chat.sent" satisfies EventCode, detail: sent.detail }
+      : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 

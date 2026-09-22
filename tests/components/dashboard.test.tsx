@@ -220,7 +220,7 @@ describe("Dashboard skeleton", () => {
           eventId: "event-1",
           createdAt: "2026-09-18T04:00:00.000Z",
           moduleId: "raid",
-          code: "shoutout.unterdrueckt",
+          code: "shoutout.suppressed",
           detail: '{"grund":"raid_erkannt"}',
           actorUserId: null,
         }, {
@@ -236,7 +236,7 @@ describe("Dashboard skeleton", () => {
           eventId: "event-3",
           createdAt: "2026-09-18T04:02:00.000Z",
           moduleId: "chat",
-          code: "host.chat.gesendet",
+          code: "host.chat.sent",
           detail: "{}",
           actorUserId: "user-1",
           actorLogin: "alice",
@@ -245,7 +245,7 @@ describe("Dashboard skeleton", () => {
           eventId: "event-4",
           createdAt: "2026-09-18T04:03:00.000Z",
           moduleId: "chat",
-          code: "host.aktion.fehler",
+          code: "host.action.failed",
           detail: "{}",
           actorUserId: "user-1",
           actorLogin: "alice",
@@ -287,7 +287,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.keyDown(eventRow as HTMLElement, { key: "Enter" });
     expect(eventRow).toHaveAttribute("aria-selected", "true");
     expect(unknownEventRow).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByText("shoutout.unterdrueckt")).toBeInTheDocument();
+    expect(screen.getByText("shoutout.suppressed")).toBeInTheDocument();
     expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
   });
 
@@ -301,7 +301,7 @@ describe("Dashboard skeleton", () => {
           { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.community_gift", detail: '{"count":5}', actorUserId: null },
           { eventId: "raid", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":21}', actorUserId: null },
           { eventId: "untimeout", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "channel_events", code: "channel_events.moderation.untimeout", detail: "{}", actorUserId: null },
-          { eventId: "sent", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "text_commands", code: "host.chat.gesendet", detail: "{}", actorUserId: null },
+          { eventId: "sent", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "text_commands", code: "host.chat.sent", detail: "{}", actorUserId: null },
           { eventId: "unknown", createdAt: "2026-09-18T04:04:00.000Z", moduleId: "plugin", code: "plugin.anderes", detail: "kein-json", actorUserId: null },
         ],
         nextCursor: null,
@@ -699,7 +699,7 @@ describe("Dashboard skeleton", () => {
           createdAt: "2026-09-18T04:00:00.000Z",
           moduleId: "text_commands",
           triggerId: "trigger-1",
-          code: "text_commands.ausgeloest",
+          code: "text_commands.triggered",
           detail: '{"name":"wiki","response":"Antwort"}',
           actorUserId: "user-1",
           actorLogin: "alice",
@@ -709,7 +709,7 @@ describe("Dashboard skeleton", () => {
           createdAt: "2026-09-18T04:01:00.000Z",
           moduleId: "text_commands",
           triggerId: "trigger-1",
-          code: "host.chat.gesendet",
+          code: "host.chat.sent",
           detail: '{"text":"Antwort"}',
           actorUserId: "user-1",
           actorLogin: "alice",
@@ -719,7 +719,7 @@ describe("Dashboard skeleton", () => {
           createdAt: "2026-09-18T04:02:00.000Z",
           moduleId: "text_commands",
           triggerId: "trigger-2",
-          code: "text_commands.ausgeloest",
+          code: "text_commands.triggered",
           detail: '{"name":"fehlversuch","response":"Antwort"}',
           actorUserId: "user-1",
           actorLogin: "alice",
@@ -729,7 +729,7 @@ describe("Dashboard skeleton", () => {
           createdAt: "2026-09-18T04:03:00.000Z",
           moduleId: "text_commands",
           triggerId: "trigger-2",
-          code: "host.chat.fehlgeschlagen",
+          code: "host.chat.failed",
           detail: '{"text":"Antwort","grund":"rate_limited"}',
           actorUserId: "user-1",
           actorLogin: "alice",
@@ -739,7 +739,7 @@ describe("Dashboard skeleton", () => {
           createdAt: "2026-09-18T04:04:00.000Z",
           moduleId: "raid",
           triggerId: "trigger-3",
-          code: "shoutout.unterdrueckt",
+          code: "shoutout.suppressed",
           detail: '{"grund":"raid_erkannt"}',
           actorUserId: null,
           actorLogin: null,
@@ -765,17 +765,17 @@ describe("Dashboard skeleton", () => {
     fireEvent.keyDown(groupRow as HTMLElement, { key: "Enter" });
 
     expect(groupRow).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("host.chat.gesendet")).toBeInTheDocument();
-    const history = screen.getByText("host.chat.gesendet").closest("li")?.parentElement;
+    expect(screen.getByText("host.chat.sent")).toBeInTheDocument();
+    const history = screen.getByText("host.chat.sent").closest("li")?.parentElement;
     if (history == null) throw new Error("Verlauf fehlt");
     const historyText = history.textContent;
-    expect(historyText.indexOf("text_commands.ausgeloest")).toBeLessThan(historyText.indexOf("host.chat.gesendet"));
+    expect(historyText.indexOf("text_commands.triggered")).toBeLessThan(historyText.indexOf("host.chat.sent"));
 
     const failedGroupRow = screen.getByText("Chat-Nachricht fehlgeschlagen").closest("tr");
     expect(failedGroupRow).not.toBeNull();
     fireEvent.click(failedGroupRow as HTMLElement);
     expect(failedGroupRow).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("host.chat.fehlgeschlagen")).toBeInTheDocument();
+    expect(screen.getByText("host.chat.failed")).toBeInTheDocument();
     expect(screen.getByText(/"grund": "rate_limited"/)).toBeInTheDocument();
   });
 
@@ -797,8 +797,8 @@ describe("Dashboard skeleton", () => {
   it("shows active filters, combines them, and reports a no-results empty state", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const channelEntry = { eventId: "channel", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":21}', actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const moduleEntry = { eventId: "module", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "text_commands", code: "text_commands.ausgeloest", detail: '{"name":"hilfe"}', actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
-    const errorEntry = { eventId: "error", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "text_commands", code: "host.chat.fehlgeschlagen", detail: "{}", actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
+    const moduleEntry = { eventId: "module", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "text_commands", code: "text_commands.triggered", detail: '{"name":"hilfe"}', actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
+    const errorEntry = { eventId: "error", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "text_commands", code: "host.chat.failed", detail: "{}", actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
@@ -2606,7 +2606,7 @@ describe("Dashboard skeleton", () => {
       createdAt: "2026-09-18T04:00:00.000Z",
       moduleId: "text_commands",
       triggerId: "trigger-1",
-      code: "text_commands.ausgeloest",
+      code: "text_commands.triggered",
       detail: '{"name":"wiki","response":"Antwort"}',
       actorUserId: "user-1",
       actorLogin: "alice",
@@ -2641,7 +2641,7 @@ describe("Dashboard skeleton", () => {
       createdAt: "2026-09-18T04:00:00.000Z",
       moduleId: "text_commands",
       triggerId: "trigger-1",
-      code: "text_commands.ausgeloest",
+      code: "text_commands.triggered",
       detail: '{"name":"wiki","response":"Antwort"}',
       actorUserId: "user-1",
       actorLogin: "alice",
@@ -2812,7 +2812,7 @@ describe("Dashboard skeleton", () => {
       createdAt: "2026-09-18T04:00:00.000Z",
       moduleId: "text_commands",
       triggerId: "trigger-1",
-      code: "text_commands.ausgeloest",
+      code: "text_commands.triggered",
       detail: '{"name":"wiki","response":"Antwort"}',
       actorUserId: "user-1",
       actorLogin: "alice",

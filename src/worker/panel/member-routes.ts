@@ -22,7 +22,7 @@ import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
-import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
+import { CHANNEL_ROLES, type AuditAction, type ChannelRole } from "../../contracts/values";
 import { revokeRealtimeUser } from "../realtime";
 
 interface MemberRouteEnvironment {
@@ -314,7 +314,7 @@ memberRouter.post("/api/channels/:channelId/members", async (context) => {
     context.env.DB,
     actorOf(context),
     member,
-    "mitglied.hinzugefügt",
+    "member.added" satisfies AuditAction,
     now,
     actorGuard(requiredActorRoles(member.role)),
   );
@@ -349,7 +349,7 @@ memberRouter.patch("/api/channels/:channelId/members/:userId", async (context) =
     context.env.DB,
     actorOf(context),
     member,
-    "mitglied.rolle_geändert",
+    "member.role_changed" satisfies AuditAction,
     now,
     actorGuard(requiredActorRoles(member.role, existing.role)),
   );
@@ -376,7 +376,7 @@ memberRouter.delete("/api/channels/:channelId/members/:userId", async (context) 
     actorOf(context),
     channelId,
     userId,
-    "mitglied.entfernt",
+    "member.removed" satisfies AuditAction,
     nowIso(),
     actorGuard(requiredActorRoles(undefined, existing.role)),
   );

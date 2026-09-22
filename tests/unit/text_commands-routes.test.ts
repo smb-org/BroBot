@@ -101,7 +101,7 @@ describe("Text commands panel", () => {
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
-        action: "text_commands.befehl.angelegt",
+        action: "text_commands.command.created",
         before_json: "null",
         after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, cooldownSeconds: 5 }),
       }),
@@ -109,7 +109,7 @@ describe("Text commands panel", () => {
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
-        action: "text_commands.befehl.geändert",
+        action: "text_commands.command.updated",
         before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, cooldownSeconds: 5 }),
         after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10 }),
       }),
@@ -117,7 +117,7 @@ describe("Text commands panel", () => {
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
-        action: "text_commands.befehl.entfernt",
+        action: "text_commands.command.removed",
         before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10 }),
         after_json: "null",
       }),
@@ -218,9 +218,9 @@ describe("Text commands panel", () => {
       "SELECT enabled FROM text_commands WHERE command_name = 'hallo'",
     ).first()).resolves.toEqual({ enabled: 0 });
     await expect(database.prepare(
-      "SELECT action, before_json, after_json FROM audit_log WHERE action = 'text_commands.befehl.geändert'",
+      "SELECT action, before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
     ).first()).resolves.toEqual({
-      action: "text_commands.befehl.geändert",
+      action: "text_commands.command.updated",
       before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
       after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
     });
@@ -353,7 +353,7 @@ describe("Text commands panel", () => {
       "SELECT minimum_level FROM text_commands WHERE command_name = 'hallo'",
     ).first()).resolves.toEqual({ minimum_level: "moderator" });
     await expect(database.prepare(
-      "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.befehl.geändert'",
+      "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
     ).first()).resolves.toEqual({
       before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
       after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5 }),
