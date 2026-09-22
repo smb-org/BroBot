@@ -228,14 +228,14 @@ const fetchWithTimeout = async (
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
       controller.abort();
-      reject(new TwitchApiError("Die EventSub-Abfrage hat das Zeitlimit überschritten.", 504, "timeout"));
+      reject(new TwitchApiError("The EventSub request timed out.", 504, "timeout"));
     }, EVENTSUB_REQUEST_TIMEOUT_MS);
   });
   try {
     return await Promise.race([fetcher(input, { ...init, signal: controller.signal }), timeout]);
   } catch (error: unknown) {
     if (controller.signal.aborted) {
-      throw new TwitchApiError("Die EventSub-Abfrage hat das Zeitlimit überschritten.", 504, "timeout");
+      throw new TwitchApiError("The EventSub request timed out.", 504, "timeout");
     }
     throw error;
   } finally {
@@ -263,7 +263,7 @@ const requestEventSubApi = async (
     });
   } catch (error: unknown) {
     if (error instanceof TwitchApiError) throw error;
-    throw new TwitchApiError("Twitch EventSub ist nicht erreichbar.", 503, "network_error");
+    throw new TwitchApiError("Twitch EventSub is not reachable.", 503, "network_error");
   }
   const body = await responseJson(response);
   if (!response.ok) {
@@ -273,7 +273,7 @@ const requestEventSubApi = async (
     throw new TwitchApiError(
       typeof body.message === "string" && body.message.length > 0
         ? body.message
-        : "Twitch EventSub hat die Anfrage abgelehnt.",
+        : "Twitch EventSub rejected the request.",
       response.status,
       code,
     );
@@ -355,12 +355,12 @@ export const fetchEventSubSubscriptions = async (
     if (cursor !== null) url.searchParams.set("after", cursor);
     const { body } = await requestEventSubApi(fetcher, appAccessToken, clientId, url);
     if (!Array.isArray(body.data)) {
-      throw new TwitchApiError("Twitch EventSub lieferte keine Aboliste.", 502, "invalid_response");
+      throw new TwitchApiError("Twitch EventSub returned no subscription list.", 502, "invalid_response");
     }
     for (const value of body.data) {
       const subscription = parseRemoteSubscription(value);
       if (subscription === null) {
-        throw new TwitchApiError("Twitch EventSub lieferte ein ungültiges Abo.", 502, "invalid_response");
+        throw new TwitchApiError("Twitch EventSub returned an invalid subscription.", 502, "invalid_response");
       }
       subscriptions.push(subscription);
     }
@@ -369,7 +369,7 @@ export const fetchEventSubSubscriptions = async (
       ? pagination.cursor
       : null;
     if (next === null) return subscriptions;
-    if (seenCursors.has(next)) throw new TwitchApiError("Twitch liefert einen wiederholten Pagination-Cursor.", 502, "pagination_loop");
+    if (seenCursors.has(next)) throw new TwitchApiError("Twitch returned a repeated pagination cursor.", 502, "pagination_loop");
     seenCursors.add(next);
     cursor = next;
   }
@@ -439,7 +439,7 @@ const createSubscription = async (
   const ring = parseKeyRing(env.TWITCH_EVENTSUB_SECRET);
   const definition = eventSubDefinitionForTarget(target);
   if (definition === null) {
-    throw new TwitchApiError("Unbekannter EventSub-Zieltyp.", 500, "invalid_target");
+    throw new TwitchApiError("Unknown EventSub target type.", 500, "invalid_target");
   }
   const { body } = await requestEventSubApi(
     fetcher,
@@ -463,10 +463,10 @@ const createSubscription = async (
   );
   const subscription = parseRemoteSubscription(Array.isArray(body.data) ? body.data[0] : null);
   if (subscription === null) {
-    throw new TwitchApiError("Twitch EventSub lieferte kein angelegtes Abo.", 502, "invalid_response");
+    throw new TwitchApiError("Twitch EventSub returned no created subscription.", 502, "invalid_response");
   }
   if (!isOwnedByTarget(subscription, target, botUserId, callbackUrl(env.PUBLIC_ORIGIN))) {
-    throw new TwitchApiError("Twitch EventSub lieferte ein fremdes Abo.", 502, "invalid_response");
+    throw new TwitchApiError("Twitch EventSub returned a foreign subscription.", 502, "invalid_response");
   }
   return subscription;
 };

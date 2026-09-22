@@ -258,6 +258,6 @@ export const dispatchEventSubNotification = async (
   } catch (error: unknown) {
     // The feed is a hint; D1 stays the authoritative state, and event
     // processing must not fail because a socket happens to be closed.
-    console.warn("Realtime-Hinweis konnte nicht gesendet werden.", error);
+    console.warn("Realtime hint could not be sent.", error);
   }
 };

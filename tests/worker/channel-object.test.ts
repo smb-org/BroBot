@@ -131,7 +131,7 @@ describe("ChannelObject realtime path", () => {
 
     expect(() => {
       object.publish({ ...eventMessage, channelId: "kanal-b" });
-    }).toThrow(/fremden Kanal/);
+    }).toThrow(/foreign channel/);
   });
 
   it("sends nothing more to an expired connection", () => {

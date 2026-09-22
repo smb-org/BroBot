@@ -107,7 +107,7 @@ export const revokeRealtimeUser = async (
     const object = channelObject(namespace, channelId);
     if (object !== null) await object.revokeUser(userId);
   } catch (error: unknown) {
-    console.warn("Realtime-Widerruf für Nutzer fehlgeschlagen.", error);
+    console.warn("Realtime revocation for user failed.", error);
   }
 };
 
@@ -120,7 +120,7 @@ export const revokeRealtimeToken = async (
     const object = channelObject(namespace, channelId);
     if (object !== null) await object.revokeToken(tokenId);
   } catch (error: unknown) {
-    console.warn("Realtime-Widerruf für Token fehlgeschlagen.", error);
+    console.warn("Realtime revocation for token failed.", error);
   }
 };
 
@@ -138,6 +138,6 @@ export const revokeRealtimeSessionForUser = async (
       if (object !== null) await object.revokeSession(sessionId);
     }));
   } catch (error: unknown) {
-    console.warn("Realtime-Widerruf für Sitzung fehlgeschlagen.", error);
+    console.warn("Realtime revocation for session failed.", error);
   }
 };

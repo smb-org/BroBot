@@ -218,7 +218,7 @@ describe("app access token", () => {
     ));
 
     await expect(getAppAccessToken(env, "2026-09-19T10:00:00.000Z", fetcher)).rejects.toThrow(
-      "App-Token konnte nach der Rotation nicht gelesen werden.",
+      "App token could not be read after rotation.",
     );
   });
 

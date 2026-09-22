@@ -61,7 +61,7 @@ export const requestAppAccessToken = async (
   if (!response.ok || typeof body.access_token !== "string" || body.access_token.length === 0 ||
       !isFinitePositiveNumber(body.expires_in)) {
     throw new TwitchApiError(
-      "Twitch-App-Token wurde abgelehnt.",
+      "Twitch app token was rejected.",
       response.status,
       typeof body.error === "string" ? body.error : null,
     );
@@ -148,7 +148,7 @@ export const getAppAccessToken = async (
     const currentToken = await decryptAppAccessToken(current.accessTokenCiphertext, encryptionKeys);
     if (currentToken !== null) return currentToken;
   }
-  throw new Error("App-Token konnte nach der Rotation nicht gelesen werden.");
+  throw new Error("App token could not be read after rotation.");
 };
 
 export const maintainAppAccessToken = async (

@@ -99,7 +99,7 @@ describe("Twitch OAuth", () => {
       fetcher,
       environment,
       "code",
-    )).rejects.toThrow("Twitch-Code-Tausch wurde abgelehnt.");
+    )).rejects.toThrow("The Twitch code exchange was rejected.");
   });
 
   it("reads the Twitch identity without email scope", async () => {

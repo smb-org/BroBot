@@ -154,7 +154,7 @@ export const fetchTwitchUserByLogin = async (
   login: string,
 ): Promise<TwitchUser | null> => {
   const accessToken = await readStoredBotAccessToken(environment);
-  if (accessToken === null) throw new Error("Bot-Token für Twitch-Nutzersuche fehlt.");
+  if (accessToken === null) throw new Error("Bot token for Twitch user search is missing.");
 
   const url = new URL("https://api.twitch.tv/helix/users");
   url.searchParams.set("login", login);
@@ -165,7 +165,7 @@ export const fetchTwitchUserByLogin = async (
     },
   });
   const body = await readResponseJson(response);
-  if (!response.ok) throw new Error("Twitch-Nutzersuche ist fehlgeschlagen.");
+  if (!response.ok) throw new Error("Twitch user search failed.");
   if (!Array.isArray(body.data)) return null;
 
   const first = (body.data as unknown[])[0];

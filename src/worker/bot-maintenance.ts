@@ -102,7 +102,7 @@ const fetchWithTimeout = async (
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
       controller.abort();
-      reject(new TwitchApiError("Die Twitch-Abfrage hat das Zeitlimit überschritten.", 504, "timeout"));
+      reject(new TwitchApiError("The Twitch request timed out.", 504, "timeout"));
     }, MODERATOR_STATUS_REQUEST_TIMEOUT_MS);
   });
   try {
@@ -112,7 +112,7 @@ const fetchWithTimeout = async (
     ]);
   } catch (error: unknown) {
     if (controller.signal.aborted) {
-      throw new TwitchApiError("Die Twitch-Abfrage hat das Zeitlimit überschritten.", 504, "timeout");
+      throw new TwitchApiError("The Twitch request timed out.", 504, "timeout");
     }
     throw error;
   } finally {
@@ -161,7 +161,7 @@ export const refreshBotToken = async (
       typeof body.refresh_token !== "string" || body.refresh_token.length === 0 ||
       !isFinitePositiveNumber(body.expires_in)) {
     throw new TwitchApiError(
-      "Twitch-Refresh wurde abgelehnt.",
+      "Twitch refresh was rejected.",
       response.status,
       typeof body.error === "string" ? body.error : null,
     );
@@ -189,13 +189,13 @@ export const validateBotToken = async (
   if (!response.ok || typeof body.user_id !== "string" || typeof body.login !== "string" ||
       !isFinitePositiveNumber(body.expires_in)) {
     throw new TwitchApiError(
-      "Twitch-Token ist ungültig.",
+      "Twitch token is invalid.",
       response.status,
       typeof body.error === "string" ? body.error : null,
     );
   }
   if (typeof body.client_id === "string" && body.client_id !== environment.TWITCH_CLIENT_ID) {
-    throw new TwitchApiError("Twitch-Token gehört zu einer anderen Anwendung.", 502);
+    throw new TwitchApiError("Twitch token belongs to a different application.", 502);
   }
   const scopes = Array.isArray(body.scopes)
     ? body.scopes.filter((scope): scope is string => typeof scope === "string")
@@ -232,7 +232,7 @@ const fetchModeratedChannelsPage = async (
     throw new TwitchApiError(
       typeof body.message === "string" && body.message.length > 0
         ? body.message
-        : "Moderatorstatus konnte nicht gelesen werden.",
+        : "Moderator status could not be read.",
       response.status,
       typeof body.error === "string" ? body.error : null,
     );
@@ -264,7 +264,7 @@ export const fetchModeratedChannels = async (
     const page = await fetchModeratedChannelsPage(fetcher, clientId, userId, accessToken, cursor);
     if (page.nextCursor === null) return page.channelIds;
     if (seenCursors.has(page.nextCursor)) {
-      throw new TwitchApiError("Twitch liefert einen wiederholten Pagination-Cursor.", 502);
+      throw new TwitchApiError("Twitch returned a repeated pagination cursor.", 502);
     }
     seenCursors.add(page.nextCursor);
     return page.channelIds.concat(await fetchPage(page.nextCursor));

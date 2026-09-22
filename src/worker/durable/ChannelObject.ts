@@ -190,7 +190,7 @@ export class ChannelObject extends DurableObject<Env> {
   ): void {
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || message.channelId !== ownChannelId) {
-      throw new Error("Realtime-Nachricht gehört zu einem fremden Kanal.");
+      throw new Error("Realtime message belongs to a foreign channel.");
     }
     const now = Date.now();
     const serialized = JSON.stringify(message);
@@ -313,7 +313,7 @@ export class ChannelObject extends DurableObject<Env> {
     } catch (error: unknown) {
       // On a database error, connections are closed for safety; an alarm
       // must not leave access open that can no longer be verified.
-      console.error("Realtime-Berechtigungsprüfung fehlgeschlagen.", error);
+      console.error("Realtime authorization check failed.", error);
       for (const webSocket of webSockets) expired.add(webSocket);
     }
 
@@ -350,7 +350,7 @@ export class ChannelObject extends DurableObject<Env> {
         );
       } catch (error: unknown) {
         // A flow or D1 error must not swallow the other deadlines that are due.
-        console.error("Werbe-Vorwarnung konnte im Alarm nicht verarbeitet werden.", error);
+        console.error("Ad prewarning could not be processed in the alarm.", error);
       }
     }
     await this.scheduleEarliestAlarm();

@@ -305,7 +305,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     try {
       await refreshAdPrewarning(context.env, target.channelId, messageId, now);
     } catch (error: unknown) {
-      console.error("Werbe-Vorwarnung konnte nicht aktualisiert werden.", error);
+      console.error("Ad prewarning could not be refreshed.", error);
     }
   }
   return response(null, 204);

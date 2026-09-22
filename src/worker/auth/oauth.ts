@@ -242,10 +242,10 @@ export const exchangeAuthorizationCode = async (
   try {
     body = await response.json();
   } catch {
-    throw new OAuthExchangeError("Twitch-Code-Tausch wurde abgelehnt.");
+    throw new OAuthExchangeError("The Twitch code exchange was rejected.");
   }
   if (!response.ok || !isTwitchTokenResponse(body)) {
-    throw new OAuthExchangeError("Twitch-Code-Tausch wurde abgelehnt.");
+    throw new OAuthExchangeError("The Twitch code exchange was rejected.");
   }
   return {
     accessToken: body.access_token,
@@ -279,18 +279,18 @@ export const fetchTwitchUser = async (
       body = {};
     }
   } catch {
-    throw new Error("Twitch-Identität konnte nicht gelesen werden.");
+    throw new Error("Twitch identity could not be read.");
   }
   const data: unknown[] = Array.isArray(body.data)
     ? body.data.map((entry: unknown): unknown => entry)
     : [];
   const first = data[0] ?? null;
   if (first === null || typeof first !== "object") {
-    throw new Error("Twitch-Identität konnte nicht gelesen werden.");
+    throw new Error("Twitch identity could not be read.");
   }
   const user = first as Record<string, unknown>;
   if (!response.ok || typeof user.id !== "string" || typeof user.login !== "string") {
-    throw new Error("Twitch-Identität konnte nicht gelesen werden.");
+    throw new Error("Twitch identity could not be read.");
   }
   return { userId: user.id, login: user.login };
 };
