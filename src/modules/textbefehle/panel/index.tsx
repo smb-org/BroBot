@@ -90,17 +90,24 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
   const [name, setName] = useState(initial.name);
   const [text, setText] = useState(initial.text);
   const [art, setArt] = useState(initial.art);
-  const [cooldownSekunden, setCooldownSekunden] = useState(initial.cooldownSekunden);
+  const [cooldownSekunden, setCooldownSekunden] = useState<number | "">(initial.cooldownSekunden);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cooldownError, setCooldownError] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (confirmingDelete) confirmButtonRef.current?.focus();
+    if (confirmingDelete) cancelButtonRef.current?.focus();
   }, [confirmingDelete]);
 
   const save = async (): Promise<void> => {
+    if (cooldownSekunden === "") {
+      setCooldownError(true);
+      return;
+    }
+    setCooldownError(false);
     setBusy(true);
     setError(null);
     try {
@@ -153,7 +160,8 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
       </label> : null}
       <label className="config-field config-field--schmal">
         {labels.abkuehlung}
-        <input type="number" min="0" max="86400" value={cooldownSekunden} onChange={(event) => { setCooldownSekunden(Number(event.target.value)); }} disabled={!canManageContent || busy} />
+        <input type="number" min="0" max="86400" value={cooldownSekunden} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSekunden(event.target.value === "" ? "" : Number(event.target.value)); }} disabled={!canManageContent || busy} />
+        {cooldownError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
       </label>
       <div className="form-actions">
         <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManageContent || busy}>{labels.speichern(initial.name)}</button>
@@ -174,7 +182,7 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
           <p id="text-command-delete-confirmation-description">{labels.loeschenBestaetigung(initial.name)}</p>
           <div className="form-actions">
             <button ref={confirmButtonRef} className="button button--danger" type="button" onClick={() => { void remove(); }} disabled={!canManageContent || busy}>{labels.loeschungBestaetigen(initial.name)}</button>
-            <button className="button button--quiet" type="button" onClick={() => { setConfirmingDelete(false); }} disabled={busy}>{dashboardGemeinsameTexte().abbrechen}</button>
+            <button ref={cancelButtonRef} className="button button--quiet" type="button" onClick={() => { setConfirmingDelete(false); }} disabled={busy}>{dashboardGemeinsameTexte().abbrechen}</button>
           </div>
         </div>
       ) : null}
@@ -254,7 +262,9 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
   const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [art, setArt] = useState<"text" | "liste">("text");
-  const [cooldownSekunden, setCooldownSekunden] = useState(5);
+  const [cooldownSekunden, setCooldownSekunden] = useState<number | "">(5);
+  const [cooldownError, setCooldownError] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
   const [minimumBusyName, setMinimumBusyName] = useState<string | null>(null);
 
@@ -304,8 +314,14 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
   const canCreate = nameValid && (art === "liste" || text.trim().length > 0);
 
   const create = async (): Promise<void> => {
-    if (!canManageContent || !canCreate) return;
+    if (!canManageContent || !canCreate || creating) return;
+    if (cooldownSekunden === "") {
+      setCooldownError(true);
+      return;
+    }
+    setCooldownError(false);
     setError(null);
+    setCreating(true);
     try {
       await legeTextbefehlAn(channelId, { name: name.trim(), art, ...(art === "text" ? { text } : {}), cooldownSekunden });
       setName("");
@@ -315,6 +331,8 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
       await load();
     } catch {
       setError(labels.speichernFehler);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -363,9 +381,10 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
             {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setAnlegenOffen(false); selectName(befehl.name); }} rowRef={rowRef(befehl.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
           </section>
         </div>
-        {selected !== null ? <TextbefehlEditor channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} /> : anlegenOffen ? (
+        {selected !== null ? <TextbefehlEditor key={selected.name} channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} /> : anlegenOffen ? (
           <TextbefehleSubInspector ariaLabel={labels.anlegen} title={labels.anlegen} onClose={closeCreate}>
-            <form className="config-section" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+            <form className="config-section" aria-busy={creating} onSubmit={(event) => { event.preventDefault(); void create(); }}>
+              <fieldset disabled={!canManageContent || creating}>
               {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
               <label className="config-field config-field--mittel">
                 {labels.name}
@@ -385,9 +404,11 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
               </label> : null}
               <label className="config-field config-field--schmal">
                 {labels.abkuehlung}
-                <input type="number" min="0" max="86400" value={cooldownSekunden} onChange={(event) => { setCooldownSekunden(Number(event.target.value)); }} disabled={!canManageContent} />
+                <input type="number" min="0" max="86400" value={cooldownSekunden} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSekunden(event.target.value === "" ? "" : Number(event.target.value)); }} />
+                {cooldownError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
               </label>
-              <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canManageContent || !canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (art === "text" ? labels.antwortFehlt : labels.nameFehlt) : (art === "text" ? labels.nameAntwortFehlt : labels.nameFehlt)}</span>}</div>
+              <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (art === "text" ? labels.antwortFehlt : labels.nameFehlt) : (art === "text" ? labels.nameAntwortFehlt : labels.nameFehlt)}</span>}</div>
+              </fieldset>
             </form>
           </TextbefehleSubInspector>
         ) : null}

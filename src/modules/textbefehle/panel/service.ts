@@ -1,4 +1,5 @@
 import type { Textbefehl, TextbefehlMindeststufe } from "../contracts";
+import { PanelApiError } from "../../../contracts/panel-error";
 
 const pathFor = (channelId: string, name?: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/textbefehle/befehle${name === undefined ? "" : `/${encodeURIComponent(name)}`}`;
@@ -9,7 +10,7 @@ const json = async <T>(response: Response): Promise<T> => {
     const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
       ? body.error
       : "Anfrage fehlgeschlagen.";
-    throw new Error(message);
+    throw new PanelApiError(response.status, message, body);
   }
   return body as T;
 };

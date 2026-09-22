@@ -11,6 +11,8 @@ interface WerbungPanelProperties {
   canManage?: boolean;
 }
 
+type WerbungPanelSettings = Omit<WerbungSettings, "vorlaufSekunden"> & { vorlaufSekunden: number | "" };
+
 const formatZeitpunkt = (value: string | null, language: DashboardLanguage): string => {
   if (value === null) return "—";
   const date = new Date(value);
@@ -28,12 +30,13 @@ export const WerbungPanel = ({
 }: WerbungPanelProperties): ReactElement => {
   const labels = werbungPanelTexte(language);
   const resolvedLanguage = language ?? (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("de") ? "de" : "en");
-  const [settings, setSettings] = useState<WerbungSettings | null>(null);
+  const [settings, setSettings] = useState<WerbungPanelSettings | null>(null);
   const [zeitplan, setZeitplan] = useState<WerbungZeitplanAntwort | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [snoozeBusy, setSnoozeBusy] = useState(false);
+  const [vorlaufError, setVorlaufError] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -50,11 +53,16 @@ export const WerbungPanel = ({
   if (settings === null || zeitplan === null) return <p className="loading-line">{error ?? labels.laden}</p>;
 
   const save = async (): Promise<void> => {
+    if (settings.vorlaufSekunden === "") {
+      setVorlaufError(true);
+      return;
+    }
+    setVorlaufError(false);
     setBusy(true);
     setError(null);
     setSaved(false);
     try {
-      await speichereWerbungseinstellungen(channelId, settings);
+      await speichereWerbungseinstellungen(channelId, { ...settings, vorlaufSekunden: settings.vorlaufSekunden });
       setSaved(true);
     } catch {
       setError(labels.fehler);
@@ -111,7 +119,7 @@ export const WerbungPanel = ({
           <textarea
             value={settings.automatisch}
             disabled={!canManage || busy}
-            onChange={(event) => { setSettings({ ...settings, automatisch: event.target.value }); }}
+            onChange={(event) => { setSaved(false); setSettings({ ...settings, automatisch: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.platzhalter}</span>
         </label>
@@ -124,7 +132,7 @@ export const WerbungPanel = ({
           <textarea
             value={settings.manuell}
             disabled={!canManage || busy}
-            onChange={(event) => { setSettings({ ...settings, manuell: event.target.value }); }}
+            onChange={(event) => { setSaved(false); setSettings({ ...settings, manuell: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.platzhalter}</span>
         </label>
@@ -141,7 +149,7 @@ export const WerbungPanel = ({
             aria-label={labels.vorwarnungAktiv}
             aria-checked={settings.vorwarnung}
             disabled={!canManage || busy}
-            onClick={() => { setSettings({ ...settings, vorwarnung: !settings.vorwarnung }); }}
+            onClick={() => { setSaved(false); setSettings({ ...settings, vorwarnung: !settings.vorwarnung }); }}
           >
             <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
           </button>
@@ -154,9 +162,11 @@ export const WerbungPanel = ({
             max="300"
             step="1"
             value={settings.vorlaufSekunden}
+            aria-invalid={vorlaufError}
             disabled={!canManage || busy}
-            onChange={(event) => { setSettings({ ...settings, vorlaufSekunden: Number(event.target.value) }); }}
+            onChange={(event) => { setSaved(false); setVorlaufError(false); setSettings({ ...settings, vorlaufSekunden: event.target.value === "" ? "" : Number(event.target.value) }); }}
           />
+          {vorlaufError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
         </label>
         <label className="config-field config-field--breit">
           {labels.vorwarnungText}
@@ -164,7 +174,7 @@ export const WerbungPanel = ({
             type="search"
             value={settings.vorwarnungText}
             disabled={!canManage || busy}
-            onChange={(event) => { setSettings({ ...settings, vorwarnungText: event.target.value }); }}
+            onChange={(event) => { setSaved(false); setSettings({ ...settings, vorwarnungText: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.platzhalterVorwarnung}</span>
         </label>

@@ -30,6 +30,7 @@ interface WerbungPanelTexte {
   gespeichert: string;
   laden: string;
   fehler: string;
+  zahlFehlt: string;
 }
 
 const texte: LocaleCatalog<WerbungPanelTexte> = {
@@ -63,6 +64,7 @@ const texte: LocaleCatalog<WerbungPanelTexte> = {
     gespeichert: "Ansagen gespeichert.",
     laden: "Werbeeinstellungen werden geladen …",
     fehler: "Die Werbeeinstellungen konnten nicht geladen oder gespeichert werden.",
+    zahlFehlt: "Zahl eingeben",
   },
   en: {
     titel: "Announcements",
@@ -94,6 +96,7 @@ const texte: LocaleCatalog<WerbungPanelTexte> = {
     gespeichert: "Announcements saved.",
     laden: "Loading ad break settings …",
     fehler: "The ad break settings could not be loaded or saved.",
+    zahlFehlt: "Enter a number",
   },
 };
 
