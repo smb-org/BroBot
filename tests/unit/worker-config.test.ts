@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   LATEST_SCHEMA_MIGRATION,
-  getBetreiberUserIds,
+  getPlatformUserIds,
   getHealthStatus,
   getMissingBindings,
 } from "../../src/worker/config";
@@ -78,9 +78,9 @@ describe("Healthcheck-Bindingvalidierung", () => {
     });
 
     expect(getMissingBindings(env)).toEqual([]);
-    expect([...getBetreiberUserIds(env)]).toEqual(["26876135", "42"]);
-    expect(getBetreiberUserIds(environment(validPepper, { BETREIBER_USER_IDS: "[]" }))).toEqual(new Set());
-    expect(getBetreiberUserIds({})).toEqual(new Set());
+    expect([...getPlatformUserIds(env)]).toEqual(["26876135", "42"]);
+    expect(getPlatformUserIds(environment(validPepper, { BETREIBER_USER_IDS: "[]" }))).toEqual(new Set());
+    expect(getPlatformUserIds({})).toEqual(new Set());
   });
 
   it("meldet ein ungültiges Betreiber-Secret und liefert dafür ein leeres Set", () => {
@@ -88,7 +88,7 @@ describe("Healthcheck-Bindingvalidierung", () => {
     const env = environment(validPepper, { BETREIBER_USER_IDS: '["nicht-numerisch"]' });
 
     expect(getMissingBindings(env)).toContain("BETREIBER_USER_IDS");
-    expect(getBetreiberUserIds(env)).toEqual(new Set());
+    expect(getPlatformUserIds(env)).toEqual(new Set());
   });
 
   it("meldet fehlende Ressourcen-Bindings und eine ungültige Origin", () => {

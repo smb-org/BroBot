@@ -1,19 +1,20 @@
-import type { SessionRecord } from "./repository";
+import type {
+  SessionRecord,
+} from "../db/sessions";
+import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 
-export type ChannelMemberRole = "broadcaster" | "verwalter" | "bediener";
-
-interface ChannelMemberRoleRow {
-  role: ChannelMemberRole;
+interface ChannelRoleRow {
+  role: ChannelRole;
 }
 
-const isChannelMemberRole = (value: string): value is ChannelMemberRole =>
-  value === "broadcaster" || value === "verwalter" || value === "bediener";
+const isChannelRole = (value: string): value is ChannelRole =>
+  CHANNEL_ROLES.includes(value as ChannelRole);
 
 export const authorizeChannelAccess = async (
   db: D1Database,
   session: Pick<SessionRecord, "userId"> | null,
   channelId: string,
-): Promise<ChannelMemberRole | null> => {
+): Promise<ChannelRole | null> => {
   if (session === null) return null;
   const row = await db.prepare(
     `SELECT member.role
@@ -21,6 +22,6 @@ export const authorizeChannelAccess = async (
        JOIN channel_members AS member ON member.channel_id = channel.channel_id
       WHERE channel.channel_id = ?
         AND member.user_id = ?`,
-  ).bind(channelId, session.userId).first<ChannelMemberRoleRow>();
-  return row !== null && isChannelMemberRole(row.role) ? row.role : null;
+  ).bind(channelId, session.userId).first<ChannelRoleRow>();
+  return row !== null && isChannelRole(row.role) ? row.role : null;
 };

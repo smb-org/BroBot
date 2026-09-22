@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
-import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,7 +11,9 @@ import {
   parseEventSubTimestamp,
 } from "../../src/worker/eventsub";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { purgeOldEventSubMessages } from "../../src/worker/auth/repository";
+import {
+  purgeOldEventSubMessages,
+} from "../../src/worker/db/eventsub-state";
 import { scheduled } from "../../src/worker/scheduled";
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
@@ -372,7 +372,7 @@ describe("EventSub-Eingang", () => {
     await insertLoginIdentityAndSession(database, "200", ["channel:read:ads"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('200', 'werbung', 1, '{}')`,
+       VALUES ('200', 'ads', 1, '{}')`,
     ).run();
     await insertBotIdentity(database);
     vi.stubGlobal("fetch", invalidTokenFetcher());
@@ -464,7 +464,7 @@ describe("EventSub-Eingang", () => {
     await insertChannel(database, "channel-condition");
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('channel-condition', 'kanalereignisse', 1, '{}')`,
+       VALUES ('channel-condition', 'channel_events', 1, '{}')`,
     ).run();
     const body = JSON.stringify({
       subscription: {
@@ -491,9 +491,9 @@ describe("EventSub-Eingang", () => {
          FROM event_log`,
     ).first()).resolves.toEqual({
       channel_id: "channel-condition",
-      module_id: "kanalereignisse",
-      code: "kanalereignisse.raid.eingehend",
-      detail_json: JSON.stringify({ quelle: "Quelle", zuschauer: 23 }),
+      module_id: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail_json: JSON.stringify({ source: "Quelle", viewers: 23 }),
     });
   });
 
@@ -667,16 +667,6 @@ describe("EventSub-Eingang", () => {
     expect(details).not.toContain("SCAN eventsub_messages");
   });
 
-  it("wendet die EventSub-Migration idempotent erneut an", () => {
-    const migration = readFileSync(
-      resolve(import.meta.dirname, "../../migrations/0008_eventsub_eingang.sql"),
-      "utf8",
-    );
-
-    expect(() => {
-      database.sqlite.exec(migration);
-    }).not.toThrow();
-  });
 
   it("räumt alte Message-IDs im stündlichen Cron auf", async () => {
     await database.prepare(

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type * as AuthRepository from "../../src/worker/auth/repository";
+import type * as AuthRepository from "../../src/worker/db/channel-members";
 
-vi.mock("../../src/worker/auth/repository", async (importOriginal) => {
+vi.mock("../../src/worker/db/channel-members", async (importOriginal) => {
   const actual = await importOriginal<typeof AuthRepository>();
   return {
     ...actual,
@@ -16,7 +16,7 @@ import { memberRouter } from "../../src/worker/panel/member-routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-type MemberRole = "broadcaster" | "verwalter" | "bediener";
+type MemberRole = "broadcaster" | "manager" | "operator";
 
 const key = (byte: number): string =>
   btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
@@ -84,10 +84,10 @@ describe("Mitglieder-Handler: Broadcaster-Schwelle", () => {
   });
 
   it("weist einen Verwalter beim Herabstufen und Entfernen eines Broadcasters auch bei mehreren Broadcastern ab", async () => {
-    await setupChannel(database, "verwalter");
+    await setupChannel(database, "manager");
 
     const changeResponse = await memberRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "manager" }),
       environment,
     );
     const removeResponse = await memberRouter.fetch(

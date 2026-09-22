@@ -12,7 +12,9 @@ import {
   validateBotToken,
 } from "../../src/worker/bot-maintenance";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { setBotIdentityStatus } from "../../src/worker/auth/repository";
+import {
+  setBotIdentityStatus,
+} from "../../src/worker/db/bot-identity";
 import { scheduled } from "../../src/worker/scheduled";
 
 const environment = {

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { listeAlleBroadcasterScopes } from "../../src/worker/module-scopes";
+import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -145,7 +145,7 @@ describe("Panel-Leseendpunkte", () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
     await insertBroadcasterConnection(database, "kanal-b");
     await database.prepare(
       `INSERT INTO audit_log
@@ -188,7 +188,7 @@ describe("Panel-Leseendpunkte", () => {
   it("liefert einen berechtigten Kanal ohne Broadcaster-Verbindung in Liste, Übersicht und System", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
 
     const channelsResponse = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels"),
@@ -219,7 +219,7 @@ describe("Panel-Leseendpunkte", () => {
   it("liefert den gespeicherten Scope-Zustand und alle EventSub-Abos im System-Contract", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
     await database.prepare(
       `INSERT INTO bot_identity
         (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
@@ -233,8 +233,8 @@ describe("Panel-Leseendpunkte", () => {
         (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, error_message, error_status, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      "kanal-a", "channel.raid", "eingehend", "1", "raid-in", "secret", "enabled", null, null, null, "2026-09-18T04:00:00.000Z",
-      "kanal-a", "channel.raid", "ausgehend", "1", "raid-out", null, "error", "missing_scope", "Scope fehlt", 403, "2026-09-18T03:00:00.000Z",
+      "kanal-a", "channel.raid", "incoming", "1", "raid-in", "secret", "enabled", null, null, null, "2026-09-18T04:00:00.000Z",
+      "kanal-a", "channel.raid", "outgoing", "1", "raid-out", null, "error", "missing_scope", "Scope fehlt", 403, "2026-09-18T03:00:00.000Z",
     ).run();
 
     const response = await panelRouter.fetch(
@@ -246,18 +246,18 @@ describe("Panel-Leseendpunkte", () => {
     await expect(response.json()).resolves.toMatchObject({
       botPermissions: { missingScopes: ["user:bot", "user:read:chat"] },
       subscriptions: [
-        { subscriptionType: "channel.raid", variant: "ausgehend", status: "error", message: "Scope fehlt", statusCode: 403 },
-        { subscriptionType: "channel.raid", variant: "eingehend", status: "enabled" },
+        { subscriptionType: "channel.raid", variant: "incoming", status: "enabled" },
+        { subscriptionType: "channel.raid", variant: "outgoing", status: "error", message: "Scope fehlt", statusCode: 403 },
       ],
     });
   });
 
   it("liefert fehlende Broadcaster-Scopes nur für markierte Kanäle aus dem Worker", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
-    await database.prepare("UPDATE channels SET vollzustimmung = 1 WHERE channel_id = ?").bind("kanal-a").run();
+    await database.prepare("UPDATE channels SET full_consent = 1 WHERE channel_id = ?").bind("kanal-a").run();
     await insertLoginIdentityAndSession(database, "user-1");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
@@ -267,7 +267,7 @@ describe("Panel-Leseendpunkte", () => {
     expect(response.status).toBe(200);
     const body = await response.json<{ broadcasterPermissions: { missingScopes: string[] } }>();
     expect(body.broadcasterPermissions.missingScopes).toEqual(
-      expect.arrayContaining(listeAlleBroadcasterScopes().filter((scope) => scope !== "channel:read:ads")),
+      expect.arrayContaining(listAllBroadcasterScopes().filter((scope) => scope !== "channel:read:ads")),
     );
   });
 
@@ -276,9 +276,9 @@ describe("Panel-Leseendpunkte", () => {
     await insertChannel(database, "kanal-b", "Beta");
     await insertChannel(database, "kanal-c", "Gamma");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     await insertMember(database, "kanal-b", "user-2", "broadcaster");
-    await insertMember(database, "kanal-c", "user-1", "bediener");
+    await insertMember(database, "kanal-c", "user-1", "operator");
     await insertBroadcasterConnection(database, "kanal-a");
     await insertBroadcasterConnection(database, "kanal-b");
     await insertBroadcasterConnection(database, "kanal-c");
@@ -291,8 +291,8 @@ describe("Panel-Leseendpunkte", () => {
 
     expect(response.status).toBe(200);
     expect(body.channels).toEqual([
-      expect.objectContaining({ channelId: "kanal-a", role: "verwalter" }),
-      expect.objectContaining({ channelId: "kanal-c", role: "bediener" }),
+      expect.objectContaining({ channelId: "kanal-a", role: "manager" }),
+      expect.objectContaining({ channelId: "kanal-c", role: "operator" }),
     ]);
   });
 
@@ -302,9 +302,9 @@ describe("Panel-Leseendpunkte", () => {
     await insertLoginIdentityAndSession(database, "user-1", ["channel:bot"]);
     await insertLoginIdentityAndSession(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-b", ["channel:bot"]);
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
-    await insertMember(database, "kanal-b", "user-1", "verwalter");
+    await insertMember(database, "kanal-b", "user-1", "manager");
     await insertMember(database, "kanal-b", "kanal-b", "broadcaster");
 
     const response = await panelRouter.fetch(
@@ -324,7 +324,7 @@ describe("Panel-Leseendpunkte", () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertLoginIdentityAndSession(database, "kanal-a");
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
 
     const before = await panelRouter.fetch(
@@ -347,7 +347,7 @@ describe("Panel-Leseendpunkte", () => {
   it("zeigt ein fehlgeschlagenes Chat-Abo im Kanalzustand", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
     await database.prepare(
       `INSERT INTO eventsub_subscriptions
         (channel_id, subscription_type, subscription_id, secret_id, status, reason, error_message, error_status, updated_at)
@@ -391,7 +391,7 @@ describe("Panel-Leseendpunkte", () => {
   it("zeigt auch die Ablehnung des Moderations-Abos als letzten Fehler", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
     await database.prepare(
       `INSERT INTO eventsub_subscriptions
         (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, error_message, error_status, updated_at)
@@ -492,7 +492,7 @@ describe("Panel-Leseendpunkte", () => {
   it("begrenzt das Audit-Log und blättert mit dem gelieferten Cursor", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
     await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
@@ -512,7 +512,7 @@ describe("Panel-Leseendpunkte", () => {
     }>();
 
     expect(firstResponse.status).toBe(200);
-    expect(first.entries).toEqual([{ auditId: "audit-1", actorUserId: "user-1", actorLogin: null, actorDisplayName: null, actorKind: "mitglied", createdAt: "2026-09-18T03:00:00.000Z", moduleId: null, action: "neu", before: "null", after: "{}" }]);
+    expect(first.entries).toEqual([{ auditId: "audit-1", actorUserId: "user-1", actorLogin: null, actorDisplayName: null, actorKind: "member", createdAt: "2026-09-18T03:00:00.000Z", moduleId: null, action: "neu", before: "null", after: "{}" }]);
     expect(first.nextCursor).toEqual(expect.any(String));
 
     const secondResponse = await panelRouter.fetch(
@@ -522,14 +522,14 @@ describe("Panel-Leseendpunkte", () => {
     const second = await secondResponse.json<{ entries: Array<{ auditId: string; action: string }>; nextCursor: string | null }>();
 
     expect(secondResponse.status).toBe(200);
-    expect(second.entries).toEqual([{ auditId: "audit-2", actorUserId: "user-1", actorLogin: null, actorDisplayName: null, actorKind: "mitglied", createdAt: "2026-09-18T02:00:00.000Z", moduleId: null, action: "alt", before: "{}", after: "{}" }]);
+    expect(second.entries).toEqual([{ auditId: "audit-2", actorUserId: "user-1", actorLogin: null, actorDisplayName: null, actorKind: "member", createdAt: "2026-09-18T02:00:00.000Z", moduleId: null, action: "alt", before: "{}", after: "{}" }]);
     expect(second.nextCursor).toBeNull();
   });
 
   it("löst Audit-Akteure seitenweise in einem Twitch-Aufruf auf und behält ungelöste IDs", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
     await insertBotIdentity(database);
     await database.prepare(
       `INSERT INTO audit_log
@@ -584,7 +584,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
   });
 
   it("weist einen Bediener im Worker ab", async () => {
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
 
@@ -598,7 +598,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
   });
 
   it("weist ein gültiges Mitglied eines fremden Kanals ab", async () => {
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
 
@@ -612,7 +612,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
   });
 
   it("weist eine Mutation ohne CSRF-Token vor der Twitch-Abfrage ab", async () => {
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
 
@@ -626,7 +626,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
   });
 
   it("aktualisiert bei Erfolg nur den aufgerufenen Kanal und startet keine Wartung", async () => {
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     await insertBotChannelStatus(database, "kanal-a", false, "2026-09-18T03:00:00.000Z", "moderator_entfernt");
     await insertBotChannelStatus(database, "kanal-b", false, "2026-09-18T03:00:00.000Z", "moderator_entfernt");
     const fetcher = vi.fn().mockResolvedValue(new Response(
@@ -640,17 +640,17 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
       environment,
     );
     const body = await response.json<{ moderator: { isModerator: boolean; checkedAt: string; reason: string | null } }>();
-    const kanalA = await database.prepare(
+    const channelA = await database.prepare(
       "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = ?",
     ).bind("kanal-a").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
-    const kanalB = await database.prepare(
+    const channelB = await database.prepare(
       "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = ?",
     ).bind("kanal-b").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
 
     expect(response.status).toBe(200);
     expect(body.moderator).toEqual({ isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null });
-    expect(kanalA).toEqual({ is_moderator: 1, checked_at: "2026-09-18T04:00:00.000Z", reason: null });
-    expect(kanalB).toEqual({ is_moderator: 0, checked_at: "2026-09-18T03:00:00.000Z", reason: "moderator_entfernt" });
+    expect(channelA).toEqual({ is_moderator: 1, checked_at: "2026-09-18T04:00:00.000Z", reason: null });
+    expect(channelB).toEqual({ is_moderator: 0, checked_at: "2026-09-18T03:00:00.000Z", reason: "moderator_entfernt" });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       "https://api.twitch.tv/helix/moderation/channels?user_id=bot-user&first=100&broadcaster_id=kanal-a",
@@ -684,7 +684,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
   });
 
   it("blockiert einen parallelen Auslöser desselben Kanals atomar", async () => {
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     let releaseTwitch!: (response: Response) => void;
     const twitchResponse = new Promise<Response>((resolve) => { releaseTwitch = (response) => { resolve(response); }; });
     const fetcher = vi.fn().mockReturnValue(twitchResponse);
@@ -708,7 +708,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
   });
 
   it("berücksichtigt auch eine frische Prüfung aus dem Wartungslauf", async () => {
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     await insertBotChannelStatus(database, "kanal-a", true, "2026-09-18T03:57:00.000Z", null);
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
@@ -725,7 +725,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
   });
 
   it("lässt den bisherigen Wert bei einem Twitch-Fehler unverändert und gibt die Ursache zurück", async () => {
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     await insertBotChannelStatus(database, "kanal-a", true, "2026-09-18T03:00:00.000Z", null);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ message: "Twitch ist vorübergehend nicht erreichbar." }),
@@ -748,7 +748,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
   });
 
   it("beendet eine hängende Twitch-Prüfung nach dem Zeitlimit und räumt nur ihre Sperre auf", async () => {
-    await insertMember(database, "kanal-a", "user-1", "verwalter");
+    await insertMember(database, "kanal-a", "user-1", "manager");
     const fetcher = vi.fn().mockReturnValue(new Promise<Response>(() => undefined));
     vi.stubGlobal("fetch", fetcher);
 

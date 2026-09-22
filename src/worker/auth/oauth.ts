@@ -1,4 +1,4 @@
-import { createOAuthTransaction } from "./repository";
+import { createOAuthTransaction, type OAuthPurpose } from "../db/oauth-transactions";
 import { parseKeyRing, signJson, verifyJson } from "./crypto";
 
 export const LOGIN_SCOPES = ["user:read:moderated_channels", "channel:bot"] as const;
@@ -31,8 +31,6 @@ export const missingBotScopes = (grantedScopes: readonly string[]): string[] => 
   return BOT_SCOPES.filter((scope) => !granted.has(scope));
 };
 
-export type OAuthPurpose = "login" | "bot";
-
 export interface OAuthEnvironment {
   TWITCH_CLIENT_ID: string;
   TWITCH_CLIENT_SECRET: string;
@@ -45,7 +43,7 @@ export interface OAuthState {
   purpose: OAuthPurpose;
   expiresAt: string;
   reconcileEventSub?: boolean;
-  vollzustimmungZweiterVersuch?: boolean;
+  fullConsentSecondAttempt?: boolean;
 }
 
 export interface OAuthStart {
@@ -121,8 +119,8 @@ const isSignedOAuthState = (value: unknown): value is SignedOAuthState => {
     typeof state.expiresAt === "string" && Number.isFinite(Date.parse(state.expiresAt)) &&
     typeof state.nonce === "string" && state.nonce.length > 0 &&
     (state.reconcileEventSub === undefined || typeof state.reconcileEventSub === "boolean") &&
-    (state.vollzustimmungZweiterVersuch === undefined ||
-      typeof state.vollzustimmungZweiterVersuch === "boolean");
+    (state.fullConsentSecondAttempt === undefined ||
+      typeof state.fullConsentSecondAttempt === "boolean");
 };
 
 /**
@@ -146,7 +144,7 @@ export const startOAuthAuthorization = async (
   additionalScopes: readonly string[] = [],
   reconcileEventSub = false,
   redirectPath: string | null = null,
-  vollzustimmungZweiterVersuch = false,
+  fullConsentSecondAttempt = false,
   expectedUserId: string | null = null,
 ): Promise<OAuthStart> => {
   const transactionId = randomToken(24);
@@ -159,7 +157,7 @@ export const startOAuthAuthorization = async (
       expiresAt,
       nonce: stateNonce,
       reconcileEventSub,
-      vollzustimmungZweiterVersuch,
+      fullConsentSecondAttempt,
     },
     parseKeyRing(environment.SESSION_COOKIE_KEYS),
   );
@@ -205,7 +203,7 @@ export const verifyOAuthState = async (
     purpose: state.purpose,
     expiresAt: state.expiresAt,
     reconcileEventSub: state.reconcileEventSub === true,
-    vollzustimmungZweiterVersuch: state.vollzustimmungZweiterVersuch === true,
+    fullConsentSecondAttempt: state.fullConsentSecondAttempt === true,
   };
 };
 

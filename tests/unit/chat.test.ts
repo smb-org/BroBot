@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { upsertBotIdentity } from "../../src/worker/auth/repository";
+import {
+  upsertBotIdentity,
+} from "../../src/worker/db/bot-identity";
 import { sendChatMessage } from "../../src/worker/chat";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -11,14 +13,14 @@ const SCHLUESSEL = JSON.stringify({
   retired: [],
 });
 
-const umgebung = (database: TestD1Database) => ({
+const environment = (database: TestD1Database) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: SCHLUESSEL,
 });
 
-const botEinrichten = async (database: TestD1Database): Promise<void> => {
+const seedBot = async (database: TestD1Database): Promise<void> => {
   await upsertBotIdentity(database as unknown as D1Database, {
     id: 1,
     userId: "bot-1",
@@ -44,12 +46,12 @@ describe("Helix-Chat", () => {
   it("sendet mit App-Token, Bot-ID, Kanal-ID und for_source_only false", async () => {
     const database = new TestD1Database();
     try {
-      await botEinrichten(database);
+      await seedBot(database);
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
         data: [{ is_sent: true, message_id: "nachricht-1" }],
       }), { status: 200 }));
 
-      await expect(sendChatMessage(umgebung(database), "kanal-a", "hallo", undefined, fetcher)).resolves.toMatchObject({
+      await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, fetcher)).resolves.toMatchObject({
         sent: true,
         reason: null,
       });
@@ -68,6 +70,41 @@ describe("Helix-Chat", () => {
         message: "hallo",
         for_source_only: false,
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  /**
+   * Der Aufruf wird im EventSub-Webhook abgewartet, und Twitch erwartet dort
+   * eine Antwort in zehn Sekunden. Ohne Zeitlimit kostet ein haengender
+   * Helix-Aufruf das Abo -- ein Ausfall, den niemand meldet.
+   */
+  it("gibt dem Helix-Aufruf ein Zeitlimit mit und meldet es getrennt vom Netzfehler", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedBot(database);
+      const timeoutError = Object.assign(new Error("abgelaufen"), { name: "TimeoutError" });
+      const fetcher = vi.fn<typeof fetch>().mockRejectedValue(timeoutError);
+
+      await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, fetcher))
+        .resolves.toMatchObject({ sent: false, reason: "timeout" });
+
+      const [, init] = fetcher.mock.calls[0] ?? [];
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("unterscheidet einen Netzfehler weiterhin vom Zeitlimit", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedBot(database);
+      const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("kein Netz"));
+
+      await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, fetcher))
+        .resolves.toMatchObject({ sent: false, reason: "network_error" });
     } finally {
       database.close();
     }

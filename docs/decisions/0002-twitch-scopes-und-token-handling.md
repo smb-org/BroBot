@@ -60,7 +60,7 @@ Liste ist deshalb die autoritative Grundlage für die kanalbezogene Prüfung:
 Für jeden Kanal wird die Identität des Broadcasters (nicht die des gerade
 angemeldeten Panel-Nutzers) auf `channel:bot` geprüft. Fehlt der Scope, zeigt
 das Panel einen Warnhinweis. Nur ein Mitglied mit der Rolle `broadcaster` darf
-die erneute Zustimmung starten; ein `verwalter` sieht den Handlungsbedarf,
+die erneute Zustimmung starten; ein `manager` sieht den Handlungsbedarf,
 kann ihn aber nicht mit seiner eigenen Identität beheben. Nach erfolgreicher
 erneuter Anmeldung verschwindet der Hinweis beim nächsten Laden automatisch.
 

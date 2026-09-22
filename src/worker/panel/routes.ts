@@ -2,11 +2,11 @@ import { Hono, type Context } from "hono";
 
 import {
   decryptStoredToken,
-  fetchModeratedChannelStatus,
+  fetchChannelStatus,
   TwitchApiError,
 } from "../bot-maintenance";
 import { getTokenEncryptionKeys } from "../auth/crypto";
-import { getBetreiberUserIds } from "../config";
+import { getPlatformUserIds } from "../config";
 import {
   requireChannelAuthorization,
   requireSessionAuthorization,
@@ -15,11 +15,13 @@ import {
 import {
   getBotChannelStatusCheckLock,
   getBotChannelStatusCheckedAt,
-  getBotIdentity,
   releaseBotChannelStatusCheck,
   setBotChannelStatusAndLock,
   tryReserveBotChannelStatusCheck,
-} from "../auth/repository";
+} from "../db/bot-channel-status";
+import {
+  getBotIdentity,
+} from "../db/bot-identity";
 import {
   decodeLogCursor,
   getAuditLogForChannel,
@@ -31,7 +33,8 @@ import {
 } from "./repository";
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
-import type { PanelEventFilters, PanelEventOrigin, PanelEventTone } from "../../panel-contract";
+import { EVENT_TONES, type EventTone } from "../../contracts/values";
+import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -62,12 +65,12 @@ const parseEventFilters = (
   const moduleId = context.req.query("module");
   const actor = context.req.query("actor");
   if (origin !== undefined && origin !== "channel" && origin !== "module") return context.text("Ereignis-Herkunft ist ungültig.", 400);
-  if (tone !== undefined && tone !== "info" && tone !== "hinweis" && tone !== "fehler") return context.text("Ereignis-Ton ist ungültig.", 400);
-  const herkunft: PanelEventOrigin | null = origin === "channel" ? "kanal" : origin === "module" ? "modul" : null;
-  const ton: PanelEventTone | null = tone === undefined ? null : tone;
-  const modul = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
+  if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.text("Ereignis-Ton ist ungültig.", 400);
+  const herkunft: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
+  const ton: EventTone | null = tone === undefined ? null : tone as EventTone;
+  const module = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
   const person = actor === undefined || actor.length === 0 ? null : actor;
-  return { herkunft, modul, ton, person };
+  return { origin: herkunft, module: module, tone: ton, person };
 };
 
 // Teilt sich nur die Parse-/Fehlermechanik zwischen Audit- und Ereignisprotokoll.
@@ -76,13 +79,13 @@ const parseEventFilters = (
 // pro Route stehen, dieser Helfer fasst sie inhaltlich nicht zusammen.
 const parseLogQuery = (
   context: Context<PanelEnvironment>,
-  fehlertexte: { limit: string; cursor: string },
+  errorTexts: { limit: string; cursor: string },
 ): LogQuery | Response => {
   const limit = parseAuditLimit(context.req.query("limit"));
-  if (limit === null) return context.text(fehlertexte.limit, 400);
+  if (limit === null) return context.text(errorTexts.limit, 400);
   const serializedCursor = context.req.query("cursor");
   const cursor = serializedCursor === undefined ? null : decodeLogCursor(serializedCursor);
-  if (serializedCursor !== undefined && cursor === null) return context.text(fehlertexte.cursor, 400);
+  if (serializedCursor !== undefined && cursor === null) return context.text(errorTexts.cursor, 400);
   return { limit, cursor };
 };
 
@@ -92,7 +95,7 @@ const laterIso = (now: string, milliseconds: number): string =>
   new Date(Date.parse(now) + milliseconds).toISOString();
 
 const canCheckModeratorStatus = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
-  role !== "bediener";
+  role !== "operator";
 
 const readBotCredentials = async (environment: Env): Promise<{ userId: string; accessToken: string } | null> => {
   const identity = await getBotIdentity(environment.DB);
@@ -110,7 +113,7 @@ panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) 
   const session = context.get("session");
   return context.json({
     channels: await listChannelsForUser(context.env.DB, session.userId),
-    betreiber: getBetreiberUserIds(context.env).has(session.userId),
+    platformAdmin: getPlatformUserIds(context.env).has(session.userId),
   });
 });
 
@@ -165,7 +168,7 @@ panelRouter.post(
       if (credentials === null) {
         throw new Error("Bot-Token fehlt oder konnte nicht gelesen werden.");
       }
-      const isModerator = await fetchModeratedChannelStatus(
+      const isModerator = await fetchChannelStatus(
         fetch,
         context.env.TWITCH_CLIENT_ID,
         credentials.userId,

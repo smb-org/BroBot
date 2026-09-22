@@ -261,7 +261,7 @@ describe("Overlay-Token-Service", () => {
       reason: "Noch einmal",
       revokedAt: "2026-09-18T00:02:00.000Z",
     })).resolves.toBe(false);
-    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = ? AND user_id = ?")
+    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
       .bind("kanal-a", TEST_ACTOR.userId).run();
     await expect(issueOverlayToken(database as unknown as D1Database, {
       channelId: "kanal-a",
@@ -283,7 +283,7 @@ describe("Overlay-Token-Service", () => {
       expiresAt: null,
       createdAt: "2026-09-18T00:00:00.000Z",
     });
-    await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = ? AND user_id = ?")
+    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
       .bind("kanal-a", TEST_ACTOR.userId).run();
 
     await expect(issueOverlayToken(database as unknown as D1Database, {

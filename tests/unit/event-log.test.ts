@@ -108,7 +108,7 @@ describe("Ereignisprotokoll", () => {
       null,
       [{
         code: "shoutout.unterdrueckt",
-        detail: { grund: "raid_erkannt", zuschauer: 8, schwelle: 10 },
+        detail: { reason: "raid_erkannt", viewers: 8, threshold: 10 },
       }],
       "2026-09-18T04:00:00.000Z",
     );
@@ -128,7 +128,7 @@ describe("Ereignisprotokoll", () => {
     expect(row).toEqual({
       module_id: "raid",
       code: "shoutout.unterdrueckt",
-      detail_json: '{"grund":"raid_erkannt","zuschauer":8,"schwelle":10}',
+      detail_json: '{"reason":"raid_erkannt","viewers":8,"threshold":10}',
       actor_user_id: null,
       trigger_id: "trigger-raid-1",
     });
@@ -257,7 +257,7 @@ describe("Ereignisprotokoll", () => {
  it("lässt einen Bediener Ereignisse seitenweise lesen", async () => {
    await insertChannel(database, "kanal-a");
    await insertLoginIdentityAndSession(database, "user-1");
-   await insertMember(database, "kanal-a", "user-1", "bediener");
+   await insertMember(database, "kanal-a", "user-1", "operator");
     await insertEvent(database, "event-a", "kanal-a", "2026-09-18T04:00:00.000Z");
     await insertEvent(database, "event-b", "kanal-a", "2026-09-18T04:00:00.000Z");
     await insertEvent(database, "event-c", "kanal-a", "2026-09-18T04:00:00.000Z", "user-1");
@@ -318,7 +318,7 @@ describe("Ereignisprotokoll", () => {
   it("löst einen gespeicherten Akteur über Twitch auf und behält die ID", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "viewer-1");
-    await insertMember(database, "kanal-a", "viewer-1", "bediener");
+    await insertMember(database, "kanal-a", "viewer-1", "operator");
     await insertBotIdentity(database);
     await insertEvent(database, "event-actor", "kanal-a", "2026-09-18T04:00:00.000Z", "user-1");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -345,7 +345,7 @@ describe("Ereignisprotokoll", () => {
   it("fällt bei fehlender Twitch-Auflösung auf die Akteur-ID zurück", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "viewer-1");
-    await insertMember(database, "kanal-a", "viewer-1", "bediener");
+    await insertMember(database, "kanal-a", "viewer-1", "operator");
     await insertBotIdentity(database);
     await insertEvent(database, "event-unresolved", "kanal-a", "2026-09-18T04:00:00.000Z", "user-1");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Twitch down", { status: 503 })));
@@ -368,12 +368,12 @@ describe("Ereignisprotokoll", () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "viewer-1");
-    await insertMember(database, "kanal-a", "viewer-1", "bediener");
-    await insertCustomEvent(database, "channel-event", "kanal-a", "kanalereignisse", "kanalereignisse.raid.eingehend");
-    await insertCustomEvent(database, "module-event", "kanal-a", "textbefehle", "textbefehle.ausgeloest", "person-a");
-    await insertCustomEvent(database, "error-event", "kanal-a", "textbefehle", "host.chat.fehlgeschlagen", "person-a");
-    await insertCustomEvent(database, "info-event", "kanal-a", "textbefehle", "host.chat.gesendet", "person-b");
-    await insertCustomEvent(database, "other-channel-event", "kanal-b", "kanalereignisse", "kanalereignisse.raid.eingehend");
+    await insertMember(database, "kanal-a", "viewer-1", "operator");
+    await insertCustomEvent(database, "channel-event", "kanal-a", "channel_events", "channel_events.raid.incoming");
+    await insertCustomEvent(database, "module-event", "kanal-a", "text_commands", "text_commands.ausgeloest", "person-a");
+    await insertCustomEvent(database, "error-event", "kanal-a", "text_commands", "host.chat.fehlgeschlagen", "person-a");
+    await insertCustomEvent(database, "info-event", "kanal-a", "text_commands", "host.chat.gesendet", "person-b");
+    await insertCustomEvent(database, "other-channel-event", "kanal-b", "channel_events", "channel_events.raid.incoming");
 
     const request = async (query: string) => panelRouter.fetch(
       await makeRequest("viewer-1", `/api/channels/kanal-a/events?${query}`),
@@ -387,10 +387,10 @@ describe("Ereignisprotokoll", () => {
     };
 
     await expect(eventIds("origin=channel")).resolves.toEqual(["channel-event"]);
-    await expect(eventIds("module=textbefehle")).resolves.toEqual(["module-event", "info-event", "error-event"]);
-    await expect(eventIds("tone=fehler")).resolves.toEqual(["error-event"]);
+    await expect(eventIds("module=text_commands")).resolves.toEqual(["module-event", "info-event", "error-event"]);
+    await expect(eventIds("tone=error")).resolves.toEqual(["error-event"]);
     await expect(eventIds("actor=person-a")).resolves.toEqual(["module-event", "error-event"]);
-    await expect(eventIds("module=textbefehle&tone=fehler")).resolves.toEqual(["error-event"]);
+    await expect(eventIds("module=text_commands&tone=error")).resolves.toEqual(["error-event"]);
     await expect(eventIds("module=werbung&actor=person-a")).resolves.toEqual([]);
   });
 
@@ -398,8 +398,8 @@ describe("Ereignisprotokoll", () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
-    await insertCustomEvent(database, "fremd", "kanal-b", "textbefehle", "host.chat.gesendet", "person-a");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertCustomEvent(database, "fremd", "kanal-b", "text_commands", "host.chat.gesendet", "person-a");
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-b/events?origin=module&actor=person-a"),
@@ -413,7 +413,7 @@ describe("Ereignisprotokoll", () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-b/events"),

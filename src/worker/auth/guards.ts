@@ -1,17 +1,23 @@
 import { createMiddleware } from "hono/factory";
 
-import { getBetreiberUserIds } from "../config";
+import { getPlatformUserIds } from "../config";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../module-authorization";
 import type { AuthorizeModuleMutation, PrepareModuleAudit } from "../../modules/contract";
 import { prepareModuleAudit } from "../module-audit";
-import { authorizeChannelAccess, type ChannelMemberRole } from "./authorization";
+import { authorizeChannelAccess } from "./authorization";
+import type { ChannelRole } from "../../contracts/values";
 import { verifyCsrfRequest } from "./csrf";
 import { getSessionFromRequest } from "./session-access";
-import type { ActorContext, SessionRecord } from "./repository";
+import type {
+  ActorContext,
+} from "../db/guards";
+import type {
+  SessionRecord,
+} from "../db/sessions";
 
 export interface ChannelAuthorizationVariables {
   session: SessionRecord;
-  channelRole: ChannelMemberRole;
+  channelRole: ChannelRole;
   actor: ActorContext;
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
@@ -22,7 +28,7 @@ export interface SessionAuthorizationVariables {
   session: SessionRecord;
 }
 
-export interface BetreiberAuthorizationVariables {
+export interface PlatformAuthorizationVariables {
   session: SessionRecord;
   actor: ActorContext;
 }
@@ -37,9 +43,9 @@ interface SessionAuthorizationEnvironment {
   Variables: SessionAuthorizationVariables;
 }
 
-interface BetreiberAuthorizationEnvironment {
+interface PlatformAuthorizationEnvironment {
   Bindings: Env;
-  Variables: BetreiberAuthorizationVariables;
+  Variables: PlatformAuthorizationVariables;
 }
 
 const csrfExemptMethods = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -78,7 +84,7 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
   },
 );
 
-export const requireBetreiber = () => createMiddleware<BetreiberAuthorizationEnvironment>(
+export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
     if (session === null) return context.text("Session fehlt.", 401);
@@ -92,7 +98,7 @@ export const requireBetreiber = () => createMiddleware<BetreiberAuthorizationEnv
       return context.text("CSRF-Token fehlt oder ist ungültig.", 403);
     }
 
-    if (!getBetreiberUserIds(context.env).has(session.userId)) {
+    if (!getPlatformUserIds(context.env).has(session.userId)) {
       return context.text("Kein Betreiberzugang.", 403);
     }
 

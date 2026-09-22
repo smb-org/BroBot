@@ -1,5 +1,5 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export interface TestD1Result {
@@ -53,35 +53,14 @@ export class TestPreparedStatement {
 export class TestD1Database {
   public readonly sqlite = new DatabaseSync(":memory:");
 
-  public constructor(migrationCount = 23) {
+  public constructor() {
     this.sqlite.exec("PRAGMA foreign_keys = ON");
-    const migrationNames = [
-      "0000_init.sql",
-      "0001_twitch_login.sql",
-      "0002_autorisierung.sql",
-      "0003_overlay_tokens.sql",
-      "0004_moderator_status_check_lock.sql",
-      "0005_moderator_status_check_owner.sql",
-      "0006_ereignisprotokoll.sql",
-      "0007_ereignisprotokoll-trigger.sql",
-      "0008_eventsub_eingang.sql",
-      "0009_eventsub_abos.sql",
-      "0010_modul_textbefehle.sql",
-      "0011_kanalsprache.sql",
-      "0012_eventsub_abo_varianten.sql",
-      "0013_eventsub_abo_versionen.sql",
-      "0014_event_log_created_at_idx.sql",
-      "0015_bot_missing_scopes.sql",
-      "0016_audit_log_module.sql",
-      "0017_oauth_transaction_redirect.sql",
-      "0018_betreiberebene.sql",
-      "0019_oauth_transaction_expected_user.sql",
-      "0020_textbefehle_art_enabled.sql",
-      "0021_textbefehle_mindeststufe.sql",
-      "0022_token_scopes.sql",
-    ];
-    for (const migrationName of migrationNames.slice(0, migrationCount)) {
-      this.sqlite.exec(readFileSync(resolve(import.meta.dirname, `../../migrations/${migrationName}`), "utf8"));
+    // Die Dateien werden gelesen statt aufgezaehlt: eine Namensliste im Test
+    // laeuft dem Verzeichnis irgendwann hinterher, und das faellt erst auf,
+    // wenn eine Migration stillschweigend nicht mitlaeuft.
+    const verzeichnis = resolve(import.meta.dirname, "../../migrations");
+    for (const datei of readdirSync(verzeichnis).filter((name) => name.endsWith(".sql")).sort()) {
+      this.sqlite.exec(readFileSync(resolve(verzeichnis, datei), "utf8"));
     }
   }
 

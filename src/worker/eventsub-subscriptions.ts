@@ -4,33 +4,30 @@ import { getAppAccessToken } from "./app-token";
 import { parseKeyRing } from "./auth/crypto";
 import {
   channelBotConsentCondition,
+} from "./db/guards";
+import {
   getBotIdentity,
   getBotIdentityStatus,
+} from "./db/bot-identity";
+import {
   listEventSubSubscriptions,
-  type EventSubAuthorizationIdentity,
   type EventSubSubscriptionStatus,
   upsertEventSubSubscription,
-} from "./auth/repository";
+} from "./db/eventsub-state";
 import {
   logMaintenanceError,
   maintenanceErrorDetails,
   TwitchApiError,
 } from "./bot-maintenance";
+import type {
+  EventSubAuthorizationIdentity,
+  EventSubSubscriptionType,
+} from "../contracts/values";
 
-export const EVENTSUB_SUBSCRIPTIONS_URL = "https://api.twitch.tv/helix/eventsub/subscriptions";
-export const EVENTSUB_CALLBACK_PATH = "/api/twitch/eventsub";
-export const EVENTSUB_REQUEST_TIMEOUT_MS = 5_000;
+export type { EventSubSubscriptionType } from "../contracts/values";
 
-export interface EventSubTarget {
-  channelId: string;
-  subscriptionType: string;
-  /** Leer bei EventSub-Typen mit genau einem Ziel; Raid unterscheidet die Richtungen. */
-  variant: string;
-  version: string;
-}
-
-export interface EventSubSubscriptionDefinition {
-  subscriptionType: string;
+interface EventSubSubscriptionDefinitionBase<SubscriptionType extends string> {
+  subscriptionType: SubscriptionType;
   variant: string;
   version: string;
   buildCondition: (channelId: string, botUserId: string) => Readonly<Record<string, string>>;
@@ -64,8 +61,15 @@ const identityFromConditionField = (
     return userId === null ? null : { kind, userId };
   };
 
-/** Abo mit Moderator-Bedingung (`broadcaster_user_id` + `moderator_user_id`), Kanal aus `broadcaster_user_id`. */
-const moderatorSubscriptionDefinition = (subscriptionType: string, version: string): EventSubSubscriptionDefinition => ({
+const noConsentingIdentity = (_condition?: Readonly<Record<string, unknown>>): null => {
+  void _condition;
+  return null;
+};
+
+const moderatorSubscriptionDefinition = <SubscriptionType extends string>(
+  subscriptionType: SubscriptionType,
+  version: string,
+): EventSubSubscriptionDefinitionBase<SubscriptionType> => ({
   subscriptionType,
   variant: "",
   version,
@@ -74,8 +78,10 @@ const moderatorSubscriptionDefinition = (subscriptionType: string, version: stri
   consentingIdentityFromCondition: identityFromConditionField("moderator_user_id", "bot"),
 });
 
-/** Abo mit Nutzer-Bedingung (`broadcaster_user_id` + `user_id`), Kanal aus `broadcaster_user_id`. */
-const userSubscriptionDefinition = (subscriptionType: string, version: string): EventSubSubscriptionDefinition => ({
+const userSubscriptionDefinition = <SubscriptionType extends string>(
+  subscriptionType: SubscriptionType,
+  version: string,
+): EventSubSubscriptionDefinitionBase<SubscriptionType> => ({
   subscriptionType,
   variant: "",
   version,
@@ -84,12 +90,11 @@ const userSubscriptionDefinition = (subscriptionType: string, version: string): 
   consentingIdentityFromCondition: identityFromConditionField("user_id", "bot"),
 });
 
-/** Abo mit ausschließlicher Broadcaster-Bedingung, wie channel.ad_break.begin. */
-const broadcasterSubscriptionDefinition = (
-  subscriptionType: string,
+const broadcasterSubscriptionDefinition = <SubscriptionType extends string>(
+  subscriptionType: SubscriptionType,
   version: string,
   requiresConsent = true,
-): EventSubSubscriptionDefinition => ({
+): EventSubSubscriptionDefinitionBase<SubscriptionType> => ({
   subscriptionType,
   variant: "",
   version,
@@ -100,28 +105,28 @@ const broadcasterSubscriptionDefinition = (
     : noConsentingIdentity,
 });
 
-const noConsentingIdentity = (): null => null;
-
-/**
- * Die einzige Tabelle für EventSub-Bedingungen. Sie beschreibt sowohl das
- * Anlegen als auch die sichere Rückgewinnung des Kanal-Mandanten aus dem
- * geprüften Abo. Ein Raid ist absichtlich zweimal vertreten.
- */
-export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDefinition[] = [
+/** Eine Tabelle, weil dieselben Bedingungen beim Anlegen und Empfangen gelten. */
+export const EVENTSUB_SUBSCRIPTION_DEFINITIONS = [
   userSubscriptionDefinition("channel.chat.message", "1"),
   {
     subscriptionType: "channel.raid",
-    variant: "eingehend",
+    variant: "incoming",
     version: "1",
-    buildCondition: (channelId) => ({ to_broadcaster_user_id: channelId }),
+    buildCondition: (channelId: string, botUserId: string) => {
+      void botUserId;
+      return { to_broadcaster_user_id: channelId };
+    },
     channelIdFromCondition: conditionField("to_broadcaster_user_id"),
     consentingIdentityFromCondition: noConsentingIdentity,
   },
   {
     subscriptionType: "channel.raid",
-    variant: "ausgehend",
+    variant: "outgoing",
     version: "1",
-    buildCondition: (channelId) => ({ from_broadcaster_user_id: channelId }),
+    buildCondition: (channelId: string, botUserId: string) => {
+      void botUserId;
+      return { from_broadcaster_user_id: channelId };
+    },
     channelIdFromCondition: conditionField("from_broadcaster_user_id"),
     consentingIdentityFromCondition: noConsentingIdentity,
   },
@@ -134,9 +139,24 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS: readonly EventSubSubscriptionDef
   moderatorSubscriptionDefinition("channel.suspicious_user.update", "1"),
   broadcasterSubscriptionDefinition("stream.online", "1", false),
   broadcasterSubscriptionDefinition("channel.ad_break.begin", "1"),
-];
+] as const satisfies readonly EventSubSubscriptionDefinitionBase<EventSubSubscriptionType>[];
 
-export const eventSubTargetKey = (target: Pick<EventSubTarget, "channelId" | "subscriptionType" | "variant" | "version">): string =>
+export type EventSubSubscriptionDefinition = (typeof EVENTSUB_SUBSCRIPTION_DEFINITIONS)[number];
+
+
+export const EVENTSUB_SUBSCRIPTIONS_URL = "https://api.twitch.tv/helix/eventsub/subscriptions";
+export const EVENTSUB_CALLBACK_PATH = "/api/twitch/eventsub";
+export const EVENTSUB_REQUEST_TIMEOUT_MS = 5_000;
+
+export interface EventSubTarget {
+  channelId: string;
+  subscriptionType: EventSubSubscriptionType;
+  /** Leer bei EventSub-Typen mit genau einem Ziel; Raid unterscheidet die Richtungen. */
+  variant: string;
+  version: string;
+}
+
+export const eventSubTargetKey = (target: { channelId: string; subscriptionType: string; variant: string; version: string }): string =>
   `${target.channelId}\u0000${target.subscriptionType}\u0000${target.variant}\u0000${target.version}`;
 
 export const eventSubDefinitionForCondition = (
@@ -296,7 +316,7 @@ export const listDesiredEventSubTargets = async (
         if (definition.subscriptionType !== subscriptionType) continue;
         const target: EventSubTarget = {
           channelId: row.channel_id,
-          subscriptionType,
+          subscriptionType: definition.subscriptionType,
           variant: definition.variant,
           version: definition.version,
         };
@@ -537,7 +557,7 @@ export const reconcileEventSubSubscriptions = async (
     if (!owned) continue;
     const remoteTarget: EventSubTarget = {
       channelId: remoteChannelId,
-      subscriptionType: subscription.type,
+      subscriptionType: definition.subscriptionType,
       variant: definition.variant,
       version: subscription.version,
     };

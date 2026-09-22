@@ -1,11 +1,12 @@
 import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
+import type { ChannelRole } from "../contracts/values";
 
 export { kuerzeAuf200Zeichen } from "../text";
 
 /** Aus Twitch-Badges abgeleiteter Status der chatseitig auslösenden Person. */
-export type ModuleChatStatus = "zuschauer" | "abonnent" | "vip" | "moderator" | "broadcaster";
+export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";
 
 /**
  * Eine Begründung für etwas, das ein Modul getan oder bewusst nicht getan hat.
@@ -23,7 +24,7 @@ export interface ModuleDiagnostic {
 /** Eine vom Host auszuführende, semantisch klar benannte Modulaktion. */
 export type ModuleAction =
   | { kind: "chat"; text: string; replyToMessageId?: string }
-  | { kind: "shoutout"; zielKanalId: string }
+  | { kind: "shoutout"; targetChannelId: string }
   | { kind: "overlay"; type: string; payload: Readonly<Record<string, unknown>> };
 
 /**
@@ -45,7 +46,7 @@ export interface ModuleResult {
 export type ModuleActor = {
   userId: string;
   login: string;
-  role: "broadcaster" | "verwalter" | "bediener" | null;
+  role: ChannelRole | null;
 };
 
 export interface ModuleMutationActor {
@@ -119,7 +120,7 @@ export const browserModuleLanguage = (): ModuleLanguage => {
 
 export interface ModuleRouteVariables {
   session: { userId: string; sessionId: string };
-  channelRole: "broadcaster" | "verwalter" | "bediener";
+  channelRole: ChannelRole;
   actor: { userId: string; sessionId: string };
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;

@@ -9,7 +9,7 @@ const channel = {
   channelId: "kanal-a",
   login: "kanal-a",
   displayName: "Alpha",
-  role: "verwalter" as const,
+  role: "manager" as const,
   broadcasterConnection: "connected" as const,
   channelBotConsent: "granted" as const,
   bot: { status: "connected" as const, reason: null, updatedAt: relativeIso(0) },
@@ -27,9 +27,9 @@ const channel = {
 const secondChannel = { ...channel, channelId: "kanal-b", login: "kanal-b", displayName: "Beta" };
 
 const moduleStates = [
-  { id: "textbefehle", enabled: true, settings: "{}" },
-  { id: "kanalereignisse", enabled: false, settings: "{}" },
-  { id: "werbung", enabled: true, settings: "{}" },
+  { id: "text_commands", enabled: true, settings: "{}" },
+  { id: "channel_events", enabled: false, settings: "{}" },
+  { id: "ads", enabled: true, settings: "{}" },
 ];
 
 const requestUrl = (input: RequestInfo | URL): URL => {
@@ -51,7 +51,7 @@ const renderModulePage = (modules = moduleStates, channels = [channel]): void =>
     if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules });
     return jsonResponse({}, 404);
   }));
-  window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+  window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
   render(<DashboardApp />);
 };
 
@@ -87,7 +87,7 @@ describe("Modulumschalter in der Brotkrume", () => {
     fireEvent.click(option);
 
     expect(await screen.findByRole("heading", { name: "Kanalereignisse", level: 1 })).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/channels/kanal-a/modules/kanalereignisse");
+    expect(window.location.pathname).toBe("/channels/kanal-a/modules/channel_events");
   });
 
   it("führt das Segment Module zur Modulübersicht", async () => {

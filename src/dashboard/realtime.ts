@@ -8,7 +8,7 @@ import type {
   RealtimeEventLogHint,
   RealtimeMessage,
 } from "../realtime-contract";
-import { ereignisTon, type EreignisCode } from "./locale";
+import { eventToneEntries, type EventCode } from "./locale";
 
 const REALTIME_PROTOCOL = "brobot.v1";
 const SOCKET_EXPIRED_CODE = 4001;
@@ -54,7 +54,7 @@ const isKnownEnvelope = (value: Record<string, unknown>): value is Record<string
   typeof value.id === "string" && value.id.length > 0 &&
   typeof value.createdAt === "string" && value.createdAt.length > 0 &&
   typeof value.channelId === "string" && value.channelId.length > 0 &&
-  (value.type === "system.hallo" || value.type === "ereignisprotokoll.neu");
+  (value.type === "system.hello" || value.type === "event_log.new");
 
 export const parseRealtimeMessage = (raw: string, channelId: string): RealtimeParseResult => {
   let parsed: unknown;
@@ -68,40 +68,40 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
     return { kind: "foreign-channel" };
   }
   if (!isKnownEnvelope(parsed)) return { kind: "ignored" };
-  if (parsed.type === "system.hallo") {
+  if (parsed.type === "system.hello") {
     return parsed.payload !== null && isRecord(parsed.payload) && Object.keys(parsed.payload).length === 0
-      ? { kind: "message", message: parsed as RealtimeEnvelope<"system.hallo"> }
+      ? { kind: "message", message: parsed as RealtimeEnvelope<"system.hello"> }
       : { kind: "ignored" };
   }
   if (!isRecord(parsed.payload) || !Array.isArray(parsed.payload.entries) ||
       !parsed.payload.entries.every(isHint)) return { kind: "ignored" };
-  return { kind: "message", message: parsed as RealtimeEnvelope<"ereignisprotokoll.neu"> };
+  return { kind: "message", message: parsed as RealtimeEnvelope<"event_log.new"> };
 };
 
 const eventMetadata = (code: string) =>
-  Object.prototype.hasOwnProperty.call(ereignisTon, code) ? ereignisTon[code as EreignisCode] : null;
+  Object.prototype.hasOwnProperty.call(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
 
 /** Dieselbe Herkunftslogik wie die Ereignisroute: Betrieb ist Moduldiagnose. */
 export const realtimeHintMatchesFilters = (
   hint: RealtimeEventLogHint,
   filters: PanelEventFilters,
 ): boolean => {
-  if (filters.modul !== null && hint.moduleId !== filters.modul) return false;
+  if (filters.module !== null && hint.moduleId !== filters.module) return false;
   if (filters.person !== null && hint.actorUserId !== filters.person) return false;
   const metadata = eventMetadata(hint.code);
-  if (filters.herkunft !== null) {
+  if (filters.origin !== null) {
     if (metadata === null) return false;
-    const istModuldiagnose = metadata.familie === "betrieb";
-    if (filters.herkunft === "modul" !== istModuldiagnose) return false;
+    const isModuleDiagnostic = metadata.familie === "betrieb";
+    if (filters.origin === "module" !== isModuleDiagnostic) return false;
   }
-  if (filters.ton !== null && (metadata === null || metadata.ton !== filters.ton)) return false;
+  if (filters.tone !== null && (metadata === null || metadata.tone !== filters.tone)) return false;
   return true;
 };
 
 const filterKey = (filters: PanelEventFilters): string => [
-  filters.herkunft ?? "",
-  filters.modul ?? "",
-  filters.ton ?? "",
+  filters.origin ?? "",
+  filters.module ?? "",
+  filters.tone ?? "",
   filters.person ?? "",
 ].join("\u001f");
 
@@ -272,7 +272,7 @@ export const useRealtimeEventFeed = ({
       }
       if (parsed.kind !== "message" || seenMessageIdsRef.current.has(parsed.message.id)) return;
       seenMessageIdsRef.current.add(parsed.message.id);
-      if (parsed.message.type !== "ereignisprotokoll.neu") return;
+      if (parsed.message.type !== "event_log.new") return;
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
       for (const hint of hints) pendingEventIdsRef.current.add(hint.eventId);
       if (hints.length > 0) {

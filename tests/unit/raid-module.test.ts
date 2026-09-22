@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { raidModul, verarbeiteRaid } from "../../src/modules/raid";
+import { raidModule, processRaid } from "../../src/modules/raid";
 import { raidSettingsSchema } from "../../src/modules/raid/contracts";
 import type { ModuleEvent } from "../../src/modules/contract";
 
 const event = (
   payload: Record<string, unknown>,
-  settings = raidModul.defaultSettings,
-  subscriptionVariant = "eingehend",
+  settings = raidModule.defaultSettings,
+  subscriptionVariant = "incoming",
 ): ModuleEvent<typeof settings> => ({
   channelId: "kanal-a",
   subscriptionType: "channel.raid",
@@ -31,44 +31,44 @@ describe("Raid-Modul", () => {
   it("setzt alte gespeicherte Schwellen still auf die neuen Defaults zurück", () => {
     expect(raidSettingsSchema.parse({
       mindestZuschauer: 50,
-      textVoll: "voll",
-      textKlein: "klein",
+      textLong: "voll",
+      textShort: "klein",
     })).toEqual({
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "voll",
-      textKlein: "klein",
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "voll",
+      textShort: "klein",
     });
   });
 
   it("abonniert channel.raid ohne Broadcaster-Scope", () => {
-    expect(raidModul.eventSubTypes).toEqual(["channel.raid"]);
-    expect(raidModul.broadcasterScopes).toBeUndefined();
+    expect(raidModule.eventSubTypes).toEqual(["channel.raid"]);
+    expect(raidModule.broadcasterScopes).toBeUndefined();
   });
 
   it("erzeugt ab der Shoutout-Schwelle Shoutout und volle Chatzeile", () => {
-    const result = verarbeiteRaid(event(eingehenderRaid(8), {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "Willkommen {channel} mit {viewers} Zuschauern!",
-      textKlein: "Danke {channel}!",
+    const result = processRaid(event(eingehenderRaid(8), {
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "Willkommen {channel} mit {viewers} Zuschauern!",
+      textShort: "Danke {channel}!",
     }));
 
     expect(result.actions).toEqual([
-      { kind: "shoutout", zielKanalId: "quelle-1" },
+      { kind: "shoutout", targetChannelId: "quelle-1" },
       { kind: "chat", text: "Willkommen quelle mit 8 Zuschauern!" },
     ]);
   });
 
   it("erzeugt ab der Shoutout-Schwelle ohne Schalter nur die volle Chatzeile", () => {
-    const result = verarbeiteRaid(event(eingehenderRaid(8), {
-      shoutoutAktiv: false,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "Voll {channel} {viewers}",
-      textKlein: "Danke {channel} für {viewers}!",
+    const result = processRaid(event(eingehenderRaid(8), {
+      shoutoutEnabled: false,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "Voll {channel} {viewers}",
+      textShort: "Danke {channel} für {viewers}!",
     }));
 
     expect(result.actions).toEqual([
@@ -76,17 +76,17 @@ describe("Raid-Modul", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.unterdrueckt",
-      detail: { grund: "abgeschaltet", zuschauer: 8, schwelle: 3 },
+      detail: { reason: "abgeschaltet", viewers: 8, threshold: 3 },
     }]);
   });
 
   it("erzeugt unter der Shoutout-Schwelle nur die kurze Chatzeile", () => {
-    const result = verarbeiteRaid(event(eingehenderRaid(2), {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "Voll {channel} {viewers}",
-      textKlein: "Danke {channel} für {viewers}!",
+    const result = processRaid(event(eingehenderRaid(2), {
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "Voll {channel} {viewers}",
+      textShort: "Danke {channel} für {viewers}!",
     }));
 
     expect(result.actions).toEqual([
@@ -94,17 +94,17 @@ describe("Raid-Modul", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.unterdrueckt",
-      detail: { grund: "unter_schwelle", zuschauer: 2, schwelle: 3 },
+      detail: { reason: "unter_schwelle", viewers: 2, threshold: 3 },
     }]);
   });
 
   it("wendet Shoutout- und Text-Schwelle unabhängig an", () => {
-    const result = verarbeiteRaid(event(eingehenderRaid(10), {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 50,
-      textSchwelle: 5,
-      textVoll: "Voll {channel} {viewers}",
-      textKlein: "Klein {channel} {viewers}",
+    const result = processRaid(event(eingehenderRaid(10), {
+      shoutoutEnabled: true,
+      shoutoutThreshold: 50,
+      textThreshold: 5,
+      textLong: "Voll {channel} {viewers}",
+      textShort: "Klein {channel} {viewers}",
     }));
 
     expect(result.actions).toEqual([
@@ -112,61 +112,61 @@ describe("Raid-Modul", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.unterdrueckt",
-      detail: { grund: "unter_schwelle", zuschauer: 10, schwelle: 50 },
+      detail: { reason: "unter_schwelle", viewers: 10, threshold: 50 },
     }]);
   });
 
   it("meldet einen ausgehenden Raid und erzeugt keine Aktion", () => {
-    const result = verarbeiteRaid(event({
+    const result = processRaid(event({
       from_broadcaster_user_id: "kanal-a",
       to_broadcaster_user_id: "ziel-1",
       viewers: 20,
-    }, raidModul.defaultSettings, "ausgehend"));
+    }, raidModule.defaultSettings, "outgoing"));
 
     expect(result.actions).toEqual([]);
     expect(result.diagnostics).toEqual([{
-      code: "raid.ausgehend",
-      detail: { zielKanalId: "ziel-1", zuschauer: 20 },
+      code: "raid.outgoing",
+      detail: { targetChannelId: "ziel-1", viewers: 20 },
     }]);
   });
 
   it("ersetzt beide Platzhalter und behandelt Schwelle null inklusiv", () => {
-    const result = verarbeiteRaid(event(eingehenderRaid(0), {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 0,
-      textSchwelle: 0,
-      textVoll: "{channel}/{viewers}",
-      textKlein: "klein",
+    const result = processRaid(event(eingehenderRaid(0), {
+      shoutoutEnabled: true,
+      shoutoutThreshold: 0,
+      textThreshold: 0,
+      textLong: "{channel}/{viewers}",
+      textShort: "klein",
     }));
 
     expect(result.actions).toEqual([
-      { kind: "shoutout", zielKanalId: "quelle-1" },
+      { kind: "shoutout", targetChannelId: "quelle-1" },
       { kind: "chat", text: "quelle/0" },
     ]);
   });
 
   it("begründet einen Raid unter der Schwelle", () => {
-    const result = verarbeiteRaid(event(eingehenderRaid(2), {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "voll",
-      textKlein: "klein",
+    const result = processRaid(event(eingehenderRaid(2), {
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "voll",
+      textShort: "klein",
     }));
 
     expect(result.diagnostics).toEqual([{
       code: "shoutout.unterdrueckt",
-      detail: { grund: "unter_schwelle", zuschauer: 2, schwelle: 3 },
+      detail: { reason: "unter_schwelle", viewers: 2, threshold: 3 },
     }]);
   });
 
   it("ersetzt deutsche Raid-Platzhalter nicht mehr", () => {
-    const result = verarbeiteRaid(event(eingehenderRaid(8), {
-      shoutoutAktiv: false,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "{kanal} {zuschauer}",
-      textKlein: "klein",
+    const result = processRaid(event(eingehenderRaid(8), {
+      shoutoutEnabled: false,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "{kanal} {zuschauer}",
+      textShort: "klein",
     }));
 
     expect(result.actions).toEqual([{ kind: "chat", text: "{kanal} {zuschauer}" }]);

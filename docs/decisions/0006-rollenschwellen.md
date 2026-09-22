@@ -6,7 +6,7 @@
 
 ## Kurzfazit
 
-Es gibt drei Rollen — `broadcaster`, `verwalter`, `bediener` — und drei
+Es gibt drei Rollen — `broadcaster`, `manager`, `operator` — und drei
 Schwellen. Welche Handlung welche Schwelle hat, steht hier und nicht nur im
 Code. Berechtigt ist ausschließlich, wer eine Zeile in `channel_members` hat;
 die Twitch-Rolle spielt dabei keine Rolle.
@@ -16,7 +16,7 @@ die Twitch-Rolle spielt dabei keine Rolle.
 | Schwelle | Wer | Wofür |
 |---|---|---|
 | **Nur Broadcaster** | `broadcaster` | Die Rolle `broadcaster` vergeben oder entziehen |
-| **Verwaltend** | `broadcaster`, `verwalter` | Mitglieder verwalten, Module aktivieren, Moduleinstellungen ändern, Overlay-Token ausstellen und widerrufen |
+| **Verwaltend** | `broadcaster`, `manager` | Mitglieder verwalten, Module aktivieren, Moduleinstellungen ändern, Overlay-Token ausstellen und widerrufen |
 | **Betrieblich** | alle drei | Alles Lesende: Kanalübersicht, Mitgliederliste, Ereignisprotokoll, Modulliste |
 
 ## 2. Warum Modulaktivierung verwaltend ist und nicht betrieblich
@@ -26,7 +26,7 @@ Zuschauer und unter dem Namen des Kanals. Das ist keine Betriebshandlung wie
 das Nachsehen, warum ein Shoutout ausblieb, sondern eine Festlegung darüber,
 wie der Kanal nach außen auftritt.
 
-Ein `bediener` betreut den Stream; er soll sehen, was passiert, und im
+Ein `operator` betreut den Stream; er soll sehen, was passiert, und im
 Ereignisprotokoll nachvollziehen können, warum etwas nicht passiert ist. Er
 soll nicht ohne Rücksprache ein Modul scharf schalten, das anschließend im
 Chat schreibt.
@@ -36,7 +36,7 @@ Chat schreibt.
 Ein einzelner Befehl innerhalb eines bereits aktiven Moduls ist davon zu
 unterscheiden: Er wurde von jemandem angelegt, der dazu berechtigt war. Ihn
 stillzulegen nimmt nichts weg und schafft nichts Neues. Deshalb darf ein
-`bediener` einen solchen Befehl im laufenden Betrieb ein- oder ausschalten;
+`operator` einen solchen Befehl im laufenden Betrieb ein- oder ausschalten;
 Anlegen, Ändern und Löschen bleiben verwaltende Inhaltsänderungen.
 
 ## 3. Warum Lesen für alle offen ist
@@ -82,7 +82,7 @@ als `soleBroadcasterPredicate` in derselben Anweisung wie die Änderung.
 
 ## 7. Offen
 
-Ob es unterhalb von `bediener` noch eine reine Leserolle braucht, und ob
+Ob es unterhalb von `operator` noch eine reine Leserolle braucht, und ob
 einzelne Module eigene Schwellen setzen dürfen, ist nicht entschieden. Beides
 gehört in den Spike #17. Bis dahin gilt: Ein Modul erbt die Schwellen aus
 dieser Entscheidung und definiert keine eigenen.

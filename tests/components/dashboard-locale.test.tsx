@@ -22,7 +22,7 @@ describe("Panel-Dokumentensprache", () => {
   it("rendert Abo- und Berechtigungszustände auf Englisch", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const channel = {
-      channelId: "kanal-a", login: "alpha", displayName: "Alpha", role: "verwalter",
+      channelId: "kanal-a", login: "alpha", displayName: "Alpha", role: "manager",
       broadcasterConnection: "connected", channelBotConsent: "granted",
       bot: { status: "connected", reason: null, updatedAt: "2026-09-18T04:00:00.000Z" },
       botPermissions: { missingScopes: [] }, moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
@@ -35,7 +35,7 @@ describe("Panel-Dokumentensprache", () => {
       if (url.pathname === "/api/channels") return Promise.resolve(new Response(JSON.stringify({ channels: [channel] }), { status: 200 }));
       if (url.pathname.endsWith("/system")) return Promise.resolve(new Response(JSON.stringify({
         broadcasterConnection: "connected", bot: channel.bot, botPermissions: { missingScopes: [] }, chatSubscription: channel.chatSubscription,
-        subscriptions: [{ subscriptionType: "channel.raid", variant: "eingehend", version: "1", subscriptionId: "raid-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" }], tokens: channel.tokens,
+        subscriptions: [{ subscriptionType: "channel.raid", variant: "incoming", version: "1", subscriptionId: "raid-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" }], tokens: channel.tokens,
       }), { status: 200 }));
       if (url.pathname.endsWith("/audit-log")) return Promise.resolve(new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 }));
       return Promise.resolve(new Response("{}", { status: 404 }));

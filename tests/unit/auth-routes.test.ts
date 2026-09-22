@@ -8,7 +8,7 @@ import { maintainBotIdentity } from "../../src/worker/bot-maintenance";
 import { maintainEventSubSubscriptions } from "../../src/worker/eventsub-subscriptions";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
-import { listeAlleBroadcasterScopes } from "../../src/worker/module-scopes";
+import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 
 vi.mock("../../src/worker/bot-maintenance", () => ({
   maintainBotIdentity: vi.fn(),
@@ -28,7 +28,7 @@ const mockedMaintainEventSubSubscriptions = vi.mocked(maintainEventSubSubscripti
  * etwas geaendert haette. Den Ablauf selbst prueft csrf.test.ts mit
  * ausdruecklich uebergebenen Zeitpunkten.
  */
-const frischerZeitpunkt = (): string => new Date().toISOString();
+const freshTimestamp = (): string => new Date().toISOString();
 
 const key = (byte: number): string =>
   btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
@@ -135,19 +135,19 @@ const fetchWith = (...responses: Response[]) => {
   return fetcher;
 };
 
-const umgebungFürDatenbank = (datenbank: TestD1Database) => {
+const environmentForDatabase = (database: TestD1Database) => {
   const { environment } = makeEnvironment();
-  environment.DB = datenbank as unknown as D1Database;
+  environment.DB = database as unknown as D1Database;
   return environment;
 };
 
-const setzeVollzustimmung = async (datenbank: TestD1Database, kanalId: string): Promise<void> => {
-  await datenbank.prepare(
-    "UPDATE channels SET vollzustimmung = 1 WHERE channel_id = ?",
-  ).bind(kanalId).run();
+const setFullConsent = async (database: TestD1Database, channelId: string): Promise<void> => {
+  await database.prepare(
+    "UPDATE channels SET full_consent = 1 WHERE channel_id = ?",
+  ).bind(channelId).run();
 };
 
-const tokenAntwort = (scopes: readonly string[]): Response => new Response(
+const tokenResponse = (scopes: readonly string[]): Response => new Response(
   JSON.stringify({
     access_token: "access",
     refresh_token: "refresh",
@@ -157,14 +157,14 @@ const tokenAntwort = (scopes: readonly string[]): Response => new Response(
   { status: 200 },
 );
 
-const identitätsAntwort = (userId: string, login: string): Response => new Response(
+const identityResponse = (userId: string, login: string): Response => new Response(
   JSON.stringify({ data: [{ id: userId, login }] }),
   { status: 200 },
 );
 
-const anzahlZeilen = async (datenbank: TestD1Database, tabelle: string): Promise<number> => {
-  const zeile = await datenbank.prepare(`SELECT COUNT(*) AS anzahl FROM ${tabelle}`).first<{ anzahl: number }>();
-  return zeile?.anzahl ?? 0;
+const countRows = async (database: TestD1Database, tabelle: string): Promise<number> => {
+  const zeile = await database.prepare(`SELECT COUNT(*) AS count FROM ${tabelle}`).first<{ count: number }>();
+  return zeile?.count ?? 0;
 };
 
 describe("Auth-Routen", () => {
@@ -188,155 +188,155 @@ describe("Auth-Routen", () => {
   });
 
   it("gibt einem markierten Kanal beim Einladungslink den vollständigen Umfang", async () => {
-    const datenbank = new TestD1Database();
+    const database = new TestD1Database();
     try {
-      await insertChannel(datenbank, "kanal-voll");
-      await setzeVollzustimmung(datenbank, "kanal-voll");
-      const umgebung = umgebungFürDatenbank(datenbank);
+      await insertChannel(database, "kanal-voll");
+      await setFullConsent(database, "kanal-voll");
+      const environment = environmentForDatabase(database);
 
-      const antwort = await authRouter.fetch(
-        new Request("https://brobot.example/auth/login?kanal=KANAL-VOLL"),
-        umgebung,
+      const response = await authRouter.fetch(
+        new Request("https://brobot.example/auth/login?channel=KANAL-VOLL"),
+        environment,
       );
-      const umfang = new URL(antwort.headers.get("location") ?? "https://ungültig").searchParams
+      const umfang = new URL(response.headers.get("location") ?? "https://ungültig").searchParams
         .get("scope")?.split(" ");
 
-      expect(antwort.status).toBe(302);
-      expect(umfang).toEqual(listeAlleBroadcasterScopes());
+      expect(response.status).toBe(302);
+      expect(umfang).toEqual(listAllBroadcasterScopes());
     } finally {
-      datenbank.close();
+      database.close();
     }
   });
 
   it("gibt einem unmarkierten Kanal beim Einladungslink nur den bisherigen Login-Umfang", async () => {
-    const datenbank = new TestD1Database();
+    const database = new TestD1Database();
     try {
-      await insertChannel(datenbank, "kanal-normal");
-      const umgebung = umgebungFürDatenbank(datenbank);
+      await insertChannel(database, "kanal-normal");
+      const environment = environmentForDatabase(database);
 
-      const antwort = await authRouter.fetch(
-        new Request("https://brobot.example/auth/login?kanal=kanal-normal"),
-        umgebung,
+      const response = await authRouter.fetch(
+        new Request("https://brobot.example/auth/login?channel=kanal-normal"),
+        environment,
       );
-      const umfang = new URL(antwort.headers.get("location") ?? "https://ungültig").searchParams
+      const umfang = new URL(response.headers.get("location") ?? "https://ungültig").searchParams
         .get("scope")?.split(" ");
 
-      expect(antwort.status).toBe(302);
+      expect(response.status).toBe(302);
       expect(umfang).toEqual([...LOGIN_SCOPES]);
     } finally {
-      datenbank.close();
+      database.close();
     }
   });
 
   it("ignoriert einen unbekannten Einladungslink-Kanal vollständig", async () => {
-    const datenbank = new TestD1Database();
+    const database = new TestD1Database();
     try {
-      await insertChannel(datenbank, "kanal-voll");
-      await setzeVollzustimmung(datenbank, "kanal-voll");
-      const umgebung = umgebungFürDatenbank(datenbank);
+      await insertChannel(database, "kanal-voll");
+      await setFullConsent(database, "kanal-voll");
+      const environment = environmentForDatabase(database);
       const erfundenerLogin = "kanal-voll-aber-erfunden";
 
-      const antwort = await authRouter.fetch(
-        new Request(`https://brobot.example/auth/login?kanal=${erfundenerLogin}`),
-        umgebung,
+      const response = await authRouter.fetch(
+        new Request(`https://brobot.example/auth/login?channel=${erfundenerLogin}`),
+        environment,
       );
-      const url = new URL(antwort.headers.get("location") ?? "https://ungültig");
+      const url = new URL(response.headers.get("location") ?? "https://ungültig");
 
-      expect(antwort.status).toBe(302);
+      expect(response.status).toBe(302);
       expect(url.searchParams.get("scope")?.split(" ")).toEqual([...LOGIN_SCOPES]);
       expect(url.toString()).not.toContain(erfundenerLogin);
     } finally {
-      datenbank.close();
+      database.close();
     }
   });
 
   it("speichert bei unvollständigem Token weder Identität noch Sitzung und startet den zweiten Versuch", async () => {
-    const datenbank = new TestD1Database();
+    const database = new TestD1Database();
     try {
-      await insertChannel(datenbank, "kanal-voll");
-      await setzeVollzustimmung(datenbank, "kanal-voll");
-      const umgebung = umgebungFürDatenbank(datenbank);
+      await insertChannel(database, "kanal-voll");
+      await setFullConsent(database, "kanal-voll");
+      const environment = environmentForDatabase(database);
       const login = await authRouter.fetch(
         new Request("https://brobot.example/auth/login"),
-        umgebung,
+        environment,
       );
       const fetcher = fetchWith(
-        tokenAntwort(LOGIN_SCOPES),
-        identitätsAntwort("kanal-voll", "kanal-voll"),
+        tokenResponse(LOGIN_SCOPES),
+        identityResponse("kanal-voll", "kanal-voll"),
       );
 
-      const antwort = await authRouter.fetch(callbackRequest(login), umgebung);
-      const zweiteUrl = new URL(antwort.headers.get("location") ?? "https://ungültig");
+      const response = await authRouter.fetch(callbackRequest(login), environment);
+      const zweiteUrl = new URL(response.headers.get("location") ?? "https://ungültig");
 
-      expect(antwort.status).toBe(302);
-      expect(zweiteUrl.searchParams.get("scope")?.split(" ")).toEqual(listeAlleBroadcasterScopes());
-      expect(await anzahlZeilen(datenbank, "twitch_login_identity")).toBe(0);
-      expect(await anzahlZeilen(datenbank, "auth_sessions")).toBe(0);
+      expect(response.status).toBe(302);
+      expect(zweiteUrl.searchParams.get("scope")?.split(" ")).toEqual(listAllBroadcasterScopes());
+      expect(await countRows(database, "twitch_login_identity")).toBe(0);
+      expect(await countRows(database, "auth_sessions")).toBe(0);
       expect(fetcher).toHaveBeenCalledTimes(2);
     } finally {
-      datenbank.close();
+      database.close();
     }
   });
 
   it("beendet den zweiten unvollständigen Rücklauf mit 403 statt in einer Schleife", async () => {
-    const datenbank = new TestD1Database();
+    const database = new TestD1Database();
     try {
-      await insertChannel(datenbank, "kanal-voll");
-      await setzeVollzustimmung(datenbank, "kanal-voll");
-      const umgebung = umgebungFürDatenbank(datenbank);
+      await insertChannel(database, "kanal-voll");
+      await setFullConsent(database, "kanal-voll");
+      const environment = environmentForDatabase(database);
       const login = await authRouter.fetch(
         new Request("https://brobot.example/auth/login"),
-        umgebung,
+        environment,
       );
       const fetcher = fetchWith(
-        tokenAntwort(LOGIN_SCOPES),
-        identitätsAntwort("kanal-voll", "kanal-voll"),
-        tokenAntwort(LOGIN_SCOPES),
-        identitätsAntwort("kanal-voll", "kanal-voll"),
+        tokenResponse(LOGIN_SCOPES),
+        identityResponse("kanal-voll", "kanal-voll"),
+        tokenResponse(LOGIN_SCOPES),
+        identityResponse("kanal-voll", "kanal-voll"),
       );
 
-      const ersteAntwort = await authRouter.fetch(callbackRequest(login), umgebung);
-      const zweiteAntwort = await authRouter.fetch(callbackRequest(ersteAntwort), umgebung);
+      const firstResponse = await authRouter.fetch(callbackRequest(login), environment);
+      const secondResponse = await authRouter.fetch(callbackRequest(firstResponse), environment);
 
-      expect(zweiteAntwort.status).toBe(403);
-      await expect(zweiteAntwort.text()).resolves.toContain("vollständige Zustimmung");
-      expect(await anzahlZeilen(datenbank, "twitch_login_identity")).toBe(0);
-      expect(await anzahlZeilen(datenbank, "auth_sessions")).toBe(0);
-      await expect(datenbank.prepare(
+      expect(secondResponse.status).toBe(403);
+      await expect(secondResponse.text()).resolves.toContain("vollständige Zustimmung");
+      expect(await countRows(database, "twitch_login_identity")).toBe(0);
+      expect(await countRows(database, "auth_sessions")).toBe(0);
+      await expect(database.prepare(
         "SELECT failure_reason FROM oauth_transactions WHERE failure_reason = ?",
       ).bind("vollzustimmung_zweiter_versuch_unvollständig").all()).resolves.toMatchObject({
         results: [{ failure_reason: "vollzustimmung_zweiter_versuch_unvollständig" }],
       });
       expect(fetcher).toHaveBeenCalledTimes(4);
     } finally {
-      datenbank.close();
+      database.close();
     }
   });
 
   it("legt ein vollständiges Token ohne zweite Umleitung an", async () => {
-    const datenbank = new TestD1Database();
+    const database = new TestD1Database();
     try {
-      await insertChannel(datenbank, "kanal-voll");
-      await setzeVollzustimmung(datenbank, "kanal-voll");
-      const umgebung = umgebungFürDatenbank(datenbank);
+      await insertChannel(database, "kanal-voll");
+      await setFullConsent(database, "kanal-voll");
+      const environment = environmentForDatabase(database);
       const login = await authRouter.fetch(
-        new Request("https://brobot.example/auth/login?kanal=kanal-voll"),
-        umgebung,
+        new Request("https://brobot.example/auth/login?channel=kanal-voll"),
+        environment,
       );
       const fetcher = fetchWith(
-        tokenAntwort(listeAlleBroadcasterScopes()),
-        identitätsAntwort("kanal-voll", "kanal-voll"),
+        tokenResponse(listAllBroadcasterScopes()),
+        identityResponse("kanal-voll", "kanal-voll"),
       );
 
-      const antwort = await authRouter.fetch(callbackRequest(login), umgebung);
+      const response = await authRouter.fetch(callbackRequest(login), environment);
 
-      expect(antwort.status).toBe(302);
-      expect(antwort.headers.get("location")).toBe("https://brobot.example/");
-      expect(await anzahlZeilen(datenbank, "twitch_login_identity")).toBe(1);
-      expect(await anzahlZeilen(datenbank, "auth_sessions")).toBe(1);
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("https://brobot.example/");
+      expect(await countRows(database, "twitch_login_identity")).toBe(1);
+      expect(await countRows(database, "auth_sessions")).toBe(1);
       expect(fetcher).toHaveBeenCalledTimes(2);
     } finally {
-      datenbank.close();
+      database.close();
     }
   });
 
@@ -385,7 +385,7 @@ describe("Auth-Routen", () => {
       purpose: "login",
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
-      redirect_path: "/channels/kanal-a/modules/werbung",
+      redirect_path: "/channels/kanal-a/modules/ads",
     };
     const { environment } = makeEnvironment(transaction);
     const login = await authRouter.fetch(new Request("https://brobot.example/auth/login"), environment);
@@ -397,7 +397,7 @@ describe("Auth-Routen", () => {
     const response = await authRouter.fetch(callbackRequest(login), environment);
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe("https://brobot.example/channels/kanal-a/modules/werbung");
+    expect(response.headers.get("location")).toBe("https://brobot.example/channels/kanal-a/modules/ads");
   });
 
   it("ignoriert ein nicht einfaches hinterlegtes Rückwegziel", async () => {
@@ -713,7 +713,7 @@ describe("Auth-Routen", () => {
     const csrfToken = await createCsrfToken(
       "session-1",
       environment.SESSION_COOKIE_KEYS,
-      frischerZeitpunkt(),
+      freshTimestamp(),
     );
 
     const response = await authRouter.fetch(
@@ -802,7 +802,7 @@ describe("Auth-Routen", () => {
     const csrfToken = await createCsrfToken(
       "session-1",
       environment.SESSION_COOKIE_KEYS,
-      frischerZeitpunkt(),
+      freshTimestamp(),
     );
     const request = new Request("https://brobot.example/auth/logout", {
       method: "POST",
@@ -985,7 +985,7 @@ describe("Auth-Routen", () => {
 
   it("lässt einen Verwalter die channel:bot-Zustimmung nicht für den Broadcaster starten", async () => {
     const { environment } = makeEnvironment(
-      { role: "verwalter" },
+      { role: "manager" },
       sessionRowFor("verwalter"),
     );
     const response = await authRouter.fetch(
@@ -1029,10 +1029,10 @@ describe("Auth-Routen", () => {
       await insertChannel(database, "kanal-a");
       await insertLoginIdentityAndSession(database, "kanal-a");
       await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
-      const environment = umgebungFürDatenbank(database);
+      const environment = environmentForDatabase(database);
 
       const login = await authRouter.fetch(
-        new Request("https://brobot.example/auth/channels/kanal-a/broadcaster-scopes/werbung", {
+        new Request("https://brobot.example/auth/channels/kanal-a/broadcaster-scopes/ads", {
           headers: { Cookie: await sessionCookieHeaderFor("kanal-a") },
         }),
         environment,
@@ -1042,7 +1042,7 @@ describe("Auth-Routen", () => {
         "SELECT expected_user_id FROM oauth_transactions",
       ).first()).resolves.toEqual({ expected_user_id: "kanal-a" });
 
-      fetchWith(tokenAntwort(LOGIN_SCOPES), identitätsAntwort("fremdes-konto", "fremdes-konto"));
+      fetchWith(tokenResponse(LOGIN_SCOPES), identityResponse("fremdes-konto", "fremdes-konto"));
       const response = await authRouter.fetch(callbackRequest(login), environment);
 
       expect(response.status).toBe(403);
@@ -1115,17 +1115,17 @@ describe("Auth-Routen", () => {
       new Request("https://brobot.example/api/csrf", { headers: { Cookie: cookieHeader } }),
       environment,
     );
-    const ersterToken = await csrfTokenFrom(erster);
+    const firstToken = await csrfTokenFrom(erster);
 
     const zweiter = await authRouter.fetch(
       new Request("https://brobot.example/api/csrf", {
-        headers: { Cookie: `${cookieHeader}; __Host-brobot_csrf=${ersterToken}` },
+        headers: { Cookie: `${cookieHeader}; __Host-brobot_csrf=${firstToken}` },
       }),
       environment,
     );
-    const zweiterToken = await csrfTokenFrom(zweiter);
+    const secondToken = await csrfTokenFrom(zweiter);
 
-    expect(zweiterToken).toBe(ersterToken);
+    expect(secondToken).toBe(firstToken);
     // Kein neues Cookie, also bleibt das Token des ersten Tabs gültig.
     expect(zweiter.headers.get("set-cookie")).toBeNull();
   });

@@ -5,7 +5,7 @@ import {
   rotateLoginTokensForUser,
   setLoginIdentityTokenScopes,
   setLoginIdentityStatusIfCurrent,
-} from "./auth/repository";
+} from "./db/login-identity";
 import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import {
   confirmIdentityAuthorization,

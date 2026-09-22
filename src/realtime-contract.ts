@@ -1,7 +1,9 @@
+import type { ChannelRole } from "./contracts/values";
+
 /** Die einzige auf der Strecke verwendete Protokollversion. */
 export type RealtimeProtocolVersion = 1;
 
-export type RealtimeMessageType = "system.hallo" | "ereignisprotokoll.neu";
+export type RealtimeMessageType = "system.hello" | "event_log.new";
 
 export interface RealtimeEventLogHint {
   eventId: string;
@@ -12,8 +14,8 @@ export interface RealtimeEventLogHint {
 }
 
 export interface RealtimePayloads {
-  "system.hallo": Record<string, never>;
-  "ereignisprotokoll.neu": {
+  "system.hello": Record<string, never>;
+  "event_log.new": {
     entries: readonly RealtimeEventLogHint[];
   };
 }
@@ -39,7 +41,7 @@ export type RealtimePanelPrincipal = {
   channelId: string;
   userId: string;
   sessionId: string;
-  role: "broadcaster" | "verwalter" | "bediener";
+  role: ChannelRole;
   expiresAt: string;
 };
 

@@ -2,11 +2,11 @@ import {
   actorGuard,
   bindActorGuard,
   type ActorContext,
-} from "./repository";
+} from "../db/guards";
 import type { ModuleLanguage } from "../../modules/contract";
 import { prepareModuleAudit } from "../module-audit";
 
-const overlayTokenRoles = "'broadcaster', 'verwalter'";
+export const overlayTokenRoles = "'broadcaster', 'manager'";
 const OVERLAY_AUDIT_MODULE_ID = null;
 
 type OverlayTokenAuditSnapshot = Pick<
@@ -69,7 +69,7 @@ const mapOverlayToken = (row: OverlayTokenRow): OverlayTokenRecord => ({
   language: row.language,
 });
 
-const overlayTokenSelectColumns = `
+export const overlayTokenSelectColumns = `
   token.token_id AS token_id,
   token.channel_id AS channel_id,
   token.token_hash AS token_hash,
@@ -80,7 +80,7 @@ const overlayTokenSelectColumns = `
   token.last_used_at AS last_used_at,
   channel.language AS language`;
 
-const overlayTokenReturningColumns = `
+export const overlayTokenReturningColumns = `
   token_id, channel_id, token_hash, expires_at, created_at,
   revoked_at, revocation_reason, last_used_at`;
 

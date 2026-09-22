@@ -112,7 +112,7 @@ test("die Brotkrumensegmente bleiben bei jeder Fensterbreite zusammen", async ({
     channelId: "kanal-e2e",
     login: "brotkrumen-kanal",
     displayName: "Brotkrumen-Kanal",
-    role: "verwalter",
+    role: "manager",
     broadcasterConnection: "connected",
     channelBotConsent: "granted",
     bot: { status: "connected", reason: null, updatedAt: "2026-09-20T08:00:00.000Z" },
@@ -137,7 +137,7 @@ test("die Brotkrumensegmente bleiben bei jeder Fensterbreite zusammen", async ({
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ ...channel, activeModules: [{ moduleId: "textbefehle", settings: "{}" }] }),
+        body: JSON.stringify({ ...channel, activeModules: [{ moduleId: "text_commands", settings: "{}" }] }),
       });
       return;
     }
@@ -145,14 +145,14 @@ test("die Brotkrumensegmente bleiben bei jeder Fensterbreite zusammen", async ({
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] }),
+        body: JSON.stringify({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] }),
       });
       return;
     }
     await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
   });
 
-  await page.goto("/channels/kanal-e2e/modules/textbefehle");
+  await page.goto("/channels/kanal-e2e/modules/text_commands");
   await expect(page.getByRole("heading", { name: "Textbefehle", level: 1 })).toBeVisible();
 
   for (const width of [1280, 1920, 3440]) {

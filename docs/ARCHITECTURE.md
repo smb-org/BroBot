@@ -30,7 +30,7 @@ für HTTP und die Module.
 
 Ein Modul ist ein Feature-Slice unter `src/modules/<id>` mit `contracts/`,
 `domain/`, `service.ts`, `repository.ts`, `adapters/`, `overlay/` und
-`panel/`. Das erste konkrete Modul ist `src/modules/textbefehle/`. Es
+`panel/`. Das erste konkrete Modul ist `src/modules/text_commands/`. Es
 ergänzt den Contract um den vom Host aufgelösten `ModuleEvent.actor`, den
 `ModuleExecutionContext` für den eigenen D1-Adapter und typisierte Props für
 seine lazy Panel-Ansicht. Die Migration liegt als
@@ -50,7 +50,7 @@ ESLint schützt die Grenze: Overlay-Ansichten importieren weder Worker-, Service
 
 Das Admin- und Mod-Panel ist die primäre Bedienoberfläche. Sein Grundgerüst gehört dem Host; die konkrete Ansicht kommt pro Modul optional über den `BotModule`-Contract hinzu. Overlay- und Panel-Ansichten werden lazy geladen, damit ein deaktiviertes Modul in keinem der beiden Bundles Gewicht trägt.
 
-Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach. Das Textbefehle-Panel lädt und mutiert seine Liste über `/api/channels/:channelId/modules/textbefehle/befehle`; die Ansicht bleibt lazy und führt keinen Worker-, Repository- oder Adaptercode aus.
+Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach. Das Textbefehle-Panel lädt und mutiert seine Liste über `/api/channels/:channelId/modules/text_commands/commands`; die Ansicht bleibt lazy und führt keinen Worker-, Repository- oder Adaptercode aus.
 
 Sichtbare Panel-Texte eines Moduls stehen gesammelt in dessen Panel-Locale.
 Die gemeinsame Sprachauflösung und Datumsformatierung liegt in
@@ -118,7 +118,8 @@ Bild oder einer im Overlay-Bundle fest eingetragenen Versionszeichenkette.
 5. **`channel_members` existiert ab Tag 1.** Autorisierung fragt immer, ob ein User in genau diesem Kanal zugelassen ist. Eine globale Rolle außerhalb des Kanalmandanten gibt es nicht.
 
 6. **Administrative Mitgliedsänderungen werden atomar auditiert.** Die
-   Migration `0002_autorisierung.sql` begrenzt die Rollen per SQLite-`CHECK`.
+   Schema-Baseline `0000_baseline.sql` begrenzt die Rollen per SQLite-`CHECK`;
+   `tests/unit/sql-role-contract.test.ts` hält den Constraint an `CHANNEL_ROLES`.
    Eine Änderung an `channel_members` und ihr Eintrag in `audit_log` werden in
    einem D1-Batch ausgeführt; ohne erfolgreiche Änderung gibt es keinen Audit-
    Eintrag.

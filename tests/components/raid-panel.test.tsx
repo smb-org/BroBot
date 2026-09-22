@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { WerbungPanel } from "../../src/modules/werbung/panel";
-import { ladeWerbungseinstellungen } from "../../src/modules/werbung/panel/service";
+import { AdsPanel } from "../../src/modules/ads/panel";
+import { loadAdSettings } from "../../src/modules/ads/panel/service";
 import { ladeRaidEinstellungen } from "../../src/modules/raid/panel/service";
 import { RaidPanel } from "../../src/modules/raid/panel";
-import { ladeTextbefehle } from "../../src/modules/textbefehle/panel/service";
+import { loadTextCommands } from "../../src/modules/text_commands/panel/service";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
@@ -20,11 +20,11 @@ describe("Raid-Panel-Ansicht", () => {
 
   it("zeigt die Einstellungen zweisprachig an", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "Voll {channel} {viewers}",
-      textKlein: "Klein {channel} {viewers}",
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "Voll {channel} {viewers}",
+      textShort: "Klein {channel} {viewers}",
     } })));
 
     render(<RaidPanel channelId="kanal-a" language="en" />);
@@ -39,11 +39,11 @@ describe("Raid-Panel-Ansicht", () => {
 
   it("zeigt Felder für Bediener, deaktiviert sie aber mit Begründung", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "voll",
-      textKlein: "klein",
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "voll",
+      textShort: "klein",
     } })));
 
     render(<RaidPanel channelId="kanal-a" language="de" canManage={false} />);
@@ -59,11 +59,11 @@ describe("Raid-Panel-Ansicht", () => {
 
   it("zeigt die abgeschaltete Shoutout-Schwelle deaktiviert, lässt die Text-Schwelle aber bedienbar", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
-      shoutoutAktiv: false,
-      shoutoutSchwelle: 50,
-      textSchwelle: 5,
-      textVoll: "voll",
-      textKlein: "klein",
+      shoutoutEnabled: false,
+      shoutoutThreshold: 50,
+      textThreshold: 5,
+      textLong: "voll",
+      textShort: "klein",
     } })));
 
     render(<RaidPanel channelId="kanal-a" language="de" />);
@@ -76,15 +76,15 @@ describe("Raid-Panel-Ansicht", () => {
   it("blendet die Erfolgsmeldung nach einer weiteren Änderung in beiden Panels aus", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/raid/einstellungen")) return Promise.resolve(jsonResponse({ settings: {
-        shoutoutAktiv: true, shoutoutSchwelle: 3, textSchwelle: 3, textVoll: "voll", textKlein: "klein",
+      if (url.pathname.endsWith("/raid/settings")) return Promise.resolve(jsonResponse({ settings: {
+        shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "voll", textShort: "klein",
       } }));
-      if (url.pathname.endsWith("/werbung/zeitplan")) return Promise.resolve(jsonResponse({
+      if (url.pathname.endsWith("/ads/zeitplan")) return Promise.resolve(jsonResponse({
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
-        snoozeScopeVorhanden: true, letzteWerbepausen: [],
+        snoozeScopeAvailable: true, recentAdBreaks: [],
       }));
-      if (url.pathname.endsWith("/werbung/einstellungen")) return Promise.resolve(jsonResponse({ settings: {
-        automatisch: "auto {duration}", manuell: "manuell {duration}", vorwarnung: true, vorlaufSekunden: 60, vorwarnungText: "gleich {seconds}",
+      if (url.pathname.endsWith("/ads/settings")) return Promise.resolve(jsonResponse({ settings: {
+        automatic: "auto {duration}", manual: "manuell {duration}", prewarning: true, leadSeconds: 60, prewarningText: "gleich {seconds}",
       } }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "PATCH") return Promise.resolve(jsonResponse({}));
@@ -100,7 +100,7 @@ describe("Raid-Panel-Ansicht", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     cleanup();
-    render(<WerbungPanel channelId="kanal-a" language="de" />);
+    render(<AdsPanel channelId="kanal-a" language="de" />);
     const adText = (await screen.findAllByRole("textbox"))[0];
     if (adText === undefined) throw new Error("Werbungstextfeld fehlt");
     fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
@@ -112,8 +112,8 @@ describe("Raid-Panel-Ansicht", () => {
   it("behandelt ein geleertes Raid-Zahlenfeld als Feldfehler statt als null", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/raid/einstellungen") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
-        shoutoutAktiv: true, shoutoutSchwelle: 3, textSchwelle: 3, textVoll: "voll", textKlein: "klein",
+      if (url.pathname.endsWith("/raid/settings") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
+        shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "voll", textShort: "klein",
       } }));
       return Promise.resolve(jsonResponse({}));
     });
@@ -134,9 +134,9 @@ describe("Raid-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ error: "Sitzung abgelaufen" }, 401)));
 
     for (const load of [
-      () => ladeTextbefehle("kanal-a"),
+      () => loadTextCommands("kanal-a"),
       () => ladeRaidEinstellungen("kanal-a"),
-      () => ladeWerbungseinstellungen("kanal-a"),
+      () => loadAdSettings("kanal-a"),
     ]) {
       await expect(load()).rejects.toMatchObject({ name: "PanelApiError", status: 401 });
     }

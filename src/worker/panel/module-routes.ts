@@ -5,12 +5,12 @@ import {
   getChannelModuleForChannel,
   listChannelModulesForChannel,
   updateChannelModuleWithAudit,
-} from "../auth/repository";
+} from "../db/channel-modules";
 import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
-import type { ChannelMemberRole } from "../auth/authorization";
+import type { ChannelRole } from "../../contracts/values";
 import type { ModuleRouteVariables } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
@@ -31,7 +31,7 @@ interface ModuleRouteEnvironment {
 
 const nowIso = (): string => new Date().toISOString();
 
-const canManageModules = (role: ChannelMemberRole): boolean => role !== "bediener";
+const canManageModules = (role: ChannelRole): boolean => role !== "operator";
 
 const manageDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
   context.text("Nur Broadcaster und Verwalter dürfen Module ändern.", 403);
@@ -92,7 +92,7 @@ moduleRouter.get("/api/channels/:channelId/modules", async (context) => {
   return context.json({ modules });
 });
 
-moduleRouter.get("/api/channels/:channelId/modules/:moduleId/einstellungen", async (context) => {
+moduleRouter.get("/api/channels/:channelId/modules/:moduleId/settings", async (context) => {
   const module = MODULES.find((candidate) => candidate.id === context.req.param("moduleId"));
   if (module === undefined) return context.text("Unbekanntes Modul.", 404);
   const stored = await getChannelModuleForChannel(context.env.DB, context.req.param("channelId"), module.id);
@@ -107,7 +107,7 @@ moduleRouter.get("/api/channels/:channelId/modules/:moduleId/einstellungen", asy
   return settings.success ? context.json({ settings: settings.data }) : context.text("Moduleinstellungen sind ungültig.", 500);
 });
 
-moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/einstellungen", async (context) => {
+moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async (context) => {
   if (!canManageModules(context.get("channelRole"))) return manageDenied(context);
   const module = MODULES.find((candidate) => candidate.id === context.req.param("moduleId"));
   if (module === undefined) return context.text("Unbekanntes Modul.", 404);

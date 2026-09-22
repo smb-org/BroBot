@@ -19,7 +19,7 @@ const healthyChannel = (channelId: string, displayName: string) => ({
   channelId,
   login: channelId,
   displayName,
-  role: "verwalter",
+  role: "manager",
   broadcasterConnection: "connected",
   channelBotConsent: "granted",
   bot: { status: "connected", reason: null, updatedAt: relativeIso(0) },
@@ -69,7 +69,7 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
  * drei Zugriffstests unterscheiden sich nur in den Mitgliedsdaten; alles
  * andere ist Gerüst.
  */
-const zeigeMitglieder = async (mitglieder: {
+const showMembers = async (members: {
   members: unknown[];
   broadcasterCount: number;
   viewerUserId: string;
@@ -78,7 +78,7 @@ const zeigeMitglieder = async (mitglieder: {
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
     const path = requestUrl(input).pathname;
     if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-    if (path.endsWith("/members")) return jsonResponse({ ...mitglieder, nextCursor: null });
+    if (path.endsWith("/members")) return jsonResponse({ ...members, nextCursor: null });
     return jsonResponse({}, 404);
   }));
   window.history.replaceState({}, "", "/channels/kanal-a/members");
@@ -179,10 +179,10 @@ describe("Dashboard-Grundgerüst", () => {
   });
 
   it("erkennt die Unterseite eines kanalgebundenen Moduls", () => {
-    expect(parseDashboardRoute("/channels/kanal-a/modules/textbefehle")).toEqual({
+    expect(parseDashboardRoute("/channels/kanal-a/modules/text_commands")).toEqual({
       kind: "module",
       channelId: "kanal-a",
-      moduleId: "textbefehle",
+      moduleId: "text_commands",
     });
   });
 
@@ -267,7 +267,7 @@ describe("Dashboard-Grundgerüst", () => {
     const failedRow = screen.getByText("Aktion fehlgeschlagen").closest("tr");
     expect(sentRow?.querySelector(".event-chip[data-ton='info']")).toHaveTextContent("Info");
     expect(within(sentRow as HTMLElement).getByText("Info")).toBeInTheDocument();
-    expect(failedRow?.querySelector(".event-chip[data-ton='fehler']")).toHaveTextContent("Fehler");
+    expect(failedRow?.querySelector(".event-chip[data-ton='error']")).toHaveTextContent("Fehler");
     expect(within(failedRow as HTMLElement).getByText("Fehler")).toBeInTheDocument();
     const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
     const unknownEventRow = screen.getByText("plugin.anderes").closest("tr");
@@ -291,10 +291,10 @@ describe("Dashboard-Grundgerüst", () => {
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
       if (path.endsWith("/events")) return jsonResponse({
         entries: [
-          { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.community_gift", detail: '{"anzahl":5}', actorUserId: null },
-          { eventId: "raid", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":21}', actorUserId: null },
-          { eventId: "untimeout", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.moderation.untimeout", detail: "{}", actorUserId: null },
-          { eventId: "sent", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "textbefehle", code: "host.chat.gesendet", detail: "{}", actorUserId: null },
+          { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.community_gift", detail: '{"count":5}', actorUserId: null },
+          { eventId: "raid", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":21}', actorUserId: null },
+          { eventId: "untimeout", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "channel_events", code: "channel_events.moderation.untimeout", detail: "{}", actorUserId: null },
+          { eventId: "sent", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "text_commands", code: "host.chat.gesendet", detail: "{}", actorUserId: null },
           { eventId: "unknown", createdAt: "2026-09-18T04:04:00.000Z", moduleId: "plugin", code: "plugin.anderes", detail: "kein-json", actorUserId: null },
         ],
         nextCursor: null,
@@ -335,11 +335,11 @@ describe("Dashboard-Grundgerüst", () => {
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
       if (path.endsWith("/events")) return jsonResponse({
         entries: [
-          { eventId: "t1", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier1","stufe":"1000"}', actorUserId: null },
-          { eventId: "t2", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier2","stufe":"2000"}', actorUserId: null },
-          { eventId: "t3", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"tier3","stufe":"3000"}', actorUserId: null },
-          { eventId: "prime", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"primeperson","stufe":"Prime"}', actorUserId: null },
-          { eventId: "unbekannt", createdAt: "2026-09-18T04:04:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.chat.sub", detail: '{"person":"rätselperson","stufe":"9999"}', actorUserId: null },
+          { eventId: "t1", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.sub", detail: '{"person":"tier1","tier":"1000"}', actorUserId: null },
+          { eventId: "t2", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "channel_events", code: "channel_events.chat.sub", detail: '{"person":"tier2","tier":"2000"}', actorUserId: null },
+          { eventId: "t3", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "channel_events", code: "channel_events.chat.sub", detail: '{"person":"tier3","tier":"3000"}', actorUserId: null },
+          { eventId: "prime", createdAt: "2026-09-18T04:03:00.000Z", moduleId: "channel_events", code: "channel_events.chat.sub", detail: '{"person":"primeperson","tier":"Prime"}', actorUserId: null },
+          { eventId: "unbekannt", createdAt: "2026-09-18T04:04:00.000Z", moduleId: "channel_events", code: "channel_events.chat.sub", detail: '{"person":"rätselperson","tier":"9999"}', actorUserId: null },
         ],
         nextCursor: null,
       });
@@ -367,7 +367,7 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("erreicht Ereignisse über die Navigation und lädt die nächste Seite beim Scrollen", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const ersteSeite = {
+    const firstPage = {
       entries: [{
         eventId: "event-neu",
         createdAt: "2026-09-18T04:00:00.000Z",
@@ -378,7 +378,7 @@ describe("Dashboard-Grundgerüst", () => {
       }],
       nextCursor: "cursor-1",
     };
-    const zweiteSeite = {
+    const secondPage = {
       entries: [{
         eventId: "event-alt",
         createdAt: "2026-09-18T03:00:00.000Z",
@@ -396,7 +396,7 @@ describe("Dashboard-Grundgerüst", () => {
       if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
       if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
       if (url.pathname === "/api/channels/kanal-a/events") {
-        return jsonResponse(url.searchParams.has("cursor") ? zweiteSeite : ersteSeite);
+        return jsonResponse(url.searchParams.has("cursor") ? secondPage : firstPage);
       }
       return jsonResponse({}, 404);
     }));
@@ -422,16 +422,16 @@ describe("Dashboard-Grundgerüst", () => {
   it("lädt neue Ereignisse am Anfang nach und mischt sie ein", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":7}', actorUserId: null, actorLogin: null, actorDisplayName: null };
-    let ersteSeite = 0;
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":7}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    let firstPage = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
       if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
       if (url.pathname === "/api/channels/kanal-a/events") {
-        ersteSeite += 1;
-        return jsonResponse({ entries: ersteSeite === 1 ? [alt] : [neu, alt], nextCursor: null });
+        firstPage += 1;
+        return jsonResponse({ entries: firstPage === 1 ? [alt] : [neu, alt], nextCursor: null });
       }
       return jsonResponse({}, 404);
     }));
@@ -443,16 +443,16 @@ describe("Dashboard-Grundgerüst", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
-    socket.receive(JSON.stringify({ version: 1, id: "message-1", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "ereignisprotokoll.neu", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
+    socket.receive(JSON.stringify({ version: 1, id: "message-1", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
     expect(await screen.findByText("Raid von unbekannt mit 7 Zuschauern")).toBeInTheDocument();
-    expect(ersteSeite).toBe(2);
+    expect(firstPage).toBe(2);
   });
 
   it("hält die Liste weiter unten an und zeigt nur den Hinweis", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":8}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":8}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -477,7 +477,7 @@ describe("Dashboard-Grundgerüst", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
-    socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "ereignisprotokoll.neu", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
+    socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
     expect(await screen.findByRole("button", { name: "1 neue Ereignisse" })).toBeInTheDocument();
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
@@ -488,7 +488,7 @@ describe("Dashboard-Grundgerüst", () => {
   it("springt mit dem Hinweis an den Anfang und lädt dann nach", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":9}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":9}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
     const scrollTo = vi.fn();
     Object.defineProperty(window, "scrollTo", { configurable: true, value: scrollTo });
@@ -515,7 +515,7 @@ describe("Dashboard-Grundgerüst", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
-    socket.receive(JSON.stringify({ version: 1, id: "message-jump", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "ereignisprotokoll.neu", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
+    socket.receive(JSON.stringify({ version: 1, id: "message-jump", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
     fireEvent.click(await screen.findByRole("button", { name: "1 neue Ereignisse" }));
     expect(await screen.findByText("Raid von unbekannt mit 9 Zuschauern")).toBeInTheDocument();
@@ -526,7 +526,7 @@ describe("Dashboard-Grundgerüst", () => {
   it("verarbeitet eine doppelte Nachricht nur einmal", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":10}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":10}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -547,7 +547,7 @@ describe("Dashboard-Grundgerüst", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
-    const message = JSON.stringify({ version: 1, id: "message-dupe", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "ereignisprotokoll.neu", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } });
+    const message = JSON.stringify({ version: 1, id: "message-dupe", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } });
     socket.receive(message);
     socket.receive(message);
 
@@ -601,7 +601,7 @@ describe("Dashboard-Grundgerüst", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
-    socket.receive(JSON.stringify({ version: 1, id: "message-fremd", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-b", type: "ereignisprotokoll.neu", payload: { entries: [] } }));
+    socket.receive(JSON.stringify({ version: 1, id: "message-fremd", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-b", type: "event_log.new", payload: { entries: [] } }));
 
     expect(socket.readyState).toBe(3);
     expect(await screen.findByText("Offline")).toBeInTheDocument();
@@ -610,7 +610,7 @@ describe("Dashboard-Grundgerüst", () => {
   it("lädt Seite 1 nach einem Wiederaufbau neu", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":11}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":11}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -644,11 +644,11 @@ describe("Dashboard-Grundgerüst", () => {
   it("lädt am zugänglichen Feed-Ende nur einmal und zeigt das Ende ausdrücklich", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let releaseSecondPage: ((response: Response) => void) | undefined;
-    const ersteSeite = {
+    const firstPage = {
       entries: [{ eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "raid", code: "neu", detail: "{}", actorUserId: null }],
       nextCursor: "cursor-1",
     };
-    const zweiteSeite = {
+    const secondPage = {
       entries: [{ eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null }],
       nextCursor: null,
     };
@@ -659,7 +659,7 @@ describe("Dashboard-Grundgerüst", () => {
       if (url.pathname === "/api/channels/kanal-a/events") {
         return url.searchParams.has("cursor")
           ? new Promise<Response>((resolve) => { releaseSecondPage = resolve; })
-          : Promise.resolve(jsonResponse(ersteSeite));
+          : Promise.resolve(jsonResponse(firstPage));
       }
       return Promise.resolve(jsonResponse({}, 404));
     });
@@ -676,7 +676,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(eventRequests).toHaveLength(2);
     expect(await screen.findByText("Ältere Ereignisse werden geladen …")).toBeInTheDocument();
 
-    releaseSecondPage?.(jsonResponse(zweiteSeite));
+    releaseSecondPage?.(jsonResponse(secondPage));
     expect(await screen.findByText("alt")).toBeInTheDocument();
     expect(screen.getByText("Ende des Ereignisverlaufs erreicht.")).toBeInTheDocument();
   });
@@ -690,17 +690,17 @@ describe("Dashboard-Grundgerüst", () => {
         entries: [{
           eventId: "event-command",
           createdAt: "2026-09-18T04:00:00.000Z",
-          moduleId: "textbefehle",
+          moduleId: "text_commands",
           triggerId: "trigger-1",
-          code: "textbefehle.ausgeloest",
-          detail: '{"name":"wiki","antwort":"Antwort"}',
+          code: "text_commands.ausgeloest",
+          detail: '{"name":"wiki","response":"Antwort"}',
           actorUserId: "user-1",
           actorLogin: "alice",
           actorDisplayName: "Alice",
         }, {
           eventId: "event-sent",
           createdAt: "2026-09-18T04:01:00.000Z",
-          moduleId: "textbefehle",
+          moduleId: "text_commands",
           triggerId: "trigger-1",
           code: "host.chat.gesendet",
           detail: '{"text":"Antwort"}',
@@ -710,17 +710,17 @@ describe("Dashboard-Grundgerüst", () => {
         }, {
           eventId: "event-command-red",
           createdAt: "2026-09-18T04:02:00.000Z",
-          moduleId: "textbefehle",
+          moduleId: "text_commands",
           triggerId: "trigger-2",
-          code: "textbefehle.ausgeloest",
-          detail: '{"name":"fehlversuch","antwort":"Antwort"}',
+          code: "text_commands.ausgeloest",
+          detail: '{"name":"fehlversuch","response":"Antwort"}',
           actorUserId: "user-1",
           actorLogin: "alice",
           actorDisplayName: "Alice",
         }, {
           eventId: "event-red",
           createdAt: "2026-09-18T04:03:00.000Z",
-          moduleId: "textbefehle",
+          moduleId: "text_commands",
           triggerId: "trigger-2",
           code: "host.chat.fehlgeschlagen",
           detail: '{"text":"Antwort","grund":"rate_limited"}',
@@ -762,7 +762,7 @@ describe("Dashboard-Grundgerüst", () => {
     const history = screen.getByText("host.chat.gesendet").closest("li")?.parentElement;
     if (history == null) throw new Error("Verlauf fehlt");
     const historyText = history.textContent;
-    expect(historyText.indexOf("textbefehle.ausgeloest")).toBeLessThan(historyText.indexOf("host.chat.gesendet"));
+    expect(historyText.indexOf("text_commands.ausgeloest")).toBeLessThan(historyText.indexOf("host.chat.gesendet"));
 
     const failedGroupRow = screen.getByText("Chat-Nachricht fehlgeschlagen").closest("tr");
     expect(failedGroupRow).not.toBeNull();
@@ -789,27 +789,27 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("zeigt aktive Filter, kombiniert sie und meldet einen Treffer-Leerzustand", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const channelEntry = { eventId: "channel", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "kanalereignisse", code: "kanalereignisse.raid.eingehend", detail: '{"zuschauer":21}', actorUserId: null, actorLogin: null, actorDisplayName: null };
-    const moduleEntry = { eventId: "module", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "textbefehle", code: "textbefehle.ausgeloest", detail: '{"name":"hilfe"}', actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
-    const errorEntry = { eventId: "error", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "textbefehle", code: "host.chat.fehlgeschlagen", detail: "{}", actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
+    const channelEntry = { eventId: "channel", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":21}', actorUserId: null, actorLogin: null, actorDisplayName: null };
+    const moduleEntry = { eventId: "module", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "text_commands", code: "text_commands.ausgeloest", detail: '{"name":"hilfe"}', actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
+    const errorEntry = { eventId: "error", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "text_commands", code: "host.chat.fehlgeschlagen", detail: "{}", actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
       if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
-        { id: "kanalereignisse", enabled: true, settings: "{}" },
-        { id: "textbefehle", enabled: true, settings: "{}" },
-        { id: "werbung", enabled: true, settings: "{}" },
+        { id: "channel_events", enabled: true, settings: "{}" },
+        { id: "text_commands", enabled: true, settings: "{}" },
+        { id: "ads", enabled: true, settings: "{}" },
       ] }));
       if (url.pathname === "/api/channels/kanal-a/events") {
         const origin = url.searchParams.get("origin");
         const module = url.searchParams.get("module");
         const tone = url.searchParams.get("tone");
         const actor = url.searchParams.get("actor");
-        if (module === "werbung" && actor === "person-a") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
+        if (module === "ads" && actor === "person-a") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
         if (origin === "channel") return Promise.resolve(jsonResponse({ entries: [channelEntry], nextCursor: null }));
-        if (module === "textbefehle" && tone === "fehler") return Promise.resolve(jsonResponse({ entries: [errorEntry], nextCursor: null }));
-        if (module === "textbefehle") return Promise.resolve(jsonResponse({ entries: [errorEntry, moduleEntry], nextCursor: null }));
-        if (tone === "fehler") return Promise.resolve(jsonResponse({ entries: [errorEntry], nextCursor: null }));
+        if (module === "text_commands" && tone === "error") return Promise.resolve(jsonResponse({ entries: [errorEntry], nextCursor: null }));
+        if (module === "text_commands") return Promise.resolve(jsonResponse({ entries: [errorEntry, moduleEntry], nextCursor: null }));
+        if (tone === "error") return Promise.resolve(jsonResponse({ entries: [errorEntry], nextCursor: null }));
         if (actor === "person-a") return Promise.resolve(jsonResponse({ entries: [errorEntry, moduleEntry], nextCursor: null }));
         return Promise.resolve(jsonResponse({ entries: [channelEntry, errorEntry, moduleEntry], nextCursor: null }));
       }
@@ -822,28 +822,28 @@ describe("Dashboard-Grundgerüst", () => {
 
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     const herkunft = screen.getByRole("combobox", { name: "Herkunft" });
-    const modul = screen.getByRole("combobox", { name: "Modul" });
+    const module = screen.getByRole("combobox", { name: "Modul" });
     const ton = screen.getByRole("combobox", { name: "Ton" });
     const person = screen.getByRole("textbox", { name: "Person" });
     expect(herkunft).toBeInTheDocument();
-    expect(modul).toBeInTheDocument();
+    expect(module).toBeInTheDocument();
     expect(ton).toBeInTheDocument();
     expect(person).toBeInTheDocument();
 
-    fireEvent.change(herkunft, { target: { value: "kanal" } });
+    fireEvent.change(herkunft, { target: { value: "channel" } });
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.queryByText("Befehl !hilfe ausgeführt")).not.toBeInTheDocument();
     expect(screen.getByText(/Aktive Filter:/)).toHaveTextContent("Kanalereignisse");
 
     fireEvent.click(screen.getByRole("button", { name: "Filter zurücksetzen" }));
-    fireEvent.change(modul, { target: { value: "textbefehle" } });
-    fireEvent.change(ton, { target: { value: "fehler" } });
+    fireEvent.change(module, { target: { value: "text_commands" } });
+    fireEvent.change(ton, { target: { value: "error" } });
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
     fireEvent.change(person, { target: { value: "person-a" } });
     expect(await screen.findByText("Alice")).toBeInTheDocument();
 
-    fireEvent.change(modul, { target: { value: "werbung" } });
+    fireEvent.change(module, { target: { value: "ads" } });
     expect(await screen.findByText("Keine Ereignisse passen zu den Filtern.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Filter zurücksetzen" }));
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
@@ -889,7 +889,7 @@ describe("Dashboard-Grundgerüst", () => {
     // sieht aus wie eine Möglichkeit — man muss ihn drücken, um zu erfahren,
     // dass es keine ist. Gesperrt mit Grund statt versteckt: ein verschwundener
     // Knopf wirft die Frage auf, ob etwas kaputt ist.
-    await zeigeMitglieder({
+    await showMembers({
       members: [broadcaster("100", "esembe", "esembe")],
       broadcasterCount: 1,
       viewerUserId: "100",
@@ -906,7 +906,7 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("lässt den Entzug zu, sobald ein zweiter Broadcaster bleibt", async () => {
     // Gegenprobe: Die Sperre darf den erlaubten Fall nicht mitsperren.
-    await zeigeMitglieder({
+    await showMembers({
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
@@ -918,7 +918,7 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("warnt beim Entzug des eigenen Zugangs ausdrücklich vor der Aussperrung", async () => {
     const frage = vi.fn((meldung: string) => { void meldung; return false; });
-    await zeigeMitglieder({
+    await showMembers({
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
@@ -939,7 +939,7 @@ describe("Dashboard-Grundgerüst", () => {
     const members = {
       members: [
         { userId: "100", login: "streamer", displayName: "Streamerin", profileImageUrl: "https://cdn.example/streamerin.png", role: "broadcaster", joinedAt: "2026-09-17T12:00:00.000Z" },
-        { userId: "200", login: null, displayName: null, profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T12:00:00.000Z" },
+        { userId: "200", login: null, displayName: null, profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T12:00:00.000Z" },
       ],
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -974,7 +974,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText(/17\.09\.2026|Sep 17, 2026/), "Beitrittszeitpunkt wird angezeigt").toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Suchen" })).toBeInTheDocument();
 
-    const operatorChannel = { ...channel, role: "bediener" };
+    const operatorChannel = { ...channel, role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel] });
@@ -990,8 +990,8 @@ describe("Dashboard-Grundgerüst", () => {
   });
 
   it("behält die Semantik der Mitgliedertabelle für schmale Karten", async () => {
-    await zeigeMitglieder({
-      members: [{ userId: "100", login: "streamer", displayName: "Streamerin", profileImageUrl: null, role: "verwalter", joinedAt: "2026-09-17T12:00:00.000Z" }],
+    await showMembers({
+      members: [{ userId: "100", login: "streamer", displayName: "Streamerin", profileImageUrl: null, role: "manager", joinedAt: "2026-09-17T12:00:00.000Z" }],
       broadcasterCount: 1,
       viewerUserId: "100",
     });
@@ -1009,9 +1009,9 @@ describe("Dashboard-Grundgerüst", () => {
   });
 
   it("zeigt dem Bediener Mitgliederaktionen deaktiviert mit Begründung", async () => {
-    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "bediener" };
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "operator" };
     const members = {
-      members: [{ userId: "200", login: "moderation", displayName: "Moderation", role: "bediener", joinedAt: "2026-09-18T12:00:00.000Z" }],
+      members: [{ userId: "200", login: "moderation", displayName: "Moderation", role: "operator", joinedAt: "2026-09-18T12:00:00.000Z" }],
       broadcasterCount: 1,
       viewerUserId: "200",
       nextCursor: null,
@@ -1027,22 +1027,22 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
-    const grund = "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.";
-    const suche = screen.getByRole("button", { name: "Suchen" });
-    expect(suche).toBeDisabled();
-    expect(suche).toHaveAttribute("title", grund);
+    const reason = "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.";
+    const search = screen.getByRole("button", { name: "Suchen" });
+    expect(search).toBeDisabled();
+    expect(search).toHaveAttribute("title", reason);
     const freigeben = screen.getByRole("button", { name: "Zugriff freigeben" });
     expect(freigeben).toBeDisabled();
-    expect(freigeben).toHaveAttribute("title", grund);
+    expect(freigeben).toHaveAttribute("title", reason);
     expect(await screen.findByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
     const entziehen = screen.getByRole("button", { name: "Zugriff für Moderation entziehen" });
     expect(entziehen).toBeDisabled();
-    expect(screen.getAllByText(grund).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(reason).length).toBeGreaterThan(0);
   });
 
   it("verwirft Suchergebnis und Freigabebestätigung beim Kanalwechsel", async () => {
-    const alpha = { ...healthyChannel("kanal-a", "Alpha"), role: "verwalter" };
-    const beta = { ...healthyChannel("kanal-b", "Beta"), role: "bediener" };
+    const alpha = { ...healthyChannel("kanal-a", "Alpha"), role: "manager" };
+    const beta = { ...healthyChannel("kanal-b", "Beta"), role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta] });
@@ -1072,24 +1072,24 @@ describe("Dashboard-Grundgerüst", () => {
   });
 
   it("zeigt dem Bediener die Modulaktivierung deaktiviert mit Begründung", async () => {
-    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "bediener" };
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
       if (path.endsWith("/overview")) return jsonResponse(overview(channel));
-      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "textbefehle", enabled: false, settings: "{}" }] });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "text_commands", enabled: false, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
 
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
-    const grund = "Nur Broadcaster und Verwalter dürfen Module ändern.";
+    const reason = "Nur Broadcaster und Verwalter dürfen Module ändern.";
     const schalter = await screen.findAllByRole("switch", { name: /Textbefehle/i });
     expect(schalter).toHaveLength(2);
     schalter.forEach((element) => { expect(element).toBeDisabled(); });
-    expect(screen.getAllByText(grund)).toHaveLength(2);
+    expect(screen.getAllByText(reason)).toHaveLength(2);
   });
 
   it("zeigt Systemzustand, bevor das Audit-Log eintrifft", async () => {
@@ -1170,8 +1170,8 @@ describe("Dashboard-Grundgerüst", () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
     const subscriptions = [
       { subscriptionType: "channel.chat.message", variant: "", version: "1", subscriptionId: "chat-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" },
-      { subscriptionType: "channel.raid", variant: "eingehend", version: "1", subscriptionId: "raid-in", status: "missing", reason: "subscription_replaced", message: null, statusCode: null, updatedAt: "2026-09-18T03:00:00.000Z" },
-      { subscriptionType: "channel.raid", variant: "ausgehend", version: "1", subscriptionId: "raid-out", status: "error", reason: "missing_scope", message: "Scope fehlt", statusCode: 403, updatedAt: "2026-09-18T02:00:00.000Z" },
+      { subscriptionType: "channel.raid", variant: "incoming", version: "1", subscriptionId: "raid-in", status: "missing", reason: "subscription_replaced", message: null, statusCode: null, updatedAt: "2026-09-18T03:00:00.000Z" },
+      { subscriptionType: "channel.raid", variant: "outgoing", version: "1", subscriptionId: "raid-out", status: "error", reason: "missing_scope", message: "Scope fehlt", statusCode: 403, updatedAt: "2026-09-18T02:00:00.000Z" },
       { subscriptionType: "channel.future", variant: "", version: "9", subscriptionId: null, status: "pending", reason: "wartet", message: null, statusCode: null, updatedAt: "2026-09-18T01:00:00.000Z" },
     ];
     const systemResponse = { ...system, botPermissions: { missingScopes: [] }, subscriptions };
@@ -1253,7 +1253,7 @@ describe("Dashboard-Grundgerüst", () => {
     const inspector = await screen.findByRole("region", { name: "Fehlende Broadcaster-Berechtigungen" });
     expect(within(inspector).getByText("channel:manage:broadcast")).toHaveClass("mono");
     const consentLink = await screen.findByRole("link", { name: "Vollzustimmung erteilen" });
-    expect(consentLink).toHaveAttribute("href", "/auth/login?kanal=kanal-a");
+    expect(consentLink).toHaveAttribute("href", "/auth/login?channel=kanal-a");
   });
 
   it("zeigt für einen unmarkierten Kanal keinen Vollzustimmungszustand", async () => {
@@ -1293,7 +1293,7 @@ describe("Dashboard-Grundgerüst", () => {
   it("zeigt Verwaltern die Vollzustimmung deaktiviert mit Begründung", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
-      role: "verwalter",
+      role: "manager",
       broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1337,7 +1337,7 @@ describe("Dashboard-Grundgerüst", () => {
       const path = url.pathname;
       if (path === "/api/channels/kanal-a/members" && init?.method === "POST") {
         addRequestCount += 1;
-        return jsonResponse({ member: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png", role: "bediener", joinedAt: "2026-09-19T00:00:00.000Z" } }, 201);
+        return jsonResponse({ member: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png", role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" } }, 201);
       }
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
       if (path === "/api/channels/kanal-a/members") return jsonResponse({ members: [] });
@@ -1417,8 +1417,8 @@ describe("Dashboard-Grundgerüst", () => {
     const alphaReload = new Promise<Response>((resolve) => {
       resolveAlphaReload = resolve;
     });
-    const alphaMember = { userId: "alpha-user", login: "alpha-user", displayName: "Alpha-Mitglied", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
-    const betaMember = { userId: "beta-user", login: "beta-user", displayName: "Beta-Mitglied", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const alphaMember = { userId: "alpha-user", login: "alpha-user", displayName: "Alpha-Mitglied", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const betaMember = { userId: "beta-user", login: "beta-user", displayName: "Beta-Mitglied", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
     let memberRequestCount = 0;
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
@@ -1430,7 +1430,7 @@ describe("Dashboard-Grundgerüst", () => {
       }
       if (url.pathname === "/api/channels/kanal-b/members") return Promise.resolve(jsonResponse({ members: [betaMember], nextCursor: null }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/members/alpha-user") return Promise.resolve(jsonResponse({ member: { ...alphaMember, role: "verwalter" } }));
+      if (url.pathname === "/api/channels/kanal-a/members/alpha-user") return Promise.resolve(jsonResponse({ member: { ...alphaMember, role: "manager" } }));
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -1438,7 +1438,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
     await screen.findByText("Alpha-Mitglied");
-    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Alpha-Mitglied" }), { target: { value: "verwalter" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Alpha-Mitglied" }), { target: { value: "manager" } });
     await waitFor(() => expect(resolveAlphaReload).toBeTypeOf("function"));
 
     act(() => {
@@ -1461,8 +1461,8 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("behält den erfolgreichen Reload-Stand gegen eine verspätete Erstantwort", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const neuerMember = { userId: "new-user", login: "new-user", displayName: "Neuer Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-19T00:00:00.000Z" };
-    const verspäteterMember = { userId: "late-user", login: "late-user", displayName: "Verspäteter Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const neuerMember = { userId: "new-user", login: "new-user", displayName: "Neuer Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" };
+    const delayedMember = { userId: "late-user", login: "late-user", displayName: "Verspäteter Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
     let resolveLateInitial: ((response: Response) => void) | undefined;
     const lateInitial = new Promise<Response>((resolve) => {
       resolveLateInitial = resolve;
@@ -1496,7 +1496,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(screen.getByRole("table")).getByText("Neuer Stand")).toBeInTheDocument();
 
     await act(async () => {
-      resolveLateInitial?.(jsonResponse({ members: [verspäteterMember], broadcasterCount: 1, viewerUserId: "late-user", nextCursor: null }));
+      resolveLateInitial?.(jsonResponse({ members: [delayedMember], broadcasterCount: 1, viewerUserId: "late-user", nextCursor: null }));
       await Promise.resolve();
     });
 
@@ -1506,8 +1506,8 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("sperrt die Pagination während eines laufenden Mitglieder-Reloads", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const ersterMember = { userId: "first-user", login: "first-user", displayName: "Erster Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
-    const reloadMember = { userId: "reload-user", login: "reload-user", displayName: "Reload-Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-19T00:00:00.000Z" };
+    const ersterMember = { userId: "first-user", login: "first-user", displayName: "Erster Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const reloadMember = { userId: "reload-user", login: "reload-user", displayName: "Reload-Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" };
     let resolveReload: ((response: Response) => void) | undefined;
     const reload = new Promise<Response>((resolve) => {
       resolveReload = resolve;
@@ -1518,7 +1518,7 @@ describe("Dashboard-Grundgerüst", () => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/members/first-user" && init?.method === "PATCH") return Promise.resolve(jsonResponse({ member: { ...ersterMember, role: "verwalter" } }));
+      if (url.pathname === "/api/channels/kanal-a/members/first-user" && init?.method === "PATCH") return Promise.resolve(jsonResponse({ member: { ...ersterMember, role: "manager" } }));
       if (url.pathname === "/api/channels/kanal-a/members" && url.search !== "") {
         paginationRequestCount += 1;
         return Promise.resolve(jsonResponse({ members: [], broadcasterCount: 1, viewerUserId: "first-user", nextCursor: null }));
@@ -1535,7 +1535,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     render(<DashboardApp />);
     await screen.findByText("Erster Stand");
-    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "verwalter" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "manager" } });
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
     });
@@ -1556,9 +1556,9 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("setzt den Pagination-Zustand nach einem Reload während der Pagination zurück", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const ersterMember = { userId: "first-user", login: "first-user", displayName: "Erster Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" };
-    const reloadMember = { userId: "reload-user", login: "reload-user", displayName: "Reload-Stand", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-19T00:00:00.000Z" };
-    const latePageMember = { userId: "late-page-user", login: "late-page-user", displayName: "Verspätete Seite", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-17T00:00:00.000Z" };
+    const ersterMember = { userId: "first-user", login: "first-user", displayName: "Erster Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
+    const reloadMember = { userId: "reload-user", login: "reload-user", displayName: "Reload-Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" };
+    const latePageMember = { userId: "late-page-user", login: "late-page-user", displayName: "Verspätete Seite", profileImageUrl: null, role: "operator", joinedAt: "2026-09-17T00:00:00.000Z" };
     let resolveNextPage: ((response: Response) => void) | undefined;
     const nextPage = new Promise<Response>((resolve) => {
       resolveNextPage = resolve;
@@ -1572,7 +1572,7 @@ describe("Dashboard-Grundgerüst", () => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/members/first-user" && init?.method === "PATCH") return Promise.resolve(jsonResponse({ member: { ...ersterMember, role: "verwalter" } }));
+      if (url.pathname === "/api/channels/kanal-a/members/first-user" && init?.method === "PATCH") return Promise.resolve(jsonResponse({ member: { ...ersterMember, role: "manager" } }));
       if (url.pathname === "/api/channels/kanal-a/members" && url.search === "?cursor=cursor-1") return nextPage;
       if (url.pathname === "/api/channels/kanal-a/members") {
         memberRequestCount += 1;
@@ -1591,7 +1591,7 @@ describe("Dashboard-Grundgerüst", () => {
       expect(fetcher.mock.calls.some(([reqInput]) => requestUrl(reqInput).search === "?cursor=cursor-1")).toBe(true);
     });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "verwalter" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "manager" } });
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
     });
@@ -1620,10 +1620,10 @@ describe("Dashboard-Grundgerüst", () => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
       if (url.pathname === "/api/channels/kanal-a/members" && url.search === "") {
-        return Promise.resolve(jsonResponse({ members: [{ userId: "user-1", login: "erste", displayName: "Erste Person", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: "cursor-1" }));
+        return Promise.resolve(jsonResponse({ members: [{ userId: "user-1", login: "erste", displayName: "Erste Person", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: "cursor-1" }));
       }
       if (url.pathname === "/api/channels/kanal-a/members" && url.search === "?cursor=cursor-1") {
-        return Promise.resolve(jsonResponse({ members: [{ userId: "user-2", login: "zweite", displayName: "Zweite Person", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: null }));
+        return Promise.resolve(jsonResponse({ members: [{ userId: "user-2", login: "zweite", displayName: "Zweite Person", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: null }));
       }
       return Promise.resolve(jsonResponse({}, 404));
     });
@@ -1661,11 +1661,11 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("verweist in der Kanalübersicht auf aktive Module statt ihre Formulare einzubetten", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(aktivesModul);
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(activeModule);
       return jsonResponse({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
@@ -1673,20 +1673,20 @@ describe("Dashboard-Grundgerüst", () => {
     render(<DashboardApp />);
 
     const link = await screen.findByRole("link", { name: /Textbefehle ·/ });
-    expect(link).toHaveAttribute("href", "/channels/kanal-a/modules/textbefehle");
+    expect(link).toHaveAttribute("href", "/channels/kanal-a/modules/text_commands");
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
   });
 
   it("erreicht ein aktives Modul über seine eigene Unterseite", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(aktivesModul);
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(activeModule);
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
 
     render(<DashboardApp />);
 
@@ -1697,16 +1697,16 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("zeigt im Kopf Anzeigename, Twitch-ID und den beschrifteten Modulschalter", async () => {
     const channel = { ...healthyChannel("26876135", "Esembe"), login: "esembe" };
-    const zweiterKanal = healthyChannel("987654", "ZweiteRinne");
-    const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    const secondChannel = healthyChannel("987654", "ZweiteRinne");
+    const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel, zweiterKanal] });
-      if (path === "/api/channels/26876135/overview") return jsonResponse(aktivesModul);
-      if (path === "/api/channels/26876135/modules") return jsonResponse({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel, secondChannel] });
+      if (path === "/api/channels/26876135/overview") return jsonResponse(activeModule);
+      if (path === "/api/channels/26876135/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/26876135/modules/textbefehle");
+    window.history.replaceState({}, "", "/channels/26876135/modules/text_commands");
 
     render(<DashboardApp />);
 
@@ -1721,7 +1721,7 @@ describe("Dashboard-Grundgerüst", () => {
   it("lädt die Kanalübersicht nach dem Einschalten neu und zeigt die Modulansicht", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
     let overviewAufrufe = 0;
-    let modulesAufrufe = 0;
+    let modulesCalls = 0;
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
@@ -1729,21 +1729,21 @@ describe("Dashboard-Grundgerüst", () => {
         overviewAufrufe += 1;
         return jsonResponse(overviewAufrufe === 1 ? overview(channel) : {
           ...overview(channel),
-          activeModules: [{ moduleId: "textbefehle", settings: "{}" }],
+          activeModules: [{ moduleId: "text_commands", settings: "{}" }],
         });
       }
       if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
-        modulesAufrufe += 1;
-        return jsonResponse({ modules: [{ id: "textbefehle", enabled: modulesAufrufe > 1, settings: "{}" }] });
+        modulesCalls += 1;
+        return jsonResponse({ modules: [{ id: "text_commands", enabled: modulesCalls > 1, settings: "{}" }] });
       }
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
-      if (url.pathname === "/api/channels/kanal-a/modules/textbefehle" && init?.method === "PATCH") {
-        return jsonResponse({ module: { id: "textbefehle", enabled: true, settings: "{}" } });
+      if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
       }
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetcher);
-    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
 
     render(<DashboardApp />);
 
@@ -1854,11 +1854,11 @@ describe("Dashboard-Grundgerüst", () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path.endsWith("/overview")) return jsonResponse({ ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] });
-      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] });
+      if (path.endsWith("/overview")) return jsonResponse({ ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
 
     render(<DashboardApp />);
 
@@ -1894,15 +1894,15 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("zeigt die Brotkrume und die fünf Einträge der Schiene auf allen Bereichen und der Moduldetailseite", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
+    const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
-      if (path.endsWith("/overview")) return jsonResponse(path.includes("modules/textbefehle") ? activeModuleOverview : overview(channel));
+      if (path.endsWith("/overview")) return jsonResponse(path.includes("modules/text_commands") ? activeModuleOverview : overview(channel));
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
       if (path.endsWith("/members")) return jsonResponse({ members: [], broadcasterCount: 1, viewerUserId: "viewer", nextCursor: null });
-      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "textbefehle", enabled: true, settings: "{}" }] });
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
       if (path.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
       return jsonResponse({}, 404);
     }));
@@ -1914,7 +1914,7 @@ describe("Dashboard-Grundgerüst", () => {
       { path: "/channels/kanal-a/members", heading: "Mitglieder", current: "Mitglieder" },
       { path: "/channels/kanal-a/modules", heading: "Module", current: "Module" },
       { path: "/channels/kanal-a/events", heading: "Ereignisse", current: "Ereignisse" },
-      { path: "/channels/kanal-a/modules/textbefehle", heading: "Textbefehle", current: "Textbefehle" },
+      { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", current: "Textbefehle" },
     ];
 
     for (const page of pages) {
@@ -1957,17 +1957,17 @@ describe("Dashboard-Grundgerüst", () => {
 
   it("mountet beim Wechsel zur Modulroute nicht den alten Übersichtsstand", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const aktivesModul = { ...overview(channel), activeModules: [{ moduleId: "textbefehle", settings: "{}" }] };
-    const deaktiviertesModul = overview(channel);
+    const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
+    const inactiveModule = overview(channel);
     let overviewAufrufe = 0;
-    let loeseZweiteAntwortAuf!: (response: Response) => void;
-    const zweiteAntwort = new Promise<Response>((resolve) => { loeseZweiteAntwortAuf = resolve; });
+    let resolveSecondResponse!: (response: Response) => void;
+    const secondResponse = new Promise<Response>((resolve) => { resolveSecondResponse = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
       if (path === "/api/channels/kanal-a/overview") {
         overviewAufrufe += 1;
-        return overviewAufrufe === 1 ? jsonResponse(aktivesModul) : zweiteAntwort;
+        return overviewAufrufe === 1 ? jsonResponse(activeModule) : secondResponse;
       }
       return jsonResponse({}, 404);
     }));
@@ -1978,7 +1978,7 @@ describe("Dashboard-Grundgerüst", () => {
     link.click();
 
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
-    loeseZweiteAntwortAuf(jsonResponse(deaktiviertesModul));
+    resolveSecondResponse(jsonResponse(inactiveModule));
     expect(await screen.findByText("Module werden geladen …")).toBeInTheDocument();
     expect(screen.queryByText("Das Modul „Textbefehle“ ist in diesem Kanal nicht aktiv.")).not.toBeInTheDocument();
   });
@@ -1989,10 +1989,10 @@ describe("Dashboard-Grundgerüst", () => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [channel] });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "textbefehle", enabled: false, settings: "{}" }] });
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: false, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/modules/textbefehle");
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
 
     render(<DashboardApp />);
 
@@ -2077,7 +2077,7 @@ describe("Dashboard-Grundgerüst", () => {
         at: "2026-09-18T02:00:00.000Z",
       },
     };
-    const zeigeKanal = async (): Promise<void> => {
+    const showChannel = async (): Promise<void> => {
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
         if (path === "/api/channels") return jsonResponse({ channels: [channel] });
@@ -2090,7 +2090,7 @@ describe("Dashboard-Grundgerüst", () => {
     };
 
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-    await zeigeKanal();
+    await showChannel();
     expect(screen.getByText(/Moderationsereignisse: Forbidden/)).toBeInTheDocument();
     expect(screen.getByText(/Keine Berechtigung\./)).toBeInTheDocument();
     expect(screen.getByText(/HTTP 403/)).toBeInTheDocument();
@@ -2098,7 +2098,7 @@ describe("Dashboard-Grundgerüst", () => {
     cleanup();
     vi.unstubAllGlobals();
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
-    await zeigeKanal();
+    await showChannel();
     expect(screen.getByText(/Moderation events: Forbidden/)).toBeInTheDocument();
     cleanup();
     vi.unstubAllGlobals();
@@ -2111,18 +2111,18 @@ describe("Dashboard-Grundgerüst", () => {
       channelBotConsent: "missing",
       lastError: null,
     };
-    const zeigeKanal = (angezeigterKanal: typeof channel): void => {
+    const showChannel = (displayedChannel: typeof channel): void => {
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [angezeigterKanal] });
-        if (path.endsWith("/overview")) return jsonResponse({ ...angezeigterKanal, activeModules: [] });
+        if (path === "/api/channels") return jsonResponse({ channels: [displayedChannel] });
+        if (path.endsWith("/overview")) return jsonResponse({ ...displayedChannel, activeModules: [] });
         return jsonResponse({}, 404);
       }));
       window.history.replaceState({}, "", "/channels/kanal-a");
       render(<DashboardApp />);
     };
 
-    zeigeKanal(channel);
+    showChannel(channel);
 
     expect((await screen.findAllByText("Broadcaster-Zustimmung fehlt")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Der Broadcaster muss Twitch erneut autorisieren.")).toBeInTheDocument();
@@ -2130,7 +2130,7 @@ describe("Dashboard-Grundgerüst", () => {
 
     cleanup();
     const broadcasterChannel = { ...channel, role: "broadcaster" };
-    zeigeKanal(broadcasterChannel);
+    showChannel(broadcasterChannel);
 
     const action = await screen.findByRole("link", { name: "Broadcaster-Zustimmung anfordern" });
     expect(action).toHaveAttribute("href", "/auth/channels/kanal-a/channel-bot");
@@ -2140,7 +2140,7 @@ describe("Dashboard-Grundgerüst", () => {
   it("zeigt die letzte Moderatorprüfung und die Aktion nur für berechtigte Rollen", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
-      role: "verwalter",
+      role: "manager",
       moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -2158,7 +2158,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("button", { name: "Moderatorstatus prüfen" })).toBeInTheDocument();
 
     cleanup();
-    const operatorChannel = { ...channel, role: "bediener" };
+    const operatorChannel = { ...channel, role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel] });
@@ -2695,10 +2695,10 @@ describe("Dashboard-Grundgerüst", () => {
     const entry = {
       eventId: "event-1",
       createdAt: "2026-09-18T04:00:00.000Z",
-      moduleId: "textbefehle",
+      moduleId: "text_commands",
       triggerId: "trigger-1",
-      code: "textbefehle.ausgeloest",
-      detail: '{"name":"wiki","antwort":"Antwort"}',
+      code: "text_commands.ausgeloest",
+      detail: '{"name":"wiki","response":"Antwort"}',
       actorUserId: "user-1",
       actorLogin: "alice",
       actorDisplayName: "Alice",
@@ -2729,10 +2729,10 @@ describe("Dashboard-Grundgerüst", () => {
     const entry = {
       eventId: "event-1",
       createdAt: "2026-09-18T04:00:00.000Z",
-      moduleId: "textbefehle",
+      moduleId: "text_commands",
       triggerId: "trigger-1",
-      code: "textbefehle.ausgeloest",
-      detail: '{"name":"wiki","antwort":"Antwort"}',
+      code: "text_commands.ausgeloest",
+      detail: '{"name":"wiki","response":"Antwort"}',
       actorUserId: "user-1",
       actorLogin: "alice",
       actorDisplayName: "Alice",
@@ -2899,10 +2899,10 @@ describe("Dashboard-Grundgerüst", () => {
     const entry = {
       eventId: "event-1",
       createdAt: "2026-09-18T04:00:00.000Z",
-      moduleId: "textbefehle",
+      moduleId: "text_commands",
       triggerId: "trigger-1",
-      code: "textbefehle.ausgeloest",
-      detail: '{"name":"wiki","antwort":"Antwort"}',
+      code: "text_commands.ausgeloest",
+      detail: '{"name":"wiki","response":"Antwort"}',
       actorUserId: "user-1",
       actorLogin: "alice",
       actorDisplayName: "Alice",

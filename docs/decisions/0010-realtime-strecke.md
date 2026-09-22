@@ -134,7 +134,7 @@ kommen additiv hinzu; ein unbekannter Typ wird vom Client ignoriert, damit ein
 altes Panel ein neues Modul nicht zum Absturz bringt.
 
 **Der Feed bekommt Hinweise mit Kurzdaten, nicht die Zeilen.** Eine
-`ereignisprotokoll.neu`-Nachricht trägt je neuem Eintrag `eventId`,
+`event_log.new`-Nachricht trägt je neuem Eintrag `eventId`,
 `createdAt`, `moduleId`, `code` und `actorUserId` — genug, um clientseitig
 gegen die aktiven Filter vorzusortieren und zu zählen, aber ohne `detail` und
 ohne Namen. Den verbindlichen Stand lädt das Panel über `GET …/events` nach.

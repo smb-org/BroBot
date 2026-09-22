@@ -1,13 +1,20 @@
 import {
   getBotIdentity,
   getBotIdentityStatus,
-  listChannelIds,
-  purgeExpiredOAuthTransactions,
   setBotIdentityMissingScopesIfCurrent,
-  setBotChannelStatus,
   setBotIdentityStatusIfCurrent,
   rotateBotTokens,
-} from "./auth/repository";
+} from "./db/bot-identity";
+import type { IdentityStatus } from "../contracts/values";
+import {
+  listChannelIds,
+} from "./db/channels";
+import {
+  purgeExpiredOAuthTransactions,
+} from "./db/oauth-transactions";
+import {
+  setBotChannelStatus,
+} from "./db/bot-channel-status";
 import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 import { kuerzeAuf200Zeichen } from "../text";
@@ -266,7 +273,7 @@ export const fetchModeratedChannels = async (
   return fetchPage(null);
 };
 
-export const fetchModeratedChannelStatus = async (
+export const fetchChannelStatus = async (
   fetcher: typeof fetch,
   clientId: string,
   userId: string,
@@ -333,7 +340,7 @@ export interface IdentityAuthorizationRecord {
   accessTokenCiphertext: string;
   refreshTokenCiphertext: string;
   updatedAt: string;
-  status?: "connected" | "revoked" | "error";
+  status?: IdentityStatus;
 }
 
 /** Gemeinsamer Ablauf zur Bestätigung eines widerrufenen Identitätstokens. */

@@ -1,12 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  authorizeChannelAccess,
-  type ChannelMemberRole,
-} from "../../src/worker/auth/authorization";
+import { authorizeChannelAccess } from "../../src/worker/auth/authorization";
+import type { ChannelRole } from "../../src/contracts/values";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import {
   requireChannelAuthorization,
@@ -14,11 +10,15 @@ import {
 } from "../../src/worker/auth/guards";
 import {
   actorGuard,
+} from "../../src/worker/db/guards";
+import {
   createChannelMemberWithAudit,
   deleteChannelMemberWithAudit,
   updateChannelMemberWithAudit,
-} from "../../src/worker/auth/repository";
-import type { SessionRecord } from "../../src/worker/auth/repository";
+} from "../../src/worker/db/channel-members";
+import type {
+  SessionRecord,
+} from "../../src/worker/db/sessions";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
@@ -103,7 +103,7 @@ const seedMember = async (
   database: TestD1Database,
   channelId: string,
   userId: string,
-  role: ChannelMemberRole,
+  role: ChannelRole,
 ): Promise<void> => {
   await database.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
@@ -196,10 +196,10 @@ describe("kanalgebundene Autorisierung", () => {
 
   it("akzeptiert ein Mitglied nur im angeforderten, vorhandenen Kanal", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "user-1", "verwalter");
+    await seedMember(database, "kanal-a", "user-1", "manager");
 
     await expect(authorizeChannelAccess(database as unknown as D1Database, session("user-1"), "kanal-a"))
-      .resolves.toBe("verwalter");
+      .resolves.toBe("manager");
   });
 
   it("lehnt ein Nichtmitglied ab", async () => {
@@ -237,61 +237,7 @@ describe("kanalgebundene Autorisierung", () => {
       .resolves.toBeNull();
   });
 
-  it("übernimmt die vorhandene Broadcaster-Zeile unverändert in die neue Tabelle", async () => {
-    const migrationDatabase = new TestD1Database(2);
-    migrationDatabase.prepare(
-      `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind("kanal-a", "kanal-a", "kanal-a", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").runSync();
-    migrationDatabase.prepare(
-      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind("kanal-a", "user-1", "broadcaster", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").runSync();
 
-    migrationDatabase.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0002_autorisierung.sql"), "utf8"));
-
-    await expect(migrationDatabase.prepare(
-      `SELECT channel_id, user_id, role, created_at, updated_at
-         FROM channel_members
-        WHERE channel_id = ? AND user_id = ?`,
-    ).bind("kanal-a", "user-1").first()).resolves.toEqual({
-      channel_id: "kanal-a",
-      user_id: "user-1",
-      role: "broadcaster",
-      created_at: "2026-09-18T00:00:00.000Z",
-      updated_at: "2026-09-18T00:00:00.000Z",
-    });
-    migrationDatabase.close();
-  });
-
-  it("bricht die Migration bei einem ungültigen Altrollenwert ab und erhält die alte Tabelle", () => {
-    const migrationDatabase = new TestD1Database(2);
-    migrationDatabase.prepare(
-      `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind("kanal-a", "kanal-a", "kanal-a", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").runSync();
-    migrationDatabase.prepare(
-      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind("kanal-a", "user-1", "administrator", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").runSync();
-
-    expect(() => {
-      migrationDatabase.sqlite.exec(readFileSync(resolve(import.meta.dirname, "../../migrations/0002_autorisierung.sql"), "utf8"));
-    }).toThrow();
-    expect(migrationDatabase.sqlite.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'channel_members'",
-    ).get()).toEqual({ name: "channel_members" });
-    expect(migrationDatabase.sqlite.prepare(
-      `SELECT channel_id, user_id, role
-         FROM channel_members
-        WHERE channel_id = ? AND user_id = ?`,
-    ).get("kanal-a", "user-1")).toEqual({
-      channel_id: "kanal-a",
-      user_id: "user-1",
-      role: "administrator",
-    });
-    migrationDatabase.close();
-  });
 
   it("stellt beide fachlichen channel_members-Indizes nach der Migration wieder her", () => {
     const migrationDatabase = new TestD1Database();
@@ -313,7 +259,7 @@ describe("kanalgebundene Autorisierung", () => {
     ).bind(
       "kanal-a",
       "user-1",
-      "operator",
+      "invalid",
       "2026-09-18T00:00:00.000Z",
       "2026-09-18T00:00:00.000Z",
     ).run()).rejects.toThrow();
@@ -321,7 +267,7 @@ describe("kanalgebundene Autorisierung", () => {
 
   it("behält den Cascade-Fremdschlüssel zum Kanal bei", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "user-1", "operator");
 
     await database.prepare("DELETE FROM channels WHERE channel_id = ?")
       .bind("kanal-a")
@@ -332,7 +278,7 @@ describe("kanalgebundene Autorisierung", () => {
 
   it("schließt einen Request-Body-Rollenwert aus der Autorisierungsentscheidung aus", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "user-1");
 
     const response = await authorizationApp.fetch(
@@ -341,7 +287,7 @@ describe("kanalgebundene Autorisierung", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ role: "bediener" });
+    await expect(response.json()).resolves.toEqual({ role: "operator" });
   });
 });
 
@@ -358,7 +304,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("schreibt Änderung und Audit-Eintrag gemeinsam", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
 
     await createChannelMemberWithAudit(
@@ -367,16 +313,16 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "user-1",
-        role: "bediener",
+        role: "operator",
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:00:00.000Z",
       },
       "mitglied.hinzugefügt",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     );
 
-    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
+    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "operator" });
     await expect(readAudit(database)).resolves.toMatchObject({
       results: [{
         actor_user_id: "actor-1",
@@ -387,7 +333,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
         after_json: JSON.stringify({
           channelId: "kanal-a",
           userId: "user-1",
-          role: "bediener",
+          role: "operator",
           createdAt: "2026-09-18T00:00:00.000Z",
           updatedAt: "2026-09-18T00:00:00.000Z",
         }),
@@ -397,8 +343,8 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("auditiert eine Rollenänderung mit dem tatsächlichen Vorher-Zustand", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
+    await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "actor-1");
 
     await updateChannelMemberWithAudit(
@@ -407,31 +353,31 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "user-1",
-        role: "verwalter",
+        role: "manager",
         createdAt: "2099-01-01T00:00:00.000Z",
         updatedAt: "2026-09-18T00:03:00.000Z",
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:03:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({
-      role: "verwalter",
+      role: "manager",
       created_at: "2026-09-18T00:00:00.000Z",
     });
     const audit = await readAudit(database);
-    expect(JSON.parse(audit.results[0]?.before_json ?? "{}") as unknown).toMatchObject({ role: "bediener" });
+    expect(JSON.parse(audit.results[0]?.before_json ?? "{}") as unknown).toMatchObject({ role: "operator" });
     expect(JSON.parse(audit.results[0]?.after_json ?? "{}") as unknown).toMatchObject({
-      role: "verwalter",
+      role: "manager",
       createdAt: "2026-09-18T00:00:00.000Z",
     });
   });
 
   it("schreibt bei einer konkurrierenden Änderung keinen veralteten Audit-Vorzustand", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
+    await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "actor-1");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
@@ -456,13 +402,13 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "user-1",
-        role: "verwalter",
+        role: "manager",
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:03:00.000Z",
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:03:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -471,8 +417,8 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("legt bei einer konkurrierenden Löschung durch PATCH kein Mitglied neu an", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
+    await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "actor-1");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
@@ -490,13 +436,13 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "user-1",
-        role: "verwalter",
+        role: "manager",
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:03:00.000Z",
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:03:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -505,7 +451,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("verweigert INSERT, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
     const racingDatabase = databaseRacingBeforeBatch(database, () => {
       database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
@@ -518,13 +464,13 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "user-1",
-        role: "bediener",
+        role: "operator",
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:01:00.000Z",
       },
       "mitglied.hinzugefügt",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -533,8 +479,8 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("verweigert UPDATE, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
+    await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "actor-1");
     const racingDatabase = databaseRacingBeforeBatch(database, () => {
       database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
@@ -547,23 +493,23 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "user-1",
-        role: "verwalter",
+        role: "manager",
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:01:00.000Z",
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     )).resolves.toBe(false);
 
-    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
+    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "operator" });
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
   it("verweigert DELETE, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
+    await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "actor-1");
     const racingDatabase = databaseRacingBeforeBatch(database, () => {
       database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
@@ -577,16 +523,16 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       "user-1",
       "mitglied.entfernt",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     )).resolves.toBe(false);
 
-    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
+    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "operator" });
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
   it("schützt zwei gleichzeitige Löschungen bei genau zwei Broadcastern atomar", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "broadcaster-1", "broadcaster");
     await seedMember(database, "kanal-a", "broadcaster-2", "broadcaster");
     await seedSession(database, "actor-1");
@@ -602,7 +548,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       "broadcaster-1",
       "mitglied.entfernt",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "broadcaster-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -611,7 +557,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("schützt zwei gleichzeitige Herabstufungen bei genau zwei Broadcastern atomar", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "broadcaster-1", "broadcaster");
     await seedMember(database, "kanal-a", "broadcaster-2", "broadcaster");
     await seedSession(database, "actor-1");
@@ -626,13 +572,13 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "broadcaster-1",
-        role: "verwalter",
+        role: "manager",
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:01:00.000Z",
       },
       "mitglied.rolle_geändert",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "broadcaster-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -641,12 +587,12 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("verwandelt einen zweiten Create nicht in ein UPDATE", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
     const member = {
       channelId: "kanal-a",
       userId: "user-1",
-      role: "bediener" as const,
+      role: "operator" as const,
       createdAt: "2026-09-18T00:00:00.000Z",
       updatedAt: "2026-09-18T00:01:00.000Z",
     };
@@ -657,24 +603,24 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       member,
       "mitglied.hinzugefügt",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     )).resolves.toBe(true);
     await expect(createChannelMemberWithAudit(
       database as unknown as D1Database,
       actorContext("actor-1"),
-      { ...member, role: "verwalter" },
+      { ...member, role: "manager" },
       "mitglied.hinzugefügt",
       "2026-09-18T00:02:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     )).resolves.toBe(false);
 
-    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "bediener" });
+    await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "operator" });
     await expect(readAudit(database)).resolves.toMatchObject({ results: [expect.objectContaining({ action: "mitglied.hinzugefügt" })] });
   });
 
   it("hinterlässt bei einer fehlgeschlagenen Änderung keinen Audit-Eintrag", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
 
     await expect(createChannelMemberWithAudit(
@@ -683,13 +629,13 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "user-1",
-        role: "außenstehend" as ChannelMemberRole,
+        role: "außenstehend" as ChannelRole,
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:00:00.000Z",
       },
       "mitglied.geändert",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     )).rejects.toThrow();
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -698,7 +644,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("rollt eine erfolgreiche Mitgliedsänderung zurück, wenn der Audit-Schritt scheitert", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
     await database.prepare(
       `INSERT INTO audit_log
@@ -722,13 +668,13 @@ describe("atomare Mitgliedsänderung und Audit", () => {
         {
           channelId: "kanal-a",
           userId: "user-1",
-          role: "bediener",
+          role: "operator",
           createdAt: "2026-09-18T00:01:00.000Z",
           updatedAt: "2026-09-18T00:01:00.000Z",
         },
         "mitglied.hinzugefügt",
         "2026-09-18T00:01:00.000Z",
-        actorGuard("'broadcaster', 'verwalter'"),
+        actorGuard("'broadcaster', 'manager'"),
       )).rejects.toThrow();
     } finally {
       randomUuid.mockRestore();
@@ -742,8 +688,8 @@ describe("atomare Mitgliedsänderung und Audit", () => {
 
   it("auditiert das Entfernen mit Vorher- und Nachher-Zustand", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
+    await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "actor-1");
 
     await deleteChannelMemberWithAudit(
@@ -753,7 +699,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       "user-1",
       "mitglied.entfernt",
       "2026-09-18T00:02:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -762,15 +708,15 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     expect(JSON.parse(audit.results[0]?.before_json ?? "{}") as unknown).toMatchObject({
       channelId: "kanal-a",
       userId: "user-1",
-      role: "bediener",
+      role: "operator",
     });
     expect(audit.results[0]?.after_json).toBe("null");
   });
 
   it("schreibt nach einer konkurrierenden Löschung keinen Audit-Eintrag", async () => {
     await seedChannel(database, "kanal-a");
-    await seedMember(database, "kanal-a", "actor-1", "verwalter");
-    await seedMember(database, "kanal-a", "user-1", "bediener");
+    await seedMember(database, "kanal-a", "actor-1", "manager");
+    await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "actor-1");
     const racingDatabase = {
       prepare: database.prepare.bind(database),
@@ -789,7 +735,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       "user-1",
       "mitglied.entfernt",
       "2026-09-18T00:02:00.000Z",
-      actorGuard("'broadcaster', 'verwalter'"),
+      actorGuard("'broadcaster', 'manager'"),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();

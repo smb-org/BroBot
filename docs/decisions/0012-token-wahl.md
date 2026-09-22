@@ -122,7 +122,7 @@ PATCH https://api.twitch.tv/helix/channels?broadcaster_id=<kanal>
 - Erfolg ist HTTP 204 ohne Inhalt
 
 **Wer auslöst und wer ausführt, sind zwei verschiedene Personen.** Ein
-`verwalter` oder `bediener` darf die Aktion im Panel auslösen, wenn unsere
+`manager` oder `operator` darf die Aktion im Panel auslösen, wenn unsere
 eigene Rollenprüfung ([0006](0006-rollenschwellen.md)) es erlaubt; ausgeführt
 wird sie mit der Zustimmung des Broadcasters. Das Ereignisprotokoll hält
 deshalb **beide** fest — die auslösende Person und den Kanal. Der Broadcaster

@@ -5,7 +5,9 @@ import type {
   RealtimePrincipal,
 } from "../realtime-contract";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "./auth/guards";
-import { listChannelIdsForUser } from "./auth/repository";
+import {
+  listChannelIdsForUser,
+} from "./db/channels";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "./realtime-protocol";
 
 interface RealtimeRouteEnvironment {
@@ -88,7 +90,7 @@ const channelObject = (namespace: Env["CHANNEL"] | undefined, channelId: string)
 
 export const publishRealtimeMessage = async (
   namespace: Env["CHANNEL"] | undefined,
-  message: RealtimeEnvelope<"ereignisprotokoll.neu">,
+  message: RealtimeEnvelope<"event_log.new">,
 ): Promise<void> => {
   const object = channelObject(namespace, message.channelId);
   if (object === null) return;

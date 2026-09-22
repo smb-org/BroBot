@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import type { RaidSettings } from "../contracts";
 import { ladeRaidEinstellungen, speichereRaidEinstellungen } from "./service";
-import { raidPanelTexte } from "./locale";
+import { raidPanelTexts } from "./locale";
 
 interface RaidPanelProperties {
   channelId: string;
@@ -11,9 +11,9 @@ interface RaidPanelProperties {
   canManage?: boolean;
 }
 
-type RaidPanelSettings = Omit<RaidSettings, "shoutoutSchwelle" | "textSchwelle"> & {
-  shoutoutSchwelle: number | "";
-  textSchwelle: number | "";
+type RaidPanelSettings = Omit<RaidSettings, "shoutoutThreshold" | "textThreshold"> & {
+  shoutoutThreshold: number | "";
+  textThreshold: number | "";
 };
 
 export const RaidPanel = ({
@@ -21,12 +21,12 @@ export const RaidPanel = ({
   language,
   canManage = true,
 }: RaidPanelProperties): ReactElement => {
-  const labels = raidPanelTexte(language);
+  const labels = raidPanelTexts(language);
   const [settings, setSettings] = useState<RaidPanelSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [numberErrors, setNumberErrors] = useState({ shoutoutSchwelle: false, textSchwelle: false });
+  const [numberErrors, setNumberErrors] = useState({ shoutoutThreshold: false, textThreshold: false });
 
   useEffect(() => {
     let active = true;
@@ -38,29 +38,29 @@ export const RaidPanel = ({
     return () => { active = false; };
   }, [channelId, labels.fehler]);
 
-  if (settings === null) return <p className="loading-line">{error ?? labels.laden}</p>;
+  if (settings === null) return <p className="loading-line">{error ?? labels.load}</p>;
 
   const disabled = !canManage || busy;
-  const shoutoutSchwelleDeaktiviert = disabled || !settings.shoutoutAktiv;
+  const shoutoutThresholdDisabled = disabled || !settings.shoutoutEnabled;
   const save = async (): Promise<void> => {
-    if (typeof settings.shoutoutSchwelle !== "number" || typeof settings.textSchwelle !== "number") {
+    if (typeof settings.shoutoutThreshold !== "number" || typeof settings.textThreshold !== "number") {
       setNumberErrors({
-        shoutoutSchwelle: typeof settings.shoutoutSchwelle !== "number",
-        textSchwelle: typeof settings.textSchwelle !== "number",
+        shoutoutThreshold: typeof settings.shoutoutThreshold !== "number",
+        textThreshold: typeof settings.textThreshold !== "number",
       });
       return;
     }
-    const shoutoutSchwelle = settings.shoutoutSchwelle;
-    const textSchwelle = settings.textSchwelle;
-    setNumberErrors({ shoutoutSchwelle: false, textSchwelle: false });
+    const shoutoutThreshold = settings.shoutoutThreshold;
+    const textThreshold = settings.textThreshold;
+    setNumberErrors({ shoutoutThreshold: false, textThreshold: false });
     setBusy(true);
     setError(null);
     setSaved(false);
     try {
       await speichereRaidEinstellungen(channelId, {
         ...settings,
-        shoutoutSchwelle,
-        textSchwelle,
+        shoutoutThreshold: shoutoutThreshold,
+        textThreshold: textThreshold,
       });
       setSaved(true);
     } catch {
@@ -76,57 +76,57 @@ export const RaidPanel = ({
       <section className="config-section" aria-label={labels.schwelleAbschnitt}>
         <div className="section-heading"><h2>{labels.schwelleAbschnitt}</h2></div>
         <label className="config-field config-field--breit">
-          <span>{labels.shoutoutAktiv}</span>
+          <span>{labels.shoutoutEnabled}</span>
           <button
             className="switch"
             type="button"
             role="switch"
-            aria-label={labels.schalter(settings.shoutoutAktiv)}
-            aria-checked={settings.shoutoutAktiv}
+            aria-label={labels.schalter(settings.shoutoutEnabled)}
+            aria-checked={settings.shoutoutEnabled}
             aria-busy={busy}
             disabled={disabled}
-            onClick={() => { setSaved(false); setSettings({ ...settings, shoutoutAktiv: !settings.shoutoutAktiv }); }}
+            onClick={() => { setSaved(false); setSettings({ ...settings, shoutoutEnabled: !settings.shoutoutEnabled }); }}
           >
             <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
           </button>
         </label>
         <label className="config-field config-field--schmal">
-          {labels.shoutoutSchwelle}
+          {labels.shoutoutThreshold}
           <input
-            aria-label={labels.shoutoutSchwelle}
+            aria-label={labels.shoutoutThreshold}
             type="number"
             min="0"
             max="100000"
             step="1"
-            value={settings.shoutoutSchwelle}
-            aria-invalid={numberErrors.shoutoutSchwelle}
-            disabled={shoutoutSchwelleDeaktiviert}
-            onChange={(event) => { setSaved(false); setNumberErrors({ ...numberErrors, shoutoutSchwelle: false }); setSettings({ ...settings, shoutoutSchwelle: event.target.value === "" ? "" : Number(event.target.value) }); }}
+            value={settings.shoutoutThreshold}
+            aria-invalid={numberErrors.shoutoutThreshold}
+            disabled={shoutoutThresholdDisabled}
+            onChange={(event) => { setSaved(false); setNumberErrors({ ...numberErrors, shoutoutThreshold: false }); setSettings({ ...settings, shoutoutThreshold: event.target.value === "" ? "" : Number(event.target.value) }); }}
           />
-          {numberErrors.shoutoutSchwelle ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
+          {numberErrors.shoutoutThreshold ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
         </label>
         <label className="config-field config-field--schmal">
-          {labels.textSchwelle}
+          {labels.textThreshold}
           <input
-            aria-label={labels.textSchwelle}
+            aria-label={labels.textThreshold}
             type="number"
             min="0"
             max="100000"
             step="1"
-            value={settings.textSchwelle}
-            aria-invalid={numberErrors.textSchwelle}
+            value={settings.textThreshold}
+            aria-invalid={numberErrors.textThreshold}
             disabled={disabled}
-            onChange={(event) => { setSaved(false); setNumberErrors({ ...numberErrors, textSchwelle: false }); setSettings({ ...settings, textSchwelle: event.target.value === "" ? "" : Number(event.target.value) }); }}
+            onChange={(event) => { setSaved(false); setNumberErrors({ ...numberErrors, textThreshold: false }); setSettings({ ...settings, textThreshold: event.target.value === "" ? "" : Number(event.target.value) }); }}
           />
-          {numberErrors.textSchwelle ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
+          {numberErrors.textThreshold ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
         </label>
         <label className="config-field config-field--breit">
           {labels.vollerText}
           <textarea
             aria-label={labels.vollerText}
-            value={settings.textVoll}
+            value={settings.textLong}
             disabled={disabled}
-            onChange={(event) => { setSaved(false); setSettings({ ...settings, textVoll: event.target.value }); }}
+            onChange={(event) => { setSaved(false); setSettings({ ...settings, textLong: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.platzhalterVoll}</span>
         </label>
@@ -134,9 +134,9 @@ export const RaidPanel = ({
           {labels.kurzerText}
           <textarea
             aria-label={labels.kurzerText}
-            value={settings.textKlein}
+            value={settings.textShort}
             disabled={disabled}
-            onChange={(event) => { setSaved(false); setSettings({ ...settings, textKlein: event.target.value }); }}
+            onChange={(event) => { setSaved(false); setSettings({ ...settings, textShort: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.platzhalterKlein}</span>
         </label>
@@ -144,7 +144,7 @@ export const RaidPanel = ({
       <section className="config-section" aria-label={labels.aktionen}>
         <div className="section-heading"><h2>{labels.aktionen}</h2></div>
         <div className="form-actions">
-          <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={disabled}>{labels.speichern}</button>
+          <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={disabled}>{labels.save}</button>
           {saved ? <span className="muted" role="status">{labels.gespeichert}</span> : null}
         </div>
       </section>

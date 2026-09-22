@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { werbungModul } from "../../src/modules/werbung";
+import { adsModule } from "../../src/modules/ads";
 import { LOGIN_SCOPES } from "../../src/worker/auth/oauth";
 import {
-  listeAlleBroadcasterScopes,
+  listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUser,
   moduleBroadcasterScopeState,
   moduleOptionalBroadcasterScopes,
   VOLLUMFANG_BROADCASTER_SCOPES,
 } from "../../src/worker/module-scopes";
-import { upsertLoginIdentity, setLoginIdentityStatus } from "../../src/worker/auth/repository";
+import {
+  upsertLoginIdentity,
+  setLoginIdentityStatus,
+} from "../../src/worker/db/login-identity";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -61,7 +64,7 @@ describe("Broadcaster-Scopes", () => {
 
   it("leitet den vollständigen Broadcaster-Umfang aus Login, Modulen und Abschnitt 7 ab", () => {
     database = new TestD1Database();
-    expect(new Set(listeAlleBroadcasterScopes())).toEqual(new Set([
+    expect(new Set(listAllBroadcasterScopes())).toEqual(new Set([
       ...LOGIN_SCOPES,
       ...VOLLUMFANG_BROADCASTER_SCOPES,
     ]));
@@ -92,9 +95,9 @@ describe("Broadcaster-Scopes", () => {
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
-    await insertMember(database, "kanal-b", "kanal-a", "verwalter");
+    await insertMember(database, "kanal-b", "kanal-a", "manager");
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'werbung', 1, '{}'), ('kanal-b', 'werbung', 1, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'ads', 1, '{}'), ('kanal-b', 'ads', 1, '{}')",
     ).run();
 
     await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual(["channel:read:ads"]);
@@ -107,7 +110,7 @@ describe("Broadcaster-Scopes", () => {
     await insertLoginIdentityAndSession(database, "kanal-a");
     await insertMember(database, "kanal-b", "kanal-a", "broadcaster");
     await database.prepare(
-      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-b', 'werbung', 1, '{}')",
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-b', 'ads', 1, '{}')",
     ).run();
 
     await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual([]);
@@ -115,12 +118,12 @@ describe("Broadcaster-Scopes", () => {
 
   it("meldet fehlende und vorhandene Modul-Scopes getrennt", async () => {
     database = new TestD1Database();
-    await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", werbungModul)).resolves.toEqual({
+    await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", adsModule)).resolves.toEqual({
       required: ["channel:read:ads"],
       missing: ["channel:read:ads"],
     });
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
-    await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", werbungModul)).resolves.toEqual({
+    await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", adsModule)).resolves.toEqual({
       required: ["channel:read:ads"],
       missing: [],
     });
@@ -128,6 +131,6 @@ describe("Broadcaster-Scopes", () => {
 
   it("kennzeichnet channel:manage:ads am Werbemodul als optionalen Scope", () => {
     database = new TestD1Database();
-    expect(moduleOptionalBroadcasterScopes(werbungModul)).toEqual(["channel:manage:ads"]);
+    expect(moduleOptionalBroadcasterScopes(adsModule)).toEqual(["channel:manage:ads"]);
   });
 });

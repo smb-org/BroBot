@@ -91,8 +91,8 @@ wäre jeder gespeicherte Text nach einem Sprachwechsel kaputt.
 
 | Modul | Platzhalter |
 |---|---|
-| `textbefehle` | `{user}`, `{channel}` |
-| `werbung` | `{duration}`, `{seconds}` |
+| `text_commands` | `{user}`, `{channel}` |
+| `ads` | `{duration}`, `{seconds}` |
 | `raid` | `{channel}`, `{viewers}` |
 
 ## 7. Ausdrücklich nicht betroffen

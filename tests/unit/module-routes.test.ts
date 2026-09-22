@@ -20,12 +20,12 @@ const testModule: BotModule<typeof testModuleSchema> = {
   onEnable: ({ DB, prepareModuleAudit, now }, channelId) => {
     if (!prepareEnableCommand || prepareModuleAudit === undefined) return;
     const mutation = DB.prepare(
-      `INSERT INTO textbefehle_commands
-        (channel_id, command_name, response_text, art, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
-       SELECT ?, 'befehle', '', 'liste', 1, 'alle', 5, NULL, ?, ?
+      `INSERT INTO text_commands
+        (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
+       SELECT ?, 'befehle', '', 'list', 1, 'everyone', 5, NULL, ?, ?
         WHERE changes() > 0
           AND NOT EXISTS (
-            SELECT 1 FROM textbefehle_commands
+            SELECT 1 FROM text_commands
              WHERE channel_id = ? AND command_name = 'befehle'
           )`,
     ).bind(channelId, now, now, channelId);
@@ -36,7 +36,7 @@ const testModule: BotModule<typeof testModuleSchema> = {
         moduleId: "test-modul",
         action: "test-modul.befehl.angelegt",
         before: null,
-        after: { name: "befehle", art: "liste", enabled: true, mindeststufe: "alle", text: "", cooldownSekunden: 5 },
+        after: { name: "befehle", kind: "list", enabled: true, minimumTier: "everyone", text: "", cooldownSeconds: 5 },
       }, now),
     ];
   },
@@ -128,7 +128,7 @@ const expectDeniedPatch = async (
   environment: Env,
   options: {
     memberChannelId: string;
-    role: "broadcaster" | "verwalter" | "bediener";
+    role: "broadcaster" | "manager" | "operator";
     targetChannelId: string;
     extraChannelIds?: string[];
     expectedStatus: number;
@@ -168,7 +168,7 @@ describe("Modulverwaltung im Panel", () => {
   it("liefert im Leerzustand die Registry-Module mit Default-Einstellungen", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules"),
@@ -222,7 +222,7 @@ describe("Modulverwaltung im Panel", () => {
     );
 
     expect(second.status).toBe(200);
-    await expect(database.prepare("SELECT COUNT(*) AS count FROM textbefehle_commands").first())
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_commands").first())
       .resolves.toEqual({ count: 1 });
     await expect(auditCount(database)).resolves.toBe(beforeReenable + 1);
 
@@ -232,7 +232,7 @@ describe("Modulverwaltung im Panel", () => {
     const racingDatabase = {
       prepare: database.prepare.bind(database),
       batch: async (statements: TestPreparedStatement[]) => {
-        await database.prepare("UPDATE channel_members SET role = 'bediener' WHERE channel_id = 'kanal-b' AND user_id = 'user-1'").run();
+        await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-b' AND user_id = 'user-1'").run();
         return database.batch(statements);
       },
     } as unknown as D1Database;
@@ -245,7 +245,7 @@ describe("Modulverwaltung im Panel", () => {
     expect(failed.status).toBe(409);
     await expect(database.prepare("SELECT COUNT(*) AS count FROM channel_modules WHERE channel_id = 'kanal-b'").first())
       .resolves.toEqual({ count: 0 });
-    await expect(database.prepare("SELECT COUNT(*) AS count FROM textbefehle_commands WHERE channel_id = 'kanal-b'").first())
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_commands WHERE channel_id = 'kanal-b'").first())
       .resolves.toEqual({ count: 0 });
     await expect(auditCount(database)).resolves.toBe(beforeFailedAudit);
   });
@@ -364,7 +364,7 @@ describe("Modulverwaltung im Panel", () => {
   it("verweigert einem Bediener das Aktivieren eines Moduls", async () => {
     await expectDeniedPatch(database, environment, {
       memberChannelId: "kanal-a",
-      role: "bediener",
+      role: "operator",
       targetChannelId: "kanal-a",
       expectedStatus: 403,
     });

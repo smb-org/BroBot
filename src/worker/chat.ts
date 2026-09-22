@@ -1,8 +1,18 @@
-import { getBotIdentity } from "./auth/repository";
+import {
+  getBotIdentity,
+} from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
 import { kuerzeAuf200Zeichen } from "../modules/contract";
 
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
+
+/**
+ * Twitch erwartet auf den EventSub-Webhook eine Antwort in zehn Sekunden, und
+ * dieser Aufruf wird dort abgewartet (`dispatch.ts`). Ohne Zeitlimit kostet ein
+ * haengender Helix-Aufruf das Abo. Faellt weg, sobald der Helix-Wrapper kommt.
+ */
+const HELIX_REQUEST_TIMEOUT_MS = 5_000;
+
 
 export interface ChatSendResult {
   sent: boolean;
@@ -72,9 +82,11 @@ export const sendChatMessage = async (
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(HELIX_REQUEST_TIMEOUT_MS),
     });
-  } catch {
-    return { sent: false, reason: "network_error", detail: textDetail };
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    return { sent: false, reason: timedOut ? "timeout" : "network_error", detail: textDetail };
   }
 
   let body: unknown;

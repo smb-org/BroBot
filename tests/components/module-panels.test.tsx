@@ -36,14 +36,14 @@ describe("Modul-Panel-Lader", () => {
   });
 
   it("lädt das Panel erst auf der Modulunterseite lazy", async () => {
-    render(<ModulePage channelId="kanal-a" moduleId="aktiv" ownRole="verwalter" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "aktiv", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
+    render(<ModulePage channelId="kanal-a" moduleId="aktiv" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "aktiv", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
 
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     expect(activeLoader).toHaveBeenCalledTimes(1);
   });
 
   it("zeigt für ein aktives Modul ohne Panel einen erklärten Zustand", () => {
-    render(<ModulePage channelId="kanal-a" moduleId="ohne-panel" ownRole="verwalter" modules={[{ id: "ohne-panel", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "ohne-panel", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
+    render(<ModulePage channelId="kanal-a" moduleId="ohne-panel" ownRole="manager" modules={[{ id: "ohne-panel", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "ohne-panel", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
 
     expect(screen.getByText("Für dieses aktive Modul gibt es noch keine Panel-Ansicht.")).toBeInTheDocument();
   });
@@ -52,7 +52,7 @@ describe("Modul-Panel-Lader", () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
-      ownRole="verwalter"
+      ownRole="manager"
       modules={[{ id: "aktiv", enabled: true, settings: "{}" }]}
       activeModules={[]}
       onNavigate={vi.fn()}
@@ -68,7 +68,7 @@ describe("Modul-Panel-Lader", () => {
     const fetcher = vi.fn<typeof fetch>();
     const onNavigate = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    render(<ModuleWorkspace channelId="kanal-a" ownRole="verwalter" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} />);
+    render(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} />);
 
     const taste = screen.getByRole("link", { name: /aktiv.*Läuft/i });
     fireEvent.click(taste);
@@ -78,7 +78,7 @@ describe("Modul-Panel-Lader", () => {
   });
 
   it("zeigt über der Modulüberschrift keinen Kicker", () => {
-    render(<ModuleWorkspace channelId="kanal-a" ownRole="verwalter" modules={[]} onNavigate={vi.fn()} />);
+    render(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("Tastenraster")).not.toBeInTheDocument();
@@ -89,7 +89,7 @@ describe("Modul-Panel-Lader", () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
-      ownRole="bediener"
+      ownRole="operator"
       modules={[{ id: "aktiv", enabled: true, settings: "{}" }]}
       activeModules={[{ moduleId: "aktiv", settings: "{}" }]}
       onNavigate={vi.fn()}
@@ -105,7 +105,7 @@ describe("Modul-Panel-Lader", () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
-      ownRole="verwalter"
+      ownRole="manager"
       modules={[{ id: "aktiv", enabled: true, settings: "{}" }]}
       activeModules={[{ moduleId: "aktiv", settings: "{}" }]}
       onNavigate={vi.fn()}
@@ -120,7 +120,7 @@ describe("Modul-Panel-Lader", () => {
     const { rerender } = render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
-      ownRole="verwalter"
+      ownRole="manager"
       modules={[{ id: "aktiv", enabled: false, settings: "{}" }]}
       activeModules={[]}
       onNavigate={vi.fn()}
@@ -131,7 +131,7 @@ describe("Modul-Panel-Lader", () => {
     rerender(<ModulePage
       channelId="kanal-a"
       moduleId="unbekannt"
-      ownRole="verwalter"
+      ownRole="manager"
       modules={[]}
       activeModules={[]}
       onNavigate={vi.fn()}

@@ -6,7 +6,7 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
-type MemberRole = "broadcaster" | "verwalter" | "bediener";
+type MemberRole = "broadcaster" | "manager" | "operator";
 
 const key = (byte: number): string =>
   btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
@@ -229,19 +229,19 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("lässt einen Bediener die Liste lesen, aber keine Änderung ausführen", async () => {
-    await setupChannel(database, "bediener");
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await setupChannel(database, "operator");
+    await insertMember(database, "kanal-a", "user-2", "operator");
 
     const listResponse = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members"),
       environment,
     );
     const addResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-3", role: "bediener" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-3", role: "operator" }),
       environment,
     );
     const changeResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "manager" }),
       environment,
     );
     const removeResponse = await panelRouter.fetch(
@@ -258,7 +258,7 @@ describe("Mitgliederverwaltung", () => {
 
   it("liefert für auflösbare Mitglieder Login und Anzeigename aus Helix", async () => {
     await setupChannel(database);
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await insertMember(database, "kanal-a", "user-2", "operator");
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       data: [
@@ -276,7 +276,7 @@ describe("Mitgliederverwaltung", () => {
     expect(response.status).toBe(200);
     expect(body.members).toEqual([
       { userId: "user-1", login: "streamer", displayName: "Streamerin", profileImageUrl: "https://cdn.example/streamer.png", role: "broadcaster", joinedAt: "2026-09-18T00:00:00.000Z" },
-      { userId: "user-2", login: "helfer", displayName: "Helfer", profileImageUrl: null, role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" },
+      { userId: "user-2", login: "helfer", displayName: "Helfer", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" },
     ]);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
@@ -287,13 +287,13 @@ describe("Mitgliederverwaltung", () => {
     const stored = await database.prepare("SELECT * FROM channel_members ORDER BY user_id").all<Record<string, unknown>>();
     expect(stored.results).toEqual([
       { channel_id: "kanal-a", user_id: "user-1", role: "broadcaster", created_at: "2026-09-18T00:00:00.000Z", updated_at: "2026-09-18T00:00:00.000Z" },
-      { channel_id: "kanal-a", user_id: "user-2", role: "bediener", created_at: "2026-09-18T00:00:00.000Z", updated_at: "2026-09-18T00:00:00.000Z" },
+      { channel_id: "kanal-a", user_id: "user-2", role: "operator", created_at: "2026-09-18T00:00:00.000Z", updated_at: "2026-09-18T00:00:00.000Z" },
     ]);
   });
 
   it("behält unauflösbare Mitglieder in der Liste und macht ihren Entzug weiter möglich", async () => {
     await setupChannel(database);
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await insertMember(database, "kanal-a", "user-2", "operator");
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       data: [{ id: "user-1", login: "streamer", display_name: "Streamerin" }],
@@ -318,7 +318,7 @@ describe("Mitgliederverwaltung", () => {
 
   it("liefert die Mitgliederliste auch bei einem Helix-Fehler mit nicht auflösbaren Namen", async () => {
     await setupChannel(database);
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await insertMember(database, "kanal-a", "user-2", "operator");
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response("Twitch ist nicht erreichbar.", { status: 503 }));
 
@@ -338,7 +338,7 @@ describe("Mitgliederverwaltung", () => {
   it("begrenzt Mitgliederseiten auf 100 und löst jede Seite mit höchstens einem Helix-Aufruf auf", async () => {
     await setupChannel(database);
     for (let index = 0; index < 100; index += 1) {
-      await insertMember(database, "kanal-a", `user-${String(index).padStart(3, "0")}`, "bediener");
+      await insertMember(database, "kanal-a", `user-${String(index).padStart(3, "0")}`, "operator");
     }
     await insertBotIdentity(database);
     vi.mocked(fetch)
@@ -379,7 +379,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("verhindert, dass ein Verwalter sich selbst zum Broadcaster macht", async () => {
-    await setupChannel(database, "verwalter");
+    await setupChannel(database, "manager");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members/user-1", "PATCH", { role: "broadcaster" }),
@@ -392,7 +392,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("verhindert Self-DELETE gegen Self-POST auch bei einer Löschung im Zwischenzustand", async () => {
-    await setupChannel(database, "verwalter");
+    await setupChannel(database, "manager");
     const racingDatabase = databaseRacingBeforeMemberRead(database, () => {
       deleteMemberImmediately(database, "kanal-a", "user-1");
     });
@@ -412,15 +412,15 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("macht aus DELETE gegen PATCH desselben Mitglieds kein neues Mitglied", async () => {
-    await setupChannel(database, "verwalter");
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await setupChannel(database, "manager");
+    await insertMember(database, "kanal-a", "user-2", "operator");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
       deleteMemberImmediately(database, "kanal-a", "user-2");
     });
     environment = { ...environment, DB: racingDatabase };
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "manager" }),
       environment,
     );
 
@@ -432,21 +432,21 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("macht aus POST gegen ein gleichzeitiges Anlegen kein UPDATE", async () => {
-    await setupChannel(database, "verwalter");
+    await setupChannel(database, "manager");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
-      insertMemberImmediately(database, "kanal-a", "user-2", "bediener");
+      insertMemberImmediately(database, "kanal-a", "user-2", "operator");
     });
     environment = { ...environment, DB: racingDatabase };
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "manager" }),
       environment,
     );
 
     expect(response.status).toBe(409);
     await expect(database.prepare(
       "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
-    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "bediener" });
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "operator" });
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
@@ -457,11 +457,11 @@ describe("Mitgliederverwaltung", () => {
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
 
     const addResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "bediener", channelId: "kanal-b" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "operator", channelId: "kanal-b" }),
       environment,
     );
     const changeResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter", channelId: "kanal-b" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "manager", channelId: "kanal-b" }),
       environment,
     );
     const removeResponse = await panelRouter.fetch(
@@ -484,7 +484,7 @@ describe("Mitgliederverwaltung", () => {
     await setupChannel(database);
 
     const changeResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-1", "PATCH", { role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-1", "PATCH", { role: "manager" }),
       environment,
     );
     const removeResponse = await panelRouter.fetch(
@@ -505,7 +505,7 @@ describe("Mitgliederverwaltung", () => {
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-b/members", "POST", { userId: "user-2", role: "bediener" }),
+      await requestFor("user-1", "/api/channels/kanal-b/members", "POST", { userId: "user-2", role: "operator" }),
       environment,
     );
 
@@ -517,14 +517,14 @@ describe("Mitgliederverwaltung", () => {
     await setupChannel(database);
 
     const addResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "bediener" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "operator" }),
       environment,
     );
     expect(addResponse.status).toBe(201);
     await expect(auditCount(database)).resolves.toBe(1);
 
     const changeResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "manager" }),
       environment,
     );
     expect(changeResponse.status).toBe(200);
@@ -595,7 +595,7 @@ describe("Mitgliederverwaltung", () => {
     );
     const searchedUser = await searchResponse.json<{ user: { userId: string } }>();
     const addResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: searchedUser.user.userId, role: "bediener" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: searchedUser.user.userId, role: "operator" }),
       environment,
     );
 
@@ -608,7 +608,7 @@ describe("Mitgliederverwaltung", () => {
     expect(stored).toEqual({
       channel_id: "kanal-a",
       user_id: "300",
-      role: "bediener",
+      role: "operator",
       created_at: createdAt,
       updated_at: updatedAt,
     });
@@ -622,7 +622,7 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("verbietet einem Bediener die Twitch-Nutzersuche ohne Helix-Aufruf", async () => {
-    await setupChannel(database, "bediener");
+    await setupChannel(database, "operator");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members/search?login=neue-person"),
@@ -656,7 +656,7 @@ describe("Mitgliederverwaltung", () => {
     // Sonst macht der Verwalter sein Zweitkonto zum Broadcaster und entfernt
     // danach den ursprünglichen — der Schutz des letzten Broadcasters greift
     // dann nicht, weil zwischenzeitlich zwei existieren.
-    await setupChannel(database, "verwalter");
+    await setupChannel(database, "manager");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "broadcaster" }),
@@ -671,8 +671,8 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("lässt einen Verwalter niemanden zum Broadcaster befördern", async () => {
-    await setupChannel(database, "verwalter");
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await setupChannel(database, "manager");
+    await insertMember(database, "kanal-a", "user-2", "operator");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "broadcaster" }),
@@ -682,7 +682,7 @@ describe("Mitgliederverwaltung", () => {
     expect(response.status).toBe(403);
     await expect(database.prepare(
       "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
-    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "bediener" });
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "operator" });
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
@@ -707,7 +707,7 @@ describe("Mitgliederverwaltung", () => {
     await insertMember(database, "kanal-a", "user-3", "broadcaster");
 
     const changeResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "manager" }),
       environment,
     );
     const removeResponse = await panelRouter.fetch(
@@ -719,23 +719,23 @@ describe("Mitgliederverwaltung", () => {
     expect(removeResponse.status).toBe(204);
     await expect(database.prepare(
       "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
-    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "verwalter" });
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "manager" });
     await expect(database.prepare(
       "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
     ).bind("kanal-a", "user-3").first()).resolves.toBeNull();
   });
 
   it("lässt einen Verwalter Verwalter und Bediener wie bisher verwalten", async () => {
-    await setupChannel(database, "verwalter");
-    await insertMember(database, "kanal-a", "user-2", "verwalter");
-    await insertMember(database, "kanal-a", "user-3", "bediener");
+    await setupChannel(database, "manager");
+    await insertMember(database, "kanal-a", "user-2", "manager");
+    await insertMember(database, "kanal-a", "user-3", "operator");
 
     const lowerResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "bediener" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "operator" }),
       environment,
     );
     const raiseResponse = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-3", "PATCH", { role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-3", "PATCH", { role: "manager" }),
       environment,
     );
     const removeResponse = await panelRouter.fetch(
@@ -748,7 +748,7 @@ describe("Mitgliederverwaltung", () => {
     expect(removeResponse.status).toBe(204);
     await expect(database.prepare(
       "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
-    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "bediener" });
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "operator" });
     await expect(database.prepare(
       "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
     ).bind("kanal-a", "user-3").first()).resolves.toBeNull();
@@ -758,14 +758,14 @@ describe("Mitgliederverwaltung", () => {
     // Der Guard prüft die Session, danach wartet der Handler auf den Body.
     // Ein Client kann ihn offen lassen, bis seine Session widerrufen ist.
     // Die Mutation muss das bemerken, nicht nur der Guard.
-    await setupChannel(database, "verwalter");
+    await setupChannel(database, "manager");
     const racingDatabase = databaseRacingBeforeMemberRead(database, () => {
       revokeSessionImmediately(database, "user-1");
     });
     environment = { ...environment, DB: racingDatabase };
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "manager" }),
       environment,
     );
 
@@ -777,28 +777,28 @@ describe("Mitgliederverwaltung", () => {
   });
 
   it("ändert keine Rolle, wenn die Session nach dem Guard widerrufen wird", async () => {
-    await setupChannel(database, "verwalter");
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await setupChannel(database, "manager");
+    await insertMember(database, "kanal-a", "user-2", "operator");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
       revokeSessionImmediately(database, "user-1");
     });
     environment = { ...environment, DB: racingDatabase };
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "verwalter" }),
+      await requestFor("user-1", "/api/channels/kanal-a/members/user-2", "PATCH", { role: "manager" }),
       environment,
     );
 
     expect(response.status).toBe(409);
     await expect(database.prepare(
       "SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ?",
-    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "bediener" });
+    ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "operator" });
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
   it("entfernt kein Mitglied, wenn die Session nach dem Guard widerrufen wird", async () => {
-    await setupChannel(database, "verwalter");
-    await insertMember(database, "kanal-a", "user-2", "bediener");
+    await setupChannel(database, "manager");
+    await insertMember(database, "kanal-a", "user-2", "operator");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
       revokeSessionImmediately(database, "user-1");
     });
@@ -821,7 +821,7 @@ describe("Mitgliederverwaltung", () => {
     // Eintrag zu erkennen. Bei seitenweiser Liste darf sie es nicht selbst
     // zählen: die Zahl gilt für den Kanal, nicht für die Seite.
     await setupChannel(database, "broadcaster");
-    await insertMember(database, "kanal-a", "user-2", "verwalter");
+    await insertMember(database, "kanal-a", "user-2", "manager");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members"),
@@ -837,7 +837,7 @@ describe("Mitgliederverwaltung", () => {
   it("zählt Broadcaster über den ganzen Kanal, nicht über die abgerufene Seite", async () => {
     await setupChannel(database, "broadcaster");
     await insertMember(database, "kanal-a", "user-2", "broadcaster");
-    await insertMember(database, "kanal-a", "user-3", "bediener");
+    await insertMember(database, "kanal-a", "user-3", "operator");
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/members?limit=1"),
@@ -853,7 +853,7 @@ describe("Mitgliederverwaltung", () => {
     await setupChannel(database);
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "bediener" }, false),
+      await requestFor("user-1", "/api/channels/kanal-a/members", "POST", { userId: "user-2", role: "operator" }, false),
       environment,
     );
 

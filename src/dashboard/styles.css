@@ -404,8 +404,8 @@ pre {
 .event-chip[data-familie="raid"][data-stufe="voll"] { background: var(--raid-grund); }
 .event-chip[data-familie="moderation"] { color: var(--moderation); border-color: color-mix(in srgb, var(--moderation) 45%, var(--linie)); }
 .event-chip[data-familie="moderation"][data-stufe="voll"] { background: var(--moderation-grund); }
-.event-chip[data-ton="fehler"] { color: var(--fehler-text); border-color: color-mix(in srgb, var(--fehler) 45%, var(--linie)); }
-.event-chip[data-ton="hinweis"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--linie)); }
+.event-chip[data-ton="error"] { color: var(--fehler-text); border-color: color-mix(in srgb, var(--fehler) 45%, var(--linie)); }
+.event-chip[data-ton="warning"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--linie)); }
 .module-workspace { display: block; min-height: calc(100vh - 56px); margin: -24px -32px -40px; background: var(--grund); }
 .module-workspace__main { min-width: 0; padding: 28px 32px 40px; background: var(--grund); }
 .module-workspace__heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; min-height: 56px; margin-bottom: 24px; }

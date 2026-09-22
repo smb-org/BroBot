@@ -14,7 +14,12 @@ export const REQUIRED_SECRET_NAMES = [
 // Wrangler führt die angewandten Dateinamen in d1_migrations. Dadurch muss
 // nicht die komplette Tabelle-zu-Migration-Liste dupliziert werden; nur der
 // aktuelle Release-Sentinel ändert sich, wenn eine neue Migration hinzukommt.
-export const LATEST_SCHEMA_MIGRATION = "0022_token_scopes.sql";
+//
+// Die Konstante von Hand nachzuziehen ist die Stelle, an der es schiefgeht:
+// vergisst man sie, meldet /healthz eine frisch aufgesetzte Datenbank als
+// kaputt (503), obwohl alles stimmt. `tests/unit/schema-baseline.test.ts`
+// hält sie deshalb an der letzten Datei in `migrations/`.
+export const LATEST_SCHEMA_MIGRATION = "0000_baseline.sql";
 export const LATEST_SCHEMA_TABLE = "twitch_login_identity";
 
 const REQUIRED_BINDING_NAMES = ["DB", "CHANNEL", "ASSETS", "CF_VERSION_METADATA"] as const;
@@ -25,7 +30,7 @@ const KEY_RING_SECRET_NAMES = new Set([
   "TOKEN_ENCRYPTION_KEYS",
 ]);
 const PLACEHOLDER_PATTERN = /replace-with|example\.invalid/i;
-const BETREIBER_USER_ID_PATTERN = /^\d+$/;
+const PLATFORM_USER_ID_PATTERN = /^\d+$/;
 
 const secretValue = (env: Env, name: string): unknown => {
   const value: unknown = Reflect.get(env, name);
@@ -35,22 +40,22 @@ const secretValue = (env: Env, name: string): unknown => {
   return value;
 };
 
-const parseBetreiberUserIds = (value: unknown): string[] | null => {
+const parsePlatformUserIds = (value: unknown): string[] | null => {
   if (typeof value !== "string" || value.length === 0) return null;
   try {
     const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) && parsed.every(
-      (userId): userId is string => typeof userId === "string" && BETREIBER_USER_ID_PATTERN.test(userId),
+      (userId): userId is string => typeof userId === "string" && PLATFORM_USER_ID_PATTERN.test(userId),
     ) ? parsed : null;
   } catch {
     return null;
   }
 };
 
-export const getBetreiberUserIds = (
+export const getPlatformUserIds = (
   env: { readonly BETREIBER_USER_IDS?: unknown },
 ): ReadonlySet<string> => {
-  const parsed = parseBetreiberUserIds(env.BETREIBER_USER_IDS);
+  const parsed = parsePlatformUserIds(env.BETREIBER_USER_IDS);
   return parsed === null ? new Set<string>() : new Set(parsed);
 };
 
@@ -80,7 +85,7 @@ export const getMissingBindings = (env: Env): string[] => [
     if (typeof value !== "string" || value.length === 0 || PLACEHOLDER_PATTERN.test(value)) return true;
     if (name === "PUBLIC_ORIGIN") return !isAbsoluteOrigin(value);
     if (name === "OVERLAY_TOKEN_PEPPER") return !isBase64url32Byte(value);
-    if (name === "BETREIBER_USER_IDS") return parseBetreiberUserIds(value) === null;
+    if (name === "BETREIBER_USER_IDS") return parsePlatformUserIds(value) === null;
     if (!KEY_RING_SECRET_NAMES.has(name)) return false;
     try {
       parseKeyRing(value);

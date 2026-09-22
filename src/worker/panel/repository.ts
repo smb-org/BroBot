@@ -6,10 +6,8 @@ import type {
   PanelBotPermissions,
   PanelBroadcasterPermissions,
   PanelChannelOverview,
-  PanelChannelRole,
   PanelChannelState,
   PanelLastError,
-  PanelLoginStatusName,
   PanelModeratorStatus,
   PanelSystemResponse,
   PanelEventSubSubscription,
@@ -18,17 +16,29 @@ import type {
   PanelEventFilters,
   PanelEventsResponse,
 } from "../../panel-contract";
-import { ereignisTon } from "../../dashboard/locale";
-import { channelBotConsentCondition, listEventSubSubscriptions } from "../auth/repository";
-import { listeAlleBroadcasterScopes } from "../module-scopes";
+import type {
+  AuditActorKind,
+  ChannelRole,
+  EventSubSubscriptionType,
+  IdentityStatus,
+} from "../../contracts/values";
+import { eventToneEntries } from "../../dashboard/locale";
+import {
+  channelBotConsentCondition,
+} from "../db/guards";
+import {
+  listEventSubSubscriptions,
+} from "../db/eventsub-state";
+import { decodeCursor, encodeCursor } from "../db/cursor";
+import { listAllBroadcasterScopes } from "../module-scopes";
 
 interface ChannelStateRow {
   channel_id: string;
   login: string;
   display_name: string;
-  role: PanelChannelRole;
+  role: ChannelRole;
   broadcaster_connection: number;
-  vollzustimmung: number;
+  full_consent: number;
   broadcaster_scopes_json: string | null;
   broadcaster_status: string | null;
   channel_bot_consent: number;
@@ -37,7 +47,7 @@ interface ChannelStateRow {
   bot_updated_at: string | null;
   bot_missing_scopes_json: string | null;
   bot_expires_at: string | null;
-  login_status: PanelLoginStatusName | null;
+  login_status: IdentityStatus | null;
   login_reason: string | null;
   login_expires_at: string | null;
   login_updated_at: string | null;
@@ -46,13 +56,13 @@ interface ChannelStateRow {
   moderator_reason: string | null;
   eventsub_status: "enabled" | "missing" | "error" | "revoked" | null;
   eventsub_subscription_id: string | null;
-  eventsub_subscription_type: string | null;
+  eventsub_subscription_type: EventSubSubscriptionType | null;
   eventsub_variant: string | null;
   eventsub_reason: string | null;
   eventsub_message: string | null;
   eventsub_status_code: number | null;
   eventsub_updated_at: string | null;
-  eventsub_error_subscription_type: string | null;
+  eventsub_error_subscription_type: EventSubSubscriptionType | null;
   eventsub_error_variant: string | null;
   eventsub_error_reason: string | null;
   eventsub_error_message: string | null;
@@ -68,7 +78,7 @@ interface ActiveModuleRow {
 interface AuditLogRow {
   audit_id: string;
   actor_user_id: string;
-  actor_kind: "mitglied" | "betreiber";
+  actor_kind: AuditActorKind;
   created_at: string;
   module_id: string | null;
   action: string;
@@ -91,47 +101,34 @@ export interface LogCursor {
   id: string;
 }
 
-const ereignisCodesForHerkunft = (herkunft: PanelEventFilters["herkunft"]): string[] => {
+const eventCodesForOrigin = (herkunft: PanelEventFilters["origin"]): string[] => {
   if (herkunft === null) return [];
-  const betrieb = herkunft === "modul";
-  return Object.entries(ereignisTon)
+  const betrieb = herkunft === "module";
+  return Object.entries(eventToneEntries)
     .filter(([, metadata]) => (metadata.familie === "betrieb") === betrieb)
     .map(([code]) => code);
 };
 
-const ereignisCodesForTon = (ton: PanelEventFilters["ton"]): string[] => {
+const eventCodesForTone = (ton: PanelEventFilters["tone"]): string[] => {
   if (ton === null) return [];
-  return Object.entries(ereignisTon)
-    .filter(([, metadata]) => metadata.ton === ton)
+  return Object.entries(eventToneEntries)
+    .filter(([, metadata]) => metadata.tone === ton)
     .map(([code]) => code);
 };
 
-const encodeCursor = (cursor: LogCursor): string => {
-  const serialized = JSON.stringify(cursor);
-  const encoded = btoa(serialized);
-  return encoded.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-};
-
-export const decodeLogCursor = (serialized: string): LogCursor | null => {
-  try {
-    const normalized = serialized.replaceAll("-", "+").replaceAll("_", "/")
-      .padEnd(Math.ceil(serialized.length / 4) * 4, "=");
-    const value: unknown = JSON.parse(atob(normalized));
+export const decodeLogCursor = (serialized: string): LogCursor | null => decodeCursor(serialized, (value) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
     const cursor = value as Record<string, unknown>;
     return typeof cursor.createdAt === "string" && cursor.createdAt.length > 0 &&
       typeof cursor.id === "string" && cursor.id.length > 0
       ? { createdAt: cursor.createdAt, id: cursor.id }
       : null;
-  } catch {
-    return null;
-  }
-};
+});
 
-const channelStateQuery = `
+export const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, member.role,
            CASE WHEN broadcaster_identity.status = 'connected' THEN 1 ELSE 0 END AS broadcaster_connection,
-           channel.vollzustimmung AS vollzustimmung,
+           channel.full_consent AS full_consent,
            broadcaster_identity.scopes_json AS broadcaster_scopes_json,
            broadcaster_identity.status AS broadcaster_status,
            CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent,
@@ -233,10 +230,10 @@ const parseScopes = (serialized: string | null): string[] => {
 };
 
 const mapBroadcasterPermissions = (row: ChannelStateRow): PanelBroadcasterPermissions | null => {
-  if (row.vollzustimmung !== 1) return null;
+  if (row.full_consent !== 1) return null;
   const granted = new Set(row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : []);
   return {
-    missingScopes: listeAlleBroadcasterScopes().filter((scope) => !granted.has(scope)),
+    missingScopes: listAllBroadcasterScopes().filter((scope) => !granted.has(scope)),
   };
 };
 
@@ -443,24 +440,24 @@ export const getEventLogForChannel = async (
   channelId: string,
   limit: number,
   cursor: LogCursor | null,
-  filters: PanelEventFilters = { herkunft: null, modul: null, ton: null, person: null },
+  filters: PanelEventFilters = { origin: null, module: null, tone: null, person: null },
 ): Promise<PanelEventsResponse> => {
   const where = ["channel_id = ?"];
   const filterValues: (string | number)[] = [channelId];
-  if (filters.herkunft !== null) {
-    const codes = ereignisCodesForHerkunft(filters.herkunft);
+  if (filters.origin !== null) {
+    const codes = eventCodesForOrigin(filters.origin);
     if (codes.length === 0) where.push("1 = 0");
     else {
       where.push(`code IN (${codes.map(() => "?").join(", ")})`);
       filterValues.push(...codes);
     }
   }
-  if (filters.modul !== null) {
+  if (filters.module !== null) {
     where.push("module_id = ?");
-    filterValues.push(filters.modul);
+    filterValues.push(filters.module);
   }
-  if (filters.ton !== null) {
-    const codes = ereignisCodesForTon(filters.ton);
+  if (filters.tone !== null) {
+    const codes = eventCodesForTone(filters.tone);
     if (codes.length === 0) where.push("1 = 0");
     else {
       where.push(`code IN (${codes.map(() => "?").join(", ")})`);

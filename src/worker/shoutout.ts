@@ -1,7 +1,16 @@
-import { getBotIdentity } from "./auth/repository";
+import {
+  getBotIdentity,
+} from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
 
 const SHOUTOUT_URL = "https://api.twitch.tv/helix/chat/shoutouts";
+
+/**
+ * Twitch erwartet auf den EventSub-Webhook eine Antwort in zehn Sekunden, und
+ * dieser Aufruf wird dort abgewartet (`dispatch.ts`). Ohne Zeitlimit kostet ein
+ * haengender Helix-Aufruf das Abo. Faellt weg, sobald der Helix-Wrapper kommt.
+ */
+const HELIX_REQUEST_TIMEOUT_MS = 5_000;
 
 export interface ShoutoutSendResult {
   sent: boolean;
@@ -35,10 +44,10 @@ export const sendShoutout = async (
     SESSION_ENCRYPTION_KEYS?: string;
   },
   channelId: string,
-  zielKanalId: string,
+  targetChannelId: string,
   fetcher: typeof fetch = fetch,
 ): Promise<ShoutoutSendResult> => {
-  const detail = { von: channelId, nach: zielKanalId };
+  const detail = { von: channelId, nach: targetChannelId };
   const identity = await getBotIdentity(environment.DB);
   if (identity === null) return { sent: false, reason: "bot_identity_missing", detail };
 
@@ -57,7 +66,7 @@ export const sendShoutout = async (
   // Absender ist der eigene Kanal, Empfaenger der Quellkanal des Raids.
   // Vertauscht wuerde Twitch mit 401 antworten: Der Bot ist dort kein Moderator.
   url.searchParams.set("from_broadcaster_id", channelId);
-  url.searchParams.set("to_broadcaster_id", zielKanalId);
+  url.searchParams.set("to_broadcaster_id", targetChannelId);
   url.searchParams.set("moderator_id", identity.userId);
 
   let response: Response;
@@ -68,9 +77,11 @@ export const sendShoutout = async (
         "Client-ID": environment.TWITCH_CLIENT_ID,
         Authorization: `Bearer ${accessToken}`,
       },
+      signal: AbortSignal.timeout(HELIX_REQUEST_TIMEOUT_MS),
     });
-  } catch {
-    return { sent: false, reason: "network_error", detail };
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    return { sent: false, reason: timedOut ? "timeout" : "network_error", detail };
   }
 
   const body = await responseBody(response);

@@ -1,41 +1,41 @@
 import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 
-export interface RaidPanelTexte {
+export interface RaidPanelTexts {
   titel: string;
   schwelleAbschnitt: string;
-  shoutoutAktiv: string;
-  shoutoutSchwelle: string;
-  textSchwelle: string;
-  schalter: (aktiv: boolean) => string;
+  shoutoutEnabled: string;
+  shoutoutThreshold: string;
+  textThreshold: string;
+  schalter: (active: boolean) => string;
   vollerText: string;
   kurzerText: string;
   platzhalterVoll: string;
   platzhalterKlein: string;
   aktionen: string;
-  speichern: string;
+  save: string;
   gespeichert: string;
-  laden: string;
+  load: string;
   fehler: string;
   zahlFehlt: string;
   verwaltungGesperrt: string;
 }
 
-const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
+const katalog: Record<DashboardLanguage, RaidPanelTexts> = {
   de: {
     titel: "Raid-Shoutout",
     schwelleAbschnitt: "Shoutout und Nachrichten",
-    shoutoutAktiv: "Helix-Shoutout automatisch senden",
-    shoutoutSchwelle: "Shoutout-Schwelle (Zuschauer)",
-    textSchwelle: "Text-Schwelle (Zuschauer)",
-    schalter: (aktiv) => `Helix-Shoutout automatisch senden: ${aktiv ? "eingeschaltet" : "ausgeschaltet"}`,
+    shoutoutEnabled: "Helix-Shoutout automatisch senden",
+    shoutoutThreshold: "Shoutout-Schwelle (Zuschauer)",
+    textThreshold: "Text-Schwelle (Zuschauer)",
+    schalter: (active) => `Helix-Shoutout automatisch senden: ${active ? "eingeschaltet" : "ausgeschaltet"}`,
     vollerText: "Voller Raid-Text",
     kurzerText: "Kurzer Dankestext",
     platzhalterVoll: "{channel} und {viewers} werden beim Eingang ersetzt.",
     platzhalterKlein: "{channel} und {viewers} werden beim Eingang ersetzt.",
     aktionen: "Aktionen",
-    speichern: "Raid-Einstellungen speichern",
+    save: "Raid-Einstellungen speichern",
     gespeichert: "Raid-Einstellungen gespeichert.",
-    laden: "Raid-Einstellungen werden geladen …",
+    load: "Raid-Einstellungen werden geladen …",
     fehler: "Die Raid-Einstellungen konnten nicht geladen oder gespeichert werden.",
     zahlFehlt: "Zahl eingeben",
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Raid-Einstellungen ändern.",
@@ -43,22 +43,22 @@ const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
   en: {
     titel: "Raid shoutout",
     schwelleAbschnitt: "Shoutout and messages",
-    shoutoutAktiv: "Send automatic Helix shoutouts",
-    shoutoutSchwelle: "Shoutout threshold (viewers)",
-    textSchwelle: "Text threshold (viewers)",
-    schalter: (aktiv) => `Automatic Helix shoutout: ${aktiv ? "enabled" : "disabled"}`,
+    shoutoutEnabled: "Send automatic Helix shoutouts",
+    shoutoutThreshold: "Shoutout threshold (viewers)",
+    textThreshold: "Text threshold (viewers)",
+    schalter: (active) => `Automatic Helix shoutout: ${active ? "enabled" : "disabled"}`,
     vollerText: "Full raid message",
     kurzerText: "Small raid message",
     platzhalterVoll: "{channel} and {viewers} are replaced when the raid arrives.",
     platzhalterKlein: "{channel} and {viewers} are replaced when the raid arrives.",
     aktionen: "Actions",
-    speichern: "Save raid settings",
+    save: "Save raid settings",
     gespeichert: "Raid settings saved.",
-    laden: "Loading raid settings …",
+    load: "Loading raid settings …",
     fehler: "The raid settings could not be loaded or saved.",
     zahlFehlt: "Enter a number",
     verwaltungGesperrt: "Only broadcasters and managers may change raid settings.",
   },
 };
 
-export const raidPanelTexte = (language: DashboardLanguage = dashboardLanguage()): RaidPanelTexte => katalog[language];
+export const raidPanelTexts = (language: DashboardLanguage = dashboardLanguage()): RaidPanelTexts => katalog[language];

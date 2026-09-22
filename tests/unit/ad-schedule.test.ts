@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getAdSchedule, snoozeNextAd } from "../../src/modules/werbung/adapters/ad-schedule";
+import { getAdSchedule, snoozeNextAd } from "../../src/modules/ads/adapters/ad-schedule";
 import { getAppAccessToken } from "../../src/worker/app-token";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken } from "./fixtures";

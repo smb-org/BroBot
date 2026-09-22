@@ -2,7 +2,9 @@ import { maintainAppAccessToken } from "./app-token";
 import { maintainBotIdentity } from "./bot-maintenance";
 import { purgeOldEventLogEntries } from "./event-log";
 import { maintainLoginIdentities } from "./login-maintenance";
-import { purgeOldEventSubMessages } from "./auth/repository";
+import {
+  purgeOldEventSubMessages,
+} from "./db/eventsub-state";
 import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
 import { eventSubMessageCutoff } from "./eventsub";
 

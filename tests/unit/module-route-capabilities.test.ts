@@ -63,7 +63,7 @@ describe("Fähigkeiten für Modulrouten", () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
   });
 
   afterEach(() => { database.close(); });

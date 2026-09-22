@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import {
-  requireBetreiber,
+  requirePlatform,
   requireChannelAuthorization,
-  type BetreiberAuthorizationVariables,
+  type PlatformAuthorizationVariables,
   type ChannelAuthorizationVariables,
 } from "../../src/worker/auth/guards";
 import { createSessionCookie } from "../../src/worker/auth/session";
@@ -24,7 +24,7 @@ const environmentKeys = {
 };
 
 type GuardEnvironment = Env & { DB: D1Database };
-interface GuardVariables extends ChannelAuthorizationVariables, BetreiberAuthorizationVariables {}
+interface GuardVariables extends ChannelAuthorizationVariables, PlatformAuthorizationVariables {}
 type GuardContext = { Bindings: GuardEnvironment; Variables: GuardVariables };
 
 const app = new Hono<GuardContext>();
@@ -35,8 +35,8 @@ app.post("/api/channels/:channelId/write", (context) =>
 app.all("/api/channels/:channelId/write", (context) =>
   context.json({ role: context.get("channelRole") }),
 );
-app.use("/api/betreiber/*", requireBetreiber());
-app.get("/api/betreiber/probe", (context) => {
+app.use("/api/platform/*", requirePlatform());
+app.get("/api/platform/probe", (context) => {
   const variables = context.var as unknown as Partial<GuardVariables>;
   return context.json({
     userId: variables.actor?.userId,
@@ -78,7 +78,7 @@ const insertMember = async (
   database: TestD1Database,
   channelId: string,
   userId: string,
-  role: "broadcaster" | "verwalter" | "bediener",
+  role: "broadcaster" | "manager" | "operator",
 ): Promise<void> => {
   await database.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
@@ -138,16 +138,16 @@ describe("kanalgebundener Routen-Guard", () => {
   });
 
   it("liefert die Datenbankrolle und ignoriert eine Rolle aus dem Request-Body", async () => {
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
 
     const response = await app.fetch(await makeRequest(environment), environment);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ role: "bediener" });
+    await expect(response.json()).resolves.toEqual({ role: "operator" });
   });
 
   it("lehnt fehlenden CSRF-Schutz vor dem Handler ab", async () => {
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
 
     const response = await app.fetch(await makeRequest(environment, undefined, false), environment);
 
@@ -155,7 +155,7 @@ describe("kanalgebundener Routen-Guard", () => {
   });
 
   it("lehnt einen falschen CSRF-Header trotz gültiger Session ab", async () => {
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
     const request = await makeRequest(environment);
     const headers = new Headers(request.headers);
     headers.set("X-CSRF-Token", "manipuliert");
@@ -170,7 +170,7 @@ describe("kanalgebundener Routen-Guard", () => {
     environment.BETREIBER_USER_IDS = '["26876135"]';
 
     const response = await app.fetch(
-      await makeRequest(environment, {}, true, "kanal-a", "GET", "26876135", "/api/betreiber/probe"),
+      await makeRequest(environment, {}, true, "kanal-a", "GET", "26876135", "/api/platform/probe"),
       environment,
     );
 
@@ -187,7 +187,7 @@ describe("kanalgebundener Routen-Guard", () => {
     environment.BETREIBER_USER_IDS = '["26876135"]';
 
     const response = await app.fetch(
-      await makeRequest(environment, {}, true, "kanal-a", "GET", "user-1", "/api/betreiber/probe"),
+      await makeRequest(environment, {}, true, "kanal-a", "GET", "user-1", "/api/platform/probe"),
       environment,
     );
 
@@ -208,7 +208,7 @@ describe("kanalgebundener Routen-Guard", () => {
   });
 
   it("schützt eine ungewöhnliche HTTP-Methode ebenfalls mit CSRF", async () => {
-    await insertMember(database, "kanal-a", "user-1", "bediener");
+    await insertMember(database, "kanal-a", "user-1", "operator");
 
     const response = await app.fetch(
       await makeRequest(environment, undefined, false, "kanal-a", "PURGE"),
@@ -219,7 +219,7 @@ describe("kanalgebundener Routen-Guard", () => {
   });
 
   it("lehnt ein Nichtmitglied, einen fremden Kanal und einen unbekannten Kanal ab", async () => {
-    await insertMember(database, "kanal-b", "user-1", "bediener");
+    await insertMember(database, "kanal-b", "user-1", "operator");
 
     await expect(app.fetch(await makeRequest(environment), environment)).resolves.toHaveProperty("status", 403);
 

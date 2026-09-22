@@ -129,18 +129,18 @@ describe("Dashboard-API-Requestgrenze", () => {
       channelId: string,
       cursor: string | null,
       signal: AbortSignal,
-      filters: { herkunft: "kanal" | "modul" | null; modul: string | null; ton: "info" | "hinweis" | "fehler" | null; person: string | null },
+      filters: { origin: "channel" | "module" | null; module: string | null; tone: "info" | "warning" | "error" | null; person: string | null },
     ) => Promise<unknown>;
     await fetchEventsWithFilters("kanal-a", "cursor /?#&", controller.signal, {
-      herkunft: "modul",
-      modul: "textbefehle",
-      ton: "fehler",
+      origin: "module",
+      module: "text_commands",
+      tone: "error",
       person: "person /?#&",
     });
 
     expect(fetcher).toHaveBeenCalledWith(
       new URL(
-        "/api/channels/kanal-a/events?cursor=cursor+%2F%3F%23%26&origin=module&module=textbefehle&tone=fehler&actor=person+%2F%3F%23%26",
+        "/api/channels/kanal-a/events?cursor=cursor+%2F%3F%23%26&origin=module&module=text_commands&tone=error&actor=person+%2F%3F%23%26",
         window.location.origin,
       ),
       { credentials: "same-origin", signal: controller.signal },
@@ -150,15 +150,15 @@ describe("Dashboard-API-Requestgrenze", () => {
   it("holt vor jeder Mitgliederänderung CSRF und sendet die passende Mutation", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ token: "csrf-token" }))
-      .mockResolvedValueOnce(jsonResponse({ member: { userId: "123", role: "bediener", joinedAt: "2026-09-18T00:00:00.000Z" } }, 201))
+      .mockResolvedValueOnce(jsonResponse({ member: { userId: "123", role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" } }, 201))
       .mockResolvedValueOnce(jsonResponse({ token: "csrf-token-2" }))
-      .mockResolvedValueOnce(jsonResponse({ member: { userId: "123", role: "verwalter", joinedAt: "2026-09-18T00:00:00.000Z" } }))
+      .mockResolvedValueOnce(jsonResponse({ member: { userId: "123", role: "manager", joinedAt: "2026-09-18T00:00:00.000Z" } }))
       .mockResolvedValueOnce(jsonResponse({ token: "csrf-token-3" }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetcher);
 
-    await addChannelMember("kanal-a", "123", "bediener");
-    await updateChannelMemberRole("kanal-a", "123", "verwalter");
+    await addChannelMember("kanal-a", "123", "operator");
+    await updateChannelMemberRole("kanal-a", "123", "manager");
     await removeChannelMember("kanal-a", "123");
 
     expect(fetcher).toHaveBeenNthCalledWith(

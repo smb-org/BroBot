@@ -5,24 +5,26 @@ import type {
   RealtimePrincipal,
   RealtimeRecipientKind,
 } from "../../realtime-contract";
-import { verarbeiteWerbevorwarnung } from "../werbe-vorwarnung";
+import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
+import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
-const SECURITY_DEADLINE_KEY = "sicherheitsrunde";
-const WERBEVORWARNUNG_DEADLINE_KEY = "werbevorwarnung";
+// Beim Reset wird die Durable-Object-Klasse verworfen; deshalb sind neue Schlüssel
+// sicher. Ohne diesen Reset fände scheduleEarliestAlarm() alte Fristen nicht,
+// löschte den Wecker lautlos, und Sicherheitsrunde sowie Werbevorwarnung fielen aus.
+const SECURITY_DEADLINE_KEY = "security_round";
+const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
 
 type SessionValidityRow = {
   session_id: string;
   user_id: string;
-  role: "broadcaster" | "verwalter" | "bediener" | null;
+  role: ChannelRole | null;
 };
 
 type TokenValidityRow = { token_id: string };
-
-const roleValues = new Set(["broadcaster", "verwalter", "bediener"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -35,7 +37,7 @@ const isRealtimePrincipal = (value: unknown): value is RealtimePrincipal => {
   if (value.kind === "panel") {
     return isNonEmptyString(value.userId) &&
       isNonEmptyString(value.sessionId) &&
-      typeof value.role === "string" && roleValues.has(value.role) &&
+      typeof value.role === "string" && CHANNEL_ROLES.includes(value.role as ChannelRole) &&
       isNonEmptyString(value.expiresAt);
   }
   if (value.kind === "overlay") {
@@ -74,8 +76,8 @@ const tagsFor = (principal: RealtimePrincipal): string[] => principal.kind === "
 
 const envelopeFor = (
   channelId: string,
-  type: "system.hallo",
-): RealtimeEnvelope<"system.hallo"> => ({
+  type: "system.hello",
+): RealtimeEnvelope<"system.hello"> => ({
   version: 1,
   id: crypto.randomUUID(),
   createdAt: new Date().toISOString(),
@@ -104,7 +106,7 @@ export class ChannelObject extends DurableObject<Env> {
   private async scheduleEarliestAlarm(): Promise<void> {
     const deadlines = await Promise.all([
       this.ctx.storage.get(SECURITY_DEADLINE_KEY),
-      this.ctx.storage.get(WERBEVORWARNUNG_DEADLINE_KEY),
+      this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
     ]);
     const validDeadlines = deadlines.filter((deadline): deadline is number =>
       typeof deadline === "number" && Number.isFinite(deadline));
@@ -131,17 +133,17 @@ export class ChannelObject extends DurableObject<Env> {
     }
   }
 
-  public async planeWerbevorwarnung(faelligAmMs: number): Promise<void> {
-    if (!Number.isFinite(faelligAmMs)) {
-      await this.loescheWerbevorwarnung();
+  public async scheduleAdPrewarning(dueAtMs: number): Promise<void> {
+    if (!Number.isFinite(dueAtMs)) {
+      await this.clearAdPrewarning();
       return;
     }
-    await this.ctx.storage.put(WERBEVORWARNUNG_DEADLINE_KEY, faelligAmMs);
+    await this.ctx.storage.put(AD_PREWARNING_DEADLINE_KEY, dueAtMs);
     await this.scheduleEarliestAlarm();
   }
 
-  public async loescheWerbevorwarnung(): Promise<void> {
-    await this.ctx.storage.delete(WERBEVORWARNUNG_DEADLINE_KEY);
+  public async clearAdPrewarning(): Promise<void> {
+    await this.ctx.storage.delete(AD_PREWARNING_DEADLINE_KEY);
     await this.scheduleEarliestAlarm();
   }
 
@@ -172,7 +174,7 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
     void this.scheduleSecurityAlarm();
-    pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hallo")));
+    pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
     return new Response(null, {
       status: 101,
       headers: { "Sec-WebSocket-Protocol": REALTIME_PROTOCOL },
@@ -237,13 +239,13 @@ export class ChannelObject extends DurableObject<Env> {
     const nowIso = new Date(now).toISOString();
     const [securityDeadline, warningDeadline] = await Promise.all([
       this.ctx.storage.get(SECURITY_DEADLINE_KEY),
-      this.ctx.storage.get(WERBEVORWARNUNG_DEADLINE_KEY),
+      this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
     ]);
     const securityDue = typeof securityDeadline === "number" && Number.isFinite(securityDeadline) && securityDeadline <= now;
     const warningDue = typeof warningDeadline === "number" && Number.isFinite(warningDeadline) && warningDeadline <= now;
     const expired = new Set<WebSocket>();
 
-    if (warningDue) await this.ctx.storage.delete(WERBEVORWARNUNG_DEADLINE_KEY);
+    if (warningDue) await this.ctx.storage.delete(AD_PREWARNING_DEADLINE_KEY);
 
     const principals = webSockets.map((webSocket) => ({ webSocket, principal: readAttachment(webSocket) }));
 
@@ -328,12 +330,12 @@ export class ChannelObject extends DurableObject<Env> {
       await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
     }
 
-    const eigenerKanal = this.ownChannelId();
-    if (warningDue && typeof warningDeadline === "number" && eigenerKanal !== null) {
+    const ownChannel = this.ownChannelId();
+    if (warningDue && typeof warningDeadline === "number" && ownChannel !== null) {
       try {
-        await verarbeiteWerbevorwarnung(
+        await processAdPrewarning(
           this.env,
-          eigenerKanal,
+          ownChannel,
           warningDeadline,
           undefined,
           nowIso,
@@ -341,8 +343,8 @@ export class ChannelObject extends DurableObject<Env> {
           // Eigener Planer statt Stub: Ein Stub auf dieses Objekt waere aus
           // alarm() heraus ein Selbstaufruf und kaeme nie zurueck.
           {
-            plane: async (faelligAmMs) => { await this.planeWerbevorwarnung(faelligAmMs); },
-            loesche: async () => { await this.loescheWerbevorwarnung(); },
+            schedule: async (dueAtMs) => { await this.scheduleAdPrewarning(dueAtMs); },
+            clear: async () => { await this.clearAdPrewarning(); },
           },
         );
       } catch (error: unknown) {

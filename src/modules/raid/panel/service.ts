@@ -2,7 +2,7 @@ import type { RaidSettings } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 
 const pathFor = (channelId: string): string =>
-  `/api/channels/${encodeURIComponent(channelId)}/modules/raid/einstellungen`;
+  `/api/channels/${encodeURIComponent(channelId)}/modules/raid/settings`;
 
 const json = async <T>(response: Response): Promise<T> => {
   const body: unknown = await response.json().catch(() => null);
