@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { textbefehlModul, type TextbefehlMindeststufe } from "../../src/modules/text_commands";
-import { createTextbefehlRepository } from "../../src/modules/text_commands/adapters/d1";
+import { textCommandModule, type TextCommandMinimumTier } from "../../src/modules/text_commands";
+import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
@@ -16,26 +16,26 @@ const schluessel = JSON.stringify({
   retired: [],
 });
 
-const fetcherFuerChat = () => vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(
+const fetcherForChat = () => vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(
   new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "gesendet-1" }] }), {
     status: 200,
     headers: { "content-type": "application/json" },
   }),
 ));
 
-const koerper = (fetcher: ReturnType<typeof fetcherFuerChat>, index: number): Record<string, unknown> => {
+const koerper = (fetcher: ReturnType<typeof fetcherForChat>, index: number): Record<string, unknown> => {
   const body = fetcher.mock.calls[index]?.[1]?.body;
   return typeof body === "string" ? JSON.parse(body) as Record<string, unknown> : {};
 };
 
-const umgebung = (database: TestD1Database) => ({
+const environment = (database: TestD1Database) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: schluessel,
 });
 
-const eventFuer = (text: string, channelId = "kanal-a", receivedAt = JETZT, triggerId = "trigger-1", badges: readonly { set_id: string }[] = []) => ({
+const eventFor = (text: string, channelId = "kanal-a", receivedAt = JETZT, triggerId = "trigger-1", badges: readonly { set_id: string }[] = []) => ({
   channelId,
   subscriptionType: "channel.chat.message",
   triggerId,
@@ -50,14 +50,14 @@ const eventFuer = (text: string, channelId = "kanal-a", receivedAt = JETZT, trig
   receivedAt,
 });
 
-const aktiviere = async (database: TestD1Database, channelId: string): Promise<void> => {
+const activate = async (database: TestD1Database, channelId: string): Promise<void> => {
   await database.prepare(
     "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{}')",
-  ).bind(channelId, textbefehlModul.id).run();
+  ).bind(channelId, textCommandModule.id).run();
 };
 
-const legeBefehlAn = async (database: TestD1Database, name = "hallo", mindeststufe: TextbefehlMindeststufe = "everyone"): Promise<void> => {
-  const repository = createTextbefehlRepository(
+const createCommand = async (database: TestD1Database, name = "hallo", minimumTier: TextCommandMinimumTier = "everyone"): Promise<void> => {
+  const repository = createTextCommandRepository(
     database as unknown as D1Database,
     () => ({ sql: "AND 1 = 1", values: [] as const }),
   );
@@ -66,8 +66,8 @@ const legeBefehlAn = async (database: TestD1Database, name = "hallo", mindeststu
     name,
     text: "Hallo {user}",
     kind: "text",
-    mindeststufe,
-    cooldownSekunden: 5,
+    minimumTier: minimumTier,
+    cooldownSeconds: 5,
     now: JETZT,
   }, { userId: "user-1" });
 };
@@ -105,11 +105,11 @@ describe("Textbefehle-Modul", () => {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
-      await aktiviere(database, "kanal-a");
-      const fetcher = fetcherFuerChat();
+      await activate(database, "kanal-a");
+      const fetcher = fetcherForChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!befehl hinzufuegen foo bar", "kanal-a", JETZT, "trigger-add"), fetcher, [textbefehlModul]);
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!befehl entfernen foo", "kanal-a", JETZT, "trigger-remove"), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(environment(database), eventFor("!befehl hinzufuegen foo bar", "kanal-a", JETZT, "trigger-add"), fetcher, [textCommandModule]);
+      await dispatchEventSubNotification(environment(database), eventFor("!befehl entfernen foo", "kanal-a", JETZT, "trigger-remove"), fetcher, [textCommandModule]);
 
       expect(fetcher).not.toHaveBeenCalled();
       await expect(database.prepare("SELECT COUNT(*) AS count FROM text_commands").first<{ count: number }>())
@@ -127,13 +127,13 @@ describe("Textbefehle-Modul", () => {
       await insertChannel(database, "kanal-b");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
-      await aktiviere(database, "kanal-a");
-      await aktiviere(database, "kanal-b");
-      await legeBefehlAn(database);
-      const fetcher = fetcherFuerChat();
+      await activate(database, "kanal-a");
+      await activate(database, "kanal-b");
+      await createCommand(database);
+      const fetcher = fetcherForChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", JETZT, "trigger-2"), fetcher, [textbefehlModul]);
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-b", JETZT, "trigger-3"), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", JETZT, "trigger-2"), fetcher, [textCommandModule]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-b", JETZT, "trigger-3"), fetcher, [textCommandModule]);
 
       expect(fetcher).toHaveBeenCalledTimes(1);
       expect(koerper(fetcher, 0).message).toBe("Hallo alice");
@@ -149,10 +149,10 @@ describe("Textbefehle-Modul", () => {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
-      await aktiviere(database, "kanal-a");
-      const fetcher = fetcherFuerChat();
+      await activate(database, "kanal-a");
+      const fetcher = fetcherForChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!unbekannt"), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(environment(database), eventFor("!unbekannt"), fetcher, [textCommandModule]);
 
       expect(fetcher).not.toHaveBeenCalled();
       await expect(eventCodes(database)).resolves.toEqual(["text_commands.unbekannt"]);
@@ -167,12 +167,12 @@ describe("Textbefehle-Modul", () => {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
-      await aktiviere(database, "kanal-a");
-      await legeBefehlAn(database);
-      const fetcher = fetcherFuerChat();
+      await activate(database, "kanal-a");
+      await createCommand(database);
+      const fetcher = fetcherForChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", JETZT, "trigger-2"), fetcher, [textbefehlModul]);
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", "2026-09-19T12:00:01.000Z", "trigger-3"), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", JETZT, "trigger-2"), fetcher, [textCommandModule]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", "2026-09-19T12:00:01.000Z", "trigger-3"), fetcher, [textCommandModule]);
 
       expect(fetcher).toHaveBeenCalledTimes(1);
       await expect(eventCodes(database)).resolves.toContain("text_commands.abgekuehlt");
@@ -185,7 +185,7 @@ describe("Textbefehle-Modul", () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
-      await textbefehlModul.onEnable?.({
+      await textCommandModule.onEnable?.({
         DB: database as unknown as D1Database,
         authorizeMutation: () => ({ sql: "AND 1 = 1", values: [] as const }),
         actor: { userId: "user-1" },
@@ -210,12 +210,12 @@ describe("Textbefehle-Modul", () => {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
-      await aktiviere(database, "kanal-a");
-      await legeBefehlAn(database);
+      await activate(database, "kanal-a");
+      await createCommand(database);
       await database.prepare("UPDATE text_commands SET enabled = 0 WHERE command_name = 'hallo'").run();
-      const fetcher = fetcherFuerChat();
+      const fetcher = fetcherForChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", JETZT, "trigger-disabled-broadcaster", [{ set_id: "broadcaster" }]), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", JETZT, "trigger-disabled-broadcaster", [{ set_id: "broadcaster" }]), fetcher, [textCommandModule]);
 
       expect(fetcher).not.toHaveBeenCalled();
       await expect(eventCodes(database)).resolves.toEqual(["text_commands.deaktiviert"]);
@@ -230,12 +230,12 @@ describe("Textbefehle-Modul", () => {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
-      await aktiviere(database, "kanal-a");
-      await legeBefehlAn(database, "hallo", "moderator");
-      const fetcher = fetcherFuerChat();
+      await activate(database, "kanal-a");
+      await createCommand(database, "hallo", "moderator");
+      const fetcher = fetcherForChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", JETZT, "trigger-moderator", [{ set_id: "moderator" }]), fetcher, [textbefehlModul]);
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", "2026-09-19T12:00:01.000Z", "trigger-viewer"), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", JETZT, "trigger-moderator", [{ set_id: "moderator" }]), fetcher, [textCommandModule]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", "2026-09-19T12:00:01.000Z", "trigger-viewer"), fetcher, [textCommandModule]);
 
       expect(fetcher).toHaveBeenCalledTimes(1);
       const denied = await database.prepare(
@@ -256,12 +256,12 @@ describe("Textbefehle-Modul", () => {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
-      await aktiviere(database, "kanal-a");
-      await legeBefehlAn(database, "hallo", "subscriber");
-      const fetcher = fetcherFuerChat();
+      await activate(database, "kanal-a");
+      await createCommand(database, "hallo", "subscriber");
+      const fetcher = fetcherForChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", JETZT, "trigger-moderator", [{ set_id: "moderator" }]), fetcher, [textbefehlModul]);
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!hallo", "kanal-a", "2026-09-19T12:00:06.000Z", "trigger-founder", [{ set_id: "founder" }]), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", JETZT, "trigger-moderator", [{ set_id: "moderator" }]), fetcher, [textCommandModule]);
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo", "kanal-a", "2026-09-19T12:00:06.000Z", "trigger-founder", [{ set_id: "founder" }]), fetcher, [textCommandModule]);
 
       expect(fetcher).toHaveBeenCalledTimes(2);
     } finally {
@@ -275,18 +275,18 @@ describe("Textbefehle-Modul", () => {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
-      await aktiviere(database, "kanal-a");
-      const repository = createTextbefehlRepository(
+      await activate(database, "kanal-a");
+      const repository = createTextCommandRepository(
         database as unknown as D1Database,
         () => ({ sql: "AND 1 = 1", values: [] as const }),
       );
-      await repository.anlegen({ channelId: "kanal-a", name: "befehle", text: "", kind: "list", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
-      await repository.anlegen({ channelId: "kanal-a", name: "aktiv", text: "Antwort", kind: "text", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
-      await repository.anlegen({ channelId: "kanal-a", name: "aus", text: "Antwort", kind: "text", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
+      await repository.anlegen({ channelId: "kanal-a", name: "befehle", text: "", kind: "list", cooldownSeconds: 5, now: JETZT }, { userId: "user-1" });
+      await repository.anlegen({ channelId: "kanal-a", name: "aktiv", text: "Antwort", kind: "text", cooldownSeconds: 5, now: JETZT }, { userId: "user-1" });
+      await repository.anlegen({ channelId: "kanal-a", name: "aus", text: "Antwort", kind: "text", cooldownSeconds: 5, now: JETZT }, { userId: "user-1" });
       await database.prepare("UPDATE text_commands SET enabled = 0 WHERE command_name = 'aus'").run();
-      const fetcher = fetcherFuerChat();
+      const fetcher = fetcherForChat();
 
-      await dispatchEventSubNotification(umgebung(database), eventFuer("!befehle"), fetcher, [textbefehlModul]);
+      await dispatchEventSubNotification(environment(database), eventFor("!befehle"), fetcher, [textCommandModule]);
 
       expect(koerper(fetcher, 0).message).toBe("Befehle: !aktiv, !befehle");
     } finally {

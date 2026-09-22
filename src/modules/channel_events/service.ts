@@ -1,12 +1,12 @@
 import type { ModuleEvent, ModuleResult } from "../contract";
 import { isEventSubSubscriptionType } from "../../contracts/values";
-import { diagnostiziereKanalereignis } from "./domain";
+import { diagnoseChannelEvent } from "./domain";
 
-export const verarbeiteKanalereignis = (event: ModuleEvent): ModuleResult => {
+export const processChannelEvent = (event: ModuleEvent): ModuleResult => {
   if (!isEventSubSubscriptionType(event.subscriptionType)) return { actions: [], diagnostics: [] };
   return {
     actions: [],
-    diagnostics: diagnostiziereKanalereignis(
+    diagnostics: diagnoseChannelEvent(
       event.subscriptionType,
       event.payload,
       event.channelId,

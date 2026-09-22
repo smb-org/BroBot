@@ -7,11 +7,11 @@ import type {
   PanelActiveModule,
   PanelAuditEntry,
   PanelAuditResponse,
-  PanelBetreiberAuditEntry,
-  PanelBetreiberAuditResponse,
-  PanelBetreiberKanalÜbersicht,
-  PanelBetreiberMitgliederResponse,
-  PanelBetreiberÜbersichtResponse,
+  PanelPlatformAuditEntry,
+  PanelPlatformAuditResponse,
+  PanelPlatformChannelOverview,
+  PanelPlatformMembersResponse,
+  PanelPlatformOverviewResponse,
   PanelBotPermissions,
   PanelBotStatus,
   PanelBroadcasterPermissions,
@@ -33,9 +33,9 @@ import type {
   PanelEventOrigin,
 } from "../../src/panel-contract";
 import { MODULES } from "../../src/modules/registry";
-import { TEXTBEFEHL_MINDESTSTUFEN } from "../../src/modules/text_commands/contracts";
-import type { TextbefehlArt } from "../../src/modules/text_commands/contracts";
-import { werbungModul } from "../../src/modules/ads";
+import { TEXT_COMMAND_MINIMUM_TIERS } from "../../src/modules/text_commands/contracts";
+import type { TextCommandKind } from "../../src/modules/text_commands/contracts";
+import { adsModule } from "../../src/modules/ads";
 import type {
   ModuleActor,
   ModuleAction,
@@ -54,6 +54,8 @@ import type {
   RealtimeRecipientKind,
 } from "../../src/realtime-contract";
 import type { ChannelRole, EventTone } from "../../src/contracts/values";
+import type { TextCommand } from "../../src/modules/text_commands/contracts";
+import type { OAuthState } from "../../src/worker/auth/oauth";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { realtimeRouter } from "../../src/worker/realtime";
@@ -163,7 +165,7 @@ const panelChannelOverview: PanelChannelOverview = {
 const panelModuleState: PanelModuleState = {
   id: "ads",
   enabled: true,
-  settings: JSON.stringify(werbungModul.defaultSettings),
+  settings: JSON.stringify(adsModule.defaultSettings),
   requiredBroadcasterScopes: ["channel:read:ads"],
   missingBroadcasterScopes: [],
 };
@@ -209,7 +211,7 @@ const panelEventEntry: PanelEventEntry = {
   actorDisplayName: "Person",
 };
 
-const panelBetreiberKanal: PanelBetreiberKanalÜbersicht = {
+const panelPlatformChannel: PanelPlatformChannelOverview = {
   channelId: "kanal-a",
   login: "kanal-a",
   displayName: "Kanal A",
@@ -218,7 +220,7 @@ const panelBetreiberKanal: PanelBetreiberKanalÜbersicht = {
   broadcasterConnected: true,
 };
 
-const panelBetreiberAuditEntry: PanelBetreiberAuditEntry = {
+const panelPlatformAuditEntry: PanelPlatformAuditEntry = {
   ...panelAuditEntry,
   actorKind: "platform_admin",
   channelId: "kanal-a",
@@ -231,14 +233,14 @@ const panelForms = {
   moduleState: panelModuleState,
   modulesResponse: { modules: [panelModuleState] } satisfies PanelModulesResponse,
   channelsResponse: { channels: [panelChannelState], platformAdmin: false },
-  betreiberKanal: panelBetreiberKanal,
-  betreiberOverview: { channels: [panelBetreiberKanal] } satisfies PanelBetreiberÜbersichtResponse,
-  betreiberMembers: {
+  platformChannel: panelPlatformChannel,
+  platformOverview: { channels: [panelPlatformChannel] } satisfies PanelPlatformOverviewResponse,
+  platformMembers: {
     members: [panelMember],
     nextCursor: null,
     broadcasterCount: 1,
     viewerUserId: "user-1",
-  } satisfies PanelBetreiberMitgliederResponse,
+  } satisfies PanelPlatformMembersResponse,
   member: panelMember,
   membersResponse: {
     members: [panelMember],
@@ -258,11 +260,11 @@ const panelForms = {
   } satisfies PanelSystemResponse,
   auditEntry: panelAuditEntry,
   auditResponse: { entries: [panelAuditEntry], nextCursor: null } satisfies PanelAuditResponse,
-  betreiberAuditEntry: panelBetreiberAuditEntry,
-  betreiberAuditResponse: {
-    entries: [panelBetreiberAuditEntry],
+  platformAuditEntry: panelPlatformAuditEntry,
+  platformAuditResponse: {
+    entries: [panelPlatformAuditEntry],
     nextCursor: null,
-  } satisfies PanelBetreiberAuditResponse,
+  } satisfies PanelPlatformAuditResponse,
   eventEntry: panelEventEntry,
   eventFilters: {
     origin: "module",
@@ -404,11 +406,11 @@ const requestForRealtime = async (userId: string): Promise<Request> => {
 const alleRollen: Record<ChannelRole, true> = { broadcaster: true, manager: true, operator: true };
 const alleNachrichtentypen: Record<RealtimeMessageType, true> = { "system.hello": true, "event_log.new": true };
 const alleEmpfaengerarten: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
-const alleChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
+const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
 const alleAktionsarten: Record<ModuleAction["kind"], true> = { chat: true, shoutout: true, overlay: true };
 const alleSprachen: Record<ModuleLanguage, true> = { de: true, en: true };
-const alleTextbefehlArten: Record<TextbefehlArt, true> = { text: true, list: true };
-const alleEreignisherkuenfte: Record<PanelEventOrigin, true> = { channel: true, module: true };
+const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true };
+const allEventOrigins: Record<PanelEventOrigin, true> = { channel: true, module: true };
 const alleTonlagen: Record<EventTone, true> = { info: true, warning: true, error: true };
 
 describe("serialisierte Vertragsformen", () => {
@@ -475,10 +477,39 @@ describe("serialisierte Vertragsformen", () => {
         "utf8",
       );
       const durableObjectKeys = [
-        ...durableObjectSource.matchAll(/const (?:SECURITY_DEADLINE_KEY|WERBEVORWARNUNG_DEADLINE_KEY) = "([^"]+)"/g),
+        ...durableObjectSource.matchAll(/const (?:SECURITY_DEADLINE_KEY|AD_PREWARNING_DEADLINE_KEY) = "([^"]+)"/g),
       ].map((match) => match[1]).sort();
 
+      // Der signierte OAuth-Zustand laeuft ueber Twitch und zurueck. Er stand
+      // lange ausserhalb dieses Satzes und trug deshalb unbemerkt einen
+      // deutschen Schluessel -- genau die Blindstelle, die dieser Test schliessen
+      // soll.
+      const oauthState: OAuthState = {
+        transactionId: "transaktion-1",
+        purpose: "login",
+        expiresAt: "2026-09-21T12:00:00.000Z",
+        reconcileEventSub: true,
+        fullConsentSecondAttempt: true,
+      };
+
+      // Die Textbefehl-Form geht ueber die Route und ins Audit. Sie stand
+      // ausserhalb dieses Satzes und trug deshalb unbemerkt deutsche Schluessel.
+      const textCommand: TextCommand = {
+        channelId: "kanal-a",
+        name: "hallo",
+        text: "Hallo {user}",
+        kind: "text",
+        enabled: true,
+        minimumTier: "everyone",
+        cooldownSeconds: 5,
+        lastUsedAt: null,
+        createdAt: "2026-09-21T12:00:00.000Z",
+        updatedAt: "2026-09-21T12:00:00.000Z",
+      };
+
       const wireShapes = {
+        oauthState,
+        textCommand,
         realtime: {
           ...realtimeForms,
           panelPrincipal,
@@ -489,7 +520,7 @@ describe("serialisierte Vertragsformen", () => {
       };
 
       expect(shapeKeys(wireShapes)).toEqual([
-        "$: modules,panel,realtime",
+        "$: modules,oauthState,panel,realtime,textCommand",
         "$.modules: action,actor,auditEntry,diagnostic,event,mutationActor,mutationAuthorization,result",
         "$.modules.action[]: kind,replyToMessageId,text",
         "$.modules.action[]: kind,targetChannelId",
@@ -513,21 +544,12 @@ describe("serialisierte Vertragsformen", () => {
         "$.modules.result.actions[].payload: text",
         "$.modules.result.diagnostics[]: code,detail",
         "$.modules.result.diagnostics[].detail: allowed,missing,reason,viewers",
-        "$.panel: activeModule,auditEntry,auditResponse,betreiberAuditEntry,betreiberAuditResponse,betreiberKanal,betreiberMembers,betreiberOverview,channelOverview,channelState,channelsResponse,eventEntry,eventFilters,eventsResponse,member,membersResponse,moduleState,modulesResponse,system,twitchUser",
+        "$.oauthState: expiresAt,fullConsentSecondAttempt,purpose,reconcileEventSub,transactionId",
+        "$.panel: activeModule,auditEntry,auditResponse,channelOverview,channelState,channelsResponse,eventEntry,eventFilters,eventsResponse,member,membersResponse,moduleState,modulesResponse,platformAuditEntry,platformAuditResponse,platformChannel,platformMembers,platformOverview,system,twitchUser",
         "$.panel.activeModule: moduleId,settings",
         "$.panel.auditEntry: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,createdAt,moduleId",
         "$.panel.auditResponse: entries,nextCursor",
         "$.panel.auditResponse.entries[]: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,createdAt,moduleId",
-        "$.panel.betreiberAuditEntry: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId",
-        "$.panel.betreiberAuditResponse: entries,nextCursor",
-        "$.panel.betreiberAuditResponse.entries[]: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId",
-        "$.panel.betreiberKanal: broadcasterConnected,channelId,displayName,fullConsent,login,memberCounts",
-        "$.panel.betreiberKanal.memberCounts: broadcaster,manager,operator",
-        "$.panel.betreiberMembers: broadcasterCount,members,nextCursor,viewerUserId",
-        "$.panel.betreiberMembers.members[]: displayName,joinedAt,login,profileImageUrl,role,userId",
-        "$.panel.betreiberOverview: channels",
-        "$.panel.betreiberOverview.channels[]: broadcasterConnected,channelId,displayName,fullConsent,login,memberCounts",
-        "$.panel.betreiberOverview.channels[].memberCounts: broadcaster,manager,operator",
         "$.panel.channelOverview: activeModules,bot,botPermissions,broadcasterConnection,broadcasterPermissions,channelBotConsent,channelId,chatSubscription,displayName,lastError,login,moderator,role,tokens",
         "$.panel.channelOverview.activeModules[]: moduleId,settings",
         "$.panel.channelOverview.bot: reason,status,updatedAt",
@@ -564,6 +586,16 @@ describe("serialisierte Vertragsformen", () => {
         "$.panel.modulesResponse: modules",
         "$.panel.modulesResponse.modules[]: enabled,id,missingBroadcasterScopes,requiredBroadcasterScopes,settings",
         "$.panel.moduleState: enabled,id,missingBroadcasterScopes,requiredBroadcasterScopes,settings",
+        "$.panel.platformAuditEntry: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId",
+        "$.panel.platformAuditResponse: entries,nextCursor",
+        "$.panel.platformAuditResponse.entries[]: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId",
+        "$.panel.platformChannel: broadcasterConnected,channelId,displayName,fullConsent,login,memberCounts",
+        "$.panel.platformChannel.memberCounts: broadcaster,manager,operator",
+        "$.panel.platformMembers: broadcasterCount,members,nextCursor,viewerUserId",
+        "$.panel.platformMembers.members[]: displayName,joinedAt,login,profileImageUrl,role,userId",
+        "$.panel.platformOverview: channels",
+        "$.panel.platformOverview.channels[]: broadcasterConnected,channelId,displayName,fullConsent,login,memberCounts",
+        "$.panel.platformOverview.channels[].memberCounts: broadcaster,manager,operator",
         "$.panel.system: bot,botPermissions,broadcasterConnection,broadcasterPermissions,chatSubscription,subscriptions,tokens",
         "$.panel.system.bot: reason,status,updatedAt",
         "$.panel.system.botPermissions: missingScopes",
@@ -583,6 +615,7 @@ describe("serialisierte Vertragsformen", () => {
         "$.realtime.panelPrincipal: channelId,expiresAt,kind,role,sessionId,userId,v",
         "$.realtime.systemHello: channelId,createdAt,id,payload,type,version",
         "$.realtime.systemHello.payload: ",
+        "$.textCommand: channelId,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,text,updatedAt",
       ]);
       expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
       expect(MODULES.map((module) => module.id).sort()).toEqual([
@@ -592,7 +625,7 @@ describe("serialisierte Vertragsformen", () => {
         "text_commands",
       ]);
       expect(Object.fromEntries(MODULES.map((module) => [module.id, JSON.parse(JSON.stringify(module.defaultSettings))]))).toEqual(expectedModuleSettings);
-      expect([...TEXTBEFEHL_MINDESTSTUFEN].sort()).toEqual(["broadcaster", "everyone", "moderator", "subscriber", "vip"]);
+      expect([...TEXT_COMMAND_MINIMUM_TIERS].sort()).toEqual(["broadcaster", "everyone", "moderator", "subscriber", "vip"]);
       // Die geschlossenen Wertemengen sind reine TypeScript-Unions und haben zur
       // Laufzeit keinen Wert, den man auslesen koennte. Ein Literal gegen dasselbe
       // Literal zu pruefen waere eine Tautologie. Stattdessen zwingt ein
@@ -602,11 +635,11 @@ describe("serialisierte Vertragsformen", () => {
       expect(Object.keys(alleRollen).sort()).toEqual(["broadcaster", "manager", "operator"]);
       expect(Object.keys(alleNachrichtentypen).sort()).toEqual(["event_log.new", "system.hello"]);
       expect(Object.keys(alleEmpfaengerarten).sort()).toEqual(["overlay", "panel"]);
-      expect(Object.keys(alleChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
+      expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
       expect(Object.keys(alleAktionsarten).sort()).toEqual(["chat", "overlay", "shoutout"]);
       expect(Object.keys(alleSprachen).sort()).toEqual(["de", "en"]);
-      expect(Object.keys(alleTextbefehlArten).sort()).toEqual(["list", "text"]);
-      expect(Object.keys(alleEreignisherkuenfte).sort()).toEqual(["channel", "module"]);
+      expect(Object.keys(allTextCommandKinds).sort()).toEqual(["list", "text"]);
+      expect(Object.keys(allEventOrigins).sort()).toEqual(["channel", "module"]);
       expect(Object.keys(alleTonlagen).sort()).toEqual(["error", "info", "warning"]);
     } finally {
       principalDatabase.close();

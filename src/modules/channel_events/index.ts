@@ -1,11 +1,11 @@
-export type { KanalereignisDiagnose, KanalereignisDetail } from "./contracts";
-export { diagnostiziereKanalereignis } from "./domain";
+export type { ChannelEventDiagnostic, ChannelEventDetail } from "./contracts";
+export { diagnoseChannelEvent } from "./domain";
 
 import { z } from "zod";
 
 import type { EventSubSubscriptionType } from "../../contracts/values";
 import type { BotModule } from "../contract";
-import { verarbeiteKanalereignis } from "./service";
+import { processChannelEvent } from "./service";
 
 const settingsSchema = z.object({});
 const eventSubTypes = [
@@ -19,10 +19,10 @@ const eventSubTypes = [
   "channel.suspicious_user.update",
 ] as const satisfies readonly EventSubSubscriptionType[];
 
-export const kanalereignisseModul: BotModule<typeof settingsSchema> = {
+export const channelEventsModule: BotModule<typeof settingsSchema> = {
   id: "channel_events",
   settingsSchema,
   defaultSettings: {},
   eventSubTypes,
-  handleEvent: (event) => verarbeiteKanalereignis(event),
+  handleEvent: (event) => processChannelEvent(event),
 };

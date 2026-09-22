@@ -1,6 +1,6 @@
-import type { LetzteWerbepause } from "./contracts";
+import type { LastAdBreak } from "./contracts";
 
-interface WerbeereignisZeile {
+interface AdEventRow {
   created_at: string;
   detail_json: string;
 }
@@ -11,11 +11,11 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const dauer = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
-export const listeLetzteWerbepausen = async (
+export const listLastAdBreaks = async (
   db: D1Database,
   channelId: string,
   limit = 5,
-): Promise<LetzteWerbepause[]> => {
+): Promise<LastAdBreak[]> => {
   const result = await db.prepare(
     `SELECT created_at, detail_json
        FROM event_log
@@ -24,7 +24,7 @@ export const listeLetzteWerbepausen = async (
         AND code = 'ads.ankuendigung'
       ORDER BY created_at DESC, event_id DESC
       LIMIT ?`,
-  ).bind(channelId, limit).all<WerbeereignisZeile>();
+  ).bind(channelId, limit).all<AdEventRow>();
 
   return result.results.flatMap((row) => {
     let parsed: unknown;

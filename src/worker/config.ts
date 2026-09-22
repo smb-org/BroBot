@@ -30,7 +30,7 @@ const KEY_RING_SECRET_NAMES = new Set([
   "TOKEN_ENCRYPTION_KEYS",
 ]);
 const PLACEHOLDER_PATTERN = /replace-with|example\.invalid/i;
-const BETREIBER_USER_ID_PATTERN = /^\d+$/;
+const PLATFORM_USER_ID_PATTERN = /^\d+$/;
 
 const secretValue = (env: Env, name: string): unknown => {
   const value: unknown = Reflect.get(env, name);
@@ -40,22 +40,22 @@ const secretValue = (env: Env, name: string): unknown => {
   return value;
 };
 
-const parseBetreiberUserIds = (value: unknown): string[] | null => {
+const parsePlatformUserIds = (value: unknown): string[] | null => {
   if (typeof value !== "string" || value.length === 0) return null;
   try {
     const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) && parsed.every(
-      (userId): userId is string => typeof userId === "string" && BETREIBER_USER_ID_PATTERN.test(userId),
+      (userId): userId is string => typeof userId === "string" && PLATFORM_USER_ID_PATTERN.test(userId),
     ) ? parsed : null;
   } catch {
     return null;
   }
 };
 
-export const getBetreiberUserIds = (
+export const getPlatformUserIds = (
   env: { readonly BETREIBER_USER_IDS?: unknown },
 ): ReadonlySet<string> => {
-  const parsed = parseBetreiberUserIds(env.BETREIBER_USER_IDS);
+  const parsed = parsePlatformUserIds(env.BETREIBER_USER_IDS);
   return parsed === null ? new Set<string>() : new Set(parsed);
 };
 
@@ -85,7 +85,7 @@ export const getMissingBindings = (env: Env): string[] => [
     if (typeof value !== "string" || value.length === 0 || PLACEHOLDER_PATTERN.test(value)) return true;
     if (name === "PUBLIC_ORIGIN") return !isAbsoluteOrigin(value);
     if (name === "OVERLAY_TOKEN_PEPPER") return !isBase64url32Byte(value);
-    if (name === "BETREIBER_USER_IDS") return parseBetreiberUserIds(value) === null;
+    if (name === "BETREIBER_USER_IDS") return parsePlatformUserIds(value) === null;
     if (!KEY_RING_SECRET_NAMES.has(name)) return false;
     try {
       parseKeyRing(value);

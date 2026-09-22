@@ -13,7 +13,7 @@ const SCHLUESSEL = JSON.stringify({
   retired: [],
 });
 
-const umgebung = (database: TestD1Database) => ({
+const environment = (database: TestD1Database) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
@@ -51,7 +51,7 @@ describe("Helix-Chat", () => {
         data: [{ is_sent: true, message_id: "nachricht-1" }],
       }), { status: 200 }));
 
-      await expect(sendChatMessage(umgebung(database), "kanal-a", "hallo", undefined, fetcher)).resolves.toMatchObject({
+      await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, fetcher)).resolves.toMatchObject({
         sent: true,
         reason: null,
       });

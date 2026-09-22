@@ -1,20 +1,20 @@
 import type { ModuleChatStatus } from "../contract";
-import type { TextbefehlMindeststufe } from "../contracts";
+import type { TextCommandMinimumTier } from "../contracts";
 
-export const BEFEHLSNAME_MUSTER = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
-export type TextbefehlEingabe =
+export type TextCommandInput =
   | { kind: "befehl"; name: string; argumente?: string }
   | { kind: "unbekannt" };
 
-export const gueltigerBefehlsname = (name: string): boolean => BEFEHLSNAME_MUSTER.test(name);
+export const validCommandName = (name: string): boolean => COMMAND_NAME_PATTERN.test(name);
 
-export const befehlAusNachricht = (message: string): TextbefehlEingabe | null => {
+export const commandFromMessage = (message: string): TextCommandInput | null => {
   const trimmed = message.trim();
   const erstesWort = trimmed.split(/\s+/u)[0];
   if (erstesWort === undefined || !erstesWort.startsWith("!")) return null;
   const name = erstesWort.slice(1);
-  if (!gueltigerBefehlsname(name)) return { kind: "unbekannt" };
+  if (!validCommandName(name)) return { kind: "unbekannt" };
   const argumente = trimmed.slice(erstesWort.length).trim();
   return {
     kind: "befehl",
@@ -23,14 +23,14 @@ export const befehlAusNachricht = (message: string): TextbefehlEingabe | null =>
   };
 };
 
-export const befehlTextMitPlatzhaltern = (text: string, user: string, channel: string): string =>
+export const commandTextWithPlaceholders = (text: string, user: string, channel: string): string =>
   text.replaceAll("{user}", user).replaceAll("{channel}", channel);
 
-export const cooldownRestzeit = (zuletztVerwendet: string | null, jetzt: string, cooldownSekunden: number): number => {
+export const cooldownRestzeit = (zuletztVerwendet: string | null, jetzt: string, cooldownSeconds: number): number => {
   if (zuletztVerwendet === null) return 0;
   const vergangen = Date.parse(jetzt) - Date.parse(zuletztVerwendet);
-  if (!Number.isFinite(vergangen) || vergangen < 0) return cooldownSekunden;
-  return Math.max(0, Math.ceil(cooldownSekunden - vergangen / 1000));
+  if (!Number.isFinite(vergangen) || vergangen < 0) return cooldownSeconds;
+  return Math.max(0, Math.ceil(cooldownSeconds - vergangen / 1000));
 };
 
 /**
@@ -38,7 +38,7 @@ export const cooldownRestzeit = (zuletztVerwendet: string | null, jetzt: string,
  * Badges enthalten: Moderator und Broadcaster erfüllen auch „Abonnent“ und
  * „VIP“, ein VIP aber nicht „Abonnent“.
  */
-const statusFuerStufe: Record<TextbefehlMindeststufe, readonly ModuleChatStatus[]> = {
+const statusForTier: Record<TextCommandMinimumTier, readonly ModuleChatStatus[]> = {
   everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
   subscriber: ["subscriber", "moderator", "broadcaster"],
   vip: ["vip", "moderator", "broadcaster"],
@@ -46,8 +46,8 @@ const statusFuerStufe: Record<TextbefehlMindeststufe, readonly ModuleChatStatus[
   broadcaster: ["broadcaster"],
 };
 
-export const chatStatusErfuelltStufe = (
+export const chatStatusMeetsTier = (
   status: readonly ModuleChatStatus[] | null,
-  mindeststufe: TextbefehlMindeststufe,
-): boolean => mindeststufe === "everyone"
-  || (status !== null && status.some((eintrag) => statusFuerStufe[mindeststufe].includes(eintrag)));
+  minimumTier: TextCommandMinimumTier,
+): boolean => minimumTier === "everyone"
+  || (status !== null && status.some((entry) => statusForTier[minimumTier].includes(entry)));

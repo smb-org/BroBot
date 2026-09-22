@@ -17,42 +17,42 @@ import {
   updateChannelModuleWithAudit,
 } from "../../src/worker/db/channel-modules";
 import { createOverlayToken, revokeOverlayToken } from "../../src/worker/auth/overlay-token-repository";
-import { createTextbefehlRepository } from "../../src/modules/text_commands/adapters/d1";
+import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import {
-  ändereBetreiberMitglied,
-  ändereVollzustimmung,
-  entferneBetreiberMitglied,
-  freigebenBetreiberKanal,
-  fügeBetreiberMitgliedHinzu,
-  type BetreiberKanal,
-} from "../../src/worker/betreiber/repository";
+  changePlatformMember,
+  changeFullConsent,
+  removePlatformMember,
+  releasePlatformChannel,
+  addPlatformMember,
+  type PlatformChannel,
+} from "../../src/worker/platform/repository";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-type Kanalrolle = "broadcaster" | "manager" | "operator";
-type Zeile = Kanalrolle | "kein Mitglied";
+type ChannelRole = "broadcaster" | "manager" | "operator";
+type Zeile = ChannelRole | "kein Mitglied";
 
 const rollen: readonly Zeile[] = ["broadcaster", "manager", "operator", "kein Mitglied"];
-const zeitpunkt = "2026-09-18T00:00:00.000Z";
-const akteur: ActorContext = { userId: "actor", sessionId: "session-actor" };
+const timestamp = "2026-09-18T00:00:00.000Z";
+const actor: ActorContext = { userId: "actor", sessionId: "session-actor" };
 
-const erlaubt = (
+const allowed = (
   broadcaster: boolean,
   verwalter: boolean,
   bediener: boolean,
-  keinMitglied: boolean,
+  noMember: boolean,
 ): Record<Zeile, boolean> => ({
   broadcaster,
   manager: verwalter,
   operator: bediener,
-  "kein Mitglied": keinMitglied,
+  "kein Mitglied": noMember,
 });
 
-const aktionsMitglied = (
+const actionMember = (
   userId: string,
-  role: Kanalrolle,
-  createdAt = zeitpunkt,
-  updatedAt = zeitpunkt,
+  role: ChannelRole,
+  createdAt = timestamp,
+  updatedAt = timestamp,
 ): ChannelMemberRecord => ({
   channelId: "kanal-a",
   userId,
@@ -61,62 +61,62 @@ const aktionsMitglied = (
   updatedAt,
 });
 
-const textbefehlZeile = (name = "hallo", enabled = true): string =>
+const textCommandRow = (name = "hallo", enabled = true): string =>
   `INSERT INTO text_commands
     (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
-   VALUES ('kanal-a', '${name}', 'Hallo {user}', 'text', ${enabled ? "1" : "0"}, 'everyone', 5, NULL, '${zeitpunkt}', '${zeitpunkt}')`;
+   VALUES ('kanal-a', '${name}', 'Hallo {user}', 'text', ${enabled ? "1" : "0"}, 'everyone', 5, NULL, '${timestamp}', '${timestamp}')`;
 
-const overlayTokenZeile = (tokenId: string): string =>
+const overlayTokenRow = (tokenId: string): string =>
   `INSERT INTO overlay_tokens
     (token_id, channel_id, token_hash, expires_at, created_at, revoked_at, revocation_reason, last_used_at)
-   VALUES ('${tokenId}', 'kanal-a', 'hash-${tokenId}', NULL, '${zeitpunkt}', NULL, NULL, NULL)`;
+   VALUES ('${tokenId}', 'kanal-a', 'hash-${tokenId}', NULL, '${timestamp}', NULL, NULL, NULL)`;
 
 interface Rollenaktion {
   name: string;
   quelle: string;
   erwartet: Record<Zeile, boolean>;
-  ausführen: (database: TestD1Database, role: Kanalrolle | null) => Promise<boolean>;
+  ausführen: (database: TestD1Database, role: ChannelRole | null) => Promise<boolean>;
 }
 
 const aktionen: readonly Rollenaktion[] = [
   {
     name: "Kanalmitglied als Bediener anlegen",
     quelle: "db/channel-members.ts:createChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: (database) => createChannelMemberWithAudit(
       database as unknown as D1Database,
-      akteur,
-      aktionsMitglied("target", "operator"),
+      actor,
+      actionMember("target", "operator"),
       "mitglied.hinzugefügt",
-      zeitpunkt,
+      timestamp,
       actorGuard(requiredActorRoles("operator")),
     ),
   },
   {
     name: "Kanalmitglied als Broadcaster anlegen",
     quelle: "db/channel-members.ts:createChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
-    erwartet: erlaubt(true, false, false, false),
+    erwartet: allowed(true, false, false, false),
     ausführen: (database) => createChannelMemberWithAudit(
       database as unknown as D1Database,
-      akteur,
-      aktionsMitglied("target", "broadcaster"),
+      actor,
+      actionMember("target", "broadcaster"),
       "mitglied.hinzugefügt",
-      zeitpunkt,
+      timestamp,
       actorGuard(requiredActorRoles("broadcaster")),
     ),
   },
   {
     name: "Kanalmitglied von Bediener zu Verwalter ändern",
     quelle: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "operator");
       return updateChannelMemberWithAudit(
         database as unknown as D1Database,
-        akteur,
-        aktionsMitglied("target", "manager"),
+        actor,
+        actionMember("target", "manager"),
         "mitglied.rolle_geändert",
-        zeitpunkt,
+        timestamp,
         actorGuard(requiredActorRoles("manager", "operator")),
       );
     },
@@ -124,16 +124,16 @@ const aktionen: readonly Rollenaktion[] = [
   {
     name: "Kanalmitglied von Broadcaster zu Verwalter ändern",
     quelle: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:lastBroadcasterRoleChangeGuard",
-    erwartet: erlaubt(true, false, false, false),
+    erwartet: allowed(true, false, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "broadcaster");
-      const member = aktionsMitglied("target", "manager");
+      const member = actionMember("target", "manager");
       return updateChannelMemberWithAudit(
         database as unknown as D1Database,
-        akteur,
+        actor,
         member,
         "mitglied.rolle_geändert",
-        zeitpunkt,
+        timestamp,
         actorGuard(requiredActorRoles(member.role, "broadcaster")),
       );
     },
@@ -141,26 +141,26 @@ const aktionen: readonly Rollenaktion[] = [
   {
     name: "Letzten Broadcaster herabstufen",
     quelle: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:lastBroadcasterRoleChangeGuard",
-    erwartet: erlaubt(false, false, false, false),
+    erwartet: allowed(false, false, false, false),
     ausführen: async (database, role) => {
       const target = role === "broadcaster" ? "actor" : "target";
       if (target === "actor") {
         return updateChannelMemberWithAudit(
           database as unknown as D1Database,
-          akteur,
-          aktionsMitglied("actor", "manager"),
+          actor,
+          actionMember("actor", "manager"),
           "mitglied.rolle_geändert",
-          zeitpunkt,
+          timestamp,
           actorGuard(requiredActorRoles("manager", "broadcaster")),
         );
       }
       await insertMember(database, "kanal-a", target, "broadcaster");
       return updateChannelMemberWithAudit(
         database as unknown as D1Database,
-        akteur,
-        aktionsMitglied(target, "manager"),
+        actor,
+        actionMember(target, "manager"),
         "mitglied.rolle_geändert",
-        zeitpunkt,
+        timestamp,
         actorGuard(requiredActorRoles("manager", "broadcaster")),
       );
     },
@@ -168,16 +168,16 @@ const aktionen: readonly Rollenaktion[] = [
   {
     name: "Kanalmitglied als Bediener entfernen",
     quelle: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:actorGuard + db/guards.ts:lastBroadcasterGuard",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "operator");
       return deleteChannelMemberWithAudit(
         database as unknown as D1Database,
-        akteur,
+        actor,
         "kanal-a",
         "target",
         "mitglied.entfernt",
-        zeitpunkt,
+        timestamp,
         actorGuard(requiredActorRoles(undefined, "operator")),
       );
     },
@@ -185,16 +185,16 @@ const aktionen: readonly Rollenaktion[] = [
   {
     name: "Nicht letzten Broadcaster entfernen",
     quelle: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:lastBroadcasterGuard",
-    erwartet: erlaubt(true, false, false, false),
+    erwartet: allowed(true, false, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "broadcaster");
       return deleteChannelMemberWithAudit(
         database as unknown as D1Database,
-        akteur,
+        actor,
         "kanal-a",
         "target",
         "mitglied.entfernt",
-        zeitpunkt,
+        timestamp,
         actorGuard(requiredActorRoles(undefined, "broadcaster")),
       );
     },
@@ -202,17 +202,17 @@ const aktionen: readonly Rollenaktion[] = [
   {
     name: "Letzten Broadcaster entfernen",
     quelle: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:lastBroadcasterGuard",
-    erwartet: erlaubt(false, false, false, false),
+    erwartet: allowed(false, false, false, false),
     ausführen: async (database, role) => {
       const target = role === "broadcaster" ? "actor" : "target";
       if (target !== "actor") await insertMember(database, "kanal-a", target, "broadcaster");
       return deleteChannelMemberWithAudit(
         database as unknown as D1Database,
-        akteur,
+        actor,
         "kanal-a",
         target,
         "mitglied.entfernt",
-        zeitpunkt,
+        timestamp,
         actorGuard(requiredActorRoles(undefined, "broadcaster")),
       );
     },
@@ -220,19 +220,19 @@ const aktionen: readonly Rollenaktion[] = [
   {
     name: "Modul aktivieren",
     quelle: "db/channel-modules.ts:createChannelModuleWithAudit + db/guards.ts:actorGuard",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: (database) => createChannelModuleWithAudit(
       database as unknown as D1Database,
-      akteur,
+      actor,
       { channelId: "kanal-a", moduleId: "raid", enabled: true, settings: "{}" },
       "modul.aktiviert",
-      zeitpunkt,
+      timestamp,
     ),
   },
   {
     name: "Moduleinstellungen ändern",
     quelle: "db/channel-modules.ts:updateChannelModuleWithAudit + db/guards.ts:actorGuard",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: async (database) => {
       await database.prepare(
         `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
@@ -240,23 +240,23 @@ const aktionen: readonly Rollenaktion[] = [
       ).run();
       return updateChannelModuleWithAudit(
         database as unknown as D1Database,
-        akteur,
+        actor,
         "kanal-a",
         "raid",
         true,
         '{"textSchwelle":5}',
         "raid.einstellungen_geaendert",
-        zeitpunkt,
+        timestamp,
       );
     },
   },
   {
     name: "Einzelnen Textbefehl schalten",
     quelle: "modules/textbefehle/adapters/d1.ts:aendern + authorizeModuleMutation/actorGuard",
-    erwartet: erlaubt(true, true, true, false),
+    erwartet: allowed(true, true, true, false),
     ausführen: async (database) => {
-      await database.prepare(textbefehlZeile()).run();
-      const result = await createTextbefehlRepository(
+      await database.prepare(textCommandRow()).run();
+      const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleMutation,
       ).aendern({
@@ -267,19 +267,19 @@ const aktionen: readonly Rollenaktion[] = [
         kind: "text",
         enabled: false,
         nurSchalter: true,
-        cooldownSekunden: 5,
-        now: zeitpunkt,
-      }, akteur);
+        cooldownSeconds: 5,
+        now: timestamp,
+      }, actor);
       return result.ok;
     },
   },
   {
     name: "Textbefehl bearbeiten",
     quelle: "modules/textbefehle/adapters/d1.ts:aendern + authorizeModuleManagementMutation/actorGuard",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: async (database) => {
-      await database.prepare(textbefehlZeile()).run();
-      const result = await createTextbefehlRepository(
+      await database.prepare(textCommandRow()).run();
+      const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleManagementMutation,
       ).aendern({
@@ -289,19 +289,19 @@ const aktionen: readonly Rollenaktion[] = [
         text: "Neu",
         kind: "text",
         enabled: true,
-        cooldownSekunden: 5,
-        mindeststufe: "everyone",
-        now: zeitpunkt,
-      }, akteur);
+        cooldownSeconds: 5,
+        minimumTier: "everyone",
+        now: timestamp,
+      }, actor);
       return result.ok;
     },
   },
   {
     name: "Textbefehl anlegen",
     quelle: "modules/textbefehle/adapters/d1.ts:anlegen + authorizeModuleManagementMutation/actorGuard",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: async (database) => {
-      const result = await createTextbefehlRepository(
+      const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleManagementMutation,
       ).anlegen({
@@ -309,29 +309,29 @@ const aktionen: readonly Rollenaktion[] = [
         name: "neu",
         text: "Neu",
         kind: "text",
-        cooldownSekunden: 5,
-        now: zeitpunkt,
-      }, akteur);
+        cooldownSeconds: 5,
+        now: timestamp,
+      }, actor);
       return result.ok;
     },
   },
   {
     name: "Textbefehl löschen",
     quelle: "modules/textbefehle/adapters/d1.ts:loeschen + authorizeModuleManagementMutation/actorGuard",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: async (database) => {
-      await database.prepare(textbefehlZeile()).run();
-      const result = await createTextbefehlRepository(
+      await database.prepare(textCommandRow()).run();
+      const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleManagementMutation,
-      ).loeschen("kanal-a", "hallo", akteur, zeitpunkt);
+      ).loeschen("kanal-a", "hallo", actor, timestamp);
       return result.ok;
     },
   },
   {
     name: "Overlay-Token ausstellen",
     quelle: "auth/overlay-token-repository.ts:createOverlayToken + actorGuard",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: (database) => createOverlayToken(
       database as unknown as D1Database,
       {
@@ -339,105 +339,105 @@ const aktionen: readonly Rollenaktion[] = [
         channelId: "kanal-a",
         tokenHash: "hash-token-1",
         expiresAt: null,
-        createdAt: zeitpunkt,
+        createdAt: timestamp,
         revokedAt: null,
         revocationReason: null,
         lastUsedAt: null,
       },
-      akteur,
+      actor,
     ),
   },
   {
     name: "Overlay-Token widerrufen",
     quelle: "auth/overlay-token-repository.ts:revokeOverlayToken + actorGuard",
-    erwartet: erlaubt(true, true, false, false),
+    erwartet: allowed(true, true, false, false),
     ausführen: async (database) => {
-      await database.prepare(overlayTokenZeile("token-1")).run();
+      await database.prepare(overlayTokenRow("token-1")).run();
       return revokeOverlayToken(
         database as unknown as D1Database,
         "kanal-a",
         "token-1",
         "2026-09-18T00:01:00.000Z",
         "Test",
-        akteur,
+        actor,
       );
     },
   },
   {
     name: "Betreiber-Kanal freigeben",
-    quelle: "betreiber/repository.ts:freigebenBetreiberKanal + betreiberSessionGuard",
-    erwartet: erlaubt(true, true, true, true),
-    ausführen: (database) => freigebenBetreiberKanal(
+    quelle: "platform/repository.ts:releasePlatformChannel + platformSessionGuard",
+    erwartet: allowed(true, true, true, true),
+    ausführen: (database) => releasePlatformChannel(
       database as unknown as D1Database,
-      akteur,
+      actor,
       { userId: "kanal-b", login: "kanal-b", displayName: "Kanal B" },
       true,
-      zeitpunkt,
+      timestamp,
     ),
   },
   {
     name: "Betreiber-Vollzustimmung ändern",
-    quelle: "betreiber/repository.ts:ändereVollzustimmung + betreiberSessionGuard",
-    erwartet: erlaubt(true, true, true, true),
+    quelle: "platform/repository.ts:changeFullConsent + platformSessionGuard",
+    erwartet: allowed(true, true, true, true),
     ausführen: async (database) => {
       await insertChannel(database, "kanal-b");
       await database.prepare("UPDATE channels SET full_consent = 1 WHERE channel_id = 'kanal-b'").run();
-      const channel: BetreiberKanal = {
+      const channel: PlatformChannel = {
         channelId: "kanal-b",
         login: "kanal-b",
         displayName: "Kanal B",
         fullConsent: true,
       };
-      return ändereVollzustimmung(database as unknown as D1Database, akteur, channel, false, zeitpunkt);
+      return changeFullConsent(database as unknown as D1Database, actor, channel, false, timestamp);
     },
   },
   {
     name: "Betreiber-Mitglied anlegen",
-    quelle: "betreiber/repository.ts:fügeBetreiberMitgliedHinzu + betreiberSessionGuard",
-    erwartet: erlaubt(true, true, true, true),
+    quelle: "platform/repository.ts:addPlatformMember + platformSessionGuard",
+    erwartet: allowed(true, true, true, true),
     ausführen: async (database) => {
       await insertChannel(database, "kanal-b");
-      return fügeBetreiberMitgliedHinzu(
+      return addPlatformMember(
         database as unknown as D1Database,
-        akteur,
-        { channelId: "kanal-b", userId: "target", role: "manager", createdAt: zeitpunkt, updatedAt: zeitpunkt },
-        zeitpunkt,
+        actor,
+        { channelId: "kanal-b", userId: "target", role: "manager", createdAt: timestamp, updatedAt: timestamp },
+        timestamp,
       );
     },
   },
   {
     name: "Betreiber-Mitglied ändern",
-    quelle: "betreiber/repository.ts:ändereBetreiberMitglied + betreiberSessionGuard",
-    erwartet: erlaubt(true, true, true, true),
+    quelle: "platform/repository.ts:changePlatformMember + platformSessionGuard",
+    erwartet: allowed(true, true, true, true),
     ausführen: async (database) => {
       await insertChannel(database, "kanal-b");
       await database.prepare(
         `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
          VALUES ('kanal-b', 'target', 'manager', ?, ?)`,
-      ).bind(zeitpunkt, zeitpunkt).run();
-      return ändereBetreiberMitglied(
+      ).bind(timestamp, timestamp).run();
+      return changePlatformMember(
         database as unknown as D1Database,
-        akteur,
-        { channelId: "kanal-b", userId: "target", role: "manager", createdAt: zeitpunkt, updatedAt: zeitpunkt },
-        { channelId: "kanal-b", userId: "target", role: "operator", createdAt: zeitpunkt, updatedAt: "2026-09-18T00:01:00.000Z" },
+        actor,
+        { channelId: "kanal-b", userId: "target", role: "manager", createdAt: timestamp, updatedAt: timestamp },
+        { channelId: "kanal-b", userId: "target", role: "operator", createdAt: timestamp, updatedAt: "2026-09-18T00:01:00.000Z" },
         "2026-09-18T00:01:00.000Z",
       );
     },
   },
   {
     name: "Betreiber-Mitglied entfernen",
-    quelle: "betreiber/repository.ts:entferneBetreiberMitglied + betreiberSessionGuard",
-    erwartet: erlaubt(true, true, true, true),
+    quelle: "platform/repository.ts:removePlatformMember + platformSessionGuard",
+    erwartet: allowed(true, true, true, true),
     ausführen: async (database) => {
       await insertChannel(database, "kanal-b");
       await database.prepare(
         `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
          VALUES ('kanal-b', 'target', 'operator', ?, ?)`,
-      ).bind(zeitpunkt, zeitpunkt).run();
-      return entferneBetreiberMitglied(
+      ).bind(timestamp, timestamp).run();
+      return removePlatformMember(
         database as unknown as D1Database,
-        akteur,
-        { channelId: "kanal-b", userId: "target", role: "operator", createdAt: zeitpunkt, updatedAt: zeitpunkt },
+        actor,
+        { channelId: "kanal-b", userId: "target", role: "operator", createdAt: timestamp, updatedAt: timestamp },
         "2026-09-18T00:01:00.000Z",
       );
     },

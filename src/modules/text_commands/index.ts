@@ -1,30 +1,30 @@
 export type {
-  NeuerTextbefehl,
-  Textbefehl,
-  TextbefehlArt,
-  TextbefehlMindeststufe,
-  TextbefehlAenderung,
-  TextbefehlBeanspruchung,
-  TextbefehlAkteur,
+  NewTextCommand,
+  TextCommand,
+  TextCommandKind,
+  TextCommandMinimumTier,
+  TextCommandChange,
+  TextCommandClaim,
+  TextCommandActor,
 } from "./contracts";
-export { TEXTBEFEHL_MINDESTSTUFEN } from "./contracts";
-export type { TextbefehlRepository } from "./repository";
+export { TEXT_COMMAND_MINIMUM_TIERS } from "./contracts";
+export type { TextCommandRepository } from "./repository";
 
 import { z } from "zod";
 
 import type { BotModule } from "../contract";
-import { createTextbefehlRepository, initialisiereListenbefehl } from "./adapters/d1";
-import { textbefehlRoutes } from "./routes";
-import { verarbeiteTextbefehlNachricht } from "./service";
+import { createTextCommandRepository, initializeListCommand } from "./adapters/d1";
+import { textCommandRoutes } from "./routes";
+import { processTextCommandMessage } from "./service";
 
 const settingsSchema = z.object({});
 
-export const textbefehlModul: BotModule<typeof settingsSchema> = {
+export const textCommandModule: BotModule<typeof settingsSchema> = {
   id: "text_commands",
   settingsSchema,
   defaultSettings: {},
   eventSubTypes: ["channel.chat.message"],
-  onEnable: (context, channelId) => initialisiereListenbefehl(
+  onEnable: (context, channelId) => initializeListCommand(
     context.DB,
     channelId,
     context.actor,
@@ -32,10 +32,10 @@ export const textbefehlModul: BotModule<typeof settingsSchema> = {
     context.authorizeMutation,
     context.prepareModuleAudit,
   ),
-  routes: textbefehlRoutes,
+  routes: textCommandRoutes,
   panel: () => import("./panel"),
-  handleEvent: (event, context) => verarbeiteTextbefehlNachricht(
+  handleEvent: (event, context) => processTextCommandMessage(
     event,
-    createTextbefehlRepository(context.DB, context.authorizeMutation),
+    createTextCommandRepository(context.DB, context.authorizeMutation),
   ),
 };

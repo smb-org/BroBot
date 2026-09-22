@@ -58,7 +58,7 @@ describe("Textbefehle-Panel", () => {
 
     const create = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "hallo", text: "A".repeat(205), cooldownSekunden: 5,
+        name: "hallo", text: "A".repeat(205), cooldownSeconds: 5,
       }),
       environment,
     );
@@ -66,7 +66,7 @@ describe("Textbefehle-Panel", () => {
 
     const edit = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/hallo", "PATCH", {
-        text: "Neue Antwort", cooldownSekunden: 10,
+        text: "Neue Antwort", cooldownSeconds: 10,
       }),
       environment,
     );
@@ -103,22 +103,22 @@ describe("Textbefehle-Panel", () => {
         module_id: "text_commands",
         action: "text_commands.befehl.angelegt",
         before_json: "null",
-        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, cooldownSeconds: 5 }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.befehl.geändert",
-        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
-        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: "Neue Antwort", cooldownSekunden: 10 }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, cooldownSeconds: 5 }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10 }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.befehl.entfernt",
-        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: "Neue Antwort", cooldownSekunden: 10 }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10 }),
         after_json: "null",
       }),
     ]));
@@ -132,7 +132,7 @@ describe("Textbefehle-Panel", () => {
 
     const edit = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/fehlt", "PATCH", {
-        text: "Neue Antwort", cooldownSekunden: 10,
+        text: "Neue Antwort", cooldownSeconds: 10,
       }),
       environment,
     );
@@ -155,7 +155,7 @@ describe("Textbefehle-Panel", () => {
 
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-b/modules/text_commands/commands", "POST", {
-        name: "fremd", text: "Darf nicht", cooldownSekunden: 5,
+        name: "fremd", text: "Darf nicht", cooldownSeconds: 5,
       }),
       environmentFor(database),
     );
@@ -171,20 +171,20 @@ describe("Textbefehle-Panel", () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     const environment = environmentFor(database);
 
-    const liste = await panelRouter.fetch(
+    const list = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "befehle", kind: "list", cooldownSekunden: 5,
+        name: "befehle", kind: "list", cooldownSeconds: 5,
       }),
       environment,
     );
     const text = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "leer", kind: "text", cooldownSekunden: 5,
+        name: "leer", kind: "text", cooldownSeconds: 5,
       }),
       environment,
     );
 
-    expect(liste.status).toBe(201);
+    expect(list.status).toBe(201);
     expect(text.status).toBe(400);
     await expect(database.prepare(
       "SELECT command_name, response_text, kind, enabled FROM text_commands",
@@ -201,7 +201,7 @@ describe("Textbefehle-Panel", () => {
 
     const create = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5,
+        name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5,
       }),
       environment,
     );
@@ -221,8 +221,8 @@ describe("Textbefehle-Panel", () => {
       "SELECT action, before_json, after_json FROM audit_log WHERE action = 'text_commands.befehl.geändert'",
     ).first()).resolves.toEqual({
       action: "text_commands.befehl.geändert",
-      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
-      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
     });
   });
 
@@ -234,7 +234,7 @@ describe("Textbefehle-Panel", () => {
 
     await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "hallo", text: "Antwort", cooldownSekunden: 5,
+        name: "hallo", text: "Antwort", cooldownSeconds: 5,
       }),
       environment,
     );
@@ -260,7 +260,7 @@ describe("Textbefehle-Panel", () => {
 
     const create = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "hallo", text: "Antwort", cooldownSekunden: 5,
+        name: "hallo", text: "Antwort", cooldownSeconds: 5,
       }),
       environment,
     );
@@ -268,7 +268,7 @@ describe("Textbefehle-Panel", () => {
 
     const deniedCreate = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "neu", text: "Neue Antwort", cooldownSekunden: 5,
+        name: "neu", text: "Neue Antwort", cooldownSeconds: 5,
       }),
       environment,
     );
@@ -300,7 +300,7 @@ describe("Textbefehle-Panel", () => {
 
     await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "hallo", text: "Antwort", cooldownSekunden: 5,
+        name: "hallo", text: "Antwort", cooldownSeconds: 5,
       }),
       environment,
     );
@@ -327,14 +327,14 @@ describe("Textbefehle-Panel", () => {
 
     await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "hallo", text: "Antwort", cooldownSekunden: 5,
+        name: "hallo", text: "Antwort", cooldownSeconds: 5,
       }),
       environment,
     );
     await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     const denied = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/hallo", "PATCH", {
-        mindeststufe: "moderator",
+        minimumTier: "moderator",
       }),
       environment,
     );
@@ -343,7 +343,7 @@ describe("Textbefehle-Panel", () => {
     await database.prepare("UPDATE channel_members SET role = 'manager' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     const changed = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/hallo", "PATCH", {
-        mindeststufe: "moderator",
+        minimumTier: "moderator",
       }),
       environment,
     );
@@ -355,8 +355,8 @@ describe("Textbefehle-Panel", () => {
     await expect(database.prepare(
       "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.befehl.geändert'",
     ).first()).resolves.toEqual({
-      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
-      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "moderator", text: "Antwort", cooldownSekunden: 5 }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5 }),
     });
   });
 });

@@ -4,7 +4,7 @@ import { hmacSha256, parseKeyRing } from "./auth/crypto";
 import { confirmBotIdentityAuthorization } from "./bot-maintenance";
 import { confirmLoginIdentityAuthorization } from "./login-maintenance";
 import { dispatchEventSubNotification } from "./dispatch";
-import { aktualisiereWerbevorwarnung, isWerbevorwarnungsAnlass } from "./werbe-vorwarnung";
+import { refreshAdPrewarning, isAdPrewarningTrigger } from "./ad-prewarning";
 import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
 import type { EventSubSubscriptionType } from "../contracts/values";
 import {
@@ -180,7 +180,7 @@ const subscriptionRecord = (
  * ausschließlich aus der Bedingung des Abos und nie aus dem Ereignisrumpf —
  * sonst könnte ein fremder Kanal in unseren hineinschreiben.
  */
-const notificationZiel = (body: Record<string, unknown>): {
+const notificationTarget = (body: Record<string, unknown>): {
   channelId: string;
   subscriptionType: EventSubSubscriptionType;
   subscriptionVariant: string;
@@ -286,23 +286,23 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
   if (!isNew) return response(null, 204);
 
-  const ziel = notificationZiel(body);
-  if (ziel === null) return response("Ungültige EventSub-Benachrichtigung.", 400);
+  const target = notificationTarget(body);
+  if (target === null) return response("Ungültige EventSub-Benachrichtigung.", 400);
 
   // Bewusst abgewartet statt im Hintergrund: Ein Chat-Aufruf ist kurz, und so
   // ist der Ausgang in Tests sichtbar. Sollte die Verteilung später länger
   // dauern, gehört sie hinter die Antwort.
   await dispatchEventSubNotification(context.env, {
-    channelId: ziel.channelId,
-    subscriptionType: ziel.subscriptionType,
-    subscriptionVariant: ziel.subscriptionVariant,
+    channelId: target.channelId,
+    subscriptionType: target.subscriptionType,
+    subscriptionVariant: target.subscriptionVariant,
     triggerId: messageId,
-    payload: ziel.payload,
+    payload: target.payload,
     receivedAt: now,
   });
-  if (isWerbevorwarnungsAnlass(ziel.subscriptionType)) {
+  if (isAdPrewarningTrigger(target.subscriptionType)) {
     try {
-      await aktualisiereWerbevorwarnung(context.env, ziel.channelId, messageId, now);
+      await refreshAdPrewarning(context.env, target.channelId, messageId, now);
     } catch (error: unknown) {
       console.error("Werbe-Vorwarnung konnte nicht aktualisiert werden.", error);
     }

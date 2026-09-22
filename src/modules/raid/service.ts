@@ -2,12 +2,12 @@ import type { ModuleEvent, ModuleResult } from "../contract";
 import type { RaidSettings } from "./contracts";
 import { entscheideRaid } from "./domain";
 
-const textMitRaid = (vorlage: string, kanal: string, zuschauer: number): string => vorlage
+const textMitRaid = (vorlage: string, channel: string, zuschauer: number): string => vorlage
   .trim()
-  .replaceAll("{channel}", kanal)
+  .replaceAll("{channel}", channel)
   .replaceAll("{viewers}", String(zuschauer));
 
-export const verarbeiteRaid = (
+export const processRaid = (
   event: ModuleEvent<RaidSettings>,
 ): ModuleResult => {
   const entscheidung = entscheideRaid(

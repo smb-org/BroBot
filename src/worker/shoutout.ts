@@ -37,10 +37,10 @@ export const sendShoutout = async (
     SESSION_ENCRYPTION_KEYS?: string;
   },
   channelId: string,
-  zielKanalId: string,
+  targetChannelId: string,
   fetcher: typeof fetch = fetch,
 ): Promise<ShoutoutSendResult> => {
-  const detail = { von: channelId, nach: zielKanalId };
+  const detail = { von: channelId, nach: targetChannelId };
   const identity = await getBotIdentity(environment.DB);
   if (identity === null) return { sent: false, reason: "bot_identity_missing", detail };
 
@@ -59,7 +59,7 @@ export const sendShoutout = async (
   // Absender ist der eigene Kanal, Empfaenger der Quellkanal des Raids.
   // Vertauscht wuerde Twitch mit 401 antworten: Der Bot ist dort kein Moderator.
   url.searchParams.set("from_broadcaster_id", channelId);
-  url.searchParams.set("to_broadcaster_id", zielKanalId);
+  url.searchParams.set("to_broadcaster_id", targetChannelId);
   url.searchParams.set("moderator_id", identity.userId);
 
   let response: Response;

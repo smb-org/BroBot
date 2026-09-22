@@ -1,37 +1,37 @@
 import { describe, expect, it } from "vitest";
 
 import type { ModuleEvent, ModuleResult } from "../../src/modules/contract";
-import { verarbeiteTextbefehlNachricht } from "../../src/modules/text_commands/service";
-import type { Textbefehl, TextbefehlRepository } from "../../src/modules/text_commands";
+import { processTextCommandMessage } from "../../src/modules/text_commands/service";
+import type { TextCommand, TextCommandRepository } from "../../src/modules/text_commands";
 
 const JETZT = "2026-09-19T12:00:00.000Z";
 
-const befehl = (name: string, text: string, zuletztVerwendetAt: string | null = null): Textbefehl => ({
+const command = (name: string, text: string, lastUsedAt: string | null = null): TextCommand => ({
   channelId: "kanal-a",
   name,
   text,
   kind: "text",
   enabled: true,
-  mindeststufe: "everyone",
-  cooldownSekunden: 5,
-  zuletztVerwendetAt,
+  minimumTier: "everyone",
+  cooldownSeconds: 5,
+  lastUsedAt,
   createdAt: JETZT,
   updatedAt: JETZT,
 });
 
-const repositoryFuer = (befehle: Textbefehl[]): TextbefehlRepository => ({
-  auflisten: () => Promise.resolve(befehle),
-  finden: (_channelId, name) => Promise.resolve(befehle.find((eintrag) => eintrag.name === name) ?? null),
+const repositoryFor = (commands: TextCommand[]): TextCommandRepository => ({
+  auflisten: () => Promise.resolve(commands),
+  finden: (_channelId, name) => Promise.resolve(commands.find((entry) => entry.name === name) ?? null),
   anlegen: () => Promise.resolve({ ok: true }),
   aendern: () => Promise.resolve({ ok: true }),
   loeschen: () => Promise.resolve({ ok: true }),
   beanspruchen: (_channelId, name) => {
-    const eintrag = befehle.find((candidate) => candidate.name === name);
-    return Promise.resolve(eintrag === undefined ? null : { befehl: eintrag, beansprucht: eintrag.zuletztVerwendetAt === null });
+    const entry = commands.find((candidate) => candidate.name === name);
+    return Promise.resolve(entry === undefined ? null : { befehl: entry, beansprucht: entry.lastUsedAt === null });
   },
 });
 
-const eventFuer = (text: string, actor: ModuleEvent["actor"] = {
+const eventFor = (text: string, actor: ModuleEvent["actor"] = {
   userId: "user-1", login: "alice", role: "operator",
 }): ModuleEvent => ({
   channelId: "kanal-a",
@@ -50,9 +50,9 @@ const eventFuer = (text: string, actor: ModuleEvent["actor"] = {
 
 describe("Textbefehle-Service", () => {
   it("ersetzt User und Kanal im gespeicherten Antworttext", async () => {
-    const result: ModuleResult = await verarbeiteTextbefehlNachricht(
-      eventFuer("!hallo"),
-      repositoryFuer([befehl("hallo", "Hallo {user} in {channel}")]),
+    const result: ModuleResult = await processTextCommandMessage(
+      eventFor("!hallo"),
+      repositoryFor([command("hallo", "Hallo {user} in {channel}")]),
     );
 
     expect(result.actions).toEqual([{
@@ -67,9 +67,9 @@ describe("Textbefehle-Service", () => {
   });
 
   it("protokolliert Befehl, Argumente und aufgelöste Antwort", async () => {
-    const result = await verarbeiteTextbefehlNachricht(
-      eventFuer("!hallo erster   zweiter"),
-      repositoryFuer([befehl("hallo", "Antwort für {user}")]),
+    const result = await processTextCommandMessage(
+      eventFor("!hallo erster   zweiter"),
+      repositoryFor([command("hallo", "Antwort für {user}")]),
     );
 
     expect(result.diagnostics).toEqual([{
@@ -79,9 +79,9 @@ describe("Textbefehle-Service", () => {
   });
 
   it("trimmt Argumente nach mehreren Leerzeichen zwischen Name und Argument", async () => {
-    const result = await verarbeiteTextbefehlNachricht(
-      eventFuer("!wiki   foo bar"),
-      repositoryFuer([befehl("wiki", "Antwort")]),
+    const result = await processTextCommandMessage(
+      eventFor("!wiki   foo bar"),
+      repositoryFor([command("wiki", "Antwort")]),
     );
 
     expect(result.diagnostics).toEqual([{
@@ -93,13 +93,13 @@ describe("Textbefehle-Service", () => {
   it("kürzt Argumente und Antwort sichtbar, lässt genau 200 Zeichen aber unverändert", async () => {
     const exaktZweihundert = "x".repeat(200);
     const zuLang = "y".repeat(201);
-    const exakt = await verarbeiteTextbefehlNachricht(
-      eventFuer(`!hallo ${exaktZweihundert}`),
-      repositoryFuer([befehl("hallo", exaktZweihundert)]),
+    const exakt = await processTextCommandMessage(
+      eventFor(`!hallo ${exaktZweihundert}`),
+      repositoryFor([command("hallo", exaktZweihundert)]),
     );
-    const gekuerzt = await verarbeiteTextbefehlNachricht(
-      eventFuer(`!hallo ${zuLang}`),
-      repositoryFuer([befehl("hallo", zuLang)]),
+    const gekuerzt = await processTextCommandMessage(
+      eventFor(`!hallo ${zuLang}`),
+      repositoryFor([command("hallo", zuLang)]),
     );
 
     expect(exakt.diagnostics[0]?.detail).toEqual({
@@ -111,23 +111,23 @@ describe("Textbefehle-Service", () => {
   });
 
   it("schweigt bei einem unbekannten Befehl und begründet das", async () => {
-    const result = await verarbeiteTextbefehlNachricht(eventFuer("!gibt-es-nicht"), repositoryFuer([]));
+    const result = await processTextCommandMessage(eventFor("!gibt-es-nicht"), repositoryFor([]));
 
     expect(result.actions).toEqual([]);
     expect(result.diagnostics).toEqual([{ code: "text_commands.unbekannt", detail: { name: "gibt-es-nicht" } }]);
   });
 
   it("schweigt bei einer unbekannten Befehlsform und begründet das", async () => {
-    const result = await verarbeiteTextbefehlNachricht(eventFuer("!befehl unbekannt"), repositoryFuer([]));
+    const result = await processTextCommandMessage(eventFor("!befehl unbekannt"), repositoryFor([]));
 
     expect(result.actions).toEqual([]);
     expect(result.diagnostics).toEqual([{ code: "text_commands.unbekannt", detail: { name: "befehl" } }]);
   });
 
   it("schweigt während der Abkühlzeit und meldet die Restzeit", async () => {
-    const result = await verarbeiteTextbefehlNachricht(
-      eventFuer("!hallo"),
-      repositoryFuer([befehl("hallo", "Antwort", JETZT)]),
+    const result = await processTextCommandMessage(
+      eventFor("!hallo"),
+      repositoryFor([command("hallo", "Antwort", JETZT)]),
     );
 
     expect(result.actions).toEqual([]);
@@ -135,9 +135,9 @@ describe("Textbefehle-Service", () => {
   });
 
   it("schweigt bei einem ausgeschalteten Befehl und begründet das separat", async () => {
-    const result = await verarbeiteTextbefehlNachricht(
-      eventFuer("!hallo"),
-      repositoryFuer([{ ...befehl("hallo", "Antwort"), enabled: false }]),
+    const result = await processTextCommandMessage(
+      eventFor("!hallo"),
+      repositoryFor([{ ...command("hallo", "Antwort"), enabled: false }]),
     );
 
     expect(result.actions).toEqual([]);
@@ -148,12 +148,12 @@ describe("Textbefehle-Service", () => {
   });
 
   it("listet nur eingeschaltete Befehle und zählt die eigene Listenzeile mit auf", async () => {
-    const result = await verarbeiteTextbefehlNachricht(
-      eventFuer("!befehle"),
-      repositoryFuer([
-        { ...befehl("befehle", ""), kind: "list" },
-        { ...befehl("aktiv", "Antwort") },
-        { ...befehl("aus", "Antwort"), enabled: false },
+    const result = await processTextCommandMessage(
+      eventFor("!befehle"),
+      repositoryFor([
+        { ...command("befehle", ""), kind: "list" },
+        { ...command("aktiv", "Antwort") },
+        { ...command("aus", "Antwort"), enabled: false },
       ]),
     );
 
@@ -165,9 +165,9 @@ describe("Textbefehle-Service", () => {
   });
 
   it("wendet die Abkühlzeit auch auf Listenzeilen an", async () => {
-    const result = await verarbeiteTextbefehlNachricht(
-      eventFuer("!befehle"),
-      repositoryFuer([{ ...befehl("befehle", "", JETZT), kind: "list" }]),
+    const result = await processTextCommandMessage(
+      eventFor("!befehle"),
+      repositoryFor([{ ...command("befehle", "", JETZT), kind: "list" }]),
     );
 
     expect(result.actions).toEqual([]);

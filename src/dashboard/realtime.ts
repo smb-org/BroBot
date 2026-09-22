@@ -8,7 +8,7 @@ import type {
   RealtimeEventLogHint,
   RealtimeMessage,
 } from "../realtime-contract";
-import { ereignisTon, type EreignisCode } from "./locale";
+import { eventToneEntries, type EventCode } from "./locale";
 
 const REALTIME_PROTOCOL = "brobot.v1";
 const SOCKET_EXPIRED_CODE = 4001;
@@ -79,7 +79,7 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
 };
 
 const eventMetadata = (code: string) =>
-  Object.prototype.hasOwnProperty.call(ereignisTon, code) ? ereignisTon[code as EreignisCode] : null;
+  Object.prototype.hasOwnProperty.call(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
 
 /** Dieselbe Herkunftslogik wie die Ereignisroute: Betrieb ist Moduldiagnose. */
 export const realtimeHintMatchesFilters = (
@@ -91,8 +91,8 @@ export const realtimeHintMatchesFilters = (
   const metadata = eventMetadata(hint.code);
   if (filters.origin !== null) {
     if (metadata === null) return false;
-    const istModuldiagnose = metadata.familie === "betrieb";
-    if (filters.origin === "module" !== istModuldiagnose) return false;
+    const isModuleDiagnostic = metadata.familie === "betrieb";
+    if (filters.origin === "module" !== isModuleDiagnostic) return false;
   }
   if (filters.tone !== null && (metadata === null || metadata.tone !== filters.tone)) return false;
   return true;

@@ -1,7 +1,7 @@
-const textwert = (value: unknown): string | null =>
+const textValue = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
-const zuschauerwert = (value: unknown): number | null =>
+const viewerValue = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 
 export type RaidEntscheidung =
@@ -27,11 +27,11 @@ export const entscheideRaid = (
   payload: Readonly<Record<string, unknown>>,
   channelId: string,
   subscriptionVariant: string | undefined,
-  textSchwelle: number,
+  textThreshold: number,
 ): RaidEntscheidung => {
-  const fromId = textwert(payload.from_broadcaster_user_id);
-  const toId = textwert(payload.to_broadcaster_user_id);
-  const zuschauer = zuschauerwert(payload.viewers);
+  const fromId = textValue(payload.from_broadcaster_user_id);
+  const toId = textValue(payload.to_broadcaster_user_id);
+  const zuschauer = viewerValue(payload.viewers);
   const outgoing = subscriptionVariant === "outgoing" ||
     (subscriptionVariant !== "incoming" && fromId === channelId);
 
@@ -43,8 +43,8 @@ export const entscheideRaid = (
   return {
     kind: "incoming",
     quelleKanalId: fromId,
-    quelleKanalName: textwert(payload.from_broadcaster_user_name) ?? textwert(payload.from_broadcaster_user_login) ?? fromId,
+    quelleKanalName: textValue(payload.from_broadcaster_user_name) ?? textValue(payload.from_broadcaster_user_login) ?? fromId,
     viewers: zuschauer,
-    voll: zuschauer >= textSchwelle,
+    voll: zuschauer >= textThreshold,
   };
 };

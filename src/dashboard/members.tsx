@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } f
 import { CHANNEL_ROLES, type ChannelRole } from "../contracts/values";
 import type { PanelMember, PanelTwitchUser } from "../panel-contract";
 import { roleLabel } from "./labels";
-import { dashboardGemeinsameTexte, dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatDatum } from "./locale";
+import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatDatum } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
 import {
   addChannelMember,
@@ -35,14 +35,14 @@ const manageableRoles = CHANNEL_ROLES;
 /** Der Beitritt liegt Tage bis Jahre zurück; die Uhrzeit trägt dort nichts bei. */
 const formatJoinDate = (value: string): string => formatDatum(value);
 
-interface MembersTexte {
+interface MembersTexts {
   verwaltungGesperrt: string;
   zugriffVergeben: string;
   twitchName: string;
   suchen: string;
   sucheLaeuft: string;
   titel: string;
-  count: (anzahl: string) => string;
+  count: (count: string) => string;
   name: string;
   rolle: string;
   zugriffSeit: string;
@@ -69,10 +69,10 @@ interface MembersTexte {
   fremdenEntfernen: (name: string) => string;
 }
 
-const texte: LocaleCatalog<MembersTexte> = {
+const texts: LocaleCatalog<MembersTexts> = {
   de: {
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", zugriffVergeben: "Zugriff vergeben",
-    twitchName: "Twitch-Name", suchen: "Suchen", sucheLaeuft: "Suche läuft …", titel: "Mitglieder", count: (anzahl) => `${anzahl} Mitglieder`, name: "Name",
+    twitchName: "Twitch-Name", suchen: "Suchen", sucheLaeuft: "Suche läuft …", titel: "Mitglieder", count: (count) => `${count} Mitglieder`, name: "Name",
     rolle: "Rolle", zugriffSeit: "Zugriff seit", aktionen: "Aktionen", entziehen: "Entziehen",
     letzterBroadcaster: "Letzter Broadcaster", nichtAufloesbar: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
     rolleFuer: (name) => `Rolle für ${name}`, zugriffEntziehen: (name) => `Zugriff für ${name} entziehen`,
@@ -87,7 +87,7 @@ const texte: LocaleCatalog<MembersTexte> = {
   },
   en: {
     verwaltungGesperrt: "Only broadcasters and managers may change members.", zugriffVergeben: "Grant access", twitchName: "Twitch name",
-    suchen: "Search", sucheLaeuft: "Searching …", titel: "Members", count: (anzahl) => `${anzahl} members`, name: "Name", rolle: "Role", zugriffSeit: "Access since",
+    suchen: "Search", sucheLaeuft: "Searching …", titel: "Members", count: (count) => `${count} members`, name: "Name", rolle: "Role", zugriffSeit: "Access since",
     aktionen: "Actions", entziehen: "Remove", letzterBroadcaster: "Last broadcaster", nichtAufloesbar: "Unresolvable",
     twitchId: (userId) => `Twitch ID ${userId}`, rolleFuer: (name) => `Role for ${name}`, zugriffEntziehen: (name) => `Remove access for ${name}`,
     leer: "No one else has access to this channel yet.", zugriffFreigeben: "Grant access", neueRolle: "Role for new membership",
@@ -100,12 +100,12 @@ const texte: LocaleCatalog<MembersTexte> = {
   },
 };
 
-const membersTexte = (language: DashboardLanguage = dashboardLanguage()): MembersTexte => texte[language];
+const membersTexts = (language: DashboardLanguage = dashboardLanguage()): MembersTexts => texts[language];
 
 const errorMessage = (error: unknown): string => {
-  if (error instanceof PanelApiError && error.status === 401) return membersTexte().sitzungUngueltig;
+  if (error instanceof PanelApiError && error.status === 401) return membersTexts().sitzungUngueltig;
   if (error instanceof Error && error.message.length > 0) return error.message;
-  return membersTexte().aenderungFehlgeschlagen;
+  return membersTexts().aenderungFehlgeschlagen;
 };
 
 const canManage = (role: ChannelRole): boolean => role !== "operator";
@@ -126,7 +126,7 @@ const letzterBroadcaster = (member: PanelMember, broadcasterCount: number): bool
 
 const entzugGesperrt = (member: PanelMember, broadcasterCount: number): string | null =>
   letzterBroadcaster(member, broadcasterCount)
-    ? membersTexte().letzterBroadcaster
+    ? membersTexts().letzterBroadcaster
     : null;
 
 /**
@@ -145,13 +145,13 @@ const waehlbareRollen = (
 };
 
 const memberLabel = (member: PanelMember): string =>
-  member.displayName ?? (member.login === null ? membersTexte().nichtAufloesbar : `@${member.login}`);
+  member.displayName ?? (member.login === null ? membersTexts().nichtAufloesbar : `@${member.login}`);
 
 const roleOptions = (rollen: readonly ChannelRole[] = manageableRoles): ReactElement[] =>
   rollen.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>);
 
 const accessConfirmation = (role: ChannelRole): string =>
-  membersTexte().bestaetigung(roleLabel(role));
+  membersTexts().bestaetigung(roleLabel(role));
 
 /**
  * `src` darf auch fehlen, nicht nur `null` sein: Während eines Deploys kann
@@ -183,13 +183,13 @@ const MemberTable = ({
   onRemove: (member: PanelMember) => void;
   busyUserId: string | null;
 }): ReactElement => {
-  const texte = membersTexte();
-  if (members.length === 0) return <p className="muted">{texte.leer}</p>;
-  const verwaltungGesperrt = canManageMembers ? null : texte.verwaltungGesperrt;
+  const texts = membersTexts();
+  if (members.length === 0) return <p className="muted">{texts.leer}</p>;
+  const verwaltungGesperrt = canManageMembers ? null : texts.verwaltungGesperrt;
   return (
     <div className="tabelle-wrap">
       <table className="tabelle mitglieder-tabelle">
-        <thead className="sr-only"><tr role="row"><th scope="col" role="columnheader">{texte.name}</th><th scope="col" role="columnheader">{texte.rolle}</th><th scope="col" role="columnheader" aria-sort="descending">{texte.zugriffSeit}</th><th scope="col" role="columnheader" className="tabelle__aktion"><span className="sr-only">{texte.aktionen}</span></th></tr></thead>
+        <thead className="sr-only"><tr role="row"><th scope="col" role="columnheader">{texts.name}</th><th scope="col" role="columnheader">{texts.rolle}</th><th scope="col" role="columnheader" aria-sort="descending">{texts.zugriffSeit}</th><th scope="col" role="columnheader" className="tabelle__aktion"><span className="sr-only">{texts.aktionen}</span></th></tr></thead>
         <tbody>
           {members.map((member) => (
             <tr key={member.userId} role="row">
@@ -206,13 +206,13 @@ const MemberTable = ({
                         rel="noreferrer noopener"
                       >twitch.tv/{member.login}</a>
                     ) : null}
-                    {member.displayName === null && member.login === null ? <span className="login-hinweis">{texte.twitchId(member.userId)}</span> : null}
+                    {member.displayName === null && member.login === null ? <span className="login-hinweis">{texts.twitchId(member.userId)}</span> : null}
                   </div>
                 </div>
               </th>
               <td role="cell">
                 <select
-                  aria-label={texte.rolleFuer(memberLabel(member))}
+                  aria-label={texts.rolleFuer(memberLabel(member))}
                   value={member.role}
                   disabled={!canManageMembers || busyUserId === member.userId || letzterBroadcaster(member, broadcasterCount)}
                   title={verwaltungGesperrt ?? entzugGesperrt(member, broadcasterCount) ?? undefined}
@@ -220,19 +220,19 @@ const MemberTable = ({
                   >
                     {roleOptions(waehlbareRollen(member, eigeneUserId, broadcasterCount))}
                   </select>
-                  {verwaltungGesperrt !== null ? <span className="sperrgrund">{verwaltungGesperrt}</span> : entzugGesperrt(member, broadcasterCount) === null ? null : <span className="sperrgrund">{texte.letzterBroadcaster}</span>}
+                  {verwaltungGesperrt !== null ? <span className="sperrgrund">{verwaltungGesperrt}</span> : entzugGesperrt(member, broadcasterCount) === null ? null : <span className="sperrgrund">{texts.letzterBroadcaster}</span>}
               </td>
               <td className="zahl" role="cell">{formatJoinDate(member.joinedAt)}</td>
               <td className="tabelle__aktion" role="cell">
                 <button
                   className="button button--quiet"
                   type="button"
-                  aria-label={texte.zugriffEntziehen(memberLabel(member))}
+                  aria-label={texts.zugriffEntziehen(memberLabel(member))}
                   disabled={!canManageMembers || busyUserId === member.userId || entzugGesperrt(member, broadcasterCount) !== null}
                   title={verwaltungGesperrt ?? entzugGesperrt(member, broadcasterCount) ?? undefined}
                   onClick={() => onRemove(member)}
-                >{texte.entziehen}</button>
-                {entzugGesperrt(member, broadcasterCount) === null ? null : <span className="sperrgrund">{texte.letzterBroadcaster}</span>}
+                >{texts.entziehen}</button>
+                {entzugGesperrt(member, broadcasterCount) === null ? null : <span className="sperrgrund">{texts.letzterBroadcaster}</span>}
               </td>
             </tr>
           ))}
@@ -256,7 +256,7 @@ export const MembersPage = ({
   onLoadNextPage,
   onAuthenticationRequired,
 }: MembersPageProperties): ReactElement => {
-  const texte = membersTexte();
+  const texts = membersTexts();
   const [login, setLogin] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -331,8 +331,8 @@ export const MembersPage = ({
   const handleRemove = async (member: PanelMember): Promise<void> => {
     const selbst = member.userId === eigeneUserId;
     const frage = selbst
-      ? texte.selbstEntfernen
-      : texte.fremdenEntfernen(memberLabel(member));
+      ? texts.selbstEntfernen
+      : texts.fremdenEntfernen(memberLabel(member));
     if (!window.confirm(frage)) return;
     setBusyUserId(member.userId);
     setActionError(null);
@@ -349,15 +349,15 @@ export const MembersPage = ({
 
   return (
     <>
-      <ModuleHeading kind="members" title={texte.titel} subtitle={<ModuleCount count={members.length} label={texte.count} />} />
-      <section className="inspector-section inspector-form" aria-label={texte.zugriffVergeben}>
-        <div className="section-heading"><h2>{texte.zugriffVergeben}</h2></div>
-        {!canManageMembers ? <p className="sperrgrund">{texte.verwaltungGesperrt}</p> : null}
+      <ModuleHeading kind="members" title={texts.titel} subtitle={<ModuleCount count={members.length} label={texts.count} />} />
+      <section className="inspector-section inspector-form" aria-label={texts.zugriffVergeben}>
+        <div className="section-heading"><h2>{texts.zugriffVergeben}</h2></div>
+        {!canManageMembers ? <p className="sperrgrund">{texts.verwaltungGesperrt}</p> : null}
         <form className="inspector-form" onSubmit={(event) => { void handleSearch(event); }}>
-          <label htmlFor="member-search">{texte.twitchName}</label>
-          <div className="form-row"><input id="member-search" value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="off" disabled={!canManageMembers} title={!canManageMembers ? texte.verwaltungGesperrt : undefined} /><button className="button" type="submit" disabled={!canManageMembers || searching || login.trim().length === 0} title={!canManageMembers ? texte.verwaltungGesperrt : undefined}>{searching ? texte.sucheLaeuft : texte.suchen}</button></div>
+          <label htmlFor="member-search">{texts.twitchName}</label>
+          <div className="form-row"><input id="member-search" value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="off" disabled={!canManageMembers} title={!canManageMembers ? texts.verwaltungGesperrt : undefined} /><button className="button" type="submit" disabled={!canManageMembers || searching || login.trim().length === 0} title={!canManageMembers ? texts.verwaltungGesperrt : undefined}>{searching ? texts.sucheLaeuft : texts.suchen}</button></div>
         </form>
-        {!canManageMembers && foundUser === null ? <div><button className="button" type="button" disabled title={texte.verwaltungGesperrt}>{texte.zugriffFreigeben}</button><span className="sperrgrund">{texte.verwaltungGesperrt}</span></div> : null}
+        {!canManageMembers && foundUser === null ? <div><button className="button" type="button" disabled title={texts.verwaltungGesperrt}>{texts.zugriffFreigeben}</button><span className="sperrgrund">{texts.verwaltungGesperrt}</span></div> : null}
         {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
         {foundUser === null ? null : (
           <div className="inspector-result">
@@ -374,10 +374,10 @@ export const MembersPage = ({
                 >twitch.tv/{foundUser.login}</a>
               </div>
             </div>
-            <label>{texte.rolle}<select aria-label={texte.neueRolle} value={newRole} disabled={!canManageMembers} title={!canManageMembers ? texte.verwaltungGesperrt : undefined} onChange={(event) => setNewRole(event.target.value as ChannelRole)}>{roleOptions()}</select></label>
+            <label>{texts.rolle}<select aria-label={texts.neueRolle} value={newRole} disabled={!canManageMembers} title={!canManageMembers ? texts.verwaltungGesperrt : undefined} onChange={(event) => setNewRole(event.target.value as ChannelRole)}>{roleOptions()}</select></label>
             <div>
-              <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texte.verwaltungGesperrt : undefined}>{texte.zugriffFreigeben}</button>
-              {!canManageMembers ? <span className="sperrgrund">{texte.verwaltungGesperrt}</span> : null}
+              <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texts.verwaltungGesperrt : undefined}>{texts.zugriffFreigeben}</button>
+              {!canManageMembers ? <span className="sperrgrund">{texts.verwaltungGesperrt}</span> : null}
             </div>
           </div>
         )}
@@ -393,28 +393,28 @@ export const MembersPage = ({
             <div className="avatar-row">
               <MemberAvatar src={foundUser.profileImageUrl} />
               <div>
-                <h3 id="member-add-confirmation-title">{texte.bestaetigungTitel(foundUser.displayName)}</h3>
+                <h3 id="member-add-confirmation-title">{texts.bestaetigungTitel(foundUser.displayName)}</h3>
                 <span>@{foundUser.login}</span>
               </div>
             </div>
             <p id="member-add-confirmation-description">{accessConfirmation(newRole)}</p>
-            {!canManageMembers ? <span className="sperrgrund">{texte.verwaltungGesperrt}</span> : null}
+            {!canManageMembers ? <span className="sperrgrund">{texts.verwaltungGesperrt}</span> : null}
             <div className="form-actions">
-              <button ref={confirmButtonRef} className="button button--primary" type="button" onClick={() => { void handleAdd(); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texte.verwaltungGesperrt : undefined}>{texte.endgueltigFreigeben}</button>
-              <button className="button button--quiet" type="button" onClick={cancelAdd} disabled={busyUserId === foundUser.userId}>{dashboardGemeinsameTexte().abbrechen}</button>
+              <button ref={confirmButtonRef} className="button button--primary" type="button" onClick={() => { void handleAdd(); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texts.verwaltungGesperrt : undefined}>{texts.endgueltigFreigeben}</button>
+              <button className="button button--quiet" type="button" onClick={cancelAdd} disabled={busyUserId === foundUser.userId}>{dashboardCommonTexts().abbrechen}</button>
             </div>
           </div>
         ) : null}
       </section>
-      <section className="content-section" aria-label={texte.freigegebeneMitglieder}>
-        <div className="section-heading"><h2>{texte.freigegebeneMitglieder}</h2></div>
-        {loading && members.length === 0 ? <p className="loading-line">{texte.laden}</p> : null}
+      <section className="content-section" aria-label={texts.freigegebeneMitglieder}>
+        <div className="section-heading"><h2>{texts.freigegebeneMitglieder}</h2></div>
+        {loading && members.length === 0 ? <p className="loading-line">{texts.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
         {members.length === 0 && loading ? null : <div className={loading ? "veraltet" : undefined}>
           <MemberTable members={members} canManageMembers={canManageMembers} broadcasterCount={broadcasterCount} eigeneUserId={eigeneUserId} onRoleChange={(userId, role) => { void handleRoleChange(userId, role); }} onRemove={(member) => { void handleRemove(member); }} busyUserId={busyUserId} />
         </div>}
-        {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texte.weitereWerdenGeladen : texte.weitereLaden}</button>}
+        {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.weitereWerdenGeladen : texts.weitereLaden}</button>}
       </section>
     </>
   );

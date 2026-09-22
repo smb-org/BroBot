@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { kanalereignisseModul } from "../../src/modules/channel_events";
+import { channelEventsModule } from "../../src/modules/channel_events";
 import type { ModuleEvent } from "../../src/modules/contract";
 
 const event = (subscriptionType: string, payload: Record<string, unknown>, subscriptionVariant?: string): ModuleEvent<Record<string, never>> => ({
@@ -41,7 +41,7 @@ describe("Kanalereignisse-Modul", () => {
     ];
 
     for (const moduleEvent of events) {
-      const result = await kanalereignisseModul.handleEvent?.(moduleEvent, {} as never);
+      const result = await channelEventsModule.handleEvent?.(moduleEvent, {} as never);
       expect(result?.actions).toHaveLength(0);
     }
   });

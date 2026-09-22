@@ -1,8 +1,8 @@
 import type {
   PanelAuditResponse,
-  PanelBetreiberMitgliederResponse,
-  PanelBetreiberAuditResponse,
-  PanelBetreiberÜbersichtResponse,
+  PanelPlatformMembersResponse,
+  PanelPlatformAuditResponse,
+  PanelPlatformOverviewResponse,
   PanelChannelOverview,
   PanelChannelsResponse,
   PanelEventsResponse,
@@ -93,73 +93,73 @@ const modulePath = (channelId: string, moduleId?: string): string =>
 export const fetchChannels = (signal?: AbortSignal): Promise<PanelChannelsResponse> =>
   requestJson<PanelChannelsResponse>("/api/channels", requestOptions(signal));
 
-export const holeBetreiberÜbersicht = (): Promise<PanelBetreiberÜbersichtResponse> =>
-  requestJson<PanelBetreiberÜbersichtResponse>("/api/platform");
+export const getPlatformOverview = (): Promise<PanelPlatformOverviewResponse> =>
+  requestJson<PanelPlatformOverviewResponse>("/api/platform");
 
-export const sucheBetreiberNutzer = (login: string): Promise<{ user: PanelTwitchUser }> =>
+export const searchPlatformUser = (login: string): Promise<{ user: PanelTwitchUser }> =>
   requestJson<{ user: PanelTwitchUser }>(`/api/platform/users?${new URLSearchParams({ login }).toString()}`);
 
-export const gibBetreiberKanalFrei = (
+export const releasePlatformChannel = (
   login: string,
-  vollzustimmung: boolean,
-): Promise<{ channel: PanelBetreiberÜbersichtResponse["channels"][number] }> => requestMutation(
+  fullConsent: boolean,
+): Promise<{ channel: PanelPlatformOverviewResponse["channels"][number] }> => requestMutation(
   "/api/platform/channels",
   "POST",
-  { login, fullConsent: vollzustimmung },
+  { login, fullConsent: fullConsent },
 );
 
-export const setzeBetreiberVollzustimmung = (
+export const setPlatformFullConsent = (
   channelId: string,
-  vollzustimmung: boolean,
-): Promise<{ channel: PanelBetreiberÜbersichtResponse["channels"][number] }> => requestMutation(
+  fullConsent: boolean,
+): Promise<{ channel: PanelPlatformOverviewResponse["channels"][number] }> => requestMutation(
   `/api/platform/channels/${encodeURIComponent(channelId)}`,
   "PATCH",
-  { fullConsent: vollzustimmung },
+  { fullConsent: fullConsent },
 );
 
-export const holeBetreiberMitglieder = (
+export const getPlatformMembers = (
   channelId: string,
   cursor: string | null = null,
-): Promise<PanelBetreiberMitgliederResponse> => {
+): Promise<PanelPlatformMembersResponse> => {
   const parameter = new URLSearchParams();
   if (cursor !== null) parameter.set("cursor", cursor);
   const query = parameter.toString();
-  return requestJson<PanelBetreiberMitgliederResponse>(
+  return requestJson<PanelPlatformMembersResponse>(
     `/api/platform/channels/${encodeURIComponent(channelId)}/members${query.length > 0 ? `?${query}` : ""}`,
   );
 };
 
-export const fügeBetreiberMitgliedHinzu = (
+export const addPlatformMember = (
   channelId: string,
   userId: string,
   role: "manager" | "operator",
-): Promise<{ member: PanelBetreiberMitgliederResponse["members"][number] }> => requestMutation(
+): Promise<{ member: PanelPlatformMembersResponse["members"][number] }> => requestMutation(
   `/api/platform/channels/${encodeURIComponent(channelId)}/members`,
   "POST",
   { userId, role },
 );
 
-export const ändereBetreiberMitglied = (
+export const changePlatformMember = (
   channelId: string,
   userId: string,
   role: "manager" | "operator",
-): Promise<{ member: PanelBetreiberMitgliederResponse["members"][number] }> => requestMutation(
+): Promise<{ member: PanelPlatformMembersResponse["members"][number] }> => requestMutation(
   `/api/platform/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}`,
   "PATCH",
   { role },
 );
 
-export const entferneBetreiberMitglied = (channelId: string, userId: string): Promise<undefined> =>
+export const removePlatformMember = (channelId: string, userId: string): Promise<undefined> =>
   requestMutation<undefined>(
     `/api/platform/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}`,
     "DELETE",
   );
 
-export const holeBetreiberAudit = (cursor: string | null = null): Promise<PanelBetreiberAuditResponse> => {
+export const getPlatformAudit = (cursor: string | null = null): Promise<PanelPlatformAuditResponse> => {
   const parameter = new URLSearchParams();
   if (cursor !== null) parameter.set("cursor", cursor);
   const query = parameter.toString();
-  return requestJson<PanelBetreiberAuditResponse>(`/api/platform/audit${query.length > 0 ? `?${query}` : ""}`);
+  return requestJson<PanelPlatformAuditResponse>(`/api/platform/audit${query.length > 0 ? `?${query}` : ""}`);
 };
 
 export const fetchChannelOverview = (

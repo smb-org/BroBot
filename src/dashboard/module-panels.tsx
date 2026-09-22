@@ -4,13 +4,13 @@ import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
 import type { ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState } from "../panel-contract";
-import { dashboardLanguage, dashboardTexte, formatZahl, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { dashboardLanguage, dashboardTexts, formatZahl, type DashboardLanguage, type LocaleCatalog } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
 
-interface ModuleWorkspaceTexte {
+interface ModuleWorkspaceTexts {
   status: string;
   hauptschalter: string;
   inhalt: string;
@@ -21,7 +21,7 @@ interface ModuleWorkspaceTexte {
   keineBeschreibung: string;
 }
 
-const workspaceKatalog: LocaleCatalog<ModuleWorkspaceTexte> = {
+const workspaceKatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
   de: {
     status: "Modulstatus",
     hauptschalter: "Hauptschalter",
@@ -44,14 +44,14 @@ const workspaceKatalog: LocaleCatalog<ModuleWorkspaceTexte> = {
   },
 };
 
-const workspaceTexte = (language: DashboardLanguage = dashboardLanguage()): ModuleWorkspaceTexte => workspaceKatalog[language];
+const workspaceTexts = (language: DashboardLanguage = dashboardLanguage()): ModuleWorkspaceTexts => workspaceKatalog[language];
 
 const moduleDetails = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): { name: string; description: string } => ({
   name: moduleName(moduleId, language),
-  description: moduleDescription(moduleId, language) ?? workspaceTexte(language).keineBeschreibung,
+  description: moduleDescription(moduleId, language) ?? workspaceTexts(language).keineBeschreibung,
 });
 
-export type ZustandsTon = "healthy" | "warning" | "error" | "neutral";
+export type StateTone = "healthy" | "warning" | "error" | "neutral";
 export type LedStatus = "green" | "amber" | "red" | "off";
 
 export const NavigationIcon = ({ kind, className = "navigation-icon" }: { kind: string; className?: string }): ReactElement => (
@@ -78,9 +78,9 @@ export const Led = ({ status, label }: { status: LedStatus; label: string }): Re
   </span>
 );
 
-export const ZustandZeile = ({ label, tone, wort, detail, aktion, icon }: {
+export const StateRow = ({ label, tone, wort, detail, aktion, icon }: {
   label: string;
-  tone: ZustandsTon;
+  tone: StateTone;
   wort: string;
   detail?: ReactNode;
   aktion?: ReactNode;
@@ -118,7 +118,7 @@ export const ModuleCount = ({ count, label }: { count: number; label: (formatted
   return <>{<span className="zahl">{formattedCount}</span>}{label(formattedCount).slice(formattedCount.length)}</>;
 };
 
-export const ModuleTaste = ({ channelId, moduleId, enabled, onNavigate, name, icon, route, ledStatus, ledLabel }: {
+export const ModuleTile = ({ channelId, moduleId, enabled, onNavigate, name, icon, route, ledStatus, ledLabel }: {
   channelId: string;
   moduleId: string;
   enabled: boolean;
@@ -130,26 +130,26 @@ export const ModuleTaste = ({ channelId, moduleId, enabled, onNavigate, name, ic
   ledLabel?: string;
 }): ReactElement => {
   const details = moduleDetails(moduleId);
-  const tasteRoute: DashboardRoute = route ?? { kind: "module", channelId, moduleId };
+  const tileRoute: DashboardRoute = route ?? { kind: "module", channelId, moduleId };
   const tasteName = name ?? details.name;
-  const tasteStatus = ledStatus ?? (enabled ? "green" : "off");
+  const tileStatus = ledStatus ?? (enabled ? "green" : "off");
   const tasteLabel = ledLabel ?? statusWord(enabled);
   const label = `${tasteName} · ${tasteLabel}`;
   return (
     <a
       className="module-taste"
-      href={dashboardRoutePath(tasteRoute)}
+      href={dashboardRoutePath(tileRoute)}
       aria-label={label}
       data-enabled={enabled ? "true" : "false"}
-      data-status={tasteStatus}
+      data-status={tileStatus}
       onClick={(event) => {
         event.preventDefault();
-        onNavigate(tasteRoute);
+        onNavigate(tileRoute);
       }}
     >
       <span className="module-taste__icon" aria-hidden="true">{icon ?? iconFor(moduleId)}</span>
       <strong>{tasteName}</strong>
-      <Led status={tasteStatus} label={tasteLabel} />
+      <Led status={tileStatus} label={tasteLabel} />
     </a>
   );
 };
@@ -160,7 +160,7 @@ export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
   activeModules: PanelActiveModule[];
   onNavigate: (route: DashboardRoute) => void;
 }): ReactElement => (
-  <nav className="module-navigation" aria-label={dashboardTexte().module.module}>
+  <nav className="module-navigation" aria-label={dashboardTexts().module.module}>
     {activeModules.map(({ moduleId }) => {
       const route: DashboardRoute = { kind: "module", channelId, moduleId };
       return <a className="nav-link" href={dashboardRoutePath(route)} key={moduleId} onClick={(event) => { event.preventDefault(); onNavigate(route); }}>{moduleName(moduleId)}</a>;
@@ -213,17 +213,17 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true }:
   });
 
   if (registeredPanels.length === 0) {
-    const texte = dashboardTexte();
+    const texts = dashboardTexts();
     return (
-      <section className="module-empty" aria-label={texte.module.module}>
-        <p>{activeModules.length === 0 ? texte.module.keineAktiv : texte.module.keineAnsicht}</p>
+      <section className="module-empty" aria-label={texts.module.module}>
+        <p>{activeModules.length === 0 ? texts.module.keineAktiv : texts.module.keineAnsicht}</p>
       </section>
     );
   }
 
   return (
-    <section className="module-stack" aria-label={dashboardTexte().module.ansichten}>
-      <Suspense fallback={<p className="muted">{dashboardTexte().module.ansichtenLaden}</p>}>
+    <section className="module-stack" aria-label={dashboardTexts().module.ansichten}>
+      <Suspense fallback={<p className="muted">{dashboardTexts().module.ansichtenLaden}</p>}>
         {registeredPanels.map(({ id, Panel }) => <Panel key={id} channelId={channelId} language={dashboardLanguage()} canManage={canManage} />)}
       </Suspense>
     </section>
@@ -249,20 +249,20 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
   }));
 
   return (
-    <section className="module-workspace" aria-label={dashboardTexte().navigation.module}>
+    <section className="module-workspace" aria-label={dashboardTexts().navigation.module}>
       <div className="module-workspace__main">
         <header className="module-workspace__heading">
-          <h1>{dashboardTexte().navigation.module}</h1>
-          {loading ? <span className="muted">{dashboardTexte().module.laden}</span> : null}
+          <h1>{dashboardTexts().navigation.module}</h1>
+          {loading ? <span className="muted">{dashboardTexts().module.laden}</span> : null}
         </header>
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         <div className="module-grid">
-          {registeredModules.map(({ id, enabled, missing }) => <ModuleTaste
+          {registeredModules.map(({ id, enabled, missing }) => <ModuleTile
             key={id}
             channelId={channelId}
             moduleId={id}
             enabled={enabled}
-            {...(missing.length === 0 ? {} : { ledStatus: "amber" as const, ledLabel: workspaceTexte().deaktiviert })}
+            {...(missing.length === 0 ? {} : { ledStatus: "amber" as const, ledLabel: workspaceTexts().deaktiviert })}
             onNavigate={onNavigate}
           />)}
         </div>
@@ -284,7 +284,7 @@ const ModuleListLink = ({ channelId, onNavigate }: { channelId: string; onNaviga
         onNavigate(route);
       }}
     >
-      {dashboardTexte().navigation.module}
+      {dashboardTexts().navigation.module}
     </a>
   );
 };
@@ -303,15 +303,15 @@ interface ModulePageProperties {
 }
 
 export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, loading = false, error = null, busy = false, onNavigate, onToggle }: ModulePageProperties): ReactElement => {
-  const texte = dashboardTexte();
-  const labels = workspaceTexte();
+  const texts = dashboardTexts();
+  const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
   const registered = MODULES.find((candidate) => candidate.id === moduleId);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
   const enabled = moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
-  const disabledReason = manageable ? null : texte.module.verwaltungGesperrt;
+  const disabledReason = manageable ? null : texts.module.verwaltungGesperrt;
   const switchDisabled = registered === undefined || moduleState === undefined;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
@@ -323,7 +323,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const stateMessage = registered === undefined
     ? labels.unbekannt(details.name)
     : missingScopes.length > 0
-      ? texte.module.scopesFehlen(details.name)
+      ? texts.module.scopesFehlen(details.name)
       : moduleState?.enabled === false
         ? labels.ausgeschaltet(details.name)
         : null;
@@ -348,36 +348,36 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />
           {disabledReason === null ? null : <p className="sperrgrund">{disabledReason}</p>}
         </section>
-        {missingScopes.length === 0 ? null : <section className="module-detail__authorization" aria-label={texte.module.scopeListe}>
-          <div className="section-heading"><h2>{texte.module.scopeListe}</h2></div>
+        {missingScopes.length === 0 ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeListe}>
+          <div className="section-heading"><h2>{texts.module.scopeListe}</h2></div>
           <div className="zustand-liste module-scope-list">
             {requiredScopes.map((scope) => {
               const missing = missingScopeSet.has(scope);
-              return <ZustandZeile
+              return <StateRow
                 key={scope}
                 label={moduleScopePurpose(moduleId, scope)}
                 tone={missing ? "warning" : "healthy"}
-                wort={missing ? texte.module.scopeFehlt : texte.module.scopeErteilt}
+                wort={missing ? texts.module.scopeFehlt : texts.module.scopeErteilt}
                 detail={<span className="mono">{scope}</span>}
                 icon={<NavigationIcon kind="permission" className="scope-zeile__icon" />}
               />;
             })}
           </div>
           {ownRole === "broadcaster"
-            ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes/${encodeURIComponent(moduleId)}`}>{texte.module.scopeZustimmungAnfordern}</a>
-            : <button className="button button--primary" type="button" disabled>{texte.module.scopeZustimmungAnfordern}</button>}
-          {ownRole === "broadcaster" ? null : <p className="sperrgrund">{texte.module.scopeZustimmungGesperrt}</p>}
+            ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes/${encodeURIComponent(moduleId)}`}>{texts.module.scopeZustimmungAnfordern}</a>
+            : <button className="button button--primary" type="button" disabled>{texts.module.scopeZustimmungAnfordern}</button>}
+          {ownRole === "broadcaster" ? null : <p className="sperrgrund">{texts.module.scopeZustimmungGesperrt}</p>}
         </section>}
-        {viewLoading ? <p className="muted">{texte.module.laden}</p> : null}
+        {viewLoading ? <p className="muted">{texts.module.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {stateMessage === null ? (
-          registered?.panel === undefined ? (showActiveView ? <p className="module-state">{texte.module.keineAnsicht}</p> : null) : !showActiveView ? null : (
+          registered?.panel === undefined ? (showActiveView ? <p className="module-state">{texts.module.keineAnsicht}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " veraltet" : ""}`} aria-label={labels.inhalt}>
               <ModulePanelMount channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} />
             </section>
           )
         ) : (
-          <section className={`module-state module-state--${stateTone}`} aria-label={texte.module.module}>
+          <section className={`module-state module-state--${stateTone}`} aria-label={texts.module.module}>
             <div className="module-state__summary">
               <NavigationIcon kind="permission" className="module-state__icon" />
               <p>{stateMessage}</p>

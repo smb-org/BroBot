@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import type { RaidSettings } from "../contracts";
 import { ladeRaidEinstellungen, speichereRaidEinstellungen } from "./service";
-import { raidPanelTexte } from "./locale";
+import { raidPanelTexts } from "./locale";
 
 interface RaidPanelProperties {
   channelId: string;
@@ -21,7 +21,7 @@ export const RaidPanel = ({
   language,
   canManage = true,
 }: RaidPanelProperties): ReactElement => {
-  const labels = raidPanelTexte(language);
+  const labels = raidPanelTexts(language);
   const [settings, setSettings] = useState<RaidPanelSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -41,7 +41,7 @@ export const RaidPanel = ({
   if (settings === null) return <p className="loading-line">{error ?? labels.laden}</p>;
 
   const disabled = !canManage || busy;
-  const shoutoutSchwelleDeaktiviert = disabled || !settings.shoutoutEnabled;
+  const shoutoutThresholdDisabled = disabled || !settings.shoutoutEnabled;
   const save = async (): Promise<void> => {
     if (typeof settings.shoutoutThreshold !== "number" || typeof settings.textThreshold !== "number") {
       setNumberErrors({
@@ -50,8 +50,8 @@ export const RaidPanel = ({
       });
       return;
     }
-    const shoutoutSchwelle = settings.shoutoutThreshold;
-    const textSchwelle = settings.textThreshold;
+    const shoutoutThreshold = settings.shoutoutThreshold;
+    const textThreshold = settings.textThreshold;
     setNumberErrors({ shoutoutThreshold: false, textThreshold: false });
     setBusy(true);
     setError(null);
@@ -59,8 +59,8 @@ export const RaidPanel = ({
     try {
       await speichereRaidEinstellungen(channelId, {
         ...settings,
-        shoutoutThreshold: shoutoutSchwelle,
-        textThreshold: textSchwelle,
+        shoutoutThreshold: shoutoutThreshold,
+        textThreshold: textThreshold,
       });
       setSaved(true);
     } catch {
@@ -100,7 +100,7 @@ export const RaidPanel = ({
             step="1"
             value={settings.shoutoutThreshold}
             aria-invalid={numberErrors.shoutoutThreshold}
-            disabled={shoutoutSchwelleDeaktiviert}
+            disabled={shoutoutThresholdDisabled}
             onChange={(event) => { setSaved(false); setNumberErrors({ ...numberErrors, shoutoutThreshold: false }); setSettings({ ...settings, shoutoutThreshold: event.target.value === "" ? "" : Number(event.target.value) }); }}
           />
           {numberErrors.shoutoutThreshold ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}

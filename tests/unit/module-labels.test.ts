@@ -15,7 +15,7 @@ import { moduleDescription, moduleName } from "../../src/dashboard/module-labels
  * Schema und Handler auseinanderlaufen können. Der Vertrag wiegt schwerer.
  */
 describe("Modulbeschriftungen", () => {
-  it.each(MODULES.map((modul) => modul.id))("führt für %s Namen in beiden Sprachen", (moduleId) => {
+  it.each(MODULES.map((module) => module.id))("führt für %s Namen in beiden Sprachen", (moduleId) => {
     for (const sprache of ["de", "en"] as const) {
       const name = moduleName(moduleId, sprache);
       expect(name).not.toBe(moduleId);
@@ -23,7 +23,7 @@ describe("Modulbeschriftungen", () => {
     }
   });
 
-  it.each(MODULES.map((modul) => modul.id))("führt für %s eine Beschreibung in beiden Sprachen", (moduleId) => {
+  it.each(MODULES.map((module) => module.id))("führt für %s eine Beschreibung in beiden Sprachen", (moduleId) => {
     for (const sprache of ["de", "en"] as const) {
       const beschreibung = moduleDescription(moduleId, sprache);
       expect(beschreibung).not.toBeNull();

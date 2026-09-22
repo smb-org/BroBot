@@ -1,9 +1,9 @@
 import type { ModuleEvent, ModuleResult } from "../contract";
-import type { WerbungSettings } from "./contracts";
-import { entscheideWerbepause } from "./domain";
+import type { AdsSettings } from "./contracts";
+import { decideAdBreak } from "./domain";
 
 const diagnoseDetail = (
-  event: ReturnType<typeof entscheideWerbepause>,
+  event: ReturnType<typeof decideAdBreak>,
 ): Record<string, string | number | boolean | null> => {
   if (event.kind === "skip") {
     return {
@@ -21,7 +21,7 @@ const diagnoseDetail = (
   };
 };
 
-const diagnosticCode = (event: ReturnType<typeof entscheideWerbepause>): string =>
+const diagnosticCode = (event: ReturnType<typeof decideAdBreak>): string =>
   event.kind === "announce" ? "ads.ankuendigung" : "ads.uebersprungen";
 
 const textMitDauer = (vorlage: string, dauerSekunden: number): string => {
@@ -31,10 +31,10 @@ const textMitDauer = (vorlage: string, dauerSekunden: number): string => {
     : `${text} (${String(dauerSekunden)} Sekunden)`;
 };
 
-export const verarbeiteWerbepause = (
-  event: ModuleEvent<WerbungSettings>,
+export const processAdBreak = (
+  event: ModuleEvent<AdsSettings>,
 ): ModuleResult => {
-  const entscheidung = entscheideWerbepause(event.payload);
+  const entscheidung = decideAdBreak(event.payload);
   if (entscheidung.kind === "skip") {
     return {
       actions: [],

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { werbungModul } from "../../src/modules/ads";
+import { adsModule } from "../../src/modules/ads";
 import { LOGIN_SCOPES } from "../../src/worker/auth/oauth";
 import {
-  listeAlleBroadcasterScopes,
+  listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUser,
   moduleBroadcasterScopeState,
   moduleOptionalBroadcasterScopes,
@@ -64,7 +64,7 @@ describe("Broadcaster-Scopes", () => {
 
   it("leitet den vollständigen Broadcaster-Umfang aus Login, Modulen und Abschnitt 7 ab", () => {
     database = new TestD1Database();
-    expect(new Set(listeAlleBroadcasterScopes())).toEqual(new Set([
+    expect(new Set(listAllBroadcasterScopes())).toEqual(new Set([
       ...LOGIN_SCOPES,
       ...VOLLUMFANG_BROADCASTER_SCOPES,
     ]));
@@ -118,12 +118,12 @@ describe("Broadcaster-Scopes", () => {
 
   it("meldet fehlende und vorhandene Modul-Scopes getrennt", async () => {
     database = new TestD1Database();
-    await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", werbungModul)).resolves.toEqual({
+    await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", adsModule)).resolves.toEqual({
       required: ["channel:read:ads"],
       missing: ["channel:read:ads"],
     });
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
-    await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", werbungModul)).resolves.toEqual({
+    await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", adsModule)).resolves.toEqual({
       required: ["channel:read:ads"],
       missing: [],
     });
@@ -131,6 +131,6 @@ describe("Broadcaster-Scopes", () => {
 
   it("kennzeichnet channel:manage:ads am Werbemodul als optionalen Scope", () => {
     database = new TestD1Database();
-    expect(moduleOptionalBroadcasterScopes(werbungModul)).toEqual(["channel:manage:ads"]);
+    expect(moduleOptionalBroadcasterScopes(adsModule)).toEqual(["channel:manage:ads"]);
   });
 });

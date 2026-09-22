@@ -25,16 +25,16 @@ export interface DispatchEnvironment {
 /** Der Host protokolliert Handeln und dessen Ausgang; Module begründen Nicht-Handeln. */
 const HOST_MODULE_ID = "host";
 
-const fehlermeldung = (error: unknown): string =>
+const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const textwert = (value: unknown): string | null =>
+const textValue = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
-const recordWert = (value: unknown): value is Readonly<Record<string, unknown>> =>
+const recordValue = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const chatStatusFuer = (
+const chatStatusFor = (
   subscriptionType: string,
   payload: Readonly<Record<string, unknown>>,
 ): readonly ModuleChatStatus[] | null => {
@@ -42,7 +42,7 @@ const chatStatusFuer = (
   const badges = payload.badges;
   const badgeIds = Array.isArray(badges)
     ? badges.flatMap((badge) => {
-      if (!recordWert(badge)) return [];
+      if (!recordValue(badge)) return [];
       const setId = badge.set_id;
       return typeof setId === "string" ? [setId] : [];
     })
@@ -50,22 +50,22 @@ const chatStatusFuer = (
   // Mehrere Badges sind gleichzeitig möglich. VIP und Abonnent bleiben daher
   // getrennte Status; `founder` zählt weiterhin als Abonnent. Ohne besondere
   // Badges bleibt die Liste für jedes Chatereignis mit `viewer` nicht leer.
-  const statusse: ModuleChatStatus[] = [];
-  if (badgeIds.includes("broadcaster")) statusse.push("broadcaster");
-  if (badgeIds.includes("moderator")) statusse.push("moderator");
-  if (badgeIds.includes("vip")) statusse.push("vip");
-  if (badgeIds.includes("subscriber") || badgeIds.includes("founder")) statusse.push("subscriber");
-  return statusse.length === 0 ? ["viewer"] : statusse;
+  const statuses: ModuleChatStatus[] = [];
+  if (badgeIds.includes("broadcaster")) statuses.push("broadcaster");
+  if (badgeIds.includes("moderator")) statuses.push("moderator");
+  if (badgeIds.includes("vip")) statuses.push("vip");
+  if (badgeIds.includes("subscriber") || badgeIds.includes("founder")) statuses.push("subscriber");
+  return statuses.length === 0 ? ["viewer"] : statuses;
 };
 
-const akteurFuerEreignis = async (
+const actorForEvent = async (
   db: D1Database,
   channelId: string,
   payload: Readonly<Record<string, unknown>>,
 ): Promise<ModuleActor | null> => {
-  const userId = textwert(payload.chatter_user_id);
+  const userId = textValue(payload.chatter_user_id);
   if (userId === null) return null;
-  const login = textwert(payload.chatter_user_login) ?? textwert(payload.chatter_user_name) ?? userId;
+  const login = textValue(payload.chatter_user_login) ?? textValue(payload.chatter_user_name) ?? userId;
   const member = await getChannelMemberForChannel(db, channelId, userId);
   return { userId, login, role: member?.role ?? null };
 };
@@ -80,22 +80,22 @@ const akteurFuerEreignis = async (
  * wurde, die Aktivierungszeile aber blieb.
  */
 export const selectModulesForEvent = (
-  aktivierungen: readonly { moduleId: string; enabled: boolean; settings: string }[],
+  activations: readonly { moduleId: string; enabled: boolean; settings: string }[],
   subscriptionType: string,
   registry: readonly BotModule[] = MODULES,
 ): { treffer: { module: BotModule; settings: string }[]; unbekannt: string[] } => {
   const bekannt = new Map(registry.map((module) => [module.id, module]));
   const treffer: { module: BotModule; settings: string }[] = [];
   const unbekannt: string[] = [];
-  for (const aktivierung of aktivierungen) {
-    if (!aktivierung.enabled) continue;
-    const module = bekannt.get(aktivierung.moduleId);
+  for (const activation of activations) {
+    if (!activation.enabled) continue;
+    const module = bekannt.get(activation.moduleId);
     if (module === undefined) {
-      unbekannt.push(aktivierung.moduleId);
+      unbekannt.push(activation.moduleId);
       continue;
     }
     if (!(module.eventSubTypes ?? []).includes(subscriptionType)) continue;
-    treffer.push({ module, settings: aktivierung.settings });
+    treffer.push({ module, settings: activation.settings });
   }
   return { treffer, unbekannt };
 };
@@ -112,23 +112,23 @@ const ausfuehren = async (
   for (const action of actions) {
     try {
       if (action.kind === "chat") {
-        const ergebnis = await sendChatMessage(
+        const result = await sendChatMessage(
           environment,
           channelId,
           action.text,
           action.replyToMessageId,
           fetcher,
         );
-        diagnostics.push(ergebnis.sent
-          ? { code: "host.chat.gesendet", detail: ergebnis.detail }
-          : { code: "host.chat.fehlgeschlagen", detail: { reason: ergebnis.reason, ...ergebnis.detail } });
+        diagnostics.push(result.sent
+          ? { code: "host.chat.gesendet", detail: result.detail }
+          : { code: "host.chat.fehlgeschlagen", detail: { reason: result.reason, ...result.detail } });
         continue;
       }
       if (action.kind === "shoutout") {
-        const ergebnis = await sendShoutout(environment, channelId, action.targetChannelId, fetcher);
-        diagnostics.push(ergebnis.sent
-          ? { code: "host.shoutout.gesendet", detail: ergebnis.detail }
-          : { code: "host.shoutout.fehlgeschlagen", detail: { ursache: ergebnis.reason, ...ergebnis.detail } });
+        const result = await sendShoutout(environment, channelId, action.targetChannelId, fetcher);
+        diagnostics.push(result.sent
+          ? { code: "host.shoutout.gesendet", detail: result.detail }
+          : { code: "host.shoutout.fehlgeschlagen", detail: { ursache: result.reason, ...result.detail } });
         continue;
       }
       // Die Realtime-Strecke ist #7. Bis dahin verschwindet eine
@@ -141,7 +141,7 @@ const ausfuehren = async (
     } catch (error: unknown) {
       // Eine fehlgeschlagene Aktion darf die nachfolgenden geordneten
       // Aktionen nicht unterdrücken, etwa den Chat nach einem Shoutout.
-      diagnostics.push({ code: "host.aktion.fehler", detail: { meldung: fehlermeldung(error) } });
+      diagnostics.push({ code: "host.aktion.fehler", detail: { meldung: errorMessage(error) } });
     }
   }
   return diagnostics;
@@ -167,13 +167,13 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
-  const aktivierungen = await listChannelModulesForChannel(environment.DB, event.channelId);
-  const { treffer, unbekannt } = selectModulesForEvent(aktivierungen, event.subscriptionType, registry);
-  const actor = await akteurFuerEreignis(environment.DB, event.channelId, event.payload);
-  const neueEinträge: WrittenModuleDiagnostic[] = [];
+  const activations = await listChannelModulesForChannel(environment.DB, event.channelId);
+  const { treffer, unbekannt } = selectModulesForEvent(activations, event.subscriptionType, registry);
+  const actor = await actorForEvent(environment.DB, event.channelId, event.payload);
+  const newEntries: WrittenModuleDiagnostic[] = [];
 
   for (const moduleId of unbekannt) {
-    neueEinträge.push(...await writeModuleDiagnostics(
+    newEntries.push(...await writeModuleDiagnostics(
       environment.DB,
       event.channelId,
       HOST_MODULE_ID,
@@ -186,7 +186,7 @@ export const dispatchEventSubNotification = async (
 
   for (const { module, settings } of treffer) {
     const diagnostics: ModuleDiagnostic[] = [];
-    let ergebnis: ModuleResult | null = null;
+    let result: ModuleResult | null = null;
 
     try {
       const gepruefteEinstellungen: unknown = module.settingsSchema.parse(JSON.parse(settings));
@@ -199,9 +199,9 @@ export const dispatchEventSubNotification = async (
         settings: gepruefteEinstellungen,
         receivedAt: event.receivedAt,
         actor,
-        chatStatus: chatStatusFuer(event.subscriptionType, event.payload),
+        chatStatus: chatStatusFor(event.subscriptionType, event.payload),
       };
-      ergebnis = module.handleEvent === undefined
+      result = module.handleEvent === undefined
         ? null
         : await module.handleEvent(moduleEvent, {
           DB: environment.DB,
@@ -210,19 +210,19 @@ export const dispatchEventSubNotification = async (
     } catch (error: unknown) {
       // Ein geworfenes Modul reißt weder den Worker noch die übrigen Module
       // mit. Der Fehler wird sichtbar, nicht verschluckt.
-      diagnostics.push({ code: "host.modul.fehler", detail: { meldung: fehlermeldung(error) } });
+      diagnostics.push({ code: "host.modul.fehler", detail: { meldung: errorMessage(error) } });
     }
 
-    if (ergebnis !== null) {
-      diagnostics.push(...ergebnis.diagnostics);
+    if (result !== null) {
+      diagnostics.push(...result.diagnostics);
       try {
-        diagnostics.push(...await ausfuehren(environment, event.channelId, ergebnis.actions, fetcher));
+        diagnostics.push(...await ausfuehren(environment, event.channelId, result.actions, fetcher));
       } catch (error: unknown) {
-        diagnostics.push({ code: "host.aktion.fehler", detail: { meldung: fehlermeldung(error) } });
+        diagnostics.push({ code: "host.aktion.fehler", detail: { meldung: errorMessage(error) } });
       }
     }
 
-    neueEinträge.push(...await writeModuleDiagnostics(
+    newEntries.push(...await writeModuleDiagnostics(
       environment.DB,
       event.channelId,
       module.id,
@@ -233,7 +233,7 @@ export const dispatchEventSubNotification = async (
     ));
   }
 
-  if (neueEinträge.length === 0) return;
+  if (newEntries.length === 0) return;
   const realtimeMessage: RealtimeEnvelope<"event_log.new"> = {
     version: 1,
     id: crypto.randomUUID(),
@@ -241,7 +241,7 @@ export const dispatchEventSubNotification = async (
     channelId: event.channelId,
     type: "event_log.new",
     payload: {
-      entries: neueEinträge.map(({ eventId, createdAt, moduleId, code, actorUserId }) => ({
+      entries: newEntries.map(({ eventId, createdAt, moduleId, code, actorUserId }) => ({
         eventId,
         createdAt,
         moduleId,

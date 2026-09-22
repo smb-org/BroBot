@@ -2,14 +2,14 @@ import { Hono, type Context } from "hono";
 
 import type { ModuleRouteEnvironment } from "../contract";
 import { getAdSchedule, type AdScheduleResult, snoozeNextAd, type SnoozeNextAdResult } from "./adapters/ad-schedule";
-import { aktualisiereWerbevorwarnungswecker } from "./adapters/vorwarnungswecker";
-import { WERBUNG_OPTIONALE_BROADCASTER_SCOPES } from "./contracts";
-import type { WerbungZeitplanAntwort } from "./contracts";
-import { listeLetzteWerbepausen } from "./repository";
+import { refreshAdPrewarningAlarm } from "./adapters/prewarning-alarm";
+import { ADS_OPTIONAL_BROADCASTER_SCOPES } from "./contracts";
+import type { AdsScheduleResponse } from "./contracts";
+import { listLastAdBreaks } from "./repository";
 
-const MANAGE_ADS_SCOPE = WERBUNG_OPTIONALE_BROADCASTER_SCOPES[0];
+const MANAGE_ADS_SCOPE = ADS_OPTIONAL_BROADCASTER_SCOPES[0];
 
-type WerbeDetail = Readonly<Record<string, string | number | boolean | null>>;
+type AdDetail = Readonly<Record<string, string | number | boolean | null>>;
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -33,10 +33,10 @@ const responseFor = async (
   channelId: string,
   schedule: NonNullable<AdScheduleResult["schedule"]>,
   snoozeScopeVorhanden: boolean,
-): Promise<WerbungZeitplanAntwort> => ({
+): Promise<AdsScheduleResponse> => ({
   schedule,
   snoozeScopeVorhanden,
-  letzteWerbepausen: await listeLetzteWerbepausen(db, channelId),
+  letzteWerbepausen: await listLastAdBreaks(db, channelId),
 });
 
 const log = async (
@@ -44,7 +44,7 @@ const log = async (
   channelId: string,
   triggerId: string,
   code: string,
-  detail: WerbeDetail,
+  detail: AdDetail,
 ): Promise<void> => {
   await context.get("writeModuleDiagnostics")(
     context.env.DB,
@@ -57,15 +57,15 @@ const log = async (
   );
 };
 
-const snoozeOutcome = (result: SnoozeNextAdResult): WerbeDetail => ({
+const snoozeOutcome = (result: SnoozeNextAdResult): AdDetail => ({
   ausgang: result.snoozed ? "erfolgreich" : "fehlgeschlagen",
   reason: result.reason,
   ...result.detail,
 });
 
-export const werbungRoutes = new Hono<ModuleRouteEnvironment>();
+export const adsRoutes = new Hono<ModuleRouteEnvironment>();
 
-werbungRoutes.get("/zeitplan", async (context) => {
+adsRoutes.get("/zeitplan", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const now = nowIso();
   const result = await getAdSchedule(context.env, channelId, now, context.get("getAppAccessToken"), fetch);
@@ -79,7 +79,7 @@ werbungRoutes.get("/zeitplan", async (context) => {
     }, statusFor(result.reason));
   }
 
-  await aktualisiereWerbevorwarnungswecker(
+  await refreshAdPrewarningAlarm(
     context.env,
     channelId,
     result.schedule,
@@ -89,7 +89,7 @@ werbungRoutes.get("/zeitplan", async (context) => {
   return context.json(await responseFor(context.env.DB, channelId, result.schedule, snoozeScopeVorhanden));
 });
 
-werbungRoutes.post("/snooze", async (context) => {
+adsRoutes.post("/snooze", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const now = nowIso();
   const triggerId = `werbung-snooze:${crypto.randomUUID()}`;
@@ -112,7 +112,7 @@ werbungRoutes.post("/snooze", async (context) => {
     }, statusFor(result.reason));
   }
 
-  await aktualisiereWerbevorwarnungswecker(
+  await refreshAdPrewarningAlarm(
     context.env,
     channelId,
     result.schedule,

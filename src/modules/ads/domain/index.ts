@@ -1,5 +1,5 @@
-import type { WerbepausenEreignis } from "../contracts";
-import type { WerbungSettings } from "../contracts";
+import type { AdBreaksEvent } from "../contracts";
+import type { AdsSettings } from "../contracts";
 
 const finiteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -7,13 +7,13 @@ const finiteNumber = (value: unknown): value is number =>
 const nonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
-export type WerbepausenEntscheidung =
+export type AdBreaksDecision =
   | { kind: "skip"; reason: "dauer_null" | "dauer_ungueltig" | "start_ungueltig"; dauerSekunden: number | null; automatic: boolean }
-  | { kind: "announce"; event: WerbepausenEreignis };
+  | { kind: "announce"; event: AdBreaksEvent };
 
-export const entscheideWerbepause = (
+export const decideAdBreak = (
   payload: Readonly<Record<string, unknown>>,
-): WerbepausenEntscheidung => {
+): AdBreaksDecision => {
   const dauer = finiteNumber(payload.duration_seconds) ? payload.duration_seconds : null;
   const automatisch = payload.is_automatic === true;
   if (dauer === null || dauer < 0) {
@@ -41,20 +41,20 @@ export const entscheideWerbepause = (
   };
 };
 
-export interface WerbevorwarnungsZeitplan {
+export interface AdPrewarningSchedule {
   nextAdAt: string | null;
   lastAdAt: string | null;
 }
 
-export interface WerbevorwarnungsEingabe {
-  settings: Pick<WerbungSettings, "prewarning" | "leadSeconds" | "prewarningText">;
+export interface AdPrewarningInput {
+  settings: Pick<AdsSettings, "prewarning" | "leadSeconds" | "prewarningText">;
   scopeVorhanden: boolean;
   jetztAmMs: number;
   geplantAmMs: number;
-  schedule: WerbevorwarnungsZeitplan;
+  schedule: AdPrewarningSchedule;
 }
 
-export type WerbevorwarnungsEntscheidung =
+export type AdPrewarningDecision =
   | { kind: "skip"; reason: "vorwarnung_aus" | "scope_fehlt" | "kein_termin" | "zu_spaet" | "pause_begonnen" | "termin_verschoben"; detail: Readonly<Record<string, string | number | boolean | null>> }
   | { kind: "announce"; text: string; sekunden: number; terminAm: string };
 
@@ -76,13 +76,13 @@ const MINDEST_VORLAUF_MS = 5_000;
 const TERMIN_TOLERANZ_MS = 2_000;
 
 const skip = (
-  reason: Exclude<WerbevorwarnungsEntscheidung, { kind: "announce" }>["reason"],
+  reason: Exclude<AdPrewarningDecision, { kind: "announce" }>["reason"],
   detail: Readonly<Record<string, string | number | boolean | null>> = {},
-): WerbevorwarnungsEntscheidung => ({ kind: "skip", reason, detail });
+): AdPrewarningDecision => ({ kind: "skip", reason, detail });
 
-export const entscheideWerbevorwarnung = (
-  input: WerbevorwarnungsEingabe,
-): WerbevorwarnungsEntscheidung => {
+export const decideAdPrewarning = (
+  input: AdPrewarningInput,
+): AdPrewarningDecision => {
   if (!input.settings.prewarning) return skip("vorwarnung_aus");
   if (!input.scopeVorhanden) return skip("scope_fehlt", { scope: "channel:read:ads" });
 

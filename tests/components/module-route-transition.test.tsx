@@ -40,17 +40,17 @@ describe("Modulroute beim clientseitigen Wechsel", () => {
   });
 
   it("startet das Panel erst nach der neuen Aktivitätsprüfung", async () => {
-    const aktiverStand = { ...channel, activeModules: [{ moduleId: "aktiv", settings: "{}" }] };
-    const deaktivierterStand = { ...channel, activeModules: [] };
+    const activeState = { ...channel, activeModules: [{ moduleId: "aktiv", settings: "{}" }] };
+    const inactiveState = { ...channel, activeModules: [] };
     let overviewAufrufe = 0;
-    let loeseZweiteAntwortAuf!: (value: Response) => void;
-    const zweiteAntwort = new Promise<Response>((resolve) => { loeseZweiteAntwortAuf = resolve; });
+    let resolveSecondResponse!: (value: Response) => void;
+    const secondResponse = new Promise<Response>((resolve) => { resolveSecondResponse = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), window.location.origin).pathname;
       if (path === "/api/channels") return response({ channels: [channel] });
       if (path === "/api/channels/kanal-a/overview") {
         overviewAufrufe += 1;
-        return overviewAufrufe === 1 ? response(aktiverStand) : zweiteAntwort;
+        return overviewAufrufe === 1 ? response(activeState) : secondResponse;
       }
       return response({}, 404);
     }));
@@ -63,7 +63,7 @@ describe("Modulroute beim clientseitigen Wechsel", () => {
     link.click();
     expect(activeLoader).not.toHaveBeenCalled();
 
-    loeseZweiteAntwortAuf(response(deaktivierterStand));
+    resolveSecondResponse(response(inactiveState));
     expect(await screen.findByText("Module werden geladen …")).toBeInTheDocument();
     expect(screen.queryByText("Das Modul „aktiv“ ist in diesem Kanal nicht aktiv.")).not.toBeInTheDocument();
     expect(activeLoader).not.toHaveBeenCalled();

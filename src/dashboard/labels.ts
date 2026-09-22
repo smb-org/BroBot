@@ -1,5 +1,5 @@
 import type { ChannelRole } from "../contracts/values";
-import { dashboardGemeinsameTexte, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 
 /**
  * Rollen werden im Datenmodell klein geschrieben. In der Oberflaeche steht der
@@ -7,10 +7,10 @@ import { dashboardGemeinsameTexte, dashboardLanguage, type DashboardLanguage, ty
  * Mitgliederliste nicht auseinanderlaufen.
  */
 export const roleLabel = (role: ChannelRole): string => {
-  return dashboardGemeinsameTexte().rollen[role];
+  return dashboardCommonTexts().rollen[role];
 };
 
-export interface KanalPanelTexte {
+export interface ChannelPanelTexts {
   vollzustimmungFehlt: string;
   vollzustimmungAnfordern: string;
   vollzustimmungGesperrt: string;
@@ -18,7 +18,7 @@ export interface KanalPanelTexte {
   fehlendeScopes: string;
 }
 
-const kanalPanelKatalog: LocaleCatalog<KanalPanelTexte> = {
+const channelPanelCatalog: LocaleCatalog<ChannelPanelTexts> = {
   de: {
     vollzustimmungFehlt: "Vollzustimmung fehlt",
     vollzustimmungAnfordern: "Vollzustimmung erteilen",
@@ -35,20 +35,20 @@ const kanalPanelKatalog: LocaleCatalog<KanalPanelTexte> = {
   },
 };
 
-export const kanalPanelTexte = (
+export const channelPanelTexts = (
   language: DashboardLanguage = dashboardLanguage(),
-): KanalPanelTexte => kanalPanelKatalog[language];
+): ChannelPanelTexts => channelPanelCatalog[language];
 
-export type BetreiberHandlung =
+export type PlatformAction =
   | "kanal.freigegeben"
   | "kanal.vollzustimmung_geaendert"
   | "mitglied.hinzugefuegt"
   | "mitglied.rolle_geaendert"
   | "mitglied.entfernt";
 
-export interface BetreiberTexte {
+export interface PlatformTexts {
   titel: string;
-  untertitel: (anzahl: string) => string;
+  untertitel: (count: string) => string;
   navigation: string;
   kanalübersicht: string;
   login: string;
@@ -74,7 +74,7 @@ export interface BetreiberTexte {
   twitchId: (id: string) => string;
   vollzustimmungSetzen: string;
   kanalFreigebenFrage: (name: string) => string;
-  kanalFreigebenBeschreibung: (name: string, id: string, mitZustimmung: string) => string;
+  kanalFreigebenBeschreibung: (name: string, id: string, withConsent: string) => string;
   endgültigFreigeben: string;
   einladungslink: string;
   einladungslinkHinweis: string;
@@ -105,13 +105,13 @@ export interface BetreiberTexte {
   weitereWerdenGeladen: string;
   betreiber: string;
   mitglied: string;
-  handlungLabel: Record<BetreiberHandlung, string>;
+  handlungLabel: Record<PlatformAction, string>;
 }
 
-const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
+const platformCatalog: LocaleCatalog<PlatformTexts> = {
   de: {
     titel: "Betreiberebene",
-    untertitel: (anzahl) => `${anzahl} Kanäle verwalten`,
+    untertitel: (count) => `${count} Kanäle verwalten`,
     navigation: "Betreiber",
     kanalübersicht: "Kanalübersicht",
     login: "Login",
@@ -137,7 +137,7 @@ const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
     twitchId: (id) => `Twitch-ID ${id}`,
     vollzustimmungSetzen: "Vollzustimmung setzen",
     kanalFreigebenFrage: (name) => `Kanal für ${name} freigeben?`,
-    kanalFreigebenBeschreibung: (name, id, mitZustimmung) => `${name} (${id}) wird ${mitZustimmung} Vollzustimmung angelegt.`,
+    kanalFreigebenBeschreibung: (name, id, withConsent) => `${name} (${id}) wird ${withConsent} Vollzustimmung angelegt.`,
     endgültigFreigeben: "Endgültig freigeben",
     einladungslink: "Einladungslink",
     einladungslinkHinweis: "Diesen Link bekommt der Streamer. Er startet die Twitch-Zustimmung für den gewählten Kanal.",
@@ -178,7 +178,7 @@ const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
   },
   en: {
     titel: "Operator level",
-    untertitel: (anzahl) => `Manage ${anzahl} channels`,
+    untertitel: (count) => `Manage ${count} channels`,
     navigation: "Operator",
     kanalübersicht: "Channel overview",
     login: "Login",
@@ -204,7 +204,7 @@ const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
     twitchId: (id) => `Twitch ID ${id}`,
     vollzustimmungSetzen: "Set full consent",
     kanalFreigebenFrage: (name) => `Release the channel for ${name}?`,
-    kanalFreigebenBeschreibung: (name, id, mitZustimmung) => `${name} (${id}) will be created ${mitZustimmung} full consent.`,
+    kanalFreigebenBeschreibung: (name, id, withConsent) => `${name} (${id}) will be created ${withConsent} full consent.`,
     endgültigFreigeben: "Release permanently",
     einladungslink: "Invitation link",
     einladungslinkHinweis: "Give this link to the streamer. It starts Twitch consent for the selected channel.",
@@ -245,14 +245,14 @@ const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
   },
 };
 
-export const betreiberTexte = (language: DashboardLanguage = dashboardLanguage()): BetreiberTexte => betreiberKatalog[language];
+export const platformTexts = (language: DashboardLanguage = dashboardLanguage()): PlatformTexts => platformCatalog[language];
 
-export const betreiberHandlungLabel = (
+export const platformActionLabel = (
   handlung: string,
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
-  const texte = betreiberKatalog[language];
-  return Object.prototype.hasOwnProperty.call(texte.handlungLabel, handlung)
-    ? texte.handlungLabel[handlung as BetreiberHandlung]
+  const texts = platformCatalog[language];
+  return Object.prototype.hasOwnProperty.call(texts.handlungLabel, handlung)
+    ? texts.handlungLabel[handlung as PlatformAction]
     : handlung;
 };

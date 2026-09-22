@@ -1,12 +1,12 @@
 import type { ModuleRouteVariables } from "../contract";
-import type { WerbungZeitplanAntwort } from "../contracts";
-import { werbungSettingsSchema } from "../contracts";
+import type { AdsScheduleResponse } from "../contracts";
+import { adsSettingsSchema } from "../contracts";
 
 const WARNING_SCOPE = "channel:read:ads";
 
-interface WerbevorwarnungsPlaner {
-  plane: (faelligAmMs: number) => Promise<void>;
-  loesche: () => Promise<void>;
+interface AdPrewarningScheduler {
+  schedule: (dueAtMs: number) => Promise<void>;
+  clear: () => Promise<void>;
 }
 
 interface ChannelModuleSettingsRow {
@@ -14,41 +14,41 @@ interface ChannelModuleSettingsRow {
   settings: string;
 }
 
-interface WerbevorwarnungsUmgebung extends Omit<Env, "CHANNEL"> {
+interface AdPrewarningEnvironment extends Omit<Env, "CHANNEL"> {
   CHANNEL?: Env["CHANNEL"];
 }
 
-const planerFuer = (environment: WerbevorwarnungsUmgebung, channelId: string): WerbevorwarnungsPlaner | null => {
+const schedulerFor = (environment: AdPrewarningEnvironment, channelId: string): AdPrewarningScheduler | null => {
   if (environment.CHANNEL === undefined) return null;
   const stub = environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId)) as unknown as {
-    planeWerbevorwarnung: (faelligAmMs: number) => Promise<void>;
-    loescheWerbevorwarnung: () => Promise<void>;
+    scheduleAdPrewarning: (dueAtMs: number) => Promise<void>;
+    clearAdPrewarning: () => Promise<void>;
   };
   return {
-    plane: (faelligAmMs) => stub.planeWerbevorwarnung(faelligAmMs),
-    loesche: () => stub.loescheWerbevorwarnung(),
+    schedule: (dueAtMs) => stub.scheduleAdPrewarning(dueAtMs),
+    clear: () => stub.clearAdPrewarning(),
   };
 };
 
-const loesche = async (planer: WerbevorwarnungsPlaner | null): Promise<void> => {
-  await planer?.loesche();
+const clearPrewarning = async (scheduler: AdPrewarningScheduler | null): Promise<void> => {
+  await scheduler?.clear();
 };
 
 /** Hält den Vorwarnungswecker nach einem im Panel gelesenen Zeitplan aktuell. */
-export const aktualisiereWerbevorwarnungswecker = async (
-  environment: WerbevorwarnungsUmgebung,
+export const refreshAdPrewarningAlarm = async (
+  environment: AdPrewarningEnvironment,
   channelId: string,
-  schedule: WerbungZeitplanAntwort["schedule"],
+  schedule: AdsScheduleResponse["schedule"],
   broadcasterHasScope: ModuleRouteVariables["broadcasterHasScope"],
 ): Promise<void> => {
-  const planer = planerFuer(environment, channelId);
+  const scheduler = schedulerFor(environment, channelId);
   const row = await environment.DB.prepare(
     `SELECT enabled, settings
        FROM channel_modules
       WHERE channel_id = ? AND module_id = 'ads'`,
   ).bind(channelId).first<ChannelModuleSettingsRow>();
   if (row === null || row.enabled !== 1) {
-    await loesche(planer);
+    await clearPrewarning(scheduler);
     return;
   }
 
@@ -56,27 +56,27 @@ export const aktualisiereWerbevorwarnungswecker = async (
   try {
     rawSettings = JSON.parse(row.settings);
   } catch {
-    await loesche(planer);
+    await clearPrewarning(scheduler);
     return;
   }
-  const settings = werbungSettingsSchema.safeParse(rawSettings);
+  const settings = adsSettingsSchema.safeParse(rawSettings);
   if (!settings.success || !settings.data.prewarning || !await broadcasterHasScope(
     environment.DB,
     channelId,
     WARNING_SCOPE,
   )) {
-    await loesche(planer);
+    await clearPrewarning(scheduler);
     return;
   }
 
   if (schedule.nextAdAt === null) {
-    await loesche(planer);
+    await clearPrewarning(scheduler);
     return;
   }
   const nextAdAtMs = Date.parse(schedule.nextAdAt);
   if (!Number.isFinite(nextAdAtMs)) {
-    await loesche(planer);
+    await clearPrewarning(scheduler);
     return;
   }
-  await planer?.plane(nextAdAtMs - settings.data.leadSeconds * 1000);
+  await scheduler?.schedule(nextAdAtMs - settings.data.leadSeconds * 1000);
 };

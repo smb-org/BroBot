@@ -26,11 +26,11 @@ const parseEventFilters = (search: string): PanelEventFilters | undefined => {
   const actor = params.get("actor");
   const herkunft: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
   const ton: EventTone | null = tone !== null && EVENT_TONES.includes(tone as EventTone) ? tone as EventTone : null;
-  const modul = moduleId === null || moduleId.length === 0 ? null : moduleId;
+  const module = moduleId === null || moduleId.length === 0 ? null : moduleId;
   const person = actor === null || actor.length === 0 ? null : actor;
-  return herkunft === null && ton === null && modul === null && person === null
+  return herkunft === null && ton === null && module === null && person === null
     ? undefined
-    : { origin: herkunft, module: modul, tone: ton, person };
+    : { origin: herkunft, module: module, tone: ton, person };
 };
 
 export const parseDashboardRoute = (pathname: string, search = ""): DashboardRoute => {

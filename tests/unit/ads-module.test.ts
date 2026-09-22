@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { werbungModul, verarbeiteWerbepause } from "../../src/modules/ads";
+import { adsModule, processAdBreak } from "../../src/modules/ads";
 import type { ModuleEvent } from "../../src/modules/contract";
 
-const event = (payload: Record<string, unknown>, settings = werbungModul.defaultSettings): ModuleEvent<typeof settings> => ({
+const event = (payload: Record<string, unknown>, settings = adsModule.defaultSettings): ModuleEvent<typeof settings> => ({
   channelId: "kanal-a",
   subscriptionType: "channel.ad_break.begin",
   triggerId: "trigger-1",
@@ -16,18 +16,18 @@ const event = (payload: Record<string, unknown>, settings = werbungModul.default
 
 describe("Werbung-Modul", () => {
   it("deklariert die beiden Werbe-Anlässe mit Version 1 und channel:read:ads", () => {
-    expect(werbungModul.eventSubTypes).toEqual(["stream.online", "channel.ad_break.begin"]);
-    expect(werbungModul.broadcasterScopes).toEqual(["channel:read:ads"]);
+    expect(adsModule.eventSubTypes).toEqual(["stream.online", "channel.ad_break.begin"]);
+    expect(adsModule.broadcasterScopes).toEqual(["channel:read:ads"]);
   });
 
   it("unterscheidet automatische und manuelle Pausen und nennt die Dauer", () => {
-    const automatisch = verarbeiteWerbepause(event({
+    const automatisch = processAdBreak(event({
       duration_seconds: 30,
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: true,
       requester_user_login: "streamer",
     }));
-    const manuell = verarbeiteWerbepause(event({
+    const manuell = processAdBreak(event({
       duration_seconds: 90,
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,
@@ -48,7 +48,7 @@ describe("Werbung-Modul", () => {
   });
 
   it("überspringt eine Pause mit Dauer null und begründet das", () => {
-    expect(verarbeiteWerbepause(event({
+    expect(processAdBreak(event({
       duration_seconds: 0,
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,
@@ -62,7 +62,7 @@ describe("Werbung-Modul", () => {
   });
 
   it("verwendet die Einstellung auch ohne Platzhalter und ergänzt dann die Dauer", () => {
-    const result = verarbeiteWerbepause(event({
+    const result = processAdBreak(event({
       duration_seconds: 45,
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,
@@ -78,7 +78,7 @@ describe("Werbung-Modul", () => {
   });
 
   it("ersetzt den englischen Platzhalter und keinen deutschen Altname", () => {
-    const result = verarbeiteWerbepause(event({
+    const result = processAdBreak(event({
       duration_seconds: 45,
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,

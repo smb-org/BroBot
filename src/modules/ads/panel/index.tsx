@@ -1,19 +1,19 @@
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
-import type { WerbungSettings, WerbungZeitplanAntwort } from "../contracts";
-import { ladeWerbungseinstellungen, ladeWerbungZeitplan, snoozeWerbung, speichereWerbungseinstellungen } from "./service";
-import { werbungPanelTexte } from "./locale";
+import type { AdsSettings, AdsScheduleResponse } from "../contracts";
+import { loadAdSettings, loadAdsSchedule, snoozeAds, saveAdSettings } from "./service";
+import { adsPanelTexts } from "./locale";
 
-interface WerbungPanelProperties {
+interface AdsPanelProperties {
   channelId: string;
   language?: DashboardLanguage;
   canManage?: boolean;
 }
 
-type WerbungPanelSettings = Omit<WerbungSettings, "leadSeconds"> & { leadSeconds: number | "" };
+type AdsPanelSettings = Omit<AdsSettings, "leadSeconds"> & { leadSeconds: number | "" };
 
-const formatZeitpunkt = (value: string | null, language: DashboardLanguage): string => {
+const formatTimestamp = (value: string | null, language: DashboardLanguage): string => {
   if (value === null) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
@@ -23,15 +23,15 @@ const formatZeitpunkt = (value: string | null, language: DashboardLanguage): str
   }).format(date);
 };
 
-export const WerbungPanel = ({
+export const AdsPanel = ({
   channelId,
   language,
   canManage = true,
-}: WerbungPanelProperties): ReactElement => {
-  const labels = werbungPanelTexte(language);
+}: AdsPanelProperties): ReactElement => {
+  const labels = adsPanelTexts(language);
   const resolvedLanguage = language ?? (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("de") ? "de" : "en");
-  const [settings, setSettings] = useState<WerbungPanelSettings | null>(null);
-  const [zeitplan, setZeitplan] = useState<WerbungZeitplanAntwort | null>(null);
+  const [settings, setSettings] = useState<AdsPanelSettings | null>(null);
+  const [zeitplan, setZeitplan] = useState<AdsScheduleResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -40,7 +40,7 @@ export const WerbungPanel = ({
 
   useEffect(() => {
     let active = true;
-    void Promise.all([ladeWerbungseinstellungen(channelId), ladeWerbungZeitplan(channelId)]).then(([loadedSettings, loadedZeitplan]) => {
+    void Promise.all([loadAdSettings(channelId), loadAdsSchedule(channelId)]).then(([loadedSettings, loadedZeitplan]) => {
       if (!active) return;
       setSettings(loadedSettings);
       setZeitplan(loadedZeitplan);
@@ -62,7 +62,7 @@ export const WerbungPanel = ({
     setError(null);
     setSaved(false);
     try {
-      await speichereWerbungseinstellungen(channelId, { ...settings, leadSeconds: settings.leadSeconds });
+      await saveAdSettings(channelId, { ...settings, leadSeconds: settings.leadSeconds });
       setSaved(true);
     } catch {
       setError(labels.fehler);
@@ -82,7 +82,7 @@ export const WerbungPanel = ({
     setSnoozeBusy(true);
     setError(null);
     try {
-      setZeitplan(await snoozeWerbung(channelId));
+      setZeitplan(await snoozeAds(channelId));
     } catch {
       setError(labels.fehler);
     } finally {
@@ -92,7 +92,7 @@ export const WerbungPanel = ({
 
   const snoozeLabel = labels.snoozeButton(
     snoozeCount === null ? "—" : String(snoozeCount),
-    formatZeitpunkt(zeitplan.schedule.snoozeRefreshAt, resolvedLanguage),
+    formatTimestamp(zeitplan.schedule.snoozeRefreshAt, resolvedLanguage),
   );
 
   return (
@@ -104,7 +104,7 @@ export const WerbungPanel = ({
             <table className="tabelle" aria-label={labels.zeitplanAbschnitt}>
               <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.dauer}</th></tr></thead>
               <tbody><tr>
-                <td className="zahl">{formatZeitpunkt(zeitplan.schedule.nextAdAt, resolvedLanguage)}</td>
+                <td className="zahl">{formatTimestamp(zeitplan.schedule.nextAdAt, resolvedLanguage)}</td>
                 <td className="zahl">{zeitplan.schedule.duration === null ? "—" : `${String(zeitplan.schedule.duration)} s`}</td>
               </tr></tbody>
             </table>
@@ -198,7 +198,7 @@ export const WerbungPanel = ({
               <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.dauer}</th></tr></thead>
               <tbody>{zeitplan.letzteWerbepausen.map((pause) => (
                 <tr key={`${pause.zeitpunkt}-${String(pause.dauerSekunden)}`}>
-                  <td className="zahl">{labels.letzteZeit(formatZeitpunkt(pause.zeitpunkt, resolvedLanguage))}</td>
+                  <td className="zahl">{labels.letzteZeit(formatTimestamp(pause.zeitpunkt, resolvedLanguage))}</td>
                   <td className="zahl">{labels.letzteDauer(String(pause.dauerSekunden))}</td>
                 </tr>
               ))}</tbody>
@@ -219,4 +219,4 @@ export const WerbungPanel = ({
   );
 };
 
-export default WerbungPanel;
+export default AdsPanel;

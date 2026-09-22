@@ -13,7 +13,7 @@ const SCHLUESSEL = JSON.stringify({
   retired: [],
 });
 
-const umgebung = (database: TestD1Database, keys = SCHLUESSEL) => ({
+const environment = (database: TestD1Database, keys = SCHLUESSEL) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
@@ -36,7 +36,7 @@ const botEinrichten = async (database: TestD1Database, ciphertext = "lesbar"): P
 };
 
 describe("Helix-Shoutout", () => {
-  const appTokenEinrichten = async (database: TestD1Database): Promise<void> => {
+  const setUpAppToken = async (database: TestD1Database): Promise<void> => {
     await insertAppAccessToken(
       database,
       await encryptJson({ token: "app-token" }, parseKeyRing(SCHLUESSEL)),
@@ -50,10 +50,10 @@ describe("Helix-Shoutout", () => {
     const database = new TestD1Database();
     try {
       await botEinrichten(database, "unlesbare-bot-chiffre");
-      await appTokenEinrichten(database);
+      await setUpAppToken(database);
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
 
-      await expect(sendShoutout(umgebung(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
+      await expect(sendShoutout(environment(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
         sent: true,
         reason: null,
       });
@@ -76,10 +76,10 @@ describe("Helix-Shoutout", () => {
     const database = new TestD1Database();
     try {
       await botEinrichten(database, await encryptJson({ token: "bot-token" }, parseKeyRing(SCHLUESSEL)));
-      await appTokenEinrichten(database);
+      await setUpAppToken(database);
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
 
-      await expect(sendShoutout(umgebung(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
+      await expect(sendShoutout(environment(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
         sent: false,
         reason: "rate_limited",
         detail: { status: 429 },
@@ -95,7 +95,7 @@ describe("Helix-Shoutout", () => {
       await botEinrichten(database, "unlesbare-bot-chiffre");
       const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("App-Token nicht erreichbar"));
 
-      await expect(sendShoutout(umgebung(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
+      await expect(sendShoutout(environment(database), "kanal-a", "quelle-1", fetcher)).resolves.toMatchObject({
         sent: false,
         reason: "app_token_unavailable",
       });

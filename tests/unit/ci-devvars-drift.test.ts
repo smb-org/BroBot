@@ -26,9 +26,9 @@ const ersetzteNamen = (): Set<string> => new Set(
  */
 describe("CI-Testkonfiguration", () => {
   it("übernimmt das gültige leere Betreiber-Array unverändert", () => {
-    const wert = /^BETREIBER_USER_IDS=(.*)$/m.exec(beispiel)?.[1];
+    const value = /^BETREIBER_USER_IDS=(.*)$/m.exec(beispiel)?.[1];
 
-    expect(wert).toBe("[]");
+    expect(value).toBe("[]");
   });
 
   it("ersetzt jeden Platzhalter aus .dev.vars.example", () => {

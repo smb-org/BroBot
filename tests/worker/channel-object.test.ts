@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  verarbeiteWerbevorwarnung: vi.fn().mockResolvedValue(undefined),
+  processAdPrewarning: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("../../src/worker/werbe-vorwarnung", () => mocks);
+vi.mock("../../src/worker/ad-prewarning", () => mocks);
 
 import type {
   RealtimeEnvelope,
@@ -99,7 +99,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   return object;
 };
 
-const ereignisNachricht: RealtimeEnvelope<"event_log.new"> = {
+const eventMessage: RealtimeEnvelope<"event_log.new"> = {
   version: 1,
   id: "nachricht-1",
   createdAt: "2026-09-21T12:00:00.000Z",
@@ -111,7 +111,7 @@ const ereignisNachricht: RealtimeEnvelope<"event_log.new"> = {
 describe("ChannelObject-Realtime-Strecke", () => {
   afterEach(() => {
     vi.useRealTimers();
-    mocks.verarbeiteWerbevorwarnung.mockClear();
+    mocks.processAdPrewarning.mockClear();
   });
 
   it("weist einen Aufbau ohne Prinzipal mit 403 ab", () => {
@@ -130,7 +130,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     const object = objectFor([]);
 
     expect(() => {
-      object.publish({ ...ereignisNachricht, channelId: "kanal-b" });
+      object.publish({ ...eventMessage, channelId: "kanal-b" });
     }).toThrow(/fremden Kanal/);
   });
 
@@ -139,7 +139,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     const gueltig = socketFor(gueltigerPrinzipal({ userId: "user-2", sessionId: "session-2" }));
     const object = objectFor([abgelaufen, gueltig]);
 
-    object.publish(ereignisNachricht);
+    object.publish(eventMessage);
 
     expect(abgelaufen.send.mock.calls).toHaveLength(0);
     expect(abgelaufen.close.mock.calls).toEqual([[4001, "Berechtigung abgelaufen"]]);
@@ -165,19 +165,19 @@ describe("ChannelObject-Realtime-Strecke", () => {
     const storage = storageOf(object);
 
     storage.values.set("security_round", jetzt + 2_000);
-    await object.planeWerbevorwarnung(jetzt + 4_000);
+    await object.scheduleAdPrewarning(jetzt + 4_000);
     expect(storage.setAlarm).toHaveBeenLastCalledWith(jetzt + 2_000);
 
     vi.setSystemTime(jetzt + 2_000);
     await object.alarm();
-    expect(mocks.verarbeiteWerbevorwarnung).not.toHaveBeenCalled();
+    expect(mocks.processAdPrewarning).not.toHaveBeenCalled();
     expect(storage.values.size).toBe(1);
     expect([...storage.values.values()]).toEqual([jetzt + 4_000]);
     expect(storage.setAlarm).toHaveBeenLastCalledWith(jetzt + 4_000);
 
     vi.setSystemTime(jetzt + 4_000);
     await object.alarm();
-    expect(mocks.verarbeiteWerbevorwarnung).toHaveBeenCalledTimes(1);
+    expect(mocks.processAdPrewarning).toHaveBeenCalledTimes(1);
     expect(storage.values.size).toBe(0);
     expect(storage.deleteAlarm).toHaveBeenCalled();
   });
@@ -200,7 +200,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     const storage = storageOf(object);
     socket.close.mockImplementation(() => { sockets.length = 0; });
     storage.values.set("security_round", jetzt - 1);
-    await object.planeWerbevorwarnung(jetzt + 60_000);
+    await object.scheduleAdPrewarning(jetzt + 60_000);
 
     await object.alarm();
 

@@ -273,7 +273,7 @@ export const fetchModeratedChannels = async (
   return fetchPage(null);
 };
 
-export const fetchModeratedChannelStatus = async (
+export const fetchChannelStatus = async (
   fetcher: typeof fetch,
   clientId: string,
   userId: string,

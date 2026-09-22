@@ -1,17 +1,17 @@
 import type { BotModule } from "../contract";
-import { werbungSettingsSchema } from "./contracts";
-import { verarbeiteWerbepause } from "./service";
-import { werbungRoutes } from "./routes";
+import { adsSettingsSchema } from "./contracts";
+import { processAdBreak } from "./service";
+import { adsRoutes } from "./routes";
 
-export { entscheideWerbepause, entscheideWerbevorwarnung } from "./domain";
-export { verarbeiteWerbepause } from "./service";
-export type { WerbungSettings, WerbepausenEreignis } from "./contracts";
-export type { LetzteWerbepause, WerbungZeitplan, WerbungZeitplanAntwort } from "./contracts";
-export { WERBUNG_OPTIONALE_BROADCASTER_SCOPES } from "./contracts";
+export { decideAdBreak, decideAdPrewarning } from "./domain";
+export { processAdBreak } from "./service";
+export type { AdsSettings, AdBreaksEvent } from "./contracts";
+export type { LastAdBreak, AdsSchedule, AdsScheduleResponse } from "./contracts";
+export { ADS_OPTIONAL_BROADCASTER_SCOPES } from "./contracts";
 
-export const werbungModul: BotModule<typeof werbungSettingsSchema> = {
+export const adsModule: BotModule<typeof adsSettingsSchema> = {
   id: "ads",
-  settingsSchema: werbungSettingsSchema,
+  settingsSchema: adsSettingsSchema,
   defaultSettings: {
     automatic: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",
     manual: "Werbepause: {duration} Sekunden. Bin gleich zurück!",
@@ -21,9 +21,9 @@ export const werbungModul: BotModule<typeof werbungSettingsSchema> = {
   },
   broadcasterScopes: ["channel:read:ads"],
   eventSubTypes: ["stream.online", "channel.ad_break.begin"],
-  routes: werbungRoutes,
+  routes: adsRoutes,
   panel: () => import("./panel"),
   handleEvent: (event) => event.subscriptionType === "channel.ad_break.begin"
-    ? verarbeiteWerbepause(event)
+    ? processAdBreak(event)
     : { actions: [], diagnostics: [] },
 };

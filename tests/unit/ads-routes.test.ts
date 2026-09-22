@@ -22,8 +22,8 @@ const tokenKeys = JSON.stringify({
 
 const environmentFor = (
   database: TestD1Database,
-  plane: () => void,
-  loesche: () => void,
+  schedule: () => void,
+  clear: () => void,
 ): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
@@ -33,8 +33,8 @@ const environmentFor = (
   CHANNEL: {
     idFromName: (channelId: string) => channelId,
     get: () => ({
-      planeWerbevorwarnung: () => { plane(); return Promise.resolve(); },
-      loescheWerbevorwarnung: () => { loesche(); return Promise.resolve(); },
+      scheduleAdPrewarning: () => { schedule(); return Promise.resolve(); },
+      clearAdPrewarning: () => { clear(); return Promise.resolve(); },
     }),
   } as unknown as Env["CHANNEL"],
 } as unknown as Env);
@@ -74,8 +74,8 @@ const scheduleBody = (nextAdAt: string | null = "2026-09-21T12:05:00Z"): string 
 describe("Werbung-Routen", () => {
   let database: TestD1Database;
   let appTokenCiphertext: string;
-  let plane: ReturnType<typeof vi.fn>;
-  let loesche: ReturnType<typeof vi.fn>;
+  let schedule: ReturnType<typeof vi.fn>;
+  let clear: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     database = new TestD1Database();
@@ -87,8 +87,8 @@ describe("Werbung-Routen", () => {
       "2026-09-20T00:00:00.000Z",
       "2026-09-20T00:00:00.000Z",
     );
-    plane = vi.fn<() => void>();
-    loesche = vi.fn<() => void>();
+    schedule = vi.fn<() => void>();
+    clear = vi.fn<() => void>();
   });
 
   afterEach(() => {
@@ -105,7 +105,7 @@ describe("Werbung-Routen", () => {
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
     ).run();
-    return environmentFor(database, plane as unknown as () => void, loesche as unknown as () => void);
+    return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void);
   };
 
   it("lässt einen Bediener snoozen und schreibt den Ausgang ins Ereignisprotokoll", async () => {
@@ -122,7 +122,7 @@ describe("Werbung-Routen", () => {
     await expect(database.prepare(
       "SELECT code, actor_user_id FROM event_log WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ code: "ads.snooze", actor_user_id: "user-1" });
-    expect(plane).toHaveBeenCalled();
+    expect(schedule).toHaveBeenCalled();
   });
 
   it("trennt Snooze-Bedienung von der verwaltenden Einstellungsschwelle", async () => {
@@ -145,7 +145,7 @@ describe("Werbung-Routen", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(plane).toHaveBeenCalledWith();
+    expect(schedule).toHaveBeenCalledWith();
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first()).resolves.toEqual({ count: 0 });
   });
 

@@ -1,36 +1,36 @@
 import { kuerzeAuf200Zeichen } from "../contract";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import {
-  befehlAusNachricht,
-  befehlTextMitPlatzhaltern,
-  chatStatusErfuelltStufe,
+  commandFromMessage,
+  commandTextWithPlaceholders,
+  chatStatusMeetsTier,
   cooldownRestzeit,
 } from "./domain";
-import type { TextbefehlEingabe } from "./domain";
-import type { TextbefehlRepository } from "./repository";
+import type { TextCommandInput } from "./domain";
+import type { TextCommandRepository } from "./repository";
 
-const recordWert = (value: unknown, key: string): unknown =>
+const recordValue = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? Reflect.get(value, key)
     : undefined;
 
 const nachrichtText = (event: ModuleEvent): string | null => {
-  const message = recordWert(event.payload.message, "text");
+  const message = recordValue(event.payload.message, "text");
   return typeof message === "string" ? message : null;
 };
 
-const textWert = (value: unknown): string | null =>
+const textValue = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
-const userFuer = (event: ModuleEvent): string =>
-  event.actor?.login ?? textWert(event.payload.chatter_user_login) ?? "unbekannt";
+const userFor = (event: ModuleEvent): string =>
+  event.actor?.login ?? textValue(event.payload.chatter_user_login) ?? "unbekannt";
 
-const channelFuer = (event: ModuleEvent): string =>
-  textWert(event.payload.broadcaster_user_login) ?? event.channelId;
+const channelFor = (event: ModuleEvent): string =>
+  textValue(event.payload.broadcaster_user_login) ?? event.channelId;
 
 const diagnoseAusgeloest = (
-  eingabe: Exclude<TextbefehlEingabe, { kind: "unbekannt" }>,
-  antwort: string,
+  eingabe: Exclude<TextCommandInput, { kind: "unbekannt" }>,
+  response: string,
 ) => {
   const argumente = eingabe.argumente;
   return {
@@ -40,13 +40,13 @@ const diagnoseAusgeloest = (
       ...(argumente === undefined || argumente.length === 0
         ? {}
         : { argumente: kuerzeAuf200Zeichen(argumente) }),
-      antwort: kuerzeAuf200Zeichen(antwort),
+      antwort: kuerzeAuf200Zeichen(response),
     },
   } as const;
 };
 
-const antwort = (event: ModuleEvent, eingabe: Exclude<TextbefehlEingabe, { kind: "unbekannt" }>, text: string): ModuleResult => {
-  const replyToMessageId = textWert(event.payload.message_id);
+const response = (event: ModuleEvent, eingabe: Exclude<TextCommandInput, { kind: "unbekannt" }>, text: string): ModuleResult => {
+  const replyToMessageId = textValue(event.payload.message_id);
   return {
     actions: [{
       kind: "chat",
@@ -57,40 +57,40 @@ const antwort = (event: ModuleEvent, eingabe: Exclude<TextbefehlEingabe, { kind:
   };
 };
 
-export const verarbeiteTextbefehlNachricht = async (
+export const processTextCommandMessage = async (
   event: ModuleEvent,
-  repository: TextbefehlRepository,
+  repository: TextCommandRepository,
 ): Promise<ModuleResult> => {
   const text = nachrichtText(event);
   if (text === null) return { actions: [], diagnostics: [] };
-  const eingabe = befehlAusNachricht(text);
+  const eingabe = commandFromMessage(text);
   if (eingabe === null) return { actions: [], diagnostics: [] };
 
   if (eingabe.kind === "unbekannt") {
     return { actions: [], diagnostics: [{ code: "text_commands.unbekannt" }] };
   }
 
-  const befehl = await repository.finden(event.channelId, eingabe.name);
-  if (befehl === null) {
+  const command = await repository.finden(event.channelId, eingabe.name);
+  if (command === null) {
     return {
       actions: [],
       diagnostics: [{ code: "text_commands.unbekannt", detail: { name: eingabe.name } }],
     };
   }
-  if (!befehl.enabled) {
+  if (!command.enabled) {
     return {
       actions: [],
       diagnostics: [{ code: "text_commands.deaktiviert", detail: { name: eingabe.name } }],
     };
   }
-  if (!chatStatusErfuelltStufe(event.chatStatus, befehl.mindeststufe)) {
+  if (!chatStatusMeetsTier(event.chatStatus, command.minimumTier)) {
     return {
       actions: [],
       diagnostics: [{
         code: "text_commands.berechtigung",
         detail: {
           name: eingabe.name,
-          geforderteStufe: befehl.mindeststufe,
+          geforderteStufe: command.minimumTier,
           vorhandeneStufe: event.chatStatus,
         },
       }],
@@ -106,9 +106,9 @@ export const verarbeiteTextbefehlNachricht = async (
   }
   if (!beanspruchung.beansprucht) {
     const restSekunden = cooldownRestzeit(
-      beanspruchung.befehl.zuletztVerwendetAt,
+      beanspruchung.befehl.lastUsedAt,
       event.receivedAt,
-      beanspruchung.befehl.cooldownSekunden,
+      beanspruchung.befehl.cooldownSeconds,
     );
     return {
       actions: [],
@@ -117,18 +117,18 @@ export const verarbeiteTextbefehlNachricht = async (
   }
 
   if (beanspruchung.befehl.kind === "list") {
-    const befehle = (await repository.auflisten(event.channelId))
-      .filter((befehl) => befehl.enabled)
+    const commands = (await repository.auflisten(event.channelId))
+      .filter((command) => command.enabled)
       .sort((left, right) => left.name.localeCompare(right.name));
-    const liste = befehle.length === 0
+    const list = commands.length === 0
       ? "Keine Textbefehle angelegt."
-      : `Befehle: ${befehle.map((befehl) => `!${befehl.name}`).join(", ")}`;
-    return antwort(event, eingabe, liste);
+      : `Befehle: ${commands.map((command) => `!${command.name}`).join(", ")}`;
+    return response(event, eingabe, list);
   }
 
-  return antwort(event, eingabe, befehlTextMitPlatzhaltern(
+  return response(event, eingabe, commandTextWithPlaceholders(
     beanspruchung.befehl.text,
-    userFuer(event),
-    channelFuer(event),
+    userFor(event),
+    channelFor(event),
   ));
 };

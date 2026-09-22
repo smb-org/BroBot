@@ -1,5 +1,5 @@
 import {
-  betreiberSessionGuard,
+  platformSessionGuard,
   type ActorContext,
   type MutationGuard,
 } from "../db/guards";
@@ -10,14 +10,14 @@ import { prepareAudit } from "../db/audit";
 import { decodeCursor, encodeCursor } from "../db/cursor";
 import type { AuditActorKind } from "../../contracts/values";
 
-export interface BetreiberKanal {
+export interface PlatformChannel {
   channelId: string;
   login: string;
   displayName: string;
   fullConsent: boolean;
 }
 
-export interface BetreiberKanalÜbersicht extends BetreiberKanal {
+export interface PlatformChannelOverview extends PlatformChannel {
   memberCounts: {
     broadcaster: number;
     manager: number;
@@ -26,12 +26,12 @@ export interface BetreiberKanalÜbersicht extends BetreiberKanal {
   broadcasterConnected: boolean;
 }
 
-export interface BetreiberAuditCursor {
+export interface PlatformAuditCursor {
   createdAt: string;
   id: string;
 }
 
-export interface BetreiberAuditEintrag {
+export interface PlatformAuditEntry {
   auditId: string;
   actorUserId: string;
   actorLogin: string | null;
@@ -45,26 +45,26 @@ export interface BetreiberAuditEintrag {
   after: string;
 }
 
-export interface BetreiberAuditSeite {
-  entries: BetreiberAuditEintrag[];
+export interface PlatformAuditPage {
+  entries: PlatformAuditEntry[];
   nextCursor: string | null;
 }
 
-export type BetreiberAktion =
+export type PlatformAction =
   | "kanal.freigegeben"
   | "kanal.vollzustimmung_geaendert"
   | "mitglied.hinzugefuegt"
   | "mitglied.rolle_geaendert"
   | "mitglied.entfernt";
 
-interface BetreiberKanalZeile {
+interface PlatformChannelRow {
   channel_id: string;
   login: string;
   display_name: string;
   full_consent: number;
 }
 
-interface BetreiberKanalÜbersichtZeile extends BetreiberKanalZeile {
+interface PlatformChannelOverviewRow extends PlatformChannelRow {
   broadcaster_count: number;
   verwalter_count: number;
   bediener_count: number;
@@ -83,24 +83,24 @@ interface AuditZeile {
   after_json: string;
 }
 
-export const betreiberRollenSql = "'manager', 'operator'";
+export const platformRolesSql = "'manager', 'operator'";
 
-const mutationsschutz = (akteur: ActorContext, zeitpunkt: string): MutationGuard =>
-  betreiberSessionGuard(akteur, zeitpunkt);
+const mutationGuard = (actor: ActorContext, timestamp: string): MutationGuard =>
+  platformSessionGuard(actor, timestamp);
 
 const vorbereiteAudit = (
   db: D1Database,
-  akteurId: string,
-  zeitpunkt: string,
-  kanalId: string,
-  aktion: BetreiberAktion,
-  vorher: BetreiberKanal | ChannelMemberRecord | null,
-  nachher: BetreiberKanal | ChannelMemberRecord | null,
+  actorId: string,
+  timestamp: string,
+  channelId: string,
+  aktion: PlatformAction,
+  vorher: PlatformChannel | ChannelMemberRecord | null,
+  nachher: PlatformChannel | ChannelMemberRecord | null,
 ): D1PreparedStatement => prepareAudit(
   db,
-  akteurId,
-  zeitpunkt,
-  kanalId,
+  actorId,
+  timestamp,
+  channelId,
   null,
   aktion,
   vorher,
@@ -108,14 +108,14 @@ const vorbereiteAudit = (
   "platform_admin",
 );
 
-const mapKanal = (zeile: BetreiberKanalZeile): BetreiberKanal => ({
+const mapChannel = (zeile: PlatformChannelRow): PlatformChannel => ({
   channelId: zeile.channel_id,
   login: zeile.login,
   displayName: zeile.display_name,
   fullConsent: zeile.full_consent === 1,
 });
 
-export const decodeBetreiberAuditCursor = (serialized: string): BetreiberAuditCursor | null => decodeCursor(serialized, (value) => {
+export const decodePlatformAuditCursor = (serialized: string): PlatformAuditCursor | null => decodeCursor(serialized, (value) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
     const cursor = value as Record<string, unknown>;
     return typeof cursor.createdAt === "string" && cursor.createdAt.length > 0 &&
@@ -124,9 +124,9 @@ export const decodeBetreiberAuditCursor = (serialized: string): BetreiberAuditCu
       : null;
 });
 
-export const listeBetreiberKanäle = async (
+export const listPlatformChannels = async (
   db: D1Database,
-): Promise<BetreiberKanalÜbersicht[]> => {
+): Promise<PlatformChannelOverview[]> => {
   const result = await db.prepare(
     `SELECT channel.channel_id, channel.login, channel.display_name, channel.full_consent,
             COUNT(CASE WHEN member.role = 'broadcaster' THEN 1 END) AS broadcaster_count,
@@ -142,9 +142,9 @@ export const listeBetreiberKanäle = async (
        LEFT JOIN channel_members AS member ON member.channel_id = channel.channel_id
       GROUP BY channel.channel_id, channel.login, channel.display_name, channel.full_consent
       ORDER BY channel.login, channel.channel_id`,
-  ).all<BetreiberKanalÜbersichtZeile>();
+  ).all<PlatformChannelOverviewRow>();
   return result.results.map((zeile) => ({
-    ...mapKanal(zeile),
+    ...mapChannel(zeile),
     memberCounts: {
       broadcaster: zeile.broadcaster_count,
       manager: zeile.verwalter_count,
@@ -154,113 +154,113 @@ export const listeBetreiberKanäle = async (
   }));
 };
 
-export const holeBetreiberKanal = async (
+export const getPlatformChannel = async (
   db: D1Database,
-  kanalId: string,
-): Promise<BetreiberKanal | null> => {
+  channelId: string,
+): Promise<PlatformChannel | null> => {
   const zeile = await db.prepare(
     `SELECT channel_id, login, display_name, full_consent
        FROM channels
       WHERE channel_id = ?`,
-  ).bind(kanalId).first<BetreiberKanalZeile>();
-  return zeile === null ? null : mapKanal(zeile);
+  ).bind(channelId).first<PlatformChannelRow>();
+  return zeile === null ? null : mapChannel(zeile);
 };
 
-export const freigebenBetreiberKanal = async (
+export const releasePlatformChannel = async (
   db: D1Database,
-  akteur: ActorContext,
-  kanal: { userId: string; login: string; displayName: string },
-  vollzustimmung: boolean,
-  zeitpunkt: string,
+  actor: ActorContext,
+  channel: { userId: string; login: string; displayName: string },
+  fullConsent: boolean,
+  timestamp: string,
 ): Promise<boolean> => {
-  const schutz = mutationsschutz(akteur, zeitpunkt);
-  const kanalMutation = db.prepare(
+  const guard = mutationGuard(actor, timestamp);
+  const channelMutation = db.prepare(
     `INSERT INTO channels
       (channel_id, login, display_name, created_at, updated_at, full_consent)
      SELECT ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM channels WHERE channel_id = ?
       )
-      ${schutz.sql}`,
+      ${guard.sql}`,
   ).bind(
-    kanal.userId,
-    kanal.login,
-    kanal.displayName,
-    zeitpunkt,
-    zeitpunkt,
-    vollzustimmung ? 1 : 0,
-    kanal.userId,
-    ...schutz.values,
+    channel.userId,
+    channel.login,
+    channel.displayName,
+    timestamp,
+    timestamp,
+    fullConsent ? 1 : 0,
+    channel.userId,
+    ...guard.values,
   );
-  const mitgliedMutation = db.prepare(
+  const memberMutation = db.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
      SELECT ?, channel_id, 'broadcaster', ?, ?
        FROM channels
       WHERE channel_id = ?
         AND changes() > 0`,
-  ).bind(kanal.userId, zeitpunkt, zeitpunkt, kanal.userId);
-  const nachher: BetreiberKanal = {
-    channelId: kanal.userId,
-    login: kanal.login,
-    displayName: kanal.displayName,
-    fullConsent: vollzustimmung,
+  ).bind(channel.userId, timestamp, timestamp, channel.userId);
+  const nachher: PlatformChannel = {
+    channelId: channel.userId,
+    login: channel.login,
+    displayName: channel.displayName,
+    fullConsent: fullConsent,
   };
   const audit = vorbereiteAudit(
     db,
-    akteur.userId,
-    zeitpunkt,
-    kanal.userId,
+    actor.userId,
+    timestamp,
+    channel.userId,
     "kanal.freigegeben",
     null,
     nachher,
   );
-  const ergebnisse = await db.batch([kanalMutation, mitgliedMutation, audit]);
-  return (ergebnisse[0]?.meta.changes ?? 0) > 0 && (ergebnisse[1]?.meta.changes ?? 0) > 0;
+  const results = await db.batch([channelMutation, memberMutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0 && (results[1]?.meta.changes ?? 0) > 0;
 };
 
-export const ändereVollzustimmung = async (
+export const changeFullConsent = async (
   db: D1Database,
-  akteur: ActorContext,
-  kanal: BetreiberKanal,
-  vollzustimmung: boolean,
-  zeitpunkt: string,
+  actor: ActorContext,
+  channel: PlatformChannel,
+  fullConsent: boolean,
+  timestamp: string,
 ): Promise<boolean> => {
-  const schutz = mutationsschutz(akteur, zeitpunkt);
-  const vorher: BetreiberKanal = { ...kanal };
-  const nachher: BetreiberKanal = { ...kanal, fullConsent: vollzustimmung };
+  const guard = mutationGuard(actor, timestamp);
+  const vorher: PlatformChannel = { ...channel };
+  const nachher: PlatformChannel = { ...channel, fullConsent: fullConsent };
   const mutation = db.prepare(
     `UPDATE channels
         SET full_consent = ?, updated_at = ?
       WHERE channel_id = ?
         AND full_consent <> ?
-        ${schutz.sql}`,
+        ${guard.sql}`,
   ).bind(
-    vollzustimmung ? 1 : 0,
-    zeitpunkt,
-    kanal.channelId,
-    vollzustimmung ? 1 : 0,
-    ...schutz.values,
+    fullConsent ? 1 : 0,
+    timestamp,
+    channel.channelId,
+    fullConsent ? 1 : 0,
+    ...guard.values,
   );
   const audit = vorbereiteAudit(
     db,
-    akteur.userId,
-    zeitpunkt,
-    kanal.channelId,
+    actor.userId,
+    timestamp,
+    channel.channelId,
     "kanal.vollzustimmung_geaendert",
     vorher,
     nachher,
   );
-  const ergebnisse = await db.batch([mutation, audit]);
-  return (ergebnisse[0]?.meta.changes ?? 0) > 0;
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
-export const fügeBetreiberMitgliedHinzu = async (
+export const addPlatformMember = async (
   db: D1Database,
-  akteur: ActorContext,
-  mitglied: ChannelMemberRecord,
-  zeitpunkt: string,
+  actor: ActorContext,
+  member: ChannelMemberRecord,
+  timestamp: string,
 ): Promise<boolean> => {
-  const schutz = mutationsschutz(akteur, zeitpunkt);
+  const guard = mutationGuard(actor, timestamp);
   const mutation = db.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
      SELECT ?, ?, ?, ?, ?
@@ -269,49 +269,49 @@ export const fügeBetreiberMitgliedHinzu = async (
           SELECT 1 FROM channel_members
            WHERE channel_id = ? AND user_id = ?
         )
-        AND ? IN (${betreiberRollenSql})
-        ${schutz.sql}`,
+        AND ? IN (${platformRolesSql})
+        ${guard.sql}`,
   ).bind(
-    mitglied.channelId,
-    mitglied.userId,
-    mitglied.role,
-    mitglied.createdAt,
-    mitglied.updatedAt,
-    mitglied.channelId,
-    mitglied.channelId,
-    mitglied.userId,
-    mitglied.role,
-    ...schutz.values,
+    member.channelId,
+    member.userId,
+    member.role,
+    member.createdAt,
+    member.updatedAt,
+    member.channelId,
+    member.channelId,
+    member.userId,
+    member.role,
+    ...guard.values,
   );
   const audit = vorbereiteAudit(
     db,
-    akteur.userId,
-    zeitpunkt,
-    mitglied.channelId,
+    actor.userId,
+    timestamp,
+    member.channelId,
     "mitglied.hinzugefuegt",
     null,
-    mitglied,
+    member,
   );
-  const ergebnisse = await db.batch([mutation, audit]);
-  return (ergebnisse[0]?.meta.changes ?? 0) > 0;
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
-export const ändereBetreiberMitglied = async (
+export const changePlatformMember = async (
   db: D1Database,
-  akteur: ActorContext,
+  actor: ActorContext,
   vorher: ChannelMemberRecord,
   nachher: ChannelMemberRecord,
-  zeitpunkt: string,
+  timestamp: string,
 ): Promise<boolean> => {
-  const schutz = mutationsschutz(akteur, zeitpunkt);
+  const guard = mutationGuard(actor, timestamp);
   const mutation = db.prepare(
     `UPDATE channel_members
         SET role = ?, updated_at = ?
       WHERE channel_id = ? AND user_id = ?
         AND role = ? AND created_at = ? AND updated_at = ?
-        AND role IN (${betreiberRollenSql})
-        AND ? IN (${betreiberRollenSql})
-        ${schutz.sql}`,
+        AND role IN (${platformRolesSql})
+        AND ? IN (${platformRolesSql})
+        ${guard.sql}`,
   ).bind(
     nachher.role,
     nachher.updatedAt,
@@ -321,60 +321,60 @@ export const ändereBetreiberMitglied = async (
     vorher.createdAt,
     vorher.updatedAt,
     nachher.role,
-    ...schutz.values,
+    ...guard.values,
   );
   const audit = vorbereiteAudit(
     db,
-    akteur.userId,
-    zeitpunkt,
+    actor.userId,
+    timestamp,
     nachher.channelId,
     "mitglied.rolle_geaendert",
     vorher,
     nachher,
   );
-  const ergebnisse = await db.batch([mutation, audit]);
-  return (ergebnisse[0]?.meta.changes ?? 0) > 0;
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
-export const entferneBetreiberMitglied = async (
+export const removePlatformMember = async (
   db: D1Database,
-  akteur: ActorContext,
-  mitglied: ChannelMemberRecord,
-  zeitpunkt: string,
+  actor: ActorContext,
+  member: ChannelMemberRecord,
+  timestamp: string,
 ): Promise<boolean> => {
-  const schutz = mutationsschutz(akteur, zeitpunkt);
+  const guard = mutationGuard(actor, timestamp);
   const mutation = db.prepare(
     `DELETE FROM channel_members
       WHERE channel_id = ? AND user_id = ?
         AND role = ? AND created_at = ? AND updated_at = ?
-        AND role IN (${betreiberRollenSql})
-        ${schutz.sql}`,
+        AND role IN (${platformRolesSql})
+        ${guard.sql}`,
   ).bind(
-    mitglied.channelId,
-    mitglied.userId,
-    mitglied.role,
-    mitglied.createdAt,
-    mitglied.updatedAt,
-    ...schutz.values,
+    member.channelId,
+    member.userId,
+    member.role,
+    member.createdAt,
+    member.updatedAt,
+    ...guard.values,
   );
   const audit = vorbereiteAudit(
     db,
-    akteur.userId,
-    zeitpunkt,
-    mitglied.channelId,
+    actor.userId,
+    timestamp,
+    member.channelId,
     "mitglied.entfernt",
-    mitglied,
+    member,
     null,
   );
-  const ergebnisse = await db.batch([mutation, audit]);
-  return (ergebnisse[0]?.meta.changes ?? 0) > 0;
+  const results = await db.batch([mutation, audit]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 };
 
-export const listeBetreiberAudit = async (
+export const listPlatformAudit = async (
   db: D1Database,
   limit: number,
-  cursor: BetreiberAuditCursor | null,
-): Promise<BetreiberAuditSeite> => {
+  cursor: PlatformAuditCursor | null,
+): Promise<PlatformAuditPage> => {
   const query = cursor === null
     ? `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
@@ -387,13 +387,13 @@ export const listeBetreiberAudit = async (
           AND (created_at < ? OR (created_at = ? AND audit_id < ?))
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`;
-  const werte = cursor === null
+  const values = cursor === null
     ? [limit + 1]
     : [cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
-  const ergebnis = await db.prepare(query).bind(...werte).all<AuditZeile>();
-  const hatNächsteSeite = ergebnis.results.length > limit;
-  const zeilen = ergebnis.results.slice(0, limit);
-  const einträge = zeilen.map((zeile): BetreiberAuditEintrag => ({
+  const result = await db.prepare(query).bind(...values).all<AuditZeile>();
+  const hasNextPage = result.results.length > limit;
+  const zeilen = result.results.slice(0, limit);
+  const entries = zeilen.map((zeile): PlatformAuditEntry => ({
     auditId: zeile.audit_id,
     actorUserId: zeile.actor_user_id,
     actorLogin: null,
@@ -408,8 +408,8 @@ export const listeBetreiberAudit = async (
   }));
   const letzteZeile = zeilen.at(-1);
   return {
-    entries: einträge,
-    nextCursor: hatNächsteSeite && letzteZeile !== undefined
+    entries: entries,
+    nextCursor: hasNextPage && letzteZeile !== undefined
       ? encodeCursor({ createdAt: letzteZeile.created_at, id: letzteZeile.audit_id })
       : null,
   };

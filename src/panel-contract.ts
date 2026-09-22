@@ -111,14 +111,14 @@ export interface PanelChannelsResponse {
   platformAdmin: boolean;
 }
 
-export interface PanelBetreiberKanal {
+export interface PanelPlatformChannel {
   channelId: string;
   login: string;
   displayName: string;
   fullConsent: boolean;
 }
 
-export interface PanelBetreiberKanalÜbersicht extends PanelBetreiberKanal {
+export interface PanelPlatformChannelOverview extends PanelPlatformChannel {
   memberCounts: {
     broadcaster: number;
     manager: number;
@@ -127,18 +127,18 @@ export interface PanelBetreiberKanalÜbersicht extends PanelBetreiberKanal {
   broadcasterConnected: boolean;
 }
 
-export interface PanelBetreiberÜbersichtResponse {
-  channels: PanelBetreiberKanalÜbersicht[];
+export interface PanelPlatformOverviewResponse {
+  channels: PanelPlatformChannelOverview[];
 }
 
-export interface PanelBetreiberMitgliederResponse {
+export interface PanelPlatformMembersResponse {
   members: PanelMember[];
   nextCursor: string | null;
   broadcasterCount: number;
   viewerUserId: string;
 }
 
-export interface PanelBetreiberAuditEntry {
+export interface PanelPlatformAuditEntry {
   auditId: string;
   actorUserId: string;
   actorLogin: string | null;
@@ -152,8 +152,8 @@ export interface PanelBetreiberAuditEntry {
   after: string;
 }
 
-export interface PanelBetreiberAuditResponse {
-  entries: PanelBetreiberAuditEntry[];
+export interface PanelPlatformAuditResponse {
+  entries: PanelPlatformAuditEntry[];
   nextCursor: string | null;
 }
 

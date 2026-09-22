@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { raidModul } from "../../src/modules/raid";
+import { raidModule } from "../../src/modules/raid";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
   upsertBotIdentity,
@@ -46,7 +46,7 @@ describe("Raid-Ausführung", () => {
       );
       await database.prepare(
         "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, ?)",
-      ).bind("kanal-a", raidModul.id, JSON.stringify(raidModul.defaultSettings)).run();
+      ).bind("kanal-a", raidModule.id, JSON.stringify(raidModule.defaultSettings)).run();
 
       const fetcher = vi.fn<typeof fetch>()
         .mockResolvedValueOnce(new Response(JSON.stringify({ message: "gesperrt" }), { status: 429 }))
@@ -69,7 +69,7 @@ describe("Raid-Ausführung", () => {
           viewers: 8,
         },
         receivedAt: "2026-09-20T10:00:00.000Z",
-      }, fetcher, [raidModul]);
+      }, fetcher, [raidModule]);
 
       expect(fetcher).toHaveBeenCalledTimes(2);
       const rows = await database.prepare("SELECT code, detail_json FROM event_log ORDER BY rowid").all<{ code: string; detail_json: string }>();

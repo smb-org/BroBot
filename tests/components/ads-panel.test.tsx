@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { WerbungPanel } from "../../src/modules/ads/panel";
+import { AdsPanel } from "../../src/modules/ads/panel";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
@@ -40,7 +40,7 @@ describe("Werbung-Panel-Ansicht", () => {
     } })));
     Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
 
-    render(<WerbungPanel channelId="kanal-a" />);
+    render(<AdsPanel channelId="kanal-a" />);
 
     expect(await screen.findByRole("heading", { name: automaticHeading, level: 2 })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: manualHeading, level: 2 })).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe("Werbung-Panel-Ansicht", () => {
       } }));
     }));
 
-    render(<WerbungPanel channelId="kanal-a" language="de" />);
+    render(<AdsPanel channelId="kanal-a" language="de" />);
 
     const button = await screen.findByRole("button", { name: /Snooze.*0.*Aufladung/ });
     expect(button).toBeDisabled();
@@ -122,7 +122,7 @@ describe("Werbung-Panel-Ansicht", () => {
       } }));
     }));
 
-    render(<WerbungPanel channelId="kanal-a" language="de" />);
+    render(<AdsPanel channelId="kanal-a" language="de" />);
 
     expect(await screen.findByText("Derzeit ist keine Werbung geplant.")).toBeInTheDocument();
     expect(await screen.findByText(/90 Sekunden/)).toBeInTheDocument();
@@ -146,7 +146,7 @@ describe("Werbung-Panel-Ansicht", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<WerbungPanel channelId="kanal-a" language="de" />);
+    render(<AdsPanel channelId="kanal-a" language="de" />);
     const field = await screen.findByLabelText("Vorlaufzeit (Sekunden)");
     fireEvent.change(field, { target: { value: "" } });
     expect((field as HTMLInputElement).value).toBe("");

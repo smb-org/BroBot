@@ -7,7 +7,7 @@ import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatZa
 import { ModuleHeading } from "./module-panels";
 
 
-interface ModulesTexte {
+interface ModulesTexts {
   verwaltungGesperrt: string;
   titel: string;
   liste: string;
@@ -23,7 +23,7 @@ interface ModulesTexte {
   aenderungFehlgeschlagen: string;
 }
 
-const texte: LocaleCatalog<ModulesTexte> = {
+const texts: LocaleCatalog<ModulesTexts> = {
   de: {
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Module ändern.", titel: "Module", liste: "Modulliste",
     verfuegbar: "Verfügbare Module", laden: "Module werden geladen …", registriert: "Für diesen Bot ist noch kein Modul registriert.",
@@ -38,7 +38,7 @@ const texte: LocaleCatalog<ModulesTexte> = {
   },
 };
 
-const modulesTexte = (language: DashboardLanguage = dashboardLanguage()): ModulesTexte => texte[language];
+const modulesTexts = (language: DashboardLanguage = dashboardLanguage()): ModulesTexts => texts[language];
 
 interface ModulesPageProperties {
   channelId: string;
@@ -51,9 +51,9 @@ interface ModulesPageProperties {
 }
 
 const errorMessage = (error: unknown): string => {
-  if (error instanceof PanelApiError && error.status === 401) return modulesTexte().sitzungUngueltig;
+  if (error instanceof PanelApiError && error.status === 401) return modulesTexts().sitzungUngueltig;
   if (error instanceof Error && error.message.length > 0) return error.message;
-  return modulesTexte().aenderungFehlgeschlagen;
+  return modulesTexts().aenderungFehlgeschlagen;
 };
 
 const canManageModules = (role: ChannelRole): boolean => role !== "operator";
@@ -69,7 +69,7 @@ const ModulesPage = ({
   onReload,
   onAuthenticationRequired,
 }: ModulesPageProperties): ReactElement => {
-  const texte = modulesTexte();
+  const texts = modulesTexts();
   const [busyModuleId, setBusyModuleId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const manageable = canManageModules(ownRole);
@@ -90,18 +90,18 @@ const ModulesPage = ({
 
   return (
     <>
-      <ModuleHeading kind="modules" title={texte.titel} subtitle={formatZahl(modules.length)} />
-      <section className="content-section" aria-label={texte.liste}>
-        <div className="section-heading"><h2>{texte.verfuegbar}</h2></div>
-        {loading ? <p className="loading-line">{texte.laden}</p> : null}
+      <ModuleHeading kind="modules" title={texts.titel} subtitle={formatZahl(modules.length)} />
+      <section className="content-section" aria-label={texts.liste}>
+        <div className="section-heading"><h2>{texts.verfuegbar}</h2></div>
+        {loading ? <p className="loading-line">{texts.laden}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
         {loading || error !== null ? null : modules.length === 0 ? (
-          <p className="muted">{texte.registriert}</p>
+          <p className="muted">{texts.registriert}</p>
         ) : (
           <div className="tabelle-wrap">
             <table className="tabelle">
-              <thead><tr><th scope="col">{texte.module}</th><th scope="col">{texte.aktiv}</th></tr></thead>
+              <thead><tr><th scope="col">{texts.module}</th><th scope="col">{texts.aktiv}</th></tr></thead>
               <tbody>
                 {modules.map((module) => (
                   <tr key={module.id}>
@@ -110,15 +110,15 @@ const ModulesPage = ({
                       <label className="module-toggle">
                         <input
                           type="checkbox"
-                          aria-label={`${module.id} ${module.enabled ? texte.deaktivieren : texte.aktivieren}`}
+                          aria-label={`${module.id} ${module.enabled ? texts.deaktivieren : texts.aktivieren}`}
                           checked={module.enabled}
                           disabled={!manageable || busyModuleId === module.id}
-                          title={!manageable ? texte.verwaltungGesperrt : undefined}
+                          title={!manageable ? texts.verwaltungGesperrt : undefined}
                           onChange={() => { void handleToggle(module); }}
                         />
-                        {module.enabled ? texte.aktiv : texte.inaktiv}
+                        {module.enabled ? texts.aktiv : texts.inaktiv}
                       </label>
-                      {!manageable ? <span className="sperrgrund">{texte.verwaltungGesperrt}</span> : null}
+                      {!manageable ? <span className="sperrgrund">{texts.verwaltungGesperrt}</span> : null}
                     </td>
                   </tr>
                 ))}

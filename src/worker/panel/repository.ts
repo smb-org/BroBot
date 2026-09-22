@@ -22,7 +22,7 @@ import type {
   EventSubSubscriptionType,
   IdentityStatus,
 } from "../../contracts/values";
-import { ereignisTon } from "../../dashboard/locale";
+import { eventToneEntries } from "../../dashboard/locale";
 import {
   channelBotConsentCondition,
 } from "../db/guards";
@@ -30,7 +30,7 @@ import {
   listEventSubSubscriptions,
 } from "../db/eventsub-state";
 import { decodeCursor, encodeCursor } from "../db/cursor";
-import { listeAlleBroadcasterScopes } from "../module-scopes";
+import { listAllBroadcasterScopes } from "../module-scopes";
 
 interface ChannelStateRow {
   channel_id: string;
@@ -101,17 +101,17 @@ export interface LogCursor {
   id: string;
 }
 
-const ereignisCodesForHerkunft = (herkunft: PanelEventFilters["origin"]): string[] => {
+const eventCodesForOrigin = (herkunft: PanelEventFilters["origin"]): string[] => {
   if (herkunft === null) return [];
   const betrieb = herkunft === "module";
-  return Object.entries(ereignisTon)
+  return Object.entries(eventToneEntries)
     .filter(([, metadata]) => (metadata.familie === "betrieb") === betrieb)
     .map(([code]) => code);
 };
 
-const ereignisCodesForTon = (ton: PanelEventFilters["tone"]): string[] => {
+const eventCodesForTone = (ton: PanelEventFilters["tone"]): string[] => {
   if (ton === null) return [];
-  return Object.entries(ereignisTon)
+  return Object.entries(eventToneEntries)
     .filter(([, metadata]) => metadata.tone === ton)
     .map(([code]) => code);
 };
@@ -233,7 +233,7 @@ const mapBroadcasterPermissions = (row: ChannelStateRow): PanelBroadcasterPermis
   if (row.full_consent !== 1) return null;
   const granted = new Set(row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : []);
   return {
-    missingScopes: listeAlleBroadcasterScopes().filter((scope) => !granted.has(scope)),
+    missingScopes: listAllBroadcasterScopes().filter((scope) => !granted.has(scope)),
   };
 };
 
@@ -445,7 +445,7 @@ export const getEventLogForChannel = async (
   const where = ["channel_id = ?"];
   const filterValues: (string | number)[] = [channelId];
   if (filters.origin !== null) {
-    const codes = ereignisCodesForHerkunft(filters.origin);
+    const codes = eventCodesForOrigin(filters.origin);
     if (codes.length === 0) where.push("1 = 0");
     else {
       where.push(`code IN (${codes.map(() => "?").join(", ")})`);
@@ -457,7 +457,7 @@ export const getEventLogForChannel = async (
     filterValues.push(filters.module);
   }
   if (filters.tone !== null) {
-    const codes = ereignisCodesForTon(filters.tone);
+    const codes = eventCodesForTone(filters.tone);
     if (codes.length === 0) where.push("1 = 0");
     else {
       where.push(`code IN (${codes.map(() => "?").join(", ")})`);

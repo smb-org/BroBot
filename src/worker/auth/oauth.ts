@@ -43,7 +43,7 @@ export interface OAuthState {
   purpose: OAuthPurpose;
   expiresAt: string;
   reconcileEventSub?: boolean;
-  vollzustimmungZweiterVersuch?: boolean;
+  fullConsentSecondAttempt?: boolean;
 }
 
 export interface OAuthStart {
@@ -119,8 +119,8 @@ const isSignedOAuthState = (value: unknown): value is SignedOAuthState => {
     typeof state.expiresAt === "string" && Number.isFinite(Date.parse(state.expiresAt)) &&
     typeof state.nonce === "string" && state.nonce.length > 0 &&
     (state.reconcileEventSub === undefined || typeof state.reconcileEventSub === "boolean") &&
-    (state.vollzustimmungZweiterVersuch === undefined ||
-      typeof state.vollzustimmungZweiterVersuch === "boolean");
+    (state.fullConsentSecondAttempt === undefined ||
+      typeof state.fullConsentSecondAttempt === "boolean");
 };
 
 /**
@@ -144,7 +144,7 @@ export const startOAuthAuthorization = async (
   additionalScopes: readonly string[] = [],
   reconcileEventSub = false,
   redirectPath: string | null = null,
-  vollzustimmungZweiterVersuch = false,
+  fullConsentSecondAttempt = false,
   expectedUserId: string | null = null,
 ): Promise<OAuthStart> => {
   const transactionId = randomToken(24);
@@ -157,7 +157,7 @@ export const startOAuthAuthorization = async (
       expiresAt,
       nonce: stateNonce,
       reconcileEventSub,
-      vollzustimmungZweiterVersuch,
+      fullConsentSecondAttempt,
     },
     parseKeyRing(environment.SESSION_COOKIE_KEYS),
   );
@@ -203,7 +203,7 @@ export const verifyOAuthState = async (
     purpose: state.purpose,
     expiresAt: state.expiresAt,
     reconcileEventSub: state.reconcileEventSub === true,
-    vollzustimmungZweiterVersuch: state.vollzustimmungZweiterVersuch === true,
+    fullConsentSecondAttempt: state.fullConsentSecondAttempt === true,
   };
 };
 

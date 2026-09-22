@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
 import {
   actorGuard,
-  betreiberSessionGuard,
+  platformSessionGuard,
   channelBotConsentCondition,
   lastBroadcasterGuard,
   lastBroadcasterRoleChangeGuard,
@@ -17,7 +17,7 @@ import {
   overlayTokenRoles,
   overlayTokenSelectColumns,
 } from "../../src/worker/auth/overlay-token-repository";
-import { betreiberRollenSql } from "../../src/worker/betreiber/repository";
+import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 
 interface SchemaObject {
@@ -53,18 +53,18 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
 // Attrappe. Eine Attrappe wuerde genau die Abfrage aus der Pruefung nehmen, die sie
 // ersetzt -- bei `channelStateQuery` waere das die groesste Abfrage des Projekts.
 // Nur `placeholders` ist zur Laufzeit gebildet und hat kein Produktionsliteral.
-const sqlHoleFixtures = new Map<string, string>([
+const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["prepareModuleAudit === undefined ? \"\" : \"AND changes() > 0\"", "AND changes() > 0"],
   ["actorGuard(overlayTokenRoles)", actorGuard(overlayTokenRoles)],
   ["overlayTokenSelectColumns", overlayTokenSelectColumns],
   ["overlayTokenReturningColumns", overlayTokenReturningColumns],
-  ["guardParts.sql", betreiberSessionGuard(actor, now).sql],
+  ["guardParts.sql", platformSessionGuard(actor, now).sql],
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],
   ["lastBroadcasterGuard", lastBroadcasterGuard],
   ["actorGuard(\"'broadcaster', 'manager'\")", actorGuard("'broadcaster', 'manager'")],
-  ["schutz.sql", betreiberSessionGuard(actor, now).sql],
-  ["betreiberRollenSql", betreiberRollenSql],
+  ["guard.sql", platformSessionGuard(actor, now).sql],
+  ["platformRolesSql", platformRolesSql],
   ["placeholders", "?, ?, ?"],
   ["channelStateQuery", channelStateQuery],
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
@@ -83,7 +83,7 @@ const replaceSqlHoles = (literal: ts.StringLiteral | ts.NoSubstitutionTemplateLi
   let sql = literal.head.text;
   for (const span of literal.templateSpans) {
     const expression = span.expression.getText(sourceFile);
-    const replacement = sqlHoleFixtures.get(expression);
+    const replacement = sqlGetFixtures.get(expression);
     if (replacement === undefined) {
       const line = sourceFile.getLineAndCharacterOfPosition(span.expression.getStart(sourceFile)).line + 1;
       throw new Error("Unbekannte SQL-Lücke in " + fileName + ":" + String(line) + ": " + expression);

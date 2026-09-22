@@ -1,12 +1,12 @@
 import type { BotModule } from "../contract";
 import { raidSettingsSchema } from "./contracts";
-import { verarbeiteRaid } from "./service";
+import { processRaid } from "./service";
 
 export { entscheideRaid } from "./domain";
-export { verarbeiteRaid } from "./service";
+export { processRaid } from "./service";
 export type { RaidSettings } from "./contracts";
 
-export const raidModul: BotModule<typeof raidSettingsSchema> = {
+export const raidModule: BotModule<typeof raidSettingsSchema> = {
   id: "raid",
   settingsSchema: raidSettingsSchema,
   defaultSettings: {
@@ -18,5 +18,5 @@ export const raidModul: BotModule<typeof raidSettingsSchema> = {
   },
   eventSubTypes: ["channel.raid"],
   panel: () => import("./panel"),
-  handleEvent: (event) => verarbeiteRaid(event),
+  handleEvent: (event) => processRaid(event),
 };

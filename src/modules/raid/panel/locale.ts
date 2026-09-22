@@ -1,12 +1,12 @@
 import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 
-export interface RaidPanelTexte {
+export interface RaidPanelTexts {
   titel: string;
   schwelleAbschnitt: string;
   shoutoutEnabled: string;
   shoutoutThreshold: string;
   textThreshold: string;
-  schalter: (aktiv: boolean) => string;
+  schalter: (active: boolean) => string;
   vollerText: string;
   kurzerText: string;
   platzhalterVoll: string;
@@ -20,14 +20,14 @@ export interface RaidPanelTexte {
   verwaltungGesperrt: string;
 }
 
-const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
+const katalog: Record<DashboardLanguage, RaidPanelTexts> = {
   de: {
     titel: "Raid-Shoutout",
     schwelleAbschnitt: "Shoutout und Nachrichten",
     shoutoutEnabled: "Helix-Shoutout automatisch senden",
     shoutoutThreshold: "Shoutout-Schwelle (Zuschauer)",
     textThreshold: "Text-Schwelle (Zuschauer)",
-    schalter: (aktiv) => `Helix-Shoutout automatisch senden: ${aktiv ? "eingeschaltet" : "ausgeschaltet"}`,
+    schalter: (active) => `Helix-Shoutout automatisch senden: ${active ? "eingeschaltet" : "ausgeschaltet"}`,
     vollerText: "Voller Raid-Text",
     kurzerText: "Kurzer Dankestext",
     platzhalterVoll: "{channel} und {viewers} werden beim Eingang ersetzt.",
@@ -46,7 +46,7 @@ const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
     shoutoutEnabled: "Send automatic Helix shoutouts",
     shoutoutThreshold: "Shoutout threshold (viewers)",
     textThreshold: "Text threshold (viewers)",
-    schalter: (aktiv) => `Automatic Helix shoutout: ${aktiv ? "enabled" : "disabled"}`,
+    schalter: (active) => `Automatic Helix shoutout: ${active ? "enabled" : "disabled"}`,
     vollerText: "Full raid message",
     kurzerText: "Small raid message",
     platzhalterVoll: "{channel} and {viewers} are replaced when the raid arrives.",
@@ -61,4 +61,4 @@ const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
   },
 };
 
-export const raidPanelTexte = (language: DashboardLanguage = dashboardLanguage()): RaidPanelTexte => katalog[language];
+export const raidPanelTexts = (language: DashboardLanguage = dashboardLanguage()): RaidPanelTexts => katalog[language];

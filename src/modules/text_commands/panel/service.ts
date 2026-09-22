@@ -1,4 +1,4 @@
-import type { Textbefehl, TextbefehlMindeststufe } from "../contracts";
+import type { TextCommand, TextCommandMinimumTier } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 
 const pathFor = (channelId: string, name?: string): string =>
@@ -15,9 +15,9 @@ const json = async <T>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const ladeTextbefehle = async (channelId: string): Promise<Textbefehl[]> => {
+export const loadTextCommands = async (channelId: string): Promise<TextCommand[]> => {
   const response = await fetch(pathFor(channelId));
-  const body = await json<{ befehle: Textbefehl[] }>(response);
+  const body = await json<{ befehle: TextCommand[] }>(response);
   return body.befehle;
 };
 
@@ -40,32 +40,32 @@ const mutation = async (
   await json<unknown>(response);
 };
 
-export const legeTextbefehlAn = async (
+export const createTextCommand = async (
   channelId: string,
-  command: { name: string; kind: "text" | "list"; text?: string; cooldownSekunden: number },
+  command: { name: string; kind: "text" | "list"; text?: string; cooldownSeconds: number },
 ): Promise<void> => mutation(channelId, "POST", command);
 
-export const speichereTextbefehl = async (
+export const saveTextCommand = async (
   channelId: string,
-  command: { oldName: string; name: string; kind: "text" | "list"; text?: string; cooldownSekunden: number },
+  command: { oldName: string; name: string; kind: "text" | "list"; text?: string; cooldownSeconds: number },
 ): Promise<void> => mutation(channelId, "PATCH", {
   name: command.name,
   kind: command.kind,
   ...(command.text === undefined ? {} : { text: command.text }),
-  cooldownSekunden: command.cooldownSekunden,
+  cooldownSeconds: command.cooldownSeconds,
 }, command.oldName);
 
-export const schalteTextbefehl = async (
+export const toggleTextCommand = async (
   channelId: string,
   name: string,
   enabled: boolean,
 ): Promise<void> => mutation(channelId, "PATCH", { enabled }, name);
 
-export const setzeTextbefehlMindeststufe = async (
+export const setTextCommandMinimumTier = async (
   channelId: string,
   name: string,
-  mindeststufe: TextbefehlMindeststufe,
-): Promise<void> => mutation(channelId, "PATCH", { mindeststufe }, name);
+  minimumTier: TextCommandMinimumTier,
+): Promise<void> => mutation(channelId, "PATCH", { minimumTier: minimumTier }, name);
 
-export const loescheTextbefehl = async (channelId: string, name: string): Promise<void> =>
+export const deleteTextCommand = async (channelId: string, name: string): Promise<void> =>
   mutation(channelId, "DELETE", undefined, name);

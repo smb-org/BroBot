@@ -28,7 +28,7 @@ interface LoginIdentityRow {
   updated_at: string;
 }
 
-interface VollzustimmungsKanalZeile {
+interface FullConsentChannelRow {
   vorhanden: number;
 }
 
@@ -81,27 +81,27 @@ export const getLoginIdentity = async (
   return row === null ? null : mapLoginIdentity(row);
 };
 
-export const hatVollzustimmungFürKanalId = async (
+export const hasFullConsentForChannelId = async (
   db: D1Database,
-  kanalId: string,
+  channelId: string,
 ): Promise<boolean> => {
   const zeile = await db.prepare(
     `SELECT 1 AS vorhanden
        FROM channels
       WHERE channel_id = ? AND full_consent = 1`,
-  ).bind(kanalId).first<VollzustimmungsKanalZeile>();
+  ).bind(channelId).first<FullConsentChannelRow>();
   return zeile?.vorhanden === 1;
 };
 
-export const hatVollzustimmungFürKanalLogin = async (
+export const hasFullConsentForChannelLogin = async (
   db: D1Database,
-  kanalLogin: string,
+  channelLogin: string,
 ): Promise<boolean> => {
   const zeile = await db.prepare(
     `SELECT 1 AS vorhanden
        FROM channels
       WHERE login = ? COLLATE NOCASE AND full_consent = 1`,
-  ).bind(kanalLogin).first<VollzustimmungsKanalZeile>();
+  ).bind(channelLogin).first<FullConsentChannelRow>();
   return zeile?.vorhanden === 1;
 };
 

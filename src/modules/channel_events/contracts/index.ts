@@ -1,6 +1,6 @@
-export type KanalereignisDetail = Readonly<Record<string, string | number | null>>;
+export type ChannelEventDetail = Readonly<Record<string, string | number | null>>;
 
-export interface KanalereignisDiagnose {
+export interface ChannelEventDiagnostic {
   code: string;
-  detail?: KanalereignisDetail;
+  detail?: ChannelEventDetail;
 }

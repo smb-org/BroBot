@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 /** Zustimmung für Bedienhandlungen im laufenden Stream; blockiert kein Abo. */
-export const WERBUNG_OPTIONALE_BROADCASTER_SCOPES = ["channel:manage:ads"] as const;
+export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads"] as const;
 
-export const werbungSettingsSchema = z.object({
+export const adsSettingsSchema = z.object({
   automatic: z.string().trim().min(1).max(200),
   manual: z.string().trim().min(1).max(200),
   prewarning: z.boolean().default(true),
@@ -11,9 +11,9 @@ export const werbungSettingsSchema = z.object({
   prewarningText: z.string().trim().min(1).max(200).default("Werbung in {seconds} Sekunden. Bin gleich zurück!"),
 });
 
-export type WerbungSettings = z.output<typeof werbungSettingsSchema>;
+export type AdsSettings = z.output<typeof adsSettingsSchema>;
 
-export interface WerbepausenEreignis {
+export interface AdBreaksEvent {
   dauerSekunden: number;
   gestartetAm: string;
   endetAm: string;
@@ -21,7 +21,7 @@ export interface WerbepausenEreignis {
   ausloeserLogin: string | null;
 }
 
-export interface WerbungZeitplan {
+export interface AdsSchedule {
   nextAdAt: string | null;
   duration: number | null;
   lastAdAt: string | null;
@@ -30,13 +30,13 @@ export interface WerbungZeitplan {
   snoozeRefreshAt: string | null;
 }
 
-export interface LetzteWerbepause {
+export interface LastAdBreak {
   zeitpunkt: string;
   dauerSekunden: number;
 }
 
-export interface WerbungZeitplanAntwort {
-  schedule: WerbungZeitplan;
-  letzteWerbepausen: LetzteWerbepause[];
+export interface AdsScheduleResponse {
+  schedule: AdsSchedule;
+  letzteWerbepausen: LastAdBreak[];
   snoozeScopeVorhanden: boolean;
 }

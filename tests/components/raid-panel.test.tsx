@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { WerbungPanel } from "../../src/modules/ads/panel";
-import { ladeWerbungseinstellungen } from "../../src/modules/ads/panel/service";
+import { AdsPanel } from "../../src/modules/ads/panel";
+import { loadAdSettings } from "../../src/modules/ads/panel/service";
 import { ladeRaidEinstellungen } from "../../src/modules/raid/panel/service";
 import { RaidPanel } from "../../src/modules/raid/panel";
-import { ladeTextbefehle } from "../../src/modules/text_commands/panel/service";
+import { loadTextCommands } from "../../src/modules/text_commands/panel/service";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
@@ -100,7 +100,7 @@ describe("Raid-Panel-Ansicht", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     cleanup();
-    render(<WerbungPanel channelId="kanal-a" language="de" />);
+    render(<AdsPanel channelId="kanal-a" language="de" />);
     const adText = (await screen.findAllByRole("textbox"))[0];
     if (adText === undefined) throw new Error("Werbungstextfeld fehlt");
     fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
@@ -134,9 +134,9 @@ describe("Raid-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ error: "Sitzung abgelaufen" }, 401)));
 
     for (const load of [
-      () => ladeTextbefehle("kanal-a"),
+      () => loadTextCommands("kanal-a"),
       () => ladeRaidEinstellungen("kanal-a"),
-      () => ladeWerbungseinstellungen("kanal-a"),
+      () => loadAdSettings("kanal-a"),
     ]) {
       await expect(load()).rejects.toMatchObject({ name: "PanelApiError", status: 401 });
     }

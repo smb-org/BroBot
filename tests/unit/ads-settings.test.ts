@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { BotModule, ModuleEvent } from "../../src/modules/contract";
-import { werbungModul } from "../../src/modules/ads";
+import { adsModule } from "../../src/modules/ads";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -21,7 +21,7 @@ describe("Werbung-Einstellungsdefaults", () => {
 
     let geleseneEinstellungen: unknown;
     const probe: BotModule = {
-      ...werbungModul,
+      ...adsModule,
       handleEvent: (event: ModuleEvent) => {
         geleseneEinstellungen = event.settings;
         return { actions: [], diagnostics: [] };

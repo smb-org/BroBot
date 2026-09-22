@@ -19,8 +19,8 @@ import {
 } from "../db/bot-identity";
 import {
   getLoginIdentity,
-  hatVollzustimmungFürKanalId,
-  hatVollzustimmungFürKanalLogin,
+  hasFullConsentForChannelId,
+  hasFullConsentForChannelLogin,
   upsertLoginIdentity,
 } from "../db/login-identity";
 import {
@@ -59,7 +59,7 @@ import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { revokeRealtimeSessionForUser, revokeRealtimeToken } from "../realtime";
 import { MODULES } from "../../modules/registry";
 import {
-  listeAlleBroadcasterScopes,
+  listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUserAndModule,
 } from "../module-scopes";
 
@@ -290,10 +290,10 @@ authRouter.get("/api/overlay/status", async (context) => {
 });
 
 authRouter.get("/auth/login", async (context) => {
-  const kanalLogin = context.req.query("channel");
-  const vollzustimmung = kanalLogin !== undefined && kanalLogin.length > 0 &&
-    await hatVollzustimmungFürKanalLogin(context.env.DB, kanalLogin);
-  const scopes = vollzustimmung ? listeAlleBroadcasterScopes() : [];
+  const channelLogin = context.req.query("channel");
+  const fullConsent = channelLogin !== undefined && channelLogin.length > 0 &&
+    await hasFullConsentForChannelLogin(context.env.DB, channelLogin);
+  const scopes = fullConsent ? listAllBroadcasterScopes() : [];
   const started = await startOAuthAuthorization(
     context.env.DB,
     context.env,
@@ -471,14 +471,14 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);
     }
 
-    const vollumfang = listeAlleBroadcasterScopes();
-    const istVollzustimmenderKanal = await hatVollzustimmungFürKanalId(
+    const vollumfang = listAllBroadcasterScopes();
+    const isFullyConsentingChannel = await hasFullConsentForChannelId(
       context.env.DB,
       identity.userId,
     );
     const fehlen = vollumfang.some((scope) => !tokens.scopes.includes(scope));
-    if (istVollzustimmenderKanal && fehlen) {
-      if (state.vollzustimmungZweiterVersuch) {
+    if (isFullyConsentingChannel && fehlen) {
+      if (state.fullConsentSecondAttempt) {
         await failOAuthTransaction(
           context.env.DB,
           state.transactionId,

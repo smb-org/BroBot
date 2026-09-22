@@ -1,49 +1,49 @@
-export type TextbefehlArt = "text" | "list";
-export const TEXTBEFEHL_MINDESTSTUFEN = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
-export type TextbefehlMindeststufe = (typeof TEXTBEFEHL_MINDESTSTUFEN)[number];
+export type TextCommandKind = "text" | "list";
+export const TEXT_COMMAND_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
+export type TextCommandMinimumTier = (typeof TEXT_COMMAND_MINIMUM_TIERS)[number];
 
-export interface Textbefehl {
+export interface TextCommand {
   channelId: string;
   name: string;
   text: string;
-  kind: TextbefehlArt;
+  kind: TextCommandKind;
   enabled: boolean;
-  mindeststufe: TextbefehlMindeststufe;
-  cooldownSekunden: number;
-  zuletztVerwendetAt: string | null;
+  minimumTier: TextCommandMinimumTier;
+  cooldownSeconds: number;
+  lastUsedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface NeuerTextbefehl {
+export interface NewTextCommand {
   channelId: string;
   name: string;
   text: string;
-  kind: TextbefehlArt;
-  mindeststufe?: TextbefehlMindeststufe;
-  cooldownSekunden: number;
+  kind: TextCommandKind;
+  minimumTier?: TextCommandMinimumTier;
+  cooldownSeconds: number;
   now: string;
 }
 
-export interface TextbefehlAenderung {
+export interface TextCommandChange {
   channelId: string;
   name: string;
   neuerName: string;
   text: string;
-  kind: TextbefehlArt;
+  kind: TextCommandKind;
   enabled: boolean;
   nurSchalter?: boolean;
-  mindeststufe?: TextbefehlMindeststufe;
-  cooldownSekunden: number;
+  minimumTier?: TextCommandMinimumTier;
+  cooldownSeconds: number;
   now: string;
 }
 
-export interface TextbefehlBeanspruchung {
-  befehl: Textbefehl;
+export interface TextCommandClaim {
+  befehl: TextCommand;
   beansprucht: boolean;
 }
 
-export interface TextbefehlAkteur {
+export interface TextCommandActor {
   userId: string;
   sessionId?: string;
 }

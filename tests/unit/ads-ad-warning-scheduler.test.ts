@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { verarbeiteWerbevorwarnung, type Werbeplaner } from "../../src/worker/werbe-vorwarnung";
+import { processAdPrewarning, type AdScheduler } from "../../src/worker/ad-prewarning";
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -20,7 +20,7 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
 
   const idFromName = vi.fn();
 
-  const umgebung = () => ({
+  const environment = () => ({
     DB: database as unknown as D1Database,
     TWITCH_CLIENT_ID: "client",
     TWITCH_CLIENT_SECRET: "secret",
@@ -32,14 +32,14 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
 
   const keinNetz: typeof fetch = () => { throw new Error("Es darf kein Twitch-Aufruf entstehen."); };
 
-  const planerAttrappe = (): Werbeplaner & { readonly geplant: number[]; geloescht: () => number } => {
+  const schedulerStub = (): AdScheduler & { readonly geplant: number[]; geloescht: () => number } => {
     const geplant: number[] = [];
     let geloescht = 0;
     return {
       geplant,
       geloescht: () => geloescht,
-      plane: (faelligAmMs: number) => { geplant.push(faelligAmMs); return Promise.resolve(); },
-      loesche: () => { geloescht += 1; return Promise.resolve(); },
+      schedule: (dueAtMs: number) => { geplant.push(dueAtMs); return Promise.resolve(); },
+      clear: () => { geloescht += 1; return Promise.resolve(); },
     };
   };
 
@@ -55,19 +55,19 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
        VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
     ).run();
 
-    const planer = planerAttrappe();
-    await verarbeiteWerbevorwarnung(
-      umgebung(),
+    const scheduler = schedulerStub();
+    await processAdPrewarning(
+      environment(),
       "kanal-a",
       Date.parse("2026-09-21T12:00:00.000Z"),
       "ausloeser-1",
       "2026-09-21T11:59:00.000Z",
       keinNetz,
-      planer,
+      scheduler,
     );
 
     expect(idFromName).not.toHaveBeenCalled();
-    expect(planer.geloescht()).toBe(1);
+    expect(scheduler.geloescht()).toBe(1);
 
     const zeilen = await database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a' ORDER BY rowid",
@@ -84,14 +84,14 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'ads', 0, '{}')",
     ).run();
 
-    await verarbeiteWerbevorwarnung(
-      umgebung(),
+    await processAdPrewarning(
+      environment(),
       "kanal-a",
       Date.parse("2026-09-21T12:00:00.000Z"),
       "ausloeser-2",
       "2026-09-21T11:59:00.000Z",
       keinNetz,
-      planerAttrappe(),
+      schedulerStub(),
     );
 
     expect(idFromName).not.toHaveBeenCalled();

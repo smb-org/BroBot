@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { listeAlleBroadcasterScopes } from "../../src/worker/module-scopes";
+import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -267,7 +267,7 @@ describe("Panel-Leseendpunkte", () => {
     expect(response.status).toBe(200);
     const body = await response.json<{ broadcasterPermissions: { missingScopes: string[] } }>();
     expect(body.broadcasterPermissions.missingScopes).toEqual(
-      expect.arrayContaining(listeAlleBroadcasterScopes().filter((scope) => scope !== "channel:read:ads")),
+      expect.arrayContaining(listAllBroadcasterScopes().filter((scope) => scope !== "channel:read:ads")),
     );
   });
 
@@ -640,17 +640,17 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
       environment,
     );
     const body = await response.json<{ moderator: { isModerator: boolean; checkedAt: string; reason: string | null } }>();
-    const kanalA = await database.prepare(
+    const channelA = await database.prepare(
       "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = ?",
     ).bind("kanal-a").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
-    const kanalB = await database.prepare(
+    const channelB = await database.prepare(
       "SELECT is_moderator, checked_at, reason FROM bot_channel_status WHERE channel_id = ?",
     ).bind("kanal-b").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
 
     expect(response.status).toBe(200);
     expect(body.moderator).toEqual({ isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null });
-    expect(kanalA).toEqual({ is_moderator: 1, checked_at: "2026-09-18T04:00:00.000Z", reason: null });
-    expect(kanalB).toEqual({ is_moderator: 0, checked_at: "2026-09-18T03:00:00.000Z", reason: "moderator_entfernt" });
+    expect(channelA).toEqual({ is_moderator: 1, checked_at: "2026-09-18T04:00:00.000Z", reason: null });
+    expect(channelB).toEqual({ is_moderator: 0, checked_at: "2026-09-18T03:00:00.000Z", reason: "moderator_entfernt" });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       "https://api.twitch.tv/helix/moderation/channels?user_id=bot-user&first=100&broadcaster_id=kanal-a",

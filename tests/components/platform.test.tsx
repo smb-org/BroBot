@@ -3,18 +3,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 
-const antwort = (inhalt: unknown, status = 200): Response => new Response(JSON.stringify(inhalt), {
+const response = (inhalt: unknown, status = 200): Response => new Response(JSON.stringify(inhalt), {
   status,
   headers: { "Content-Type": "application/json" },
 });
 
-const anfrageUrl = (input: RequestInfo | URL): URL => {
+const requestUrl = (input: RequestInfo | URL): URL => {
   if (input instanceof Request) return new URL(input.url);
   if (input instanceof URL) return input;
   return new URL(input, window.location.origin);
 };
 
-const kanal = {
+const channel = {
   channelId: "123",
   login: "alpha_login",
   displayName: "Alpha",
@@ -23,7 +23,7 @@ const kanal = {
   broadcasterConnected: false,
 };
 
-const mitglieder = {
+const members = {
   members: [
     { userId: "123", login: "alpha_login", displayName: "Alpha", profileImageUrl: null, role: "broadcaster", joinedAt: "2026-09-19T12:00:00.000Z" },
     { userId: "456", login: "helfer", displayName: "Helfer", profileImageUrl: null, role: "manager", joinedAt: "2026-09-19T13:00:00.000Z" },
@@ -33,17 +33,17 @@ const mitglieder = {
   viewerUserId: "999",
 };
 
-const richteBetreiberEin = (
-  betreiber: boolean,
+const setUpPlatform = (
+  platform: boolean,
   audit: { entries: unknown[]; nextCursor: string | null } = { entries: [], nextCursor: null },
 ): ReturnType<typeof vi.fn<typeof fetch>> => {
   const fetcher = vi.fn<typeof fetch>((input) => {
-    const url = anfrageUrl(input);
-    if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], platformAdmin: betreiber }));
-    if (url.pathname === "/api/platform") return Promise.resolve(antwort({ channels: [kanal] }));
-    if (url.pathname === "/api/platform/audit") return Promise.resolve(antwort(audit));
-    if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(antwort(mitglieder));
-    return Promise.resolve(antwort({}, 404));
+    const url = requestUrl(input);
+    if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], platformAdmin: platform }));
+    if (url.pathname === "/api/platform") return Promise.resolve(response({ channels: [channel] }));
+    if (url.pathname === "/api/platform/audit") return Promise.resolve(response(audit));
+    if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(response(members));
+    return Promise.resolve(response({}, 404));
   });
   vi.stubGlobal("fetch", fetcher);
   return fetcher;
@@ -57,7 +57,7 @@ afterEach(() => {
 
 describe("Betreiberebene", () => {
   it("zeigt ohne Betreiberfreigabe weder Navigation noch Betreiberroute", async () => {
-    richteBetreiberEin(false);
+    setUpPlatform(false);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
@@ -69,7 +69,7 @@ describe("Betreiberebene", () => {
   });
 
   it("bietet Broadcaster in keinem Rollenauswahlfeld an", async () => {
-    richteBetreiberEin(true);
+    setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
@@ -83,37 +83,37 @@ describe("Betreiberebene", () => {
   });
 
   it("fragt vor dem Entfernen eines Mitglieds nach und handelt noch nicht", async () => {
-    const fetcher = richteBetreiberEin(true);
+    const fetcher = setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
 
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
     const helferZeile = await screen.findByRole("row", { name: /Helfer/ });
-    const entfernen = within(helferZeile).getByRole("button", { name: "Entfernen" });
-    fireEvent.click(entfernen);
+    const remove = within(helferZeile).getByRole("button", { name: "Entfernen" });
+    fireEvent.click(remove);
 
     expect(await screen.findByRole("alertdialog", { name: /Zugriff für Helfer wirklich entfernen/ })).toBeInTheDocument();
-    expect(fetcher.mock.calls.some(([input, init]) => anfrageUrl(input).pathname.endsWith("/members/456") && init?.method === "DELETE")).toBe(false);
+    expect(fetcher.mock.calls.some(([input, init]) => requestUrl(input).pathname.endsWith("/members/456") && init?.method === "DELETE")).toBe(false);
   });
 
   it("zeigt den Entfernen-Knopf der Broadcaster-Zeile deaktiviert mit Begründung", async () => {
-    richteBetreiberEin(true);
+    setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
 
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
     const broadcasterZeile = await screen.findByRole("row", { name: /Alpha/ });
-    const entfernen = within(broadcasterZeile).getByRole("button", { name: "Entfernen" });
+    const remove = within(broadcasterZeile).getByRole("button", { name: "Entfernen" });
 
-    expect(entfernen).toBeDisabled();
-    expect(entfernen).toHaveAttribute("title", "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
-    expect(entfernen).toHaveAccessibleDescription("Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAttribute("title", "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
+    expect(remove).toHaveAccessibleDescription("Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
   });
 
   it("setzt den Einladungslink aus dem Login des gewählten Kanals zusammen", async () => {
-    richteBetreiberEin(true);
+    setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
@@ -125,7 +125,7 @@ describe("Betreiberebene", () => {
   });
 
   it("zeigt im Betreiber-Audit den Anzeigenamen und bei fehlender Auflösung die ID", async () => {
-    richteBetreiberEin(true, {
+    setUpPlatform(true, {
       entries: [{
         auditId: "audit-1",
         actorUserId: "26876135",
@@ -164,22 +164,22 @@ describe("Betreiberebene", () => {
   });
 
   it("zeigt den Einladungslink nur im Editor des gewählten Kanals", async () => {
-    richteBetreiberEin(true);
+    setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
 
-    const übersicht = await screen.findByRole("region", { name: "Kanalübersicht" });
-    expect(within(übersicht).queryByRole("textbox", { name: "Einladungslink" })).not.toBeInTheDocument();
+    const overview = await screen.findByRole("region", { name: "Kanalübersicht" });
+    expect(within(overview).queryByRole("textbox", { name: "Einladungslink" })).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
-    const editor = await within(übersicht).findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    const editor = await within(overview).findByRole("region", { name: "Kanal bearbeiten: Alpha" });
     expect(await within(editor).findByRole("textbox", { name: "Einladungslink" })).toBeInTheDocument();
-    expect(within(übersicht).getByRole("region", { name: "Einladungslink" })).toContainElement(within(editor).getByRole("textbox", { name: "Einladungslink" }));
+    expect(within(overview).getByRole("region", { name: "Einladungslink" })).toContainElement(within(editor).getByRole("textbox", { name: "Einladungslink" }));
   });
 
   it("ordnet Kanalübersicht und Kanal-Inspector als direkte Bereichskinder an", async () => {
-    richteBetreiberEin(true);
+    setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
@@ -193,7 +193,7 @@ describe("Betreiberebene", () => {
   });
 
   it("schließt den Betreiber-Kanal-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
-    richteBetreiberEin(true);
+    setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
@@ -222,7 +222,7 @@ describe("Betreiberebene", () => {
   });
 
   it("öffnet die Kanalfreigabe in der Inspektorspalte und wechselt ohne Doppelbelegung", async () => {
-    richteBetreiberEin(true);
+    setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
@@ -257,17 +257,17 @@ describe("Betreiberebene", () => {
   });
 
   it("gibt einen Kanal weiterhin über das geöffnete Formular frei", async () => {
-    const freigegeben = { ...kanal };
+    const freigegeben = { ...channel };
     const fetcher = vi.fn<typeof fetch>((input, init) => {
-      const url = anfrageUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], platformAdmin: true }));
-      if (url.pathname === "/api/platform") return Promise.resolve(antwort({ channels: [freigegeben] }));
-      if (url.pathname === "/api/platform/audit") return Promise.resolve(antwort({ entries: [], nextCursor: null }));
-      if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(antwort(mitglieder));
-      if (url.pathname === "/api/platform/users") return Promise.resolve(antwort({ user: { userId: "789", login: "beta_login", displayName: "Beta" } }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(antwort({ token: "csrf" }));
-      if (url.pathname === "/api/platform/channels" && init?.method === "POST") return Promise.resolve(antwort({ channel: freigegeben }));
-      return Promise.resolve(antwort({}, 404));
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], platformAdmin: true }));
+      if (url.pathname === "/api/platform") return Promise.resolve(response({ channels: [freigegeben] }));
+      if (url.pathname === "/api/platform/audit") return Promise.resolve(response({ entries: [], nextCursor: null }));
+      if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(response(members));
+      if (url.pathname === "/api/platform/users") return Promise.resolve(response({ user: { userId: "789", login: "beta_login", displayName: "Beta" } }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(response({ token: "csrf" }));
+      if (url.pathname === "/api/platform/channels" && init?.method === "POST") return Promise.resolve(response({ channel: freigegeben }));
+      return Promise.resolve(response({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
     window.history.replaceState({}, "", "/betreiber");
@@ -283,6 +283,6 @@ describe("Betreiberebene", () => {
     fireEvent.click(within(freigabe).getByRole("button", { name: "Kanal freigeben" }));
     fireEvent.click(await within(freigabe).findByRole("button", { name: "Endgültig freigeben" }));
 
-    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => anfrageUrl(input).pathname === "/api/platform/channels" && init?.method === "POST")).toBe(true));
+    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => requestUrl(input).pathname === "/api/platform/channels" && init?.method === "POST")).toBe(true));
   });
 });

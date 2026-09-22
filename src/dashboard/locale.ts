@@ -4,14 +4,14 @@ import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract"
 export type DashboardLanguage = ModuleLanguage;
 export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
 
-export interface DashboardCommonTexte {
+export interface DashboardCommonTexts {
   abbrechen: string;
   schliessen: string;
   speichern: string;
   rollen: Record<ChannelRole, string>;
 }
 
-const gemeinsameTexte: LocaleCatalog<DashboardCommonTexte> = {
+const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   de: {
     abbrechen: "Abbrechen",
     schliessen: "Schließen",
@@ -41,9 +41,9 @@ const gemeinsameTexte: LocaleCatalog<DashboardCommonTexte> = {
  */
 export const dashboardLanguage = (): DashboardLanguage => browserModuleLanguage();
 
-export const dashboardGemeinsameTexte = (): DashboardCommonTexte => gemeinsameTexte[dashboardLanguage()];
+export const dashboardCommonTexts = (): DashboardCommonTexts => commonTexts[dashboardLanguage()];
 
-export interface DashboardTexte {
+export interface DashboardTexts {
   kopf: {
     verbindungLaeuft: string;
     verbindungWartet: string;
@@ -80,7 +80,7 @@ export interface DashboardTexte {
     ausstehend: string;
     nichtErforderlich: string;
     vorhanden: string;
-    botBerechtigungenFehlen: (anzahl: string) => string;
+    botBerechtigungenFehlen: (count: string) => string;
   };
   navigation: {
     hauptnavigation: string;
@@ -100,8 +100,8 @@ export interface DashboardTexte {
   };
   overview: {
     einKanalFreigegeben: string;
-    kanaeleFreigegeben: (anzahl: string) => string;
-    kanaeleFreigegebenKurz: (anzahl: string) => string;
+    kanaeleFreigegeben: (count: string) => string;
+    kanaeleFreigegebenKurz: (count: string) => string;
     keinKanalFreigegeben: string;
     keineMitgliedschaft: string;
     aktiveModule: string;
@@ -109,17 +109,17 @@ export interface DashboardTexte {
   };
   moderation: {
     fuerKanalKeinePruefung: string;
-    letztePruefung: (zeitpunkt: string) => string;
+    letztePruefung: (timestamp: string) => string;
     pruefungLaeuft: string;
     moderatorstatusPruefen: string;
-    naechstePruefungAb: (zeitpunkt: string) => string;
+    naechstePruefungAb: (timestamp: string) => string;
     pruefungGesperrt: string;
     broadcasterErneutAutorisieren: string;
     broadcasterZustimmungAnfordern: string;
   };
   bot: {
     keinGespeicherterStatus: string;
-    zuletztAktualisiert: (zeitpunkt: string) => string;
+    zuletztAktualisiert: (timestamp: string) => string;
     optionaleModule: string;
     normalerBetrieb: string;
     channelBotNoetig: string;
@@ -151,9 +151,9 @@ export interface DashboardTexte {
   };
   zeit: {
     aktualisiert: (relativeZeit: string) => string;
-    vorSekunden: (anzahl: number) => string;
-    vorMinuten: (anzahl: number) => string;
-    vorStunden: (anzahl: number) => string;
+    vorSekunden: (count: number) => string;
+    vorMinuten: (count: number) => string;
+    vorStunden: (count: number) => string;
   };
   system: {
     titel: string;
@@ -198,7 +198,7 @@ export interface DashboardTexte {
   };
   ereignisse: {
     titel: string;
-    count: (anzahl: string) => string;
+    count: (count: string) => string;
     protokoll: string;
     zeit: string;
     ereignis: string;
@@ -237,7 +237,7 @@ export interface DashboardTexte {
     realtimeWiederverbindung: string;
     realtimeOffline: string;
     realtimeSitzungErneuern: string;
-    realtimeNeue: (anzahl: string) => string;
+    realtimeNeue: (count: string) => string;
   };
   anmeldung: {
     erforderlich: string;
@@ -273,7 +273,7 @@ export interface DashboardTexte {
   };
 }
 
-const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
+const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
   de: {
     kopf: {
       verbindungLaeuft: "Läuft",
@@ -293,7 +293,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       chatAboFehlt: "Chat-Abo fehlt", gesund: "Gesund", zustandUnvollstaendig: "Zustand unvollständig",
       nichtVerbunden: "Nicht verbunden", nichtEingerichtet: "Nicht eingerichtet", moderator: "Moderator", missing: "Fehlt",
       aktiv: "Aktiv", ausstehend: "Ausstehend", nichtErforderlich: "Nicht erforderlich", vorhanden: "Vorhanden",
-      botBerechtigungenFehlen: (anzahl) => `${anzahl} fehlen`,
+      botBerechtigungenFehlen: (count) => `${count} fehlen`,
     },
     navigation: {
       hauptnavigation: "Hauptnavigation", brotkrume: "Brotkrume", uebersicht: "Übersicht", kanal: "Kanal", system: "System",
@@ -304,24 +304,24 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     },
     overview: {
       einKanalFreigegeben: "1 Kanal freigegeben",
-      kanaeleFreigegeben: (anzahl) => `${anzahl} Kanäle sind für dich freigegeben.`,
-      kanaeleFreigegebenKurz: (anzahl) => `${anzahl} Kanäle freigegeben`,
+      kanaeleFreigegeben: (count) => `${count} Kanäle sind für dich freigegeben.`,
+      kanaeleFreigegebenKurz: (count) => `${count} Kanäle freigegeben`,
       keinKanalFreigegeben: "Noch kein Kanal freigegeben",
       keineMitgliedschaft: "Für dieses Konto gibt es keine Mitgliedschaft in einem freigegebenen Kanal.",
       aktiveModule: "Aktive Module", zustandLaden: "Kanalzustand wird geladen …",
     },
     moderation: {
       fuerKanalKeinePruefung: "Für diesen Kanal liegt noch keine Prüfung vor.",
-      letztePruefung: (zeitpunkt) => `Letzte Prüfung: ${zeitpunkt}`,
+      letztePruefung: (timestamp) => `Letzte Prüfung: ${timestamp}`,
       pruefungLaeuft: "Prüfung läuft …", moderatorstatusPruefen: "Moderatorstatus prüfen",
-      naechstePruefungAb: (zeitpunkt) => `Nächste Prüfung ab ${zeitpunkt}.`,
+      naechstePruefungAb: (timestamp) => `Nächste Prüfung ab ${timestamp}.`,
       pruefungGesperrt: "Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.",
       broadcasterErneutAutorisieren: "Der Broadcaster muss Twitch erneut autorisieren.",
       broadcasterZustimmungAnfordern: "Broadcaster-Zustimmung anfordern",
     },
     bot: {
       keinGespeicherterStatus: "Es gibt noch keinen gespeicherten Botstatus.",
-      zuletztAktualisiert: (zeitpunkt) => `Zuletzt aktualisiert: ${zeitpunkt}`,
+      zuletztAktualisiert: (timestamp) => `Zuletzt aktualisiert: ${timestamp}`,
       optionaleModule: "Für optionale Broadcaster-Module verbunden.",
       normalerBetrieb: "Optional; für den normalen Bot-Betrieb nicht erforderlich.",
       channelBotNoetig: "channel:bot wird vom Broadcaster benötigt.",
@@ -340,8 +340,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       keinBotStatus: "Es gibt noch keinen gespeicherten Botstatus.", chatBotNoetig: "channel:bot wird vom Broadcaster benötigt.",
     },
     zeit: {
-      aktualisiert: (relativeZeit) => `aktualisiert ${relativeZeit}`, vorSekunden: (anzahl) => `vor ${String(anzahl)} s`,
-      vorMinuten: (anzahl) => `vor ${String(anzahl)} Min.`, vorStunden: (anzahl) => `vor ${String(anzahl)} Std.`,
+      aktualisiert: (relativeZeit) => `aktualisiert ${relativeZeit}`, vorSekunden: (count) => `vor ${String(count)} s`,
+      vorMinuten: (count) => `vor ${String(count)} Min.`, vorStunden: (count) => `vor ${String(count)} Std.`,
     },
     system: {
       titel: "System", nurLesend: "nur lesend", zustandLaden: "Systemzustand wird geladen …", eigenschaften: "Eigenschaften",
@@ -357,7 +357,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       twitchMeldung: "Twitch-Meldung", httpStatus: "HTTP-Status", botBerechtigungenInspector: "Fehlende Bot-Berechtigungen", fehlendeScopes: "Fehlende Scopes",
     },
     ereignisse: {
-      titel: "Ereignisse", count: (anzahl) => `${anzahl} Einträge`, protokoll: "Ereignisprotokoll", zeit: "Zeit", ereignis: "Ereignis",
+      titel: "Ereignisse", count: (count) => `${count} Einträge`, protokoll: "Ereignisprotokoll", zeit: "Zeit", ereignis: "Ereignis",
       module: "Modul", wer: "Wer", automatic: "Automatisch", info: "Info", fehler: "Fehler", hinweis: "Hinweis", unbekannt: "Unbekannt", code: "Code", zeitstempel: "Zeitstempel", vorgang: "Vorgang", beteiligte: "Beteiligte", verlauf: "Verlauf",
       laden: "Ereignisse werden geladen …",
       keine: "Noch keine Ereignisse protokolliert.", detail: "Detail", aeltereLaden: "Ältere Ereignisse laden", aeltereWerdenGeladen: "Ältere Ereignisse werden geladen …",
@@ -366,7 +366,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       keineTreffer: "Keine Ereignisse passen zu den Filtern.", nachladenAmEnde: "Am Ende werden ältere Ereignisse nachgeladen.",
       feedEnde: "Ende des Ereignisverlaufs erreicht.",
       realtimeVerbindet: "Verbindet …", realtimeVerbunden: "Verbunden", realtimeWiederverbindung: "Verbindet neu …",
-      realtimeOffline: "Offline", realtimeSitzungErneuern: "Sitzung erneuern", realtimeNeue: (anzahl) => `${anzahl} neue Ereignisse`,
+      realtimeOffline: "Offline", realtimeSitzungErneuern: "Sitzung erneuern", realtimeNeue: (count) => `${count} neue Ereignisse`,
     },
     anmeldung: {
       erforderlich: "Anmeldung erforderlich", erklaerung: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -409,7 +409,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       chatAboFehlt: "Chat subscription missing", gesund: "Healthy", zustandUnvollstaendig: "Incomplete status",
       nichtVerbunden: "Not connected", nichtEingerichtet: "Not set up", moderator: "Moderator", missing: "Missing", aktiv: "Active",
       ausstehend: "Pending", nichtErforderlich: "Not required", vorhanden: "Present",
-      botBerechtigungenFehlen: (anzahl) => `${anzahl} missing`,
+      botBerechtigungenFehlen: (count) => `${count} missing`,
     },
     navigation: {
       hauptnavigation: "Main navigation", brotkrume: "Breadcrumb", uebersicht: "Overview", kanal: "Channel", system: "System",
@@ -420,20 +420,20 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
     },
     overview: {
       einKanalFreigegeben: "1 channel available",
-      kanaeleFreigegeben: (anzahl) => `${anzahl} channels are available to you.`,
-      kanaeleFreigegebenKurz: (anzahl) => `${anzahl} channels available`,
+      kanaeleFreigegeben: (count) => `${count} channels are available to you.`,
+      kanaeleFreigegebenKurz: (count) => `${count} channels available`,
       keinKanalFreigegeben: "No channel available yet", keineMitgliedschaft: "This account is not a member of an available channel.",
       aktiveModule: "Active modules", zustandLaden: "Loading channel status …",
     },
     moderation: {
-      fuerKanalKeinePruefung: "This channel has not been checked yet.", letztePruefung: (zeitpunkt) => `Last checked: ${zeitpunkt}`,
+      fuerKanalKeinePruefung: "This channel has not been checked yet.", letztePruefung: (timestamp) => `Last checked: ${timestamp}`,
       pruefungLaeuft: "Checking …", moderatorstatusPruefen: "Check moderator status",
-      naechstePruefungAb: (zeitpunkt) => `Next check available ${zeitpunkt}.`,
+      naechstePruefungAb: (timestamp) => `Next check available ${timestamp}.`,
       pruefungGesperrt: "Only broadcasters and managers may check moderator status.",
       broadcasterErneutAutorisieren: "The broadcaster must authorize Twitch again.", broadcasterZustimmungAnfordern: "Request broadcaster consent",
     },
     bot: {
-      keinGespeicherterStatus: "No bot status has been saved yet.", zuletztAktualisiert: (zeitpunkt) => `Last updated: ${zeitpunkt}`,
+      keinGespeicherterStatus: "No bot status has been saved yet.", zuletztAktualisiert: (timestamp) => `Last updated: ${timestamp}`,
       optionaleModule: "Connected for optional broadcaster modules.", normalerBetrieb: "Optional; not required for normal bot operation.",
       channelBotNoetig: "channel:bot is required from the broadcaster.",
       botBerechtigungenBetreiber: "The operator must authorize the application again.",
@@ -450,8 +450,8 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       keinBotStatus: "No bot status has been saved yet.", chatBotNoetig: "channel:bot is required from the broadcaster.",
     },
     zeit: {
-      aktualisiert: (relativeZeit) => `updated ${relativeZeit}`, vorSekunden: (anzahl) => `${String(anzahl)} sec ago`,
-      vorMinuten: (anzahl) => `${String(anzahl)} min ago`, vorStunden: (anzahl) => `${String(anzahl)} hr ago`,
+      aktualisiert: (relativeZeit) => `updated ${relativeZeit}`, vorSekunden: (count) => `${String(count)} sec ago`,
+      vorMinuten: (count) => `${String(count)} min ago`, vorStunden: (count) => `${String(count)} hr ago`,
     },
     system: {
       titel: "System", nurLesend: "read-only", zustandLaden: "Loading system status …", eigenschaften: "Properties",
@@ -466,7 +466,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       twitchMeldung: "Twitch message", httpStatus: "HTTP status", botBerechtigungenInspector: "Missing bot permissions", fehlendeScopes: "Missing scopes",
     },
     ereignisse: {
-      titel: "Events", count: (anzahl) => `${anzahl} entries`, protokoll: "Event log", zeit: "Time", ereignis: "Event", module: "Module",
+      titel: "Events", count: (count) => `${count} entries`, protokoll: "Event log", zeit: "Time", ereignis: "Event", module: "Module",
       wer: "Who", automatic: "Automatic", info: "Info", fehler: "Error", hinweis: "Notice", unbekannt: "Unknown", code: "Code", zeitstempel: "Timestamp", vorgang: "Operation", beteiligte: "Participants", verlauf: "History", laden: "Loading events …", keine: "No events logged yet.", detail: "Detail",
       aeltereLaden: "Load older events", aeltereWerdenGeladen: "Loading older events …",
       filter: "Filters", origin: "Origin", modulFilter: "Module", tone: "Tone", person: "Person", alle: "All",
@@ -474,7 +474,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
       keineTreffer: "No events match the filters.", nachladenAmEnde: "Older events load at the end.",
       feedEnde: "End of the event history reached.",
       realtimeVerbindet: "Connecting …", realtimeVerbunden: "Connected", realtimeWiederverbindung: "Reconnecting …",
-      realtimeOffline: "Offline", realtimeSitzungErneuern: "Renew session", realtimeNeue: (anzahl) => `${anzahl} new events`,
+      realtimeOffline: "Offline", realtimeSitzungErneuern: "Renew session", realtimeNeue: (count) => `${count} new events`,
     },
     anmeldung: {
       erforderlich: "Sign-in required", erklaerung: "Sign in with your Twitch account to see available channels.",
@@ -498,7 +498,7 @@ const dashboardTexteKatalog: LocaleCatalog<DashboardTexte> = {
   },
 };
 
-export type EreignisCode =
+export type EventCode =
   | "host.aktion.fehler"
   | "host.chat.fehlgeschlagen"
   | "host.chat.gesendet"
@@ -555,62 +555,62 @@ export type EreignisCode =
   | "text_commands.unbekannt"
   | "text_commands.ungueltig";
 
-export type EreignisDetail = Readonly<Record<string, unknown>>;
-export type EreignisText = string | ((detail: EreignisDetail) => string);
+export type EventDetail = Readonly<Record<string, unknown>>;
+export type EventText = string | ((detail: EventDetail) => string);
 
-const textbefehlName = (detail: EreignisDetail): string | null =>
+const textCommandName = (detail: EventDetail): string | null =>
   typeof detail.name === "string" && detail.name.length > 0 ? detail.name : null;
 
-const ereignisTextMitName = (
-  detail: EreignisDetail,
+const eventTextWithName = (
+  detail: EventDetail,
   ohneName: string,
   mitName: (name: string) => string,
 ): string => {
-  const name = textbefehlName(detail);
+  const name = textCommandName(detail);
   return name === null ? ohneName : mitName(name);
 };
 
-const detailText = (detail: EreignisDetail, key: string, fallback: string): string =>
+const detailText = (detail: EventDetail, key: string, fallback: string): string =>
   typeof detail[key] === "string" && detail[key].length > 0 ? detail[key] : fallback;
 
-const textbefehlStufe = (detail: EreignisDetail, key: string, fallback: string, language: DashboardLanguage): string => {
+const textCommandTier = (detail: EventDetail, key: string, fallback: string, language: DashboardLanguage): string => {
   const value = detail[key];
   const labels: Record<string, string> = language === "de"
     ? { everyone: "alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster", viewer: "Zuschauer" }
     : { everyone: "everyone", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcaster", viewer: "viewer" };
-  const werte = Array.isArray(value) ? value : [value];
-  const beschrifteteWerte = werte.filter((eintrag): eintrag is string => typeof eintrag === "string" && eintrag.length > 0);
-  return beschrifteteWerte.length === 0
+  const values = Array.isArray(value) ? value : [value];
+  const labeledValues = values.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+  return labeledValues.length === 0
     ? fallback
-    : beschrifteteWerte.map((eintrag) => labels[eintrag] ?? eintrag).join(", ");
+    : labeledValues.map((entry) => labels[entry] ?? entry).join(", ");
 };
 
-const detailZahl = (detail: EreignisDetail, key: string, fallback: string): string =>
+const detailZahl = (detail: EventDetail, key: string, fallback: string): string =>
   typeof detail[key] === "number" && Number.isFinite(detail[key]) ? String(detail[key]) : fallback;
 
-const detailDauer = (detail: EreignisDetail, einheit: string, fallback: string): string =>
+const detailDauer = (detail: EventDetail, einheit: string, fallback: string): string =>
   typeof detail.dauer === "number" && Number.isFinite(detail.dauer) ? `${String(detail.dauer)} ${einheit}` : fallback;
 
-const detailGrund = (detail: EreignisDetail): string =>
+const detailReason = (detail: EventDetail): string =>
   typeof detail.reason === "string" && detail.reason.length > 0
     ? `: ${detail.reason}`
     : "";
 
-const detailGrundMit = (detail: EreignisDetail, praeposition: string): string =>
+const detailReasonWith = (detail: EventDetail, praeposition: string): string =>
   typeof detail.reason === "string" && detail.reason.length > 0
     ? ` ${praeposition} ${detail.reason}`
     : "";
 
-const detailEinstufung = (detail: EreignisDetail, fallback: string): string =>
+const detailEinstufung = (detail: EventDetail, fallback: string): string =>
   typeof detail.einstufung === "string" && detail.einstufung.length > 0 ? detail.einstufung : fallback;
 
-const detailModerator = (detail: EreignisDetail, fallback: string): string =>
+const detailModerator = (detail: EventDetail, fallback: string): string =>
   typeof detail.moderator === "string" && detail.moderator.length > 0 ? ` von ${detail.moderator}` : fallback;
 
-const detailModeratorEn = (detail: EreignisDetail, fallback: string): string =>
+const detailModeratorEn = (detail: EventDetail, fallback: string): string =>
   typeof detail.moderator === "string" && detail.moderator.length > 0 ? ` by ${detail.moderator}` : fallback;
 
-export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = {
+export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   de: {
     "host.aktion.fehler": "Aktion fehlgeschlagen",
     "host.chat.fehlgeschlagen": "Chat-Nachricht fehlgeschlagen",
@@ -630,14 +630,14 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "channel_events.chat.community_gift": (detail) => `Community-Gift von ${detailText(detail, "spender", "unbekannt")} für ${detailZahl(detail, "count", "unbekannte Anzahl")} Subs`,
     "channel_events.chat.ankuendigung": (detail) => `Ankündigung von ${detailText(detail, "person", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
     "channel_events.chat.unbekannt": (detail) => `Unbekannte Chat-Benachrichtigung: ${detailText(detail, "art", "unbekannt")}`,
-    "channel_events.moderation.ban": (detail) => `${detailText(detail, "person", "unbekannt")} gebannt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
-    "channel_events.moderation.timeout": (detail) => `${detailText(detail, "person", "unbekannt")} für ${detailDauer(detail, "Sekunden", "unbekannte Dauer")} getimeoutet von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
+    "channel_events.moderation.ban": (detail) => `${detailText(detail, "person", "unbekannt")} gebannt von ${detailText(detail, "moderator", "unbekannt")}${detailReason(detail)}`,
+    "channel_events.moderation.timeout": (detail) => `${detailText(detail, "person", "unbekannt")} für ${detailDauer(detail, "Sekunden", "unbekannte Dauer")} getimeoutet von ${detailText(detail, "moderator", "unbekannt")}${detailReason(detail)}`,
     "channel_events.moderation.untimeout": (detail) => `${detailText(detail, "person", "unbekannt")} aus dem Timeout genommen von ${detailText(detail, "moderator", "unbekannt")}`,
     "channel_events.moderation.unban": (detail) => `${detailText(detail, "person", "unbekannt")} entbannt von ${detailText(detail, "moderator", "unbekannt")}`,
     "channel_events.moderation.delete": (detail) => `Nachricht von ${detailText(detail, "person", "unbekannt")} gelöscht von ${detailText(detail, "moderator", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
-    "channel_events.moderation.warn": (detail) => `${detailText(detail, "person", "unbekannt")} verwarnt von ${detailText(detail, "moderator", "unbekannt")}${detailGrund(detail)}`,
+    "channel_events.moderation.warn": (detail) => `${detailText(detail, "person", "unbekannt")} verwarnt von ${detailText(detail, "moderator", "unbekannt")}${detailReason(detail)}`,
     "channel_events.moderation.unbekannt": (detail) => `Unbekannte Moderationsaktion: ${detailText(detail, "aktion", "unbekannt")}`,
-    "channel_events.automod.halte": (detail) => `AutoMod hielt die Nachricht von ${detailText(detail, "person", "unbekannt")}${detailGrundMit(detail, "wegen")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
+    "channel_events.automod.halte": (detail) => `AutoMod hielt die Nachricht von ${detailText(detail, "person", "unbekannt")}${detailReasonWith(detail, "wegen")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
     "channel_events.verdacht.nachricht": (detail) => `Nachricht von auffälligem Nutzer ${detailText(detail, "person", "unbekannt")} (${detailEinstufung(detail, "unbekannte Einstufung")}): ${detailText(detail, "text", "ohne Text")}`,
     "channel_events.verdacht.einstufung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} verschärft${detailModerator(detail, "")}: ${detailEinstufung(detail, "unbekannt")}`,
     "channel_events.verdacht.entwarnung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} aufgehoben${detailModerator(detail, "")}`,
@@ -660,17 +660,17 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "ads.vorwarnung.zeitplan_fehler": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "reason", "unbekannter Fehler")}`,
     "ads.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "reason", "unbekannter Fehler")}`,
     "text_commands.abgekuehlt": (detail) => {
-      const name = textbefehlName(detail);
+      const name = textCommandName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
         ? "Textbefehl abgekühlt"
         : `Befehl !${name} abgekühlt, noch ${String(detail.restSekunden)} s`;
     },
-    "text_commands.ausgeloest": (detail) => ereignisTextMitName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
-    "text_commands.deaktiviert": (detail) => ereignisTextMitName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
-    "text_commands.berechtigung": (detail) => ereignisTextMitName(detail, "Textbefehl nicht berechtigt", (name) => `Befehl !${name} nicht ausgelöst: Mindeststufe ${textbefehlStufe(detail, "geforderteStufe", "unbekannt", "de")}, vorhanden ${textbefehlStufe(detail, "vorhandeneStufe", "kein Chat-Status", "de")}`),
-    "text_commands.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Textbefehl bereits vorhanden", (name) => `Textbefehl !${name} bereits vorhanden`),
+    "text_commands.ausgeloest": (detail) => eventTextWithName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
+    "text_commands.deaktiviert": (detail) => eventTextWithName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
+    "text_commands.berechtigung": (detail) => eventTextWithName(detail, "Textbefehl nicht berechtigt", (name) => `Befehl !${name} nicht ausgelöst: Mindeststufe ${textCommandTier(detail, "geforderteStufe", "unbekannt", "de")}, vorhanden ${textCommandTier(detail, "vorhandeneStufe", "kein Chat-Status", "de")}`),
+    "text_commands.bereits_vorhanden": (detail) => eventTextWithName(detail, "Textbefehl bereits vorhanden", (name) => `Textbefehl !${name} bereits vorhanden`),
     "text_commands.nicht_berechtigt": "Textbefehl nicht berechtigt",
-    "text_commands.unbekannt": (detail) => ereignisTextMitName(detail, "Textbefehl unbekannt", (name) => `Textbefehl !${name} unbekannt`),
+    "text_commands.unbekannt": (detail) => eventTextWithName(detail, "Textbefehl unbekannt", (name) => `Textbefehl !${name} unbekannt`),
     "text_commands.ungueltig": "Textbefehl ungültig",
   },
   en: {
@@ -692,14 +692,14 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "channel_events.chat.community_gift": (detail) => `Community gift from ${detailText(detail, "spender", "unknown")} for ${detailZahl(detail, "count", "unknown number")} subs`,
     "channel_events.chat.ankuendigung": (detail) => `Announcement from ${detailText(detail, "person", "unknown")}: ${detailText(detail, "text", "no text")}`,
     "channel_events.chat.unbekannt": (detail) => `Unknown chat notification: ${detailText(detail, "art", "unknown")}`,
-    "channel_events.moderation.ban": (detail) => `${detailText(detail, "person", "unknown")} banned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
-    "channel_events.moderation.timeout": (detail) => `${detailText(detail, "person", "unknown")} timed out for ${detailDauer(detail, "seconds", "unknown duration")} by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
+    "channel_events.moderation.ban": (detail) => `${detailText(detail, "person", "unknown")} banned by ${detailText(detail, "moderator", "unknown")}${detailReason(detail)}`,
+    "channel_events.moderation.timeout": (detail) => `${detailText(detail, "person", "unknown")} timed out for ${detailDauer(detail, "seconds", "unknown duration")} by ${detailText(detail, "moderator", "unknown")}${detailReason(detail)}`,
     "channel_events.moderation.untimeout": (detail) => `${detailText(detail, "person", "unknown")} removed from timeout by ${detailText(detail, "moderator", "unknown")}`,
     "channel_events.moderation.unban": (detail) => `${detailText(detail, "person", "unknown")} unbanned by ${detailText(detail, "moderator", "unknown")}`,
     "channel_events.moderation.delete": (detail) => `Message from ${detailText(detail, "person", "unknown")} deleted by ${detailText(detail, "moderator", "unknown")}: ${detailText(detail, "text", "no text")}`,
-    "channel_events.moderation.warn": (detail) => `${detailText(detail, "person", "unknown")} warned by ${detailText(detail, "moderator", "unknown")}${detailGrund(detail)}`,
+    "channel_events.moderation.warn": (detail) => `${detailText(detail, "person", "unknown")} warned by ${detailText(detail, "moderator", "unknown")}${detailReason(detail)}`,
     "channel_events.moderation.unbekannt": (detail) => `Unknown moderation action: ${detailText(detail, "aktion", "unknown")}`,
-    "channel_events.automod.halte": (detail) => `AutoMod held a message from ${detailText(detail, "person", "unknown")}${detailGrundMit(detail, "for")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
+    "channel_events.automod.halte": (detail) => `AutoMod held a message from ${detailText(detail, "person", "unknown")}${detailReasonWith(detail, "for")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
     "channel_events.verdacht.nachricht": (detail) => `Message from suspicious user ${detailText(detail, "person", "unknown")} (${detailEinstufung(detail, "unknown classification")}): ${detailText(detail, "text", "no text")}`,
     "channel_events.verdacht.einstufung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} tightened${detailModeratorEn(detail, "")}: ${detailEinstufung(detail, "unknown")}`,
     "channel_events.verdacht.entwarnung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} cleared${detailModeratorEn(detail, "")}`,
@@ -722,33 +722,33 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
     "ads.vorwarnung.zeitplan_fehler": (detail) => `Ad schedule could not be read: ${detailText(detail, "reason", "unknown error")}`,
     "ads.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "reason", "unknown error")}`,
     "text_commands.abgekuehlt": (detail) => {
-      const name = textbefehlName(detail);
+      const name = textCommandName(detail);
       return name === null || typeof detail.restSekunden !== "number" || !Number.isFinite(detail.restSekunden)
         ? "Text command on cooldown"
         : `Command !${name} on cooldown, ${String(detail.restSekunden)}s left`;
     },
-    "text_commands.ausgeloest": (detail) => ereignisTextMitName(detail, "Command executed", (name) => `Command !${name} executed`),
-    "text_commands.deaktiviert": (detail) => ereignisTextMitName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
-    "text_commands.berechtigung": (detail) => ereignisTextMitName(detail, "Text command not authorized", (name) => `Command !${name} not executed: minimum level ${textbefehlStufe(detail, "geforderteStufe", "unknown", "en")}, present ${textbefehlStufe(detail, "vorhandeneStufe", "no chat status", "en")}`),
-    "text_commands.bereits_vorhanden": (detail) => ereignisTextMitName(detail, "Text command already exists", (name) => `Text command !${name} already exists`),
+    "text_commands.ausgeloest": (detail) => eventTextWithName(detail, "Command executed", (name) => `Command !${name} executed`),
+    "text_commands.deaktiviert": (detail) => eventTextWithName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
+    "text_commands.berechtigung": (detail) => eventTextWithName(detail, "Text command not authorized", (name) => `Command !${name} not executed: minimum level ${textCommandTier(detail, "geforderteStufe", "unknown", "en")}, present ${textCommandTier(detail, "vorhandeneStufe", "no chat status", "en")}`),
+    "text_commands.bereits_vorhanden": (detail) => eventTextWithName(detail, "Text command already exists", (name) => `Text command !${name} already exists`),
     "text_commands.nicht_berechtigt": "Text command not authorized",
-    "text_commands.unbekannt": (detail) => ereignisTextMitName(detail, "Unknown text command", (name) => `Unknown text command !${name}`),
+    "text_commands.unbekannt": (detail) => eventTextWithName(detail, "Unknown text command", (name) => `Unknown text command !${name}`),
     "text_commands.ungueltig": "Invalid text command",
   },
 };
 
-export type EreignisFamilie = "gemeinschaft" | "raid" | "moderation" | "betrieb";
-export type EreignisStufe = "voll" | "gezeichnet";
-export type EreignisZahlSchluessel = "viewers" | "count" | "dauer" | "restSekunden" | "stufe" | null;
-export interface EreignisTon {
-  familie: EreignisFamilie;
-  stufe: EreignisStufe;
+export type EventFamily = "gemeinschaft" | "raid" | "moderation" | "betrieb";
+export type EventTier = "voll" | "gezeichnet";
+export type EventNumberKey = "viewers" | "count" | "dauer" | "restSekunden" | "stufe" | null;
+export interface EventToneEntry {
+  familie: EventFamily;
+  stufe: EventTier;
   wort: LocaleCatalog<string>;
-  zahlSchluessel: EreignisZahlSchluessel;
+  zahlSchluessel: EventNumberKey;
   tone?: EventTone;
 }
 
-export const ereignisTon: Record<EreignisCode, EreignisTon> = {
+export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.aktion.fehler": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, tone: "error" },
   "host.chat.fehlgeschlagen": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Fehler", en: "Error" }, zahlSchluessel: null, tone: "error" },
   "host.chat.gesendet": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, tone: "info" },
@@ -802,25 +802,25 @@ export const ereignisTon: Record<EreignisCode, EreignisTon> = {
   "text_commands.ungueltig": { familie: "betrieb", stufe: "gezeichnet", wort: { de: "Hinweis", en: "Notice" }, zahlSchluessel: null, tone: "warning" },
 };
 
-export function ereignisText(code: string, language?: DashboardLanguage): string;
-export function ereignisText(code: string, detail: EreignisDetail, language?: DashboardLanguage): string;
-export function ereignisText(
+export function eventText(code: string, language?: DashboardLanguage): string;
+export function eventText(code: string, detail: EventDetail, language?: DashboardLanguage): string;
+export function eventText(
   code: string,
-  detailOderSprache: EreignisDetail | DashboardLanguage = {},
+  detailOderSprache: EventDetail | DashboardLanguage = {},
   language?: DashboardLanguage,
 ): string {
   const detail = typeof detailOderSprache === "string" ? {} : detailOderSprache;
   const aufloesungsSprache = typeof detailOderSprache === "string"
     ? detailOderSprache
     : language ?? dashboardLanguage();
-  if (Object.prototype.hasOwnProperty.call(ereignisTexte[aufloesungsSprache], code)) {
-    const text = ereignisTexte[aufloesungsSprache][code as EreignisCode];
+  if (Object.prototype.hasOwnProperty.call(eventTexts[aufloesungsSprache], code)) {
+    const text = eventTexts[aufloesungsSprache][code as EventCode];
     return typeof text === "function" ? text(detail) : text;
   }
   return code;
 }
 
-export const dashboardTexte = (): DashboardTexte => dashboardTexteKatalog[dashboardLanguage()];
+export const dashboardTexts = (): DashboardTexts => dashboardTextsCatalog[dashboardLanguage()];
 
 export const formatDashboardDate = (
   value: string,
@@ -835,7 +835,7 @@ export const formatDashboardDate = (
 export const formatDatum = (value: string): string =>
   formatDashboardDate(value, { dateStyle: "medium" });
 
-export const formatZeitpunkt = (value: string): string =>
+export const formatTimestamp = (value: string): string =>
   formatDashboardDate(value, { dateStyle: "medium", timeStyle: "short" });
 
 export const formatZahl = (value: number): string =>

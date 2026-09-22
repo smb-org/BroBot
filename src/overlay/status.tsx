@@ -6,11 +6,11 @@ interface OverlayStatus {
   language: ModuleLanguage;
 }
 
-interface OverlayTexte {
+interface OverlayTexts {
   version: string;
 }
 
-const texte: Record<ModuleLanguage, OverlayTexte> = {
+const texts: Record<ModuleLanguage, OverlayTexts> = {
   de: { version: "Version" },
   en: { version: "Version" },
 };
@@ -129,5 +129,5 @@ export const OverlayStatusView = (): ReactElement | null => {
     };
   }, []);
 
-  return status === null ? null : <span style={labelStyle}>{texte[status.language].version} {status.version}</span>;
+  return status === null ? null : <span style={labelStyle}>{texts[status.language].version} {status.version}</span>;
 };

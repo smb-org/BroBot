@@ -1,7 +1,7 @@
-import type { WerbungSettings, WerbungZeitplanAntwort } from "../contracts";
+import type { AdsSettings, AdsScheduleResponse } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 
-const leereEinstellungen: WerbungSettings = {
+const leereEinstellungen: AdsSettings = {
   automatic: "",
   manual: "",
   prewarning: true,
@@ -9,7 +9,7 @@ const leereEinstellungen: WerbungSettings = {
   prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
 };
 
-const leererZeitplan: WerbungZeitplanAntwort = {
+const leererZeitplan: AdsScheduleResponse = {
   schedule: {
     nextAdAt: null,
     duration: null,
@@ -37,18 +37,18 @@ const json = async <T>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const ladeWerbungseinstellungen = async (channelId: string): Promise<WerbungSettings> => {
+export const loadAdSettings = async (channelId: string): Promise<AdsSettings> => {
   const response = await fetch(pathFor(channelId));
-  const loaded = (await json<{ settings: Partial<WerbungSettings> }>(response)).settings;
+  const loaded = (await json<{ settings: Partial<AdsSettings> }>(response)).settings;
   return { ...leereEinstellungen, ...loaded };
 };
 
 const zeitplanPathFor = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/ads/zeitplan`;
 
-export const ladeWerbungZeitplan = async (channelId: string): Promise<WerbungZeitplanAntwort> => {
+export const loadAdsSchedule = async (channelId: string): Promise<AdsScheduleResponse> => {
   const response = await fetch(zeitplanPathFor(channelId));
-  const loadedResponse = await json<Partial<WerbungZeitplanAntwort> | null>(response);
+  const loadedResponse = await json<Partial<AdsScheduleResponse> | null>(response);
   const loaded = loadedResponse !== null && typeof loadedResponse === "object" ? loadedResponse : {};
   return {
     ...leererZeitplan,
@@ -58,9 +58,9 @@ export const ladeWerbungZeitplan = async (channelId: string): Promise<WerbungZei
   };
 };
 
-export const speichereWerbungseinstellungen = async (
+export const saveAdSettings = async (
   channelId: string,
-  settings: WerbungSettings,
+  settings: AdsSettings,
 ): Promise<void> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
@@ -71,12 +71,12 @@ export const speichereWerbungseinstellungen = async (
   }));
 };
 
-export const snoozeWerbung = async (channelId: string): Promise<WerbungZeitplanAntwort> => {
+export const snoozeAds = async (channelId: string): Promise<AdsScheduleResponse> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
   const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/ads/snooze`, {
     method: "POST",
     headers: { "X-CSRF-Token": csrf.token },
   });
-  return json<WerbungZeitplanAntwort>(response);
+  return json<AdsScheduleResponse>(response);
 };

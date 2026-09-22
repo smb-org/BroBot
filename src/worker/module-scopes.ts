@@ -1,5 +1,5 @@
 import { MODULES } from "../modules/registry";
-import { WERBUNG_OPTIONALE_BROADCASTER_SCOPES } from "../modules/ads/contracts";
+import { ADS_OPTIONAL_BROADCASTER_SCOPES } from "../modules/ads/contracts";
 import type { BotModule } from "../modules/contract";
 import { LOGIN_SCOPES } from "./auth/oauth";
 
@@ -40,7 +40,7 @@ interface IdentityScopeRow {
 const unique = (scopes: readonly string[]): string[] => [...new Set(scopes)];
 
 /** Ermittelt den abgeleiteten Vollumfang für markierte Kanäle. */
-export const listeAlleBroadcasterScopes = (): string[] => unique([
+export const listAllBroadcasterScopes = (): string[] => unique([
   ...LOGIN_SCOPES,
   ...MODULES.flatMap((module) => declaredScopes(module)),
   ...VOLLUMFANG_BROADCASTER_SCOPES,
@@ -126,6 +126,6 @@ export const moduleScopeRequirement = (module: BotModule): string[] => declaredS
 
 /** Scopes, die ein Modul für optionale Bedienhandlungen kennt. */
 export const moduleOptionalBroadcasterScopes = (module: BotModule): string[] =>
-  module.id === "ads" ? [...WERBUNG_OPTIONALE_BROADCASTER_SCOPES] : [];
+  module.id === "ads" ? [...ADS_OPTIONAL_BROADCASTER_SCOPES] : [];
 
 export { broadcasterHasScope } from "./broadcaster-scope";

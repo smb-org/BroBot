@@ -1,6 +1,6 @@
 import type { ModuleDiagnostic } from "../modules/contract";
-import { werbungModul } from "../modules/ads";
-import { entscheideWerbevorwarnung, type WerbevorwarnungsEntscheidung } from "../modules/ads/domain";
+import { adsModule } from "../modules/ads";
+import { decideAdPrewarning, type AdPrewarningDecision } from "../modules/ads/domain";
 import {
   getChannelModuleForChannel,
   type ChannelModuleRecord,
@@ -15,7 +15,7 @@ const MODULE_ID = "ads";
 const WARNING_SCOPE = "channel:read:ads";
 const SCHEDULE_TRIGGER_TYPES = new Set(["stream.online", "channel.ad_break.begin"]);
 
-export interface WerbeVorwarnungEnvironment {
+export interface AdPrewarningEnvironment {
   DB: D1Database;
   TWITCH_CLIENT_ID: string;
   TWITCH_CLIENT_SECRET: string;
@@ -32,9 +32,9 @@ export interface WerbeVorwarnungEnvironment {
  * Selbstaufruf: Das Input-Gate stellt die Anfrage hinter den laufenden Alarm,
  * der auf sie wartet — der Alarm käme nie zurück.
  */
-export interface Werbeplaner {
-  plane: (faelligAmMs: number) => Promise<void>;
-  loesche: () => Promise<void>;
+export interface AdScheduler {
+  schedule: (dueAtMs: number) => Promise<void>;
+  clear: () => Promise<void>;
 }
 
 const nowMsFrom = (now: string): number => {
@@ -50,43 +50,43 @@ const moduleSettings = (record: ChannelModuleRecord | null) => {
   } catch {
     return null;
   }
-  const parsed = werbungModul.settingsSchema.safeParse(raw);
+  const parsed = adsModule.settingsSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 };
 
 const channelObject = (
-  environment: WerbeVorwarnungEnvironment,
+  environment: AdPrewarningEnvironment,
   channelId: string,
-): { planeWerbevorwarnung: (faelligAmMs: number) => Promise<void>; loescheWerbevorwarnung: () => Promise<void> } | null => {
+): { scheduleAdPrewarning: (dueAtMs: number) => Promise<void>; clearAdPrewarning: () => Promise<void> } | null => {
   if (environment.CHANNEL === undefined) return null;
   return environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId));
 };
 
-const planerFuer = (
-  environment: WerbeVorwarnungEnvironment,
+const schedulerFor = (
+  environment: AdPrewarningEnvironment,
   channelId: string,
-  eigener?: Werbeplaner,
-): Werbeplaner | null => {
+  eigener?: AdScheduler,
+): AdScheduler | null => {
   if (eigener !== undefined) return eigener;
   const stub = channelObject(environment, channelId);
   if (stub === null) return null;
   return {
-    plane: async (faelligAmMs) => { await stub.planeWerbevorwarnung(faelligAmMs); },
-    loesche: async () => { await stub.loescheWerbevorwarnung(); },
+    schedule: async (dueAtMs) => { await stub.scheduleAdPrewarning(dueAtMs); },
+    clear: async () => { await stub.clearAdPrewarning(); },
   };
 };
 
-const plane = async (planer: Werbeplaner | null, faelligAmMs: number): Promise<void> => {
-  if (!Number.isFinite(faelligAmMs)) return;
-  await planer?.plane(faelligAmMs);
+const schedule = async (scheduler: AdScheduler | null, dueAtMs: number): Promise<void> => {
+  if (!Number.isFinite(dueAtMs)) return;
+  await scheduler?.schedule(dueAtMs);
 };
 
-const clear = async (planer: Werbeplaner | null): Promise<void> => {
-  await planer?.loesche();
+const clear = async (scheduler: AdScheduler | null): Promise<void> => {
+  await scheduler?.clear();
 };
 
 const writeDiagnostics = async (
-  environment: WerbeVorwarnungEnvironment,
+  environment: AdPrewarningEnvironment,
   channelId: string,
   triggerId: string,
   now: string,
@@ -96,7 +96,7 @@ const writeDiagnostics = async (
 };
 
 const writeOne = async (
-  environment: WerbeVorwarnungEnvironment,
+  environment: AdPrewarningEnvironment,
   channelId: string,
   triggerId: string,
   now: string,
@@ -105,14 +105,14 @@ const writeOne = async (
 ): Promise<void> => writeDiagnostics(environment, channelId, triggerId, now, [{ code, detail }]);
 
 const scopeMissing = async (
-  environment: WerbeVorwarnungEnvironment,
+  environment: AdPrewarningEnvironment,
   channelId: string,
   triggerId: string,
   now: string,
-  planer: Werbeplaner | null,
+  scheduler: AdScheduler | null,
   diagnosenSchreiben = true,
 ): Promise<void> => {
-  await clear(planer);
+  await clear(scheduler);
   if (diagnosenSchreiben) {
     await writeOne(environment, channelId, triggerId, now, "ads.vorwarnung.scope_fehlt", { scope: WARNING_SCOPE });
   }
@@ -126,49 +126,49 @@ const scheduleFailureDiagnostic = (result: AdScheduleResult): ModuleDiagnostic =
 });
 
 const settingRecord = async (
-  environment: WerbeVorwarnungEnvironment,
+  environment: AdPrewarningEnvironment,
   channelId: string,
   triggerId: string,
   now: string,
-  planer: Werbeplaner | null,
+  scheduler: AdScheduler | null,
   diagnosenSchreiben = true,
 ): Promise<{ record: ChannelModuleRecord; settings: NonNullable<ReturnType<typeof moduleSettings>> } | null> => {
   const record = await getChannelModuleForChannel(environment.DB, channelId, MODULE_ID);
   const settings = moduleSettings(record);
   if (record === null || !record.enabled || settings === null) return null;
-  const scopeState = await moduleBroadcasterScopeState(environment.DB, channelId, werbungModul);
+  const scopeState = await moduleBroadcasterScopeState(environment.DB, channelId, adsModule);
   if (scopeState.missing.length > 0) {
-    await scopeMissing(environment, channelId, triggerId, now, planer, diagnosenSchreiben);
+    await scopeMissing(environment, channelId, triggerId, now, scheduler, diagnosenSchreiben);
     return null;
   }
   return { record, settings };
 };
 
-const decisionCode = (decision: WerbevorwarnungsEntscheidung): string =>
+const decisionCode = (decision: AdPrewarningDecision): string =>
   decision.kind === "announce" ? "ads.vorwarnung.angekuendigt" : `ads.vorwarnung.${decision.reason}`;
 
-const decisionDetail = (decision: WerbevorwarnungsEntscheidung): Readonly<Record<string, string | number | boolean | null>> => {
+const decisionDetail = (decision: AdPrewarningDecision): Readonly<Record<string, string | number | boolean | null>> => {
   if (decision.kind === "announce") return { sekunden: decision.sekunden, termin: decision.terminAm };
   return decision.detail;
 };
 
-const shouldReplan = (decision: WerbevorwarnungsEntscheidung): boolean =>
+const shouldReplan = (decision: AdPrewarningDecision): boolean =>
   decision.kind === "skip" && (decision.reason === "termin_verschoben" || decision.reason === "pause_begonnen");
 
 const replanFromSchedule = async (
-  planer: Werbeplaner | null,
+  scheduler: AdScheduler | null,
   settings: { leadSeconds: number },
   nextAdAt: string | null,
 ): Promise<void> => {
   if (nextAdAt === null) return;
   const nextAdAtMs = Date.parse(nextAdAt);
   if (!Number.isFinite(nextAdAtMs)) return;
-  await plane(planer, nextAdAtMs - settings.leadSeconds * 1000);
+  await schedule(scheduler, nextAdAtMs - settings.leadSeconds * 1000);
 };
 
 /** Holt den Zeitplan bei einem EventSub-Anlass und stellt den Vorwarnungswecker. */
-export const aktualisiereWerbevorwarnung = async (
-  environment: WerbeVorwarnungEnvironment,
+export const refreshAdPrewarning = async (
+  environment: AdPrewarningEnvironment,
   channelId: string,
   triggerId: string,
   now: string,
@@ -176,10 +176,10 @@ export const aktualisiereWerbevorwarnung = async (
   bereitsGelesenerZeitplan?: AdScheduleResult,
   diagnosenSchreiben = true,
 ): Promise<void> => {
-  const planer = planerFuer(environment, channelId);
-  const configured = await settingRecord(environment, channelId, triggerId, now, planer, diagnosenSchreiben);
+  const scheduler = schedulerFor(environment, channelId);
+  const configured = await settingRecord(environment, channelId, triggerId, now, scheduler, diagnosenSchreiben);
   if (configured === null || !configured.settings.prewarning) {
-    await clear(planer);
+    await clear(scheduler);
     return;
   }
 
@@ -192,7 +192,7 @@ export const aktualisiereWerbevorwarnung = async (
   );
   if (!result.fetched || result.schedule === null) {
     if (result.reason === "unauthorized") {
-      await scopeMissing(environment, channelId, triggerId, now, planer, diagnosenSchreiben);
+      await scopeMissing(environment, channelId, triggerId, now, scheduler, diagnosenSchreiben);
     } else {
       if (diagnosenSchreiben) {
         await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
@@ -201,28 +201,28 @@ export const aktualisiereWerbevorwarnung = async (
     return;
   }
   if (result.schedule.nextAdAt === null) {
-    await clear(planer);
+    await clear(scheduler);
     if (diagnosenSchreiben) {
       await writeOne(environment, channelId, triggerId, now, "ads.vorwarnung.kein_termin");
     }
     return;
   }
 
-  await replanFromSchedule(planer, configured.settings, result.schedule.nextAdAt);
+  await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
 };
 
 /** Führt die fällige Vorwarnung nach einem frischen Zeitplan-Abruf aus. */
-export const verarbeiteWerbevorwarnung = async (
-  environment: WerbeVorwarnungEnvironment,
+export const processAdPrewarning = async (
+  environment: AdPrewarningEnvironment,
   channelId: string,
   geplantFaelligAmMs: number,
   triggerId = `werbung-vorwarnung:${crypto.randomUUID()}`,
   now = new Date().toISOString(),
   fetcher: typeof fetch = fetch,
-  eigenerPlaner?: Werbeplaner,
+  ownScheduler?: AdScheduler,
 ): Promise<void> => {
-  const planer = planerFuer(environment, channelId, eigenerPlaner);
-  const configured = await settingRecord(environment, channelId, triggerId, now, planer);
+  const scheduler = schedulerFor(environment, channelId, ownScheduler);
+  const configured = await settingRecord(environment, channelId, triggerId, now, scheduler);
   if (configured === null || !configured.settings.prewarning) return;
 
   const result = await getAdSchedule(
@@ -234,14 +234,14 @@ export const verarbeiteWerbevorwarnung = async (
   );
   if (!result.fetched || result.schedule === null) {
     if (result.reason === "unauthorized") {
-      await scopeMissing(environment, channelId, triggerId, now, planer);
+      await scopeMissing(environment, channelId, triggerId, now, scheduler);
     } else {
       await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
     }
     return;
   }
 
-  const entscheidung = entscheideWerbevorwarnung({
+  const entscheidung = decideAdPrewarning({
     settings: configured.settings,
     scopeVorhanden: true,
     jetztAmMs: nowMsFrom(now),
@@ -265,9 +265,9 @@ export const verarbeiteWerbevorwarnung = async (
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 
   if (shouldReplan(entscheidung)) {
-    await replanFromSchedule(planer, configured.settings, result.schedule.nextAdAt);
+    await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
   }
 };
 
-export const isWerbevorwarnungsAnlass = (subscriptionType: string): boolean =>
+export const isAdPrewarningTrigger = (subscriptionType: string): boolean =>
   SCHEDULE_TRIGGER_TYPES.has(subscriptionType);

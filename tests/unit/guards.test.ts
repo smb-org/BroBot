@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import {
-  requireBetreiber,
+  requirePlatform,
   requireChannelAuthorization,
-  type BetreiberAuthorizationVariables,
+  type PlatformAuthorizationVariables,
   type ChannelAuthorizationVariables,
 } from "../../src/worker/auth/guards";
 import { createSessionCookie } from "../../src/worker/auth/session";
@@ -24,7 +24,7 @@ const environmentKeys = {
 };
 
 type GuardEnvironment = Env & { DB: D1Database };
-interface GuardVariables extends ChannelAuthorizationVariables, BetreiberAuthorizationVariables {}
+interface GuardVariables extends ChannelAuthorizationVariables, PlatformAuthorizationVariables {}
 type GuardContext = { Bindings: GuardEnvironment; Variables: GuardVariables };
 
 const app = new Hono<GuardContext>();
@@ -35,7 +35,7 @@ app.post("/api/channels/:channelId/write", (context) =>
 app.all("/api/channels/:channelId/write", (context) =>
   context.json({ role: context.get("channelRole") }),
 );
-app.use("/api/platform/*", requireBetreiber());
+app.use("/api/platform/*", requirePlatform());
 app.get("/api/platform/probe", (context) => {
   const variables = context.var as unknown as Partial<GuardVariables>;
   return context.json({

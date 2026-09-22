@@ -41,7 +41,7 @@ export interface MutationGuard {
   values: readonly (string | number | null)[];
 }
 
-export const betreiberSessionGuard = (
+export const platformSessionGuard = (
   actor: ActorContext,
   now: string,
 ): MutationGuard => ({

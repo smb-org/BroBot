@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { TextbefehlePanel } from "../../src/modules/text_commands/panel";
+import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
@@ -24,8 +24,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Hallo {user}",
           kind: "text",
           enabled: true,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: new Date(Date.now() - 60_000).toISOString(),
+          cooldownSeconds: 5,
+          lastUsedAt: new Date(Date.now() - 60_000).toISOString(),
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
@@ -35,7 +35,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     expect(await screen.findByText("!hallo")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "!Name" })).toBeInTheDocument();
@@ -62,7 +62,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
     const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
@@ -91,7 +91,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
     const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
@@ -115,20 +115,20 @@ describe("Textbefehle-Panel-Ansicht", () => {
   });
 
   it("setzt beim Wechsel zu einem anderen Befehl die Entwurfswerte neu", async () => {
-    const befehle = [
+    const commands = [
       {
         channelId: "kanal-a", name: "alpha", text: "Antwort A", kind: "text" as const, enabled: true,
-        cooldownSekunden: 5, zuletztVerwendetAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+        cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       },
       {
         channelId: "kanal-a", name: "beta", text: "Antwort B", kind: "text" as const, enabled: true,
-        cooldownSekunden: 10, zuletztVerwendetAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+        cooldownSeconds: 10, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       },
     ];
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ befehle })));
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ befehle: commands })));
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     fireEvent.click(await screen.findByRole("row", { name: /!alpha/ }));
     fireEvent.change(await screen.findByDisplayValue("Antwort A"), { target: { value: "Entwurf" } });
@@ -153,8 +153,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Hallo",
           kind: "text",
           enabled: true,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] : [] }));
@@ -170,7 +170,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
     const deleteButton = await screen.findByRole("button", { name: deleteLabel });
@@ -206,7 +206,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "hallo" } });
@@ -231,8 +231,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Hallo",
           kind: "text",
           enabled: true,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
@@ -242,7 +242,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     expect(await screen.findByRole("heading", { name: "Befehle" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Befehl anlegen" }));
@@ -273,8 +273,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Hallo",
           kind: "text",
           enabled: true,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
@@ -285,7 +285,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
     fireEvent.click(await screen.findByRole("button", {
@@ -303,7 +303,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     expect(await screen.findByRole("heading", { name: "Commands" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add command" }));
@@ -325,7 +325,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
     const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
@@ -336,7 +336,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
     expect(add).toBeEnabled();
     fireEvent.click(add);
-    await waitFor(() => expect(createdBody).toEqual({ name: "befehle", kind: "list", cooldownSekunden: 5 }));
+    await waitFor(() => expect(createdBody).toEqual({ name: "befehle", kind: "list", cooldownSeconds: 5 }));
   });
 
   it("zeigt Bedienern den Schalter offen und Inhaltsaktionen sichtbar, aber gesperrt", async () => {
@@ -350,8 +350,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Antwort",
           kind: "text",
           enabled,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
@@ -365,7 +365,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" canManage={false} />);
+    render(<TextCommandsPanel channelId="kanal-a" canManage={false} />);
 
     const row = await screen.findByRole("row", { name: /!hallo/ });
     const toggle = await screen.findByRole("switch", { name: "Befehl !hallo: ausgeschaltet" });
@@ -396,7 +396,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   });
 
   it("zeigt die Mindeststufe als eigene Spalte und ändert sie über den Verwaltungsweg", async () => {
-    let mindeststufe = "everyone";
+    let minimumTier = "everyone";
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
@@ -406,24 +406,24 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Antwort",
           kind: "text",
           enabled: true,
-          mindeststufe,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          minimumTier: minimumTier,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
       }
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "PATCH") {
-        const body = typeof init.body === "string" ? JSON.parse(init.body) as { mindeststufe?: string } : {};
-        mindeststufe = body.mindeststufe ?? mindeststufe;
+        const body = typeof init.body === "string" ? JSON.parse(init.body) as { minimumTier?: string } : {};
+        minimumTier = body.minimumTier ?? minimumTier;
       }
       return Promise.resolve(jsonResponse({}));
     });
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     const row = await screen.findByRole("row", { name: /!hallo/ });
     expect(screen.getByRole("columnheader", { name: "Mindeststufe" })).toBeInTheDocument();
@@ -432,7 +432,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     fireEvent.change(select, { target: { value: "moderator" } });
 
     await screen.findByRole("option", { name: "Moderatoren", selected: true });
-    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ mindeststufe: "moderator" }))).toBe(true);
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ minimumTier: "moderator" }))).toBe(true);
   });
 
   it("ordnet Liste und Inspector als direkte Kinder des Befehlsbereichs an", async () => {
@@ -445,8 +445,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Hallo",
           kind: "text",
           enabled: true,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
@@ -456,7 +456,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
     const row = await screen.findByRole("row", { name: /!hallo/ });
     fireEvent.click(row);
@@ -477,8 +477,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Hallo",
           kind: "text",
           enabled: true,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
@@ -489,7 +489,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" onCloseInspector={onCloseInspector} />);
+    render(<TextCommandsPanel channelId="kanal-a" onCloseInspector={onCloseInspector} />);
 
     const row = await screen.findByRole("row", { name: /!hallo/ });
     row.focus();
@@ -526,8 +526,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Hallo",
           kind: "text",
           enabled: true,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
@@ -537,13 +537,13 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" />);
+    render(<TextCommandsPanel channelId="kanal-a" />);
 
-    const liste = await screen.findByRole("region", { name: "Befehle" });
-    const bereich = liste.parentElement?.parentElement;
+    const list = await screen.findByRole("region", { name: "Befehle" });
+    const bereich = list.parentElement?.parentElement;
     expect(bereich).not.toBeNull();
     expect(bereich?.children).toHaveLength(1);
-    const plus = within(liste).getByRole("button", { name: "Befehl anlegen" });
+    const plus = within(list).getByRole("button", { name: "Befehl anlegen" });
     fireEvent.click(plus);
     await screen.findByRole("region", { name: "Befehl anlegen" });
     expect(bereich?.children).toHaveLength(2);
@@ -579,8 +579,8 @@ describe("Textbefehle-Panel-Ansicht", () => {
           text: "Hallo",
           kind: "text",
           enabled: true,
-          cooldownSekunden: 5,
-          zuletztVerwendetAt: null,
+          cooldownSeconds: 5,
+          lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
@@ -591,7 +591,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
-    render(<TextbefehlePanel channelId="kanal-a" onCloseInspector={onCloseInspector} />);
+    render(<TextCommandsPanel channelId="kanal-a" onCloseInspector={onCloseInspector} />);
 
     fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
     fireEvent.keyDown(await screen.findByRole("region", { name: "Eigenschaften von !hallo" }), { key: "Escape" });

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { EventSubSubscriptionType } from "../../src/contracts/values";
-import { diagnostiziereKanalereignis } from "../../src/modules/channel_events/domain";
+import { diagnoseChannelEvent } from "../../src/modules/channel_events/domain";
 
 const diagnose = (
   subscriptionType: EventSubSubscriptionType,
   payload: Record<string, unknown>,
   variant?: string,
   receivedAt?: string,
-) => diagnostiziereKanalereignis(subscriptionType, payload, "kanal-a", variant, receivedAt);
+) => diagnoseChannelEvent(subscriptionType, payload, "kanal-a", variant, receivedAt);
 
 describe("Kanalereignisse-Domain", () => {
   it("bildet eingehende und ausgehende Raids mit Quelle/Ziel und Zuschauern ab", () => {

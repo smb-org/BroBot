@@ -1,39 +1,39 @@
 import type {
-  NeuerTextbefehl,
-  Textbefehl,
-  TextbefehlAenderung,
-  TextbefehlBeanspruchung,
-  TextbefehlAkteur,
+  NewTextCommand,
+  TextCommand,
+  TextCommandChange,
+  TextCommandClaim,
+  TextCommandActor,
 } from "../contracts";
 import { kuerzeAuf200Zeichen, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
-import type { TextbefehlMutationsergebnis, TextbefehlRepository } from "../repository";
+import type { TextCommandMutationResult, TextCommandRepository } from "../repository";
 
 const MODULE_ID = "text_commands";
 
-const auditWerte = (befehl: Pick<Textbefehl, "name" | "text" | "kind" | "enabled" | "mindeststufe" | "cooldownSekunden">) => ({
-  name: befehl.name,
-  kind: befehl.kind,
-  enabled: befehl.enabled,
-  mindeststufe: befehl.mindeststufe,
-  text: kuerzeAuf200Zeichen(befehl.text),
-  cooldownSekunden: befehl.cooldownSekunden,
+const auditValues = (command: Pick<TextCommand, "name" | "text" | "kind" | "enabled" | "minimumTier" | "cooldownSeconds">) => ({
+  name: command.name,
+  kind: command.kind,
+  enabled: command.enabled,
+  minimumTier: command.minimumTier,
+  text: kuerzeAuf200Zeichen(command.text),
+  cooldownSeconds: command.cooldownSeconds,
 });
 
-const gleicheMutationswerte = (
-  links: Pick<Textbefehl, "name" | "text" | "kind" | "enabled" | "mindeststufe" | "cooldownSekunden">,
-  rechts: Pick<Textbefehl, "name" | "text" | "kind" | "enabled" | "mindeststufe" | "cooldownSekunden">,
+const sameMutationValues = (
+  links: Pick<TextCommand, "name" | "text" | "kind" | "enabled" | "minimumTier" | "cooldownSeconds">,
+  rechts: Pick<TextCommand, "name" | "text" | "kind" | "enabled" | "minimumTier" | "cooldownSeconds">,
 ): boolean => links.name === rechts.name &&
   links.text === rechts.text &&
   links.kind === rechts.kind &&
   links.enabled === rechts.enabled &&
-  links.mindeststufe === rechts.mindeststufe &&
-  links.cooldownSekunden === rechts.cooldownSekunden;
+  links.minimumTier === rechts.minimumTier &&
+  links.cooldownSeconds === rechts.cooldownSeconds;
 
-const erfolgreich = (): TextbefehlMutationsergebnis => ({ ok: true });
+const erfolgreich = (): TextCommandMutationResult => ({ ok: true });
 
-const fehlgeschlagen = (grund: Exclude<TextbefehlMutationsergebnis, { ok: true }>["reason"]): TextbefehlMutationsergebnis => ({
+const fehlgeschlagen = (reason: Exclude<TextCommandMutationResult, { ok: true }>["reason"]): TextCommandMutationResult => ({
   ok: false,
-  reason: grund,
+  reason: reason,
 });
 
 const mutationAusfuehren = async (
@@ -48,7 +48,7 @@ const mutationAusfuehren = async (
   return results[0]?.meta.changes ?? 0;
 };
 
-interface TextbefehlRow {
+interface TextCommandRow {
   channel_id: string;
   command_name: string;
   response_text: string;
@@ -61,49 +61,49 @@ interface TextbefehlRow {
   updated_at: string;
 }
 
-const mapTextbefehl = (row: TextbefehlRow): Textbefehl => ({
+const mapTextCommand = (row: TextCommandRow): TextCommand => ({
   channelId: row.channel_id,
   name: row.command_name,
   text: row.response_text,
   kind: row.kind,
   enabled: row.enabled === 1,
-  mindeststufe: row.minimum_level,
-  cooldownSekunden: row.cooldown_seconds,
-  zuletztVerwendetAt: row.last_used_at,
+  minimumTier: row.minimum_level,
+  cooldownSeconds: row.cooldown_seconds,
+  lastUsedAt: row.last_used_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
 
-export const createTextbefehlRepository = (
+export const createTextCommandRepository = (
   db: D1Database,
   authorizeMutation: AuthorizeModuleMutation,
   prepareModuleAudit?: PrepareModuleAudit,
-): TextbefehlRepository => ({
-  async auflisten(channelId: string): Promise<Textbefehl[]> {
+): TextCommandRepository => ({
+  async auflisten(channelId: string): Promise<TextCommand[]> {
     const result = await db.prepare(
       `SELECT channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
               last_used_at, created_at, updated_at
          FROM text_commands
         WHERE channel_id = ?
         ORDER BY command_name`,
-    ).bind(channelId).all<TextbefehlRow>();
-    return result.results.map(mapTextbefehl);
+    ).bind(channelId).all<TextCommandRow>();
+    return result.results.map(mapTextCommand);
   },
 
-  async finden(channelId: string, name: string): Promise<Textbefehl | null> {
+  async finden(channelId: string, name: string): Promise<TextCommand | null> {
     const row = await db.prepare(
       `SELECT channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
               last_used_at, created_at, updated_at
          FROM text_commands
         WHERE channel_id = ? AND command_name = ?`,
-    ).bind(channelId, name).first<TextbefehlRow>();
-    return row === null ? null : mapTextbefehl(row);
+    ).bind(channelId, name).first<TextCommandRow>();
+    return row === null ? null : mapTextCommand(row);
   },
 
-  async anlegen(input: NeuerTextbefehl, actor: TextbefehlAkteur): Promise<TextbefehlMutationsergebnis> {
+  async anlegen(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult> {
     if (await this.finden(input.channelId, input.name) !== null) return fehlgeschlagen("existiert");
     const authorization = authorizeMutation(input.channelId, actor, input.now);
-    const mindeststufe = input.mindeststufe ?? "everyone";
+    const minimumTier = input.minimumTier ?? "everyone";
     const mutation = db.prepare(
       `INSERT INTO text_commands
         (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
@@ -118,8 +118,8 @@ export const createTextbefehlRepository = (
       input.name,
       input.text,
       input.kind,
-      mindeststufe,
-      input.cooldownSekunden,
+      minimumTier,
+      input.cooldownSeconds,
       input.now,
       input.now,
       input.channelId,
@@ -131,21 +131,21 @@ export const createTextbefehlRepository = (
       moduleId: MODULE_ID,
       action: "text_commands.befehl.angelegt",
       before: null,
-      after: auditWerte({ ...input, mindeststufe, enabled: true }),
+      after: auditValues({ ...input, minimumTier: minimumTier, enabled: true }),
     }, input.now);
     if (changes > 0) return erfolgreich();
     return fehlgeschlagen(await this.finden(input.channelId, input.name) === null ? "nicht_berechtigt" : "existiert");
   },
 
-  async aendern(input: TextbefehlAenderung, actor: TextbefehlAkteur): Promise<TextbefehlMutationsergebnis> {
+  async aendern(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult> {
     const before = await this.finden(input.channelId, input.name);
     if (before === null) return fehlgeschlagen("nicht_gefunden");
     if (input.nurSchalter !== true && input.neuerName !== input.name && await this.finden(input.channelId, input.neuerName) !== null) {
       return fehlgeschlagen("existiert");
     }
     const authorization = authorizeMutation(input.channelId, actor, input.now);
-    const beforeMindeststufe = before.mindeststufe;
-    const mindeststufe = input.mindeststufe ?? beforeMindeststufe;
+    const beforeMinimumTier = before.minimumTier;
+    const minimumTier = input.minimumTier ?? beforeMinimumTier;
     const mutation = input.nurSchalter === true
       ? db.prepare(
         `UPDATE text_commands
@@ -162,8 +162,8 @@ export const createTextbefehlRepository = (
         before.text,
         before.kind,
         before.enabled ? 1 : 0,
-        beforeMindeststufe,
-        before.cooldownSekunden,
+        beforeMinimumTier,
+        before.cooldownSeconds,
         ...authorization.values,
       )
       : db.prepare(
@@ -182,16 +182,16 @@ export const createTextbefehlRepository = (
         input.text,
         input.kind,
         input.enabled ? 1 : 0,
-        mindeststufe,
-        input.cooldownSekunden,
+        minimumTier,
+        input.cooldownSeconds,
         input.now,
         input.channelId,
         input.name,
         before.text,
         before.kind,
         before.enabled ? 1 : 0,
-        beforeMindeststufe,
-        before.cooldownSekunden,
+        beforeMinimumTier,
+        before.cooldownSeconds,
         input.neuerName,
         input.channelId,
         input.neuerName,
@@ -205,15 +205,15 @@ export const createTextbefehlRepository = (
         text: input.text,
         kind: input.kind,
         enabled: input.enabled,
-        mindeststufe,
-        cooldownSekunden: input.cooldownSekunden,
+        minimumTier: minimumTier,
+        cooldownSeconds: input.cooldownSeconds,
       };
     const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
       action: "text_commands.befehl.geändert",
-      before: auditWerte(before),
-      after: auditWerte(after),
+      before: auditValues(before),
+      after: auditValues(after),
     }, input.now);
     if (changes > 0) return erfolgreich();
     const current = await this.finden(input.channelId, input.name);
@@ -221,10 +221,10 @@ export const createTextbefehlRepository = (
       return fehlgeschlagen("existiert");
     }
     if (current === null) return fehlgeschlagen("nicht_gefunden");
-    return fehlgeschlagen(gleicheMutationswerte(current, before) ? "nicht_berechtigt" : "konflikt");
+    return fehlgeschlagen(sameMutationValues(current, before) ? "nicht_berechtigt" : "konflikt");
   },
 
-  async loeschen(channelId: string, name: string, actor: TextbefehlAkteur, now: string): Promise<TextbefehlMutationsergebnis> {
+  async loeschen(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult> {
     const before = await this.finden(channelId, name);
     if (before === null) return fehlgeschlagen("nicht_gefunden");
     const authorization = authorizeMutation(channelId, actor, now);
@@ -240,24 +240,24 @@ export const createTextbefehlRepository = (
       before.text,
       before.kind,
       before.enabled ? 1 : 0,
-      before.mindeststufe,
-      before.cooldownSekunden,
+      before.minimumTier,
+      before.cooldownSeconds,
       ...authorization.values,
     );
     const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
       channelId,
       moduleId: MODULE_ID,
       action: "text_commands.befehl.entfernt",
-      before: auditWerte(before),
+      before: auditValues(before),
       after: null,
     }, now);
     if (changes > 0) return erfolgreich();
     const current = await this.finden(channelId, name);
     if (current === null) return fehlgeschlagen("nicht_gefunden");
-    return fehlgeschlagen(gleicheMutationswerte(current, before) ? "nicht_berechtigt" : "konflikt");
+    return fehlgeschlagen(sameMutationValues(current, before) ? "nicht_berechtigt" : "konflikt");
   },
 
-  async beanspruchen(channelId: string, name: string, now: string): Promise<TextbefehlBeanspruchung | null> {
+  async beanspruchen(channelId: string, name: string, now: string): Promise<TextCommandClaim | null> {
     const result = await db.prepare(
       `UPDATE text_commands
           SET last_used_at = ?, updated_at = ?
@@ -265,16 +265,16 @@ export const createTextbefehlRepository = (
           AND enabled = 1
           AND (last_used_at IS NULL OR julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)`,
     ).bind(now, now, channelId, name, now).run();
-    const befehl = await this.finden(channelId, name);
-    return befehl === null ? null : { befehl, beansprucht: result.meta.changes > 0 };
+    const command = await this.finden(channelId, name);
+    return command === null ? null : { befehl: command, beansprucht: result.meta.changes > 0 };
   },
 });
 
 /** Legt den eingebauten Listenbefehl beim Aktivieren einmalig als normale Zeile an. */
-export const initialisiereListenbefehl = async (
+export const initializeListCommand = async (
   db: D1Database,
   channelId: string,
-  actor: TextbefehlAkteur,
+  actor: TextCommandActor,
   now: string,
   authorizeMutation: AuthorizeModuleMutation,
   prepareModuleAudit?: PrepareModuleAudit,
@@ -308,7 +308,7 @@ export const initialisiereListenbefehl = async (
       moduleId: MODULE_ID,
       action: "text_commands.befehl.angelegt",
       before: null,
-      after: { name: "befehle", kind: "list", enabled: true, mindeststufe: "everyone", text: "", cooldownSekunden: 5 },
+      after: { name: "befehle", kind: "list", enabled: true, minimumTier: "everyone", text: "", cooldownSeconds: 5 },
     }, now),
   ];
 };

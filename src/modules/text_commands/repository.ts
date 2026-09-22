@@ -1,26 +1,26 @@
 import type {
-  NeuerTextbefehl,
-  Textbefehl,
-  TextbefehlAenderung,
-  TextbefehlBeanspruchung,
-  TextbefehlAkteur,
+  NewTextCommand,
+  TextCommand,
+  TextCommandChange,
+  TextCommandClaim,
+  TextCommandActor,
 } from "./contracts";
 
-export type TextbefehlMutationsgrund =
+export type TextCommandMutationReason =
   | "existiert"
   | "nicht_gefunden"
   | "konflikt"
   | "nicht_berechtigt";
 
-export type TextbefehlMutationsergebnis =
+export type TextCommandMutationResult =
   | { ok: true }
-  | { ok: false; reason: TextbefehlMutationsgrund };
+  | { ok: false; reason: TextCommandMutationReason };
 
-export interface TextbefehlRepository {
-  auflisten(channelId: string): Promise<Textbefehl[]>;
-  finden(channelId: string, name: string): Promise<Textbefehl | null>;
-  anlegen(input: NeuerTextbefehl, actor: TextbefehlAkteur): Promise<TextbefehlMutationsergebnis>;
-  aendern(input: TextbefehlAenderung, actor: TextbefehlAkteur): Promise<TextbefehlMutationsergebnis>;
-  loeschen(channelId: string, name: string, actor: TextbefehlAkteur, now: string): Promise<TextbefehlMutationsergebnis>;
-  beanspruchen(channelId: string, name: string, now: string): Promise<TextbefehlBeanspruchung | null>;
+export interface TextCommandRepository {
+  auflisten(channelId: string): Promise<TextCommand[]>;
+  finden(channelId: string, name: string): Promise<TextCommand | null>;
+  anlegen(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult>;
+  aendern(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult>;
+  loeschen(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult>;
+  beanspruchen(channelId: string, name: string, now: string): Promise<TextCommandClaim | null>;
 }

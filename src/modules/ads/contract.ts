@@ -1,2 +1,2 @@
 export type { ModuleEvent, ModuleResult, ModuleRouteVariables } from "../contract";
-export type { WerbungSettings, WerbepausenEreignis } from "./contracts";
+export type { AdsSettings, AdBreaksEvent } from "./contracts";
