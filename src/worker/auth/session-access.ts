@@ -1,4 +1,7 @@
-import { getSessionWithLoginIdentity, type SessionRecord } from "./repository";
+import {
+  getSessionWithLoginIdentity,
+  type SessionRecord,
+} from "../db/sessions";
 import {
   SESSION_COOKIE_NAME,
   readCookieValue,

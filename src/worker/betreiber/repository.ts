@@ -1,9 +1,13 @@
 import {
   betreiberSessionGuard,
   type ActorContext,
-  type ChannelMemberRecord,
   type MutationGuard,
-} from "../auth/repository";
+} from "../db/guards";
+import {
+  type ChannelMemberRecord,
+} from "../db/channel-members";
+import { prepareAudit } from "../db/audit";
+import { decodeCursor, encodeCursor } from "../db/cursor";
 
 export interface BetreiberKanal {
   channelId: string;
@@ -80,8 +84,6 @@ interface AuditZeile {
 
 export const betreiberRollenSql = "'verwalter', 'bediener'";
 
-const auditId = (): string => crypto.randomUUID();
-
 const mutationsschutz = (akteur: ActorContext, zeitpunkt: string): MutationGuard =>
   betreiberSessionGuard(akteur, zeitpunkt);
 
@@ -93,20 +95,15 @@ const vorbereiteAudit = (
   aktion: BetreiberAktion,
   vorher: BetreiberKanal | ChannelMemberRecord | null,
   nachher: BetreiberKanal | ChannelMemberRecord | null,
-): D1PreparedStatement => db.prepare(
-  `INSERT INTO audit_log
-    (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
-   SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
-    WHERE changes() > 0`,
-).bind(
-  auditId(),
+): D1PreparedStatement => prepareAudit(
+  db,
   akteurId,
   zeitpunkt,
   kanalId,
   null,
   aktion,
-  JSON.stringify(vorher),
-  JSON.stringify(nachher),
+  vorher,
+  nachher,
   "betreiber",
 );
 
@@ -117,26 +114,14 @@ const mapKanal = (zeile: BetreiberKanalZeile): BetreiberKanal => ({
   vollzustimmung: zeile.vollzustimmung === 1,
 });
 
-const encodeCursor = (cursor: BetreiberAuditCursor): string => {
-  const encoded = btoa(JSON.stringify(cursor));
-  return encoded.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-};
-
-export const decodeBetreiberAuditCursor = (serialized: string): BetreiberAuditCursor | null => {
-  try {
-    const normalized = serialized.replaceAll("-", "+").replaceAll("_", "/")
-      .padEnd(Math.ceil(serialized.length / 4) * 4, "=");
-    const value: unknown = JSON.parse(atob(normalized));
+export const decodeBetreiberAuditCursor = (serialized: string): BetreiberAuditCursor | null => decodeCursor(serialized, (value) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
     const cursor = value as Record<string, unknown>;
     return typeof cursor.createdAt === "string" && cursor.createdAt.length > 0 &&
       typeof cursor.id === "string" && cursor.id.length > 0
       ? { createdAt: cursor.createdAt, id: cursor.id }
       : null;
-  } catch {
-    return null;
-  }
-};
+});
 
 export const listeBetreiberKanäle = async (
   db: D1Database,

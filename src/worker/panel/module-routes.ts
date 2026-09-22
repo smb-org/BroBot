@@ -5,7 +5,7 @@ import {
   getChannelModuleForChannel,
   listChannelModulesForChannel,
   updateChannelModuleWithAudit,
-} from "../auth/repository";
+} from "../db/channel-modules";
 import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,

@@ -1,4 +1,6 @@
-import { getBotIdentity } from "./auth/repository";
+import {
+  getBotIdentity,
+} from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
 import { kuerzeAuf200Zeichen } from "../modules/contract";
 

@@ -7,7 +7,12 @@ import { prepareModuleAudit } from "../module-audit";
 import { authorizeChannelAccess, type ChannelMemberRole } from "./authorization";
 import { verifyCsrfRequest } from "./csrf";
 import { getSessionFromRequest } from "./session-access";
-import type { ActorContext, SessionRecord } from "./repository";
+import type {
+  ActorContext,
+} from "../db/guards";
+import type {
+  SessionRecord,
+} from "../db/sessions";
 
 export interface ChannelAuthorizationVariables {
   session: SessionRecord;

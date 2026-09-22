@@ -2,41 +2,62 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   consumeOAuthTransaction,
+  createOAuthTransaction,
+  failOAuthTransaction,
+  purgeExpiredOAuthTransactions,
+} from "../../src/worker/db/oauth-transactions";
+import {
   actorGuard,
   betreiberSessionGuard,
-  createChannelMemberWithAudit,
-  createSession,
-  createOAuthTransaction,
-  deleteChannelMemberWithAudit,
-  failOAuthTransaction,
-  getBotIdentity,
-  getAppAccessToken,
-  getLoginIdentity,
-  getBotIdentityStatus,
-  getSession,
-  listLoginIdentities,
-  listChannelIds,
-  revokeSession,
-  revokeLoginIdentityAndSessionsForUser,
-  purgeExpiredOAuthTransactions,
   requiredActorRoles,
-  rotateAppAccessToken,
+} from "../../src/worker/db/guards";
+import {
+  createChannelMemberWithAudit,
+  deleteChannelMemberWithAudit,
+  updateChannelMemberWithAudit,
+} from "../../src/worker/db/channel-members";
+import {
+  createSession,
+  getSession,
+  revokeSession,
+} from "../../src/worker/db/sessions";
+import {
+  getBotIdentity,
+  getBotIdentityStatus,
   rotateBotTokens,
-  rotateLoginTokensForUser,
-  setBotChannelStatus,
   setBotIdentityStatusIfCurrent,
   setBotIdentityStatus,
+  upsertBotIdentity,
+  upsertBotIdentityAndStatus,
+} from "../../src/worker/db/bot-identity";
+import {
+  getAppAccessToken,
+  rotateAppAccessToken,
+} from "../../src/worker/db/app-token";
+import {
+  getLoginIdentity,
+  listLoginIdentities,
+  revokeLoginIdentityAndSessionsForUser,
+  rotateLoginTokensForUser,
   setLoginIdentityStatus,
   setLoginIdentityTokenScopes,
+  upsertLoginIdentity,
+} from "../../src/worker/db/login-identity";
+import {
+  listChannelIds,
+} from "../../src/worker/db/channels";
+import {
+  setBotChannelStatus,
   getBotChannelStatusCheckLock,
   releaseBotChannelStatusCheck,
   tryReserveBotChannelStatusCheck,
-  updateChannelMemberWithAudit,
-  upsertLoginIdentity,
-  upsertBotIdentity,
-  upsertBotIdentityAndStatus,
-} from "../../src/worker/auth/repository";
-import type { ActorContext, ChannelMemberRecord } from "../../src/worker/auth/repository";
+} from "../../src/worker/db/bot-channel-status";
+import type {
+  ActorContext,
+} from "../../src/worker/db/guards";
+import type {
+  ChannelMemberRecord,
+} from "../../src/worker/db/channel-members";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 

@@ -3,15 +3,19 @@ import { describe, expect, it } from "vitest";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import {
   actorGuard,
-  createChannelMemberWithAudit,
-  createChannelModuleWithAudit,
-  deleteChannelMemberWithAudit,
   requiredActorRoles,
-  updateChannelMemberWithAudit,
-  updateChannelModuleWithAudit,
   type ActorContext,
+} from "../../src/worker/db/guards";
+import {
+  createChannelMemberWithAudit,
+  deleteChannelMemberWithAudit,
+  updateChannelMemberWithAudit,
   type ChannelMemberRecord,
-} from "../../src/worker/auth/repository";
+} from "../../src/worker/db/channel-members";
+import {
+  createChannelModuleWithAudit,
+  updateChannelModuleWithAudit,
+} from "../../src/worker/db/channel-modules";
 import { createOverlayToken, revokeOverlayToken } from "../../src/worker/auth/overlay-token-repository";
 import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
 import {
@@ -77,7 +81,7 @@ interface Rollenaktion {
 const aktionen: readonly Rollenaktion[] = [
   {
     name: "Kanalmitglied als Bediener anlegen",
-    quelle: "auth/repository.ts:createChannelMemberWithAudit + actorGuard(requiredActorRoles)",
+    quelle: "db/channel-members.ts:createChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
     erwartet: erlaubt(true, true, false, false),
     ausführen: (database) => createChannelMemberWithAudit(
       database as unknown as D1Database,
@@ -90,7 +94,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Kanalmitglied als Broadcaster anlegen",
-    quelle: "auth/repository.ts:createChannelMemberWithAudit + actorGuard(requiredActorRoles)",
+    quelle: "db/channel-members.ts:createChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
     erwartet: erlaubt(true, false, false, false),
     ausführen: (database) => createChannelMemberWithAudit(
       database as unknown as D1Database,
@@ -103,7 +107,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Kanalmitglied von Bediener zu Verwalter ändern",
-    quelle: "auth/repository.ts:updateChannelMemberWithAudit + actorGuard(requiredActorRoles)",
+    quelle: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
     erwartet: erlaubt(true, true, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "bediener");
@@ -119,7 +123,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Kanalmitglied von Broadcaster zu Verwalter ändern",
-    quelle: "auth/repository.ts:updateChannelMemberWithAudit + lastBroadcasterRoleChangeGuard",
+    quelle: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:lastBroadcasterRoleChangeGuard",
     erwartet: erlaubt(true, false, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "broadcaster");
@@ -136,7 +140,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Letzten Broadcaster herabstufen",
-    quelle: "auth/repository.ts:updateChannelMemberWithAudit + lastBroadcasterRoleChangeGuard",
+    quelle: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:lastBroadcasterRoleChangeGuard",
     erwartet: erlaubt(false, false, false, false),
     ausführen: async (database, role) => {
       const target = role === "broadcaster" ? "actor" : "target";
@@ -163,7 +167,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Kanalmitglied als Bediener entfernen",
-    quelle: "auth/repository.ts:deleteChannelMemberWithAudit + actorGuard + lastBroadcasterGuard",
+    quelle: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:actorGuard + db/guards.ts:lastBroadcasterGuard",
     erwartet: erlaubt(true, true, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "bediener");
@@ -180,7 +184,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Nicht letzten Broadcaster entfernen",
-    quelle: "auth/repository.ts:deleteChannelMemberWithAudit + lastBroadcasterGuard",
+    quelle: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:lastBroadcasterGuard",
     erwartet: erlaubt(true, false, false, false),
     ausführen: async (database) => {
       await insertMember(database, "kanal-a", "target", "broadcaster");
@@ -197,7 +201,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Letzten Broadcaster entfernen",
-    quelle: "auth/repository.ts:deleteChannelMemberWithAudit + lastBroadcasterGuard",
+    quelle: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:lastBroadcasterGuard",
     erwartet: erlaubt(false, false, false, false),
     ausführen: async (database, role) => {
       const target = role === "broadcaster" ? "actor" : "target";
@@ -215,7 +219,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Modul aktivieren",
-    quelle: "auth/repository.ts:createChannelModuleWithAudit + actorGuard",
+    quelle: "db/channel-modules.ts:createChannelModuleWithAudit + db/guards.ts:actorGuard",
     erwartet: erlaubt(true, true, false, false),
     ausführen: (database) => createChannelModuleWithAudit(
       database as unknown as D1Database,
@@ -227,7 +231,7 @@ const aktionen: readonly Rollenaktion[] = [
   },
   {
     name: "Moduleinstellungen ändern",
-    quelle: "auth/repository.ts:updateChannelModuleWithAudit + actorGuard",
+    quelle: "db/channel-modules.ts:updateChannelModuleWithAudit + db/guards.ts:actorGuard",
     erwartet: erlaubt(true, true, false, false),
     ausführen: async (database) => {
       await database.prepare(

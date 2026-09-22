@@ -1,4 +1,4 @@
-import { createOAuthTransaction } from "./repository";
+import { createOAuthTransaction, type OAuthPurpose } from "../db/oauth-transactions";
 import { parseKeyRing, signJson, verifyJson } from "./crypto";
 
 export const LOGIN_SCOPES = ["user:read:moderated_channels", "channel:bot"] as const;
@@ -30,8 +30,6 @@ export const missingBotScopes = (grantedScopes: readonly string[]): string[] => 
   const granted = new Set(grantedScopes);
   return BOT_SCOPES.filter((scope) => !granted.has(scope));
 };
-
-export type OAuthPurpose = "login" | "bot";
 
 export interface OAuthEnvironment {
   TWITCH_CLIENT_ID: string;

@@ -14,11 +14,15 @@ import {
 } from "../../src/worker/auth/guards";
 import {
   actorGuard,
+} from "../../src/worker/db/guards";
+import {
   createChannelMemberWithAudit,
   deleteChannelMemberWithAudit,
   updateChannelMemberWithAudit,
-} from "../../src/worker/auth/repository";
-import type { SessionRecord } from "../../src/worker/auth/repository";
+} from "../../src/worker/db/channel-members";
+import type {
+  SessionRecord,
+} from "../../src/worker/db/sessions";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 

@@ -6,7 +6,9 @@ import {
   touchOverlayToken,
   type OverlayTokenRecord,
 } from "./overlay-token-repository";
-import type { ActorContext } from "./repository";
+import type {
+  ActorContext,
+} from "../db/guards";
 
 export interface IssueOverlayTokenInput {
   channelId: string;

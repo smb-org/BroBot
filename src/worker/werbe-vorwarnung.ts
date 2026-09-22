@@ -1,7 +1,10 @@
 import type { ModuleDiagnostic } from "../modules/contract";
 import { werbungModul } from "../modules/werbung";
 import { entscheideWerbevorwarnung, type WerbevorwarnungsEntscheidung } from "../modules/werbung/domain";
-import { getChannelModuleForChannel, type ChannelModuleRecord } from "./auth/repository";
+import {
+  getChannelModuleForChannel,
+  type ChannelModuleRecord,
+} from "./db/channel-modules";
 import { moduleBroadcasterScopeState } from "./module-scopes";
 import { sendChatMessage } from "./chat";
 import { writeModuleDiagnostics } from "./event-log";

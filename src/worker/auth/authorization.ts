@@ -1,4 +1,6 @@
-import type { SessionRecord } from "./repository";
+import type {
+  SessionRecord,
+} from "../db/sessions";
 
 export type ChannelMemberRole = "broadcaster" | "verwalter" | "bediener";
 

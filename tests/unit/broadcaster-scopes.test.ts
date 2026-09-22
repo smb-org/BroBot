@@ -9,7 +9,10 @@ import {
   moduleOptionalBroadcasterScopes,
   VOLLUMFANG_BROADCASTER_SCOPES,
 } from "../../src/worker/module-scopes";
-import { upsertLoginIdentity, setLoginIdentityStatus } from "../../src/worker/auth/repository";
+import {
+  upsertLoginIdentity,
+  setLoginIdentityStatus,
+} from "../../src/worker/db/login-identity";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 

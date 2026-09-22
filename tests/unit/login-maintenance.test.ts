@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { setLoginIdentityStatus, upsertLoginIdentity } from "../../src/worker/auth/repository";
+import {
+  setLoginIdentityStatus,
+  upsertLoginIdentity,
+} from "../../src/worker/db/login-identity";
 import { confirmLoginIdentityAuthorization, maintainLoginIdentities } from "../../src/worker/login-maintenance";
 import { TestD1Database } from "./test-d1";
 

@@ -15,11 +15,13 @@ import {
 import {
   getBotChannelStatusCheckLock,
   getBotChannelStatusCheckedAt,
-  getBotIdentity,
   releaseBotChannelStatusCheck,
   setBotChannelStatusAndLock,
   tryReserveBotChannelStatusCheck,
-} from "../auth/repository";
+} from "../db/bot-channel-status";
+import {
+  getBotIdentity,
+} from "../db/bot-identity";
 import {
   decodeLogCursor,
   getAuditLogForChannel,

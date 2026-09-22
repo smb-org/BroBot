@@ -13,7 +13,9 @@ import {
   parseEventSubTimestamp,
 } from "../../src/worker/eventsub";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { purgeOldEventSubMessages } from "../../src/worker/auth/repository";
+import {
+  purgeOldEventSubMessages,
+} from "../../src/worker/db/eventsub-state";
 import { scheduled } from "../../src/worker/scheduled";
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";

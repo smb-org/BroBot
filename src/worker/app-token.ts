@@ -1,7 +1,7 @@
 import {
   getAppAccessToken as getStoredAppAccessToken,
   rotateAppAccessToken,
-} from "./auth/repository";
+} from "./db/app-token";
 import {
   decryptJson,
   encryptJson,

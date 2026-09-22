@@ -1,4 +1,6 @@
-import { getBotIdentity } from "./auth/repository";
+import {
+  getBotIdentity,
+} from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
 
 const SHOUTOUT_URL = "https://api.twitch.tv/helix/chat/shoutouts";

@@ -1,7 +1,12 @@
 import type { BotModule, ModuleAction, ModuleActor, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleResult } from "../modules/contract";
 import type { RealtimeEnvelope } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
-import { getChannelMemberForChannel, listChannelModulesForChannel } from "./auth/repository";
+import {
+  getChannelMemberForChannel,
+} from "./db/channel-members";
+import {
+  listChannelModulesForChannel,
+} from "./db/channel-modules";
 import { sendChatMessage } from "./chat";
 import { sendShoutout } from "./shoutout";
 import { publishRealtimeMessage } from "./realtime";

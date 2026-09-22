@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type * as AuthRepository from "../../src/worker/auth/repository";
+import type * as AuthRepository from "../../src/worker/db/channel-members";
 
-vi.mock("../../src/worker/auth/repository", async (importOriginal) => {
+vi.mock("../../src/worker/db/channel-members", async (importOriginal) => {
   const actual = await importOriginal<typeof AuthRepository>();
   return {
     ...actual,

@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { textbefehlModul, type TextbefehlMindeststufe } from "../../src/modules/textbefehle";
 import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
-import { upsertBotIdentity } from "../../src/worker/auth/repository";
+import {
+  upsertBotIdentity,
+} from "../../src/worker/db/bot-identity";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken, insertChannel, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";

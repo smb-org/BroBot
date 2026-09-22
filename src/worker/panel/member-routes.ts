@@ -3,17 +3,21 @@ import { Hono } from "hono";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "../auth/crypto";
 import {
   countBroadcasterMembers,
-  actorGuard,
   createChannelMemberWithAudit,
   decodeChannelMemberCursor,
   deleteChannelMemberWithAudit,
-  getBotIdentity,
   getChannelMemberForChannel,
   listChannelMembers,
   updateChannelMemberWithAudit,
-  requiredActorRoles,
   type ChannelMemberRecord,
-} from "../auth/repository";
+} from "../db/channel-members";
+import {
+  actorGuard,
+  requiredActorRoles,
+} from "../db/guards";
+import {
+  getBotIdentity,
+} from "../db/bot-identity";
 import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,

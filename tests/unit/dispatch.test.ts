@@ -3,7 +3,9 @@ import { z } from "zod";
 
 import type { BotModule, ModuleEvent, ModuleResult } from "../../src/modules/contract";
 import { dispatchEventSubNotification, selectModulesForEvent } from "../../src/worker/dispatch";
-import { upsertBotIdentity } from "../../src/worker/auth/repository";
+import {
+  upsertBotIdentity,
+} from "../../src/worker/db/bot-identity";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken, insertChannel, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";

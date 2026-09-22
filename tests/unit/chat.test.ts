@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { upsertBotIdentity } from "../../src/worker/auth/repository";
+import {
+  upsertBotIdentity,
+} from "../../src/worker/db/bot-identity";
 import { sendChatMessage } from "../../src/worker/chat";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database } from "./test-d1";

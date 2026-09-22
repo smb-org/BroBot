@@ -2,7 +2,7 @@ import {
   actorGuard,
   bindActorGuard,
   type ActorContext,
-} from "./repository";
+} from "../db/guards";
 import type { ModuleLanguage } from "../../modules/contract";
 import { prepareModuleAudit } from "../module-audit";
 

@@ -4,13 +4,17 @@ import { getAppAccessToken } from "./app-token";
 import { parseKeyRing } from "./auth/crypto";
 import {
   channelBotConsentCondition,
+} from "./db/guards";
+import {
   getBotIdentity,
   getBotIdentityStatus,
+} from "./db/bot-identity";
+import {
   listEventSubSubscriptions,
   type EventSubAuthorizationIdentity,
   type EventSubSubscriptionStatus,
   upsertEventSubSubscription,
-} from "./auth/repository";
+} from "./db/eventsub-state";
 import {
   logMaintenanceError,
   maintenanceErrorDetails,

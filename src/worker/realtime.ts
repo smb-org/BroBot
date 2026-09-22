@@ -5,7 +5,9 @@ import type {
   RealtimePrincipal,
 } from "../realtime-contract";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "./auth/guards";
-import { listChannelIdsForUser } from "./auth/repository";
+import {
+  listChannelIdsForUser,
+} from "./db/channels";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "./realtime-protocol";
 
 interface RealtimeRouteEnvironment {

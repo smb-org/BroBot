@@ -11,7 +11,7 @@ import {
   rememberEventSubMessageAndRevocation,
   rememberEventSubMessage,
   type EventSubRevocationRecord,
-} from "./auth/repository";
+} from "./db/eventsub-state";
 
 export {
   fetchEventSubSubscriptions,

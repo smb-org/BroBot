@@ -10,7 +10,7 @@ import {
   getChannelMemberForChannel,
   listChannelMembers,
   type ChannelMemberRecord,
-} from "../auth/repository";
+} from "../db/channel-members";
 import {
   fetchTwitchUserByLogin,
   fetchTwitchUsersById,

@@ -5,7 +5,7 @@ import {
   getChannelModuleForChannel,
   updateChannelModuleWithAudit,
   type ChannelModuleRecord,
-} from "../../src/worker/auth/repository";
+} from "../../src/worker/db/channel-modules";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 

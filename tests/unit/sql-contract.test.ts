@@ -11,7 +11,7 @@ import {
   channelBotConsentCondition,
   lastBroadcasterGuard,
   lastBroadcasterRoleChangeGuard,
-} from "../../src/worker/auth/repository";
+} from "../../src/worker/db/guards";
 import {
   overlayTokenReturningColumns,
   overlayTokenRoles,

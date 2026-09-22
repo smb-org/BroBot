@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { raidModul } from "../../src/modules/raid";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { upsertBotIdentity } from "../../src/worker/auth/repository";
+import {
+  upsertBotIdentity,
+} from "../../src/worker/db/bot-identity";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { insertAppAccessToken, insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";

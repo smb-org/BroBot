@@ -1,13 +1,19 @@
 import {
   getBotIdentity,
   getBotIdentityStatus,
-  listChannelIds,
-  purgeExpiredOAuthTransactions,
   setBotIdentityMissingScopesIfCurrent,
-  setBotChannelStatus,
   setBotIdentityStatusIfCurrent,
   rotateBotTokens,
-} from "./auth/repository";
+} from "./db/bot-identity";
+import {
+  listChannelIds,
+} from "./db/channels";
+import {
+  purgeExpiredOAuthTransactions,
+} from "./db/oauth-transactions";
+import {
+  setBotChannelStatus,
+} from "./db/bot-channel-status";
 import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 import { kuerzeAuf200Zeichen } from "../text";

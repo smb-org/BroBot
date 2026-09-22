@@ -1,5 +1,10 @@
 import type { AuthorizeModuleMutation } from "../modules/contract";
-import { actorGuard, bindActorGuard, ANY_MEMBER_ROLES, type ActorContext } from "./auth/repository";
+import {
+  actorGuard,
+  bindActorGuard,
+  ANY_MEMBER_ROLES,
+  type ActorContext,
+} from "./db/guards";
 
 /** Liefert dem Modul nur die bereits geprüfte SQL-Bedingung, nicht channel_members. */
 export const authorizeModuleMutation: AuthorizeModuleMutation = (channelId, actor, now) => {

@@ -19,7 +19,13 @@ import type {
   PanelEventsResponse,
 } from "../../panel-contract";
 import { ereignisTon } from "../../dashboard/locale";
-import { channelBotConsentCondition, listEventSubSubscriptions } from "../auth/repository";
+import {
+  channelBotConsentCondition,
+} from "../db/guards";
+import {
+  listEventSubSubscriptions,
+} from "../db/eventsub-state";
+import { decodeCursor, encodeCursor } from "../db/cursor";
 import { listeAlleBroadcasterScopes } from "../module-scopes";
 
 interface ChannelStateRow {
@@ -106,27 +112,14 @@ const ereignisCodesForTon = (ton: PanelEventFilters["ton"]): string[] => {
     .map(([code]) => code);
 };
 
-const encodeCursor = (cursor: LogCursor): string => {
-  const serialized = JSON.stringify(cursor);
-  const encoded = btoa(serialized);
-  return encoded.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-};
-
-export const decodeLogCursor = (serialized: string): LogCursor | null => {
-  try {
-    const normalized = serialized.replaceAll("-", "+").replaceAll("_", "/")
-      .padEnd(Math.ceil(serialized.length / 4) * 4, "=");
-    const value: unknown = JSON.parse(atob(normalized));
+export const decodeLogCursor = (serialized: string): LogCursor | null => decodeCursor(serialized, (value) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
     const cursor = value as Record<string, unknown>;
     return typeof cursor.createdAt === "string" && cursor.createdAt.length > 0 &&
       typeof cursor.id === "string" && cursor.id.length > 0
       ? { createdAt: cursor.createdAt, id: cursor.id }
       : null;
-  } catch {
-    return null;
-  }
-};
+});
 
 export const channelStateQuery = `
     SELECT channel.channel_id, channel.login, channel.display_name, member.role,

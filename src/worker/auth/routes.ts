@@ -7,16 +7,22 @@ import {
 } from "./guards";
 import {
   consumeOAuthTransaction,
-  createSession,
   failOAuthTransaction,
+} from "../db/oauth-transactions";
+import {
+  createSession,
+  revokeSession,
+} from "../db/sessions";
+import {
   getBotIdentity,
+  upsertBotIdentityAndStatus,
+} from "../db/bot-identity";
+import {
   getLoginIdentity,
   hatVollzustimmungFürKanalId,
   hatVollzustimmungFürKanalLogin,
-  revokeSession,
   upsertLoginIdentity,
-  upsertBotIdentityAndStatus,
-} from "./repository";
+} from "../db/login-identity";
 import {
   exchangeAuthorizationCode,
   fetchTwitchUser,
