@@ -47,7 +47,7 @@ const TextCommandsSubInspector = ({ ariaLabel, title, identifier, onClose, child
     <div className="inspector-section__heading">
       <h3>{title}</h3>
       {identifier === undefined ? null : <span className="mono muted">{identifier}</span>}
-      <button className="button button--quiet inspector-close" type="button" aria-label={dashboardCommonTexts().schliessen} onClick={onClose}>
+      <button className="button button--quiet inspector-close" type="button" aria-label={dashboardCommonTexts().close} onClick={onClose}>
         <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M6 6l12 12M18 6 6 18" />
         </svg>
@@ -89,8 +89,8 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
   const labels = textCommandsTexts(language);
   const [name, setName] = useState(initial.name);
   const [text, setText] = useState(initial.text);
-  const [art, setArt] = useState(initial.kind);
-  const [cooldownSeconds, setCooldownSekunden] = useState<number | "">(initial.cooldownSeconds);
+  const [kind, setKind] = useState(initial.kind);
+  const [cooldownSeconds, setCooldownSeconds] = useState<number | "">(initial.cooldownSeconds);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldownError, setCooldownError] = useState(false);
@@ -114,8 +114,8 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
       await saveTextCommand(channelId, {
         oldName: initial.name,
         name: name.trim(),
-        kind: art,
-        ...(art === "text" ? { text } : {}),
+        kind,
+        ...(kind === "text" ? { text } : {}),
         cooldownSeconds,
       });
       await onChanged();
@@ -141,27 +141,27 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
   };
 
   return (
-    <TextCommandsSubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.columns.zuletzt} {relativeZeit(initial.lastUsedAt, labels)}</span>} onClose={onClose}>
-      {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
+    <TextCommandsSubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.columns.last} {relativeTime(initial.lastUsedAt, labels)}</span>} onClose={onClose}>
+      {!canManageContent ? <p className="sperrgrund">{labels.managementLocked}</p> : null}
       <label className="config-field config-field--mittel">
         {labels.name}
         <input value={name} onChange={(event) => { setName(event.target.value); }} disabled={!canManageContent || busy} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
       </label>
       <label className="config-field config-field--schmal">
         {labels.kind}
-        <select aria-label={labels.kind} value={art} onChange={(event) => { setArt(event.target.value as "text" | "list"); }} disabled={!canManageContent || busy}>
-          <option value="text">{labels.artText}</option>
-          <option value="list">{labels.artListe}</option>
+        <select aria-label={labels.kind} value={kind} onChange={(event) => { setKind(event.target.value as "text" | "list"); }} disabled={!canManageContent || busy}>
+          <option value="text">{labels.kindText}</option>
+          <option value="list">{labels.kindList}</option>
         </select>
       </label>
-      {art === "text" ? <label className="config-field config-field--breit">
+      {kind === "text" ? <label className="config-field config-field--breit">
         {labels.text}
         <textarea value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent || busy} />
       </label> : null}
       <label className="config-field config-field--schmal">
-        {labels.abkuehlung}
-        <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSekunden(event.target.value === "" ? "" : Number(event.target.value)); }} disabled={!canManageContent || busy} />
-        {cooldownError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
+        {labels.cooldown}
+        <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSeconds(event.target.value === "" ? "" : Number(event.target.value)); }} disabled={!canManageContent || busy} />
+        {cooldownError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
       </label>
       <div className="form-actions">
         <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManageContent || busy}>{labels.save(initial.name)}</button>
@@ -182,7 +182,7 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
           <p id="text-command-delete-confirmation-description">{labels.deleteConfirmation(initial.name)}</p>
           <div className="form-actions">
             <button ref={confirmButtonRef} className="button button--danger" type="button" onClick={() => { void remove(); }} disabled={!canManageContent || busy}>{labels.confirmDeletion(initial.name)}</button>
-            <button ref={cancelButtonRef} className="button button--quiet" type="button" onClick={() => { setConfirmingDelete(false); }} disabled={busy}>{dashboardCommonTexts().abbrechen}</button>
+            <button ref={cancelButtonRef} className="button button--quiet" type="button" onClick={() => { setConfirmingDelete(false); }} disabled={busy}>{dashboardCommonTexts().cancel}</button>
           </div>
         </div>
       ) : null}
@@ -191,15 +191,15 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
   );
 };
 
-const relativeZeit = (value: string | null, labels: ReturnType<typeof textCommandsTexts>): string => {
-  if (value === null) return labels.nie;
+const relativeTime = (value: string | null, labels: ReturnType<typeof textCommandsTexts>): string => {
+  if (value === null) return labels.never;
   const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return labels.nie;
+  if (!Number.isFinite(parsed)) return labels.never;
   const seconds = Math.max(0, Math.round((Date.now() - parsed) / 1000));
-  if (seconds < 60) return labels.vorSekunden(seconds);
+  if (seconds < 60) return labels.secondsAgo(seconds);
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return labels.vorMinuten(minutes);
-  return labels.vorStunden(Math.round(minutes / 60));
+  if (minutes < 60) return labels.minutesAgo(minutes);
+  return labels.hoursAgo(Math.round(minutes / 60));
 };
 
 const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: () => void): void => {
@@ -211,18 +211,18 @@ const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: 
 
 const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canManageContent, toggleBusy, onToggle, minimumBusy, onMinimumChange }: TextCommandRowProperties): ReactElement => {
   const labels = textCommandsTexts(language);
-  const minimumDisabledReason = canManageContent ? undefined : labels.minimumTierGesperrt;
+  const minimumDisabledReason = canManageContent ? undefined : labels.minimumTierLocked;
   const minimumTier = (initial as { minimumTier?: TextCommandMinimumTier }).minimumTier ?? "everyone";
   return (
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
-      <td>{initial.kind === "text" ? labels.artText : labels.artListe}</td>
+      <td>{initial.kind === "text" ? labels.kindText : labels.kindList}</td>
       <td className="tabelle__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
       <td className="mono">{initial.cooldownSeconds}</td>
-      <td className="tabelle__last-used">{relativeZeit(initial.lastUsedAt, labels)}</td>
+      <td className="tabelle__last-used">{relativeTime(initial.lastUsedAt, labels)}</td>
       <td>
         <select
-          aria-label={labels.minimumTierFuer(initial.name)}
+          aria-label={labels.minimumTierFor(initial.name)}
           value={minimumTier}
           disabled={!canManageContent || minimumBusy}
           aria-busy={minimumBusy}
@@ -238,7 +238,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
           className="switch"
           type="button"
           role="switch"
-          aria-label={labels.schalter(initial.name, initial.enabled)}
+          aria-label={labels.toggleLabel(initial.name, initial.enabled)}
           aria-checked={initial.enabled}
           aria-busy={toggleBusy}
           disabled={toggleBusy}
@@ -255,14 +255,14 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
   const labels = textCommandsTexts(language);
   const [commands, setCommands] = useState<TextCommand[]>([]);
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useTextCommandsSelection();
-  const [anlegenOffen, setAnlegenOffen] = useState(false);
-  const anlegenButton = useRef<HTMLButtonElement | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const createButton = useRef<HTMLButtonElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [text, setText] = useState("");
-  const [art, setArt] = useState<"text" | "list">("text");
-  const [cooldownSeconds, setCooldownSekunden] = useState<number | "">(5);
+  const [kind, setKind] = useState<"text" | "list">("text");
+  const [cooldownSeconds, setCooldownSeconds] = useState<number | "">(5);
   const [cooldownError, setCooldownError] = useState(false);
   const [creating, setCreating] = useState(false);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
@@ -276,11 +276,11 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
       setCommands(data);
       if (selectedName !== null && !data.some((command) => command.name === selectedName)) closeSelection();
     } catch {
-      setError(labels.fehler);
+      setError(labels.error);
     } finally {
       setLoading(false);
     }
-  }, [channelId, closeSelection, labels.fehler, selectedName]);
+  }, [channelId, closeSelection, labels.error, selectedName]);
 
   useEffect(() => {
     let active = true;
@@ -290,11 +290,11 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
       setLoading(false);
     }).catch(() => {
       if (!active) return;
-      setError(labels.fehler);
+      setError(labels.error);
       setLoading(false);
     });
     return () => { active = false; };
-  }, [channelId, labels.fehler]);
+  }, [channelId, labels.error]);
 
   const selected = useMemo(() => commands.find((command) => command.name === selectedName) ?? null, [commands, selectedName]);
   const closeInspector = useCallback((): void => {
@@ -303,15 +303,15 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
   }, [closeSelection, onCloseInspector]);
   const openCreate = (): void => {
     closeSelection();
-    setAnlegenOffen(true);
-    anlegenButton.current?.focus();
+    setCreateOpen(true);
+    createButton.current?.focus();
   };
   const closeCreate = (): void => {
-    setAnlegenOffen(false);
-    anlegenButton.current?.focus();
+    setCreateOpen(false);
+    createButton.current?.focus();
   };
   const nameValid = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name.trim());
-  const canCreate = nameValid && (art === "list" || text.trim().length > 0);
+  const canCreate = nameValid && (kind === "list" || text.trim().length > 0);
 
   const create = async (): Promise<void> => {
     if (!canManageContent || !canCreate || creating) return;
@@ -323,11 +323,11 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
     setError(null);
     setCreating(true);
     try {
-      await createTextCommand(channelId, { name: name.trim(), kind: art, ...(art === "text" ? { text } : {}), cooldownSeconds });
+      await createTextCommand(channelId, { name: name.trim(), kind, ...(kind === "text" ? { text } : {}), cooldownSeconds });
       setName("");
       setText("");
-      setArt("text");
-      setCooldownSekunden(5);
+      setKind("text");
+      setCooldownSeconds(5);
       await load();
     } catch {
       setError(labels.saveError);
@@ -363,13 +363,13 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
   };
 
   return (
-    <section className="module-stack command-panel" aria-label={labels.titel}>
-      <section className={`inspektor-bereich${selected === null && !anlegenOffen ? "" : " inspektor-bereich--offen"}`}>
+    <section className="module-stack command-panel" aria-label={labels.title}>
+      <section className={`inspektor-bereich${selected === null && !createOpen ? "" : " inspektor-bereich--offen"}`}>
         <div className="inspektor-bereich__liste">
-          <section className="command-list config-section" aria-label={labels.liste}>
+          <section className="command-list config-section" aria-label={labels.list}>
             <div className="section-heading">
-              <h2>{labels.liste}</h2>
-              <button ref={anlegenButton} className="button button--quiet inspector-close" type="button" aria-label={labels.anlegen} onClick={openCreate}>
+              <h2>{labels.list}</h2>
+              <button ref={createButton} className="button button--quiet inspector-close" type="button" aria-label={labels.add} onClick={openCreate}>
                 <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <path d="M12 5v14M5 12h14" />
                 </svg>
@@ -377,37 +377,37 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
             </div>
             {loading ? <p className="loading-line">{labels.load}</p> : null}
             {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-            {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-            {!loading && error === null && commands.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.text}</th><th scope="col">{labels.columns.abkuehlung}</th><th scope="col">{labels.columns.zuletzt}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.aktiv}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setAnlegenOffen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
+            {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
+            {!loading && error === null && commands.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.text}</th><th scope="col">{labels.columns.cooldown}</th><th scope="col">{labels.columns.last}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setCreateOpen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
           </section>
         </div>
-        {selected !== null ? <TextCommandEditor key={selected.name} channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} /> : anlegenOffen ? (
-          <TextCommandsSubInspector ariaLabel={labels.anlegen} title={labels.anlegen} onClose={closeCreate}>
+        {selected !== null ? <TextCommandEditor key={selected.name} channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} /> : createOpen ? (
+          <TextCommandsSubInspector ariaLabel={labels.add} title={labels.add} onClose={closeCreate}>
             <form className="config-section" aria-busy={creating} onSubmit={(event) => { event.preventDefault(); void create(); }}>
               <fieldset disabled={!canManageContent || creating}>
-              {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
+              {!canManageContent ? <p className="sperrgrund">{labels.managementLocked}</p> : null}
               <label className="config-field config-field--mittel">
                 {labels.name}
                 <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />
-                <span className="muted">{labels.nameHinweis}</span>
+                <span className="muted">{labels.nameHint}</span>
               </label>
               <label className="config-field config-field--schmal">
                 {labels.kind}
-                <select aria-label={labels.kind} value={art} onChange={(event) => { setArt(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
-                  <option value="text">{labels.artText}</option>
-                  <option value="list">{labels.artListe}</option>
+                <select aria-label={labels.kind} value={kind} onChange={(event) => { setKind(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
+                  <option value="text">{labels.kindText}</option>
+                  <option value="list">{labels.kindList}</option>
                 </select>
               </label>
-              {art === "text" ? <label className="config-field config-field--breit">
+              {kind === "text" ? <label className="config-field config-field--breit">
                 {labels.text}
                 <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent} />
               </label> : null}
               <label className="config-field config-field--schmal">
-                {labels.abkuehlung}
-                <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSekunden(event.target.value === "" ? "" : Number(event.target.value)); }} />
-                {cooldownError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
+                {labels.cooldown}
+                <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSeconds(event.target.value === "" ? "" : Number(event.target.value)); }} />
+                {cooldownError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
               </label>
-              <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (art === "text" ? labels.responseMissing : labels.nameFehlt) : (art === "text" ? labels.nameAntwortFehlt : labels.nameFehlt)}</span>}</div>
+              <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.add}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (kind === "text" ? labels.responseMissing : labels.nameMissing) : (kind === "text" ? labels.nameAndResponseMissing : labels.nameMissing)}</span>}</div>
               </fieldset>
             </form>
           </TextCommandsSubInspector>

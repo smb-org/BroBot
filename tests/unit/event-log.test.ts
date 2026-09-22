@@ -163,8 +163,8 @@ describe("event log", () => {
       "trigger-raid-2",
       null,
       [
-        { code: "chat.gesendet", detail: { nachricht: "shoutout" } },
-        { code: "shoutout.fehlgeschlagen", detail: { ursache: "429" } },
+        { code: "chat.gesendet", detail: { message: "shoutout" } },
+        { code: "shoutout.fehlgeschlagen", detail: { cause: "429" } },
       ],
       "2026-09-18T04:00:00.000Z",
     );
@@ -175,8 +175,8 @@ describe("event log", () => {
 
     expect(rows.results).toHaveLength(2);
     expect(rows.results).toEqual(expect.arrayContaining([
-      { code: "chat.gesendet", trigger_id: "trigger-raid-2", detail_json: '{"nachricht":"shoutout"}' },
-      { code: "shoutout.fehlgeschlagen", trigger_id: "trigger-raid-2", detail_json: '{"ursache":"429"}' },
+      { code: "chat.gesendet", trigger_id: "trigger-raid-2", detail_json: '{"message":"shoutout"}' },
+      { code: "shoutout.fehlgeschlagen", trigger_id: "trigger-raid-2", detail_json: '{"cause":"429"}' },
     ]));
   });
 

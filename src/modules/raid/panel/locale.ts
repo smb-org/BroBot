@@ -1,64 +1,64 @@
 import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 
 export interface RaidPanelTexts {
-  titel: string;
-  schwelleAbschnitt: string;
+  title: string;
+  thresholdSection: string;
   shoutoutEnabled: string;
   shoutoutThreshold: string;
   textThreshold: string;
-  schalter: (active: boolean) => string;
-  vollerText: string;
-  kurzerText: string;
-  platzhalterVoll: string;
-  platzhalterKlein: string;
-  aktionen: string;
+  toggleLabel: (active: boolean) => string;
+  fullText: string;
+  shortText: string;
+  placeholderFull: string;
+  placeholderShort: string;
+  actions: string;
   save: string;
-  gespeichert: string;
+  saved: string;
   load: string;
-  fehler: string;
-  zahlFehlt: string;
-  verwaltungGesperrt: string;
+  error: string;
+  numberMissing: string;
+  managementLocked: string;
 }
 
-const katalog: Record<DashboardLanguage, RaidPanelTexts> = {
+const catalog: Record<DashboardLanguage, RaidPanelTexts> = {
   de: {
-    titel: "Raid-Shoutout",
-    schwelleAbschnitt: "Shoutout und Nachrichten",
+    title: "Raid-Shoutout",
+    thresholdSection: "Shoutout und Nachrichten",
     shoutoutEnabled: "Helix-Shoutout automatisch senden",
     shoutoutThreshold: "Shoutout-Schwelle (Zuschauer)",
     textThreshold: "Text-Schwelle (Zuschauer)",
-    schalter: (active) => `Helix-Shoutout automatisch senden: ${active ? "eingeschaltet" : "ausgeschaltet"}`,
-    vollerText: "Voller Raid-Text",
-    kurzerText: "Kurzer Dankestext",
-    platzhalterVoll: "{channel} und {viewers} werden beim Eingang ersetzt.",
-    platzhalterKlein: "{channel} und {viewers} werden beim Eingang ersetzt.",
-    aktionen: "Aktionen",
+    toggleLabel: (active) => `Helix-Shoutout automatisch senden: ${active ? "eingeschaltet" : "ausgeschaltet"}`,
+    fullText: "Voller Raid-Text",
+    shortText: "Kurzer Dankestext",
+    placeholderFull: "{channel} und {viewers} werden beim Eingang ersetzt.",
+    placeholderShort: "{channel} und {viewers} werden beim Eingang ersetzt.",
+    actions: "Aktionen",
     save: "Raid-Einstellungen speichern",
-    gespeichert: "Raid-Einstellungen gespeichert.",
+    saved: "Raid-Einstellungen gespeichert.",
     load: "Raid-Einstellungen werden geladen …",
-    fehler: "Die Raid-Einstellungen konnten nicht geladen oder gespeichert werden.",
-    zahlFehlt: "Zahl eingeben",
-    verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Raid-Einstellungen ändern.",
+    error: "Die Raid-Einstellungen konnten nicht geladen oder gespeichert werden.",
+    numberMissing: "Zahl eingeben",
+    managementLocked: "Nur Broadcaster und Verwalter dürfen Raid-Einstellungen ändern.",
   },
   en: {
-    titel: "Raid shoutout",
-    schwelleAbschnitt: "Shoutout and messages",
+    title: "Raid shoutout",
+    thresholdSection: "Shoutout and messages",
     shoutoutEnabled: "Send automatic Helix shoutouts",
     shoutoutThreshold: "Shoutout threshold (viewers)",
     textThreshold: "Text threshold (viewers)",
-    schalter: (active) => `Automatic Helix shoutout: ${active ? "enabled" : "disabled"}`,
-    vollerText: "Full raid message",
-    kurzerText: "Small raid message",
-    platzhalterVoll: "{channel} and {viewers} are replaced when the raid arrives.",
-    platzhalterKlein: "{channel} and {viewers} are replaced when the raid arrives.",
-    aktionen: "Actions",
+    toggleLabel: (active) => `Automatic Helix shoutout: ${active ? "enabled" : "disabled"}`,
+    fullText: "Full raid message",
+    shortText: "Small raid message",
+    placeholderFull: "{channel} and {viewers} are replaced when the raid arrives.",
+    placeholderShort: "{channel} and {viewers} are replaced when the raid arrives.",
+    actions: "Actions",
     save: "Save raid settings",
-    gespeichert: "Raid settings saved.",
+    saved: "Raid settings saved.",
     load: "Loading raid settings …",
-    fehler: "The raid settings could not be loaded or saved.",
-    zahlFehlt: "Enter a number",
-    verwaltungGesperrt: "Only broadcasters and managers may change raid settings.",
+    error: "The raid settings could not be loaded or saved.",
+    numberMissing: "Enter a number",
+    managementLocked: "Only broadcasters and managers may change raid settings.",
   },
 };
 
-export const raidPanelTexts = (language: DashboardLanguage = dashboardLanguage()): RaidPanelTexts => katalog[language];
+export const raidPanelTexts = (language: DashboardLanguage = dashboardLanguage()): RaidPanelTexts => catalog[language];

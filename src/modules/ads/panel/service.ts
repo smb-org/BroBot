@@ -1,7 +1,7 @@
 import type { AdsSettings, AdsScheduleResponse } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 
-const leereEinstellungen: AdsSettings = {
+const emptySettings: AdsSettings = {
   automatic: "",
   manual: "",
   prewarning: true,
@@ -9,7 +9,7 @@ const leereEinstellungen: AdsSettings = {
   prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
 };
 
-const leererZeitplan: AdsScheduleResponse = {
+const emptySchedule: AdsScheduleResponse = {
   schedule: {
     nextAdAt: null,
     duration: null,
@@ -40,20 +40,20 @@ const json = async <T>(response: Response): Promise<T> => {
 export const loadAdSettings = async (channelId: string): Promise<AdsSettings> => {
   const response = await fetch(pathFor(channelId));
   const loaded = (await json<{ settings: Partial<AdsSettings> }>(response)).settings;
-  return { ...leereEinstellungen, ...loaded };
+  return { ...emptySettings, ...loaded };
 };
 
-const zeitplanPathFor = (channelId: string): string =>
-  `/api/channels/${encodeURIComponent(channelId)}/modules/ads/zeitplan`;
+const schedulePathFor = (channelId: string): string =>
+  `/api/channels/${encodeURIComponent(channelId)}/modules/ads/schedule`;
 
 export const loadAdsSchedule = async (channelId: string): Promise<AdsScheduleResponse> => {
-  const response = await fetch(zeitplanPathFor(channelId));
+  const response = await fetch(schedulePathFor(channelId));
   const loadedResponse = await json<Partial<AdsScheduleResponse> | null>(response);
   const loaded = loadedResponse !== null && typeof loadedResponse === "object" ? loadedResponse : {};
   return {
-    ...leererZeitplan,
+    ...emptySchedule,
     ...loaded,
-    schedule: { ...leererZeitplan.schedule, ...(loaded.schedule ?? {}) },
+    schedule: { ...emptySchedule.schedule, ...(loaded.schedule ?? {}) },
     recentAdBreaks: loaded.recentAdBreaks ?? [],
   };
 };

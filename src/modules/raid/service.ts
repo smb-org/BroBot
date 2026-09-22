@@ -1,50 +1,50 @@
 import type { ModuleEvent, ModuleResult } from "../contract";
 import type { RaidSettings } from "./contracts";
-import { entscheideRaid } from "./domain";
+import { decideRaid } from "./domain";
 
-const textMitRaid = (vorlage: string, channel: string, zuschauer: number): string => vorlage
+const textWithRaid = (template: string, channel: string, viewers: number): string => template
   .trim()
   .replaceAll("{channel}", channel)
-  .replaceAll("{viewers}", String(zuschauer));
+  .replaceAll("{viewers}", String(viewers));
 
 export const processRaid = (
   event: ModuleEvent<RaidSettings>,
 ): ModuleResult => {
-  const entscheidung = entscheideRaid(
+  const decision = decideRaid(
     event.payload,
     event.channelId,
     event.subscriptionVariant,
     event.settings.textThreshold,
   );
 
-  if (entscheidung.kind === "outgoing") {
+  if (decision.kind === "outgoing") {
     return {
       actions: [],
       diagnostics: [{
         code: "raid.outgoing",
-        detail: { targetChannelId: entscheidung.targetChannelId, viewers: entscheidung.viewers },
+        detail: { targetChannelId: decision.targetChannelId, viewers: decision.viewers },
       }],
     };
   }
 
-  if (entscheidung.kind === "ungueltig") {
-    return { actions: [], diagnostics: [{ code: "raid.ungueltig", detail: { reason: entscheidung.reason } }] };
+  if (decision.kind === "invalid") {
+    return { actions: [], diagnostics: [{ code: "raid.ungueltig", detail: { reason: decision.reason } }] };
   }
 
-  const chatText = textMitRaid(
-    entscheidung.voll ? event.settings.textLong : event.settings.textShort,
-    entscheidung.sourceChannelName,
-    entscheidung.viewers,
+  const chatText = textWithRaid(
+    decision.aboveThreshold ? event.settings.textLong : event.settings.textShort,
+    decision.sourceChannelName,
+    decision.viewers,
   );
-  const shoutoutMoeglich = event.settings.shoutoutEnabled && entscheidung.viewers >= event.settings.shoutoutThreshold;
-  if (!shoutoutMoeglich) {
+  const shoutoutPossible = event.settings.shoutoutEnabled && decision.viewers >= event.settings.shoutoutThreshold;
+  if (!shoutoutPossible) {
     return {
       actions: [{ kind: "chat", text: chatText }],
       diagnostics: [{
         code: "shoutout.unterdrueckt",
         detail: {
           reason: event.settings.shoutoutEnabled ? "unter_schwelle" : "abgeschaltet",
-          viewers: entscheidung.viewers,
+          viewers: decision.viewers,
           threshold: event.settings.shoutoutThreshold,
         },
       }],
@@ -53,14 +53,14 @@ export const processRaid = (
 
   return {
     actions: [
-      { kind: "shoutout", targetChannelId: entscheidung.sourceChannelId },
+      { kind: "shoutout", targetChannelId: decision.sourceChannelId },
       { kind: "chat", text: chatText },
     ],
     diagnostics: [{
       code: "raid.shoutout",
       detail: {
-        sourceChannelId: entscheidung.sourceChannelId,
-        viewers: entscheidung.viewers,
+        sourceChannelId: decision.sourceChannelId,
+        viewers: decision.viewers,
         threshold: event.settings.shoutoutThreshold,
       },
     }],

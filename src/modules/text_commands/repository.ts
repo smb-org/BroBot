@@ -18,9 +18,9 @@ export type TextCommandMutationResult =
 
 export interface TextCommandRepository {
   list(channelId: string): Promise<TextCommand[]>;
-  finden(channelId: string, name: string): Promise<TextCommand | null>;
-  anlegen(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult>;
+  find(channelId: string, name: string): Promise<TextCommand | null>;
+  create(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult>;
   change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult>;
   delete(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult>;
-  beanspruchen(channelId: string, name: string, now: string): Promise<TextCommandClaim | null>;
+  claim(channelId: string, name: string, now: string): Promise<TextCommandClaim | null>;
 }

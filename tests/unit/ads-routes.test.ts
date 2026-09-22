@@ -140,7 +140,7 @@ describe("ad routes", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody("2026-09-21T12:00:00Z"), { status: 200 })));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/zeitplan"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
       environment,
     );
 
@@ -157,7 +157,7 @@ describe("ad routes", () => {
     )));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/zeitplan"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
       environment,
     );
 
@@ -172,7 +172,7 @@ describe("ad routes", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody(null), { status: 200 })));
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/zeitplan"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
       environment,
     );
 

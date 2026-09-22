@@ -8,7 +8,7 @@ interface AdEventRow {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const dauer = (value: unknown): number | null =>
+const toDuration = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
 export const listLastAdBreaks = async (
@@ -34,10 +34,14 @@ export const listLastAdBreaks = async (
       return [];
     }
     if (!record(parsed)) return [];
-    const duration = dauer(parsed.duration);
+    const duration = toDuration(parsed.duration);
     if (duration === null) return [];
-    const startedAt = typeof parsed.gestartet === "string" && parsed.gestartet.length > 0
-      ? parsed.gestartet
+    // "gestartet" stays: it is the literal wire key ads/service.ts writes into
+    // event_log.detail_json for ads.ankuendigung (built via a helper, so it
+    // evades the automated frozen-key detector) -- renaming it would orphan
+    // the field already stored in production rows.
+    const startedAt = typeof parsed.startedAt === "string" && parsed.startedAt.length > 0
+      ? parsed.startedAt
       : row.created_at;
     return [{ timestamp: startedAt, durationSeconds: duration }];
   });

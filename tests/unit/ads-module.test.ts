@@ -40,9 +40,9 @@ describe("ads module", () => {
       detail: {
         duration: 30,
         automatic: true,
-        gestartet: "2026-09-20T10:00:00.000Z",
+        startedAt: "2026-09-20T10:00:00.000Z",
         endsAt: "2026-09-20T10:00:30.000Z",
-        ausloeser: "streamer",
+        triggerLogin: "streamer",
       },
     });
   });

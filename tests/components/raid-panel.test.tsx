@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AdsPanel } from "../../src/modules/ads/panel";
 import { loadAdSettings } from "../../src/modules/ads/panel/service";
-import { ladeRaidEinstellungen } from "../../src/modules/raid/panel/service";
+import { loadRaidSettings } from "../../src/modules/raid/panel/service";
 import { RaidPanel } from "../../src/modules/raid/panel";
 import { loadTextCommands } from "../../src/modules/text_commands/panel/service";
 
@@ -79,7 +79,7 @@ describe("Raid panel view", () => {
       if (url.pathname.endsWith("/raid/settings")) return Promise.resolve(jsonResponse({ settings: {
         shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "voll", textShort: "klein",
       } }));
-      if (url.pathname.endsWith("/ads/zeitplan")) return Promise.resolve(jsonResponse({
+      if (url.pathname.endsWith("/ads/schedule")) return Promise.resolve(jsonResponse({
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
         snoozeScopeAvailable: true, recentAdBreaks: [],
       }));
@@ -135,7 +135,7 @@ describe("Raid panel view", () => {
 
     for (const load of [
       () => loadTextCommands("kanal-a"),
-      () => ladeRaidEinstellungen("kanal-a"),
+      () => loadRaidSettings("kanal-a"),
       () => loadAdSettings("kanal-a"),
     ]) {
       await expect(load()).rejects.toMatchObject({ name: "PanelApiError", status: 401 });

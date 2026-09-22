@@ -2,7 +2,7 @@ import {
   getBotIdentity,
 } from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
-import { kuerzeAuf200Zeichen } from "../modules/contract";
+import { truncateTo200Chars } from "../modules/contract";
 
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
 
@@ -48,7 +48,7 @@ export const sendChatMessage = async (
   replyToMessageId: string | undefined,
   fetcher: typeof fetch = fetch,
 ): Promise<ChatSendResult> => {
-  const textDetail = { text: kuerzeAuf200Zeichen(text) };
+  const textDetail = { text: truncateTo200Chars(text) };
   const identity = await getBotIdentity(environment.DB);
   if (identity === null) {
     return { sent: false, reason: "bot_identity_missing", detail: textDetail };

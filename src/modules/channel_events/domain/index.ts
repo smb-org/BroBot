@@ -1,4 +1,4 @@
-import { kuerzeAuf200Zeichen } from "../contract";
+import { truncateTo200Chars } from "../contract";
 import type { ChannelEventDiagnostic, ChannelEventDetail } from "../contracts";
 import type { EventSubSubscriptionType } from "../../../contracts/values";
 
@@ -10,20 +10,20 @@ const stringValue = (value: unknown): string | null =>
 
 const textValue = (value: unknown): string | null => {
   const text = stringValue(value);
-  return text === null ? null : kuerzeAuf200Zeichen(text);
+  return text === null ? null : truncateTo200Chars(text);
 };
 
 const numberValue = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
-const feld = (payload: Readonly<Record<string, unknown>>, key: string): unknown => payload[key];
+const field = (payload: Readonly<Record<string, unknown>>, key: string): unknown => payload[key];
 
 const optionaleTextDetail = (
   key: string,
   value: string | null,
 ): ChannelEventDetail => value === null ? {} : { [key]: value };
 
-const nestedFeld = (
+const nestedField = (
   payload: Readonly<Record<string, unknown>>,
   noticeType: string,
   key: string,
@@ -36,15 +36,15 @@ const person = (
   payload: Readonly<Record<string, unknown>>,
   prefix: string,
 ): string | null => {
-  const displayName = textValue(feld(payload, `${prefix}_user_name`));
-  const login = textValue(feld(payload, `${prefix}_user_login`));
+  const displayName = textValue(field(payload, `${prefix}_user_name`));
+  const login = textValue(field(payload, `${prefix}_user_login`));
   if (displayName === null && login === null) return null;
   if (displayName === null) return login;
   if (login === null || displayName === login) return displayName;
-  return kuerzeAuf200Zeichen(`${displayName} (@${login})`);
+  return truncateTo200Chars(`${displayName} (@${login})`);
 };
 
-const personAusObjekt = (
+const personFromObject = (
   value: Readonly<Record<string, unknown>>,
   prefix: string,
 ): string | null => {
@@ -53,36 +53,36 @@ const personAusObjekt = (
   if (displayName === null && login === null) return null;
   if (displayName === null) return login;
   if (login === null || displayName === login) return displayName;
-  return kuerzeAuf200Zeichen(`${displayName} (@${login})`);
+  return truncateTo200Chars(`${displayName} (@${login})`);
 };
 
 const detail = (values: ChannelEventDetail): ChannelEventDetail => values;
 
-const raidDiagnose = (
+const raidDiagnostic = (
   payload: Readonly<Record<string, unknown>>,
   channelId: string,
   variant: string | undefined,
 ): ChannelEventDiagnostic => {
-  const fromId = stringValue(feld(payload, "from_broadcaster_user_id"));
+  const fromId = stringValue(field(payload, "from_broadcaster_user_id"));
   const outgoing = variant === "outgoing" || (variant !== "incoming" && fromId === channelId);
   return outgoing
     ? {
       code: "channel_events.raid.outgoing",
       detail: detail({
         target: person(payload, "to_broadcaster"),
-        viewers: numberValue(feld(payload, "viewers")),
+        viewers: numberValue(field(payload, "viewers")),
       }),
     }
     : {
       code: "channel_events.raid.incoming",
       detail: detail({
         source: person(payload, "from_broadcaster"),
-        viewers: numberValue(feld(payload, "viewers")),
+        viewers: numberValue(field(payload, "viewers")),
       }),
     };
 };
 
-const shoutoutDiagnose = (
+const shoutoutDiagnostic = (
   subscriptionType: EventSubSubscriptionType,
   payload: Readonly<Record<string, unknown>>,
 ): ChannelEventDiagnostic => subscriptionType === "channel.shoutout.create"
@@ -94,32 +94,32 @@ const shoutoutDiagnose = (
     code: "channel_events.shoutout.empfangen",
     detail: detail({
       source: person(payload, "from_broadcaster"),
-      ...(numberValue(feld(payload, "viewer_count")) === null
+      ...(numberValue(field(payload, "viewer_count")) === null
         ? {}
-        : { viewers: numberValue(feld(payload, "viewer_count")) }),
+        : { viewers: numberValue(field(payload, "viewer_count")) }),
     }),
   };
 
-const chatNotificationDiagnose = (
+const chatNotificationDiagnostic = (
   payload: Readonly<Record<string, unknown>>,
 ): ChannelEventDiagnostic => {
-  const noticeType = textValue(feld(payload, "notice_type"));
-  const typ = noticeType === null ? "unbekannt" : noticeType;
+  const noticeType = textValue(field(payload, "notice_type"));
+  const type = noticeType === null ? "unbekannt" : noticeType;
   const chatter = person(payload, "chatter");
-  const tier = textValue(nestedFeld(payload, typ, "sub_tier"));
-  if (typ === "sub") {
+  const tier = textValue(nestedField(payload, type, "sub_tier"));
+  if (type === "sub") {
     return {
       code: "channel_events.chat.sub",
       detail: detail({ person: chatter, tier: tier }),
     };
   }
-  if (typ === "resub") {
+  if (type === "resub") {
     return {
       code: "channel_events.chat.resub",
       detail: detail({ person: chatter, tier: tier }),
     };
   }
-  if (typ === "sub_gift") {
+  if (type === "sub_gift") {
     return {
       code: "channel_events.chat.gift_sub",
       detail: detail({
@@ -129,17 +129,17 @@ const chatNotificationDiagnose = (
       }),
     };
   }
-  if (typ === "community_sub_gift") {
+  if (type === "community_sub_gift") {
     return {
       code: "channel_events.chat.community_gift",
       detail: detail({
         gifter: person(payload, "gifter"),
-        count: numberValue(nestedFeld(payload, typ, "total")),
+        count: numberValue(nestedField(payload, type, "total")),
         tier: tier,
       }),
     };
   }
-  if (typ === "announcement") {
+  if (type === "announcement") {
     const message = isRecord(payload.message) ? textValue(payload.message.text) : textValue(payload.message);
     return {
       code: "channel_events.chat.ankuendigung",
@@ -148,50 +148,50 @@ const chatNotificationDiagnose = (
   }
   return {
     code: "channel_events.chat.unbekannt",
-    detail: detail({ kind: kuerzeAuf200Zeichen(typ) }),
+    detail: detail({ kind: truncateTo200Chars(type) }),
   };
 };
 
-const dauerInSekunden = (ende: string | null, eventTime: string | undefined): number | null => {
-  if (ende === null || eventTime === undefined) return null;
-  const endeMs = Date.parse(ende);
+const durationInSeconds = (end: string | null, eventTime: string | undefined): number | null => {
+  if (end === null || eventTime === undefined) return null;
+  const endMs = Date.parse(end);
   const eventMs = Date.parse(eventTime);
-  if (!Number.isFinite(endeMs) || !Number.isFinite(eventMs)) return null;
-  return Math.max(0, Math.round((endeMs - eventMs) / 1000));
+  if (!Number.isFinite(endMs) || !Number.isFinite(eventMs)) return null;
+  return Math.max(0, Math.round((endMs - eventMs) / 1000));
 };
 
-const moderationDiagnose = (
+const moderationDiagnostic = (
   payload: Readonly<Record<string, unknown>>,
   eventTime: string | undefined,
 ): ChannelEventDiagnostic => {
-  const action = textValue(feld(payload, "action"));
+  const action = textValue(field(payload, "action"));
   const actionName = action ?? "unbekannt";
-  const actionData = action !== null && isRecord(feld(payload, action)) ? feld(payload, action) as Readonly<Record<string, unknown>> : {};
-  const beteiligt = personAusObjekt(actionData, "user");
+  const actionData = action !== null && isRecord(field(payload, action)) ? field(payload, action) as Readonly<Record<string, unknown>> : {};
+  const participant = personFromObject(actionData, "user");
   const moderator = person(payload, "moderator");
   const reason = textValue(actionData.reason);
-  const common = { person: beteiligt, moderator, reason: reason };
+  const common = { person: participant, moderator, reason: reason };
 
   if (actionName === "ban") {
     return { code: "channel_events.moderation.ban", detail: detail(common) };
   }
   if (actionName === "timeout") {
-    const ende = textValue(actionData.ends_at);
+    const end = textValue(actionData.ends_at);
     return {
       code: "channel_events.moderation.timeout",
-      detail: detail({ ...common, endsAt: ende, duration: dauerInSekunden(ende, eventTime) }),
+      detail: detail({ ...common, endsAt: end, duration: durationInSeconds(end, eventTime) }),
     };
   }
   if (actionName === "untimeout") {
-    return { code: "channel_events.moderation.untimeout", detail: detail({ person: beteiligt, moderator }) };
+    return { code: "channel_events.moderation.untimeout", detail: detail({ person: participant, moderator }) };
   }
   if (actionName === "unban") {
-    return { code: "channel_events.moderation.unban", detail: detail({ person: beteiligt, moderator }) };
+    return { code: "channel_events.moderation.unban", detail: detail({ person: participant, moderator }) };
   }
   if (actionName === "delete") {
     return {
       code: "channel_events.moderation.delete",
-      detail: detail({ person: beteiligt, moderator, text: textValue(actionData.message_body) }),
+      detail: detail({ person: participant, moderator, text: textValue(actionData.message_body) }),
     };
   }
   if (actionName === "warn") {
@@ -204,7 +204,7 @@ const moderationDiagnose = (
 };
 
 const messageText = (payload: Readonly<Record<string, unknown>>): string | null => {
-  const message = feld(payload, "message");
+  const message = field(payload, "message");
   return isRecord(message) ? textValue(message.text) : textValue(message);
 };
 
@@ -218,61 +218,61 @@ const SUSPICIOUS_USER_TYPES = ["manually_added", "ban_evader", "banned_in_shared
 const BAN_EVASION_EVALUATIONS = ["unknown", "possible", "likely"] as const;
 
 const lowTrustStatus = (payload: Readonly<Record<string, unknown>>): string | null =>
-  documentedValue(feld(payload, "low_trust_status"), LOW_TRUST_STATUS);
+  documentedValue(field(payload, "low_trust_status"), LOW_TRUST_STATUS);
 
 const suspiciousUserTypes = (payload: Readonly<Record<string, unknown>>): string | null => {
-  const types = feld(payload, "types");
+  const types = field(payload, "types");
   if (!Array.isArray(types)) return null;
   const documentedTypes: string[] = [];
   for (const type of types) {
     const documentedType = documentedValue(type, SUSPICIOUS_USER_TYPES);
     if (documentedType !== null) documentedTypes.push(documentedType);
   }
-  return documentedTypes.length === 0 ? null : kuerzeAuf200Zeichen(documentedTypes.join(", "));
+  return documentedTypes.length === 0 ? null : truncateTo200Chars(documentedTypes.join(", "));
 };
 
-const suspiciousEinstufung = (payload: Readonly<Record<string, unknown>>): string | null => {
+const suspiciousClassification = (payload: Readonly<Record<string, unknown>>): string | null => {
   const values = [
     lowTrustStatus(payload),
     suspiciousUserTypes(payload),
-    documentedValue(feld(payload, "ban_evasion_evaluation"), BAN_EVASION_EVALUATIONS),
+    documentedValue(field(payload, "ban_evasion_evaluation"), BAN_EVASION_EVALUATIONS),
   ].filter((value): value is string => value !== null);
-  return values.length === 0 ? null : kuerzeAuf200Zeichen(values.join(" / "));
+  return values.length === 0 ? null : truncateTo200Chars(values.join(" / "));
 };
 
-const automodDiagnose = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => ({
+const automodDiagnostic = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => ({
   code: "channel_events.automod.halte",
   detail: detail({
-    ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
-    ...optionaleTextDetail("reason", textValue(feld(payload, "category"))),
+    ...optionaleTextDetail("person", personFromObject(payload, "user")),
+    ...optionaleTextDetail("reason", textValue(field(payload, "category"))),
     ...optionaleTextDetail("text", messageText(payload)),
   }),
 });
 
-const suspiciousMessageDiagnose = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => ({
-  code: "channel_events.verdacht.nachricht",
+const suspiciousMessageDiagnostic = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => ({
+  code: "channel_events.verdacht.message",
   detail: detail({
-    ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
-    ...optionaleTextDetail("einstufung", suspiciousEinstufung(payload)),
+    ...optionaleTextDetail("person", personFromObject(payload, "user")),
+    ...optionaleTextDetail("einstufung", suspiciousClassification(payload)),
     ...optionaleTextDetail("text", messageText(payload)),
   }),
 });
 
-const suspiciousUpdateDiagnose = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => {
+const suspiciousUpdateDiagnostic = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => {
   const status = lowTrustStatus(payload);
   return {
     code: status === "none"
       ? "channel_events.verdacht.entwarnung"
       : "channel_events.verdacht.einstufung",
     detail: detail({
-      ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
+      ...optionaleTextDetail("person", personFromObject(payload, "user")),
       ...optionaleTextDetail("einstufung", status),
       ...optionaleTextDetail("moderator", person(payload, "moderator")),
     }),
   };
 };
 
-/** Reine Abbildung des EventSub-Ereignisrumpfs auf Kanaldiagnosen. */
+/** Pure mapping from the EventSub event body to channel diagnostics. */
 export const diagnoseChannelEvent = (
   subscriptionType: EventSubSubscriptionType,
   payload: Readonly<Record<string, unknown>>,
@@ -280,14 +280,14 @@ export const diagnoseChannelEvent = (
   subscriptionVariant?: string,
   eventTime?: string,
 ): readonly ChannelEventDiagnostic[] => {
-  if (subscriptionType === "channel.raid") return [raidDiagnose(payload, channelId, subscriptionVariant)];
+  if (subscriptionType === "channel.raid") return [raidDiagnostic(payload, channelId, subscriptionVariant)];
   if (subscriptionType === "channel.shoutout.create" || subscriptionType === "channel.shoutout.receive") {
-    return [shoutoutDiagnose(subscriptionType, payload)];
+    return [shoutoutDiagnostic(subscriptionType, payload)];
   }
-  if (subscriptionType === "channel.chat.notification") return [chatNotificationDiagnose(payload)];
-  if (subscriptionType === "automod.message.hold") return [automodDiagnose(payload)];
-  if (subscriptionType === "channel.suspicious_user.message") return [suspiciousMessageDiagnose(payload)];
-  if (subscriptionType === "channel.suspicious_user.update") return [suspiciousUpdateDiagnose(payload)];
-  if (subscriptionType === "channel.moderate") return [moderationDiagnose(payload, eventTime)];
+  if (subscriptionType === "channel.chat.notification") return [chatNotificationDiagnostic(payload)];
+  if (subscriptionType === "automod.message.hold") return [automodDiagnostic(payload)];
+  if (subscriptionType === "channel.suspicious_user.message") return [suspiciousMessageDiagnostic(payload)];
+  if (subscriptionType === "channel.suspicious_user.update") return [suspiciousUpdateDiagnostic(payload)];
+  if (subscriptionType === "channel.moderate") return [moderationDiagnostic(payload, eventTime)];
   return [];
 };

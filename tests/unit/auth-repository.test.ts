@@ -86,7 +86,7 @@ const timestampWithInterval = (timestamp: string, abstandMs: number): string =>
 // helper; status, ciphertexts, and timestamps are always passed explicitly
 // at the call site, because those are what each test is actually about.
 
-interface BotIdentitaetFixture {
+interface BotIdentityFixture {
   userId: string;
   login: string;
   scopesJson: string;
@@ -97,11 +97,11 @@ interface BotIdentitaetFixture {
   updatedAt: string;
 }
 
-const saeeBotIdentitaet = async (
+const seedBotIdentity = async (
   database: TestD1Database,
-  overrides: Partial<BotIdentitaetFixture> = {},
+  overrides: Partial<BotIdentityFixture> = {},
 ): Promise<void> => {
-  const identitaet: BotIdentitaetFixture = {
+  const identity: BotIdentityFixture = {
     userId: "bot-user",
     login: "brobot",
     scopesJson: "[]",
@@ -118,14 +118,14 @@ const saeeBotIdentitaet = async (
        expires_at, created_at, updated_at)
      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
-    identitaet.userId,
-    identitaet.login,
-    identitaet.scopesJson,
-    identitaet.accessTokenCiphertext,
-    identitaet.refreshTokenCiphertext,
-    identitaet.expiresAt,
-    identitaet.createdAt,
-    identitaet.updatedAt,
+    identity.userId,
+    identity.login,
+    identity.scopesJson,
+    identity.accessTokenCiphertext,
+    identity.refreshTokenCiphertext,
+    identity.expiresAt,
+    identity.createdAt,
+    identity.updatedAt,
   ).run();
 };
 
@@ -141,7 +141,7 @@ const seedBotIdentityStatus = async (
   ).bind(status, reason, updatedAt).run();
 };
 
-interface LoginIdentitaetFixture {
+interface LoginIdentityFixture {
   userId: string;
   login: string;
   scopesJson: string;
@@ -155,11 +155,11 @@ interface LoginIdentitaetFixture {
   updatedAt: string;
 }
 
-const saeeLoginIdentitaet = async (
+const seedLoginIdentity = async (
   database: TestD1Database,
-  overrides: Partial<LoginIdentitaetFixture> = {},
+  overrides: Partial<LoginIdentityFixture> = {},
 ): Promise<void> => {
-  const identitaet: LoginIdentitaetFixture = {
+  const identity: LoginIdentityFixture = {
     userId: "user-1",
     login: "tester",
     scopesJson: "[]",
@@ -179,17 +179,17 @@ const saeeLoginIdentitaet = async (
        expires_at, status, reason, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
-    identitaet.userId,
-    identitaet.login,
-    identitaet.scopesJson,
-    identitaet.tokenScopesJson,
-    identitaet.accessTokenCiphertext,
-    identitaet.refreshTokenCiphertext,
-    identitaet.expiresAt,
-    identitaet.status,
-    identitaet.reason,
-    identitaet.createdAt,
-    identitaet.updatedAt,
+    identity.userId,
+    identity.login,
+    identity.scopesJson,
+    identity.tokenScopesJson,
+    identity.accessTokenCiphertext,
+    identity.refreshTokenCiphertext,
+    identity.expiresAt,
+    identity.status,
+    identity.reason,
+    identity.createdAt,
+    identity.updatedAt,
   ).run();
 };
 
@@ -290,7 +290,7 @@ const seedGuardActor = async (
   fixture: GuardActorFixture,
 ): Promise<void> => {
   await seedChannel(database, fixture.channelId);
-  await saeeLoginIdentitaet(database, {
+  await seedLoginIdentity(database, {
     userId: fixture.actor.userId,
     login: fixture.actor.userId,
     status: fixture.identityStatus ?? "connected",
@@ -613,7 +613,7 @@ describe("auth D1 repository", () => {
   it("discards stale token scopes after an intervening login rotation", async () => {
     const database = new TestD1Database();
     try {
-      await saeeLoginIdentitaet(database, { tokenScopesJson: "[\"aktuell\"]" });
+      await seedLoginIdentity(database, { tokenScopesJson: "[\"aktuell\"]" });
       await database.prepare(
         `UPDATE twitch_login_identity
             SET access_token_ciphertext = 'access-neu', refresh_token_ciphertext = 'refresh-neu'
@@ -640,7 +640,7 @@ describe("auth D1 repository", () => {
   it("doesn't refill token scopes after a concurrent revocation", async () => {
     const database = new TestD1Database();
     try {
-      await saeeLoginIdentitaet(database, { tokenScopesJson: "[\"aktuell\"]" });
+      await seedLoginIdentity(database, { tokenScopesJson: "[\"aktuell\"]" });
       await setLoginIdentityStatus(
         database as unknown as D1Database,
         "user-1",
@@ -841,7 +841,7 @@ describe("auth D1 repository", () => {
   it("replaces the bot access token only once with the real SQLite CAS", async () => {
     const database = new TestD1Database();
     try {
-      await saeeBotIdentitaet(database);
+      await seedBotIdentity(database);
 
       await expect(rotateBotTokens(database as unknown as D1Database, {
         expectedAccessTokenCiphertext: "access-alt",
@@ -876,7 +876,7 @@ describe("auth D1 repository", () => {
   it("doesn't change the bot status on a second rotation with a stale access ciphertext", async () => {
     const database = new TestD1Database();
     try {
-      await saeeBotIdentitaet(database);
+      await seedBotIdentity(database);
       await seedBotIdentityStatus(database, "revoked", "authorization_revoked", "2026-09-18T02:00:00.000Z");
 
       await expect(rotateBotTokens(database as unknown as D1Database, {
@@ -917,7 +917,7 @@ describe("auth D1 repository", () => {
   it("doesn't revoke an active session with a stale login access ciphertext", async () => {
     const database = new TestD1Database();
     try {
-      await saeeLoginIdentitaet(database, {
+      await seedLoginIdentity(database, {
         status: "revoked",
         reason: "authorization_revoked",
         updatedAt: "2026-09-18T02:00:00.000Z",
@@ -963,7 +963,7 @@ describe("auth D1 repository", () => {
   it("doesn't store a new access ciphertext on a second login rotation", async () => {
     const database = new TestD1Database();
     try {
-      await saeeLoginIdentitaet(database);
+      await seedLoginIdentity(database);
 
       await expect(rotateLoginTokens(database as unknown as D1Database, {
         userId: "user-1",
@@ -1002,7 +1002,7 @@ describe("auth D1 repository", () => {
   it("doesn't restore a session with a stale login access ciphertext", async () => {
     const database = new TestD1Database();
     try {
-      await saeeLoginIdentitaet(database);
+      await seedLoginIdentity(database);
       await seedSession(database, {
         updatedAt: "2026-09-18T02:00:00.000Z",
         revokedAt: "2026-09-18T02:00:00.000Z",
@@ -1050,7 +1050,7 @@ describe("auth D1 repository", () => {
   it("restores the successfully stored bot state after a delayed invalid_grant", async () => {
     const database = new TestD1Database();
     try {
-      await saeeBotIdentitaet(database);
+      await seedBotIdentity(database);
       await seedBotIdentityStatus(database, "connected", null, "2026-09-18T00:00:00.000Z");
 
       await expect(setBotIdentityStatusIfCurrent(
@@ -1081,7 +1081,7 @@ describe("auth D1 repository", () => {
   it("restores the login state and active sessions after a delayed invalid_grant", async () => {
     const database = new TestD1Database();
     try {
-      await saeeLoginIdentitaet(database, { expiresAt: "2026-09-18T01:00:00.000Z" });
+      await seedLoginIdentity(database, { expiresAt: "2026-09-18T01:00:00.000Z" });
       await seedSession(database);
 
       await expect(revokeLoginIdentityAndSessionsForUser(
@@ -1179,7 +1179,7 @@ describe("auth D1 repository", () => {
   it("runs identity and bot status in one atomic batch operation", async () => {
     const database = new TestD1Database();
     try {
-      await saeeBotIdentitaet(database, {
+      await seedBotIdentity(database, {
         accessTokenCiphertext: "alt-access",
         refreshTokenCiphertext: "alt-refresh",
         expiresAt: "2026-09-19T00:00:00.000Z",
@@ -1526,7 +1526,7 @@ describe("auth D1 repository", () => {
     const jetzt = freshTimestamp();
     try {
       await seedChannel(database, "kanal-a");
-      await saeeLoginIdentitaet(database, { userId: "user-1", login: "betreiber" });
+      await seedLoginIdentity(database, { userId: "user-1", login: "betreiber" });
       await seedSession(database, {
         userId: "user-1",
         login: "betreiber",

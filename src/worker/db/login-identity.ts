@@ -29,7 +29,7 @@ interface LoginIdentityRow {
 }
 
 interface FullConsentChannelRow {
-  vorhanden: number;
+  is_present: number;
 }
 
 const mapLoginIdentity = (row: LoginIdentityRow): LoginIdentityRecord => ({
@@ -85,24 +85,24 @@ export const hasFullConsentForChannelId = async (
   db: D1Database,
   channelId: string,
 ): Promise<boolean> => {
-  const zeile = await db.prepare(
-    `SELECT 1 AS vorhanden
+  const row = await db.prepare(
+    `SELECT 1 AS is_present
        FROM channels
       WHERE channel_id = ? AND full_consent = 1`,
   ).bind(channelId).first<FullConsentChannelRow>();
-  return zeile?.vorhanden === 1;
+  return row?.is_present === 1;
 };
 
 export const hasFullConsentForChannelLogin = async (
   db: D1Database,
   channelLogin: string,
 ): Promise<boolean> => {
-  const zeile = await db.prepare(
-    `SELECT 1 AS vorhanden
+  const row = await db.prepare(
+    `SELECT 1 AS is_present
        FROM channels
       WHERE login = ? COLLATE NOCASE AND full_consent = 1`,
   ).bind(channelLogin).first<FullConsentChannelRow>();
-  return zeile?.vorhanden === 1;
+  return row?.is_present === 1;
 };
 
 export const upsertLoginIdentity = async (

@@ -78,11 +78,11 @@ export const hasEventSubMessage = async (
   messageId: string,
 ): Promise<boolean> => {
   const row = await db.prepare(
-    `SELECT 1 AS vorhanden
+    `SELECT 1 AS is_present
        FROM eventsub_messages
       WHERE message_id = ?`,
-  ).bind(messageId).first<{ vorhanden: number }>();
-  return row?.vorhanden === 1;
+  ).bind(messageId).first<{ is_present: number }>();
+  return row?.is_present === 1;
 };
 
 export const purgeOldEventSubMessages = async (

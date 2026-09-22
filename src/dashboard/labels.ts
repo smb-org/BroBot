@@ -7,7 +7,7 @@ import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type L
  * member list don't drift apart.
  */
 export const roleLabel = (role: ChannelRole): string => {
-  return dashboardCommonTexts().rollen[role];
+  return dashboardCommonTexts().roles[role];
 };
 
 export interface ChannelPanelTexts {
@@ -248,11 +248,11 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
 export const platformTexts = (language: DashboardLanguage = dashboardLanguage()): PlatformTexts => platformCatalog[language];
 
 export const platformActionLabel = (
-  handlung: string,
+  action: string,
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
   const texts = platformCatalog[language];
-  return Object.prototype.hasOwnProperty.call(texts.actionLabel, handlung)
-    ? texts.actionLabel[handlung as PlatformAction]
-    : handlung;
+  return Object.prototype.hasOwnProperty.call(texts.actionLabel, action)
+    ? texts.actionLabel[action as PlatformAction]
+    : action;
 };

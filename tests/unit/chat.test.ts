@@ -8,7 +8,7 @@ import { sendChatMessage } from "../../src/worker/chat";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-const SCHLUESSEL = JSON.stringify({
+const KEY_RING = JSON.stringify({
   active: { id: "aktiv", key: Buffer.from(new Uint8Array(32).fill(5)).toString("base64url") },
   retired: [],
 });
@@ -17,7 +17,7 @@ const environment = (database: TestD1Database) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
-  TOKEN_ENCRYPTION_KEYS: SCHLUESSEL,
+  TOKEN_ENCRYPTION_KEYS: KEY_RING,
 });
 
 const seedBot = async (database: TestD1Database): Promise<void> => {
@@ -32,7 +32,7 @@ const seedBot = async (database: TestD1Database): Promise<void> => {
     createdAt: "2026-09-19T00:00:00.000Z",
     updatedAt: "2026-09-19T00:00:00.000Z",
   });
-  const appTokenCiphertext = await encryptJson({ token: "app-token" }, parseKeyRing(SCHLUESSEL));
+  const appTokenCiphertext = await encryptJson({ token: "app-token" }, parseKeyRing(KEY_RING));
   await insertAppAccessToken(
     database,
     appTokenCiphertext,
@@ -42,8 +42,8 @@ const seedBot = async (database: TestD1Database): Promise<void> => {
   );
 };
 
-describe("Helix-Chat", () => {
-  it("sendet mit App-Token, Bot-ID, Kanal-ID und for_source_only false", async () => {
+describe("Helix chat", () => {
+  it("sends with app token, bot id, channel id, and for_source_only false", async () => {
     const database = new TestD1Database();
     try {
       await seedBot(database);
@@ -76,11 +76,11 @@ describe("Helix-Chat", () => {
   });
 
   /**
-   * Der Aufruf wird im EventSub-Webhook abgewartet, und Twitch erwartet dort
-   * eine Antwort in zehn Sekunden. Ohne Zeitlimit kostet ein haengender
-   * Helix-Aufruf das Abo -- ein Ausfall, den niemand meldet.
+   * The call is awaited inside the EventSub webhook, and Twitch expects a
+   * response there within ten seconds. Without a timeout, a hanging Helix
+   * call costs the subscription -- a failure nobody reports.
    */
-  it("gibt dem Helix-Aufruf ein Zeitlimit mit und meldet es getrennt vom Netzfehler", async () => {
+  it("gives the Helix call a timeout and reports it separately from a network error", async () => {
     const database = new TestD1Database();
     try {
       await seedBot(database);
@@ -97,7 +97,7 @@ describe("Helix-Chat", () => {
     }
   });
 
-  it("unterscheidet einen Netzfehler weiterhin vom Zeitlimit", async () => {
+  it("still distinguishes a network error from a timeout", async () => {
     const database = new TestD1Database();
     try {
       await seedBot(database);

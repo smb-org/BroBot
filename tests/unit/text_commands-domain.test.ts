@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   commandFromMessage,
   commandTextWithPlaceholders,
-  cooldownRestzeit,
+  cooldownRemaining,
   chatStatusMeetsTier,
   validCommandName,
 } from "../../src/modules/text_commands/domain";
 
 describe("Text commands domain", () => {
   it("recognizes a generic !-word with no special case", () => {
-    expect(commandFromMessage("!befehle")).toEqual({ kind: "befehl", name: "befehle" });
+    expect(commandFromMessage("!befehle")).toEqual({ kind: "command", name: "befehle" });
   });
 
   it("allows only simple lowercase command names", () => {
@@ -30,8 +30,8 @@ describe("Text commands domain", () => {
   });
 
   it("returns the remaining cooldown in whole seconds", () => {
-    expect(cooldownRestzeit("2026-09-19T12:00:00.000Z", "2026-09-19T12:00:03.200Z", 5)).toBe(2);
-    expect(cooldownRestzeit("2026-09-19T12:00:00.000Z", "2026-09-19T12:00:05.000Z", 5)).toBe(0);
+    expect(cooldownRemaining("2026-09-19T12:00:00.000Z", "2026-09-19T12:00:03.200Z", 5)).toBe(2);
+    expect(cooldownRemaining("2026-09-19T12:00:00.000Z", "2026-09-19T12:00:05.000Z", 5)).toBe(0);
   });
 
   it("explicitly models the non-linear tier ladder", () => {

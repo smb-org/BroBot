@@ -10,9 +10,9 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken, insertChannel, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-const CHAT_TYP = "channel.chat.message";
-const JETZT = "2026-09-19T12:00:00.000Z";
-const schluessel = JSON.stringify({
+const CHAT_TYPE = "channel.chat.message";
+const NOW = "2026-09-19T12:00:00.000Z";
+const keyRing = JSON.stringify({
   active: { id: "aktiv", key: Buffer.from(new Uint8Array(32).fill(5)).toString("base64url") },
   retired: [],
 });
@@ -21,28 +21,28 @@ const schluessel = JSON.stringify({
  * A module double. `MODULES` is empty, and the tests must not assume a real
  * module ever exists.
  */
-const moduleDuplicate = (
+const fakeModule = (
   id: string,
   handleEvent: (event: ModuleEvent) => ModuleResult | Promise<ModuleResult>,
-  eventSubTypes: readonly string[] = [CHAT_TYP],
+  eventSubTypes: readonly string[] = [CHAT_TYPE],
 ): BotModule => ({
   id,
-  settingsSchema: z.object({ praefix: z.string() }),
-  defaultSettings: { praefix: "!" },
+  settingsSchema: z.object({ prefix: z.string() }),
+  defaultSettings: { prefix: "!" },
   eventSubTypes,
   handleEvent,
 });
 
-const stilles = (id: string) => moduleDuplicate(id, () => ({ actions: [], diagnostics: [] }));
+const silentModule = (id: string) => fakeModule(id, () => ({ actions: [], diagnostics: [] }));
 
-const activation = (moduleId: string, enabled = true, settings = '{"praefix":"!"}') =>
+const activation = (moduleId: string, enabled = true, settings = '{"prefix":"!"}') =>
   ({ moduleId, enabled, settings });
 
 const environment = (database: TestD1Database) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
-  TOKEN_ENCRYPTION_KEYS: schluessel,
+  TOKEN_ENCRYPTION_KEYS: keyRing,
 });
 
 const chatResponse = (body: unknown, status = 200) =>
@@ -50,36 +50,36 @@ const chatResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })));
 
 /** Reads the JSON body of a chat call without blindly casting it. */
-const koerperVon = (fetcher: ReturnType<typeof chatResponse>, index = 0): Record<string, unknown> => {
+const bodyOf = (fetcher: ReturnType<typeof chatResponse>, index = 0): Record<string, unknown> => {
   const body = fetcher.mock.calls[index]?.[1]?.body;
   return typeof body === "string" ? JSON.parse(body) as Record<string, unknown> : {};
 };
 
-const gesendet = () => chatResponse({ data: [{ is_sent: true, message_id: "nachricht-1" }] });
+const sent = () => chatResponse({ data: [{ is_sent: true, message_id: "nachricht-1" }] });
 
-const mitBot = async (database: TestD1Database): Promise<void> => {
+const withBot = async (database: TestD1Database): Promise<void> => {
   await insertChannel(database, "kanal-a");
   await upsertBotIdentity(database as unknown as D1Database, {
     id: 1,
     userId: "bot-1",
     login: "brobot",
     scopesJson: "[]",
-    accessTokenCiphertext: await encryptJson({ token: "bot-token" }, parseKeyRing(schluessel)),
-    refreshTokenCiphertext: await encryptJson({ token: "refresh" }, parseKeyRing(schluessel)),
+    accessTokenCiphertext: await encryptJson({ token: "bot-token" }, parseKeyRing(keyRing)),
+    refreshTokenCiphertext: await encryptJson({ token: "refresh" }, parseKeyRing(keyRing)),
     expiresAt: "2026-09-20T00:00:00.000Z",
-    createdAt: JETZT,
-    updatedAt: JETZT,
+    createdAt: NOW,
+    updatedAt: NOW,
   });
   await insertAppAccessToken(
     database,
-    await encryptJson({ token: "app-token" }, parseKeyRing(schluessel)),
+    await encryptJson({ token: "app-token" }, parseKeyRing(keyRing)),
     "2099-09-21T00:00:00.000Z",
-    JETZT,
-    JETZT,
+    NOW,
+    NOW,
   );
 };
 
-const protokoll = async (database: TestD1Database) => {
+const eventLog = async (database: TestD1Database) => {
   const result = await database.prepare(
     "SELECT module_id, code, detail_json FROM event_log ORDER BY rowid",
   ).all<{ module_id: string; code: string; detail_json: string }>();
@@ -89,16 +89,16 @@ const protokoll = async (database: TestD1Database) => {
 /** Registers every registry module as enabled; dispatch reads from the database. */
 const activate = async (database: TestD1Database, channelId: string, moduleId: string): Promise<void> => {
   await database.prepare(
-    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{\"praefix\":\"!\"}')",
+    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{\"prefix\":\"!\"}')",
   ).bind(channelId, moduleId).run();
 };
 
-const verteile = async (
+const runDispatch = async (
   database: TestD1Database,
   registry: readonly BotModule[],
   fetcher: typeof fetch,
   channelId = "kanal-a",
-  subscriptionType = CHAT_TYP,
+  subscriptionType = CHAT_TYPE,
   payload: Readonly<Record<string, unknown>> = {
     message: { text: "!hallo" },
     chatter_user_id: "user-1",
@@ -113,7 +113,7 @@ const verteile = async (
     subscriptionType,
     triggerId: "ausloeser-1",
     payload,
-    receivedAt: JETZT,
+    receivedAt: NOW,
   },
     fetcher,
     registry,
@@ -122,27 +122,27 @@ const verteile = async (
 
 describe("module selection", () => {
   it("skips disabled modules", () => {
-    const { treffer } = selectModulesForEvent(
+    const { matches } = selectModulesForEvent(
       [activation("modul-a", false)],
-      CHAT_TYP,
-      [stilles("modul-a")],
+      CHAT_TYPE,
+      [silentModule("modul-a")],
     );
-    expect(treffer).toEqual([]);
+    expect(matches).toEqual([]);
   });
 
   it("skips modules not responsible for this event type", () => {
-    const { treffer } = selectModulesForEvent(
+    const { matches } = selectModulesForEvent(
       [activation("modul-a")],
-      CHAT_TYP,
-      [moduleDuplicate("modul-a", () => ({ actions: [], diagnostics: [] }), ["channel.raid"])],
+      CHAT_TYPE,
+      [fakeModule("modul-a", () => ({ actions: [], diagnostics: [] }), ["channel.raid"])],
     );
-    expect(treffer).toEqual([]);
+    expect(matches).toEqual([]);
   });
 
   it("reports an activation the registry doesn't know", () => {
-    const { treffer, unbekannt } = selectModulesForEvent([activation("verschwunden")], CHAT_TYP, []);
-    expect(treffer).toEqual([]);
-    expect(unbekannt).toEqual(["verschwunden"]);
+    const { matches, unknownModules } = selectModulesForEvent([activation("verschwunden")], CHAT_TYPE, []);
+    expect(matches).toEqual([]);
+    expect(unknownModules).toEqual(["verschwunden"]);
   });
 });
 
@@ -150,23 +150,23 @@ describe("dispatch and execution", () => {
   it("sends a module's chat message and logs the success", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
-      const fetcher = gesendet();
-      await verteile(database, [moduleDuplicate("modul-a", () => ({
+      await withBot(database);
+      const fetcher = sent();
+      await runDispatch(database, [fakeModule("modul-a", () => ({
         actions: [{ kind: "chat", text: "hallo", replyToMessageId: "nachricht-0" }],
         diagnostics: [{ code: "modul.geantwortet" }],
       }))], fetcher);
 
       expect(fetcher).toHaveBeenCalledTimes(1);
-      expect(koerperVon(fetcher)).toMatchObject({
+      expect(bodyOf(fetcher)).toMatchObject({
         broadcaster_id: "kanal-a",
         sender_id: "bot-1",
         message: "hallo",
         reply_parent_message_id: "nachricht-0",
       });
-      const zeilen = await protokoll(database);
-      expect(zeilen.map((zeile) => zeile.code)).toEqual(["modul.geantwortet", "host.chat.gesendet"]);
-      expect(JSON.parse(zeilen[1]?.detail_json ?? "{}" )).toEqual({ messageId: "nachricht-1", text: "hallo" });
+      const rows = await eventLog(database);
+      expect(rows.map((row) => row.code)).toEqual(["modul.geantwortet", "host.chat.gesendet"]);
+      expect(JSON.parse(rows[1]?.detail_json ?? "{}" )).toEqual({ messageId: "nachricht-1", text: "hallo" });
     } finally {
       database.close();
     }
@@ -175,19 +175,19 @@ describe("dispatch and execution", () => {
   it("treats a dropped message as a failure despite HTTP 200", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
+      await withBot(database);
       // Twitch responds to an AutoMod rejection with 200 and is_sent: false.
       const fetcher = chatResponse({
         data: [{ is_sent: false, drop_reason: { code: "automod_held", message: "gehalten" } }],
       });
-      await verteile(database, [moduleDuplicate("modul-a", () => ({
+      await runDispatch(database, [fakeModule("modul-a", () => ({
         actions: [{ kind: "chat", text: "hallo" }],
         diagnostics: [],
       }))], fetcher);
 
-      const zeilen = await protokoll(database);
-      expect(zeilen.map((zeile) => zeile.code)).toEqual(["host.chat.fehlgeschlagen"]);
-      expect(JSON.parse(zeilen[0]?.detail_json ?? "{}")).toMatchObject({ reason: "automod_held", text: "hallo" });
+      const rows = await eventLog(database);
+      expect(rows.map((row) => row.code)).toEqual(["host.chat.fehlgeschlagen"]);
+      expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({ reason: "automod_held", text: "hallo" });
     } finally {
       database.close();
     }
@@ -196,9 +196,9 @@ describe("dispatch and execution", () => {
   it("preserves the order of actions", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
-      const fetcher = gesendet();
-      await verteile(database, [moduleDuplicate("modul-a", () => ({
+      await withBot(database);
+      const fetcher = sent();
+      await runDispatch(database, [fakeModule("modul-a", () => ({
         actions: [
           { kind: "chat", text: "erste" },
           { kind: "chat", text: "zweite" },
@@ -206,7 +206,7 @@ describe("dispatch and execution", () => {
         diagnostics: [],
       }))], fetcher);
 
-      const texts = fetcher.mock.calls.map((_aufruf, index) => koerperVon(fetcher, index).message);
+      const texts = fetcher.mock.calls.map((_call, index) => bodyOf(fetcher, index).message);
       expect(texts).toEqual(["erste", "zweite"]);
     } finally {
       database.close();
@@ -216,16 +216,16 @@ describe("dispatch and execution", () => {
   it("doesn't let a throwing module take the others down with it", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
-      const fetcher = gesendet();
-      await verteile(database, [
-        moduleDuplicate("modul-kaputt", () => { throw new Error("kaputt"); }),
-        moduleDuplicate("modul-heil", () => ({ actions: [{ kind: "chat", text: "trotzdem" }], diagnostics: [] })),
+      await withBot(database);
+      const fetcher = sent();
+      await runDispatch(database, [
+        fakeModule("modul-kaputt", () => { throw new Error("kaputt"); }),
+        fakeModule("modul-heil", () => ({ actions: [{ kind: "chat", text: "trotzdem" }], diagnostics: [] })),
       ], fetcher);
 
       expect(fetcher).toHaveBeenCalledTimes(1);
-      const zeilen = await protokoll(database);
-      expect(zeilen.map((zeile) => `${zeile.module_id}:${zeile.code}`)).toEqual([
+      const rows = await eventLog(database);
+      expect(rows.map((row) => `${row.module_id}:${row.code}`)).toEqual([
         "modul-kaputt:host.modul.fehler",
         "modul-heil:host.chat.gesendet",
       ]);
@@ -237,16 +237,16 @@ describe("dispatch and execution", () => {
   it("doesn't silently drop an overlay action", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
-      const fetcher = gesendet();
-      await verteile(database, [moduleDuplicate("modul-a", () => ({
+      await withBot(database);
+      const fetcher = sent();
+      await runDispatch(database, [fakeModule("modul-a", () => ({
         actions: [{ kind: "overlay", type: "konfetti", payload: {} }],
         diagnostics: [],
       }))], fetcher);
 
       expect(fetcher).not.toHaveBeenCalled();
-      const zeilen = await protokoll(database);
-      expect(zeilen.map((zeile) => zeile.code)).toEqual(["host.overlay.nicht_ausgefuehrt"]);
+      const rows = await eventLog(database);
+      expect(rows.map((row) => row.code)).toEqual(["host.overlay.nicht_ausgefuehrt"]);
     } finally {
       database.close();
     }
@@ -255,17 +255,17 @@ describe("dispatch and execution", () => {
   it("sends exclusively to the event's channel", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
+      await withBot(database);
       await insertChannel(database, "kanal-b");
-      const fetcher = gesendet();
-      await verteile(database, [moduleDuplicate("modul-a", () => ({
+      const fetcher = sent();
+      await runDispatch(database, [fakeModule("modul-a", () => ({
         // The module only describes text; it can't specify a target channel at
         // all. The host takes it from the verified event.
         actions: [{ kind: "chat", text: "hallo" }],
         diagnostics: [],
       }))], fetcher, "kanal-b");
 
-      expect(koerperVon(fetcher).broadcaster_id).toBe("kanal-b");
+      expect(bodyOf(fetcher).broadcaster_id).toBe("kanal-b");
     } finally {
       database.close();
     }
@@ -274,13 +274,13 @@ describe("dispatch and execution", () => {
   it("passes the module the actor together with the resolved channel role", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
+      await withBot(database);
       await insertMember(database, "kanal-a", "user-1", "operator");
       let actor: ModuleEvent["actor"] = null;
-      await verteile(database, [moduleDuplicate("modul-a", (event) => {
+      await runDispatch(database, [fakeModule("modul-a", (event) => {
         actor = event.actor;
         return { actions: [], diagnostics: [] };
-      })], gesendet());
+      })], sent());
 
       expect(actor).toEqual({ userId: "user-1", login: "alice", role: "operator" });
     } finally {
@@ -291,20 +291,20 @@ describe("dispatch and execution", () => {
   it("forwards chat status separately from the panel role and clears it when there's no chat context", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
+      await withBot(database);
       await insertMember(database, "kanal-a", "user-1", "operator");
       const statuses: Array<{ role: ModuleEvent["actor"]; chatStatus: ModuleEvent["chatStatus"] }> = [];
-      const chatModule = moduleDuplicate("chat-modul", (event) => {
+      const chatModule = fakeModule("chat-modul", (event) => {
         statuses.push({ role: event.actor, chatStatus: event.chatStatus });
         return { actions: [], diagnostics: [] };
       });
-      const raidModule = moduleDuplicate("raid-modul", (event) => {
+      const raidModule = fakeModule("raid-modul", (event) => {
         statuses.push({ role: event.actor, chatStatus: event.chatStatus });
         return { actions: [], diagnostics: [] };
       }, ["channel.raid"]);
 
-      await verteile(database, [chatModule], gesendet());
-      await verteile(database, [raidModule], gesendet(), "kanal-a", "channel.raid");
+      await runDispatch(database, [chatModule], sent());
+      await runDispatch(database, [raidModule], sent(), "kanal-a", "channel.raid");
 
       expect(statuses).toEqual([
         { role: { userId: "user-1", login: "alice", role: "operator" }, chatStatus: ["viewer"] },
@@ -318,19 +318,19 @@ describe("dispatch and execution", () => {
   it("reports VIP and subscriber together from the chat badges", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
+      await withBot(database);
       let chatStatus: ModuleEvent["chatStatus"] = null;
-      const chatModule = moduleDuplicate("chat-modul", (event) => {
+      const chatModule = fakeModule("chat-modul", (event) => {
         chatStatus = event.chatStatus;
         return { actions: [], diagnostics: [] };
       });
 
-      await verteile(
+      await runDispatch(
         database,
         [chatModule],
-        gesendet(),
+        sent(),
         "kanal-a",
-        CHAT_TYP,
+        CHAT_TYPE,
         {
           message: { text: "!hallo" },
           chatter_user_id: "user-1",
@@ -348,14 +348,14 @@ describe("dispatch and execution", () => {
   it("logs an activation the registry doesn't know", async () => {
     const database = new TestD1Database();
     try {
-      await mitBot(database);
+      await withBot(database);
       await database.prepare(
         "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{}')",
       ).bind("kanal-a", "verschwunden").run();
-      await verteile(database, [], gesendet());
+      await runDispatch(database, [], sent());
 
-      const zeilen = await protokoll(database);
-      expect(zeilen.map((zeile) => zeile.code)).toEqual(["host.modul.unbekannt"]);
+      const rows = await eventLog(database);
+      expect(rows.map((row) => row.code)).toEqual(["host.modul.unbekannt"]);
     } finally {
       database.close();
     }
@@ -371,11 +371,11 @@ describe("dispatch and execution", () => {
         get: vi.fn(() => ({ publish })),
       } as unknown as Env["CHANNEL"];
       const env = { ...environment(database), CHANNEL: namespace };
-      const moduleA = moduleDuplicate("modul-a", () => ({
+      const moduleA = fakeModule("modul-a", () => ({
         actions: [],
         diagnostics: [{ code: "modul.eins" }],
       }));
-      const moduleB = moduleDuplicate("modul-b", () => ({
+      const moduleB = fakeModule("modul-b", () => ({
         actions: [],
         diagnostics: [{ code: "modul.zwei" }],
       }));
@@ -386,10 +386,10 @@ describe("dispatch and execution", () => {
         env,
         {
           channelId: "kanal-a",
-          subscriptionType: CHAT_TYP,
+          subscriptionType: CHAT_TYPE,
           triggerId: "ausloeser-1",
           payload: {},
-          receivedAt: JETZT,
+          receivedAt: NOW,
         },
         fetch,
         [moduleA, moduleB],

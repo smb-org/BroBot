@@ -28,19 +28,19 @@ export interface NewTextCommand {
 export interface TextCommandChange {
   channelId: string;
   name: string;
-  neuerName: string;
+  newName: string;
   text: string;
   kind: TextCommandKind;
   enabled: boolean;
-  nurSchalter?: boolean;
+  onlyToggle?: boolean;
   minimumTier?: TextCommandMinimumTier;
   cooldownSeconds: number;
   now: string;
 }
 
 export interface TextCommandClaim {
-  befehl: TextCommand;
-  beansprucht: boolean;
+  command: TextCommand;
+  claimed: boolean;
 }
 
 export interface TextCommandActor {

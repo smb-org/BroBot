@@ -5,7 +5,7 @@ import type {
   TextCommandClaim,
   TextCommandActor,
 } from "../contracts";
-import { kuerzeAuf200Zeichen, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
+import { truncateTo200Chars, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
 import type { TextCommandMutationResult, TextCommandRepository } from "../repository";
 
 const MODULE_ID = "text_commands";
@@ -15,28 +15,28 @@ const auditValues = (command: Pick<TextCommand, "name" | "text" | "kind" | "enab
   kind: command.kind,
   enabled: command.enabled,
   minimumTier: command.minimumTier,
-  text: kuerzeAuf200Zeichen(command.text),
+  text: truncateTo200Chars(command.text),
   cooldownSeconds: command.cooldownSeconds,
 });
 
 const sameMutationValues = (
-  links: Pick<TextCommand, "name" | "text" | "kind" | "enabled" | "minimumTier" | "cooldownSeconds">,
-  rechts: Pick<TextCommand, "name" | "text" | "kind" | "enabled" | "minimumTier" | "cooldownSeconds">,
-): boolean => links.name === rechts.name &&
-  links.text === rechts.text &&
-  links.kind === rechts.kind &&
-  links.enabled === rechts.enabled &&
-  links.minimumTier === rechts.minimumTier &&
-  links.cooldownSeconds === rechts.cooldownSeconds;
+  left: Pick<TextCommand, "name" | "text" | "kind" | "enabled" | "minimumTier" | "cooldownSeconds">,
+  right: Pick<TextCommand, "name" | "text" | "kind" | "enabled" | "minimumTier" | "cooldownSeconds">,
+): boolean => left.name === right.name &&
+  left.text === right.text &&
+  left.kind === right.kind &&
+  left.enabled === right.enabled &&
+  left.minimumTier === right.minimumTier &&
+  left.cooldownSeconds === right.cooldownSeconds;
 
-const erfolgreich = (): TextCommandMutationResult => ({ ok: true });
+const succeeded = (): TextCommandMutationResult => ({ ok: true });
 
-const fehlgeschlagen = (reason: Exclude<TextCommandMutationResult, { ok: true }>["reason"]): TextCommandMutationResult => ({
+const failed = (reason: Exclude<TextCommandMutationResult, { ok: true }>["reason"]): TextCommandMutationResult => ({
   ok: false,
   reason: reason,
 });
 
-const mutationAusfuehren = async (
+const runMutation = async (
   db: D1Database,
   prepareModuleAudit: PrepareModuleAudit | undefined,
   mutation: D1PreparedStatement,
@@ -90,7 +90,7 @@ export const createTextCommandRepository = (
     return result.results.map(mapTextCommand);
   },
 
-  async finden(channelId: string, name: string): Promise<TextCommand | null> {
+  async find(channelId: string, name: string): Promise<TextCommand | null> {
     const row = await db.prepare(
       `SELECT channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
               last_used_at, created_at, updated_at
@@ -100,8 +100,8 @@ export const createTextCommandRepository = (
     return row === null ? null : mapTextCommand(row);
   },
 
-  async anlegen(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult> {
-    if (await this.finden(input.channelId, input.name) !== null) return fehlgeschlagen("existiert");
+  async create(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult> {
+    if (await this.find(input.channelId, input.name) !== null) return failed("existiert");
     const authorization = authorizeMutation(input.channelId, actor, input.now);
     const minimumTier = input.minimumTier ?? "everyone";
     const mutation = db.prepare(
@@ -126,27 +126,27 @@ export const createTextCommandRepository = (
       input.name,
       ...authorization.values,
     );
-    const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
+    const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
       action: "text_commands.befehl.angelegt",
       before: null,
       after: auditValues({ ...input, minimumTier: minimumTier, enabled: true }),
     }, input.now);
-    if (changes > 0) return erfolgreich();
-    return fehlgeschlagen(await this.finden(input.channelId, input.name) === null ? "nicht_berechtigt" : "existiert");
+    if (changes > 0) return succeeded();
+    return failed(await this.find(input.channelId, input.name) === null ? "nicht_berechtigt" : "existiert");
   },
 
   async change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult> {
-    const before = await this.finden(input.channelId, input.name);
-    if (before === null) return fehlgeschlagen("nicht_gefunden");
-    if (input.nurSchalter !== true && input.neuerName !== input.name && await this.finden(input.channelId, input.neuerName) !== null) {
-      return fehlgeschlagen("existiert");
+    const before = await this.find(input.channelId, input.name);
+    if (before === null) return failed("nicht_gefunden");
+    if (input.onlyToggle !== true && input.newName !== input.name && await this.find(input.channelId, input.newName) !== null) {
+      return failed("existiert");
     }
     const authorization = authorizeMutation(input.channelId, actor, input.now);
     const beforeMinimumTier = before.minimumTier;
     const minimumTier = input.minimumTier ?? beforeMinimumTier;
-    const mutation = input.nurSchalter === true
+    const mutation = input.onlyToggle === true
       ? db.prepare(
         `UPDATE text_commands
             SET enabled = ?, updated_at = ?
@@ -178,7 +178,7 @@ export const createTextCommandRepository = (
             ))
             ${authorization.sql}`,
       ).bind(
-        input.neuerName,
+        input.newName,
         input.text,
         input.kind,
         input.enabled ? 1 : 0,
@@ -192,41 +192,41 @@ export const createTextCommandRepository = (
         before.enabled ? 1 : 0,
         beforeMinimumTier,
         before.cooldownSeconds,
-        input.neuerName,
+        input.newName,
         input.channelId,
-        input.neuerName,
+        input.newName,
         ...authorization.values,
       );
-    const after = input.nurSchalter === true
+    const after = input.onlyToggle === true
       ? { ...before, enabled: input.enabled }
       : {
         ...before,
-        name: input.neuerName,
+        name: input.newName,
         text: input.text,
         kind: input.kind,
         enabled: input.enabled,
         minimumTier: minimumTier,
         cooldownSeconds: input.cooldownSeconds,
       };
-    const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
+    const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
       action: "text_commands.befehl.geändert",
       before: auditValues(before),
       after: auditValues(after),
     }, input.now);
-    if (changes > 0) return erfolgreich();
-    const current = await this.finden(input.channelId, input.name);
-    if (await this.finden(input.channelId, input.neuerName) !== null && input.neuerName !== input.name) {
-      return fehlgeschlagen("existiert");
+    if (changes > 0) return succeeded();
+    const current = await this.find(input.channelId, input.name);
+    if (await this.find(input.channelId, input.newName) !== null && input.newName !== input.name) {
+      return failed("existiert");
     }
-    if (current === null) return fehlgeschlagen("nicht_gefunden");
-    return fehlgeschlagen(sameMutationValues(current, before) ? "nicht_berechtigt" : "konflikt");
+    if (current === null) return failed("nicht_gefunden");
+    return failed(sameMutationValues(current, before) ? "nicht_berechtigt" : "konflikt");
   },
 
   async delete(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult> {
-    const before = await this.finden(channelId, name);
-    if (before === null) return fehlgeschlagen("nicht_gefunden");
+    const before = await this.find(channelId, name);
+    if (before === null) return failed("nicht_gefunden");
     const authorization = authorizeMutation(channelId, actor, now);
     const mutation = db.prepare(
       `DELETE FROM text_commands
@@ -244,20 +244,20 @@ export const createTextCommandRepository = (
       before.cooldownSeconds,
       ...authorization.values,
     );
-    const changes = await mutationAusfuehren(db, prepareModuleAudit, mutation, {
+    const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId,
       moduleId: MODULE_ID,
       action: "text_commands.befehl.entfernt",
       before: auditValues(before),
       after: null,
     }, now);
-    if (changes > 0) return erfolgreich();
-    const current = await this.finden(channelId, name);
-    if (current === null) return fehlgeschlagen("nicht_gefunden");
-    return fehlgeschlagen(sameMutationValues(current, before) ? "nicht_berechtigt" : "konflikt");
+    if (changes > 0) return succeeded();
+    const current = await this.find(channelId, name);
+    if (current === null) return failed("nicht_gefunden");
+    return failed(sameMutationValues(current, before) ? "nicht_berechtigt" : "konflikt");
   },
 
-  async beanspruchen(channelId: string, name: string, now: string): Promise<TextCommandClaim | null> {
+  async claim(channelId: string, name: string, now: string): Promise<TextCommandClaim | null> {
     const result = await db.prepare(
       `UPDATE text_commands
           SET last_used_at = ?, updated_at = ?
@@ -265,8 +265,8 @@ export const createTextCommandRepository = (
           AND enabled = 1
           AND (last_used_at IS NULL OR julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)`,
     ).bind(now, now, channelId, name, now).run();
-    const command = await this.finden(channelId, name);
-    return command === null ? null : { befehl: command, beansprucht: result.meta.changes > 0 };
+    const command = await this.find(channelId, name);
+    return command === null ? null : { command: command, claimed: result.meta.changes > 0 };
   },
 });
 

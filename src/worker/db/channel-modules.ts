@@ -54,9 +54,9 @@ export const listChannelModulesForChannel = async (
 };
 
 /**
- * Dieselbe Rollenschwelle wie bei Mitgliederaenderungen: Nur Broadcaster und
- * Verwalter duerfen Module schalten, durchgesetzt im actorGuard der Mutation
- * selbst, nicht nur im Handler.
+ * The same role threshold as for member changes: only broadcasters and
+ * managers may toggle modules, enforced in the mutation's own actorGuard,
+ * not just in the handler.
  */
 export const createChannelModuleWithAudit = async (
   db: D1Database,

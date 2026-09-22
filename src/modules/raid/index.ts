@@ -2,7 +2,7 @@ import type { BotModule } from "../contract";
 import { raidSettingsSchema } from "./contracts";
 import { processRaid } from "./service";
 
-export { entscheideRaid } from "./domain";
+export { decideRaid } from "./domain";
 export { processRaid } from "./service";
 export type { RaidSettings } from "./contracts";
 

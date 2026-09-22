@@ -30,22 +30,22 @@ import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fi
 import { TestD1Database } from "./test-d1";
 
 type ChannelRole = "broadcaster" | "manager" | "operator";
-type Zeile = ChannelRole | "kein Mitglied";
+type RoleRow = ChannelRole | "no member";
 
-const rollen: readonly Zeile[] = ["broadcaster", "manager", "operator", "kein Mitglied"];
+const roleRows: readonly RoleRow[] = ["broadcaster", "manager", "operator", "no member"];
 const timestamp = "2026-09-18T00:00:00.000Z";
 const actor: ActorContext = { userId: "actor", sessionId: "session-actor" };
 
 const allowed = (
   broadcaster: boolean,
-  verwalter: boolean,
-  bediener: boolean,
+  manager: boolean,
+  operator: boolean,
   noMember: boolean,
-): Record<Zeile, boolean> => ({
+): Record<RoleRow, boolean> => ({
   broadcaster,
-  manager: verwalter,
-  operator: bediener,
-  "kein Mitglied": noMember,
+  manager,
+  operator,
+  "no member": noMember,
 });
 
 const actionMember = (
@@ -71,19 +71,19 @@ const overlayTokenRow = (tokenId: string): string =>
     (token_id, channel_id, token_hash, expires_at, created_at, revoked_at, revocation_reason, last_used_at)
    VALUES ('${tokenId}', 'kanal-a', 'hash-${tokenId}', NULL, '${timestamp}', NULL, NULL, NULL)`;
 
-interface Rollenaktion {
+interface RoleAction {
   name: string;
   source: string;
-  erwartet: Record<Zeile, boolean>;
-  ausführen: (database: TestD1Database, role: ChannelRole | null) => Promise<boolean>;
+  expected: Record<RoleRow, boolean>;
+  execute: (database: TestD1Database, role: ChannelRole | null) => Promise<boolean>;
 }
 
-const aktionen: readonly Rollenaktion[] = [
+const actions: readonly RoleAction[] = [
   {
-    name: "Kanalmitglied als Bediener anlegen",
+    name: "Create channel member as operator",
     source: "db/channel-members.ts:createChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
-    erwartet: allowed(true, true, false, false),
-    ausführen: (database) => createChannelMemberWithAudit(
+    expected: allowed(true, true, false, false),
+    execute: (database) => createChannelMemberWithAudit(
       database as unknown as D1Database,
       actor,
       actionMember("target", "operator"),
@@ -93,10 +93,10 @@ const aktionen: readonly Rollenaktion[] = [
     ),
   },
   {
-    name: "Kanalmitglied als Broadcaster anlegen",
+    name: "Create channel member as broadcaster",
     source: "db/channel-members.ts:createChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
-    erwartet: allowed(true, false, false, false),
-    ausführen: (database) => createChannelMemberWithAudit(
+    expected: allowed(true, false, false, false),
+    execute: (database) => createChannelMemberWithAudit(
       database as unknown as D1Database,
       actor,
       actionMember("target", "broadcaster"),
@@ -106,10 +106,10 @@ const aktionen: readonly Rollenaktion[] = [
     ),
   },
   {
-    name: "Kanalmitglied von Bediener zu Verwalter ändern",
+    name: "Change channel member from operator to manager",
     source: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:actorGuard(requiredActorRoles)",
-    erwartet: allowed(true, true, false, false),
-    ausführen: async (database) => {
+    expected: allowed(true, true, false, false),
+    execute: async (database) => {
       await insertMember(database, "kanal-a", "target", "operator");
       return updateChannelMemberWithAudit(
         database as unknown as D1Database,
@@ -122,10 +122,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Kanalmitglied von Broadcaster zu Verwalter ändern",
+    name: "Change channel member from broadcaster to manager",
     source: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:lastBroadcasterRoleChangeGuard",
-    erwartet: allowed(true, false, false, false),
-    ausführen: async (database) => {
+    expected: allowed(true, false, false, false),
+    execute: async (database) => {
       await insertMember(database, "kanal-a", "target", "broadcaster");
       const member = actionMember("target", "manager");
       return updateChannelMemberWithAudit(
@@ -139,10 +139,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Letzten Broadcaster herabstufen",
+    name: "Demote the last broadcaster",
     source: "db/channel-members.ts:updateChannelMemberWithAudit + db/guards.ts:lastBroadcasterRoleChangeGuard",
-    erwartet: allowed(false, false, false, false),
-    ausführen: async (database, role) => {
+    expected: allowed(false, false, false, false),
+    execute: async (database, role) => {
       const target = role === "broadcaster" ? "actor" : "target";
       if (target === "actor") {
         return updateChannelMemberWithAudit(
@@ -166,10 +166,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Kanalmitglied als Bediener entfernen",
+    name: "Remove channel member as operator",
     source: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:actorGuard + db/guards.ts:lastBroadcasterGuard",
-    erwartet: allowed(true, true, false, false),
-    ausführen: async (database) => {
+    expected: allowed(true, true, false, false),
+    execute: async (database) => {
       await insertMember(database, "kanal-a", "target", "operator");
       return deleteChannelMemberWithAudit(
         database as unknown as D1Database,
@@ -183,10 +183,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Nicht letzten Broadcaster entfernen",
+    name: "Remove a non-last broadcaster",
     source: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:lastBroadcasterGuard",
-    erwartet: allowed(true, false, false, false),
-    ausführen: async (database) => {
+    expected: allowed(true, false, false, false),
+    execute: async (database) => {
       await insertMember(database, "kanal-a", "target", "broadcaster");
       return deleteChannelMemberWithAudit(
         database as unknown as D1Database,
@@ -200,10 +200,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Letzten Broadcaster entfernen",
+    name: "Remove the last broadcaster",
     source: "db/channel-members.ts:deleteChannelMemberWithAudit + db/guards.ts:lastBroadcasterGuard",
-    erwartet: allowed(false, false, false, false),
-    ausführen: async (database, role) => {
+    expected: allowed(false, false, false, false),
+    execute: async (database, role) => {
       const target = role === "broadcaster" ? "actor" : "target";
       if (target !== "actor") await insertMember(database, "kanal-a", target, "broadcaster");
       return deleteChannelMemberWithAudit(
@@ -218,10 +218,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Modul aktivieren",
+    name: "Enable module",
     source: "db/channel-modules.ts:createChannelModuleWithAudit + db/guards.ts:actorGuard",
-    erwartet: allowed(true, true, false, false),
-    ausführen: (database) => createChannelModuleWithAudit(
+    expected: allowed(true, true, false, false),
+    execute: (database) => createChannelModuleWithAudit(
       database as unknown as D1Database,
       actor,
       { channelId: "kanal-a", moduleId: "raid", enabled: true, settings: "{}" },
@@ -230,10 +230,10 @@ const aktionen: readonly Rollenaktion[] = [
     ),
   },
   {
-    name: "Moduleinstellungen ändern",
+    name: "Change module settings",
     source: "db/channel-modules.ts:updateChannelModuleWithAudit + db/guards.ts:actorGuard",
-    erwartet: allowed(true, true, false, false),
-    ausführen: async (database) => {
+    expected: allowed(true, true, false, false),
+    execute: async (database) => {
       await database.prepare(
         `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
          VALUES ('kanal-a', 'raid', 1, '{}')`,
@@ -251,10 +251,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Einzelnen Textbefehl schalten",
-    source: "modules/textbefehle/adapters/d1.ts:aendern + authorizeModuleMutation/actorGuard",
-    erwartet: allowed(true, true, true, false),
-    ausführen: async (database) => {
+    name: "Toggle a single text command",
+    source: "modules/text_commands/adapters/d1.ts:change + authorizeModuleMutation/actorGuard",
+    expected: allowed(true, true, true, false),
+    execute: async (database) => {
       await database.prepare(textCommandRow()).run();
       const result = await createTextCommandRepository(
         database as unknown as D1Database,
@@ -262,11 +262,11 @@ const aktionen: readonly Rollenaktion[] = [
       ).change({
         channelId: "kanal-a",
         name: "hallo",
-        neuerName: "hallo",
+        newName: "hallo",
         text: "Hallo {user}",
         kind: "text",
         enabled: false,
-        nurSchalter: true,
+        onlyToggle: true,
         cooldownSeconds: 5,
         now: timestamp,
       }, actor);
@@ -274,10 +274,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Textbefehl bearbeiten",
-    source: "modules/textbefehle/adapters/d1.ts:aendern + authorizeModuleManagementMutation/actorGuard",
-    erwartet: allowed(true, true, false, false),
-    ausführen: async (database) => {
+    name: "Edit text command",
+    source: "modules/text_commands/adapters/d1.ts:change + authorizeModuleManagementMutation/actorGuard",
+    expected: allowed(true, true, false, false),
+    execute: async (database) => {
       await database.prepare(textCommandRow()).run();
       const result = await createTextCommandRepository(
         database as unknown as D1Database,
@@ -285,7 +285,7 @@ const aktionen: readonly Rollenaktion[] = [
       ).change({
         channelId: "kanal-a",
         name: "hallo",
-        neuerName: "hallo-neu",
+        newName: "hallo-neu",
         text: "Neu",
         kind: "text",
         enabled: true,
@@ -297,14 +297,14 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Textbefehl anlegen",
-    source: "modules/textbefehle/adapters/d1.ts:anlegen + authorizeModuleManagementMutation/actorGuard",
-    erwartet: allowed(true, true, false, false),
-    ausführen: async (database) => {
+    name: "Create text command",
+    source: "modules/text_commands/adapters/d1.ts:create + authorizeModuleManagementMutation/actorGuard",
+    expected: allowed(true, true, false, false),
+    execute: async (database) => {
       const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleManagementMutation,
-      ).anlegen({
+      ).create({
         channelId: "kanal-a",
         name: "neu",
         text: "Neu",
@@ -316,10 +316,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Textbefehl löschen",
-    source: "modules/textbefehle/adapters/d1.ts:loeschen + authorizeModuleManagementMutation/actorGuard",
-    erwartet: allowed(true, true, false, false),
-    ausführen: async (database) => {
+    name: "Delete text command",
+    source: "modules/text_commands/adapters/d1.ts:delete + authorizeModuleManagementMutation/actorGuard",
+    expected: allowed(true, true, false, false),
+    execute: async (database) => {
       await database.prepare(textCommandRow()).run();
       const result = await createTextCommandRepository(
         database as unknown as D1Database,
@@ -329,10 +329,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Overlay-Token ausstellen",
+    name: "Issue overlay token",
     source: "auth/overlay-token-repository.ts:createOverlayToken + actorGuard",
-    erwartet: allowed(true, true, false, false),
-    ausführen: (database) => createOverlayToken(
+    expected: allowed(true, true, false, false),
+    execute: (database) => createOverlayToken(
       database as unknown as D1Database,
       {
         tokenId: "token-1",
@@ -348,10 +348,10 @@ const aktionen: readonly Rollenaktion[] = [
     ),
   },
   {
-    name: "Overlay-Token widerrufen",
+    name: "Revoke overlay token",
     source: "auth/overlay-token-repository.ts:revokeOverlayToken + actorGuard",
-    erwartet: allowed(true, true, false, false),
-    ausführen: async (database) => {
+    expected: allowed(true, true, false, false),
+    execute: async (database) => {
       await database.prepare(overlayTokenRow("token-1")).run();
       return revokeOverlayToken(
         database as unknown as D1Database,
@@ -364,10 +364,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Betreiber-Kanal freigeben",
+    name: "Release operator channel",
     source: "platform/repository.ts:releasePlatformChannel + platformSessionGuard",
-    erwartet: allowed(true, true, true, true),
-    ausführen: (database) => releasePlatformChannel(
+    expected: allowed(true, true, true, true),
+    execute: (database) => releasePlatformChannel(
       database as unknown as D1Database,
       actor,
       { userId: "kanal-b", login: "kanal-b", displayName: "Kanal B" },
@@ -376,10 +376,10 @@ const aktionen: readonly Rollenaktion[] = [
     ),
   },
   {
-    name: "Betreiber-Vollzustimmung ändern",
+    name: "Change operator full consent",
     source: "platform/repository.ts:changeFullConsent + platformSessionGuard",
-    erwartet: allowed(true, true, true, true),
-    ausführen: async (database) => {
+    expected: allowed(true, true, true, true),
+    execute: async (database) => {
       await insertChannel(database, "kanal-b");
       await database.prepare("UPDATE channels SET full_consent = 1 WHERE channel_id = 'kanal-b'").run();
       const channel: PlatformChannel = {
@@ -392,10 +392,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Betreiber-Mitglied anlegen",
+    name: "Create operator member",
     source: "platform/repository.ts:addPlatformMember + platformSessionGuard",
-    erwartet: allowed(true, true, true, true),
-    ausführen: async (database) => {
+    expected: allowed(true, true, true, true),
+    execute: async (database) => {
       await insertChannel(database, "kanal-b");
       return addPlatformMember(
         database as unknown as D1Database,
@@ -406,10 +406,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Betreiber-Mitglied ändern",
+    name: "Change operator member",
     source: "platform/repository.ts:changePlatformMember + platformSessionGuard",
-    erwartet: allowed(true, true, true, true),
-    ausführen: async (database) => {
+    expected: allowed(true, true, true, true),
+    execute: async (database) => {
       await insertChannel(database, "kanal-b");
       await database.prepare(
         `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
@@ -425,10 +425,10 @@ const aktionen: readonly Rollenaktion[] = [
     },
   },
   {
-    name: "Betreiber-Mitglied entfernen",
+    name: "Remove operator member",
     source: "platform/repository.ts:removePlatformMember + platformSessionGuard",
-    erwartet: allowed(true, true, true, true),
-    ausführen: async (database) => {
+    expected: allowed(true, true, true, true),
+    execute: async (database) => {
       await insertChannel(database, "kanal-b");
       await database.prepare(
         `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
@@ -444,23 +444,23 @@ const aktionen: readonly Rollenaktion[] = [
   },
 ];
 
-const setupActor = async (database: TestD1Database, role: Zeile): Promise<void> => {
+const setupActor = async (database: TestD1Database, role: RoleRow): Promise<void> => {
   await insertChannel(database, "kanal-a");
   await insertLoginIdentityAndSession(database, "actor");
-  if (role !== "kein Mitglied") await insertMember(database, "kanal-a", "actor", role);
+  if (role !== "no member") await insertMember(database, "kanal-a", "actor", role);
 };
 
 describe("Role-times-action matrix", () => {
   it("runs every guard-protected write action for every channel role", async () => {
     // Without this floor, the test would pass if the table ran empty.
-    expect(aktionen.length).toBeGreaterThanOrEqual(20);
-    for (const action of aktionen) {
-      for (const row of rollen) {
+    expect(actions.length).toBeGreaterThanOrEqual(20);
+    for (const action of actions) {
+      for (const row of roleRows) {
         const database = new TestD1Database();
         try {
           await setupActor(database, row);
-          const actual = await action.ausführen(database, row === "kein Mitglied" ? null : row);
-          expect(actual, `${action.name} (${row}) — ${action.source}`).toBe(action.erwartet[row]);
+          const actual = await action.execute(database, row === "no member" ? null : row);
+          expect(actual, `${action.name} (${row}) — ${action.source}`).toBe(action.expected[row]);
         } finally {
           database.close();
         }

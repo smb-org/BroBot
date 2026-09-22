@@ -24,13 +24,13 @@ const parseEventFilters = (search: string): PanelEventFilters | undefined => {
   const tone = params.get("tone");
   const moduleId = params.get("module");
   const actor = params.get("actor");
-  const herkunft: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
-  const ton: EventTone | null = tone !== null && EVENT_TONES.includes(tone as EventTone) ? tone as EventTone : null;
+  const validOrigin: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
+  const validTone: EventTone | null = tone !== null && EVENT_TONES.includes(tone as EventTone) ? tone as EventTone : null;
   const module = moduleId === null || moduleId.length === 0 ? null : moduleId;
   const person = actor === null || actor.length === 0 ? null : actor;
-  return herkunft === null && ton === null && module === null && person === null
+  return validOrigin === null && validTone === null && module === null && person === null
     ? undefined
-    : { origin: herkunft, module: module, tone: ton, person };
+    : { origin: validOrigin, module: module, tone: validTone, person };
 };
 
 export const parseDashboardRoute = (pathname: string, search = ""): DashboardRoute => {

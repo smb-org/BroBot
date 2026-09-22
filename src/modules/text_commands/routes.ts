@@ -55,7 +55,7 @@ const param = (context: { req: { param: (name: string) => string | undefined } }
 
 textCommandRoutes.get("/commands", async (context) => {
   const repository = createTextCommandRepository(context.env.DB, context.get("authorizeMutation"));
-  return context.json({ befehle: await repository.list(param(context, "channelId")) });
+  return context.json({ commands: await repository.list(param(context, "channelId")) });
 });
 
 textCommandRoutes.post("/commands", async (context) => {
@@ -68,9 +68,9 @@ textCommandRoutes.post("/commands", async (context) => {
     context.get("prepareModuleAudit"),
   );
   const channelId = param(context, "channelId");
-  const angelegt = await repository.anlegen({ channelId, ...body, text: body.text ?? "", now: nowIso() }, context.get("actor"));
-  if (angelegt.ok) return context.json({ befehl: { ...body, channelId, lastUsedAt: null } }, 201);
-  return angelegt.reason === "existiert"
+  const created = await repository.create({ channelId, ...body, text: body.text ?? "", now: nowIso() }, context.get("actor"));
+  if (created.ok) return context.json({ command: { ...body, channelId, lastUsedAt: null } }, 201);
+  return created.reason === "existiert"
     ? context.json({ error: "Der Befehl existiert bereits." }, 409)
     : context.json({ error: "Der Befehl darf nicht angelegt werden." }, 403);
 });
@@ -85,15 +85,15 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   );
   const channelId = param(context, "channelId");
   const oldName = param(context, "name");
-  const before = await repository.finden(channelId, oldName);
+  const before = await repository.find(channelId, oldName);
   if (before === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   const newName = body.name ?? before.name;
   if (!validCommandName(newName)) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
   const contentChanged = Object.keys(body).some((key) => key !== "enabled");
   if (contentChanged && context.get("channelRole") === "operator") return managementDenied(context);
-  const art = body.kind ?? before.kind;
-  const text = art === "list" ? "" : body.text ?? before.text;
-  if (art === "text" && text.trim().length === 0) {
+  const kind = body.kind ?? before.kind;
+  const text = kind === "list" ? "" : body.text ?? before.text;
+  if (kind === "text" && text.trim().length === 0) {
     return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
   }
   const cooldownSeconds = body.cooldownSeconds ?? before.cooldownSeconds;
@@ -101,26 +101,26 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const authorizeMutation = contentChanged
     ? context.get("authorizeManagementMutation")
     : context.get("authorizeMutation");
-  const geaendert = await createTextCommandRepository(
+  const changed = await createTextCommandRepository(
     context.env.DB,
     authorizeMutation,
     context.get("prepareModuleAudit"),
   ).change({
     channelId,
     name: oldName,
-    neuerName: newName,
+    newName,
     text,
-    kind: art,
+    kind,
     cooldownSeconds,
     minimumTier: minimumTier,
     enabled: body.enabled ?? before.enabled,
-    nurSchalter: !contentChanged,
+    onlyToggle: !contentChanged,
     now: nowIso(),
   }, context.get("actor"));
-  if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, kind: art, cooldownSeconds, minimumTier: minimumTier, enabled: body.enabled ?? before.enabled } });
-  if (geaendert.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
-  if (geaendert.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
-  if (geaendert.reason === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
+  if (changed.ok) return context.json({ command: { ...before, ...body, channelId, name: newName, text, kind, cooldownSeconds, minimumTier: minimumTier, enabled: body.enabled ?? before.enabled } });
+  if (changed.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (changed.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
+  if (changed.reason === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });
 
@@ -132,12 +132,12 @@ textCommandRoutes.delete("/commands/:name", async (context) => {
   );
   const channelId = param(context, "channelId");
   const name = param(context, "name");
-  if (await repository.finden(channelId, name) === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (await repository.find(channelId, name) === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (context.get("channelRole") === "operator") return managementDenied(context);
-  const geloescht = await repository.delete(channelId, name, context.get("actor"), nowIso());
-  if (geloescht.ok) return new Response(null, { status: 204 });
-  if (geloescht.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
-  if (geloescht.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);
-  if (geloescht.reason === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
+  const deleted = await repository.delete(channelId, name, context.get("actor"), nowIso());
+  if (deleted.ok) return new Response(null, { status: 204 });
+  if (deleted.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (deleted.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);
+  if (deleted.reason === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });

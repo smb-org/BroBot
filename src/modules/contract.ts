@@ -3,7 +3,7 @@ import type { ComponentType } from "react";
 import type { z } from "zod";
 import type { ChannelRole } from "../contracts/values";
 
-export { kuerzeAuf200Zeichen } from "../text";
+export { truncateTo200Chars } from "../text";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
 export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";
@@ -16,9 +16,33 @@ export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "
  * question that today goes unanswered everywhere: "Raid detected, why was
  * there no shoutout?"
  */
+/**
+ * The keys a diagnostic detail may carry. Closed on purpose: the detail lands in
+ * `event_log.detail_json` and the interface reads it back, so it is wire data.
+ * While this was `Record<string, ...>`, German keys survived four renaming
+ * passes here -- each one found by accident, because a scanner only sees the
+ * shapes it was taught, and every new way of building the object slipped past
+ * it. A union is seen by the compiler at every construction site, however the
+ * object is assembled.
+ *
+ * Adding a key means adding it here, and whoever adds it sees its neighbours.
+ */
+export type ModuleDiagnosticDetailKey =
+  | "action" | "allowed" | "arguments" | "cause" | "count" | "current"
+  | "currentTier" | "missing"
+  | "duration" | "endsAt" | "gifter" | "kind" | "lastAdBreakAt" | "message"
+  | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person"
+  | "reason" | "recipient" | "remainingSeconds" | "requiredTier" | "response"
+  | "scheduledAt" | "scheduledFor" | "scope" | "seconds" | "source"
+  | "sourceChannelId" | "startedAt" | "status" | "target" | "targetChannelId"
+  | "text" | "threshold" | "tier" | "triggerLogin" | "type" | "viewers";
+
 export interface ModuleDiagnostic {
   code: string;
-  detail?: Readonly<Record<string, string | number | boolean | null | readonly ModuleChatStatus[]>>;
+  detail?: Readonly<Partial<Record<
+    ModuleDiagnosticDetailKey,
+    string | number | boolean | null | readonly ModuleChatStatus[]
+  >>>;
 }
 
 /** A semantically well-named module action for the host to execute. */

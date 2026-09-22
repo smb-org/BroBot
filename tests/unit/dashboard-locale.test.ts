@@ -68,10 +68,10 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.moderation.timeout", {
       person: "Alice", moderator: "Mod", duration: 300, reason: "Spam",
     })).toBe("Alice für 300 Sekunden getimeoutet von Mod: Spam");
-    expect(eventToneEntries["channel_events.moderation.timeout"]).toMatchObject({ familie: "moderation", tier: "voll", zahlSchluessel: "duration" });
-    expect(eventToneEntries["channel_events.moderation.untimeout"]).toMatchObject({ familie: "moderation", tier: "gezeichnet" });
-    expect(eventToneEntries["channel_events.moderation.unban"]).toMatchObject({ familie: "moderation", tier: "gezeichnet" });
-    expect(eventToneEntries["channel_events.moderation.unbekannt"]).toMatchObject({ familie: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.moderation.timeout"]).toMatchObject({ family: "moderation", tier: "voll", numberKey: "duration" });
+    expect(eventToneEntries["channel_events.moderation.untimeout"]).toMatchObject({ family: "moderation", tier: "gezeichnet" });
+    expect(eventToneEntries["channel_events.moderation.unban"]).toMatchObject({ family: "moderation", tier: "gezeichnet" });
+    expect(eventToneEntries["channel_events.moderation.unbekannt"]).toMatchObject({ family: "moderation", tier: "voll" });
 
     setBrowserLanguage("en-US");
     expect(eventText("channel_events.moderation.unbekannt", { action: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
@@ -86,7 +86,7 @@ describe("dashboard locale", () => {
       "channel_events.chat.community_gift", "channel_events.chat.ankuendigung", "channel_events.chat.unbekannt",
       "channel_events.moderation.ban", "channel_events.moderation.timeout", "channel_events.moderation.untimeout",
       "channel_events.moderation.unban", "channel_events.moderation.delete", "channel_events.moderation.warn",
-      "channel_events.moderation.unbekannt", "channel_events.automod.halte", "channel_events.verdacht.nachricht",
+      "channel_events.moderation.unbekannt", "channel_events.automod.halte", "channel_events.verdacht.message",
       "channel_events.verdacht.einstufung", "channel_events.verdacht.entwarnung", "raid.outgoing", "raid.shoutout", "raid.ungueltig", "shoutout.unterdrueckt",
       "ads.ankuendigung", "ads.uebersprungen", "ads.vorwarnung.angekuendigt", "ads.vorwarnung.kein_termin",
       "ads.vorwarnung.zu_spaet", "ads.vorwarnung.pause_begonnen", "ads.vorwarnung.termin_verschoben",
@@ -97,20 +97,20 @@ describe("dashboard locale", () => {
 
     expect(Object.keys(eventToneEntries).sort()).toEqual([...codes].sort());
     expect(eventToneEntries["channel_events.chat.community_gift"]).toEqual({
-      familie: "gemeinschaft", tier: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "count",
+      family: "gemeinschaft", tier: "voll", word: { de: "Gift", en: "Gift" }, numberKey: "count",
     });
     expect(eventToneEntries["channel_events.raid.incoming"]).toEqual({
-      familie: "raid", tier: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "viewers",
+      family: "raid", tier: "voll", word: { de: "Raid", en: "Raid" }, numberKey: "viewers",
     });
     expect(eventToneEntries["channel_events.moderation.untimeout"]).toEqual({
-      familie: "moderation", tier: "gezeichnet", wort: { de: "Entsperrt", en: "Untimeout" }, zahlSchluessel: null,
+      family: "moderation", tier: "gezeichnet", word: { de: "Entsperrt", en: "Untimeout" }, numberKey: null,
     });
     expect(eventToneEntries["host.chat.gesendet"]).toEqual({
-      familie: "betrieb", tier: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, tone: "info",
+      family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info",
     });
     for (const code of codes) {
-      expect(eventToneEntries[code].wort.de.length).toBeLessThanOrEqual(12);
-      expect(eventToneEntries[code].wort.en.length).toBeLessThanOrEqual(12);
+      expect(eventToneEntries[code].word.de.length).toBeLessThanOrEqual(12);
+      expect(eventToneEntries[code].word.en.length).toBeLessThanOrEqual(12);
     }
   });
 
@@ -133,7 +133,7 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.automod.halte", {
       person: "Alice", reason: "aggressive", text: "Nachricht",
     })).toBe("AutoMod hielt die Nachricht von Alice wegen aggressive: Nachricht");
-    expect(eventText("channel_events.verdacht.nachricht", {
+    expect(eventText("channel_events.verdacht.message", {
       person: "Alice", einstufung: "restricted / ban_evader / possible", text: "Nachricht",
     })).toBe("Nachricht von auffälligem Nutzer Alice (restricted / ban_evader / possible): Nachricht");
     expect(eventText("channel_events.verdacht.einstufung", {
@@ -142,10 +142,10 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.verdacht.entwarnung", {
       person: "Alice", einstufung: "none", moderator: "Mod",
     })).toBe("Einstufung von Alice aufgehoben von Mod");
-    expect(eventToneEntries["channel_events.automod.halte"]).toMatchObject({ familie: "moderation", tier: "voll" });
-    expect(eventToneEntries["channel_events.verdacht.nachricht"]).toMatchObject({ familie: "moderation", tier: "voll" });
-    expect(eventToneEntries["channel_events.verdacht.einstufung"]).toMatchObject({ familie: "moderation", tier: "voll" });
-    expect(eventToneEntries["channel_events.verdacht.entwarnung"]).toMatchObject({ familie: "moderation", tier: "gezeichnet" });
+    expect(eventToneEntries["channel_events.automod.halte"]).toMatchObject({ family: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.verdacht.message"]).toMatchObject({ family: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.verdacht.einstufung"]).toMatchObject({ family: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.verdacht.entwarnung"]).toMatchObject({ family: "moderation", tier: "gezeichnet" });
 
     setBrowserLanguage("en-US");
     expect(eventText("channel_events.automod.halte", {

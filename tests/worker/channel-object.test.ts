@@ -13,7 +13,7 @@ import type {
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
 
-const gueltigerPrinzipal = (
+const validPrincipal = (
   overrides: Partial<RealtimePanelPrincipal> = {},
 ): RealtimePanelPrincipal => ({
   v: 1,
@@ -123,7 +123,7 @@ describe("ChannelObject realtime path", () => {
   it("rejects a principal for a foreign channel with 403", () => {
     const object = objectFor([]);
 
-    expect(object.fetch(upgradeRequest(gueltigerPrinzipal({ channelId: "kanal-b" }))).status).toBe(403);
+    expect(object.fetch(upgradeRequest(validPrincipal({ channelId: "kanal-b" }))).status).toBe(403);
   });
 
   it("rejects a publish for a foreign channel", () => {
@@ -135,26 +135,26 @@ describe("ChannelObject realtime path", () => {
   });
 
   it("sends nothing more to an expired connection", () => {
-    const abgelaufen = socketFor(gueltigerPrinzipal({ expiresAt: "2000-01-01T00:00:00.000Z" }));
-    const gueltig = socketFor(gueltigerPrinzipal({ userId: "user-2", sessionId: "session-2" }));
-    const object = objectFor([abgelaufen, gueltig]);
+    const expired = socketFor(validPrincipal({ expiresAt: "2000-01-01T00:00:00.000Z" }));
+    const valid = socketFor(validPrincipal({ userId: "user-2", sessionId: "session-2" }));
+    const object = objectFor([expired, valid]);
 
     object.publish(eventMessage);
 
-    expect(abgelaufen.send.mock.calls).toHaveLength(0);
-    expect(abgelaufen.close.mock.calls).toEqual([[4001, "Berechtigung abgelaufen"]]);
-    expect(gueltig.send.mock.calls).toHaveLength(1);
+    expect(expired.send.mock.calls).toHaveLength(0);
+    expect(expired.close.mock.calls).toEqual([[4001, "Berechtigung abgelaufen"]]);
+    expect(valid.send.mock.calls).toHaveLength(1);
   });
 
   it("revokes only the connection of the affected user", async () => {
-    const betroffener = socketFor(gueltigerPrinzipal());
-    const anderer = socketFor(gueltigerPrinzipal({ userId: "user-2", sessionId: "session-2" }));
-    const object = objectFor([betroffener, anderer]);
+    const affected = socketFor(validPrincipal());
+    const other = socketFor(validPrincipal({ userId: "user-2", sessionId: "session-2" }));
+    const object = objectFor([affected, other]);
 
     await object.revokeUser("user-1");
 
-    expect(betroffener.close.mock.calls).toEqual([[4003, "Kanalzugriff widerrufen"]]);
-    expect(anderer.close.mock.calls).toHaveLength(0);
+    expect(affected.close.mock.calls).toEqual([[4003, "Kanalzugriff widerrufen"]]);
+    expect(other.close.mock.calls).toHaveLength(0);
   });
 
   it("keeps two deadlines separate, processes the earlier one and keeps the later one", async () => {
@@ -186,7 +186,7 @@ describe("ChannelObject realtime path", () => {
     vi.useFakeTimers();
     const jetzt = Date.parse("2026-09-21T12:00:00.000Z");
     vi.setSystemTime(jetzt);
-    const socket = socketFor(gueltigerPrinzipal());
+    const socket = socketFor(validPrincipal());
     const sockets = [socket];
     const prepare = vi.fn(() => {
       const statement = {

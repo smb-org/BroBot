@@ -17,8 +17,8 @@ const json = async <T>(response: Response): Promise<T> => {
 
 export const loadTextCommands = async (channelId: string): Promise<TextCommand[]> => {
   const response = await fetch(pathFor(channelId));
-  const body = await json<{ befehle: TextCommand[] }>(response);
-  return body.befehle;
+  const body = await json<{ commands: TextCommand[] }>(response);
+  return body.commands;
 };
 
 const mutation = async (

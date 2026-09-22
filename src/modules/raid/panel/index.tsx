@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import type { RaidSettings } from "../contracts";
-import { ladeRaidEinstellungen, speichereRaidEinstellungen } from "./service";
+import { loadRaidSettings, saveRaidSettings } from "./service";
 import { raidPanelTexts } from "./locale";
 
 interface RaidPanelProperties {
@@ -30,13 +30,13 @@ export const RaidPanel = ({
 
   useEffect(() => {
     let active = true;
-    void ladeRaidEinstellungen(channelId).then((loaded) => {
+    void loadRaidSettings(channelId).then((loaded) => {
       if (active) setSettings(loaded);
     }).catch(() => {
-      if (active) setError(labels.fehler);
+      if (active) setError(labels.error);
     });
     return () => { active = false; };
-  }, [channelId, labels.fehler]);
+  }, [channelId, labels.error]);
 
   if (settings === null) return <p className="loading-line">{error ?? labels.load}</p>;
 
@@ -57,31 +57,31 @@ export const RaidPanel = ({
     setError(null);
     setSaved(false);
     try {
-      await speichereRaidEinstellungen(channelId, {
+      await saveRaidSettings(channelId, {
         ...settings,
         shoutoutThreshold: shoutoutThreshold,
         textThreshold: textThreshold,
       });
       setSaved(true);
     } catch {
-      setError(labels.fehler);
+      setError(labels.error);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <section className="module-stack" aria-label={labels.titel}>
-      {!canManage ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
-      <section className="config-section" aria-label={labels.schwelleAbschnitt}>
-        <div className="section-heading"><h2>{labels.schwelleAbschnitt}</h2></div>
+    <section className="module-stack" aria-label={labels.title}>
+      {!canManage ? <p className="sperrgrund">{labels.managementLocked}</p> : null}
+      <section className="config-section" aria-label={labels.thresholdSection}>
+        <div className="section-heading"><h2>{labels.thresholdSection}</h2></div>
         <label className="config-field config-field--breit">
           <span>{labels.shoutoutEnabled}</span>
           <button
             className="switch"
             type="button"
             role="switch"
-            aria-label={labels.schalter(settings.shoutoutEnabled)}
+            aria-label={labels.toggleLabel(settings.shoutoutEnabled)}
             aria-checked={settings.shoutoutEnabled}
             aria-busy={busy}
             disabled={disabled}
@@ -103,7 +103,7 @@ export const RaidPanel = ({
             disabled={shoutoutThresholdDisabled}
             onChange={(event) => { setSaved(false); setNumberErrors({ ...numberErrors, shoutoutThreshold: false }); setSettings({ ...settings, shoutoutThreshold: event.target.value === "" ? "" : Number(event.target.value) }); }}
           />
-          {numberErrors.shoutoutThreshold ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
+          {numberErrors.shoutoutThreshold ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
         </label>
         <label className="config-field config-field--schmal">
           {labels.textThreshold}
@@ -118,34 +118,34 @@ export const RaidPanel = ({
             disabled={disabled}
             onChange={(event) => { setSaved(false); setNumberErrors({ ...numberErrors, textThreshold: false }); setSettings({ ...settings, textThreshold: event.target.value === "" ? "" : Number(event.target.value) }); }}
           />
-          {numberErrors.textThreshold ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
+          {numberErrors.textThreshold ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
         </label>
         <label className="config-field config-field--breit">
-          {labels.vollerText}
+          {labels.fullText}
           <textarea
-            aria-label={labels.vollerText}
+            aria-label={labels.fullText}
             value={settings.textLong}
             disabled={disabled}
             onChange={(event) => { setSaved(false); setSettings({ ...settings, textLong: event.target.value }); }}
           />
-          <span className="config-field__hint">{labels.platzhalterVoll}</span>
+          <span className="config-field__hint">{labels.placeholderFull}</span>
         </label>
         <label className="config-field config-field--breit">
-          {labels.kurzerText}
+          {labels.shortText}
           <textarea
-            aria-label={labels.kurzerText}
+            aria-label={labels.shortText}
             value={settings.textShort}
             disabled={disabled}
             onChange={(event) => { setSaved(false); setSettings({ ...settings, textShort: event.target.value }); }}
           />
-          <span className="config-field__hint">{labels.platzhalterKlein}</span>
+          <span className="config-field__hint">{labels.placeholderShort}</span>
         </label>
       </section>
-      <section className="config-section" aria-label={labels.aktionen}>
-        <div className="section-heading"><h2>{labels.aktionen}</h2></div>
+      <section className="config-section" aria-label={labels.actions}>
+        <div className="section-heading"><h2>{labels.actions}</h2></div>
         <div className="form-actions">
           <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={disabled}>{labels.save}</button>
-          {saved ? <span className="muted" role="status">{labels.gespeichert}</span> : null}
+          {saved ? <span className="muted" role="status">{labels.saved}</span> : null}
         </div>
       </section>
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}

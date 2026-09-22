@@ -101,18 +101,18 @@ export interface LogCursor {
   id: string;
 }
 
-const eventCodesForOrigin = (herkunft: PanelEventFilters["origin"]): string[] => {
-  if (herkunft === null) return [];
-  const betrieb = herkunft === "module";
+const eventCodesForOrigin = (origin: PanelEventFilters["origin"]): string[] => {
+  if (origin === null) return [];
+  const operational = origin === "module";
   return Object.entries(eventToneEntries)
-    .filter(([, metadata]) => (metadata.familie === "betrieb") === betrieb)
+    .filter(([, metadata]) => (metadata.family === "betrieb") === operational)
     .map(([code]) => code);
 };
 
-const eventCodesForTone = (ton: PanelEventFilters["tone"]): string[] => {
-  if (ton === null) return [];
+const eventCodesForTone = (tone: PanelEventFilters["tone"]): string[] => {
+  if (tone === null) return [];
   return Object.entries(eventToneEntries)
-    .filter(([, metadata]) => metadata.tone === ton)
+    .filter(([, metadata]) => metadata.tone === tone)
     .map(([code]) => code);
 };
 

@@ -918,7 +918,7 @@ describe("Dashboard skeleton", () => {
   });
 
   it("explicitly warns about lockout when revoking one's own access", async () => {
-    const frage = vi.fn((meldung: string) => { void meldung; return false; });
+    const frage = vi.fn((message: string) => { void message; return false; });
     await showMembers({
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
@@ -1462,7 +1462,7 @@ describe("Dashboard skeleton", () => {
 
   it("keeps the successful reload state against a late initial response", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    const neuerMember = { userId: "new-user", login: "new-user", displayName: "Neuer Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" };
+    const newMember = { userId: "new-user", login: "new-user", displayName: "Neuer Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" };
     const delayedMember = { userId: "late-user", login: "late-user", displayName: "Verspäteter Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
     let resolveLateInitial: ((response: Response) => void) | undefined;
     const lateInitial = new Promise<Response>((resolve) => {
@@ -1474,11 +1474,11 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (url.pathname === "/api/channels/kanal-a/members/search") return Promise.resolve(jsonResponse({ user: { userId: "new-user", login: "neue-person", displayName: "Neuer Stand", profileImageUrl: null } }));
-      if (url.pathname === "/api/channels/kanal-a/members" && init?.method === "POST") return Promise.resolve(jsonResponse({ member: neuerMember }, 201));
+      if (url.pathname === "/api/channels/kanal-a/members" && init?.method === "POST") return Promise.resolve(jsonResponse({ member: newMember }, 201));
       if (url.pathname === "/api/channels/kanal-a/members") {
         memberRequestCount += 1;
         if (memberRequestCount === 1) return lateInitial;
-        return Promise.resolve(jsonResponse({ members: [neuerMember], broadcasterCount: 1, viewerUserId: "new-user", nextCursor: null }));
+        return Promise.resolve(jsonResponse({ members: [newMember], broadcasterCount: 1, viewerUserId: "new-user", nextCursor: null }));
       }
       return Promise.resolve(jsonResponse({}, 404));
     });

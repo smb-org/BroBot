@@ -31,33 +31,33 @@ export const AdsPanel = ({
   const labels = adsPanelTexts(language);
   const resolvedLanguage = language ?? (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("de") ? "de" : "en");
   const [settings, setSettings] = useState<AdsPanelSettings | null>(null);
-  const [zeitplan, setZeitplan] = useState<AdsScheduleResponse | null>(null);
+  const [schedule, setSchedule] = useState<AdsScheduleResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [snoozeBusy, setSnoozeBusy] = useState(false);
-  const [vorlaufError, setVorlaufError] = useState(false);
+  const [leadSecondsError, setLeadSecondsError] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([loadAdSettings(channelId), loadAdsSchedule(channelId)]).then(([loadedSettings, loadedZeitplan]) => {
+    void Promise.all([loadAdSettings(channelId), loadAdsSchedule(channelId)]).then(([loadedSettings, loadedSchedule]) => {
       if (!active) return;
       setSettings(loadedSettings);
-      setZeitplan(loadedZeitplan);
+      setSchedule(loadedSchedule);
     }).catch(() => {
-      if (active) setError(labels.fehler);
+      if (active) setError(labels.error);
     });
     return () => { active = false; };
-  }, [channelId, labels.fehler]);
+  }, [channelId, labels.error]);
 
-  if (settings === null || zeitplan === null) return <p className="loading-line">{error ?? labels.load}</p>;
+  if (settings === null || schedule === null) return <p className="loading-line">{error ?? labels.load}</p>;
 
   const save = async (): Promise<void> => {
     if (settings.leadSeconds === "") {
-      setVorlaufError(true);
+      setLeadSecondsError(true);
       return;
     }
-    setVorlaufError(false);
+    setLeadSecondsError(false);
     setBusy(true);
     setError(null);
     setSaved(false);
@@ -65,26 +65,26 @@ export const AdsPanel = ({
       await saveAdSettings(channelId, { ...settings, leadSeconds: settings.leadSeconds });
       setSaved(true);
     } catch {
-      setError(labels.fehler);
+      setError(labels.error);
     } finally {
       setBusy(false);
     }
   };
 
-  const snoozeCount = zeitplan.schedule.snoozeCount;
-  const snoozeButtonDisabled = snoozeBusy || !zeitplan.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
-  const snoozeReason = !zeitplan.snoozeScopeAvailable
-    ? labels.snoozeScopeFehlt
+  const snoozeCount = schedule.schedule.snoozeCount;
+  const snoozeButtonDisabled = snoozeBusy || !schedule.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
+  const snoozeReason = !schedule.snoozeScopeAvailable
+    ? labels.snoozeScopeMissing
     : snoozeCount === null
-      ? labels.snoozeUnbekannt
-      : snoozeCount <= 0 ? labels.snoozeKeine : null;
+      ? labels.snoozeUnknown
+      : snoozeCount <= 0 ? labels.snoozeNone : null;
   const snooze = async (): Promise<void> => {
     setSnoozeBusy(true);
     setError(null);
     try {
-      setZeitplan(await snoozeAds(channelId));
+      setSchedule(await snoozeAds(channelId));
     } catch {
-      setError(labels.fehler);
+      setError(labels.error);
     } finally {
       setSnoozeBusy(false);
     }
@@ -92,28 +92,28 @@ export const AdsPanel = ({
 
   const snoozeLabel = labels.snoozeButton(
     snoozeCount === null ? "—" : String(snoozeCount),
-    formatTimestamp(zeitplan.schedule.snoozeRefreshAt, resolvedLanguage),
+    formatTimestamp(schedule.schedule.snoozeRefreshAt, resolvedLanguage),
   );
 
   return (
-    <section className="module-stack" aria-label={labels.titel}>
+    <section className="module-stack" aria-label={labels.title}>
       <section className="config-section" aria-label={labels.scheduleSection}>
         <div className="section-heading"><h2>{labels.scheduleSection}</h2></div>
-        {zeitplan.schedule.nextAdAt === null ? <p className="empty-state">{labels.keineWerbung}</p> : (
+        {schedule.schedule.nextAdAt === null ? <p className="empty-state">{labels.noAdBreak}</p> : (
           <div className="tabelle-wrap">
             <table className="tabelle" aria-label={labels.scheduleSection}>
-              <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.duration}</th></tr></thead>
+              <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody><tr>
-                <td className="zahl">{formatTimestamp(zeitplan.schedule.nextAdAt, resolvedLanguage)}</td>
-                <td className="zahl">{zeitplan.schedule.duration === null ? "—" : `${String(zeitplan.schedule.duration)} s`}</td>
+                <td className="zahl">{formatTimestamp(schedule.schedule.nextAdAt, resolvedLanguage)}</td>
+                <td className="zahl">{schedule.schedule.duration === null ? "—" : `${String(schedule.schedule.duration)} s`}</td>
               </tr></tbody>
             </table>
           </div>
         )}
       </section>
 
-      <section className="config-section" aria-label={labels.automatischAbschnitt}>
-        <div className="section-heading"><h2>{labels.automatischAbschnitt}</h2></div>
+      <section className="config-section" aria-label={labels.automaticSection}>
+        <div className="section-heading"><h2>{labels.automaticSection}</h2></div>
         <label className="config-field config-field--breit">
           {labels.automatic}
           <textarea
@@ -121,12 +121,12 @@ export const AdsPanel = ({
             disabled={!canManage || busy}
             onChange={(event) => { setSaved(false); setSettings({ ...settings, automatic: event.target.value }); }}
           />
-          <span className="config-field__hint">{labels.platzhalter}</span>
+          <span className="config-field__hint">{labels.durationPlaceholderHint}</span>
         </label>
       </section>
 
-      <section className="config-section" aria-label={labels.manuellAbschnitt}>
-        <div className="section-heading"><h2>{labels.manuellAbschnitt}</h2></div>
+      <section className="config-section" aria-label={labels.manualSection}>
+        <div className="section-heading"><h2>{labels.manualSection}</h2></div>
         <label className="config-field config-field--breit">
           {labels.manual}
           <textarea
@@ -134,19 +134,19 @@ export const AdsPanel = ({
             disabled={!canManage || busy}
             onChange={(event) => { setSaved(false); setSettings({ ...settings, manual: event.target.value }); }}
           />
-          <span className="config-field__hint">{labels.platzhalter}</span>
+          <span className="config-field__hint">{labels.durationPlaceholderHint}</span>
         </label>
       </section>
 
-      <section className="config-section" aria-label={labels.vorwarnungAbschnitt}>
-        <div className="section-heading"><h2>{labels.vorwarnungAbschnitt}</h2></div>
+      <section className="config-section" aria-label={labels.warningSection}>
+        <div className="section-heading"><h2>{labels.warningSection}</h2></div>
         <label className="config-field config-field--breit">
-          <span>{labels.vorwarnungAktiv}</span>
+          <span>{labels.warningEnabled}</span>
           <button
             className="switch"
             type="button"
             role="switch"
-            aria-label={labels.vorwarnungAktiv}
+            aria-label={labels.warningEnabled}
             aria-checked={settings.prewarning}
             disabled={!canManage || busy}
             onClick={() => { setSaved(false); setSettings({ ...settings, prewarning: !settings.prewarning }); }}
@@ -162,11 +162,11 @@ export const AdsPanel = ({
             max="300"
             step="1"
             value={settings.leadSeconds}
-            aria-invalid={vorlaufError}
+            aria-invalid={leadSecondsError}
             disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setVorlaufError(false); setSettings({ ...settings, leadSeconds: event.target.value === "" ? "" : Number(event.target.value) }); }}
+            onChange={(event) => { setSaved(false); setLeadSecondsError(false); setSettings({ ...settings, leadSeconds: event.target.value === "" ? "" : Number(event.target.value) }); }}
           />
-          {vorlaufError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
+          {leadSecondsError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
         </label>
         <label className="config-field config-field--breit">
           {labels.prewarningText}
@@ -176,12 +176,12 @@ export const AdsPanel = ({
             disabled={!canManage || busy}
             onChange={(event) => { setSaved(false); setSettings({ ...settings, prewarningText: event.target.value }); }}
           />
-          <span className="config-field__hint">{labels.platzhalterVorwarnung}</span>
+          <span className="config-field__hint">{labels.warningPlaceholderHint}</span>
         </label>
       </section>
 
-      <section className="config-section" aria-label={labels.snoozeAbschnitt}>
-        <div className="section-heading"><h2>{labels.snoozeAbschnitt}</h2></div>
+      <section className="config-section" aria-label={labels.snoozeSection}>
+        <div className="section-heading"><h2>{labels.snoozeSection}</h2></div>
         <div className="form-actions">
           <button className="button button--primary" type="button" disabled={snoozeButtonDisabled} onClick={() => { void snooze(); }}>
             {snoozeLabel}
@@ -190,16 +190,16 @@ export const AdsPanel = ({
         {snoozeReason === null ? null : <p className="sperrgrund">{snoozeReason}</p>}
       </section>
 
-      <section className="config-section" aria-label={labels.letzteAbschnitt}>
-        <div className="section-heading"><h2>{labels.letzteAbschnitt}</h2></div>
-        {zeitplan.recentAdBreaks.length === 0 ? <p className="empty-state">{labels.keineLetzte}</p> : (
+      <section className="config-section" aria-label={labels.recentSection}>
+        <div className="section-heading"><h2>{labels.recentSection}</h2></div>
+        {schedule.recentAdBreaks.length === 0 ? <p className="empty-state">{labels.noRecent}</p> : (
           <div className="tabelle-wrap">
-            <table className="tabelle" aria-label={labels.letzteAbschnitt}>
-              <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.duration}</th></tr></thead>
-              <tbody>{zeitplan.recentAdBreaks.map((pause) => (
-                <tr key={`${pause.timestamp}-${String(pause.durationSeconds)}`}>
-                  <td className="zahl">{labels.letzteZeit(formatTimestamp(pause.timestamp, resolvedLanguage))}</td>
-                  <td className="zahl">{labels.letzteDauer(String(pause.durationSeconds))}</td>
+            <table className="tabelle" aria-label={labels.recentSection}>
+              <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
+              <tbody>{schedule.recentAdBreaks.map((adBreak) => (
+                <tr key={`${adBreak.timestamp}-${String(adBreak.durationSeconds)}`}>
+                  <td className="zahl">{labels.recentTime(formatTimestamp(adBreak.timestamp, resolvedLanguage))}</td>
+                  <td className="zahl">{labels.recentDuration(String(adBreak.durationSeconds))}</td>
                 </tr>
               ))}</tbody>
             </table>
@@ -207,11 +207,11 @@ export const AdsPanel = ({
         )}
       </section>
 
-      <section className="config-section" aria-label={labels.aktionen}>
-        <div className="section-heading"><h2>{labels.aktionen}</h2></div>
+      <section className="config-section" aria-label={labels.actions}>
+        <div className="section-heading"><h2>{labels.actions}</h2></div>
         <div className="form-actions">
           <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManage || busy}>{labels.save}</button>
-          {saved ? <span className="muted" role="status">{labels.gespeichert}</span> : null}
+          {saved ? <span className="muted" role="status">{labels.saved}</span> : null}
         </div>
       </section>
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}

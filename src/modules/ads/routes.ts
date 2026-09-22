@@ -32,10 +32,10 @@ const responseFor = async (
   db: D1Database,
   channelId: string,
   schedule: NonNullable<AdScheduleResult["schedule"]>,
-  snoozeScopeVorhanden: boolean,
+  snoozeScopeAvailable: boolean,
 ): Promise<AdsScheduleResponse> => ({
   schedule,
-  snoozeScopeAvailable: snoozeScopeVorhanden,
+  snoozeScopeAvailable,
   recentAdBreaks: await listLastAdBreaks(db, channelId),
 });
 
@@ -58,14 +58,14 @@ const log = async (
 };
 
 const snoozeOutcome = (result: SnoozeNextAdResult): AdDetail => ({
-  ausgang: result.snoozed ? "erfolgreich" : "fehlgeschlagen",
+  outcome: result.snoozed ? "erfolgreich" : "fehlgeschlagen",
   reason: result.reason,
   ...result.detail,
 });
 
 export const adsRoutes = new Hono<ModuleRouteEnvironment>();
 
-adsRoutes.get("/zeitplan", async (context) => {
+adsRoutes.get("/schedule", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const now = nowIso();
   const result = await getAdSchedule(context.env, channelId, now, context.get("getAppAccessToken"), fetch);
@@ -85,16 +85,16 @@ adsRoutes.get("/zeitplan", async (context) => {
     result.schedule,
     context.get("broadcasterHasScope"),
   );
-  const snoozeScopeVorhanden = await context.get("broadcasterHasScope")(context.env.DB, channelId, MANAGE_ADS_SCOPE);
-  return context.json(await responseFor(context.env.DB, channelId, result.schedule, snoozeScopeVorhanden));
+  const snoozeScopeAvailable = await context.get("broadcasterHasScope")(context.env.DB, channelId, MANAGE_ADS_SCOPE);
+  return context.json(await responseFor(context.env.DB, channelId, result.schedule, snoozeScopeAvailable));
 });
 
 adsRoutes.post("/snooze", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const now = nowIso();
   const triggerId = `werbung-snooze:${crypto.randomUUID()}`;
-  const scopeVorhanden = await context.get("broadcasterHasScope")(context.env.DB, channelId, MANAGE_ADS_SCOPE);
-  const result: SnoozeNextAdResult = scopeVorhanden
+  const scopeAvailable = await context.get("broadcasterHasScope")(context.env.DB, channelId, MANAGE_ADS_SCOPE);
+  const result: SnoozeNextAdResult = scopeAvailable
     ? await snoozeNextAd(context.env, channelId, now, context.get("getAppAccessToken"), fetch)
     : {
       snoozed: false,
@@ -118,5 +118,5 @@ adsRoutes.post("/snooze", async (context) => {
     result.schedule,
     context.get("broadcasterHasScope"),
   );
-  return context.json(await responseFor(context.env.DB, channelId, result.schedule, scopeVorhanden));
+  return context.json(await responseFor(context.env.DB, channelId, result.schedule, scopeAvailable));
 });

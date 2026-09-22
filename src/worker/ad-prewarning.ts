@@ -65,9 +65,9 @@ const channelObject = (
 const schedulerFor = (
   environment: AdPrewarningEnvironment,
   channelId: string,
-  eigener?: AdScheduler,
+  own?: AdScheduler,
 ): AdScheduler | null => {
-  if (eigener !== undefined) return eigener;
+  if (own !== undefined) return own;
   const stub = channelObject(environment, channelId);
   if (stub === null) return null;
   return {
@@ -110,10 +110,10 @@ const scopeMissing = async (
   triggerId: string,
   now: string,
   scheduler: AdScheduler | null,
-  diagnosenSchreiben = true,
+  shouldWriteDiagnostics = true,
 ): Promise<void> => {
   await clear(scheduler);
-  if (diagnosenSchreiben) {
+  if (shouldWriteDiagnostics) {
     await writeOne(environment, channelId, triggerId, now, "ads.vorwarnung.scope_fehlt", { scope: WARNING_SCOPE });
   }
 };
@@ -131,14 +131,14 @@ const settingRecord = async (
   triggerId: string,
   now: string,
   scheduler: AdScheduler | null,
-  diagnosenSchreiben = true,
+  shouldWriteDiagnostics = true,
 ): Promise<{ record: ChannelModuleRecord; settings: NonNullable<ReturnType<typeof moduleSettings>> } | null> => {
   const record = await getChannelModuleForChannel(environment.DB, channelId, MODULE_ID);
   const settings = moduleSettings(record);
   if (record === null || !record.enabled || settings === null) return null;
   const scopeState = await moduleBroadcasterScopeState(environment.DB, channelId, adsModule);
   if (scopeState.missing.length > 0) {
-    await scopeMissing(environment, channelId, triggerId, now, scheduler, diagnosenSchreiben);
+    await scopeMissing(environment, channelId, triggerId, now, scheduler, shouldWriteDiagnostics);
     return null;
   }
   return { record, settings };
@@ -148,7 +148,7 @@ const decisionCode = (decision: AdPrewarningDecision): string =>
   decision.kind === "announce" ? "ads.vorwarnung.angekuendigt" : `ads.vorwarnung.${decision.reason}`;
 
 const decisionDetail = (decision: AdPrewarningDecision): Readonly<Record<string, string | number | boolean | null>> => {
-  if (decision.kind === "announce") return { sekunden: decision.sekunden, termin: decision.terminAm };
+  if (decision.kind === "announce") return { seconds: decision.seconds, scheduledAt: decision.scheduledAt };
   return decision.detail;
 };
 
@@ -173,17 +173,17 @@ export const refreshAdPrewarning = async (
   triggerId: string,
   now: string,
   fetcher: typeof fetch = fetch,
-  bereitsGelesenerZeitplan?: AdScheduleResult,
-  diagnosenSchreiben = true,
+  alreadyFetchedSchedule?: AdScheduleResult,
+  shouldWriteDiagnostics = true,
 ): Promise<void> => {
   const scheduler = schedulerFor(environment, channelId);
-  const configured = await settingRecord(environment, channelId, triggerId, now, scheduler, diagnosenSchreiben);
+  const configured = await settingRecord(environment, channelId, triggerId, now, scheduler, shouldWriteDiagnostics);
   if (configured === null || !configured.settings.prewarning) {
     await clear(scheduler);
     return;
   }
 
-  const result = bereitsGelesenerZeitplan ?? await getAdSchedule(
+  const result = alreadyFetchedSchedule ?? await getAdSchedule(
     environment as unknown as Env,
     channelId,
     now,
@@ -192,9 +192,9 @@ export const refreshAdPrewarning = async (
   );
   if (!result.fetched || result.schedule === null) {
     if (result.reason === "unauthorized") {
-      await scopeMissing(environment, channelId, triggerId, now, scheduler, diagnosenSchreiben);
+      await scopeMissing(environment, channelId, triggerId, now, scheduler, shouldWriteDiagnostics);
     } else {
-      if (diagnosenSchreiben) {
+      if (shouldWriteDiagnostics) {
         await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
       }
     }
@@ -202,7 +202,7 @@ export const refreshAdPrewarning = async (
   }
   if (result.schedule.nextAdAt === null) {
     await clear(scheduler);
-    if (diagnosenSchreiben) {
+    if (shouldWriteDiagnostics) {
       await writeOne(environment, channelId, triggerId, now, "ads.vorwarnung.kein_termin");
     }
     return;
@@ -215,7 +215,7 @@ export const refreshAdPrewarning = async (
 export const processAdPrewarning = async (
   environment: AdPrewarningEnvironment,
   channelId: string,
-  geplantFaelligAmMs: number,
+  scheduledDueAtMs: number,
   triggerId = `werbung-vorwarnung:${crypto.randomUUID()}`,
   now = new Date().toISOString(),
   fetcher: typeof fetch = fetch,
@@ -241,11 +241,11 @@ export const processAdPrewarning = async (
     return;
   }
 
-  const entscheidung = decideAdPrewarning({
+  const decision = decideAdPrewarning({
     settings: configured.settings,
-    scopeVorhanden: true,
-    jetztAmMs: nowMsFrom(now),
-    geplantAmMs: geplantFaelligAmMs + configured.settings.leadSeconds * 1000,
+    scopeAvailable: true,
+    nowAtMs: nowMsFrom(now),
+    plannedAtMs: scheduledDueAtMs + configured.settings.leadSeconds * 1000,
     schedule: {
       nextAdAt: result.schedule.nextAdAt,
       lastAdAt: result.schedule.lastAdAt,
@@ -253,18 +253,18 @@ export const processAdPrewarning = async (
   });
 
   const diagnostics: ModuleDiagnostic[] = [{
-    code: decisionCode(entscheidung),
-    detail: decisionDetail(entscheidung),
+    code: decisionCode(decision),
+    detail: decisionDetail(decision),
   }];
-  if (entscheidung.kind === "announce") {
-    const sent = await sendChatMessage(environment, channelId, entscheidung.text, undefined, fetcher);
+  if (decision.kind === "announce") {
+    const sent = await sendChatMessage(environment, channelId, decision.text, undefined, fetcher);
     diagnostics.push(sent.sent
       ? { code: "host.chat.gesendet", detail: sent.detail }
       : { code: "host.chat.fehlgeschlagen", detail: { reason: sent.reason, ...sent.detail } });
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 
-  if (shouldReplan(entscheidung)) {
+  if (shouldReplan(decision)) {
     await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
   }
 };

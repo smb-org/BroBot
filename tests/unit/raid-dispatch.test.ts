@@ -9,7 +9,7 @@ import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { insertAppAccessToken, insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-const SCHLUESSEL = JSON.stringify({
+const KEY_RING = JSON.stringify({
   active: { id: "aktiv", key: Buffer.from(new Uint8Array(32).fill(5)).toString("base64url") },
   retired: [],
 });
@@ -31,15 +31,15 @@ describe("Raid dispatch", () => {
         userId: "bot-1",
         login: "brobot",
         scopesJson: "[]",
-        accessTokenCiphertext: await encryptJson({ token: "bot-token" }, parseKeyRing(SCHLUESSEL)),
-        refreshTokenCiphertext: await encryptJson({ token: "refresh" }, parseKeyRing(SCHLUESSEL)),
+        accessTokenCiphertext: await encryptJson({ token: "bot-token" }, parseKeyRing(KEY_RING)),
+        refreshTokenCiphertext: await encryptJson({ token: "refresh" }, parseKeyRing(KEY_RING)),
         expiresAt: "2026-09-20T00:00:00.000Z",
         createdAt: "2026-09-19T00:00:00.000Z",
         updatedAt: "2026-09-19T00:00:00.000Z",
       });
       await insertAppAccessToken(
         database,
-        await encryptJson({ token: "app-token" }, parseKeyRing(SCHLUESSEL)),
+        await encryptJson({ token: "app-token" }, parseKeyRing(KEY_RING)),
         "2099-09-21T00:00:00.000Z",
         "2026-09-19T00:00:00.000Z",
         "2026-09-19T00:00:00.000Z",
@@ -56,7 +56,7 @@ describe("Raid dispatch", () => {
         DB: database as unknown as D1Database,
         TWITCH_CLIENT_ID: "client-id",
         TWITCH_CLIENT_SECRET: "client-secret",
-        TOKEN_ENCRYPTION_KEYS: SCHLUESSEL,
+        TOKEN_ENCRYPTION_KEYS: KEY_RING,
       }, {
         channelId: "kanal-a",
         subscriptionType: "channel.raid",
@@ -78,7 +78,7 @@ describe("Raid dispatch", () => {
         "host.shoutout.fehlgeschlagen",
         "host.chat.gesendet",
       ]);
-      expect(jsonRecord(rows.results[1]?.detail_json ?? "{}")).toMatchObject({ ursache: "rate_limited", status: 429 });
+      expect(jsonRecord(rows.results[1]?.detail_json ?? "{}")).toMatchObject({ cause: "rate_limited", status: 429 });
       expect(jsonRecord(rows.results[2]?.detail_json ?? "{}").text).toEqual(expect.stringContaining("quelle"));
     } finally {
       database.close();
