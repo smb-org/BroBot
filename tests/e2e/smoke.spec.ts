@@ -7,7 +7,7 @@ test("dashboard and overlay load as separate surfaces", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ channels: [] }),
+      body: JSON.stringify({ channels: [], bot: { status: "connected", reason: null, updatedAt: "2026-09-20T08:00:00.000Z" } }),
     });
   });
   await page.goto("/");
@@ -82,7 +82,7 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
   await page.route("**/api/channels**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel] }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel], bot: channel.bot }) });
       return;
     }
     if (pathname === "/api/channels/kanal-e2e/overview") {
@@ -160,7 +160,7 @@ test("ListDetail shows the two-column form at 1280px, the second monitor next to
   await page.route("**/api/channels**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel] }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel], bot: channel.bot }) });
       return;
     }
     if (pathname === "/api/channels/kanal-e2e/overview") {

@@ -39,7 +39,7 @@ const setUpPlatform = (
 ): ReturnType<typeof vi.fn<typeof fetch>> => {
   const fetcher = vi.fn<typeof fetch>((input) => {
     const url = requestUrl(input);
-    if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], platformAdmin: platform }));
+    if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], bot: { status: "connected", reason: null, updatedAt: "2026-09-18T00:00:00.000Z" }, platformAdmin: platform }));
     if (url.pathname === "/api/platform") return Promise.resolve(response({ channels: [channel] }));
     if (url.pathname === "/api/platform/audit") return Promise.resolve(response(audit));
     if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(response(members));

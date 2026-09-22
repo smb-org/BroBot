@@ -46,7 +46,7 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
 const renderModulePage = (modules = moduleStates, channels = [channel]): void => {
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
     const path = requestUrl(input).pathname;
-    if (path === "/api/channels") return jsonResponse({ channels });
+    if (path === "/api/channels") return jsonResponse({ channels, bot: channels[0]?.bot ?? null });
     if (path === "/api/channels/kanal-a/overview") return jsonResponse({ ...channel, activeModules: [] });
     if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules });
     return jsonResponse({}, 404);

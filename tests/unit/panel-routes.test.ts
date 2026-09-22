@@ -296,6 +296,37 @@ describe("Panel read endpoints", () => {
     ]);
   });
 
+  it("reports the installation's bot status even with zero released channels (#159)", async () => {
+    await insertLoginIdentityAndSession(database, "user-1");
+    await database.prepare(
+      `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+       VALUES (1, 'revoked', 'authorization_revoked', ?)`,
+    ).bind("2026-09-18T01:00:00.000Z").run();
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels"),
+      environment,
+    );
+    const body = await response.json<{ channels: unknown[]; bot: { status: string; reason: string | null } | null }>();
+
+    expect(response.status).toBe(200);
+    expect(body.channels).toEqual([]);
+    expect(body.bot).toEqual({ status: "revoked", reason: "authorization_revoked", updatedAt: "2026-09-18T01:00:00.000Z" });
+  });
+
+  it("reports a null bot status before the bot has ever signed in", async () => {
+    await insertLoginIdentityAndSession(database, "user-1");
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels"),
+      environment,
+    );
+    const body = await response.json<{ bot: unknown }>();
+
+    expect(response.status).toBe(200);
+    expect(body.bot).toBeNull();
+  });
+
   it("checks channel:bot on the broadcaster identity of each channel", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertChannel(database, "kanal-b", "Beta");

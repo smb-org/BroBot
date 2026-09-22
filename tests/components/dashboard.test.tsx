@@ -75,7 +75,7 @@ const showMembers = async (members: {
   const channel = healthyChannel("kanal-a", "Alpha");
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
     const path = requestUrl(input).pathname;
-    if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+    if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
     if (path.endsWith("/members")) return jsonResponse({ ...members, nextCursor: null });
     return jsonResponse({}, 404);
   }));
@@ -201,11 +201,20 @@ describe("Dashboard skeleton", () => {
       .toBe("/channels/kanal%2Fa/modules/text%20befehle");
   });
 
+  it("parses both /platform and the pre-rename /betreiber into the platform route", () => {
+    expect(parseDashboardRoute("/platform")).toEqual({ kind: "platform" });
+    expect(parseDashboardRoute("/betreiber")).toEqual({ kind: "platform" });
+  });
+
+  it("only ever emits /platform for the platform route", () => {
+    expect(dashboardRoutePath({ kind: "platform" })).toBe("/platform");
+  });
+
   it("shows events with module, code, detail and actor", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) return jsonResponse({
         entries: [{
           eventId: "event-1",
@@ -286,7 +295,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) return jsonResponse({
         entries: [
           { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.community_gift", detail: '{"count":5}', actorUserId: null },
@@ -330,7 +339,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) return jsonResponse({
         entries: [
           { eventId: "t1", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.sub", detail: '{"person":"tier1","tier":"1000"}', actorUserId: null },
@@ -391,7 +400,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
       if (url.pathname === "/api/channels/kanal-a/events") {
         return jsonResponse(url.searchParams.has("cursor") ? secondPage : firstPage);
@@ -425,7 +434,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
       if (url.pathname === "/api/channels/kanal-a/events") {
         firstPage += 1;
@@ -455,7 +464,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
       if (url.pathname === "/api/channels/kanal-a/events") {
         eventRequests += 1;
@@ -493,7 +502,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
       if (url.pathname === "/api/channels/kanal-a/events") {
         eventRequests += 1;
@@ -529,7 +538,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
       if (url.pathname === "/api/channels/kanal-a/events") {
         eventRequests += 1;
@@ -559,7 +568,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
       if (url.pathname === "/api/channels/kanal-a/events") {
         eventRequests += 1;
@@ -586,7 +595,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
       if (url.pathname === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
       return jsonResponse({}, 404);
@@ -613,7 +622,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
       if (url.pathname === "/api/channels/kanal-a/events") {
         eventRequests += 1;
@@ -652,7 +661,7 @@ describe("Dashboard skeleton", () => {
     };
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
       if (url.pathname === "/api/channels/kanal-a/events") {
         return url.searchParams.has("cursor")
@@ -683,7 +692,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) return jsonResponse({
         entries: [{
           eventId: "event-command",
@@ -774,7 +783,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
       return jsonResponse({}, 404);
     }));
@@ -792,7 +801,7 @@ describe("Dashboard skeleton", () => {
     const errorEntry = { eventId: "error", createdAt: "2026-09-18T04:02:00.000Z", moduleId: "text_commands", code: "host.chat.fehlgeschlagen", detail: "{}", actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
         { id: "channel_events", enabled: true, settings: "{}" },
         { id: "text_commands", enabled: true, settings: "{}" },
@@ -853,7 +862,7 @@ describe("Dashboard skeleton", () => {
     const eventRequests: URL[] = [];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/events") {
         eventRequests.push(url);
         return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
@@ -942,7 +951,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/members")) return jsonResponse(members);
       return jsonResponse({}, 404);
     }));
@@ -975,7 +984,7 @@ describe("Dashboard skeleton", () => {
     const operatorChannel = { ...channel, role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel], bot: operatorChannel.bot });
       if (path.endsWith("/members")) return jsonResponse(members);
       return jsonResponse({}, 404);
     }));
@@ -1016,7 +1025,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/members")) return jsonResponse(members);
       return jsonResponse({}, 404);
     }));
@@ -1043,7 +1052,7 @@ describe("Dashboard skeleton", () => {
     const beta = { ...healthyChannel("kanal-b", "Beta"), role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta] });
+      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta], bot: alpha.bot });
       if (path === "/api/channels/kanal-a/members/search") return jsonResponse({ user: {
         userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: null,
       } });
@@ -1073,7 +1082,7 @@ describe("Dashboard skeleton", () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse(overview(channel));
       if (path.endsWith("/modules")) return jsonResponse({ modules: [{ id: "text_commands", enabled: false, settings: "{}" }] });
       return jsonResponse({}, 404);
@@ -1096,7 +1105,7 @@ describe("Dashboard skeleton", () => {
     const auditResponse = new Promise<Response>((resolve) => { resolveAudit = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname.endsWith("/system")) return Promise.resolve(jsonResponse(system));
       if (url.pathname.endsWith("/audit-log")) return auditResponse;
       return Promise.resolve(jsonResponse({}, 404));
@@ -1135,7 +1144,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse({ entries: [auditEntry, secondAuditEntry], nextCursor: null });
       return jsonResponse({}, 404);
@@ -1175,7 +1184,7 @@ describe("Dashboard skeleton", () => {
     const systemResponse = { ...system, botPermissions: { missingScopes: [] }, subscriptions };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (path.endsWith("/system")) return Promise.resolve(jsonResponse(systemResponse));
       if (path.endsWith("/audit-log")) return Promise.resolve(jsonResponse(audit));
       return Promise.resolve(jsonResponse({}, 404));
@@ -1212,7 +1221,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -1239,7 +1248,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
       return jsonResponse({}, 404);
     }));
@@ -1258,7 +1267,7 @@ describe("Dashboard skeleton", () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: null };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
       return jsonResponse({}, 404);
     }));
@@ -1275,7 +1284,7 @@ describe("Dashboard skeleton", () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: { missingScopes: [] } };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
       return jsonResponse({}, 404);
     }));
@@ -1296,7 +1305,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
       return jsonResponse({}, 404);
     }));
@@ -1314,7 +1323,7 @@ describe("Dashboard skeleton", () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -1337,7 +1346,7 @@ describe("Dashboard skeleton", () => {
         addRequestCount += 1;
         return jsonResponse({ member: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png", role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" } }, 201);
       }
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/members") return jsonResponse({ members: [] });
       if (path === "/api/channels/kanal-a/members/search") return jsonResponse({ user: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png" } });
       if (path === "/api/csrf") return jsonResponse({ token: "csrf-token" });
@@ -1374,7 +1383,7 @@ describe("Dashboard skeleton", () => {
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels/kanal-a/members" && init?.method === "POST") addRequestCount += 1;
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/members") return jsonResponse({ members: [] });
       if (url.pathname === "/api/channels/kanal-a/members/search") return jsonResponse({ user: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: null } });
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
@@ -1420,7 +1429,7 @@ describe("Dashboard skeleton", () => {
     let memberRequestCount = 0;
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta], bot: alpha.bot }));
       if (url.pathname === "/api/channels/kanal-a/members") {
         memberRequestCount += 1;
         if (memberRequestCount === 1) return Promise.resolve(jsonResponse({ members: [alphaMember], nextCursor: null }));
@@ -1468,7 +1477,7 @@ describe("Dashboard skeleton", () => {
     let memberRequestCount = 0;
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (url.pathname === "/api/channels/kanal-a/members/search") return Promise.resolve(jsonResponse({ user: { userId: "new-user", login: "neue-person", displayName: "Neuer Stand", profileImageUrl: null } }));
       if (url.pathname === "/api/channels/kanal-a/members" && init?.method === "POST") return Promise.resolve(jsonResponse({ member: newMember }, 201));
@@ -1514,7 +1523,7 @@ describe("Dashboard skeleton", () => {
     let paginationRequestCount = 0;
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (url.pathname === "/api/channels/kanal-a/members/first-user" && init?.method === "PATCH") return Promise.resolve(jsonResponse({ member: { ...ersterMember, role: "manager" } }));
       if (url.pathname === "/api/channels/kanal-a/members" && url.search !== "") {
@@ -1568,7 +1577,7 @@ describe("Dashboard skeleton", () => {
     let memberRequestCount = 0;
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (url.pathname === "/api/channels/kanal-a/members/first-user" && init?.method === "PATCH") return Promise.resolve(jsonResponse({ member: { ...ersterMember, role: "manager" } }));
       if (url.pathname === "/api/channels/kanal-a/members" && url.search === "?cursor=cursor-1") return nextPage;
@@ -1616,7 +1625,7 @@ describe("Dashboard skeleton", () => {
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/members" && url.search === "") {
         return Promise.resolve(jsonResponse({ members: [{ userId: "user-1", login: "erste", displayName: "Erste Person", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" }], nextCursor: "cursor-1" }));
       }
@@ -1644,7 +1653,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse(overview(channel));
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
@@ -1662,7 +1671,7 @@ describe("Dashboard skeleton", () => {
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse(activeModule);
       return jsonResponse({}, 404);
     }));
@@ -1680,7 +1689,7 @@ describe("Dashboard skeleton", () => {
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse(activeModule);
       return jsonResponse({}, 404);
     }));
@@ -1699,7 +1708,7 @@ describe("Dashboard skeleton", () => {
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel, secondChannel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel, secondChannel], bot: channel.bot });
       if (path === "/api/channels/26876135/overview") return jsonResponse(activeModule);
       if (path === "/api/channels/26876135/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
       return jsonResponse({}, 404);
@@ -1726,7 +1735,7 @@ describe("Dashboard skeleton", () => {
     let modulesCalls = 0;
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/overview") {
         overviewAufrufe += 1;
         return jsonResponse(overviewAufrufe === 1 ? overview(channel) : {
@@ -1762,7 +1771,7 @@ describe("Dashboard skeleton", () => {
     const beta = healthyChannel("kanal-b", "Beta");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta] });
+      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta], bot: alpha.bot });
       if (path.endsWith("/overview")) return jsonResponse(overview(path.includes("kanal-b") ? beta : alpha));
       return jsonResponse({}, 404);
     }));
@@ -1786,7 +1795,7 @@ describe("Dashboard skeleton", () => {
     const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse(path.includes("modules/text_commands") ? activeModuleOverview : overview(channel));
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
@@ -1831,7 +1840,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse(overview(channel));
       return jsonResponse({}, 404);
     }));
@@ -1855,7 +1864,7 @@ describe("Dashboard skeleton", () => {
     const secondResponse = new Promise<Response>((resolve) => { resolveSecondResponse = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") {
         overviewAufrufe += 1;
         return overviewAufrufe === 1 ? jsonResponse(activeModule) : secondResponse;
@@ -1878,7 +1887,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
       if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: false, settings: "{}" }] });
       return jsonResponse({}, 404);
@@ -1894,7 +1903,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
       return jsonResponse({}, 404);
     }));
@@ -1909,7 +1918,7 @@ describe("Dashboard skeleton", () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterConnection: "not_connected" };
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") return jsonResponse({ ...overview(channel), broadcasterConnection: "not_connected" });
       if (path === "/api/channels/kanal-a/system") return jsonResponse({ ...system, broadcasterConnection: "not_connected" });
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
@@ -1942,7 +1951,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
       return jsonResponse({}, 404);
     }));
@@ -1971,7 +1980,7 @@ describe("Dashboard skeleton", () => {
     const showChannel = async (): Promise<void> => {
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
         if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
         return jsonResponse({}, 404);
       }));
@@ -2005,7 +2014,7 @@ describe("Dashboard skeleton", () => {
     const showChannel = (displayedChannel: typeof channel): void => {
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [displayedChannel] });
+        if (path === "/api/channels") return jsonResponse({ channels: [displayedChannel], bot: displayedChannel.bot });
         if (path.endsWith("/overview")) return jsonResponse({ ...displayedChannel, activeModules: [] });
         return jsonResponse({}, 404);
       }));
@@ -2036,7 +2045,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
       return jsonResponse({}, 404);
     }));
@@ -2052,7 +2061,7 @@ describe("Dashboard skeleton", () => {
     const operatorChannel = { ...channel, role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [operatorChannel], bot: operatorChannel.bot });
       if (path.endsWith("/overview")) return jsonResponse({ ...operatorChannel, activeModules: [] });
       return jsonResponse({}, 404);
     }));
@@ -2074,7 +2083,7 @@ describe("Dashboard skeleton", () => {
     const check = new Promise<Response>((resolve) => { resolveCheck = resolve; });
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (url.pathname === "/api/channels/kanal-a/moderator-status") return check;
@@ -2110,7 +2119,7 @@ describe("Dashboard skeleton", () => {
       const nextAllowedAt = new Date(Date.now() + 5000).toISOString();
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const url = requestUrl(input);
-        if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+        if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
         if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
         if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
         if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({
@@ -2142,7 +2151,7 @@ describe("Dashboard skeleton", () => {
     };
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({ error: "Twitch ist vorübergehend nicht erreichbar." }, 502));
@@ -2171,7 +2180,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2191,7 +2200,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2229,7 +2238,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2257,7 +2266,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2277,7 +2286,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2299,7 +2308,7 @@ describe("Dashboard skeleton", () => {
     });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta] }));
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta], bot: alpha.bot }));
       if (path === "/api/channels/kanal-a/overview") return alphaResponse;
       if (path === "/api/channels/kanal-b/overview") return Promise.resolve(jsonResponse(overview(beta)));
       if (path.endsWith("/system")) return Promise.resolve(jsonResponse(system));
@@ -2337,7 +2346,7 @@ describe("Dashboard skeleton", () => {
     });
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta], bot: alpha.bot }));
       if (url.pathname === "/api/channels/kanal-a/system") return alphaSystem;
       if (url.pathname === "/api/channels/kanal-b/system") return Promise.resolve(jsonResponse(systemFor("beta-system")));
       if (url.pathname.endsWith("/audit-log")) return Promise.resolve(jsonResponse(audit));
@@ -2372,7 +2381,7 @@ describe("Dashboard skeleton", () => {
     });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta] }));
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta], bot: alpha.bot }));
       if (url.pathname.endsWith("/system")) return Promise.resolve(jsonResponse(system));
       if (url.pathname === "/api/channels/kanal-a/audit-log") return alphaAudit;
       if (url.pathname === "/api/channels/kanal-b/audit-log") return Promise.resolve(jsonResponse({
@@ -2407,7 +2416,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/csrf") return jsonResponse({}, 401);
       if (url.pathname.endsWith("/overview")) return jsonResponse(overview(channel));
       return jsonResponse({}, 404);
@@ -2429,7 +2438,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/auth/logout" && init?.method === "POST") return jsonResponse({}, 403);
       if (url.pathname.endsWith("/overview")) return jsonResponse(overview(channel));
@@ -2452,7 +2461,7 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/auth/logout" && init?.method === "POST") return new Response(null, { status: 204 });
       if (url.pathname.endsWith("/overview")) return jsonResponse(overview(channel));
@@ -2487,7 +2496,7 @@ describe("Dashboard skeleton", () => {
     }];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/system")) return jsonResponse({ ...system, subscriptions });
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
       return jsonResponse({}, 404);
@@ -2519,7 +2528,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse({ entries: [entry], nextCursor: null });
       return jsonResponse({}, 404);
@@ -2556,7 +2565,7 @@ describe("Dashboard skeleton", () => {
     const reload = new Promise<Response>((resolve) => { resolveReload = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) {
         auditRequests += 1;
@@ -2597,7 +2606,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) return jsonResponse({ entries: [entry], nextCursor: null });
       if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
       return jsonResponse({}, 404);
@@ -2635,7 +2644,7 @@ describe("Dashboard skeleton", () => {
     const reload = new Promise<Response>((resolve) => { resolveReload = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) {
         eventRequests += 1;
         return eventRequests === 1 ? jsonResponse({ entries: [entry], nextCursor: null }) : reload;
@@ -2670,7 +2679,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
       return jsonResponse({}, 404);
     }));
@@ -2700,7 +2709,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel, beta] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel, beta], bot: channel.bot });
       if (path.endsWith("/system")) return jsonResponse({ ...system, subscriptions: [subscription] });
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
       return jsonResponse({}, 404);
@@ -2756,7 +2765,7 @@ describe("Dashboard skeleton", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse({ entries: [entry], nextCursor: null });
       return jsonResponse({}, 404);
@@ -2804,7 +2813,7 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel] });
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path.endsWith("/events")) return jsonResponse({ entries: [entry], nextCursor: null });
       if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
       return jsonResponse({}, 404);
@@ -2841,7 +2850,7 @@ describe("Dashboard skeleton", () => {
       const channel = { ...healthyChannel("kanal-a", "Alpha"), bot: { status: "revoked", reason: "authorization_revoked", updatedAt: relativeIso(0) } };
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [channel], platformAdmin: true });
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot, platformAdmin: true });
         return jsonResponse({}, 404);
       }));
       window.history.replaceState({}, "", "/channels/kanal-a");
@@ -2857,7 +2866,7 @@ describe("Dashboard skeleton", () => {
       const channel = { ...healthyChannel("kanal-a", "Alpha"), bot: null };
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [channel], platformAdmin: false });
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot, platformAdmin: false });
         return jsonResponse({}, 404);
       }));
       window.history.replaceState({}, "", "/channels/kanal-a");
@@ -2873,7 +2882,7 @@ describe("Dashboard skeleton", () => {
       const other = healthyChannel("kanal-b", "Beta");
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [other], platformAdmin: false });
+        if (path === "/api/channels") return jsonResponse({ channels: [other], bot: other.bot, platformAdmin: false });
         return jsonResponse({}, 404);
       }));
       window.history.replaceState({}, "", "/channels/kanal-a");
@@ -2889,7 +2898,7 @@ describe("Dashboard skeleton", () => {
       const channel = { ...healthyChannel("kanal-a", "Alpha"), bot: { status: "revoked", reason: "authorization_revoked", updatedAt: relativeIso(0) } };
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
         const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [channel], platformAdmin: true });
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot, platformAdmin: true });
         if (path.endsWith("/system")) return jsonResponse(systemFor("authorization_revoked"));
         if (path.endsWith("/audit-log")) return jsonResponse(audit);
         return jsonResponse({}, 404);
@@ -2900,6 +2909,51 @@ describe("Dashboard skeleton", () => {
 
       expect(await screen.findByRole("heading", { name: "System", level: 1 })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Der Bot ist nicht angemeldet" })).not.toBeInTheDocument();
+    });
+
+    it("shows the bot state with the sign-in action on the overview of a fresh, zero-channel installation for a platform admin", async () => {
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [], bot: null, platformAdmin: true });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/");
+
+      render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Bot anmelden" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Übersicht" })).not.toBeInTheDocument();
+    });
+
+    it("shows the bot state without an action on the overview of a fresh, zero-channel installation for a broadcaster or manager", async () => {
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [], bot: null, platformAdmin: false });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/");
+
+      render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Bot anmelden" })).not.toBeInTheDocument();
+      expect(screen.getByText("Wende dich an den Betreiber der Installation.")).toBeInTheDocument();
+    });
+
+    it("lets the bot state win over channel-not-released -- installation-wide beats per-viewer", async () => {
+      const other = healthyChannel("kanal-b", "Beta");
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [other], bot: null, platformAdmin: false });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a");
+
+      render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Kanal nicht freigegeben" })).not.toBeInTheDocument();
     });
   });
 });

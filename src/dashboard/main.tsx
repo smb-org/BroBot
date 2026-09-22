@@ -264,7 +264,7 @@ type PageLoadedAt = Record<"overview" | "system" | "members" | "modules" | "even
 
 const loadedAtForRoute = (route: DashboardRoute, loadedAt: PageLoadedAt): number | undefined => {
   if (route.kind === "overview") return undefined;
-  if (route.kind === "betreiber") return undefined;
+  if (route.kind === "platform") return undefined;
   if (route.kind === "module") return loadedAt.modules;
   return loadedAt[route.section];
 };
@@ -359,9 +359,9 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       id: "platform",
       label: platformTextsValues.navigation,
       icon: <NavigationIcon kind="members" className="sidebar-nav-icon" />,
-      href: dashboardRoutePath({ kind: "betreiber" }),
-      active: route.kind === "betreiber",
-      onNavigate: () => { onNavigate({ kind: "betreiber" }); },
+      href: dashboardRoutePath({ kind: "platform" }),
+      active: route.kind === "platform",
+      onNavigate: () => { onNavigate({ kind: "platform" }); },
     }],
   } : undefined;
 
@@ -1199,6 +1199,9 @@ export const DashboardApp = (): ReactElement => {
   const [route, navigate] = useDashboardRoute();
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
   const [isPlatform, setIsPlatform] = useState(false);
+  // The installation's single bot identity, independent of which channels
+  // this viewer can see -- present even with zero released channels (#159).
+  const [installationBot, setInstallationBot] = useState<PanelBotStatus | null>(null);
   const [overview, setOverview] = useState<LoadState<PanelChannelOverview>>(() => idleState());
   const [overviewRoutePath, setOverviewRoutePath] = useState<string | null>(null);
   const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(() => idleModeratorCheck());
@@ -1296,6 +1299,7 @@ export const DashboardApp = (): ReactElement => {
     cancelMembersRequest();
     setChannels({ status: "success", data: [], error: null });
     setIsPlatform(false);
+    setInstallationBot(null);
     setOverview(idleState());
     setOverviewRoutePath(null);
     setModeratorCheck(idleModeratorCheck());
@@ -1323,6 +1327,7 @@ export const DashboardApp = (): ReactElement => {
         if (!cancelled) {
           setChannels({ status: "success", data: response.channels, error: null });
           setIsPlatform(response.platformAdmin);
+          setInstallationBot(response.bot);
           setAuthenticationRequired(false);
         }
       } catch (error) {
@@ -1337,7 +1342,7 @@ export const DashboardApp = (): ReactElement => {
   }, []);
 
   useEffect(() => {
-    if (route.kind === "betreiber" && channels.status === "success" && !isPlatform) {
+    if (route.kind === "platform" && channels.status === "success" && !isPlatform) {
       navigate({ kind: "overview" });
     }
   }, [channels.status, isPlatform, navigate, route.kind]);
@@ -1738,22 +1743,20 @@ export const DashboardApp = (): ReactElement => {
 
   const sidebarModuleStates = route.kind === "channel" || route.kind === "module" ? modules.data?.modules ?? null : null;
 
-  // The bot identity is one row for the whole installation (`bot_identity_status`,
-  // id=1) joined onto every channel row identically -- any loaded channel's
-  // `bot` field already carries it, so no extra fetch is needed to know
-  // whether it's signed in (#159).
-  const installationBotStatus = channels.data?.[0]?.bot ?? null;
-  const botSignedIn = installationBotStatus !== null && installationBotStatus.status === "connected";
+  const botSignedIn = installationBot?.status === "connected";
   const isChannelOrModuleRoute = route.kind === "channel" || route.kind === "module";
-  // Per-user/channel authorization, not an outage -- and it wins over the
-  // bot state below: without a released channel there's no channel data to
-  // reason about at all.
-  const showChannelNotReleased = isChannelOrModuleRoute && selectedChannel === null && channels.status === "success";
-  // Installation-wide, but the system page (bot status + sign-in live there)
-  // and the platform page (releases channels) must stay reachable, or the
-  // block would also lock the only places that fix it.
-  const botBlockingApplies = route.kind === "module" || (route.kind === "channel" && route.section !== "system");
-  const showBotBlocking = !showChannelNotReleased && isChannelOrModuleRoute && botBlockingApplies && channels.status === "success" && !botSignedIn;
+  // Installation-wide, so it applies wherever page content depends on the
+  // bot -- including the overview, the first page everyone lands on (a
+  // fresh installation with zero released channels has nowhere else to
+  // say it). The system page (bot status + sign-in live there) and the
+  // platform page (releases channels) must stay reachable, or the block
+  // would also lock the only places that fix it.
+  const botBlockingApplies = route.kind === "overview" || route.kind === "module" || (route.kind === "channel" && route.section !== "system");
+  const showBotBlocking = botBlockingApplies && channels.status === "success" && !botSignedIn;
+  // Per-user/channel authorization, not an outage -- loses to the bot state
+  // above: installation-wide beats per-viewer, and without the bot nothing
+  // works on any channel regardless of whether this one is released.
+  const showChannelNotReleased = !showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status === "success";
 
   return (
     <UiProvider>
@@ -1767,14 +1770,14 @@ export const DashboardApp = (): ReactElement => {
         <div className="main-content">
         {channels.status === "loading" ? <p className="loading-line">{dashboardTexts().signIn.checkChannelAccess}</p> : null}
         {channels.error !== null ? <ErrorPanel message={channels.error} /> : null}
-        {route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} onNavigate={navigate} /> : null}
-        {route.kind === "betreiber" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
+        {!showBotBlocking && route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} onNavigate={navigate} /> : null}
+        {route.kind === "platform" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
         {showChannelNotReleased ? <BlockingState
           tone="neutral"
           title={dashboardTexts().blocking.channelTitle}
           description={dashboardTexts().blocking.channelDescription}
           {...(isPlatform
-            ? { action: { label: dashboardTexts().blocking.channelAction, onClick: () => { navigate({ kind: "betreiber" }); } } }
+            ? { action: { label: dashboardTexts().blocking.channelAction, onClick: () => { navigate({ kind: "platform" }); } } }
             : { contact: dashboardTexts().blocking.channelContact })}
         /> : null}
         {showBotBlocking ? <BlockingState

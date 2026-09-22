@@ -108,6 +108,9 @@ export interface PanelModulesResponse {
 
 export interface PanelChannelsResponse {
   channels: PanelChannelState[];
+  /** The installation's single bot identity, independent of which channels
+   *  this viewer can see -- present even with zero released channels. */
+  bot: PanelBotStatus | null;
   platformAdmin: boolean;
 }
 

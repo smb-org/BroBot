@@ -5,7 +5,7 @@ import type { PanelEventFilters, PanelEventOrigin } from "../panel-contract";
 
 export type DashboardRoute =
   | { kind: "overview" }
-  | { kind: "betreiber" }
+  | { kind: "platform" }
   | { kind: "channel"; channelId: string; section: "overview" | "system" | "members" | "events" | "modules"; filters?: PanelEventFilters }
   | { kind: "module"; channelId: string; moduleId: string };
 
@@ -36,7 +36,10 @@ const parseEventFilters = (search: string): PanelEventFilters | undefined => {
 export const parseDashboardRoute = (pathname: string, search = ""): DashboardRoute => {
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) return { kind: "overview" };
-  if (segments.length === 1 && segments[0] === "betreiber") return { kind: "betreiber" };
+  // "/platform" is current; "/betreiber" is kept as a parse-only alias so
+  // bookmarks and shared links from before the rename still resolve --
+  // `dashboardRoutePath` only ever emits "/platform".
+  if (segments.length === 1 && (segments[0] === "platform" || segments[0] === "betreiber")) return { kind: "platform" };
   if (segments.length === 4 && segments[0] === "channels" && segments[2] === "modules") {
     const channelId = decodeSegment(segments[1] ?? "");
     const moduleId = decodeSegment(segments[3] ?? "");
@@ -63,7 +66,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
 
 export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "overview") return "/";
-  if (route.kind === "betreiber") return "/betreiber";
+  if (route.kind === "platform") return "/platform";
   const base = `/channels/${encodeURIComponent(route.channelId)}`;
   if (route.kind === "module") return `${base}/modules/${encodeURIComponent(route.moduleId)}`;
   if (route.section === "overview") return base;

@@ -21,6 +21,7 @@ import {
 } from "../db/bot-channel-status";
 import {
   getBotIdentity,
+  getBotIdentityStatus,
 } from "../db/bot-identity";
 import {
   decodeLogCursor,
@@ -111,8 +112,17 @@ panelRouter.route("/", moduleRouter);
 
 panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) => {
   const session = context.get("session");
+  const [channels, bot] = await Promise.all([
+    listChannelsForUser(context.env.DB, session.userId),
+    getBotIdentityStatus(context.env.DB),
+  ]);
   return context.json({
-    channels: await listChannelsForUser(context.env.DB, session.userId),
+    channels,
+    // The installation's single bot identity (`bot_identity_status`, id=1),
+    // independent of which channels this viewer can see -- a fresh
+    // installation with zero released channels still needs to tell a
+    // platform admin the bot isn't signed in (#159).
+    bot,
     platformAdmin: getPlatformUserIds(context.env).has(session.userId),
   });
 });
