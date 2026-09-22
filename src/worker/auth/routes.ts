@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import {
   requireChannelAuthorization,
-  requireSessionAuthorization,
+  requirePlatform,
   type ChannelAuthorizationVariables,
 } from "./guards";
 import {
@@ -372,10 +372,14 @@ authRouter.get(
 );
 
 /**
- * Requires a session: without this check, anyone could start the bot
- * connection flow and thereby determine which Twitch account the bot uses.
+ * Platform level only. Connecting the bot is an installation-wide act: there is
+ * one bot account for every channel, and a broadcaster has no business starting
+ * that flow. The callback already refuses a login that is not
+ * `TWITCH_BOT_LOGIN`, and refuses a different user id once an identity exists,
+ * so this guard is not what stops a takeover -- it stops the flow from being
+ * reachable by the wrong person in the first place.
  */
-authRouter.get("/auth/bot/login", requireSessionAuthorization(), async (context) => {
+authRouter.get("/auth/bot/login", requirePlatform(), async (context) => {
   const started = await startOAuthAuthorization(context.env.DB, context.env, "bot", nowIso());
   context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);

@@ -48,6 +48,20 @@ describe("worker skeleton", () => {
     expect(body.missingBindings).toContain("DB_SCHEMA");
   });
 
+  /**
+   * The asset handler runs with `not_found_handling: single-page-application`,
+   * so without this route an unknown API path answers 200 with `index.html` and
+   * the caller reports "Unexpected token '<'". A renamed endpoint then looks
+   * like a parser bug rather than a missing route.
+   */
+  it("answers an unknown API path with 404 as JSON, not with the app shell", async () => {
+    const response = await exports.default.fetch(new Request("http://localhost/api/does-not-exist"));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toMatchObject({ error: expect.any(String) as unknown as string });
+  });
+
   describe("with schema applied", () => {
     beforeAll(async () => {
       await (env as unknown as { DB: D1Database }).DB.prepare(

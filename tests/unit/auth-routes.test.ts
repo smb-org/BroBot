@@ -36,6 +36,8 @@ const key = (byte: number): string =>
     .replaceAll("/", "_")
     .replaceAll("=", "");
 
+const PLATFORM_USER_ID = "4711";
+
 const sessionRowFor = (userId: string) => ({
   session_id: `session-${userId}`,
   user_id: userId,
@@ -91,6 +93,9 @@ const makeEnvironment = (
     SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
     SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
     OVERLAY_TOKEN_PEPPER: key(4),
+    // The bot connection is platform level. The id must be numeric: the
+    // parser rejects anything else, so a readable name would silently fail.
+    BETREIBER_USER_IDS: JSON.stringify([PLATFORM_USER_ID]),
   } as unknown as Env & { SESSION_ENCRYPTION_KEYS: string };
   return { environment, statement };
 };
@@ -428,10 +433,10 @@ describe("auth routes", () => {
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
     };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("betreiber"));
+    const { environment, statement } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
       }),
       environment,
     );
@@ -461,10 +466,10 @@ describe("auth routes", () => {
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
     };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("betreiber"));
+    const { environment, statement } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
       }),
       environment,
     );
@@ -491,10 +496,10 @@ describe("auth routes", () => {
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
     };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("betreiber"));
+    const { environment, statement } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
       }),
       environment,
     );
@@ -537,10 +542,10 @@ describe("auth routes", () => {
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
     };
-    const { environment } = makeEnvironment(transaction, sessionRowFor("betreiber"));
+    const { environment } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
       }),
       environment,
     );
@@ -581,10 +586,10 @@ describe("auth routes", () => {
         expires_at: "2099-09-18T00:05:00.000Z",
         created_at: "2099-09-18T00:00:00.000Z",
       };
-      const { environment, statement } = makeEnvironment(transaction, sessionRowFor("betreiber"));
+      const { environment, statement } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
       const login = await authRouter.fetch(
         new Request("https://brobot.example/auth/bot/login", {
-          headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+          headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
         }),
         environment,
       );
@@ -1071,7 +1076,7 @@ describe("auth routes", () => {
     };
     const { environment, statement } = makeEnvironment(
       transaction,
-      sessionRowFor("betreiber"),
+      sessionRowFor(PLATFORM_USER_ID),
       {
         id: 1,
         user_id: "echter-bot",
@@ -1086,7 +1091,7 @@ describe("auth routes", () => {
     );
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("betreiber") },
+        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
       }),
       environment,
     );
@@ -1128,5 +1133,23 @@ describe("auth routes", () => {
     expect(secondToken).toBe(firstToken);
     // No new cookie, so the first tab's token stays valid.
     expect(zweiter.headers.get("set-cookie")).toBeNull();
+  });
+
+  /**
+   * The bot account is installation-wide: one account posts in every channel.
+   * A broadcaster has no business starting that flow, even though the callback
+   * would refuse a foreign login anyway.
+   */
+  it("refuses to start the bot connection for a channel-level session", async () => {
+    const { environment } = makeEnvironment(null, sessionRowFor("broadcaster-1"));
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/bot/login", {
+        headers: { Cookie: await sessionCookieHeaderFor("broadcaster-1") },
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("location")).toBeNull();
   });
 });
