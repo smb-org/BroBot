@@ -1,4 +1,4 @@
-export type AuditActorKind = "mitglied" | "betreiber";
+import type { AuditActorKind } from "../../contracts/values";
 
 const auditId = (): string => crypto.randomUUID();
 
@@ -32,4 +32,3 @@ export const prepareAudit = (
   JSON.stringify(after),
   actorKind,
 );
-

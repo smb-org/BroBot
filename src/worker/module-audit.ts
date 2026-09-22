@@ -1,7 +1,8 @@
-import { prepareAudit, type AuditActorKind } from "./db/audit";
+import { prepareAudit } from "./db/audit";
 import type { ModuleAuditEntry } from "../modules/contract";
+import type { AuditActorKind } from "../contracts/values";
 
-export type { AuditActorKind } from "./db/audit";
+export type { AuditActorKind } from "../contracts/values";
 
 /**
  * Der zweite Teil wird mit der Fachmutation gebatcht. `changes()` verhindert,

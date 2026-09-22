@@ -1,3 +1,5 @@
+import type { IdentityStatus } from "../../contracts/values";
+
 export interface BotIdentityRecord {
   id: 1;
   userId: string;
@@ -10,10 +12,8 @@ export interface BotIdentityRecord {
   updatedAt: string;
 }
 
-export type BotIdentityStatus = "connected" | "revoked" | "error";
-
 export interface BotIdentityStatusRecord {
-  status: BotIdentityStatus;
+  status: IdentityStatus;
   reason: string | null;
   updatedAt: string;
 }
@@ -32,7 +32,7 @@ interface BotIdentityRow {
 
 interface BotIdentityStatusRow {
   id: 1;
-  status: BotIdentityStatus;
+  status: IdentityStatus;
   reason: string | null;
   updated_at: string;
 }
@@ -92,7 +92,7 @@ export const upsertBotIdentity = async (
 export const upsertBotIdentityAndStatus = async (
   db: D1Database,
   identity: BotIdentityRecord,
-  status: BotIdentityStatus,
+  status: IdentityStatus,
   reason: string | null,
   updatedAt: string,
 ): Promise<void> => {
@@ -146,7 +146,7 @@ export const getBotIdentityStatus = async (
 
 export const setBotIdentityStatus = async (
   db: D1Database,
-  status: BotIdentityStatus,
+  status: IdentityStatus,
   reason: string | null,
   updatedAt: string,
 ): Promise<void> => {
@@ -162,7 +162,7 @@ export const setBotIdentityStatus = async (
 
 export const setBotIdentityStatusIfCurrent = async (
   db: D1Database,
-  status: BotIdentityStatus,
+  status: IdentityStatus,
   reason: string | null,
   updatedAt: string,
   expectedAccessTokenCiphertext: string,
@@ -252,4 +252,3 @@ export const setBotIdentityMissingScopesIfCurrent = async (
   ).run();
   return result.meta.changes > 0;
 };
-

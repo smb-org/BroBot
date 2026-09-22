@@ -6,10 +6,8 @@ import type {
   PanelBotPermissions,
   PanelBroadcasterPermissions,
   PanelChannelOverview,
-  PanelChannelRole,
   PanelChannelState,
   PanelLastError,
-  PanelLoginStatusName,
   PanelModeratorStatus,
   PanelSystemResponse,
   PanelEventSubSubscription,
@@ -18,6 +16,12 @@ import type {
   PanelEventFilters,
   PanelEventsResponse,
 } from "../../panel-contract";
+import type {
+  AuditActorKind,
+  ChannelRole,
+  EventSubSubscriptionType,
+  IdentityStatus,
+} from "../../contracts/values";
 import { ereignisTon } from "../../dashboard/locale";
 import {
   channelBotConsentCondition,
@@ -32,7 +36,7 @@ interface ChannelStateRow {
   channel_id: string;
   login: string;
   display_name: string;
-  role: PanelChannelRole;
+  role: ChannelRole;
   broadcaster_connection: number;
   vollzustimmung: number;
   broadcaster_scopes_json: string | null;
@@ -43,7 +47,7 @@ interface ChannelStateRow {
   bot_updated_at: string | null;
   bot_missing_scopes_json: string | null;
   bot_expires_at: string | null;
-  login_status: PanelLoginStatusName | null;
+  login_status: IdentityStatus | null;
   login_reason: string | null;
   login_expires_at: string | null;
   login_updated_at: string | null;
@@ -52,13 +56,13 @@ interface ChannelStateRow {
   moderator_reason: string | null;
   eventsub_status: "enabled" | "missing" | "error" | "revoked" | null;
   eventsub_subscription_id: string | null;
-  eventsub_subscription_type: string | null;
+  eventsub_subscription_type: EventSubSubscriptionType | null;
   eventsub_variant: string | null;
   eventsub_reason: string | null;
   eventsub_message: string | null;
   eventsub_status_code: number | null;
   eventsub_updated_at: string | null;
-  eventsub_error_subscription_type: string | null;
+  eventsub_error_subscription_type: EventSubSubscriptionType | null;
   eventsub_error_variant: string | null;
   eventsub_error_reason: string | null;
   eventsub_error_message: string | null;
@@ -74,7 +78,7 @@ interface ActiveModuleRow {
 interface AuditLogRow {
   audit_id: string;
   actor_user_id: string;
-  actor_kind: "mitglied" | "betreiber";
+  actor_kind: AuditActorKind;
   created_at: string;
   module_id: string | null;
   action: string;

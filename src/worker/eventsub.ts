@@ -6,6 +6,7 @@ import { confirmLoginIdentityAuthorization } from "./login-maintenance";
 import { dispatchEventSubNotification } from "./dispatch";
 import { aktualisiereWerbevorwarnung, isWerbevorwarnungsAnlass } from "./werbe-vorwarnung";
 import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
+import type { EventSubSubscriptionType } from "../contracts/values";
 import {
   hasEventSubMessage,
   rememberEventSubMessageAndRevocation,
@@ -163,7 +164,7 @@ const subscriptionRecord = (
   return {
     subscriptionId: subscription.id,
     channelId,
-    subscriptionType: subscription.type,
+    subscriptionType: definition.subscriptionType,
     variant: definition.variant,
     version: typeof subscription.version === "string" && subscription.version.length > 0 ? subscription.version : "1",
     status: "revoked",
@@ -181,7 +182,7 @@ const subscriptionRecord = (
  */
 const notificationZiel = (body: Record<string, unknown>): {
   channelId: string;
-  subscriptionType: string;
+  subscriptionType: EventSubSubscriptionType;
   subscriptionVariant: string;
   payload: Readonly<Record<string, unknown>>;
 } | null => {
@@ -196,7 +197,7 @@ const notificationZiel = (body: Record<string, unknown>): {
   if (definition === null || channelId === null) return null;
   return {
     channelId,
-    subscriptionType,
+    subscriptionType: definition.subscriptionType,
     subscriptionVariant: definition.variant,
     payload: isRecord(body.event) ? body.event : {},
   };

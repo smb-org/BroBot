@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from "react";
 
-import type { PanelChannelRole, PanelModuleState } from "../panel-contract";
+import type { ChannelRole } from "../contracts/values";
+import type { PanelModuleState } from "../panel-contract";
 import { PanelApiError, setChannelModuleEnabled } from "./api";
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatZahl } from "./locale";
 import { ModuleHeading } from "./module-panels";
@@ -41,7 +42,7 @@ const modulesTexte = (language: DashboardLanguage = dashboardLanguage()): Module
 
 interface ModulesPageProperties {
   channelId: string;
-  ownRole: PanelChannelRole;
+  ownRole: ChannelRole;
   modules: PanelModuleState[];
   loading: boolean;
   error: string | null;
@@ -55,7 +56,7 @@ const errorMessage = (error: unknown): string => {
   return modulesTexte().aenderungFehlgeschlagen;
 };
 
-const canManageModules = (role: PanelChannelRole): boolean => role !== "bediener";
+const canManageModules = (role: ChannelRole): boolean => role !== "bediener";
 
 // Legacy-only file: the component intentionally is no longer exported.
 // eslint-disable-next-line react-refresh/only-export-components

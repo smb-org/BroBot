@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
+import type { ChannelRole } from "../contracts/values";
 
 export { kuerzeAuf200Zeichen } from "../text";
 
@@ -45,7 +46,7 @@ export interface ModuleResult {
 export type ModuleActor = {
   userId: string;
   login: string;
-  role: "broadcaster" | "verwalter" | "bediener" | null;
+  role: ChannelRole | null;
 };
 
 export interface ModuleMutationActor {
@@ -119,7 +120,7 @@ export const browserModuleLanguage = (): ModuleLanguage => {
 
 export interface ModuleRouteVariables {
   session: { userId: string; sessionId: string };
-  channelRole: "broadcaster" | "verwalter" | "bediener";
+  channelRole: ChannelRole;
   actor: { userId: string; sessionId: string };
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;

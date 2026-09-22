@@ -5,6 +5,7 @@ import type {
   RealtimePrincipal,
   RealtimeRecipientKind,
 } from "../../realtime-contract";
+import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { verarbeiteWerbevorwarnung } from "../werbe-vorwarnung";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 
@@ -17,12 +18,10 @@ const SOCKET_REVOKED_CODE = 4003;
 type SessionValidityRow = {
   session_id: string;
   user_id: string;
-  role: "broadcaster" | "verwalter" | "bediener" | null;
+  role: ChannelRole | null;
 };
 
 type TokenValidityRow = { token_id: string };
-
-const roleValues = new Set(["broadcaster", "verwalter", "bediener"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -35,7 +34,7 @@ const isRealtimePrincipal = (value: unknown): value is RealtimePrincipal => {
   if (value.kind === "panel") {
     return isNonEmptyString(value.userId) &&
       isNonEmptyString(value.sessionId) &&
-      typeof value.role === "string" && roleValues.has(value.role) &&
+      typeof value.role === "string" && CHANNEL_ROLES.includes(value.role as ChannelRole) &&
       isNonEmptyString(value.expiresAt);
   }
   if (value.kind === "overlay") {

@@ -30,9 +30,7 @@ import type {
   PanelSystemResponse,
   PanelTokenStatus,
   PanelTwitchUser,
-  PanelChannelRole,
   PanelEventOrigin,
-  PanelEventTone,
 } from "../../src/panel-contract";
 import { MODULES } from "../../src/modules/registry";
 import { TEXTBEFEHL_MINDESTSTUFEN } from "../../src/modules/textbefehle/contracts";
@@ -55,7 +53,7 @@ import type {
   RealtimeMessageType,
   RealtimeRecipientKind,
 } from "../../src/realtime-contract";
-import type { ChannelMemberRole } from "../../src/worker/auth/authorization";
+import type { ChannelRole, EventTone } from "../../src/contracts/values";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { realtimeRouter } from "../../src/worker/realtime";
@@ -403,8 +401,7 @@ const requestForRealtime = async (userId: string): Promise<Request> => {
 // Erschoepfungskarten: `Record<Union, true>` verlangt vom Compiler jedes Glied
 // genau einmal. Fehlt eines, ist es zuviel oder heisst es anders, bricht der
 // Typecheck -- lange bevor ein Client den geaenderten Wert auf der Leitung sieht.
-const alleRollen: Record<ChannelMemberRole, true> = { broadcaster: true, verwalter: true, bediener: true };
-const allePanelRollen: Record<PanelChannelRole, true> = { broadcaster: true, verwalter: true, bediener: true };
+const alleRollen: Record<ChannelRole, true> = { broadcaster: true, verwalter: true, bediener: true };
 const alleNachrichtentypen: Record<RealtimeMessageType, true> = { "system.hallo": true, "ereignisprotokoll.neu": true };
 const alleEmpfaengerarten: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const alleChatStatus: Record<ModuleChatStatus, true> = { zuschauer: true, abonnent: true, vip: true, moderator: true, broadcaster: true };
@@ -412,7 +409,7 @@ const alleAktionsarten: Record<ModuleAction["kind"], true> = { chat: true, shout
 const alleSprachen: Record<ModuleLanguage, true> = { de: true, en: true };
 const alleTextbefehlArten: Record<TextbefehlArt, true> = { text: true, liste: true };
 const alleEreignisherkuenfte: Record<PanelEventOrigin, true> = { kanal: true, modul: true };
-const alleTonlagen: Record<PanelEventTone, true> = { info: true, hinweis: true, fehler: true };
+const alleTonlagen: Record<EventTone, true> = { info: true, hinweis: true, fehler: true };
 
 describe("serialisierte Vertragsformen", () => {
   it("friert Schlüssel, Werte und Durable-Object-Schlüssel ein", async () => {
@@ -603,7 +600,6 @@ describe("serialisierte Vertragsformen", () => {
       // ein neues, entferntes oder umbenanntes Glied bricht `pnpm run typecheck`,
       // und die Zusicherung darunter friert die Schreibweise ein.
       expect(Object.keys(alleRollen).sort()).toEqual(["bediener", "broadcaster", "verwalter"]);
-      expect(Object.keys(allePanelRollen).sort()).toEqual(["bediener", "broadcaster", "verwalter"]);
       expect(Object.keys(alleNachrichtentypen).sort()).toEqual(["ereignisprotokoll.neu", "system.hallo"]);
       expect(Object.keys(alleEmpfaengerarten).sort()).toEqual(["overlay", "panel"]);
       expect(Object.keys(alleChatStatus).sort()).toEqual(["abonnent", "broadcaster", "moderator", "vip", "zuschauer"]);

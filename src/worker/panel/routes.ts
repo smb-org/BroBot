@@ -33,7 +33,8 @@ import {
 } from "./repository";
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
-import type { PanelEventFilters, PanelEventOrigin, PanelEventTone } from "../../panel-contract";
+import { EVENT_TONES, type EventTone } from "../../contracts/values";
+import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -64,9 +65,9 @@ const parseEventFilters = (
   const moduleId = context.req.query("module");
   const actor = context.req.query("actor");
   if (origin !== undefined && origin !== "channel" && origin !== "module") return context.text("Ereignis-Herkunft ist ungültig.", 400);
-  if (tone !== undefined && tone !== "info" && tone !== "hinweis" && tone !== "fehler") return context.text("Ereignis-Ton ist ungültig.", 400);
+  if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.text("Ereignis-Ton ist ungültig.", 400);
   const herkunft: PanelEventOrigin | null = origin === "channel" ? "kanal" : origin === "module" ? "modul" : null;
-  const ton: PanelEventTone | null = tone === undefined ? null : tone;
+  const ton: EventTone | null = tone === undefined ? null : tone as EventTone;
   const modul = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
   const person = actor === undefined || actor.length === 0 ? null : actor;
   return { herkunft, modul, ton, person };

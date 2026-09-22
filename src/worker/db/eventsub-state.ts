@@ -1,11 +1,11 @@
-export type EventSubAuthorizationIdentity =
-  | { kind: "bot"; userId: string }
-  | { kind: "login"; userId: string };
+import type { EventSubAuthorizationIdentity, EventSubSubscriptionType } from "../../contracts/values";
+
+export type { EventSubAuthorizationIdentity } from "../../contracts/values";
 
 export interface EventSubRevocationRecord {
   subscriptionId: string;
   channelId: string;
-  subscriptionType: string;
+  subscriptionType: EventSubSubscriptionType;
   /** Leer bei einem eindeutigen Ziel; wird nur für den lokalen Abo-Zustand benötigt. */
   variant?: string;
   version?: string;
@@ -20,7 +20,7 @@ export type EventSubSubscriptionStatus = "enabled" | "missing" | "error" | "revo
 
 export interface EventSubSubscriptionRecord {
   channelId: string;
-  subscriptionType: string;
+  subscriptionType: EventSubSubscriptionType;
   variant: string;
   version: string;
   subscriptionId: string | null;
@@ -34,7 +34,7 @@ export interface EventSubSubscriptionRecord {
 
 interface EventSubSubscriptionRow {
   channel_id: string;
-  subscription_type: string;
+  subscription_type: EventSubSubscriptionType;
   variant: string;
   version: string;
   subscription_id: string | null;
@@ -238,4 +238,3 @@ export const listEventSubSubscriptions = async (
     : await db.prepare(query).bind(channelId).all<EventSubSubscriptionRow>();
   return result.results.map(mapEventSubSubscription);
 };
-

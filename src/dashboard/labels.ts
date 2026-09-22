@@ -1,4 +1,4 @@
-import type { PanelChannelRole } from "../panel-contract";
+import type { ChannelRole } from "../contracts/values";
 import { dashboardGemeinsameTexte, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 
 /**
@@ -6,7 +6,7 @@ import { dashboardGemeinsameTexte, dashboardLanguage, type DashboardLanguage, ty
  * Begriff, nicht der Enum-Wert — an beiden Stellen derselbe, damit Panel und
  * Mitgliederliste nicht auseinanderlaufen.
  */
-export const roleLabel = (role: PanelChannelRole): string => {
+export const roleLabel = (role: ChannelRole): string => {
   return dashboardGemeinsameTexte().rollen[role];
 };
 

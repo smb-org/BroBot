@@ -2,7 +2,8 @@ import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type Reac
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
-import type { PanelActiveModule, PanelChannelRole, PanelModuleState } from "../panel-contract";
+import type { ChannelRole } from "../contracts/values";
+import type { PanelActiveModule, PanelModuleState } from "../panel-contract";
 import { dashboardLanguage, dashboardTexte, formatZahl, type DashboardLanguage, type LocaleCatalog } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
@@ -231,7 +232,7 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true }:
 
 interface ModuleWorkspaceProperties {
   channelId: string;
-  ownRole: PanelChannelRole;
+  ownRole: ChannelRole;
   modules: PanelModuleState[];
   loading?: boolean;
   error?: string | null;
@@ -270,7 +271,7 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
   );
 };
 
-const canManageModules = (role: PanelChannelRole): boolean => role !== "bediener";
+const canManageModules = (role: ChannelRole): boolean => role !== "bediener";
 
 const ModuleListLink = ({ channelId, onNavigate }: { channelId: string; onNavigate: (route: DashboardRoute) => void }): ReactElement => {
   const route: DashboardRoute = { kind: "channel", channelId, section: "modules" };
@@ -291,7 +292,7 @@ const ModuleListLink = ({ channelId, onNavigate }: { channelId: string; onNaviga
 interface ModulePageProperties {
   channelId: string;
   moduleId: string;
-  ownRole: PanelChannelRole;
+  ownRole: ChannelRole;
   modules: PanelModuleState[];
   activeModules: PanelActiveModule[];
   loading?: boolean;

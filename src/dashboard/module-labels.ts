@@ -1,3 +1,4 @@
+import type { EventSubSubscriptionType } from "../contracts/values";
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 /**
  * Beide Kataloge sind nach Modulkennung geschlüsselt. Die Vollständigkeit
@@ -77,7 +78,7 @@ const ereignisAboNamen: LocaleCatalog<EreignisAboNamen> = {
 };
 
 export const eventSubName = (
-  subscriptionType: string,
+  subscriptionType: EventSubSubscriptionType,
   variant = "",
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {

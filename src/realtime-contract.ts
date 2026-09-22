@@ -1,3 +1,5 @@
+import type { ChannelRole } from "./contracts/values";
+
 /** Die einzige auf der Strecke verwendete Protokollversion. */
 export type RealtimeProtocolVersion = 1;
 
@@ -39,7 +41,7 @@ export type RealtimePanelPrincipal = {
   channelId: string;
   userId: string;
   sessionId: string;
-  role: "broadcaster" | "verwalter" | "bediener";
+  role: ChannelRole;
   expiresAt: string;
 };
 

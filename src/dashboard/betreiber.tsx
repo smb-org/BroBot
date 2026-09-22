@@ -8,6 +8,7 @@ import type {
   PanelMember,
   PanelTwitchUser,
 } from "../panel-contract";
+import { CHANNEL_ROLES } from "../contracts/values";
 import {
   ändereBetreiberMitglied,
   entferneBetreiberMitglied,
@@ -52,7 +53,7 @@ const mitgliedsname = (mitglied: PanelMember): string =>
 const nutzername = (nutzer: PanelTwitchUser): string =>
   nutzer.displayName.length > 0 ? nutzer.displayName : "@" + nutzer.login;
 
-const rollenOptionen = (): ReactElement[] => (["verwalter", "bediener"] as const).map((rolle) => (
+const rollenOptionen = (): ReactElement[] => CHANNEL_ROLES.filter((rolle) => rolle !== "broadcaster").map((rolle) => (
   <option key={rolle} value={rolle}>{roleLabel(rolle)}</option>
 ));
 

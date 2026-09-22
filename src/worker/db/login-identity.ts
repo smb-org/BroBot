@@ -1,3 +1,5 @@
+import type { IdentityStatus } from "../../contracts/values";
+
 export interface LoginIdentityRecord {
   userId: string;
   login: string;
@@ -6,13 +8,11 @@ export interface LoginIdentityRecord {
   accessTokenCiphertext: string;
   refreshTokenCiphertext: string;
   expiresAt: string;
-  status: LoginIdentityStatus;
+  status: IdentityStatus;
   reason: string | null;
   createdAt: string;
   updatedAt: string;
 }
-
-export type LoginIdentityStatus = "connected" | "revoked" | "error";
 
 interface LoginIdentityRow {
   user_id: string;
@@ -22,7 +22,7 @@ interface LoginIdentityRow {
   access_token_ciphertext: string;
   refresh_token_ciphertext: string;
   expires_at: string;
-  status: LoginIdentityStatus;
+  status: IdentityStatus;
   reason: string | null;
   created_at: string;
   updated_at: string;
@@ -184,7 +184,7 @@ export const setLoginIdentityTokenScopes = async (
 export const setLoginIdentityStatus = async (
   db: D1Database,
   userId: string,
-  status: LoginIdentityStatus,
+  status: IdentityStatus,
   reason: string | null,
   updatedAt: string,
 ): Promise<void> => {
@@ -205,7 +205,7 @@ export const setLoginIdentityStatus = async (
 export const setLoginIdentityStatusIfCurrent = async (
   db: D1Database,
   userId: string,
-  status: LoginIdentityStatus,
+  status: IdentityStatus,
   reason: string | null,
   updatedAt: string,
   expectedAccessTokenCiphertext: string,

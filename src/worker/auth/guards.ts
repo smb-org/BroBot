@@ -4,7 +4,8 @@ import { getBetreiberUserIds } from "../config";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../module-authorization";
 import type { AuthorizeModuleMutation, PrepareModuleAudit } from "../../modules/contract";
 import { prepareModuleAudit } from "../module-audit";
-import { authorizeChannelAccess, type ChannelMemberRole } from "./authorization";
+import { authorizeChannelAccess } from "./authorization";
+import type { ChannelRole } from "../../contracts/values";
 import { verifyCsrfRequest } from "./csrf";
 import { getSessionFromRequest } from "./session-access";
 import type {
@@ -16,7 +17,7 @@ import type {
 
 export interface ChannelAuthorizationVariables {
   session: SessionRecord;
-  channelRole: ChannelMemberRole;
+  channelRole: ChannelRole;
   actor: ActorContext;
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;

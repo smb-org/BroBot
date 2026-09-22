@@ -1,5 +1,6 @@
 import { kuerzeAuf200Zeichen } from "../contract";
 import type { KanalereignisDiagnose, KanalereignisDetail } from "../contracts";
+import type { EventSubSubscriptionType } from "../../../contracts/values";
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -82,7 +83,7 @@ const raidDiagnose = (
 };
 
 const shoutoutDiagnose = (
-  subscriptionType: string,
+  subscriptionType: EventSubSubscriptionType,
   payload: Readonly<Record<string, unknown>>,
 ): KanalereignisDiagnose => subscriptionType === "channel.shoutout.create"
   ? {
@@ -273,7 +274,7 @@ const suspiciousUpdateDiagnose = (payload: Readonly<Record<string, unknown>>): K
 
 /** Reine Abbildung des EventSub-Ereignisrumpfs auf Kanaldiagnosen. */
 export const diagnostiziereKanalereignis = (
-  subscriptionType: string,
+  subscriptionType: EventSubSubscriptionType,
   payload: Readonly<Record<string, unknown>>,
   channelId: string,
   subscriptionVariant?: string,

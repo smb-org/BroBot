@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } from "react";
 
-import type { PanelChannelRole, PanelMember, PanelTwitchUser } from "../panel-contract";
+import { CHANNEL_ROLES, type ChannelRole } from "../contracts/values";
+import type { PanelMember, PanelTwitchUser } from "../panel-contract";
 import { roleLabel } from "./labels";
 import { dashboardGemeinsameTexte, dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatDatum } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
@@ -14,7 +15,7 @@ import {
 
 interface MembersPageProperties {
   channelId: string;
-  ownRole: PanelChannelRole;
+  ownRole: ChannelRole;
   /** Eigene Twitch-User-ID, um den eigenen Eintrag zu erkennen. */
   eigeneUserId: string;
   members: PanelMember[];
@@ -29,7 +30,7 @@ interface MembersPageProperties {
   onAuthenticationRequired: () => void;
 }
 
-const manageableRoles: readonly PanelChannelRole[] = ["broadcaster", "verwalter", "bediener"];
+const manageableRoles = CHANNEL_ROLES;
 
 /** Der Beitritt liegt Tage bis Jahre zurück; die Uhrzeit trägt dort nichts bei. */
 const formatJoinDate = (value: string): string => formatDatum(value);
@@ -107,7 +108,7 @@ const errorMessage = (error: unknown): string => {
   return membersTexte().aenderungFehlgeschlagen;
 };
 
-const canManage = (role: PanelChannelRole): boolean => role !== "bediener";
+const canManage = (role: ChannelRole): boolean => role !== "bediener";
 
 /**
  * Was der Worker ablehnen würde, bietet die Oberfläche nicht als Möglichkeit
@@ -136,20 +137,20 @@ const waehlbareRollen = (
   member: PanelMember,
   eigeneUserId: string,
   broadcasterCount: number,
-): readonly PanelChannelRole[] => {
+): readonly ChannelRole[] => {
   if (letzterBroadcaster(member, broadcasterCount)) return [member.role];
   if (member.userId !== eigeneUserId) return manageableRoles;
-  const rang: Record<PanelChannelRole, number> = { bediener: 0, verwalter: 1, broadcaster: 2 };
+  const rang: Record<ChannelRole, number> = { bediener: 0, verwalter: 1, broadcaster: 2 };
   return manageableRoles.filter((rolle) => rang[rolle] <= rang[member.role]);
 };
 
 const memberLabel = (member: PanelMember): string =>
   member.displayName ?? (member.login === null ? membersTexte().nichtAufloesbar : `@${member.login}`);
 
-const roleOptions = (rollen: readonly PanelChannelRole[] = manageableRoles): ReactElement[] =>
+const roleOptions = (rollen: readonly ChannelRole[] = manageableRoles): ReactElement[] =>
   rollen.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>);
 
-const accessConfirmation = (role: PanelChannelRole): string =>
+const accessConfirmation = (role: ChannelRole): string =>
   membersTexte().bestaetigung(roleLabel(role));
 
 /**
@@ -178,7 +179,7 @@ const MemberTable = ({
   canManageMembers: boolean;
   broadcasterCount: number;
   eigeneUserId: string;
-  onRoleChange: (userId: string, role: PanelChannelRole) => void;
+  onRoleChange: (userId: string, role: ChannelRole) => void;
   onRemove: (member: PanelMember) => void;
   busyUserId: string | null;
 }): ReactElement => {
@@ -215,7 +216,7 @@ const MemberTable = ({
                   value={member.role}
                   disabled={!canManageMembers || busyUserId === member.userId || letzterBroadcaster(member, broadcasterCount)}
                   title={verwaltungGesperrt ?? entzugGesperrt(member, broadcasterCount) ?? undefined}
-                  onChange={(event) => onRoleChange(member.userId, event.target.value as PanelChannelRole)}
+                  onChange={(event) => onRoleChange(member.userId, event.target.value as ChannelRole)}
                   >
                     {roleOptions(waehlbareRollen(member, eigeneUserId, broadcasterCount))}
                   </select>
@@ -260,7 +261,7 @@ export const MembersPage = ({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [foundUser, setFoundUser] = useState<PanelTwitchUser | null>(null);
-  const [newRole, setNewRole] = useState<PanelChannelRole>("bediener");
+  const [newRole, setNewRole] = useState<ChannelRole>("bediener");
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmingAdd, setConfirmingAdd] = useState(false);
@@ -313,7 +314,7 @@ export const MembersPage = ({
     }
   };
 
-  const handleRoleChange = async (userId: string, role: PanelChannelRole): Promise<void> => {
+  const handleRoleChange = async (userId: string, role: ChannelRole): Promise<void> => {
     setBusyUserId(userId);
     setActionError(null);
     try {
@@ -373,7 +374,7 @@ export const MembersPage = ({
                 >twitch.tv/{foundUser.login}</a>
               </div>
             </div>
-            <label>{texte.rolle}<select aria-label={texte.neueRolle} value={newRole} disabled={!canManageMembers} title={!canManageMembers ? texte.verwaltungGesperrt : undefined} onChange={(event) => setNewRole(event.target.value as PanelChannelRole)}>{roleOptions()}</select></label>
+            <label>{texte.rolle}<select aria-label={texte.neueRolle} value={newRole} disabled={!canManageMembers} title={!canManageMembers ? texte.verwaltungGesperrt : undefined} onChange={(event) => setNewRole(event.target.value as ChannelRole)}>{roleOptions()}</select></label>
             <div>
               <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texte.verwaltungGesperrt : undefined}>{texte.zugriffFreigeben}</button>
               {!canManageMembers ? <span className="sperrgrund">{texte.verwaltungGesperrt}</span> : null}

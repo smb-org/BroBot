@@ -1,14 +1,18 @@
-export type PanelChannelRole = "broadcaster" | "verwalter" | "bediener";
+import type {
+  AuditActorKind,
+  ChannelRole,
+  EventSubSubscriptionType,
+  EventTone,
+  IdentityStatus,
+} from "./contracts/values";
 
-export type PanelBotStatusName = "connected" | "revoked" | "error";
-export type PanelLoginStatusName = "connected" | "revoked" | "error";
 export type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
 export type PanelChannelBotConsentStatus = "granted" | "missing";
 export type PanelChatSubscriptionStatus = "enabled" | "missing" | "error" | "revoked";
 export type PanelEventSubSubscriptionStatus = PanelChatSubscriptionStatus | "pending";
 
 export interface PanelBotStatus {
-  status: PanelBotStatusName;
+  status: IdentityStatus;
   reason: string | null;
   updatedAt: string;
 }
@@ -27,7 +31,7 @@ export interface PanelChatSubscription {
 }
 
 export interface PanelEventSubSubscription {
-  subscriptionType: string;
+  subscriptionType: EventSubSubscriptionType;
   variant: string;
   version: string;
   subscriptionId: string | null;
@@ -48,7 +52,7 @@ export interface PanelBroadcasterPermissions {
 
 export interface PanelTokenStatus {
   botExpiresAt: string | null;
-  loginStatus: PanelLoginStatusName | null;
+  loginStatus: IdentityStatus | null;
   loginReason: string | null;
   loginExpiresAt: string | null;
 }
@@ -59,7 +63,7 @@ export interface PanelLastError {
   at: string;
   message?: string | null;
   status?: number | null;
-  subscriptionType?: string | undefined;
+  subscriptionType?: EventSubSubscriptionType | undefined;
   subscriptionVariant?: string | undefined;
 }
 
@@ -67,7 +71,7 @@ export interface PanelChannelState {
   channelId: string;
   login: string;
   displayName: string;
-  role: PanelChannelRole;
+  role: ChannelRole;
   broadcasterConnection: PanelBroadcasterConnectionStatus;
   channelBotConsent: PanelChannelBotConsentStatus;
   bot: PanelBotStatus | null;
@@ -139,7 +143,7 @@ export interface PanelBetreiberAuditEntry {
   actorUserId: string;
   actorLogin: string | null;
   actorDisplayName: string | null;
-  actorKind: "mitglied" | "betreiber";
+  actorKind: AuditActorKind;
   createdAt: string;
   channelId: string;
   moduleId: string | null;
@@ -158,7 +162,7 @@ export interface PanelMember {
   login: string | null;
   displayName: string | null;
   profileImageUrl: string | null;
-  role: PanelChannelRole;
+  role: ChannelRole;
   joinedAt: string;
 }
 
@@ -201,7 +205,7 @@ export interface PanelAuditEntry {
   actorUserId: string;
   actorLogin: string | null;
   actorDisplayName: string | null;
-  actorKind: "mitglied" | "betreiber";
+  actorKind: AuditActorKind;
   createdAt: string;
   moduleId: string | null;
   action: string;
@@ -227,12 +231,10 @@ export interface PanelEventEntry {
 }
 
 export type PanelEventOrigin = "kanal" | "modul";
-export type PanelEventTone = "info" | "hinweis" | "fehler";
-
 export interface PanelEventFilters {
   herkunft: PanelEventOrigin | null;
   modul: string | null;
-  ton: PanelEventTone | null;
+  ton: EventTone | null;
   person: string | null;
 }
 

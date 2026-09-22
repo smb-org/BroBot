@@ -21,6 +21,7 @@ import type {
   PanelSystemResponse,
   PanelTokenStatus,
 } from "../panel-contract";
+import { EVENT_TONES, type EventTone } from "../contracts/values";
 import {
   BOT_MAINTENANCE_INTERVAL_MS,
   BOT_MAINTENANCE_STALE_AFTER_MS,
@@ -1035,11 +1036,14 @@ const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactEle
 const eventMetadata = (code: string) =>
   Object.prototype.hasOwnProperty.call(ereignisTon, code) ? ereignisTon[code as EreignisCode] : null;
 
-const eventTone = (code: string): "info" | "hinweis" | "fehler" | null =>
+const eventTone = (code: string): EventTone | null =>
   eventMetadata(code)?.ton ?? null;
 
-const eventToneRang = (tone: "info" | "hinweis" | "fehler" | null): number =>
+const eventToneRang = (tone: EventTone | null): number =>
   tone === "fehler" ? 3 : tone === "hinweis" ? 2 : tone === "info" ? 1 : 0;
+
+const eventToneFromValue = (value: string): EventTone | null =>
+  EVENT_TONES.includes(value as EventTone) ? value as EventTone : null;
 
 interface EventGroup {
   key: string;
@@ -1197,7 +1201,7 @@ const EventFilterBar = ({
       <label>{texte.ereignisse.modulFilter}<select aria-label={texte.ereignisse.modulFilter} value={filters.modul ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, modul: value.length === 0 ? null : value }); }}>
         <option value="">{texte.ereignisse.alle}</option>{moduleOptions.map((module) => <option key={module.id} value={module.id}>{moduleName(module.id)}</option>)}
       </select></label>
-      <label>{texte.ereignisse.ton}<select aria-label={texte.ereignisse.ton} value={filters.ton ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, ton: value === "info" || value === "hinweis" || value === "fehler" ? value : null }); }}>
+      <label>{texte.ereignisse.ton}<select aria-label={texte.ereignisse.ton} value={filters.ton ?? ""} onChange={(event) => { onChange({ ...filters, ton: eventToneFromValue(event.target.value) }); }}>
         <option value="">{texte.ereignisse.alle}</option><option value="info">{texte.ereignisse.info}</option><option value="hinweis">{texte.ereignisse.hinweis}</option><option value="fehler">{texte.ereignisse.fehler}</option>
       </select></label>
       <label>{texte.ereignisse.person}<input aria-label={texte.ereignisse.person} value={personDraft} onChange={(event) => { setPersonDraft(event.target.value); }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }} /></label>

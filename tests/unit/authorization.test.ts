@@ -3,10 +3,8 @@ import { resolve } from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  authorizeChannelAccess,
-  type ChannelMemberRole,
-} from "../../src/worker/auth/authorization";
+import { authorizeChannelAccess } from "../../src/worker/auth/authorization";
+import type { ChannelRole } from "../../src/contracts/values";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import {
   requireChannelAuthorization,
@@ -107,7 +105,7 @@ const seedMember = async (
   database: TestD1Database,
   channelId: string,
   userId: string,
-  role: ChannelMemberRole,
+  role: ChannelRole,
 ): Promise<void> => {
   await database.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
@@ -687,7 +685,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
       {
         channelId: "kanal-a",
         userId: "user-1",
-        role: "außenstehend" as ChannelMemberRole,
+        role: "außenstehend" as ChannelRole,
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:00:00.000Z",
       },

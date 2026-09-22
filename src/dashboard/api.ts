@@ -5,7 +5,6 @@ import type {
   PanelBetreiberÜbersichtResponse,
   PanelChannelOverview,
   PanelChannelsResponse,
-  PanelChannelRole,
   PanelEventsResponse,
   PanelEventFilters,
   PanelMember,
@@ -16,6 +15,7 @@ import type {
   PanelSystemResponse,
   PanelTwitchUser,
 } from "../panel-contract";
+import type { ChannelRole } from "../contracts/values";
 
 import { PanelApiError } from "../contracts/panel-error";
 
@@ -258,7 +258,7 @@ const requestMutation = <T>(
 export const addChannelMember = (
   channelId: string,
   userId: string,
-  role: PanelChannelRole,
+  role: ChannelRole,
 ): Promise<{ member: PanelMember }> => requestMutation(
   memberPath(channelId),
   "POST",
@@ -268,7 +268,7 @@ export const addChannelMember = (
 export const updateChannelMemberRole = (
   channelId: string,
   userId: string,
-  role: PanelChannelRole,
+  role: ChannelRole,
 ): Promise<{ member: PanelMember }> => requestMutation(
   memberPath(channelId, userId),
   "PATCH",

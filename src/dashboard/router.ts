@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import type { PanelEventFilters, PanelEventOrigin, PanelEventTone } from "../panel-contract";
+import { EVENT_TONES, type EventTone } from "../contracts/values";
+import type { PanelEventFilters, PanelEventOrigin } from "../panel-contract";
 
 export type DashboardRoute =
   | { kind: "overview" }
@@ -24,7 +25,7 @@ const parseEventFilters = (search: string): PanelEventFilters | undefined => {
   const moduleId = params.get("module");
   const actor = params.get("actor");
   const herkunft: PanelEventOrigin | null = origin === "channel" ? "kanal" : origin === "module" ? "modul" : null;
-  const ton: PanelEventTone | null = tone === "info" || tone === "hinweis" || tone === "fehler" ? tone : null;
+  const ton: EventTone | null = tone !== null && EVENT_TONES.includes(tone as EventTone) ? tone as EventTone : null;
   const modul = moduleId === null || moduleId.length === 0 ? null : moduleId;
   const person = actor === null || actor.length === 0 ? null : actor;
   return herkunft === null && ton === null && modul === null && person === null

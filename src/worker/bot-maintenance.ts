@@ -5,6 +5,7 @@ import {
   setBotIdentityStatusIfCurrent,
   rotateBotTokens,
 } from "./db/bot-identity";
+import type { IdentityStatus } from "../contracts/values";
 import {
   listChannelIds,
 } from "./db/channels";
@@ -339,7 +340,7 @@ export interface IdentityAuthorizationRecord {
   accessTokenCiphertext: string;
   refreshTokenCiphertext: string;
   updatedAt: string;
-  status?: "connected" | "revoked" | "error";
+  status?: IdentityStatus;
 }
 
 /** Gemeinsamer Ablauf zur Bestätigung eines widerrufenen Identitätstokens. */

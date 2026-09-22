@@ -27,6 +27,7 @@ import {
   listeBetreiberAudit,
   listeBetreiberKanäle,
 } from "./repository";
+import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 
 interface BetreiberUmgebung {
   Bindings: Env;
@@ -37,8 +38,8 @@ interface JsonDatensatz {
   [schlüssel: string]: unknown;
 }
 
-const rollen: readonly ChannelMemberRecord["role"][] = ["broadcaster", "verwalter", "bediener"];
-const betreiberRollen: readonly ChannelMemberRecord["role"][] = ["verwalter", "bediener"];
+const rollen = CHANNEL_ROLES;
+const betreiberRollen = CHANNEL_ROLES.filter((rolle): rolle is Exclude<ChannelRole, "broadcaster"> => rolle !== "broadcaster");
 const standardAuditLimit = 50;
 const maximaleAuditLimit = 100;
 const standardMitgliederLimit = 100;
@@ -66,14 +67,14 @@ const leseLogin = (wert: string | undefined): string | null => {
 const leseUserId = (wert: unknown): string | null =>
   typeof wert === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(wert) ? wert : null;
 
-const leseRolle = (wert: unknown): ChannelMemberRecord["role"] | null =>
-  typeof wert === "string" && rollen.includes(wert as ChannelMemberRecord["role"])
-    ? wert as ChannelMemberRecord["role"]
+const leseRolle = (wert: unknown): ChannelRole | null =>
+  typeof wert === "string" && rollen.includes(wert as ChannelRole)
+    ? wert as ChannelRole
     : null;
 
-const leseBetreiberRolle = (wert: unknown): "verwalter" | "bediener" | null =>
-  typeof wert === "string" && betreiberRollen.includes(wert as "verwalter" | "bediener")
-    ? wert as "verwalter" | "bediener"
+const leseBetreiberRolle = (wert: unknown): Exclude<ChannelRole, "broadcaster"> | null =>
+  typeof wert === "string" && betreiberRollen.includes(wert as Exclude<ChannelRole, "broadcaster">)
+    ? wert as Exclude<ChannelRole, "broadcaster">
     : null;
 
 const leseBoolean = (wert: unknown): boolean | null => typeof wert === "boolean" ? wert : null;

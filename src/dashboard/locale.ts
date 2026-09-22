@@ -1,4 +1,4 @@
-import type { PanelChannelRole } from "../panel-contract";
+import type { ChannelRole, EventTone } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -8,7 +8,7 @@ export interface DashboardCommonTexte {
   abbrechen: string;
   schliessen: string;
   speichern: string;
-  rollen: Record<PanelChannelRole, string>;
+  rollen: Record<ChannelRole, string>;
 }
 
 const gemeinsameTexte: LocaleCatalog<DashboardCommonTexte> = {
@@ -740,14 +740,12 @@ export const ereignisTexte: LocaleCatalog<Record<EreignisCode, EreignisText>> = 
 export type EreignisFamilie = "gemeinschaft" | "raid" | "moderation" | "betrieb";
 export type EreignisStufe = "voll" | "gezeichnet";
 export type EreignisZahlSchluessel = "zuschauer" | "anzahl" | "dauer" | "restSekunden" | "stufe" | null;
-export type EreignisBetriebston = "info" | "hinweis" | "fehler";
-
 export interface EreignisTon {
   familie: EreignisFamilie;
   stufe: EreignisStufe;
   wort: LocaleCatalog<string>;
   zahlSchluessel: EreignisZahlSchluessel;
-  ton?: EreignisBetriebston;
+  ton?: EventTone;
 }
 
 export const ereignisTon: Record<EreignisCode, EreignisTon> = {

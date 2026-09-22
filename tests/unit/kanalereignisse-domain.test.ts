@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import type { EventSubSubscriptionType } from "../../src/contracts/values";
 import { diagnostiziereKanalereignis } from "../../src/modules/kanalereignisse/domain";
 
 const diagnose = (
-  subscriptionType: string,
+  subscriptionType: EventSubSubscriptionType,
   payload: Record<string, unknown>,
   variant?: string,
   receivedAt?: string,

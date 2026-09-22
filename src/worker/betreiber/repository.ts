@@ -8,6 +8,7 @@ import {
 } from "../db/channel-members";
 import { prepareAudit } from "../db/audit";
 import { decodeCursor, encodeCursor } from "../db/cursor";
+import type { AuditActorKind } from "../../contracts/values";
 
 export interface BetreiberKanal {
   channelId: string;
@@ -35,7 +36,7 @@ export interface BetreiberAuditEintrag {
   actorUserId: string;
   actorLogin: string | null;
   actorDisplayName: string | null;
-  actorKind: "mitglied" | "betreiber";
+  actorKind: AuditActorKind;
   createdAt: string;
   channelId: string;
   moduleId: string | null;
@@ -73,7 +74,7 @@ interface BetreiberKanalÜbersichtZeile extends BetreiberKanalZeile {
 interface AuditZeile {
   audit_id: string;
   actor_user_id: string;
-  actor_kind: "mitglied" | "betreiber";
+  actor_kind: AuditActorKind;
   created_at: string;
   channel_id: string;
   module_id: string | null;

@@ -10,7 +10,7 @@ import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
-import type { ChannelMemberRole } from "../auth/authorization";
+import type { ChannelRole } from "../../contracts/values";
 import type { ModuleRouteVariables } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
@@ -31,7 +31,7 @@ interface ModuleRouteEnvironment {
 
 const nowIso = (): string => new Date().toISOString();
 
-const canManageModules = (role: ChannelMemberRole): boolean => role !== "bediener";
+const canManageModules = (role: ChannelRole): boolean => role !== "bediener";
 
 const manageDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
   context.text("Nur Broadcaster und Verwalter dürfen Module ändern.", 403);

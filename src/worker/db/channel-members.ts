@@ -1,4 +1,5 @@
-import { prepareAudit, type AuditActorKind } from "./audit";
+import { prepareAudit } from "./audit";
+import type { AuditActorKind, ChannelRole } from "../../contracts/values";
 import { decodeCursor, encodeCursor } from "./cursor";
 import {
   bindActorGuard,
@@ -11,7 +12,7 @@ import {
 export interface ChannelMemberRecord {
   channelId: string;
   userId: string;
-  role: "broadcaster" | "verwalter" | "bediener";
+  role: ChannelRole;
   createdAt: string;
   updatedAt: string;
 }

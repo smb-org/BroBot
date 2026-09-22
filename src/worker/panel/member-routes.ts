@@ -22,7 +22,7 @@ import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
-import type { ChannelMemberRole } from "../auth/authorization";
+import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { revokeRealtimeUser } from "../realtime";
 
 interface MemberRouteEnvironment {
@@ -41,8 +41,8 @@ export interface TwitchUser {
   profileImageUrl: string | null;
 }
 
-const roles: readonly ChannelMemberRole[] = ["broadcaster", "verwalter", "bediener"];
-const roleRank: Record<ChannelMemberRole, number> = {
+const roles = CHANNEL_ROLES;
+const roleRank: Record<ChannelRole, number> = {
   bediener: 0,
   verwalter: 1,
   broadcaster: 2,
@@ -66,9 +66,9 @@ export const readJsonBody = async (request: Request): Promise<JsonRecord | null>
   }
 };
 
-const readRole = (value: unknown): ChannelMemberRole | null =>
-  typeof value === "string" && roles.includes(value as ChannelMemberRole)
-    ? value as ChannelMemberRole
+const readRole = (value: unknown): ChannelRole | null =>
+  typeof value === "string" && roles.includes(value as ChannelRole)
+    ? value as ChannelRole
     : null;
 
 const readUserId = (value: unknown): string | null =>
@@ -83,7 +83,7 @@ const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
   joinedAt: member.createdAt,
 });
 
-const canManageMembers = (role: ChannelMemberRole): boolean => role !== "bediener";
+const canManageMembers = (role: ChannelRole): boolean => role !== "bediener";
 
 /**
  * Nur ein Broadcaster darf die Rolle `broadcaster` vergeben oder entziehen.
@@ -95,9 +95,9 @@ const canManageMembers = (role: ChannelMemberRole): boolean => role !== "bediene
  * durchgesetzt wird die Regel in der Mutation selbst.
  */
 const mayAssignRole = (
-  actorRole: ChannelMemberRole,
-  targetRole: ChannelMemberRole | undefined,
-  existingRole?: ChannelMemberRole,
+  actorRole: ChannelRole,
+  targetRole: ChannelRole | undefined,
+  existingRole?: ChannelRole,
 ): boolean => (targetRole !== "broadcaster" && existingRole !== "broadcaster") || actorRole === "broadcaster";
 
 const broadcasterRoleDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
@@ -242,8 +242,8 @@ const manageDenied = (context: { text: (body: string, status: 403) => Response }
 const lastBroadcaster = async (
   db: D1Database,
   channelId: string,
-  currentRole: ChannelMemberRole,
-  nextRole?: ChannelMemberRole,
+  currentRole: ChannelRole,
+  nextRole?: ChannelRole,
 ): Promise<boolean> => currentRole === "broadcaster" &&
   (nextRole === undefined || nextRole !== "broadcaster") &&
   await countBroadcasterMembers(db, channelId) <= 1;
