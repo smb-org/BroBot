@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, type ComponentType, type LazyExoticComponent,
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
-import type { ChannelRole } from "../contracts/values";
+import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState } from "../panel-contract";
 import { PanelApiError, setChannelModuleEnabled } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage, type LocaleCatalog } from "./locale";
@@ -232,7 +232,7 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true }:
   );
 };
 
-const canManageModules = (role: ChannelRole): boolean => role !== "operator";
+const canManageModules = canManage;
 
 interface ModuleWorkspaceProperties {
   channelId: string;

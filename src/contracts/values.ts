@@ -1,6 +1,20 @@
 export const CHANNEL_ROLES = ["broadcaster", "manager", "operator"] as const;
 export type ChannelRole = (typeof CHANNEL_ROLES)[number];
 
+/**
+ * Named role thresholds per docs/decisions/0006-rollenschwellen.md, so a
+ * threshold is written once and not as a scattered `role !== "operator"` or
+ * a raw `'broadcaster', 'manager'` SQL literal. `canManage` is the shared
+ * "verwaltend" threshold from that decision -- both the dashboard (read-only
+ * UI gating) and the worker (`db/guards.ts`'s `sqlRole`/`sqlRoleList` render
+ * these same sets into SQL) use it, so the two can't drift apart.
+ */
+export const MANAGING_ROLES = ["broadcaster", "manager"] as const satisfies readonly ChannelRole[];
+export const PLATFORM_ASSIGNABLE_ROLES = ["manager", "operator"] as const satisfies readonly ChannelRole[];
+
+export const canManage = (role: ChannelRole): boolean =>
+  (MANAGING_ROLES as readonly ChannelRole[]).includes(role);
+
 export const AUDIT_ACTOR_KINDS = ["member", "platform_admin"] as const;
 export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
 

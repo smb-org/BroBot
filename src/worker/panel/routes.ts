@@ -34,7 +34,7 @@ import {
 } from "./repository";
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
-import { EVENT_TONES, type EventTone } from "../../contracts/values";
+import { EVENT_TONES, canManage, type EventTone } from "../../contracts/values";
 import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
 
 interface PanelEnvironment {
@@ -94,8 +94,7 @@ const nowIso = (): string => new Date().toISOString();
 const laterIso = (now: string, milliseconds: number): string =>
   new Date(Date.parse(now) + milliseconds).toISOString();
 
-const canCheckModeratorStatus = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
-  role !== "operator";
+const canCheckModeratorStatus = canManage;
 
 const readBotCredentials = async (environment: Env): Promise<{ userId: string; accessToken: string } | null> => {
   const identity = await getBotIdentity(environment.DB);

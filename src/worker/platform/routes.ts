@@ -27,7 +27,7 @@ import {
   listPlatformAudit,
   listPlatformChannels,
 } from "./repository";
-import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
+import { CHANNEL_ROLES, PLATFORM_ASSIGNABLE_ROLES, type ChannelRole } from "../../contracts/values";
 
 interface PlatformEnvironment {
   Bindings: Env;
@@ -39,7 +39,7 @@ interface JsonRecord {
 }
 
 const roles = CHANNEL_ROLES;
-const platformRoles = CHANNEL_ROLES.filter((role): role is Exclude<ChannelRole, "broadcaster"> => role !== "broadcaster");
+const platformRoles = PLATFORM_ASSIGNABLE_ROLES;
 const defaultAuditLimit = 50;
 const maximumAuditLimit = 100;
 const defaultMembersLimit = 100;

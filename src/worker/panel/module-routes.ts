@@ -10,7 +10,7 @@ import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
-import type { AuditAction, ChannelRole } from "../../contracts/values";
+import { canManage, type AuditAction } from "../../contracts/values";
 import type { ModuleRouteVariables } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
@@ -31,7 +31,7 @@ interface ModuleRouteEnvironment {
 
 const nowIso = (): string => new Date().toISOString();
 
-const canManageModules = (role: ChannelRole): boolean => role !== "operator";
+const canManageModules = canManage;
 
 const manageDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "module_management_denied" }, 403);

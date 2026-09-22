@@ -1,5 +1,7 @@
 import {
   platformSessionGuard,
+  sqlRole,
+  sqlRoleList,
   type ActorContext,
   type MutationGuard,
 } from "../db/guards";
@@ -8,7 +10,7 @@ import {
 } from "../db/channel-members";
 import { prepareAudit } from "../db/audit";
 import { decodeCursor, encodeCursor } from "../db/cursor";
-import type { AuditActorKind } from "../../contracts/values";
+import { PLATFORM_ASSIGNABLE_ROLES, type AuditActorKind } from "../../contracts/values";
 
 export interface PlatformChannel {
   channelId: string;
@@ -83,7 +85,7 @@ interface AuditRow {
   after_json: string;
 }
 
-export const platformRolesSql = "'manager', 'operator'";
+export const platformRolesSql = sqlRoleList(PLATFORM_ASSIGNABLE_ROLES);
 
 const mutationGuard = (actor: ActorContext, timestamp: string): MutationGuard =>
   platformSessionGuard(actor, timestamp);
@@ -129,9 +131,9 @@ export const listPlatformChannels = async (
 ): Promise<PlatformChannelOverview[]> => {
   const result = await db.prepare(
     `SELECT channel.channel_id, channel.login, channel.display_name, channel.full_consent,
-            COUNT(CASE WHEN member.role = 'broadcaster' THEN 1 END) AS broadcaster_count,
-            COUNT(CASE WHEN member.role = 'manager' THEN 1 END) AS manager_count,
-            COUNT(CASE WHEN member.role = 'operator' THEN 1 END) AS operator_count,
+            COUNT(CASE WHEN member.role = ${sqlRole("broadcaster")} THEN 1 END) AS broadcaster_count,
+            COUNT(CASE WHEN member.role = ${sqlRole("manager")} THEN 1 END) AS manager_count,
+            COUNT(CASE WHEN member.role = ${sqlRole("operator")} THEN 1 END) AS operator_count,
             CASE WHEN EXISTS (
               SELECT 1
                 FROM twitch_login_identity AS identity
@@ -194,7 +196,7 @@ export const releasePlatformChannel = async (
   );
   const memberMutation = db.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-     SELECT ?, channel_id, 'broadcaster', ?, ?
+     SELECT ?, channel_id, ${sqlRole("broadcaster")}, ?, ?
        FROM channels
       WHERE channel_id = ?
         AND changes() > 0`,

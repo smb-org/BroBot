@@ -58,6 +58,7 @@ import type {
 import type {
   ChannelMemberRecord,
 } from "../../src/worker/db/channel-members";
+import { MANAGING_ROLES } from "../../src/contracts/values";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
@@ -1246,7 +1247,7 @@ describe("auth D1 repository", () => {
         memberFor("kanal-a", "target-user", "operator"),
         "member.added",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1268,7 +1269,7 @@ describe("auth D1 repository", () => {
         memberFor("kanal-a", "target-user", "operator"),
         "member.added",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1293,7 +1294,7 @@ describe("auth D1 repository", () => {
         { ...memberFor("kanal-a", "target-user", "manager"), updatedAt: jetzt },
         "member.role_changed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1319,7 +1320,7 @@ describe("auth D1 repository", () => {
         "target-user",
         "member.removed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1343,7 +1344,7 @@ describe("auth D1 repository", () => {
         { ...memberFor("kanal-a", "target-user", "manager"), updatedAt: jetzt },
         "member.role_changed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1369,7 +1370,7 @@ describe("auth D1 repository", () => {
         "target-user",
         "member.removed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1393,7 +1394,7 @@ describe("auth D1 repository", () => {
         memberFor("kanal-b", "target-user", "operator"),
         "member.added",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-b", "target-user")).resolves.toBeNull();
@@ -1414,7 +1415,7 @@ describe("auth D1 repository", () => {
         memberFor("kanal-a", "target-user", "broadcaster"),
         "member.added",
         jetzt,
-        actorGuard("'broadcaster'"),
+        actorGuard(["broadcaster"]),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1438,7 +1439,7 @@ describe("auth D1 repository", () => {
         { ...memberFor("kanal-a", "target-user", "broadcaster"), updatedAt: jetzt },
         "member.role_changed",
         jetzt,
-        actorGuard("'broadcaster'"),
+        actorGuard(["broadcaster"]),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1514,7 +1515,7 @@ describe("auth D1 repository", () => {
         "target-user",
         "member.removed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });

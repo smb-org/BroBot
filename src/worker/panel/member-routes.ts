@@ -22,7 +22,7 @@ import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
-import { CHANNEL_ROLES, type AuditAction, type ChannelRole } from "../../contracts/values";
+import { CHANNEL_ROLES, canManage, type AuditAction, type ChannelRole } from "../../contracts/values";
 import { revokeRealtimeUser } from "../realtime";
 
 interface MemberRouteEnvironment {
@@ -83,7 +83,7 @@ const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
   joinedAt: member.createdAt,
 });
 
-const canManageMembers = (role: ChannelRole): boolean => role !== "operator";
+const canManageMembers = canManage;
 
 /**
  * Only a broadcaster may grant or revoke the `broadcaster` role. Otherwise

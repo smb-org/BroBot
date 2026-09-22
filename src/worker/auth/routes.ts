@@ -62,11 +62,11 @@ import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUserAndModule,
 } from "../module-scopes";
+import { canManage } from "../../contracts/values";
 
 const nowIso = (): string => new Date().toISOString();
 
-const canManageOverlayTokens = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
-  role === "broadcaster" || role === "manager";
+const canManageOverlayTokens = canManage;
 
 const overlayTokenManageDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "overlay_token_manage_denied" }, 403);

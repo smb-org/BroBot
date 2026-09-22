@@ -5,6 +5,7 @@ import {
   bindActorGuard,
   lastBroadcasterGuard,
   lastBroadcasterRoleChangeGuard,
+  sqlRole,
   type ActorContext,
   type MutationGuard,
 } from "./guards";
@@ -144,7 +145,7 @@ export const countBroadcasterMembers = async (
   const row = await db.prepare(
     `SELECT COUNT(*) AS count
        FROM channel_members
-      WHERE channel_id = ? AND role = 'broadcaster'`,
+      WHERE channel_id = ? AND role = ${sqlRole("broadcaster")}`,
   ).bind(channelId).first<{ count: number }>();
   return row?.count ?? 0;
 };

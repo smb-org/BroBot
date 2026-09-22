@@ -2,6 +2,7 @@ import { MODULES } from "../modules/registry";
 import { ADS_OPTIONAL_BROADCASTER_SCOPES } from "../modules/ads/contracts";
 import type { BotModule } from "../modules/contract";
 import { LOGIN_SCOPES } from "./auth/oauth";
+import { sqlRole } from "./db/guards";
 
 /**
  * The full scope set comes from 0009 section 7 and is maintained there. The
@@ -104,7 +105,7 @@ export const listRequiredBroadcasterScopesForUser = async (
          ON channel_members.channel_id = channel_modules.channel_id
         AND channel_members.user_id = ?
         AND channel_members.channel_id = ?
-        AND channel_members.role = 'broadcaster'
+        AND channel_members.role = ${sqlRole("broadcaster")}
       WHERE channel_modules.enabled = 1
       ORDER BY channel_modules.module_id`,
   ).bind(userId, userId).all<ModuleChannelRow>();

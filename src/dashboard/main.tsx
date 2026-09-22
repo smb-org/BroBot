@@ -43,6 +43,7 @@ import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber } from "./locale";
+import { canManage } from "../contracts/values";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
@@ -387,7 +388,7 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, headerModul
     : tone === "healthy" ? texts.header.connectionRunning : statusText(activeChannel);
   const connectionLed = connectionLabel === null ? null : <span className="led" data-status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : "red"}><span className="led__dot" aria-hidden="true" /><span>{connectionLabel}</span></span>;
   const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
-  const managementLocked = activeChannel?.role === "operator";
+  const managementLocked = activeChannel !== undefined && !canManage(activeChannel.role);
   return (
     <div className="dashboard-header">
       <a className="brand-mark dashboard-header__brand" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
@@ -750,7 +751,7 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
         kind="channel"
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
-        actions={<><ModeratorCheckAction canCheck={overview.role !== "operator"} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
+        actions={<><ModeratorCheckAction canCheck={canManage(overview.role)} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
       />
       <div className="zustand-liste">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
       <BotPermissionsInspector permissions={overview.botPermissions} />
@@ -1242,7 +1243,7 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" || modules.data === null) return;
     const targetModuleId = route.moduleId;
     const state = modules.data.modules.find((module) => module.id === targetModuleId);
-    if (state === undefined || selectedChannel?.role === "operator" || headerModuleBusy) return;
+    if (state === undefined || (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusy) return;
     setHeaderModuleBusy(true);
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);

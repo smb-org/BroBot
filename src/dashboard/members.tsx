@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } from "react";
 
-import { CHANNEL_ROLES, type ChannelRole } from "../contracts/values";
+import { CHANNEL_ROLES, canManage, type ChannelRole } from "../contracts/values";
 import type { PanelMember, PanelTwitchUser } from "../panel-contract";
 import { roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatDate } from "./locale";
@@ -108,8 +108,6 @@ const errorMessage = (error: unknown): string => {
   const fallback = membersTexts().changeFailed;
   return error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
 };
-
-const canManage = (role: ChannelRole): boolean => role !== "operator";
 
 /**
  * The UI does not offer as an option what the worker would reject anyway.
