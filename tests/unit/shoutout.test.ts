@@ -8,12 +8,12 @@ import { sendShoutout } from "../../src/worker/shoutout";
 import { insertAppAccessToken, insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-const SCHLUESSEL = JSON.stringify({
+const KEY_RING = JSON.stringify({
   active: { id: "aktiv", key: Buffer.from(new Uint8Array(32).fill(5)).toString("base64url") },
   retired: [],
 });
 
-const environment = (database: TestD1Database, keys = SCHLUESSEL) => ({
+const environment = (database: TestD1Database, keys = KEY_RING) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
@@ -39,7 +39,7 @@ describe("Helix-Shoutout", () => {
   const setUpAppToken = async (database: TestD1Database): Promise<void> => {
     await insertAppAccessToken(
       database,
-      await encryptJson({ token: "app-token" }, parseKeyRing(SCHLUESSEL)),
+      await encryptJson({ token: "app-token" }, parseKeyRing(KEY_RING)),
       "2099-09-21T00:00:00.000Z",
       "2026-09-19T00:00:00.000Z",
       "2026-09-19T00:00:00.000Z",
@@ -75,7 +75,7 @@ describe("Helix-Shoutout", () => {
   it("meldet die Twitch-Sperre als rate_limited", async () => {
     const database = new TestD1Database();
     try {
-      await seedBot(database, await encryptJson({ token: "bot-token" }, parseKeyRing(SCHLUESSEL)));
+      await seedBot(database, await encryptJson({ token: "bot-token" }, parseKeyRing(KEY_RING)));
       await setUpAppToken(database);
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
 

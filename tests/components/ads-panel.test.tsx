@@ -66,7 +66,7 @@ describe("Ad panel view", () => {
   it("shows snooze without scope visible, disabled, with counter and refresh time", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      if (path.endsWith("/zeitplan")) {
+      if (path.endsWith("/schedule")) {
         return Promise.resolve(jsonResponse({
           schedule: {
             nextAdAt: "2026-09-21T12:00:00Z",
@@ -99,7 +99,7 @@ describe("Ad panel view", () => {
   it("shows an empty schedule calmly and lists recent ad breaks", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      if (path.endsWith("/zeitplan")) {
+      if (path.endsWith("/schedule")) {
         return Promise.resolve(jsonResponse({
           schedule: {
             nextAdAt: null,
@@ -135,7 +135,7 @@ describe("Ad panel view", () => {
   it("treats a cleared lead time as a field error, not null", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      if (path.endsWith("/zeitplan")) return Promise.resolve(jsonResponse({
+      if (path.endsWith("/schedule")) return Promise.resolve(jsonResponse({
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
         snoozeScopeAvailable: true, recentAdBreaks: [],
       }));

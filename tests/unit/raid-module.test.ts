@@ -20,7 +20,7 @@ const event = (
   chatStatus: null,
 });
 
-const eingehenderRaid = (viewers: number): Record<string, unknown> => ({
+const incomingRaid = (viewers: number): Record<string, unknown> => ({
   from_broadcaster_user_id: "quelle-1",
   from_broadcaster_user_login: "quelle",
   to_broadcaster_user_id: "kanal-a",
@@ -48,7 +48,7 @@ describe("Raid module", () => {
   });
 
   it("produces a shoutout and the full chat line at the shoutout threshold", () => {
-    const result = processRaid(event(eingehenderRaid(8), {
+    const result = processRaid(event(incomingRaid(8), {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
       textThreshold: 3,
@@ -63,7 +63,7 @@ describe("Raid module", () => {
   });
 
   it("produces only the full chat line at the shoutout threshold when the switch is off", () => {
-    const result = processRaid(event(eingehenderRaid(8), {
+    const result = processRaid(event(incomingRaid(8), {
       shoutoutEnabled: false,
       shoutoutThreshold: 3,
       textThreshold: 3,
@@ -81,7 +81,7 @@ describe("Raid module", () => {
   });
 
   it("produces only the short chat line below the shoutout threshold", () => {
-    const result = processRaid(event(eingehenderRaid(2), {
+    const result = processRaid(event(incomingRaid(2), {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
       textThreshold: 3,
@@ -99,7 +99,7 @@ describe("Raid module", () => {
   });
 
   it("applies the shoutout and text thresholds independently", () => {
-    const result = processRaid(event(eingehenderRaid(10), {
+    const result = processRaid(event(incomingRaid(10), {
       shoutoutEnabled: true,
       shoutoutThreshold: 50,
       textThreshold: 5,
@@ -131,7 +131,7 @@ describe("Raid module", () => {
   });
 
   it("replaces both placeholders and treats a threshold of zero as inclusive", () => {
-    const result = processRaid(event(eingehenderRaid(0), {
+    const result = processRaid(event(incomingRaid(0), {
       shoutoutEnabled: true,
       shoutoutThreshold: 0,
       textThreshold: 0,
@@ -146,7 +146,7 @@ describe("Raid module", () => {
   });
 
   it("gives a reason for a raid below the threshold", () => {
-    const result = processRaid(event(eingehenderRaid(2), {
+    const result = processRaid(event(incomingRaid(2), {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
       textThreshold: 3,
@@ -161,7 +161,7 @@ describe("Raid module", () => {
   });
 
   it("no longer replaces German raid placeholders", () => {
-    const result = processRaid(event(eingehenderRaid(8), {
+    const result = processRaid(event(incomingRaid(8), {
       shoutoutEnabled: false,
       shoutoutThreshold: 3,
       textThreshold: 3,

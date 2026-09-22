@@ -85,12 +85,12 @@ export const overlayTokenReturningColumns = `
   revoked_at, revocation_reason, last_used_at`;
 
 /**
- * Zwischen dem Guard und dieser Mutation liegt `request.text()`. Ein Client
- * kann den Body offen lassen, bis seine Mitgliedschaft entzogen oder die
- * Session widerrufen wurde, und erst danach abschliessen. Deshalb wiederholt
- * der INSERT die Pruefung selbst; ohne lebende Session entsteht keine Zeile.
+ * `request.text()` sits between the guard and this mutation. A client can
+ * leave the body open until its membership is revoked or the session is
+ * revoked, and only close it afterward. That's why the INSERT repeats the
+ * check itself; without a live session no row is created.
  *
- * Rueckgabe: true, wenn das Token ausgegeben wurde.
+ * Returns: true if the token was issued.
  */
 export const createOverlayToken = async (
   db: D1Database,

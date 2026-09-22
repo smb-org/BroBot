@@ -91,7 +91,7 @@ export const realtimeHintMatchesFilters = (
   const metadata = eventMetadata(hint.code);
   if (filters.origin !== null) {
     if (metadata === null) return false;
-    const isModuleDiagnostic = metadata.familie === "betrieb";
+    const isModuleDiagnostic = metadata.family === "betrieb";
     if (filters.origin === "module" !== isModuleDiagnostic) return false;
   }
   if (filters.tone !== null && (metadata === null || metadata.tone !== filters.tone)) return false;

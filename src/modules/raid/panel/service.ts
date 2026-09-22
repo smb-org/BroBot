@@ -16,12 +16,12 @@ const json = async <T>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const ladeRaidEinstellungen = async (channelId: string): Promise<RaidSettings> => {
+export const loadRaidSettings = async (channelId: string): Promise<RaidSettings> => {
   const response = await fetch(pathFor(channelId));
   return (await json<{ settings: RaidSettings }>(response)).settings;
 };
 
-export const speichereRaidEinstellungen = async (channelId: string, settings: RaidSettings): Promise<void> => {
+export const saveRaidSettings = async (channelId: string, settings: RaidSettings): Promise<void> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
   await json(await fetch(pathFor(channelId), {

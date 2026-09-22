@@ -1,10 +1,10 @@
-import { kuerzeAuf200Zeichen } from "../contract";
+import { truncateTo200Chars } from "../contract";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import {
   commandFromMessage,
   commandTextWithPlaceholders,
   chatStatusMeetsTier,
-  cooldownRestzeit,
+  cooldownRemaining,
 } from "./domain";
 import type { TextCommandInput } from "./domain";
 import type { TextCommandRepository } from "./repository";
@@ -14,7 +14,7 @@ const recordValue = (value: unknown, key: string): unknown =>
     ? Reflect.get(value, key)
     : undefined;
 
-const nachrichtText = (event: ModuleEvent): string | null => {
+const messageText = (event: ModuleEvent): string | null => {
   const message = recordValue(event.payload.message, "text");
   return typeof message === "string" ? message : null;
 };
@@ -28,24 +28,24 @@ const userFor = (event: ModuleEvent): string =>
 const channelFor = (event: ModuleEvent): string =>
   textValue(event.payload.broadcaster_user_login) ?? event.channelId;
 
-const diagnoseAusgeloest = (
-  eingabe: Exclude<TextCommandInput, { kind: "unbekannt" }>,
+const diagnosticTriggered = (
+  input: Exclude<TextCommandInput, { kind: "unknown" }>,
   response: string,
 ) => {
-  const argumente = eingabe.argumente;
+  const argumente = input.argumente;
   return {
     code: "text_commands.ausgeloest",
     detail: {
-      name: eingabe.name,
+      name: input.name,
       ...(argumente === undefined || argumente.length === 0
         ? {}
-        : { argumente: kuerzeAuf200Zeichen(argumente) }),
-      response: kuerzeAuf200Zeichen(response),
+        : { argumente: truncateTo200Chars(argumente) }),
+      response: truncateTo200Chars(response),
     },
   } as const;
 };
 
-const response = (event: ModuleEvent, eingabe: Exclude<TextCommandInput, { kind: "unbekannt" }>, text: string): ModuleResult => {
+const response = (event: ModuleEvent, input: Exclude<TextCommandInput, { kind: "unknown" }>, text: string): ModuleResult => {
   const replyToMessageId = textValue(event.payload.message_id);
   return {
     actions: [{
@@ -53,7 +53,7 @@ const response = (event: ModuleEvent, eingabe: Exclude<TextCommandInput, { kind:
       text,
       ...(replyToMessageId === null ? {} : { replyToMessageId }),
     }],
-    diagnostics: [diagnoseAusgeloest(eingabe, text)],
+    diagnostics: [diagnosticTriggered(input, text)],
   };
 };
 
@@ -61,26 +61,26 @@ export const processTextCommandMessage = async (
   event: ModuleEvent,
   repository: TextCommandRepository,
 ): Promise<ModuleResult> => {
-  const text = nachrichtText(event);
+  const text = messageText(event);
   if (text === null) return { actions: [], diagnostics: [] };
-  const eingabe = commandFromMessage(text);
-  if (eingabe === null) return { actions: [], diagnostics: [] };
+  const input = commandFromMessage(text);
+  if (input === null) return { actions: [], diagnostics: [] };
 
-  if (eingabe.kind === "unbekannt") {
+  if (input.kind === "unknown") {
     return { actions: [], diagnostics: [{ code: "text_commands.unbekannt" }] };
   }
 
-  const command = await repository.finden(event.channelId, eingabe.name);
+  const command = await repository.find(event.channelId, input.name);
   if (command === null) {
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.unbekannt", detail: { name: eingabe.name } }],
+      diagnostics: [{ code: "text_commands.unbekannt", detail: { name: input.name } }],
     };
   }
   if (!command.enabled) {
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.deaktiviert", detail: { name: eingabe.name } }],
+      diagnostics: [{ code: "text_commands.deaktiviert", detail: { name: input.name } }],
     };
   }
   if (!chatStatusMeetsTier(event.chatStatus, command.minimumTier)) {
@@ -89,7 +89,7 @@ export const processTextCommandMessage = async (
       diagnostics: [{
         code: "text_commands.berechtigung",
         detail: {
-          name: eingabe.name,
+          name: input.name,
           requiredTier: command.minimumTier,
           currentTier: event.chatStatus,
         },
@@ -97,37 +97,37 @@ export const processTextCommandMessage = async (
     };
   }
 
-  const beanspruchung = await repository.beanspruchen(event.channelId, eingabe.name, event.receivedAt);
-  if (beanspruchung === null) {
+  const claim = await repository.claim(event.channelId, input.name, event.receivedAt);
+  if (claim === null) {
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.unbekannt", detail: { name: eingabe.name } }],
+      diagnostics: [{ code: "text_commands.unbekannt", detail: { name: input.name } }],
     };
   }
-  if (!beanspruchung.beansprucht) {
-    const restSekunden = cooldownRestzeit(
-      beanspruchung.befehl.lastUsedAt,
+  if (!claim.claimed) {
+    const remainingSeconds = cooldownRemaining(
+      claim.command.lastUsedAt,
       event.receivedAt,
-      beanspruchung.befehl.cooldownSeconds,
+      claim.command.cooldownSeconds,
     );
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.abgekuehlt", detail: { name: eingabe.name, remainingSeconds: restSekunden } }],
+      diagnostics: [{ code: "text_commands.abgekuehlt", detail: { name: input.name, remainingSeconds } }],
     };
   }
 
-  if (beanspruchung.befehl.kind === "list") {
+  if (claim.command.kind === "list") {
     const commands = (await repository.list(event.channelId))
       .filter((command) => command.enabled)
       .sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0
       ? "Keine Textbefehle angelegt."
       : `Befehle: ${commands.map((command) => `!${command.name}`).join(", ")}`;
-    return response(event, eingabe, list);
+    return response(event, input, list);
   }
 
-  return response(event, eingabe, commandTextWithPlaceholders(
-    beanspruchung.befehl.text,
+  return response(event, input, commandTextWithPlaceholders(
+    claim.command.text,
     userFor(event),
     channelFor(event),
   ));

@@ -3,38 +3,38 @@ import { useState, type ReactElement } from "react";
 import type { ChannelRole } from "../contracts/values";
 import type { PanelModuleState } from "../panel-contract";
 import { PanelApiError, setChannelModuleEnabled } from "./api";
-import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatZahl } from "./locale";
+import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatNumber } from "./locale";
 import { ModuleHeading } from "./module-panels";
 
 
 interface ModulesTexts {
-  verwaltungGesperrt: string;
-  titel: string;
-  liste: string;
-  verfuegbar: string;
+  managementLocked: string;
+  title: string;
+  list: string;
+  available: string;
   load: string;
-  registriert: string;
+  registered: string;
   module: string;
-  aktiv: string;
-  inaktiv: string;
-  aktivieren: string;
-  deaktivieren: string;
+  active: string;
+  inactive: string;
+  enable: string;
+  disable: string;
   sessionInvalid: string;
-  aenderungFehlgeschlagen: string;
+  changeFailed: string;
 }
 
 const texts: LocaleCatalog<ModulesTexts> = {
   de: {
-    verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Module ändern.", titel: "Module", liste: "Modulliste",
-    verfuegbar: "Verfügbare Module", load: "Module werden geladen …", registriert: "Für diesen Bot ist noch kein Modul registriert.",
-    module: "Modul", aktiv: "Aktiv", inaktiv: "Inaktiv", aktivieren: "aktivieren", deaktivieren: "deaktivieren",
-    sessionInvalid: "Deine Sitzung ist nicht mehr gültig.", aenderungFehlgeschlagen: "Die Moduländerung ist fehlgeschlagen.",
+    managementLocked: "Nur Broadcaster und Verwalter dürfen Module ändern.", title: "Module", list: "Modulliste",
+    available: "Verfügbare Module", load: "Module werden geladen …", registered: "Für diesen Bot ist noch kein Modul registriert.",
+    module: "Modul", active: "Aktiv", inactive: "Inaktiv", enable: "aktivieren", disable: "deaktivieren",
+    sessionInvalid: "Deine Sitzung ist nicht mehr gültig.", changeFailed: "Die Moduländerung ist fehlgeschlagen.",
   },
   en: {
-    verwaltungGesperrt: "Only broadcasters and managers may change modules.", titel: "Modules", liste: "Module list",
-    verfuegbar: "Available modules", load: "Loading modules …", registriert: "No module is registered for this bot yet.",
-    module: "Module", aktiv: "Active", inaktiv: "Inactive", aktivieren: "enable", deaktivieren: "disable",
-    sessionInvalid: "Your session is no longer valid.", aenderungFehlgeschlagen: "The module change failed.",
+    managementLocked: "Only broadcasters and managers may change modules.", title: "Modules", list: "Module list",
+    available: "Available modules", load: "Loading modules …", registered: "No module is registered for this bot yet.",
+    module: "Module", active: "Active", inactive: "Inactive", enable: "enable", disable: "disable",
+    sessionInvalid: "Your session is no longer valid.", changeFailed: "The module change failed.",
   },
 };
 
@@ -53,7 +53,7 @@ interface ModulesPageProperties {
 const errorMessage = (error: unknown): string => {
   if (error instanceof PanelApiError && error.status === 401) return modulesTexts().sessionInvalid;
   if (error instanceof Error && error.message.length > 0) return error.message;
-  return modulesTexts().aenderungFehlgeschlagen;
+  return modulesTexts().changeFailed;
 };
 
 const canManageModules = (role: ChannelRole): boolean => role !== "operator";
@@ -90,18 +90,18 @@ const ModulesPage = ({
 
   return (
     <>
-      <ModuleHeading kind="modules" title={texts.titel} subtitle={formatZahl(modules.length)} />
-      <section className="content-section" aria-label={texts.liste}>
-        <div className="section-heading"><h2>{texts.verfuegbar}</h2></div>
+      <ModuleHeading kind="modules" title={texts.title} subtitle={formatNumber(modules.length)} />
+      <section className="content-section" aria-label={texts.list}>
+        <div className="section-heading"><h2>{texts.available}</h2></div>
         {loading ? <p className="loading-line">{texts.load}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
         {loading || error !== null ? null : modules.length === 0 ? (
-          <p className="muted">{texts.registriert}</p>
+          <p className="muted">{texts.registered}</p>
         ) : (
           <div className="tabelle-wrap">
             <table className="tabelle">
-              <thead><tr><th scope="col">{texts.module}</th><th scope="col">{texts.aktiv}</th></tr></thead>
+              <thead><tr><th scope="col">{texts.module}</th><th scope="col">{texts.active}</th></tr></thead>
               <tbody>
                 {modules.map((module) => (
                   <tr key={module.id}>
@@ -110,15 +110,15 @@ const ModulesPage = ({
                       <label className="module-toggle">
                         <input
                           type="checkbox"
-                          aria-label={`${module.id} ${module.enabled ? texts.deaktivieren : texts.aktivieren}`}
+                          aria-label={`${module.id} ${module.enabled ? texts.disable : texts.enable}`}
                           checked={module.enabled}
                           disabled={!manageable || busyModuleId === module.id}
-                          title={!manageable ? texts.verwaltungGesperrt : undefined}
+                          title={!manageable ? texts.managementLocked : undefined}
                           onChange={() => { void handleToggle(module); }}
                         />
-                        {module.enabled ? texts.aktiv : texts.inaktiv}
+                        {module.enabled ? texts.active : texts.inactive}
                       </label>
-                      {!manageable ? <span className="sperrgrund">{texts.verwaltungGesperrt}</span> : null}
+                      {!manageable ? <span className="sperrgrund">{texts.managementLocked}</span> : null}
                     </td>
                   </tr>
                 ))}

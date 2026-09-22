@@ -404,12 +404,12 @@ const requestForRealtime = async (userId: string): Promise<Request> => {
 // Exhaustiveness maps: `Record<Union, true>` requires the compiler to list every member
 // exactly once. If one is missing, extra, or renamed, the
 // typecheck breaks -- long before a client sees the changed value on the wire.
-const alleRollen: Record<ChannelRole, true> = { broadcaster: true, manager: true, operator: true };
-const alleNachrichtentypen: Record<RealtimeMessageType, true> = { "system.hello": true, "event_log.new": true };
-const alleEmpfaengerarten: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
+const allRoles: Record<ChannelRole, true> = { broadcaster: true, manager: true, operator: true };
+const allMessageTypes: Record<RealtimeMessageType, true> = { "system.hello": true, "event_log.new": true };
+const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
-const alleAktionsarten: Record<ModuleAction["kind"], true> = { chat: true, shoutout: true, overlay: true };
-const alleSprachen: Record<ModuleLanguage, true> = { de: true, en: true };
+const allActionKinds: Record<ModuleAction["kind"], true> = { chat: true, shoutout: true, overlay: true };
+const allLanguages: Record<ModuleLanguage, true> = { de: true, en: true };
 const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true };
 const allEventOrigins: Record<PanelEventOrigin, true> = { channel: true, module: true };
 const alleTonlagen: Record<EventTone, true> = { info: true, warning: true, error: true };
@@ -652,12 +652,12 @@ describe("serialized contract shapes", () => {
       // `Record<Union, true>` forces the compiler to require every member exactly once:
       // a new, removed, or renamed member breaks `pnpm run typecheck`,
       // and the assertion below freezes the spelling.
-      expect(Object.keys(alleRollen).sort()).toEqual(["broadcaster", "manager", "operator"]);
-      expect(Object.keys(alleNachrichtentypen).sort()).toEqual(["event_log.new", "system.hello"]);
-      expect(Object.keys(alleEmpfaengerarten).sort()).toEqual(["overlay", "panel"]);
+      expect(Object.keys(allRoles).sort()).toEqual(["broadcaster", "manager", "operator"]);
+      expect(Object.keys(allMessageTypes).sort()).toEqual(["event_log.new", "system.hello"]);
+      expect(Object.keys(allRecipientKinds).sort()).toEqual(["overlay", "panel"]);
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
-      expect(Object.keys(alleAktionsarten).sort()).toEqual(["chat", "overlay", "shoutout"]);
-      expect(Object.keys(alleSprachen).sort()).toEqual(["de", "en"]);
+      expect(Object.keys(allActionKinds).sort()).toEqual(["chat", "overlay", "shoutout"]);
+      expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);
       expect(Object.keys(allTextCommandKinds).sort()).toEqual(["list", "text"]);
       expect(Object.keys(allEventOrigins).sort()).toEqual(["channel", "module"]);
       expect(Object.keys(alleTonlagen).sort()).toEqual(["error", "info", "warning"]);

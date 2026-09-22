@@ -18,7 +18,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo {user}",
@@ -30,7 +30,7 @@ describe("Text commands panel view", () => {
           updatedAt: "2026-09-19T12:00:00.000Z",
         }] }));
       }
-      return Promise.resolve(jsonResponse({ befehl: {} }));
+      return Promise.resolve(jsonResponse({ command: {} }));
     });
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
@@ -58,7 +58,7 @@ describe("Text commands panel view", () => {
   });
 
   it("keeps the create button disabled until required fields are filled", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ befehle: [] })));
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ commands: [] })));
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
@@ -83,7 +83,7 @@ describe("Text commands panel view", () => {
     const createFinished = new Promise<Response>((resolve) => { resolveCreate = resolve; });
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ commands: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "POST") return createFinished;
       return Promise.resolve(jsonResponse({}));
@@ -125,7 +125,7 @@ describe("Text commands panel view", () => {
         cooldownSeconds: 10, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       },
     ];
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ befehle: commands })));
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ commands: commands })));
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
     render(<TextCommandsPanel channelId="kanal-a" />);
@@ -147,7 +147,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: exists ? [{
+        return Promise.resolve(jsonResponse({ commands: exists ? [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
@@ -195,7 +195,7 @@ describe("Text commands panel view", () => {
     let created = false;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ commands: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "POST") {
         created = true;
@@ -225,7 +225,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
@@ -267,7 +267,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
@@ -299,7 +299,7 @@ describe("Text commands panel view", () => {
   });
 
   it("follows the browser language with the panel", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ befehle: [] })));
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ commands: [] })));
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
 
@@ -315,7 +315,7 @@ describe("Text commands panel view", () => {
     let createdBody: Record<string, unknown> | null = null;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ befehle: [] }));
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ commands: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "POST") {
         createdBody = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : null;
@@ -344,7 +344,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Antwort",
@@ -360,7 +360,7 @@ describe("Text commands panel view", () => {
         const body = typeof init.body === "string" ? JSON.parse(init.body) as { enabled?: boolean } : {};
         enabled = body.enabled ?? enabled;
       }
-      return Promise.resolve(jsonResponse({ befehl: {} }));
+      return Promise.resolve(jsonResponse({ command: {} }));
     });
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
@@ -400,7 +400,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Antwort",
@@ -439,7 +439,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
@@ -471,7 +471,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
@@ -520,7 +520,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
@@ -573,7 +573,7 @@ describe("Text commands panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ befehle: [{
+        return Promise.resolve(jsonResponse({ commands: [{
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",

@@ -24,27 +24,27 @@ const diagnoseDetail = (
 const diagnosticCode = (event: ReturnType<typeof decideAdBreak>): string =>
   event.kind === "announce" ? "ads.ankuendigung" : "ads.uebersprungen";
 
-const textMitDauer = (vorlage: string, dauerSekunden: number): string => {
-  const text = vorlage.trim();
+const textWithDuration = (template: string, durationSeconds: number): string => {
+  const text = template.trim();
   return text.includes("{duration}")
-    ? text.replaceAll("{duration}", String(dauerSekunden))
-    : `${text} (${String(dauerSekunden)} Sekunden)`;
+    ? text.replaceAll("{duration}", String(durationSeconds))
+    : `${text} (${String(durationSeconds)} Sekunden)`;
 };
 
 export const processAdBreak = (
   event: ModuleEvent<AdsSettings>,
 ): ModuleResult => {
-  const entscheidung = decideAdBreak(event.payload);
-  if (entscheidung.kind === "skip") {
+  const decision = decideAdBreak(event.payload);
+  if (decision.kind === "skip") {
     return {
       actions: [],
-      diagnostics: [{ code: diagnosticCode(entscheidung), detail: diagnoseDetail(entscheidung) }],
+      diagnostics: [{ code: diagnosticCode(decision), detail: diagnoseDetail(decision) }],
     };
   }
 
-  const vorlage = entscheidung.event.automatic ? event.settings.automatic : event.settings.manual;
+  const template = decision.event.automatic ? event.settings.automatic : event.settings.manual;
   return {
-    actions: [{ kind: "chat", text: textMitDauer(vorlage, entscheidung.event.durationSeconds) }],
-    diagnostics: [{ code: diagnosticCode(entscheidung), detail: diagnoseDetail(entscheidung) }],
+    actions: [{ kind: "chat", text: textWithDuration(template, decision.event.durationSeconds) }],
+    diagnostics: [{ code: diagnosticCode(decision), detail: diagnoseDetail(decision) }],
   };
 };

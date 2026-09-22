@@ -32,48 +32,48 @@ export const moduleName = (moduleId: string, language: DashboardLanguage = dashb
 };
 
 interface EventSubscriptionNames {
-  chatNachrichten: string;
-  chatBenachrichtigungen: string;
+  chatMessages: string;
+  chatNotifications: string;
   raids: string;
-  raidEingehend: string;
-  raidAusgehend: string;
-  shoutoutsGesendet: string;
-  shoutoutsEmpfangen: string;
+  raidIncoming: string;
+  raidOutgoing: string;
+  shoutoutsSent: string;
+  shoutoutsReceived: string;
   moderation: string;
-  automodHalte: string;
-  verdachtNachrichten: string;
-  verdachtEinstufungen: string;
-  werbung: string;
+  automodHolds: string;
+  suspiciousMessages: string;
+  suspiciousClassifications: string;
+  adBreaks: string;
 }
 
 const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
   de: {
-    chatNachrichten: "Chat-Nachrichten",
-    chatBenachrichtigungen: "Chat-Benachrichtigungen",
+    chatMessages: "Chat-Nachrichten",
+    chatNotifications: "Chat-Benachrichtigungen",
     raids: "Raids",
-    raidEingehend: "Eingehende Raids",
-    raidAusgehend: "Ausgehende Raids",
-    shoutoutsGesendet: "Gesendete Shoutouts",
-    shoutoutsEmpfangen: "Empfangene Shoutouts",
+    raidIncoming: "Eingehende Raids",
+    raidOutgoing: "Ausgehende Raids",
+    shoutoutsSent: "Gesendete Shoutouts",
+    shoutoutsReceived: "Empfangene Shoutouts",
     moderation: "Moderationsereignisse",
-    automodHalte: "AutoMod-Haltevorgänge",
-    verdachtNachrichten: "Nachrichten auffälliger Nutzer",
-    verdachtEinstufungen: "Einstufungen auffälliger Nutzer",
-    werbung: "Werbepausen",
+    automodHolds: "AutoMod-Haltevorgänge",
+    suspiciousMessages: "Nachrichten auffälliger Nutzer",
+    suspiciousClassifications: "Einstufungen auffälliger Nutzer",
+    adBreaks: "Werbepausen",
   },
   en: {
-    chatNachrichten: "Chat messages",
-    chatBenachrichtigungen: "Chat notifications",
+    chatMessages: "Chat messages",
+    chatNotifications: "Chat notifications",
     raids: "Raids",
-    raidEingehend: "Incoming raids",
-    raidAusgehend: "Outgoing raids",
-    shoutoutsGesendet: "Sent shoutouts",
-    shoutoutsEmpfangen: "Received shoutouts",
+    raidIncoming: "Incoming raids",
+    raidOutgoing: "Outgoing raids",
+    shoutoutsSent: "Sent shoutouts",
+    shoutoutsReceived: "Received shoutouts",
     moderation: "Moderation events",
-    automodHalte: "AutoMod holds",
-    verdachtNachrichten: "Suspicious user messages",
-    verdachtEinstufungen: "Suspicious user classifications",
-    werbung: "Ad breaks",
+    automodHolds: "AutoMod holds",
+    suspiciousMessages: "Suspicious user messages",
+    suspiciousClassifications: "Suspicious user classifications",
+    adBreaks: "Ad breaks",
   },
 };
 
@@ -83,20 +83,20 @@ export const eventSubName = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
   const texts = eventSubscriptionNames[language];
-  if (subscriptionType === "channel.chat.message") return texts.chatNachrichten;
-  if (subscriptionType === "channel.chat.notification") return texts.chatBenachrichtigungen;
+  if (subscriptionType === "channel.chat.message") return texts.chatMessages;
+  if (subscriptionType === "channel.chat.notification") return texts.chatNotifications;
   if (subscriptionType === "channel.raid") {
-    if (variant === "incoming") return texts.raidEingehend;
-    if (variant === "outgoing") return texts.raidAusgehend;
+    if (variant === "incoming") return texts.raidIncoming;
+    if (variant === "outgoing") return texts.raidOutgoing;
     return texts.raids;
   }
-  if (subscriptionType === "channel.shoutout.create") return texts.shoutoutsGesendet;
-  if (subscriptionType === "channel.shoutout.receive") return texts.shoutoutsEmpfangen;
+  if (subscriptionType === "channel.shoutout.create") return texts.shoutoutsSent;
+  if (subscriptionType === "channel.shoutout.receive") return texts.shoutoutsReceived;
   if (subscriptionType === "channel.moderate") return texts.moderation;
-  if (subscriptionType === "automod.message.hold") return texts.automodHalte;
-  if (subscriptionType === "channel.suspicious_user.message") return texts.verdachtNachrichten;
-  if (subscriptionType === "channel.suspicious_user.update") return texts.verdachtEinstufungen;
-  if (subscriptionType === "channel.ad_break.begin") return texts.werbung;
+  if (subscriptionType === "automod.message.hold") return texts.automodHolds;
+  if (subscriptionType === "channel.suspicious_user.message") return texts.suspiciousMessages;
+  if (subscriptionType === "channel.suspicious_user.update") return texts.suspiciousClassifications;
+  if (subscriptionType === "channel.ad_break.begin") return texts.adBreaks;
   return subscriptionType;
 };
 
@@ -145,19 +145,19 @@ export const moduleScopePurpose = (
 };
 
 interface ModuleStatus {
-  laeuft: string;
-  aus: string;
-  deaktiviert: string;
+  running: string;
+  off: string;
+  disabled: string;
 }
 
 const moduleStatus: LocaleCatalog<ModuleStatus> = {
-  de: { laeuft: "Läuft", aus: "Aus", deaktiviert: "Deaktiviert" },
-  en: { laeuft: "Running", aus: "Off", deaktiviert: "Disabled" },
+  de: { running: "Läuft", off: "Aus", disabled: "Deaktiviert" },
+  en: { running: "Running", off: "Off", disabled: "Disabled" },
 };
 
 export const statusWord = (enabled: boolean, language: DashboardLanguage = dashboardLanguage()): string => {
   const texts = moduleStatus[language];
-  return enabled ? texts.laeuft : texts.aus;
+  return enabled ? texts.running : texts.off;
 };
 
-export const disabledStatusWord = (language: DashboardLanguage = dashboardLanguage()): string => moduleStatus[language].deaktiviert;
+export const disabledStatusWord = (language: DashboardLanguage = dashboardLanguage()): string => moduleStatus[language].disabled;

@@ -1,4 +1,4 @@
-export { kuerzeAuf200Zeichen } from "../contract";
+export { truncateTo200Chars } from "../contract";
 
 export {
   browserModuleLanguage,

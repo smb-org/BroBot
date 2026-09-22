@@ -14,29 +14,29 @@ export type AdBreaksDecision =
 export const decideAdBreak = (
   payload: Readonly<Record<string, unknown>>,
 ): AdBreaksDecision => {
-  const dauer = finiteNumber(payload.duration_seconds) ? payload.duration_seconds : null;
-  const automatisch = payload.is_automatic === true;
-  if (dauer === null || dauer < 0) {
-    return { kind: "skip", reason: "dauer_ungueltig", durationSeconds: dauer, automatic: automatisch };
+  const duration = finiteNumber(payload.duration_seconds) ? payload.duration_seconds : null;
+  const automatic = payload.is_automatic === true;
+  if (duration === null || duration < 0) {
+    return { kind: "skip", reason: "dauer_ungueltig", durationSeconds: duration, automatic };
   }
-  if (dauer === 0) return { kind: "skip", reason: "dauer_null", durationSeconds: 0, automatic: automatisch };
+  if (duration === 0) return { kind: "skip", reason: "dauer_null", durationSeconds: 0, automatic };
 
-  const gestartetAm = nonEmptyString(payload.started_at);
-  const start = gestartetAm === null ? Number.NaN : Date.parse(gestartetAm);
-  if (gestartetAm === null || !Number.isFinite(start)) {
-    return { kind: "skip", reason: "start_ungueltig", durationSeconds: dauer, automatic: automatisch };
+  const startedAt = nonEmptyString(payload.started_at);
+  const start = startedAt === null ? Number.NaN : Date.parse(startedAt);
+  if (startedAt === null || !Number.isFinite(start)) {
+    return { kind: "skip", reason: "start_ungueltig", durationSeconds: duration, automatic };
   }
 
-  const ausloeserLogin = nonEmptyString(payload.requester_user_login) ??
+  const triggerLogin = nonEmptyString(payload.requester_user_login) ??
     nonEmptyString(payload.requester_user_name);
   return {
     kind: "announce",
     event: {
-      durationSeconds: dauer,
-      startedAt: gestartetAm,
-      endsAt: new Date(start + dauer * 1000).toISOString(),
-      automatic: automatisch,
-      triggerLogin: ausloeserLogin,
+      durationSeconds: duration,
+      startedAt,
+      endsAt: new Date(start + duration * 1000).toISOString(),
+      automatic,
+      triggerLogin,
     },
   };
 };
@@ -48,9 +48,9 @@ export interface AdPrewarningSchedule {
 
 export interface AdPrewarningInput {
   settings: Pick<AdsSettings, "prewarning" | "leadSeconds" | "prewarningText">;
-  scopeVorhanden: boolean;
-  jetztAmMs: number;
-  geplantAmMs: number;
+  scopeAvailable: boolean;
+  nowAtMs: number;
+  plannedAtMs: number;
   schedule: AdPrewarningSchedule;
 }
 
@@ -70,10 +70,10 @@ const dateMs = (value: string | null): number | null => {
  * the lead time, and the prewarning would fail every time in production,
  * while a test with exact timestamps would pass.
  */
-const MINDEST_VORLAUF_MS = 5_000;
+const MINIMUM_LEAD_MS = 5_000;
 
 /** Two timestamps within this window count as the same schedule. */
-const TERMIN_TOLERANZ_MS = 2_000;
+const SCHEDULE_TOLERANCE_MS = 2_000;
 
 const skip = (
   reason: Exclude<AdPrewarningDecision, { kind: "announce" }>["reason"],
@@ -84,31 +84,31 @@ export const decideAdPrewarning = (
   input: AdPrewarningInput,
 ): AdPrewarningDecision => {
   if (!input.settings.prewarning) return skip("vorwarnung_aus");
-  if (!input.scopeVorhanden) return skip("scope_fehlt", { scope: "channel:read:ads" });
+  if (!input.scopeAvailable) return skip("scope_fehlt", { scope: "channel:read:ads" });
 
   const nextAdAtMs = dateMs(input.schedule.nextAdAt);
   if (nextAdAtMs === null) return skip("kein_termin");
 
   const lastAdAtMs = dateMs(input.schedule.lastAdAt);
-  if (lastAdAtMs !== null && lastAdAtMs >= input.geplantAmMs) {
+  if (lastAdAtMs !== null && lastAdAtMs >= input.plannedAtMs) {
     return skip("pause_begonnen", { letztePause: input.schedule.lastAdAt });
   }
-  if (Math.abs(nextAdAtMs - input.geplantAmMs) > TERMIN_TOLERANZ_MS) {
+  if (Math.abs(nextAdAtMs - input.plannedAtMs) > SCHEDULE_TOLERANCE_MS) {
     return skip("termin_verschoben", {
-      geplant: new Date(input.geplantAmMs).toISOString(),
+      geplant: new Date(input.plannedAtMs).toISOString(),
       aktuell: input.schedule.nextAdAt,
     });
   }
 
-  const verbleibend = nextAdAtMs - input.jetztAmMs;
-  if (verbleibend < MINDEST_VORLAUF_MS) {
-    return skip("zu_spaet", { verbleibendSekunden: Math.max(0, Math.round(verbleibend / 1000)) });
+  const remainingMs = nextAdAtMs - input.nowAtMs;
+  if (remainingMs < MINIMUM_LEAD_MS) {
+    return skip("zu_spaet", { verbleibendSekunden: Math.max(0, Math.round(remainingMs / 1000)) });
   }
 
   // The announcement uses the actually remaining time, not the configured
   // lead time: if the alarm fires later or Twitch shifted the schedule
   // slightly, the text would otherwise be wrong.
-  const sekunden = Math.round(verbleibend / 1000);
+  const sekunden = Math.round(remainingMs / 1000);
   return {
     kind: "announce",
     text: input.settings.prewarningText.replaceAll("{seconds}", String(sekunden)),

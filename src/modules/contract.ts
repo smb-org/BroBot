@@ -3,7 +3,7 @@ import type { ComponentType } from "react";
 import type { z } from "zod";
 import type { ChannelRole } from "../contracts/values";
 
-export { kuerzeAuf200Zeichen } from "../text";
+export { truncateTo200Chars } from "../text";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
 export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";

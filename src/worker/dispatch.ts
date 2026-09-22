@@ -82,24 +82,28 @@ export const selectModulesForEvent = (
   activations: readonly { moduleId: string; enabled: boolean; settings: string }[],
   subscriptionType: string,
   registry: readonly BotModule[] = MODULES,
-): { treffer: { module: BotModule; settings: string }[]; unbekannt: string[] } => {
-  const bekannt = new Map(registry.map((module) => [module.id, module]));
-  const treffer: { module: BotModule; settings: string }[] = [];
-  const unbekannt: string[] = [];
+): { matches: { module: BotModule; settings: string }[]; unknownModules: string[] } => {
+  const known = new Map(registry.map((module) => [module.id, module]));
+  const matches: { module: BotModule; settings: string }[] = [];
+  const unknownModules: string[] = [];
   for (const activation of activations) {
     if (!activation.enabled) continue;
-    const module = bekannt.get(activation.moduleId);
+    const module = known.get(activation.moduleId);
     if (module === undefined) {
-      unbekannt.push(activation.moduleId);
+      unknownModules.push(activation.moduleId);
       continue;
     }
     if (!(module.eventSubTypes ?? []).includes(subscriptionType)) continue;
-    treffer.push({ module, settings: activation.settings });
+    matches.push({ module, settings: activation.settings });
   }
-  return { treffer, unbekannt };
+  return { matches, unknownModules };
 };
 
-const ausfuehren = async (
+// The `ursache`/`typ`/`meldung` detail keys below stay: they land in
+// event_log.detail_json (a wire/stored shape), and this file lives outside
+// `src/modules`, so the frozen detailKeys() test in
+// tests/unit/detail-keys.test.ts never sees them either way.
+const runActions = async (
   environment: DispatchEnvironment,
   channelId: string,
   actions: readonly ModuleAction[],
@@ -166,11 +170,11 @@ export const dispatchEventSubNotification = async (
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
   const activations = await listChannelModulesForChannel(environment.DB, event.channelId);
-  const { treffer, unbekannt } = selectModulesForEvent(activations, event.subscriptionType, registry);
+  const { matches, unknownModules } = selectModulesForEvent(activations, event.subscriptionType, registry);
   const actor = await actorForEvent(environment.DB, event.channelId, event.payload);
   const newEntries: WrittenModuleDiagnostic[] = [];
 
-  for (const moduleId of unbekannt) {
+  for (const moduleId of unknownModules) {
     newEntries.push(...await writeModuleDiagnostics(
       environment.DB,
       event.channelId,
@@ -182,19 +186,19 @@ export const dispatchEventSubNotification = async (
     ));
   }
 
-  for (const { module, settings } of treffer) {
+  for (const { module, settings } of matches) {
     const diagnostics: ModuleDiagnostic[] = [];
     let result: ModuleResult | null = null;
 
     try {
-      const gepruefteEinstellungen: unknown = module.settingsSchema.parse(JSON.parse(settings));
+      const validatedSettings: unknown = module.settingsSchema.parse(JSON.parse(settings));
       const moduleEvent: ModuleEvent = {
         channelId: event.channelId,
         subscriptionType: event.subscriptionType,
         ...(event.subscriptionVariant === undefined ? {} : { subscriptionVariant: event.subscriptionVariant }),
         triggerId: event.triggerId,
         payload: event.payload,
-        settings: gepruefteEinstellungen,
+        settings: validatedSettings,
         receivedAt: event.receivedAt,
         actor,
         chatStatus: chatStatusFor(event.subscriptionType, event.payload),
@@ -214,7 +218,7 @@ export const dispatchEventSubNotification = async (
     if (result !== null) {
       diagnostics.push(...result.diagnostics);
       try {
-        diagnostics.push(...await ausfuehren(environment, event.channelId, result.actions, fetcher));
+        diagnostics.push(...await runActions(environment, event.channelId, result.actions, fetcher));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.aktion.fehler", detail: { meldung: errorMessage(error) } });
       }

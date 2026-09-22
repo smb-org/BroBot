@@ -30,16 +30,16 @@ describe("ad prewarning in the channel object", () => {
     } as unknown as Env["CHANNEL"],
   });
 
-  const keinNetz: typeof fetch = () => { throw new Error("Es darf kein Twitch-Aufruf entstehen."); };
+  const noNetwork: typeof fetch = () => { throw new Error("Es darf kein Twitch-Aufruf entstehen."); };
 
-  const schedulerStub = (): AdScheduler & { readonly geplant: number[]; geloescht: () => number } => {
-    const geplant: number[] = [];
-    let geloescht = 0;
+  const schedulerStub = (): AdScheduler & { readonly scheduled: number[]; cleared: () => number } => {
+    const scheduled: number[] = [];
+    let cleared = 0;
     return {
-      geplant,
-      geloescht: () => geloescht,
-      schedule: (dueAtMs: number) => { geplant.push(dueAtMs); return Promise.resolve(); },
-      clear: () => { geloescht += 1; return Promise.resolve(); },
+      scheduled,
+      cleared: () => cleared,
+      schedule: (dueAtMs: number) => { scheduled.push(dueAtMs); return Promise.resolve(); },
+      clear: () => { cleared += 1; return Promise.resolve(); },
     };
   };
 
@@ -62,17 +62,17 @@ describe("ad prewarning in the channel object", () => {
       Date.parse("2026-09-21T12:00:00.000Z"),
       "ausloeser-1",
       "2026-09-21T11:59:00.000Z",
-      keinNetz,
+      noNetwork,
       scheduler,
     );
 
     expect(idFromName).not.toHaveBeenCalled();
-    expect(scheduler.geloescht()).toBe(1);
+    expect(scheduler.cleared()).toBe(1);
 
-    const zeilen = await database.prepare(
+    const rows = await database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a' ORDER BY rowid",
     ).all<{ code: string }>();
-    expect(zeilen.results.map((zeile) => zeile.code)).toEqual(["ads.vorwarnung.scope_fehlt"]);
+    expect(rows.results.map((row) => row.code)).toEqual(["ads.vorwarnung.scope_fehlt"]);
   });
 
   it("doesn't touch the channel binding either when the module is disabled", async () => {
@@ -90,7 +90,7 @@ describe("ad prewarning in the channel object", () => {
       Date.parse("2026-09-21T12:00:00.000Z"),
       "ausloeser-2",
       "2026-09-21T11:59:00.000Z",
-      keinNetz,
+      noNetwork,
       schedulerStub(),
     );
 

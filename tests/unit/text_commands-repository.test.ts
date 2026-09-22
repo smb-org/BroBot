@@ -24,10 +24,10 @@ describe("Text commands D1 adapter", () => {
     await insertMember(database, "kanal-b", "user-1", "operator");
     const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
 
-    await expect(repository.anlegen({
+    await expect(repository.create({
       channelId: "kanal-a", name: "hallo", text: "A", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
-    await expect(repository.anlegen({
+    await expect(repository.create({
       channelId: "kanal-b", name: "hallo", text: "B", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
@@ -44,15 +44,15 @@ describe("Text commands D1 adapter", () => {
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
     const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
-    await repository.anlegen({
+    await repository.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR);
 
-    await expect(repository.beanspruchen("kanal-a", "hallo", NOW)).resolves.toMatchObject({ beansprucht: true });
-    await expect(repository.beanspruchen("kanal-a", "hallo", "2026-09-19T12:00:01.000Z"))
-      .resolves.toMatchObject({ beansprucht: false, befehl: { lastUsedAt: NOW } });
-    await expect(repository.beanspruchen("kanal-a", "hallo", "2026-09-19T12:00:05.000Z"))
-      .resolves.toMatchObject({ beansprucht: true });
+    await expect(repository.claim("kanal-a", "hallo", NOW)).resolves.toMatchObject({ claimed: true });
+    await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:01.000Z"))
+      .resolves.toMatchObject({ claimed: false, command: { lastUsedAt: NOW } });
+    await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:05.000Z"))
+      .resolves.toMatchObject({ claimed: true });
   });
 
   it("writes only to its own table", async () => {
@@ -60,7 +60,7 @@ describe("Text commands D1 adapter", () => {
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
     const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
-    await repository.anlegen({
+    await repository.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR);
     const tables = await database.prepare(
@@ -79,18 +79,18 @@ describe("Text commands D1 adapter", () => {
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
     const allowed = createTextCommandRepository(database as unknown as D1Database, authorize);
-    await allowed.anlegen({
+    await allowed.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR);
 
     const verweigert = createTextCommandRepository(database as unknown as D1Database, authorizeModuleMutation);
     const foreignActor = { userId: "user-2", sessionId: "session-user-2" };
 
-    await expect(verweigert.anlegen({
+    await expect(verweigert.create({
       channelId: "kanal-a", name: "neu", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, foreignActor)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
     await expect(verweigert.change({
-      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10, now: NOW,
+      channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10, now: NOW,
     }, foreignActor)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
 
     await expect(verweigert.delete("kanal-a", "hallo", foreignActor, NOW))
@@ -105,18 +105,18 @@ describe("Text commands D1 adapter", () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const repository = createTextCommandRepository(database as unknown as D1Database, authorizeModuleManagementMutation);
 
-    await expect(repository.anlegen({
+    await expect(repository.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
 
     await database.prepare("UPDATE channel_members SET role = 'manager' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
-    await expect(repository.anlegen({
+    await expect(repository.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
     await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     await expect(repository.change({
-      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10, now: NOW,
+      channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
     await expect(repository.delete("kanal-a", "hallo", ACTOR, NOW))
       .resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
@@ -128,20 +128,20 @@ describe("Text commands D1 adapter", () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const repository = createTextCommandRepository(database as unknown as D1Database, authorizeModuleMutation);
 
-    await expect(repository.anlegen({
+    await expect(repository.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
     await expect(repository.change({
       channelId: "kanal-a",
       name: "hallo",
-      neuerName: "hallo",
+      newName: "hallo",
       text: "Veraltete Antwort",
       kind: "text",
       enabled: false,
       cooldownSeconds: 999,
       now: "2026-09-19T12:01:00.000Z",
-      nurSchalter: true,
+      onlyToggle: true,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
     await expect(database.prepare(
@@ -154,7 +154,7 @@ describe("Text commands D1 adapter", () => {
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
     const baseRepository = createTextCommandRepository(database as unknown as D1Database, authorizeModuleMutation);
-    await expect(baseRepository.anlegen({
+    await expect(baseRepository.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
@@ -173,14 +173,14 @@ describe("Text commands D1 adapter", () => {
       (entry, changedAt) => prepareModuleAudit(updateDb, ACTOR.userId, changedAt, entry),
     );
     await expect(updateRepository.change({
-      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Antwort", kind: "text",
-      enabled: false, cooldownSeconds: 5, now: "2026-09-19T12:01:00.000Z", nurSchalter: true,
+      channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Antwort", kind: "text",
+      enabled: false, cooldownSeconds: 5, now: "2026-09-19T12:01:00.000Z", onlyToggle: true,
     }, ACTOR)).resolves.toEqual({ ok: false, reason: "konflikt" });
     await expect(database.prepare("SELECT response_text, minimum_level, enabled FROM text_commands WHERE command_name = 'hallo'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "moderator", enabled: 1 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
 
-    await expect(baseRepository.anlegen({
+    await expect(baseRepository.create({
       channelId: "kanal-a", name: "loeschen", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
     const deleteDb = {
@@ -203,7 +203,7 @@ describe("Text commands D1 adapter", () => {
       .resolves.toEqual({ response_text: "Neu", minimum_level: "vip" });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
 
-    await expect(baseRepository.anlegen({
+    await expect(baseRepository.create({
       channelId: "kanal-a", name: "chat", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
     const chatDb = {
@@ -221,8 +221,8 @@ describe("Text commands D1 adapter", () => {
       (entry, changedAt) => prepareModuleAudit(chatDb, ACTOR.userId, changedAt, entry),
     );
     await expect(chatRepository.change({
-      channelId: "kanal-a", name: "chat", neuerName: "chat", text: "Antwort", kind: "text",
-      enabled: false, cooldownSeconds: 5, now: "2026-09-19T12:01:00.000Z", nurSchalter: true,
+      channelId: "kanal-a", name: "chat", newName: "chat", text: "Antwort", kind: "text",
+      enabled: false, cooldownSeconds: 5, now: "2026-09-19T12:01:00.000Z", onlyToggle: true,
     }, ACTOR)).resolves.toEqual({ ok: true });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 1 });
     const audit = await database.prepare("SELECT before_json, after_json FROM audit_log").first<{ before_json: string; after_json: string }>();
@@ -240,7 +240,7 @@ describe("Text commands D1 adapter", () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
 
-    await expect(repository.anlegen({
+    await expect(repository.create({
       channelId: "kanal-a", name: "liste", text: "", kind: "list", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
     await expect(repository.list("kanal-a")).resolves.toEqual([expect.objectContaining({

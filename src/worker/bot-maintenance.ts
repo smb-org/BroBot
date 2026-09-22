@@ -17,7 +17,7 @@ import {
 } from "./db/bot-channel-status";
 import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
-import { kuerzeAuf200Zeichen } from "../text";
+import { truncateTo200Chars } from "../text";
 import { missingBotScopes } from "./auth/oauth";
 
 export interface TwitchClientEnvironment {
@@ -63,7 +63,7 @@ export interface MaintenanceErrorDetails {
   code: string;
 }
 
-const logPart = (value: string | null | undefined): string => kuerzeAuf200Zeichen(value ?? "-").replace(/[\r\n]+/g, " ");
+const logPart = (value: string | null | undefined): string => truncateTo200Chars(value ?? "-").replace(/[\r\n]+/g, " ");
 
 export const maintenanceErrorDetails = (
   error: unknown,

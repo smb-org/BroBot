@@ -66,11 +66,11 @@ const parseEventFilters = (
   const actor = context.req.query("actor");
   if (origin !== undefined && origin !== "channel" && origin !== "module") return context.text("Ereignis-Herkunft ist ungültig.", 400);
   if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.text("Ereignis-Ton ist ungültig.", 400);
-  const herkunft: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
-  const ton: EventTone | null = tone === undefined ? null : tone as EventTone;
+  const validOrigin: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
+  const validTone: EventTone | null = tone === undefined ? null : tone as EventTone;
   const module = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
   const person = actor === undefined || actor.length === 0 ? null : actor;
-  return { origin: herkunft, module: module, tone: ton, person };
+  return { origin: validOrigin, module: module, tone: validTone, person };
 };
 
 // Only shares the parsing/error mechanics between the audit log and the

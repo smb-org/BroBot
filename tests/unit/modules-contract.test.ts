@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ModuleResult } from "../../src/modules/contract";
 
-describe("Modul-Contract", () => {
-  it("bewahrt die Reihenfolge semantischer Aktionen in einem Ergebnis", () => {
+describe("Module contract", () => {
+  it("preserves the order of semantic actions in a result", () => {
     const result: ModuleResult = {
       actions: [
         { kind: "chat", text: "Hallo", replyToMessageId: "message-1" },
