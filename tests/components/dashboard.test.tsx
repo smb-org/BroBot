@@ -892,6 +892,7 @@ describe("Dashboard skeleton", () => {
       broadcasterCount: 1,
       viewerUserId: "100",
     });
+    fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
 
     expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
     expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(2);
@@ -909,6 +910,7 @@ describe("Dashboard skeleton", () => {
       broadcasterCount: 2,
       viewerUserId: "100",
     });
+    fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
 
     expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeEnabled();
     expect(screen.queryByText("Letzter Broadcaster")).not.toBeInTheDocument();
@@ -922,13 +924,15 @@ describe("Dashboard skeleton", () => {
       viewerUserId: "100",
     });
     vi.stubGlobal("confirm", frage);
+    fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" }));
 
     expect(frage).toHaveBeenCalledOnce();
     expect(frage.mock.calls.at(0)?.[0] ?? "").toContain("selbst aus");
 
     // Someone else's entry: same action, different question.
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff für Zweit entziehen" }));
+    fireEvent.click(screen.getByRole("row", { name: /Zweit/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Zugriff für Zweit entziehen" }));
     expect(frage.mock.calls.at(1)?.[0] ?? "").not.toContain("selbst aus");
   });
 
@@ -1002,7 +1006,7 @@ describe("Dashboard skeleton", () => {
     const row = table.querySelector("tbody tr");
     expect(row).toHaveAttribute("role", "row");
     expect(row?.querySelector("th[scope='row']")).toHaveAttribute("role", "rowheader");
-    expect(row?.querySelectorAll("td")).toHaveLength(3);
+    expect(row?.querySelectorAll("td")).toHaveLength(2);
     expect(Array.from(row?.querySelectorAll("td") ?? []).every((cell) => cell.getAttribute("role") === "cell")).toBe(true);
   });
 
@@ -1032,6 +1036,7 @@ describe("Dashboard skeleton", () => {
     const freigeben = screen.getByRole("button", { name: "Zugriff freigeben" });
     expect(freigeben).toBeDisabled();
     expect(freigeben).toHaveAttribute("title", reason);
+    fireEvent.click(await screen.findByRole("row", { name: /Moderation/ }));
     expect(await screen.findByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
     const entziehen = screen.getByRole("button", { name: "Zugriff für Moderation entziehen" });
     expect(entziehen).toBeDisabled();
@@ -1436,6 +1441,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByText("Alpha-Mitglied");
+    fireEvent.click(screen.getByRole("row", { name: /Alpha-Mitglied/ }));
     fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Alpha-Mitglied" }), { target: { value: "manager" } });
     await waitFor(() => expect(resolveAlphaReload).toBeTypeOf("function"));
 
@@ -1533,6 +1539,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByText("Erster Stand");
+    fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
     fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "manager" } });
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
@@ -1589,6 +1596,7 @@ describe("Dashboard skeleton", () => {
       expect(fetcher.mock.calls.some(([reqInput]) => requestUrl(reqInput).search === "?cursor=cursor-1")).toBe(true);
     });
 
+    fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
     fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "manager" } });
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);

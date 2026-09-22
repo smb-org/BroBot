@@ -5,6 +5,7 @@ import type { PanelMember, PanelTwitchUser } from "../panel-contract";
 import { roleLabel } from "./labels";
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
+import { ListDetail, SubInspector, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -46,7 +47,7 @@ interface MembersTexts {
   name: string;
   role: string;
   accessSince: string;
-  actions: string;
+  editMember: (name: string) => string;
   remove: string;
   lastBroadcaster: string;
   unresolvable: string;
@@ -73,7 +74,7 @@ const texts: LocaleCatalog<MembersTexts> = {
   de: {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", grantAccessTitle: "Zugriff vergeben",
     twitchName: "Twitch-Name", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", count: (count) => `${count} Mitglieder`, name: "Name",
-    role: "Rolle", accessSince: "Zugriff seit", actions: "Aktionen", remove: "Entziehen",
+    role: "Rolle", accessSince: "Zugriff seit", editMember: (name) => `Mitglied bearbeiten: ${name}`, remove: "Entziehen",
     lastBroadcaster: "Letzter Broadcaster", unresolvable: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
     roleFor: (name) => `Rolle für ${name}`, removeAccessFor: (name) => `Zugriff für ${name} entziehen`,
     empty: "Für diesen Kanal ist noch niemand zusätzlich freigegeben.", grantAccess: "Zugriff freigeben",
@@ -88,7 +89,7 @@ const texts: LocaleCatalog<MembersTexts> = {
   en: {
     managementLocked: "Only broadcasters and managers may change members.", grantAccessTitle: "Grant access", twitchName: "Twitch name",
     search: "Search", searching: "Searching …", title: "Members", count: (count) => `${count} members`, name: "Name", role: "Role", accessSince: "Access since",
-    actions: "Actions", remove: "Remove", lastBroadcaster: "Last broadcaster", unresolvable: "Unresolvable",
+    editMember: (name) => `Edit member: ${name}`, remove: "Remove", lastBroadcaster: "Last broadcaster", unresolvable: "Unresolvable",
     twitchId: (userId) => `Twitch ID ${userId}`, roleFor: (name) => `Role for ${name}`, removeAccessFor: (name) => `Remove access for ${name}`,
     empty: "No one else has access to this channel yet.", grantAccess: "Grant access", newMemberRoleLabel: "Role for new membership",
     confirmationTitle: (name) => `Grant access for ${name}?`, confirmationText: (role) => `This person has no Twitch relationship proving access to this channel. The ${role} role grants access to the member list and the channel features allowed by that role.`,
@@ -166,79 +167,131 @@ const MemberAvatar = ({ src }: { src: string | null | undefined }): ReactElement
   return <img className="member-avatar" src={src} alt="" aria-hidden="true" onError={() => setFailedSource(src)} />;
 };
 
-const MemberTable = ({
+const MemberList = ({
   members,
-  canManageMembers,
-  broadcasterCount,
-  ownUserId,
-  onRoleChange,
-  onRemove,
-  busyUserId,
+  selectedUserId,
+  onSelect,
+  rowRef,
 }: {
   members: PanelMember[];
-  canManageMembers: boolean;
-  broadcasterCount: number;
-  ownUserId: string;
-  onRoleChange: (userId: string, role: ChannelRole) => void;
-  onRemove: (member: PanelMember) => void;
-  busyUserId: string | null;
+  selectedUserId: string | null;
+  onSelect: (userId: string) => void;
+  rowRef: (userId: string) => (row: HTMLTableRowElement | null) => void;
 }): ReactElement => {
   const texts = membersTexts();
   if (members.length === 0) return <p className="muted">{texts.empty}</p>;
-  const managementLocked = canManageMembers ? null : texts.managementLocked;
   return (
     <div className="tabelle-wrap">
       <table className="tabelle mitglieder-tabelle">
-        <thead className="sr-only"><tr role="row"><th scope="col" role="columnheader">{texts.name}</th><th scope="col" role="columnheader">{texts.role}</th><th scope="col" role="columnheader" aria-sort="descending">{texts.accessSince}</th><th scope="col" role="columnheader" className="tabelle__aktion"><span className="sr-only">{texts.actions}</span></th></tr></thead>
+        <thead className="sr-only"><tr role="row"><th scope="col" role="columnheader">{texts.name}</th><th scope="col" role="columnheader">{texts.role}</th><th scope="col" role="columnheader" aria-sort="descending">{texts.accessSince}</th></tr></thead>
         <tbody>
-          {members.map((member) => (
-            <tr key={member.userId} role="row">
-              <th scope="row" role="rowheader">
-                <div className="avatar-row">
-                  <MemberAvatar src={member.profileImageUrl} />
-                  <div>
-                    <span>{memberLabel(member)}</span>
-                    {member.displayName !== null && member.login !== null ? (
-                      <a
-                        className="login-hinweis profile-link"
-                        href={`https://twitch.tv/${member.login}`}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                      >twitch.tv/{member.login}</a>
-                    ) : null}
-                    {member.displayName === null && member.login === null ? <span className="login-hinweis">{texts.twitchId(member.userId)}</span> : null}
+          {members.map((member) => {
+            const selected = selectedUserId === member.userId;
+            const select = (): void => onSelect(member.userId);
+            return (
+              <tr
+                key={member.userId}
+                ref={rowRef(member.userId)}
+                role="row"
+                tabIndex={0}
+                aria-selected={selected}
+                onClick={select}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); } }}
+              >
+                <th scope="row" role="rowheader">
+                  <div className="avatar-row">
+                    <MemberAvatar src={member.profileImageUrl} />
+                    <div>
+                      <span>{memberLabel(member)}</span>
+                      {member.displayName !== null && member.login !== null ? (
+                        <a
+                          className="login-hinweis profile-link"
+                          href={`https://twitch.tv/${member.login}`}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >twitch.tv/{member.login}</a>
+                      ) : null}
+                      {member.displayName === null && member.login === null ? <span className="login-hinweis">{texts.twitchId(member.userId)}</span> : null}
+                    </div>
                   </div>
-                </div>
-              </th>
-              <td role="cell">
-                <select
-                  aria-label={texts.roleFor(memberLabel(member))}
-                  value={member.role}
-                  disabled={!canManageMembers || busyUserId === member.userId || isLastBroadcaster(member, broadcasterCount)}
-                  title={managementLocked ?? removalLocked(member, broadcasterCount) ?? undefined}
-                  onChange={(event) => onRoleChange(member.userId, event.target.value as ChannelRole)}
-                  >
-                    {roleOptions(selectableRoles(member, ownUserId, broadcasterCount))}
-                  </select>
-                  {managementLocked !== null ? <span className="sperrgrund">{managementLocked}</span> : removalLocked(member, broadcasterCount) === null ? null : <span className="sperrgrund">{texts.lastBroadcaster}</span>}
-              </td>
-              <td className="zahl" role="cell">{formatJoinDate(member.joinedAt)}</td>
-              <td className="tabelle__aktion" role="cell">
-                <button
-                  className="button button--quiet"
-                  type="button"
-                  aria-label={texts.removeAccessFor(memberLabel(member))}
-                  disabled={!canManageMembers || busyUserId === member.userId || removalLocked(member, broadcasterCount) !== null}
-                  title={managementLocked ?? removalLocked(member, broadcasterCount) ?? undefined}
-                  onClick={() => onRemove(member)}
-                >{texts.remove}</button>
-                {removalLocked(member, broadcasterCount) === null ? null : <span className="sperrgrund">{texts.lastBroadcaster}</span>}
-              </td>
-            </tr>
-          ))}
+                </th>
+                <td role="cell">{roleLabel(member.role)}</td>
+                <td className="zahl" role="cell">{formatJoinDate(member.joinedAt)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
+  );
+};
+
+const MemberEditor = ({
+  member,
+  canManageMembers,
+  broadcasterCount,
+  ownUserId,
+  busy,
+  onRoleChange,
+  onRemove,
+  onClose,
+}: {
+  member: PanelMember;
+  canManageMembers: boolean;
+  broadcasterCount: number;
+  ownUserId: string;
+  busy: boolean;
+  onRoleChange: (role: ChannelRole) => void;
+  onRemove: () => void;
+  onClose: () => void;
+}): ReactElement => {
+  const texts = membersTexts();
+  const name = memberLabel(member);
+  const managementLocked = canManageMembers ? null : texts.managementLocked;
+  const locked = removalLocked(member, broadcasterCount);
+
+  return (
+    <SubInspector ariaLabel={texts.editMember(name)} title={name} identifier={formatJoinDate(member.joinedAt)} closeLabel={dashboardCommonTexts().close} onClose={onClose}>
+      <div className="avatar-row">
+        <MemberAvatar src={member.profileImageUrl} />
+        <div>
+          <span>{name}</span>
+          {member.displayName !== null && member.login !== null ? (
+            <a
+              className="login-hinweis profile-link"
+              href={`https://twitch.tv/${member.login}`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >twitch.tv/{member.login}</a>
+          ) : null}
+          {member.displayName === null && member.login === null ? <span className="login-hinweis">{texts.twitchId(member.userId)}</span> : null}
+        </div>
+      </div>
+      <label className="config-field config-field--mittel">
+        {texts.role}
+        <select
+          aria-label={texts.roleFor(name)}
+          value={member.role}
+          disabled={!canManageMembers || busy || isLastBroadcaster(member, broadcasterCount)}
+          title={managementLocked ?? locked ?? undefined}
+          onChange={(event) => { onRoleChange(event.target.value as ChannelRole); }}
+        >
+          {roleOptions(selectableRoles(member, ownUserId, broadcasterCount))}
+        </select>
+        {managementLocked !== null ? <span className="sperrgrund">{managementLocked}</span> : locked === null ? null : <span className="sperrgrund">{texts.lastBroadcaster}</span>}
+      </label>
+      <div className="form-actions form-actions--destructive">
+        <button
+          className="button button--quiet"
+          type="button"
+          aria-label={texts.removeAccessFor(name)}
+          disabled={!canManageMembers || busy || locked !== null}
+          title={managementLocked ?? locked ?? undefined}
+          onClick={onRemove}
+        >{texts.remove}</button>
+      </div>
+      {locked === null ? null : <span className="sperrgrund">{texts.lastBroadcaster}</span>}
+    </SubInspector>
   );
 };
 
@@ -267,6 +320,7 @@ export const MembersPage = ({
   const [confirmingAdd, setConfirmingAdd] = useState(false);
   const canManageMembers = canManage(ownRole);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { selectedKey: selectedUserId, select: selectMember, rowRef, close: closeSelection } = useInspectorSelection<string>();
 
   /**
    * `role="alertdialog"` requires focus to actually move into it —
@@ -276,6 +330,10 @@ export const MembersPage = ({
   useEffect(() => {
     if (confirmingAdd) confirmButtonRef.current?.focus();
   }, [confirmingAdd]);
+
+  useEffect(() => {
+    if (selectedUserId !== null && !members.some((member) => member.userId === selectedUserId)) closeSelection();
+  }, [members, selectedUserId, closeSelection]);
 
   const cancelAdd = (): void => setConfirmingAdd(false);
 
@@ -347,6 +405,8 @@ export const MembersPage = ({
     }
   };
 
+  const selectedMember = members.find((member) => member.userId === selectedUserId) ?? null;
+
   return (
     <>
       <ModuleHeading kind="members" title={texts.title} subtitle={<ModuleCount count={members.length} label={texts.count} />} />
@@ -412,7 +472,23 @@ export const MembersPage = ({
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
         {members.length === 0 && loading ? null : <div className={loading ? "veraltet" : undefined}>
-          <MemberTable members={members} canManageMembers={canManageMembers} broadcasterCount={broadcasterCount} ownUserId={ownUserId} onRoleChange={(userId, role) => { void handleRoleChange(userId, role); }} onRemove={(member) => { void handleRemove(member); }} busyUserId={busyUserId} />
+          <ListDetail
+            list={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMember} rowRef={rowRef} />}
+            inspector={selectedMember === null ? null : (
+              <MemberEditor
+                key={selectedMember.userId}
+                member={selectedMember}
+                canManageMembers={canManageMembers}
+                broadcasterCount={broadcasterCount}
+                ownUserId={ownUserId}
+                busy={busyUserId === selectedMember.userId}
+                onRoleChange={(role) => { void handleRoleChange(selectedMember.userId, role); }}
+                onRemove={() => { void handleRemove(selectedMember); }}
+                onClose={closeSelection}
+              />
+            )}
+            onCloseInspector={closeSelection}
+          />
         </div>}
         {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
       </section>
