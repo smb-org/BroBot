@@ -525,7 +525,7 @@ export type EventCode =
   | "channel_events.moderation.warn"
   | "channel_events.moderation.unbekannt"
   | "channel_events.automod.halte"
-  | "channel_events.verdacht.nachricht"
+  | "channel_events.verdacht.message"
   | "channel_events.verdacht.einstufung"
   | "channel_events.verdacht.entwarnung"
   | "raid.outgoing"
@@ -638,7 +638,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "channel_events.moderation.warn": (detail) => `${detailText(detail, "person", "unbekannt")} verwarnt von ${detailText(detail, "moderator", "unbekannt")}${detailReason(detail)}`,
     "channel_events.moderation.unbekannt": (detail) => `Unbekannte Moderationsaktion: ${detailText(detail, "action", "unbekannt")}`,
     "channel_events.automod.halte": (detail) => `AutoMod hielt die Nachricht von ${detailText(detail, "person", "unbekannt")}${detailReasonWith(detail, "wegen")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
-    "channel_events.verdacht.nachricht": (detail) => `Nachricht von auffälligem Nutzer ${detailText(detail, "person", "unbekannt")} (${detailClassification(detail, "unbekannte Einstufung")}): ${detailText(detail, "text", "ohne Text")}`,
+    "channel_events.verdacht.message": (detail) => `Nachricht von auffälligem Nutzer ${detailText(detail, "person", "unbekannt")} (${detailClassification(detail, "unbekannte Einstufung")}): ${detailText(detail, "text", "ohne Text")}`,
     "channel_events.verdacht.einstufung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} verschärft${detailModerator(detail, "")}: ${detailClassification(detail, "unbekannt")}`,
     "channel_events.verdacht.entwarnung": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} aufgehoben${detailModerator(detail, "")}`,
     "raid.outgoing": (detail) => `Ausgehender Raid zu ${detailText(detail, "targetChannelId", "unbekannt")}`,
@@ -649,7 +649,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
       : detail.reason === "unter_schwelle"
         ? `Shoutout unter der Schwelle (${detailNumber(detail, "viewers", "unbekannt")} von ${detailNumber(detail, "threshold", "unbekannt")} Zuschauern)`
         : "Shoutout unterdrückt",
-    "ads.ankuendigung": (detail) => `Werbepause ${detail.automatic === true ? "automatisch" : "manuell"} gestartet: ${detailNumber(detail, "duration", "unbekannte Dauer")} Sekunden`,
+    "ads.ankuendigung": (detail) => `Werbepause ${detail.automatic === true ? "automatisch" : "manuell"} startedAt: ${detailNumber(detail, "duration", "unbekannte Dauer")} Sekunden`,
     "ads.uebersprungen": (detail) => `Werbepause übersprungen: ${detail.reason === "dauer_null" ? "Dauer ist null" : "Ereignisdaten sind ungültig"}`,
     "ads.vorwarnung.angekuendigt": (detail) => `Vorwarnung: Werbung in ${detailNumber(detail, "sekunden", "unbekannter Zeit")} Sekunden`,
     "ads.vorwarnung.kein_termin": "Keine nächste Werbepause geplant",
@@ -658,7 +658,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.vorwarnung.termin_verschoben": "Werbe-Vorwarnung unterdrückt: Termin wurde verschoben",
     "ads.vorwarnung.scope_fehlt": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
     "ads.vorwarnung.zeitplan_fehler": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "reason", "unbekannter Fehler")}`,
-    "ads.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "reason", "unbekannter Fehler")}`,
+    "ads.snooze": (detail) => detail.outcome === "erfolgreich" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "reason", "unbekannter Fehler")}`,
     "text_commands.abgekuehlt": (detail) => {
       const name = textCommandName(detail);
       return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
@@ -700,7 +700,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "channel_events.moderation.warn": (detail) => `${detailText(detail, "person", "unknown")} warned by ${detailText(detail, "moderator", "unknown")}${detailReason(detail)}`,
     "channel_events.moderation.unbekannt": (detail) => `Unknown moderation action: ${detailText(detail, "action", "unknown")}`,
     "channel_events.automod.halte": (detail) => `AutoMod held a message from ${detailText(detail, "person", "unknown")}${detailReasonWith(detail, "for")}${typeof detail.text === "string" && detail.text.length > 0 ? `: ${detail.text}` : ""}`,
-    "channel_events.verdacht.nachricht": (detail) => `Message from suspicious user ${detailText(detail, "person", "unknown")} (${detailClassification(detail, "unknown classification")}): ${detailText(detail, "text", "no text")}`,
+    "channel_events.verdacht.message": (detail) => `Message from suspicious user ${detailText(detail, "person", "unknown")} (${detailClassification(detail, "unknown classification")}): ${detailText(detail, "text", "no text")}`,
     "channel_events.verdacht.einstufung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} tightened${detailModeratorEn(detail, "")}: ${detailClassification(detail, "unknown")}`,
     "channel_events.verdacht.entwarnung": (detail) => `Classification for ${detailText(detail, "person", "unknown")} cleared${detailModeratorEn(detail, "")}`,
     "raid.outgoing": (detail) => `Outgoing raid to ${detailText(detail, "targetChannelId", "unknown")}`,
@@ -720,7 +720,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.vorwarnung.termin_verschoben": "Ad warning suppressed: schedule changed",
     "ads.vorwarnung.scope_fehlt": "Ad warning suppressed: channel:read:ads is missing",
     "ads.vorwarnung.zeitplan_fehler": (detail) => `Ad schedule could not be read: ${detailText(detail, "reason", "unknown error")}`,
-    "ads.snooze": (detail) => detail.ausgang === "erfolgreich" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "reason", "unknown error")}`,
+    "ads.snooze": (detail) => detail.outcome === "erfolgreich" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "reason", "unknown error")}`,
     "text_commands.abgekuehlt": (detail) => {
       const name = textCommandName(detail);
       return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
@@ -775,7 +775,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "channel_events.moderation.warn": { family: "moderation", tier: "voll", word: { de: "Verwarnung", en: "Warning" }, numberKey: null },
   "channel_events.moderation.unbekannt": { family: "moderation", tier: "voll", word: { de: "Unbekannt", en: "Unknown" }, numberKey: null },
   "channel_events.automod.halte": { family: "moderation", tier: "voll", word: { de: "AutoMod", en: "AutoMod" }, numberKey: null },
-  "channel_events.verdacht.nachricht": { family: "moderation", tier: "voll", word: { de: "Verdacht", en: "Suspicious" }, numberKey: null },
+  "channel_events.verdacht.message": { family: "moderation", tier: "voll", word: { de: "Verdacht", en: "Suspicious" }, numberKey: null },
   "channel_events.verdacht.einstufung": { family: "moderation", tier: "voll", word: { de: "Einstufung", en: "Classified" }, numberKey: null },
   "channel_events.verdacht.entwarnung": { family: "moderation", tier: "gezeichnet", word: { de: "Entwarnt", en: "Cleared" }, numberKey: null },
   "raid.outgoing": { family: "raid", tier: "gezeichnet", word: { de: "Raid", en: "Raid" }, numberKey: "viewers", tone: "warning" },

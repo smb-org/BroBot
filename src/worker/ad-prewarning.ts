@@ -148,7 +148,7 @@ const decisionCode = (decision: AdPrewarningDecision): string =>
   decision.kind === "announce" ? "ads.vorwarnung.angekuendigt" : `ads.vorwarnung.${decision.reason}`;
 
 const decisionDetail = (decision: AdPrewarningDecision): Readonly<Record<string, string | number | boolean | null>> => {
-  if (decision.kind === "announce") return { sekunden: decision.sekunden, termin: decision.terminAm };
+  if (decision.kind === "announce") return { seconds: decision.seconds, scheduledAt: decision.scheduledAt };
   return decision.detail;
 };
 

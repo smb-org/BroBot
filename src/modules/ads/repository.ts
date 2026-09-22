@@ -40,8 +40,8 @@ export const listLastAdBreaks = async (
     // event_log.detail_json for ads.ankuendigung (built via a helper, so it
     // evades the automated frozen-key detector) -- renaming it would orphan
     // the field already stored in production rows.
-    const startedAt = typeof parsed.gestartet === "string" && parsed.gestartet.length > 0
-      ? parsed.gestartet
+    const startedAt = typeof parsed.startedAt === "string" && parsed.startedAt.length > 0
+      ? parsed.startedAt
       : row.created_at;
     return [{ timestamp: startedAt, durationSeconds: duration }];
   });

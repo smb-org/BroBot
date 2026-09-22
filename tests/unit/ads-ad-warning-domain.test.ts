@@ -27,8 +27,8 @@ describe("ad prewarning decision", () => {
     expect(decideAdPrewarning(input())).toEqual({
       kind: "announce",
       text: "Werbung in 60 Sekunden.",
-      sekunden: 60,
-      terminAm: "2026-09-21T12:00:00.000Z",
+      seconds: 60,
+      scheduledAt: "2026-09-21T12:00:00.000Z",
     });
   });
 
@@ -38,7 +38,7 @@ describe("ad prewarning decision", () => {
   it("announces even when the alarm fires a second late", () => {
     expect(decideAdPrewarning(input({
       nowAtMs: nowAtMs + 1_100,
-    }))).toMatchObject({ kind: "announce", sekunden: 59, text: "Werbung in 59 Sekunden." });
+    }))).toMatchObject({ kind: "announce", seconds: 59, text: "Werbung in 59 Sekunden." });
   });
 
   it("ignores the German legacy placeholder name for seconds", () => {
@@ -52,7 +52,7 @@ describe("ad prewarning decision", () => {
   it("reports the actually remaining time, not the configured lead time", () => {
     expect(decideAdPrewarning(input({
       nowAtMs: Date.parse("2026-09-21T11:59:15.000Z"),
-    }))).toMatchObject({ kind: "announce", sekunden: 45, text: "Werbung in 45 Sekunden." });
+    }))).toMatchObject({ kind: "announce", seconds: 45, text: "Werbung in 45 Sekunden." });
   });
 
   it("treats a one-second shift as the same schedule", () => {

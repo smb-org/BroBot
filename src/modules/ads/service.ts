@@ -15,9 +15,9 @@ const diagnoseDetail = (
   return {
     duration: event.event.durationSeconds,
     automatic: event.event.automatic,
-    gestartet: event.event.startedAt,
+    startedAt: event.event.startedAt,
     endsAt: event.event.endsAt,
-    ausloeser: event.event.triggerLogin,
+    triggerLogin: event.event.triggerLogin,
   };
 };
 

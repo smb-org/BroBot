@@ -918,7 +918,7 @@ describe("Dashboard skeleton", () => {
   });
 
   it("explicitly warns about lockout when revoking one's own access", async () => {
-    const frage = vi.fn((meldung: string) => { void meldung; return false; });
+    const frage = vi.fn((message: string) => { void message; return false; });
     await showMembers({
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,

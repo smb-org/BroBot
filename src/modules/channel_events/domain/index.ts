@@ -250,7 +250,7 @@ const automodDiagnostic = (payload: Readonly<Record<string, unknown>>): ChannelE
 });
 
 const suspiciousMessageDiagnostic = (payload: Readonly<Record<string, unknown>>): ChannelEventDiagnostic => ({
-  code: "channel_events.verdacht.nachricht",
+  code: "channel_events.verdacht.message",
   detail: detail({
     ...optionaleTextDetail("person", personFromObject(payload, "user")),
     ...optionaleTextDetail("einstufung", suspiciousClassification(payload)),

@@ -86,7 +86,7 @@ describe("dashboard locale", () => {
       "channel_events.chat.community_gift", "channel_events.chat.ankuendigung", "channel_events.chat.unbekannt",
       "channel_events.moderation.ban", "channel_events.moderation.timeout", "channel_events.moderation.untimeout",
       "channel_events.moderation.unban", "channel_events.moderation.delete", "channel_events.moderation.warn",
-      "channel_events.moderation.unbekannt", "channel_events.automod.halte", "channel_events.verdacht.nachricht",
+      "channel_events.moderation.unbekannt", "channel_events.automod.halte", "channel_events.verdacht.message",
       "channel_events.verdacht.einstufung", "channel_events.verdacht.entwarnung", "raid.outgoing", "raid.shoutout", "raid.ungueltig", "shoutout.unterdrueckt",
       "ads.ankuendigung", "ads.uebersprungen", "ads.vorwarnung.angekuendigt", "ads.vorwarnung.kein_termin",
       "ads.vorwarnung.zu_spaet", "ads.vorwarnung.pause_begonnen", "ads.vorwarnung.termin_verschoben",
@@ -133,7 +133,7 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.automod.halte", {
       person: "Alice", reason: "aggressive", text: "Nachricht",
     })).toBe("AutoMod hielt die Nachricht von Alice wegen aggressive: Nachricht");
-    expect(eventText("channel_events.verdacht.nachricht", {
+    expect(eventText("channel_events.verdacht.message", {
       person: "Alice", einstufung: "restricted / ban_evader / possible", text: "Nachricht",
     })).toBe("Nachricht von auffälligem Nutzer Alice (restricted / ban_evader / possible): Nachricht");
     expect(eventText("channel_events.verdacht.einstufung", {
@@ -143,7 +143,7 @@ describe("dashboard locale", () => {
       person: "Alice", einstufung: "none", moderator: "Mod",
     })).toBe("Einstufung von Alice aufgehoben von Mod");
     expect(eventToneEntries["channel_events.automod.halte"]).toMatchObject({ family: "moderation", tier: "voll" });
-    expect(eventToneEntries["channel_events.verdacht.nachricht"]).toMatchObject({ family: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.verdacht.message"]).toMatchObject({ family: "moderation", tier: "voll" });
     expect(eventToneEntries["channel_events.verdacht.einstufung"]).toMatchObject({ family: "moderation", tier: "voll" });
     expect(eventToneEntries["channel_events.verdacht.entwarnung"]).toMatchObject({ family: "moderation", tier: "gezeichnet" });
 

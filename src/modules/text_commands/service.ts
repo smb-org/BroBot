@@ -32,14 +32,14 @@ const diagnosticTriggered = (
   input: Exclude<TextCommandInput, { kind: "unknown" }>,
   response: string,
 ) => {
-  const argumente = input.argumente;
+  const argumente = input.arguments;
   return {
     code: "text_commands.ausgeloest",
     detail: {
       name: input.name,
       ...(argumente === undefined || argumente.length === 0
         ? {}
-        : { argumente: truncateTo200Chars(argumente) }),
+        : { arguments: truncateTo200Chars(argumente) }),
       response: truncateTo200Chars(response),
     },
   } as const;

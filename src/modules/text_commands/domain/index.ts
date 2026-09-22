@@ -4,7 +4,7 @@ import type { TextCommandMinimumTier } from "../contracts";
 export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 export type TextCommandInput =
-  | { kind: "command"; name: string; argumente?: string }
+  | { kind: "command"; name: string; arguments?: string }
   | { kind: "unknown" };
 
 export const validCommandName = (name: string): boolean => COMMAND_NAME_PATTERN.test(name);
@@ -15,14 +15,14 @@ export const commandFromMessage = (message: string): TextCommandInput | null => 
   if (firstWord === undefined || !firstWord.startsWith("!")) return null;
   const name = firstWord.slice(1);
   if (!validCommandName(name)) return { kind: "unknown" };
-  // "argumente" stays: it is the literal key stored in event_log.detail_json
-  // for text_commands.ausgeloest (via a shorthand return here), not just a
-  // local name -- renaming it would rename the stored wire key too.
-  const argumente = trimmed.slice(firstWord.length).trim();
+  // Spelled out rather than shorthand: the key travels into
+  // `event_log.detail_json`, so renaming the local would rename the stored key
+  // with it. That is exactly how this broke once already.
+  const commandArguments = trimmed.slice(firstWord.length).trim();
   return {
     kind: "command",
     name,
-    ...(argumente.length === 0 ? {} : { argumente }),
+    ...(commandArguments.length === 0 ? {} : { arguments: commandArguments }),
   };
 };
 

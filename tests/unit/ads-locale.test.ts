@@ -5,7 +5,7 @@ import { eventSubName, moduleDescription, moduleName, moduleScopePurpose } from 
 
 describe("ad locale", () => {
   it.each([
-    ["de" as const, "Werbung", "Kündigt beginnende Werbepausen im Chat an.", "Werbepausen", "Werbepause automatisch gestartet: 30 Sekunden"],
+    ["de" as const, "Werbung", "Kündigt beginnende Werbepausen im Chat an.", "Werbepausen", "Werbepause automatisch startedAt: 30 Sekunden"],
     ["en" as const, "Ad breaks", "Announces beginning ad breaks in chat.", "Ad breaks", "Ad break automatically started: 30 seconds"],
   ])("delivers all visible texts for %s", (language, name, description, eventName, eventText) => {
     expect(moduleName("ads", language)).toBe(name);

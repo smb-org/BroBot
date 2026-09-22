@@ -74,7 +74,7 @@ describe("Text commands service", () => {
 
     expect(result.diagnostics).toEqual([{
       code: "text_commands.ausgeloest",
-      detail: { name: "hallo", argumente: "erster   zweiter", response: "Antwort für alice" },
+      detail: { name: "hallo", arguments: "erster   zweiter", response: "Antwort für alice" },
     }]);
   });
 
@@ -86,7 +86,7 @@ describe("Text commands service", () => {
 
     expect(result.diagnostics).toEqual([{
       code: "text_commands.ausgeloest",
-      detail: { name: "wiki", argumente: "foo bar", response: "Antwort" },
+      detail: { name: "wiki", arguments: "foo bar", response: "Antwort" },
     }]);
   });
 
@@ -103,10 +103,10 @@ describe("Text commands service", () => {
     );
 
     expect(exact.diagnostics[0]?.detail).toEqual({
-      name: "hallo", argumente: exactlyTwoHundred, response: exactlyTwoHundred,
+      name: "hallo", arguments: exactlyTwoHundred, response: exactlyTwoHundred,
     });
     expect(truncated.diagnostics[0]?.detail).toEqual({
-      name: "hallo", argumente: `${"y".repeat(199)}…`, response: `${"y".repeat(199)}…`,
+      name: "hallo", arguments: `${"y".repeat(199)}…`, response: `${"y".repeat(199)}…`,
     });
   });
 

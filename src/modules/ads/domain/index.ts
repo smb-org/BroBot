@@ -56,7 +56,7 @@ export interface AdPrewarningInput {
 
 export type AdPrewarningDecision =
   | { kind: "skip"; reason: "vorwarnung_aus" | "scope_fehlt" | "kein_termin" | "zu_spaet" | "pause_begonnen" | "termin_verschoben"; detail: Readonly<Record<string, string | number | boolean | null>> }
-  | { kind: "announce"; text: string; sekunden: number; terminAm: string };
+  | { kind: "announce"; text: string; seconds: number; scheduledAt: string };
 
 const dateMs = (value: string | null): number | null => {
   if (value === null) return null;
@@ -91,28 +91,28 @@ export const decideAdPrewarning = (
 
   const lastAdAtMs = dateMs(input.schedule.lastAdAt);
   if (lastAdAtMs !== null && lastAdAtMs >= input.plannedAtMs) {
-    return skip("pause_begonnen", { letztePause: input.schedule.lastAdAt });
+    return skip("pause_begonnen", { lastAdBreakAt: input.schedule.lastAdAt });
   }
   if (Math.abs(nextAdAtMs - input.plannedAtMs) > SCHEDULE_TOLERANCE_MS) {
     return skip("termin_verschoben", {
-      geplant: new Date(input.plannedAtMs).toISOString(),
-      aktuell: input.schedule.nextAdAt,
+      scheduledFor: new Date(input.plannedAtMs).toISOString(),
+      current: input.schedule.nextAdAt,
     });
   }
 
   const remainingMs = nextAdAtMs - input.nowAtMs;
   if (remainingMs < MINIMUM_LEAD_MS) {
-    return skip("zu_spaet", { verbleibendSekunden: Math.max(0, Math.round(remainingMs / 1000)) });
+    return skip("zu_spaet", { remainingSeconds: Math.max(0, Math.round(remainingMs / 1000)) });
   }
 
   // The announcement uses the actually remaining time, not the configured
   // lead time: if the alarm fires later or Twitch shifted the schedule
   // slightly, the text would otherwise be wrong.
-  const sekunden = Math.round(remainingMs / 1000);
+  const seconds = Math.round(remainingMs / 1000);
   return {
     kind: "announce",
-    text: input.settings.prewarningText.replaceAll("{seconds}", String(sekunden)),
-    sekunden,
-    terminAm: input.schedule.nextAdAt ?? new Date(nextAdAtMs).toISOString(),
+    text: input.settings.prewarningText.replaceAll("{seconds}", String(seconds)),
+    seconds,
+    scheduledAt: input.schedule.nextAdAt ?? new Date(nextAdAtMs).toISOString(),
   };
 };

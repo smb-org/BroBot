@@ -78,7 +78,7 @@ describe("Raid dispatch", () => {
         "host.shoutout.fehlgeschlagen",
         "host.chat.gesendet",
       ]);
-      expect(jsonRecord(rows.results[1]?.detail_json ?? "{}")).toMatchObject({ ursache: "rate_limited", status: 429 });
+      expect(jsonRecord(rows.results[1]?.detail_json ?? "{}")).toMatchObject({ cause: "rate_limited", status: 429 });
       expect(jsonRecord(rows.results[2]?.detail_json ?? "{}").text).toEqual(expect.stringContaining("quelle"));
     } finally {
       database.close();

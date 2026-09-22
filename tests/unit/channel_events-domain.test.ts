@@ -214,7 +214,7 @@ describe("channel events domain", () => {
       ban_evasion_evaluation: "possible",
       message: { text: "Eine auffällige Nachricht." },
     })).toEqual([{
-      code: "channel_events.verdacht.nachricht",
+      code: "channel_events.verdacht.message",
       detail: {
         person: "Xemdo (@xemdo)",
         einstufung: "active_monitoring / ban_evader / possible",
@@ -263,7 +263,7 @@ describe("channel events domain", () => {
       ban_evasion_evaluation: "unbekannt",
       message: { text: 42 },
     })).toEqual([{
-      code: "channel_events.verdacht.nachricht",
+      code: "channel_events.verdacht.message",
       detail: {},
     }]);
     expect(diagnose("channel.suspicious_user.update", {
