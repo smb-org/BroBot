@@ -35,8 +35,8 @@ const responseFor = async (
   snoozeScopeVorhanden: boolean,
 ): Promise<AdsScheduleResponse> => ({
   schedule,
-  snoozeScopeVorhanden,
-  letzteWerbepausen: await listLastAdBreaks(db, channelId),
+  snoozeScopeAvailable: snoozeScopeVorhanden,
+  recentAdBreaks: await listLastAdBreaks(db, channelId),
 });
 
 const log = async (

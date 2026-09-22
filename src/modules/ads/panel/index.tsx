@@ -50,7 +50,7 @@ export const AdsPanel = ({
     return () => { active = false; };
   }, [channelId, labels.fehler]);
 
-  if (settings === null || zeitplan === null) return <p className="loading-line">{error ?? labels.laden}</p>;
+  if (settings === null || zeitplan === null) return <p className="loading-line">{error ?? labels.load}</p>;
 
   const save = async (): Promise<void> => {
     if (settings.leadSeconds === "") {
@@ -72,8 +72,8 @@ export const AdsPanel = ({
   };
 
   const snoozeCount = zeitplan.schedule.snoozeCount;
-  const snoozeButtonDisabled = snoozeBusy || !zeitplan.snoozeScopeVorhanden || snoozeCount === null || snoozeCount <= 0;
-  const snoozeReason = !zeitplan.snoozeScopeVorhanden
+  const snoozeButtonDisabled = snoozeBusy || !zeitplan.snoozeScopeAvailable || snoozeCount === null || snoozeCount <= 0;
+  const snoozeReason = !zeitplan.snoozeScopeAvailable
     ? labels.snoozeScopeFehlt
     : snoozeCount === null
       ? labels.snoozeUnbekannt
@@ -97,11 +97,11 @@ export const AdsPanel = ({
 
   return (
     <section className="module-stack" aria-label={labels.titel}>
-      <section className="config-section" aria-label={labels.zeitplanAbschnitt}>
-        <div className="section-heading"><h2>{labels.zeitplanAbschnitt}</h2></div>
+      <section className="config-section" aria-label={labels.scheduleSection}>
+        <div className="section-heading"><h2>{labels.scheduleSection}</h2></div>
         {zeitplan.schedule.nextAdAt === null ? <p className="empty-state">{labels.keineWerbung}</p> : (
           <div className="tabelle-wrap">
-            <table className="tabelle" aria-label={labels.zeitplanAbschnitt}>
+            <table className="tabelle" aria-label={labels.scheduleSection}>
               <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody><tr>
                 <td className="zahl">{formatTimestamp(zeitplan.schedule.nextAdAt, resolvedLanguage)}</td>
@@ -192,14 +192,14 @@ export const AdsPanel = ({
 
       <section className="config-section" aria-label={labels.letzteAbschnitt}>
         <div className="section-heading"><h2>{labels.letzteAbschnitt}</h2></div>
-        {zeitplan.letzteWerbepausen.length === 0 ? <p className="empty-state">{labels.keineLetzte}</p> : (
+        {zeitplan.recentAdBreaks.length === 0 ? <p className="empty-state">{labels.keineLetzte}</p> : (
           <div className="tabelle-wrap">
             <table className="tabelle" aria-label={labels.letzteAbschnitt}>
               <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.duration}</th></tr></thead>
-              <tbody>{zeitplan.letzteWerbepausen.map((pause) => (
-                <tr key={`${pause.zeitpunkt}-${String(pause.dauerSekunden)}`}>
-                  <td className="zahl">{labels.letzteZeit(formatTimestamp(pause.zeitpunkt, resolvedLanguage))}</td>
-                  <td className="zahl">{labels.letzteDauer(String(pause.dauerSekunden))}</td>
+              <tbody>{zeitplan.recentAdBreaks.map((pause) => (
+                <tr key={`${pause.timestamp}-${String(pause.durationSeconds)}`}>
+                  <td className="zahl">{labels.letzteZeit(formatTimestamp(pause.timestamp, resolvedLanguage))}</td>
+                  <td className="zahl">{labels.letzteDauer(String(pause.durationSeconds))}</td>
                 </tr>
               ))}</tbody>
             </table>
@@ -210,7 +210,7 @@ export const AdsPanel = ({
       <section className="config-section" aria-label={labels.aktionen}>
         <div className="section-heading"><h2>{labels.aktionen}</h2></div>
         <div className="form-actions">
-          <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManage || busy}>{labels.speichern}</button>
+          <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManage || busy}>{labels.save}</button>
           {saved ? <span className="muted" role="status">{labels.gespeichert}</span> : null}
         </div>
       </section>

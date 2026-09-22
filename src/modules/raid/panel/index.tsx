@@ -38,7 +38,7 @@ export const RaidPanel = ({
     return () => { active = false; };
   }, [channelId, labels.fehler]);
 
-  if (settings === null) return <p className="loading-line">{error ?? labels.laden}</p>;
+  if (settings === null) return <p className="loading-line">{error ?? labels.load}</p>;
 
   const disabled = !canManage || busy;
   const shoutoutThresholdDisabled = disabled || !settings.shoutoutEnabled;
@@ -144,7 +144,7 @@ export const RaidPanel = ({
       <section className="config-section" aria-label={labels.aktionen}>
         <div className="section-heading"><h2>{labels.aktionen}</h2></div>
         <div className="form-actions">
-          <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={disabled}>{labels.speichern}</button>
+          <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={disabled}>{labels.save}</button>
           {saved ? <span className="muted" role="status">{labels.gespeichert}</span> : null}
         </div>
       </section>

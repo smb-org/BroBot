@@ -39,6 +39,6 @@ export const listLastAdBreaks = async (
     const startedAt = typeof parsed.gestartet === "string" && parsed.gestartet.length > 0
       ? parsed.gestartet
       : row.created_at;
-    return [{ zeitpunkt: startedAt, dauerSekunden: duration }];
+    return [{ timestamp: startedAt, durationSeconds: duration }];
   });
 };

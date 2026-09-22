@@ -8,7 +8,7 @@ export type RaidEntscheidung =
   | {
     kind: "incoming";
     sourceChannelId: string;
-    quelleKanalName: string;
+    sourceChannelName: string;
     viewers: number;
     voll: boolean;
   }
@@ -43,7 +43,7 @@ export const entscheideRaid = (
   return {
     kind: "incoming",
     sourceChannelId: fromId,
-    quelleKanalName: textValue(payload.from_broadcaster_user_name) ?? textValue(payload.from_broadcaster_user_login) ?? fromId,
+    sourceChannelName: textValue(payload.from_broadcaster_user_name) ?? textValue(payload.from_broadcaster_user_login) ?? fromId,
     viewers: zuschauer,
     voll: zuschauer >= textThreshold,
   };

@@ -17,10 +17,10 @@ export type TextCommandMutationResult =
   | { ok: false; reason: TextCommandMutationReason };
 
 export interface TextCommandRepository {
-  auflisten(channelId: string): Promise<TextCommand[]>;
+  list(channelId: string): Promise<TextCommand[]>;
   finden(channelId: string, name: string): Promise<TextCommand | null>;
   anlegen(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult>;
-  aendern(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult>;
-  loeschen(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult>;
+  change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult>;
+  delete(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult>;
   beanspruchen(channelId: string, name: string, now: string): Promise<TextCommandClaim | null>;
 }

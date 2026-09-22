@@ -55,7 +55,7 @@ const param = (context: { req: { param: (name: string) => string | undefined } }
 
 textCommandRoutes.get("/commands", async (context) => {
   const repository = createTextCommandRepository(context.env.DB, context.get("authorizeMutation"));
-  return context.json({ befehle: await repository.auflisten(param(context, "channelId")) });
+  return context.json({ befehle: await repository.list(param(context, "channelId")) });
 });
 
 textCommandRoutes.post("/commands", async (context) => {
@@ -105,7 +105,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     context.env.DB,
     authorizeMutation,
     context.get("prepareModuleAudit"),
-  ).aendern({
+  ).change({
     channelId,
     name: oldName,
     neuerName: newName,
@@ -134,7 +134,7 @@ textCommandRoutes.delete("/commands/:name", async (context) => {
   const name = param(context, "name");
   if (await repository.finden(channelId, name) === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (context.get("channelRole") === "operator") return managementDenied(context);
-  const geloescht = await repository.loeschen(channelId, name, context.get("actor"), nowIso());
+  const geloescht = await repository.delete(channelId, name, context.get("actor"), nowIso());
   if (geloescht.ok) return new Response(null, { status: 204 });
   if (geloescht.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
   if (geloescht.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);

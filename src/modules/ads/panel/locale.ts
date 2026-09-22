@@ -2,7 +2,7 @@ import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from ".
 
 interface AdsPanelTexts {
   titel: string;
-  zeitplanAbschnitt: string;
+  scheduleSection: string;
   keineWerbung: string;
   naechsteWerbung: string;
   duration: string;
@@ -26,9 +26,9 @@ interface AdsPanelTexts {
   automatic: string;
   manual: string;
   platzhalter: string;
-  speichern: string;
+  save: string;
   gespeichert: string;
-  laden: string;
+  load: string;
   fehler: string;
   zahlFehlt: string;
 }
@@ -36,7 +36,7 @@ interface AdsPanelTexts {
 const texts: LocaleCatalog<AdsPanelTexts> = {
   de: {
     titel: "Ansagen",
-    zeitplanAbschnitt: "Nächste Werbung",
+    scheduleSection: "Nächste Werbung",
     keineWerbung: "Derzeit ist keine Werbung geplant.",
     naechsteWerbung: "Zeitpunkt",
     duration: "Dauer",
@@ -60,15 +60,15 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     automatic: "Automatische Werbepause",
     manual: "Manuell gestartete Werbepause",
     platzhalter: "{duration} wird durch die Dauer in Sekunden ersetzt.",
-    speichern: "Ansagen speichern",
+    save: "Ansagen speichern",
     gespeichert: "Ansagen gespeichert.",
-    laden: "Werbeeinstellungen werden geladen …",
+    load: "Werbeeinstellungen werden geladen …",
     fehler: "Die Werbeeinstellungen konnten nicht geladen oder gespeichert werden.",
     zahlFehlt: "Zahl eingeben",
   },
   en: {
     titel: "Announcements",
-    zeitplanAbschnitt: "Next ad break",
+    scheduleSection: "Next ad break",
     keineWerbung: "No ad break is currently scheduled.",
     naechsteWerbung: "Time",
     duration: "Duration",
@@ -92,9 +92,9 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     automatic: "Automatic ad break",
     manual: "Manually started ad break",
     platzhalter: "{duration} is replaced with the duration in seconds.",
-    speichern: "Save announcements",
+    save: "Save announcements",
     gespeichert: "Announcements saved.",
-    laden: "Loading ad break settings …",
+    load: "Loading ad break settings …",
     fehler: "The ad break settings could not be loaded or saved.",
     zahlFehlt: "Enter a number",
   },

@@ -8,7 +8,7 @@ const nonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
 export type AdBreaksDecision =
-  | { kind: "skip"; reason: "dauer_null" | "dauer_ungueltig" | "start_ungueltig"; dauerSekunden: number | null; automatic: boolean }
+  | { kind: "skip"; reason: "dauer_null" | "dauer_ungueltig" | "start_ungueltig"; durationSeconds: number | null; automatic: boolean }
   | { kind: "announce"; event: AdBreaksEvent };
 
 export const decideAdBreak = (
@@ -17,14 +17,14 @@ export const decideAdBreak = (
   const dauer = finiteNumber(payload.duration_seconds) ? payload.duration_seconds : null;
   const automatisch = payload.is_automatic === true;
   if (dauer === null || dauer < 0) {
-    return { kind: "skip", reason: "dauer_ungueltig", dauerSekunden: dauer, automatic: automatisch };
+    return { kind: "skip", reason: "dauer_ungueltig", durationSeconds: dauer, automatic: automatisch };
   }
-  if (dauer === 0) return { kind: "skip", reason: "dauer_null", dauerSekunden: 0, automatic: automatisch };
+  if (dauer === 0) return { kind: "skip", reason: "dauer_null", durationSeconds: 0, automatic: automatisch };
 
   const gestartetAm = nonEmptyString(payload.started_at);
   const start = gestartetAm === null ? Number.NaN : Date.parse(gestartetAm);
   if (gestartetAm === null || !Number.isFinite(start)) {
-    return { kind: "skip", reason: "start_ungueltig", dauerSekunden: dauer, automatic: automatisch };
+    return { kind: "skip", reason: "start_ungueltig", durationSeconds: dauer, automatic: automatisch };
   }
 
   const ausloeserLogin = nonEmptyString(payload.requester_user_login) ??
@@ -32,11 +32,11 @@ export const decideAdBreak = (
   return {
     kind: "announce",
     event: {
-      dauerSekunden: dauer,
-      gestartetAm,
-      endetAm: new Date(start + dauer * 1000).toISOString(),
+      durationSeconds: dauer,
+      startedAt: gestartetAm,
+      endsAt: new Date(start + dauer * 1000).toISOString(),
       automatic: automatisch,
-      ausloeserLogin,
+      triggerLogin: ausloeserLogin,
     },
   };
 };

@@ -20,11 +20,11 @@ const command = (name: string, text: string, lastUsedAt: string | null = null): 
 });
 
 const repositoryFor = (commands: TextCommand[]): TextCommandRepository => ({
-  auflisten: () => Promise.resolve(commands),
+  list: () => Promise.resolve(commands),
   finden: (_channelId, name) => Promise.resolve(commands.find((entry) => entry.name === name) ?? null),
   anlegen: () => Promise.resolve({ ok: true }),
-  aendern: () => Promise.resolve({ ok: true }),
-  loeschen: () => Promise.resolve({ ok: true }),
+  change: () => Promise.resolve({ ok: true }),
+  delete: () => Promise.resolve({ ok: true }),
   beanspruchen: (_channelId, name) => {
     const entry = commands.find((candidate) => candidate.name === name);
     return Promise.resolve(entry === undefined ? null : { befehl: entry, beansprucht: entry.lastUsedAt === null });

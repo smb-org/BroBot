@@ -81,7 +81,7 @@ describe("Raid-Panel-Ansicht", () => {
       } }));
       if (url.pathname.endsWith("/ads/zeitplan")) return Promise.resolve(jsonResponse({
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
-        snoozeScopeVorhanden: true, letzteWerbepausen: [],
+        snoozeScopeAvailable: true, recentAdBreaks: [],
       }));
       if (url.pathname.endsWith("/ads/settings")) return Promise.resolve(jsonResponse({ settings: {
         automatic: "auto {duration}", manual: "manuell {duration}", prewarning: true, leadSeconds: 60, prewarningText: "gleich {seconds}",

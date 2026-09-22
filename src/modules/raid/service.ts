@@ -33,7 +33,7 @@ export const processRaid = (
 
   const chatText = textMitRaid(
     entscheidung.voll ? event.settings.textLong : event.settings.textShort,
-    entscheidung.quelleKanalName,
+    entscheidung.sourceChannelName,
     entscheidung.viewers,
   );
   const shoutoutMoeglich = event.settings.shoutoutEnabled && entscheidung.viewers >= event.settings.shoutoutThreshold;

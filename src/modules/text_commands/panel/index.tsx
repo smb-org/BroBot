@@ -120,7 +120,7 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
       });
       await onChanged();
     } catch {
-      setError(labels.speichernFehler);
+      setError(labels.saveError);
     } finally {
       setBusy(false);
     }
@@ -134,14 +134,14 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
       setConfirmingDelete(false);
       await onChanged();
     } catch {
-      setError(labels.loeschenFehler);
+      setError(labels.deleteError);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <TextCommandsSubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.spalten.zuletzt} {relativeZeit(initial.lastUsedAt, labels)}</span>} onClose={onClose}>
+    <TextCommandsSubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.columns.zuletzt} {relativeZeit(initial.lastUsedAt, labels)}</span>} onClose={onClose}>
       {!canManageContent ? <p className="sperrgrund">{labels.verwaltungGesperrt}</p> : null}
       <label className="config-field config-field--mittel">
         {labels.name}
@@ -164,10 +164,10 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
         {cooldownError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
       </label>
       <div className="form-actions">
-        <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManageContent || busy}>{labels.speichern(initial.name)}</button>
+        <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManageContent || busy}>{labels.save(initial.name)}</button>
       </div>
       <div className="form-actions form-actions--destructive">
-        <button className="button button--danger" type="button" onClick={() => { setError(null); setConfirmingDelete(true); }} disabled={!canManageContent || busy}>{labels.loeschen(initial.name)}</button>
+        <button className="button button--danger" type="button" onClick={() => { setError(null); setConfirmingDelete(true); }} disabled={!canManageContent || busy}>{labels.delete(initial.name)}</button>
       </div>
       {confirmingDelete ? (
         <div
@@ -178,10 +178,10 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
           aria-describedby="text-command-delete-confirmation-description"
           onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setConfirmingDelete(false); } }}
         >
-          <h3 id="text-command-delete-confirmation-title">{labels.loeschenTitel(initial.name)}</h3>
-          <p id="text-command-delete-confirmation-description">{labels.loeschenBestaetigung(initial.name)}</p>
+          <h3 id="text-command-delete-confirmation-title">{labels.deleteTitle(initial.name)}</h3>
+          <p id="text-command-delete-confirmation-description">{labels.deleteConfirmation(initial.name)}</p>
           <div className="form-actions">
-            <button ref={confirmButtonRef} className="button button--danger" type="button" onClick={() => { void remove(); }} disabled={!canManageContent || busy}>{labels.loeschungBestaetigen(initial.name)}</button>
+            <button ref={confirmButtonRef} className="button button--danger" type="button" onClick={() => { void remove(); }} disabled={!canManageContent || busy}>{labels.confirmDeletion(initial.name)}</button>
             <button ref={cancelButtonRef} className="button button--quiet" type="button" onClick={() => { setConfirmingDelete(false); }} disabled={busy}>{dashboardCommonTexts().abbrechen}</button>
           </div>
         </div>
@@ -230,7 +230,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
           onClick={(event) => { event.stopPropagation(); }}
           onChange={(event) => { void onMinimumChange(event.target.value as TextCommandMinimumTier); }}
         >
-          {TEXT_COMMAND_MINIMUM_TIERS.map((tier) => <option key={tier} value={tier}>{labels.stufen[tier]}</option>)}
+          {TEXT_COMMAND_MINIMUM_TIERS.map((tier) => <option key={tier} value={tier}>{labels.tiers[tier]}</option>)}
         </select>
       </td>
       <td>
@@ -330,7 +330,7 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
       setCooldownSekunden(5);
       await load();
     } catch {
-      setError(labels.speichernFehler);
+      setError(labels.saveError);
     } finally {
       setCreating(false);
     }
@@ -343,7 +343,7 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
       await toggleTextCommand(channelId, command.name, !command.enabled);
       await load();
     } catch {
-      setError(labels.speichernFehler);
+      setError(labels.saveError);
     } finally {
       setToggleBusyName(null);
     }
@@ -356,7 +356,7 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
       await setTextCommandMinimumTier(channelId, command.name, minimumTier);
       await load();
     } catch {
-      setError(labels.speichernFehler);
+      setError(labels.saveError);
     } finally {
       setMinimumBusyName(null);
     }
@@ -375,10 +375,10 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
                 </svg>
               </button>
             </div>
-            {loading ? <p className="loading-line">{labels.laden}</p> : null}
+            {loading ? <p className="loading-line">{labels.load}</p> : null}
             {error === null ? null : <p className="form-error" role="alert">{error}</p>}
             {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-            {!loading && error === null && commands.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.kind}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.minimumTier}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setAnlegenOffen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
+            {!loading && error === null && commands.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.text}</th><th scope="col">{labels.columns.abkuehlung}</th><th scope="col">{labels.columns.zuletzt}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.aktiv}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setAnlegenOffen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
           </section>
         </div>
         {selected !== null ? <TextCommandEditor key={selected.name} channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} /> : anlegenOffen ? (
@@ -407,7 +407,7 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
                 <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSekunden(event.target.value === "" ? "" : Number(event.target.value)); }} />
                 {cooldownError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
               </label>
-              <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (art === "text" ? labels.antwortFehlt : labels.nameFehlt) : (art === "text" ? labels.nameAntwortFehlt : labels.nameFehlt)}</span>}</div>
+              <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.anlegen}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (art === "text" ? labels.responseMissing : labels.nameFehlt) : (art === "text" ? labels.nameAntwortFehlt : labels.nameFehlt)}</span>}</div>
               </fieldset>
             </form>
           </TextCommandsSubInspector>

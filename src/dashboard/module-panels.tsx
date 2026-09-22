@@ -253,7 +253,7 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
       <div className="module-workspace__main">
         <header className="module-workspace__heading">
           <h1>{dashboardTexts().navigation.module}</h1>
-          {loading ? <span className="muted">{dashboardTexts().module.laden}</span> : null}
+          {loading ? <span className="muted">{dashboardTexts().module.load}</span> : null}
         </header>
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         <div className="module-grid">
@@ -368,7 +368,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             : <button className="button button--primary" type="button" disabled>{texts.module.scopeZustimmungAnfordern}</button>}
           {ownRole === "broadcaster" ? null : <p className="sperrgrund">{texts.module.scopeZustimmungGesperrt}</p>}
         </section>}
-        {viewLoading ? <p className="muted">{texts.module.laden}</p> : null}
+        {viewLoading ? <p className="muted">{texts.module.load}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {stateMessage === null ? (
           registered?.panel === undefined ? (showActiveView ? <p className="module-state">{texts.module.keineAnsicht}</p> : null) : !showActiveView ? null : (

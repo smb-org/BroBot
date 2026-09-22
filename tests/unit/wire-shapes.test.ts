@@ -55,6 +55,7 @@ import type {
 } from "../../src/realtime-contract";
 import type { ChannelRole, EventTone } from "../../src/contracts/values";
 import type { TextCommand } from "../../src/modules/text_commands/contracts";
+import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
 import type { OAuthState } from "../../src/worker/auth/oauth";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
@@ -507,7 +508,23 @@ describe("serialisierte Vertragsformen", () => {
         updatedAt: "2026-09-21T12:00:00.000Z",
       };
 
+      // Die Werbe-Zeitplan-Antwort geht ans Panel und stand ebenfalls
+      // ausserhalb dieses Satzes; sie trug deshalb unbemerkt deutsche Schluessel.
+      const adsScheduleResponse: AdsScheduleResponse = {
+        schedule: {
+          nextAdAt: "2026-09-21T12:30:00.000Z",
+          duration: 180,
+          lastAdAt: "2026-09-21T12:00:00.000Z",
+          prerollFreeTime: 0,
+          snoozeCount: 3,
+          snoozeRefreshAt: "2026-09-21T13:00:00.000Z",
+        },
+        recentAdBreaks: [{ timestamp: "2026-09-21T12:00:00.000Z", durationSeconds: 180 }],
+        snoozeScopeAvailable: true,
+      };
+
       const wireShapes = {
+        adsScheduleResponse,
         oauthState,
         textCommand,
         realtime: {
@@ -520,7 +537,10 @@ describe("serialisierte Vertragsformen", () => {
       };
 
       expect(shapeKeys(wireShapes)).toEqual([
-        "$: modules,oauthState,panel,realtime,textCommand",
+        "$: adsScheduleResponse,modules,oauthState,panel,realtime,textCommand",
+        "$.adsScheduleResponse: recentAdBreaks,schedule,snoozeScopeAvailable",
+        "$.adsScheduleResponse.recentAdBreaks[]: durationSeconds,timestamp",
+        "$.adsScheduleResponse.schedule: duration,lastAdAt,nextAdAt,prerollFreeTime,snoozeCount,snoozeRefreshAt",
         "$.modules: action,actor,auditEntry,diagnostic,event,mutationActor,mutationAuthorization,result",
         "$.modules.action[]: kind,replyToMessageId,text",
         "$.modules.action[]: kind,targetChannelId",

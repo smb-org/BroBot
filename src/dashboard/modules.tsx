@@ -12,29 +12,29 @@ interface ModulesTexts {
   titel: string;
   liste: string;
   verfuegbar: string;
-  laden: string;
+  load: string;
   registriert: string;
   module: string;
   aktiv: string;
   inaktiv: string;
   aktivieren: string;
   deaktivieren: string;
-  sitzungUngueltig: string;
+  sessionInvalid: string;
   aenderungFehlgeschlagen: string;
 }
 
 const texts: LocaleCatalog<ModulesTexts> = {
   de: {
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Module ändern.", titel: "Module", liste: "Modulliste",
-    verfuegbar: "Verfügbare Module", laden: "Module werden geladen …", registriert: "Für diesen Bot ist noch kein Modul registriert.",
+    verfuegbar: "Verfügbare Module", load: "Module werden geladen …", registriert: "Für diesen Bot ist noch kein Modul registriert.",
     module: "Modul", aktiv: "Aktiv", inaktiv: "Inaktiv", aktivieren: "aktivieren", deaktivieren: "deaktivieren",
-    sitzungUngueltig: "Deine Sitzung ist nicht mehr gültig.", aenderungFehlgeschlagen: "Die Moduländerung ist fehlgeschlagen.",
+    sessionInvalid: "Deine Sitzung ist nicht mehr gültig.", aenderungFehlgeschlagen: "Die Moduländerung ist fehlgeschlagen.",
   },
   en: {
     verwaltungGesperrt: "Only broadcasters and managers may change modules.", titel: "Modules", liste: "Module list",
-    verfuegbar: "Available modules", laden: "Loading modules …", registriert: "No module is registered for this bot yet.",
+    verfuegbar: "Available modules", load: "Loading modules …", registriert: "No module is registered for this bot yet.",
     module: "Module", aktiv: "Active", inaktiv: "Inactive", aktivieren: "enable", deaktivieren: "disable",
-    sitzungUngueltig: "Your session is no longer valid.", aenderungFehlgeschlagen: "The module change failed.",
+    sessionInvalid: "Your session is no longer valid.", aenderungFehlgeschlagen: "The module change failed.",
   },
 };
 
@@ -51,7 +51,7 @@ interface ModulesPageProperties {
 }
 
 const errorMessage = (error: unknown): string => {
-  if (error instanceof PanelApiError && error.status === 401) return modulesTexts().sitzungUngueltig;
+  if (error instanceof PanelApiError && error.status === 401) return modulesTexts().sessionInvalid;
   if (error instanceof Error && error.message.length > 0) return error.message;
   return modulesTexts().aenderungFehlgeschlagen;
 };
@@ -93,7 +93,7 @@ const ModulesPage = ({
       <ModuleHeading kind="modules" title={texts.titel} subtitle={formatZahl(modules.length)} />
       <section className="content-section" aria-label={texts.liste}>
         <div className="section-heading"><h2>{texts.verfuegbar}</h2></div>
-        {loading ? <p className="loading-line">{texts.laden}</p> : null}
+        {loading ? <p className="loading-line">{texts.load}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
         {loading || error !== null ? null : modules.length === 0 ? (

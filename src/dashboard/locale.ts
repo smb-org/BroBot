@@ -7,7 +7,7 @@ export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
 export interface DashboardCommonTexts {
   abbrechen: string;
   schliessen: string;
-  speichern: string;
+  save: string;
   rollen: Record<ChannelRole, string>;
 }
 
@@ -15,7 +15,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   de: {
     abbrechen: "Abbrechen",
     schliessen: "Schließen",
-    speichern: "Speichern",
+    save: "Speichern",
     rollen: {
       broadcaster: "Broadcaster",
       manager: "Verwalter",
@@ -25,7 +25,7 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
   en: {
     abbrechen: "Cancel",
     schliessen: "Close",
-    speichern: "Save",
+    save: "Save",
     rollen: {
       broadcaster: "Broadcaster",
       manager: "Manager",
@@ -48,7 +48,7 @@ export interface DashboardTexts {
     verbindungLaeuft: string;
     verbindungWartet: string;
     verbindungGestort: string;
-    kanalIdentitaet: string;
+    channelIdentity: string;
     keineVerbindung: string;
     schalterAn: string;
     schalterAus: string;
@@ -68,10 +68,10 @@ export interface DashboardTexts {
     chatAboWiderrufen: string;
     botFehler: string;
     botTokenWiderrufen: string;
-    broadcasterZustimmungFehlt: string;
+    broadcasterConsentMissing: string;
     chatAboFehlt: string;
     gesund: string;
-    zustandUnvollstaendig: string;
+    stateIncomplete: string;
     nichtVerbunden: string;
     nichtEingerichtet: string;
     moderator: string;
@@ -86,13 +86,13 @@ export interface DashboardTexts {
     hauptnavigation: string;
     brotkrume: string;
     uebersicht: string;
-    kanal: string;
+    channel: string;
     system: string;
-    mitglieder: string;
+    members: string;
     module: string;
     ereignisse: string;
-    kanalAuswaehlen: string;
-    modulAuswaehlen: string;
+    selectChannel: string;
+    selectModule: string;
     twitchAnmelden: string;
     twitchKonto: string;
     abmeldungLaeuft: string;
@@ -105,15 +105,15 @@ export interface DashboardTexts {
     keinKanalFreigegeben: string;
     keineMitgliedschaft: string;
     aktiveModule: string;
-    zustandLaden: string;
+    loadState: string;
   };
   moderation: {
     fuerKanalKeinePruefung: string;
     letztePruefung: (timestamp: string) => string;
-    pruefungLaeuft: string;
+    checkRunning: string;
     moderatorstatusPruefen: string;
     naechstePruefungAb: (timestamp: string) => string;
-    pruefungGesperrt: string;
+    checkLocked: string;
     broadcasterErneutAutorisieren: string;
     broadcasterZustimmungAnfordern: string;
   };
@@ -129,11 +129,11 @@ export interface DashboardTexts {
   fehler: {
     titel: string;
     warnung: string;
-    sitzungUngueltig: string;
+    sessionInvalid: string;
     datenLaden: string;
     letzter: string;
     keineUrsache: string;
-    kanalNichtFreigegeben: string;
+    channelNotReleased: string;
   };
   statusKarte: {
     deineRolle: string;
@@ -144,12 +144,12 @@ export interface DashboardTexts {
     moderatorstatus: string;
     chatAbo: string;
     tokenZustand: string;
-    broadcasterZustimmungFehlt: string;
+    broadcasterConsentMissing: string;
     broadcastErklaerung: string;
     keinBotStatus: string;
     chatBotNoetig: string;
   };
-  zeit: {
+  time: {
     aktualisiert: (relativeZeit: string) => string;
     vorSekunden: (count: number) => string;
     vorMinuten: (count: number) => string;
@@ -158,7 +158,7 @@ export interface DashboardTexts {
   system: {
     titel: string;
     nurLesend: string;
-    zustandLaden: string;
+    loadState: string;
     eigenschaften: string;
     botGrund: string;
     botAktualisiert: string;
@@ -171,10 +171,10 @@ export interface DashboardTexts {
     botGueltigBis: string;
     auditLog: string;
     eintraege: string;
-    zeit: string;
+    time: string;
     action: string;
     wer: string;
-    auditLaden: string;
+    loadAudit: string;
     keineAuditEintraege: string;
     aenderungsdaten: string;
     vorher: string;
@@ -184,7 +184,7 @@ export interface DashboardTexts {
     abonnements: string;
     keineAbonnements: string;
     abo: string;
-    zustand: string;
+    state: string;
     reason: string;
     aboInspector: string;
     aboTyp: string;
@@ -200,7 +200,7 @@ export interface DashboardTexts {
     titel: string;
     count: (count: string) => string;
     protokoll: string;
-    zeit: string;
+    time: string;
     ereignis: string;
     module: string;
     wer: string;
@@ -210,23 +210,23 @@ export interface DashboardTexts {
     hinweis: string;
     unbekannt: string;
     code: string;
-    zeitstempel: string;
+    timestamp: string;
     vorgang: string;
     beteiligte: string;
     verlauf: string;
-    laden: string;
+    load: string;
     keine: string;
     detail: string;
     aeltereLaden: string;
     aeltereWerdenGeladen: string;
     filter: string;
     origin: string;
-    modulFilter: string;
+    moduleFilter: string;
     tone: string;
     person: string;
     alle: string;
-    kanalereignisse: string;
-    moduldiagnosen: string;
+    channelEvents: string;
+    moduleDiagnostics: string;
     aktiveFilter: string;
     filterZuruecksetzen: string;
     keineTreffer: string;
@@ -243,20 +243,20 @@ export interface DashboardTexts {
     erforderlich: string;
     erklaerung: string;
     mitTwitchAnmelden: string;
-    kanalzugriffPruefen: string;
-    mitgliederLaden: string;
+    checkChannelAccess: string;
+    loadMembers: string;
   };
   module: {
     module: string;
     verfuegbar: string;
-    laden: string;
+    load: string;
     registriert: string;
     aktiv: string;
     inaktiv: string;
     aktivieren: string;
     deaktivieren: string;
-    modulliste: string;
-    modulUebersicht: string;
+    moduleList: string;
+    moduleOverview: string;
     verwaltungGesperrt: string;
     keineAktiv: string;
     keineAnsicht: string;
@@ -279,7 +279,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       verbindungLaeuft: "Läuft",
       verbindungWartet: "Wartet",
       verbindungGestort: "Gestört",
-      kanalIdentitaet: "Kanal",
+      channelIdentity: "Kanal",
       keineVerbindung: "Keine Verbindung",
       schalterAn: "An",
       schalterAus: "Aus",
@@ -289,16 +289,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       loginIdentitaetFehlt: "Login-Identität fehlt", nichtGeprueft: "Nicht geprüft", abgelaufen: "Abgelaufen",
       wartungUeberfaellig: "Wartung überfällig", erneuerungUeberfaellig: "Erneuerung überfällig", gueltig: "Gültig",
       moderatorrolleFehlt: "Moderatorrolle fehlt", chatAboFehler: "Chat-Abo-Fehler", chatAboWiderrufen: "Chat-Abo widerrufen",
-      botFehler: "Bot-Fehler", botTokenWiderrufen: "Bot-Token widerrufen", broadcasterZustimmungFehlt: "Broadcaster-Zustimmung fehlt",
-      chatAboFehlt: "Chat-Abo fehlt", gesund: "Gesund", zustandUnvollstaendig: "Zustand unvollständig",
+      botFehler: "Bot-Fehler", botTokenWiderrufen: "Bot-Token widerrufen", broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt",
+      chatAboFehlt: "Chat-Abo fehlt", gesund: "Gesund", stateIncomplete: "Zustand unvollständig",
       nichtVerbunden: "Nicht verbunden", nichtEingerichtet: "Nicht eingerichtet", moderator: "Moderator", missing: "Fehlt",
       aktiv: "Aktiv", ausstehend: "Ausstehend", nichtErforderlich: "Nicht erforderlich", vorhanden: "Vorhanden",
       botBerechtigungenFehlen: (count) => `${count} fehlen`,
     },
     navigation: {
-      hauptnavigation: "Hauptnavigation", brotkrume: "Brotkrume", uebersicht: "Übersicht", kanal: "Kanal", system: "System",
-      mitglieder: "Mitglieder", module: "Module", ereignisse: "Ereignisse", kanalAuswaehlen: "Kanal auswählen",
-      modulAuswaehlen: "Modul auswählen",
+      hauptnavigation: "Hauptnavigation", brotkrume: "Brotkrume", uebersicht: "Übersicht", channel: "Kanal", system: "System",
+      members: "Mitglieder", module: "Module", ereignisse: "Ereignisse", selectChannel: "Kanal auswählen",
+      selectModule: "Modul auswählen",
       twitchAnmelden: "Mit Twitch anmelden", twitchKonto: "Twitch-Konto",
       abmeldungLaeuft: "Abmeldung …", abmelden: "Abmelden",
     },
@@ -308,14 +308,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       kanaeleFreigegebenKurz: (count) => `${count} Kanäle freigegeben`,
       keinKanalFreigegeben: "Noch kein Kanal freigegeben",
       keineMitgliedschaft: "Für dieses Konto gibt es keine Mitgliedschaft in einem freigegebenen Kanal.",
-      aktiveModule: "Aktive Module", zustandLaden: "Kanalzustand wird geladen …",
+      aktiveModule: "Aktive Module", loadState: "Kanalzustand wird geladen …",
     },
     moderation: {
       fuerKanalKeinePruefung: "Für diesen Kanal liegt noch keine Prüfung vor.",
       letztePruefung: (timestamp) => `Letzte Prüfung: ${timestamp}`,
-      pruefungLaeuft: "Prüfung läuft …", moderatorstatusPruefen: "Moderatorstatus prüfen",
+      checkRunning: "Prüfung läuft …", moderatorstatusPruefen: "Moderatorstatus prüfen",
       naechstePruefungAb: (timestamp) => `Nächste Prüfung ab ${timestamp}.`,
-      pruefungGesperrt: "Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.",
+      checkLocked: "Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.",
       broadcasterErneutAutorisieren: "Der Broadcaster muss Twitch erneut autorisieren.",
       broadcasterZustimmungAnfordern: "Broadcaster-Zustimmung anfordern",
     },
@@ -329,40 +329,40 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botBerechtigungenVollstaendig: "Alle angeforderten Bot-Berechtigungen sind vorhanden.",
     },
     fehler: {
-      titel: "Fehler", warnung: "Warnung", sitzungUngueltig: "Deine Sitzung ist nicht mehr gültig.",
+      titel: "Fehler", warnung: "Warnung", sessionInvalid: "Deine Sitzung ist nicht mehr gültig.",
       datenLaden: "Die Daten konnten nicht geladen werden.", letzter: "Letzter Fehler",
-      keineUrsache: "Keine gespeicherte Ursache", kanalNichtFreigegeben: "Dieser Kanal ist für dein Konto nicht freigegeben.",
+      keineUrsache: "Keine gespeicherte Ursache", channelNotReleased: "Dieser Kanal ist für dein Konto nicht freigegeben.",
     },
     statusKarte: {
       deineRolle: "Deine Rolle", broadcasterOauth: "Broadcaster-OAuth", chatZustimmung: "Chat-Zustimmung",
       botAccount: "Bot-Account", botBerechtigungen: "Bot-Berechtigungen", moderatorstatus: "Moderatorstatus", chatAbo: "Chat-Abo", tokenZustand: "Token-Zustand",
-      broadcasterZustimmungFehlt: "Broadcaster-Zustimmung fehlt", broadcastErklaerung: "Für optionale Broadcaster-Module verbunden.",
+      broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt", broadcastErklaerung: "Für optionale Broadcaster-Module verbunden.",
       keinBotStatus: "Es gibt noch keinen gespeicherten Botstatus.", chatBotNoetig: "channel:bot wird vom Broadcaster benötigt.",
     },
-    zeit: {
+    time: {
       aktualisiert: (relativeZeit) => `aktualisiert ${relativeZeit}`, vorSekunden: (count) => `vor ${String(count)} s`,
       vorMinuten: (count) => `vor ${String(count)} Min.`, vorStunden: (count) => `vor ${String(count)} Std.`,
     },
     system: {
-      titel: "System", nurLesend: "nur lesend", zustandLaden: "Systemzustand wird geladen …", eigenschaften: "Eigenschaften",
+      titel: "System", nurLesend: "nur lesend", loadState: "Systemzustand wird geladen …", eigenschaften: "Eigenschaften",
       botGrund: "Bot-Grund", botAktualisiert: "Bot zuletzt aktualisiert", chatAboId: "Chat-Abo-ID", chatAboGrund: "Chat-Abo-Grund",
       chatAboAktualisiert: "Chat-Abo zuletzt aktualisiert", loginStatus: "Login-Token-Status", loginGrund: "Login-Token-Grund",
       loginGueltigBis: "Login-Token gültig bis", botGueltigBis: "Bot-Token gültig bis", auditLog: "Audit-Log",
-      eintraege: "Einträge", zeit: "Zeit", action: "Aktion", wer: "Wer", auditLaden: "Audit-Log wird geladen …",
+      eintraege: "Einträge", time: "Zeit", action: "Aktion", wer: "Wer", loadAudit: "Audit-Log wird geladen …",
       keineAuditEintraege: "Noch keine Audit-Einträge gespeichert.", aenderungsdaten: "Änderungsdaten",
       vorher: "Vorher", nachher: "Nachher", aeltereEintraege: "Ältere Einträge laden",
       aeltereEintraegeLaden: "Ältere Einträge werden geladen …",
-      abonnements: "Abonnements", keineAbonnements: "Keine Abonnements gespeichert.", abo: "Abo", zustand: "Zustand", reason: "Grund",
+      abonnements: "Abonnements", keineAbonnements: "Keine Abonnements gespeichert.", abo: "Abo", state: "Zustand", reason: "Grund",
       aboInspector: "Abo-Details", aboTyp: "Roher Typ", aboVersion: "Version", aboId: "Abo-ID", aboAktualisiert: "Zuletzt geändert",
       twitchMeldung: "Twitch-Meldung", httpStatus: "HTTP-Status", botBerechtigungenInspector: "Fehlende Bot-Berechtigungen", fehlendeScopes: "Fehlende Scopes",
     },
     ereignisse: {
-      titel: "Ereignisse", count: (count) => `${count} Einträge`, protokoll: "Ereignisprotokoll", zeit: "Zeit", ereignis: "Ereignis",
-      module: "Modul", wer: "Wer", automatic: "Automatisch", info: "Info", fehler: "Fehler", hinweis: "Hinweis", unbekannt: "Unbekannt", code: "Code", zeitstempel: "Zeitstempel", vorgang: "Vorgang", beteiligte: "Beteiligte", verlauf: "Verlauf",
-      laden: "Ereignisse werden geladen …",
+      titel: "Ereignisse", count: (count) => `${count} Einträge`, protokoll: "Ereignisprotokoll", time: "Zeit", ereignis: "Ereignis",
+      module: "Modul", wer: "Wer", automatic: "Automatisch", info: "Info", fehler: "Fehler", hinweis: "Hinweis", unbekannt: "Unbekannt", code: "Code", timestamp: "Zeitstempel", vorgang: "Vorgang", beteiligte: "Beteiligte", verlauf: "Verlauf",
+      load: "Ereignisse werden geladen …",
       keine: "Noch keine Ereignisse protokolliert.", detail: "Detail", aeltereLaden: "Ältere Ereignisse laden", aeltereWerdenGeladen: "Ältere Ereignisse werden geladen …",
-      filter: "Filter", origin: "Herkunft", modulFilter: "Modul", tone: "Ton", person: "Person", alle: "Alle",
-      kanalereignisse: "Kanalereignisse", moduldiagnosen: "Moduldiagnosen", aktiveFilter: "Aktive Filter:", filterZuruecksetzen: "Filter zurücksetzen",
+      filter: "Filter", origin: "Herkunft", moduleFilter: "Modul", tone: "Ton", person: "Person", alle: "Alle",
+      channelEvents: "Kanalereignisse", moduleDiagnostics: "Moduldiagnosen", aktiveFilter: "Aktive Filter:", filterZuruecksetzen: "Filter zurücksetzen",
       keineTreffer: "Keine Ereignisse passen zu den Filtern.", nachladenAmEnde: "Am Ende werden ältere Ereignisse nachgeladen.",
       feedEnde: "Ende des Ereignisverlaufs erreicht.",
       realtimeVerbindet: "Verbindet …", realtimeVerbunden: "Verbunden", realtimeWiederverbindung: "Verbindet neu …",
@@ -370,13 +370,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     anmeldung: {
       erforderlich: "Anmeldung erforderlich", erklaerung: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
-      mitTwitchAnmelden: "Mit Twitch anmelden", kanalzugriffPruefen: "Kanalzugriff wird geprüft …", mitgliederLaden: "Mitglieder werden geladen …",
+      mitTwitchAnmelden: "Mit Twitch anmelden", checkChannelAccess: "Kanalzugriff wird geprüft …", loadMembers: "Mitglieder werden geladen …",
     },
     module: {
-      module: "Modul", verfuegbar: "Verfügbare Module", laden: "Module werden geladen …",
+      module: "Modul", verfuegbar: "Verfügbare Module", load: "Module werden geladen …",
       registriert: "Für diesen Bot ist noch kein Modul registriert.", aktiv: "Aktiv", inaktiv: "Inaktiv",
-      aktivieren: "aktivieren", deaktivieren: "deaktivieren", modulliste: "Modulliste",
-      modulUebersicht: "Modulübersicht",
+      aktivieren: "aktivieren", deaktivieren: "deaktivieren", moduleList: "Modulliste",
+      moduleOverview: "Modulübersicht",
       verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Module ändern.", keineAktiv: "Keine Module aktiv.",
       keineAnsicht: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", ansichten: "Modulansichten",
       ansichtenLaden: "Modulansichten werden geladen …",
@@ -395,7 +395,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       verbindungLaeuft: "Running",
       verbindungWartet: "Waiting",
       verbindungGestort: "Interrupted",
-      kanalIdentitaet: "Channel",
+      channelIdentity: "Channel",
       keineVerbindung: "No connection",
       schalterAn: "On",
       schalterAus: "Off",
@@ -405,16 +405,16 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       nichtGeprueft: "Not checked", abgelaufen: "Expired", wartungUeberfaellig: "Maintenance overdue",
       erneuerungUeberfaellig: "Renewal overdue", gueltig: "Valid", moderatorrolleFehlt: "Moderator role missing",
       chatAboFehler: "Chat subscription error", chatAboWiderrufen: "Chat subscription revoked", botFehler: "Bot error",
-      botTokenWiderrufen: "Bot token revoked", broadcasterZustimmungFehlt: "Broadcaster consent missing",
-      chatAboFehlt: "Chat subscription missing", gesund: "Healthy", zustandUnvollstaendig: "Incomplete status",
+      botTokenWiderrufen: "Bot token revoked", broadcasterConsentMissing: "Broadcaster consent missing",
+      chatAboFehlt: "Chat subscription missing", gesund: "Healthy", stateIncomplete: "Incomplete status",
       nichtVerbunden: "Not connected", nichtEingerichtet: "Not set up", moderator: "Moderator", missing: "Missing", aktiv: "Active",
       ausstehend: "Pending", nichtErforderlich: "Not required", vorhanden: "Present",
       botBerechtigungenFehlen: (count) => `${count} missing`,
     },
     navigation: {
-      hauptnavigation: "Main navigation", brotkrume: "Breadcrumb", uebersicht: "Overview", kanal: "Channel", system: "System",
-      mitglieder: "Members", module: "Modules", ereignisse: "Events", kanalAuswaehlen: "Select channel",
-      modulAuswaehlen: "Select module",
+      hauptnavigation: "Main navigation", brotkrume: "Breadcrumb", uebersicht: "Overview", channel: "Channel", system: "System",
+      members: "Members", module: "Modules", ereignisse: "Events", selectChannel: "Select channel",
+      selectModule: "Select module",
       twitchAnmelden: "Sign in with Twitch", twitchKonto: "Twitch account",
       abmeldungLaeuft: "Signing out …", abmelden: "Sign out",
     },
@@ -423,13 +423,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       kanaeleFreigegeben: (count) => `${count} channels are available to you.`,
       kanaeleFreigegebenKurz: (count) => `${count} channels available`,
       keinKanalFreigegeben: "No channel available yet", keineMitgliedschaft: "This account is not a member of an available channel.",
-      aktiveModule: "Active modules", zustandLaden: "Loading channel status …",
+      aktiveModule: "Active modules", loadState: "Loading channel status …",
     },
     moderation: {
       fuerKanalKeinePruefung: "This channel has not been checked yet.", letztePruefung: (timestamp) => `Last checked: ${timestamp}`,
-      pruefungLaeuft: "Checking …", moderatorstatusPruefen: "Check moderator status",
+      checkRunning: "Checking …", moderatorstatusPruefen: "Check moderator status",
       naechstePruefungAb: (timestamp) => `Next check available ${timestamp}.`,
-      pruefungGesperrt: "Only broadcasters and managers may check moderator status.",
+      checkLocked: "Only broadcasters and managers may check moderator status.",
       broadcasterErneutAutorisieren: "The broadcaster must authorize Twitch again.", broadcasterZustimmungAnfordern: "Request broadcaster consent",
     },
     bot: {
@@ -440,37 +440,37 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botBerechtigungenVollstaendig: "All requested bot permissions are present.",
     },
     fehler: {
-      titel: "Error", warnung: "Warning", sitzungUngueltig: "Your session is no longer valid.", datenLaden: "The data could not be loaded.",
-      letzter: "Last error", keineUrsache: "No saved cause", kanalNichtFreigegeben: "This channel is not available to your account.",
+      titel: "Error", warnung: "Warning", sessionInvalid: "Your session is no longer valid.", datenLaden: "The data could not be loaded.",
+      letzter: "Last error", keineUrsache: "No saved cause", channelNotReleased: "This channel is not available to your account.",
     },
     statusKarte: {
       deineRolle: "Your role", broadcasterOauth: "Broadcaster OAuth", chatZustimmung: "Chat consent", botAccount: "Bot account", botBerechtigungen: "Bot permissions",
       moderatorstatus: "Moderator status", chatAbo: "Chat subscription", tokenZustand: "Token status",
-      broadcasterZustimmungFehlt: "Broadcaster consent missing", broadcastErklaerung: "Connected for optional broadcaster modules.",
+      broadcasterConsentMissing: "Broadcaster consent missing", broadcastErklaerung: "Connected for optional broadcaster modules.",
       keinBotStatus: "No bot status has been saved yet.", chatBotNoetig: "channel:bot is required from the broadcaster.",
     },
-    zeit: {
+    time: {
       aktualisiert: (relativeZeit) => `updated ${relativeZeit}`, vorSekunden: (count) => `${String(count)} sec ago`,
       vorMinuten: (count) => `${String(count)} min ago`, vorStunden: (count) => `${String(count)} hr ago`,
     },
     system: {
-      titel: "System", nurLesend: "read-only", zustandLaden: "Loading system status …", eigenschaften: "Properties",
+      titel: "System", nurLesend: "read-only", loadState: "Loading system status …", eigenschaften: "Properties",
       botGrund: "Bot reason", botAktualisiert: "Bot last updated", chatAboId: "Chat subscription ID", chatAboGrund: "Chat subscription reason",
       chatAboAktualisiert: "Chat subscription last updated", loginStatus: "Login token status", loginGrund: "Login token reason",
       loginGueltigBis: "Login token valid until", botGueltigBis: "Bot token valid until", auditLog: "Audit log", eintraege: "entries",
-      zeit: "Time", action: "Action", wer: "Who",
-      auditLaden: "Loading audit log …", keineAuditEintraege: "No audit entries saved yet.", aenderungsdaten: "Change data",
+      time: "Time", action: "Action", wer: "Who",
+      loadAudit: "Loading audit log …", keineAuditEintraege: "No audit entries saved yet.", aenderungsdaten: "Change data",
       vorher: "Before", nachher: "After", aeltereEintraege: "Load older entries", aeltereEintraegeLaden: "Loading older entries …",
-      abonnements: "Subscriptions", keineAbonnements: "No subscriptions saved.", abo: "Subscription", zustand: "State", reason: "Reason",
+      abonnements: "Subscriptions", keineAbonnements: "No subscriptions saved.", abo: "Subscription", state: "State", reason: "Reason",
       aboInspector: "Subscription details", aboTyp: "Raw type", aboVersion: "Version", aboId: "Subscription ID", aboAktualisiert: "Last changed",
       twitchMeldung: "Twitch message", httpStatus: "HTTP status", botBerechtigungenInspector: "Missing bot permissions", fehlendeScopes: "Missing scopes",
     },
     ereignisse: {
-      titel: "Events", count: (count) => `${count} entries`, protokoll: "Event log", zeit: "Time", ereignis: "Event", module: "Module",
-      wer: "Who", automatic: "Automatic", info: "Info", fehler: "Error", hinweis: "Notice", unbekannt: "Unknown", code: "Code", zeitstempel: "Timestamp", vorgang: "Operation", beteiligte: "Participants", verlauf: "History", laden: "Loading events …", keine: "No events logged yet.", detail: "Detail",
+      titel: "Events", count: (count) => `${count} entries`, protokoll: "Event log", time: "Time", ereignis: "Event", module: "Module",
+      wer: "Who", automatic: "Automatic", info: "Info", fehler: "Error", hinweis: "Notice", unbekannt: "Unknown", code: "Code", timestamp: "Timestamp", vorgang: "Operation", beteiligte: "Participants", verlauf: "History", load: "Loading events …", keine: "No events logged yet.", detail: "Detail",
       aeltereLaden: "Load older events", aeltereWerdenGeladen: "Loading older events …",
-      filter: "Filters", origin: "Origin", modulFilter: "Module", tone: "Tone", person: "Person", alle: "All",
-      kanalereignisse: "Channel events", moduldiagnosen: "Module diagnostics", aktiveFilter: "Active filters:", filterZuruecksetzen: "Reset filters",
+      filter: "Filters", origin: "Origin", moduleFilter: "Module", tone: "Tone", person: "Person", alle: "All",
+      channelEvents: "Channel events", moduleDiagnostics: "Module diagnostics", aktiveFilter: "Active filters:", filterZuruecksetzen: "Reset filters",
       keineTreffer: "No events match the filters.", nachladenAmEnde: "Older events load at the end.",
       feedEnde: "End of the event history reached.",
       realtimeVerbindet: "Connecting …", realtimeVerbunden: "Connected", realtimeWiederverbindung: "Reconnecting …",
@@ -478,12 +478,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     anmeldung: {
       erforderlich: "Sign-in required", erklaerung: "Sign in with your Twitch account to see available channels.",
-      mitTwitchAnmelden: "Sign in with Twitch", kanalzugriffPruefen: "Checking channel access …", mitgliederLaden: "Loading members …",
+      mitTwitchAnmelden: "Sign in with Twitch", checkChannelAccess: "Checking channel access …", loadMembers: "Loading members …",
     },
     module: {
-      module: "Module", verfuegbar: "Available modules", laden: "Loading modules …", registriert: "No module is registered for this bot yet.",
-      aktiv: "Active", inaktiv: "Inactive", aktivieren: "enable", deaktivieren: "disable", modulliste: "Module list",
-      modulUebersicht: "Module overview",
+      module: "Module", verfuegbar: "Available modules", load: "Loading modules …", registriert: "No module is registered for this bot yet.",
+      aktiv: "Active", inaktiv: "Inactive", aktivieren: "enable", deaktivieren: "disable", moduleList: "Module list",
+      moduleOverview: "Module overview",
       verwaltungGesperrt: "Only broadcasters and managers may change modules.", keineAktiv: "No modules active.",
       keineAnsicht: "This active module does not have a panel view yet.", ansichten: "Module views", ansichtenLaden: "Loading module views …",
       nichtAktiv: (name) => `The module “${name}” is not active in this channel.`,

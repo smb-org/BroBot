@@ -11,27 +11,27 @@ export const roleLabel = (role: ChannelRole): string => {
 };
 
 export interface ChannelPanelTexts {
-  vollzustimmungFehlt: string;
-  vollzustimmungAnfordern: string;
-  vollzustimmungGesperrt: string;
-  fehlendeBroadcasterBerechtigungen: string;
-  fehlendeScopes: string;
+  fullConsentMissing: string;
+  requestFullConsent: string;
+  fullConsentLocked: string;
+  missingBroadcasterPermissions: string;
+  missingScopes: string;
 }
 
 const channelPanelCatalog: LocaleCatalog<ChannelPanelTexts> = {
   de: {
-    vollzustimmungFehlt: "Vollzustimmung fehlt",
-    vollzustimmungAnfordern: "Vollzustimmung erteilen",
-    vollzustimmungGesperrt: "Nur der Broadcaster kann die Vollzustimmung erteilen.",
-    fehlendeBroadcasterBerechtigungen: "Fehlende Broadcaster-Berechtigungen",
-    fehlendeScopes: "Fehlende Scopes",
+    fullConsentMissing: "Vollzustimmung fehlt",
+    requestFullConsent: "Vollzustimmung erteilen",
+    fullConsentLocked: "Nur der Broadcaster kann die Vollzustimmung erteilen.",
+    missingBroadcasterPermissions: "Fehlende Broadcaster-Berechtigungen",
+    missingScopes: "Fehlende Scopes",
   },
   en: {
-    vollzustimmungFehlt: "Full consent missing",
-    vollzustimmungAnfordern: "Grant full consent",
-    vollzustimmungGesperrt: "Only the broadcaster can grant full consent.",
-    fehlendeBroadcasterBerechtigungen: "Missing broadcaster permissions",
-    fehlendeScopes: "Missing scopes",
+    fullConsentMissing: "Full consent missing",
+    requestFullConsent: "Grant full consent",
+    fullConsentLocked: "Only the broadcaster can grant full consent.",
+    missingBroadcasterPermissions: "Missing broadcaster permissions",
+    missingScopes: "Missing scopes",
   },
 };
 
@@ -47,128 +47,128 @@ export type PlatformAction =
   | "mitglied.entfernt";
 
 export interface PlatformTexts {
-  titel: string;
-  untertitel: (count: string) => string;
+  title: string;
+  subtitle: (count: string) => string;
   navigation: string;
-  kanalübersicht: string;
+  channelOverview: string;
   login: string;
-  kennung: string;
+  identifier: string;
   fullConsent: string;
   broadcaster: string;
-  verwalter: string;
-  bediener: string;
-  ja: string;
-  nein: string;
-  identität: string;
-  verbunden: string;
-  zustimmungAusstehend: string;
-  zustimmungAusstehendHinweis: string;
-  laden: string;
-  keineKanäle: string;
-  fehler: string;
-  kanalFreigeben: string;
+  manager: string;
+  operator: string;
+  yes: string;
+  no: string;
+  identity: string;
+  connected: string;
+  consentPending: string;
+  consentPendingHint: string;
+  load: string;
+  noChannels: string;
+  error: string;
+  releaseChannel: string;
   twitchLogin: string;
-  suchen: string;
-  sucheLäuft: string;
-  nutzerGefunden: string;
+  search: string;
+  searching: string;
+  userFound: string;
   twitchId: (id: string) => string;
-  vollzustimmungSetzen: string;
-  kanalFreigebenFrage: (name: string) => string;
-  kanalFreigebenBeschreibung: (name: string, id: string, withConsent: string) => string;
-  endgültigFreigeben: string;
-  einladungslink: string;
-  einladungslinkHinweis: string;
-  kanalAuswählen: string;
-  linkKopieren: string;
-  linkKopiert: string;
-  kanalBearbeiten: (name: string) => string;
-  zustimmungUmschalten: string;
-  mitglieder: string;
-  mitgliederLaden: string;
-  keineMitglieder: string;
-  mitgliedHinzufügen: string;
-  rolle: string;
-  neueRolle: string;
-  hinzufügen: string;
-  ändern: string;
-  entfernen: string;
-  broadcasterEntfernenHinweis: string;
-  entfernenFrage: (name: string) => string;
-  endgültigEntfernen: string;
+  setFullConsent: string;
+  releaseChannelQuestion: (name: string) => string;
+  releaseChannelDescription: (name: string, id: string, withConsent: string) => string;
+  confirmRelease: string;
+  invitationLink: string;
+  invitationLinkHint: string;
+  selectChannel: string;
+  copyLink: string;
+  linkCopied: string;
+  editChannel: (name: string) => string;
+  toggleConsent: string;
+  members: string;
+  loadMembers: string;
+  noMembers: string;
+  addMember: string;
+  role: string;
+  newRole: string;
+  add: string;
+  change: string;
+  remove: string;
+  removeBroadcasterHint: string;
+  removeQuestion: (name: string) => string;
+  confirmRemove: string;
   audit: string;
-  auditLaden: string;
-  auditLeer: string;
-  zeitpunkt: string;
-  handlung: string;
-  akteur: string;
-  weitereLaden: string;
-  weitereWerdenGeladen: string;
-  betreiber: string;
-  mitglied: string;
-  handlungLabel: Record<PlatformAction, string>;
+  loadAudit: string;
+  auditEmpty: string;
+  timestamp: string;
+  action: string;
+  actor: string;
+  loadMore: string;
+  loadingMore: string;
+  platformAdmin: string;
+  member: string;
+  actionLabel: Record<PlatformAction, string>;
 }
 
 const platformCatalog: LocaleCatalog<PlatformTexts> = {
   de: {
-    titel: "Betreiberebene",
-    untertitel: (count) => `${count} Kanäle verwalten`,
+    title: "Betreiberebene",
+    subtitle: (count) => `${count} Kanäle verwalten`,
     navigation: "Betreiber",
-    kanalübersicht: "Kanalübersicht",
+    channelOverview: "Kanalübersicht",
     login: "Login",
-    kennung: "Kennung",
+    identifier: "Kennung",
     fullConsent: "Vollzustimmung",
     broadcaster: "Broadcaster",
-    verwalter: "Verwalter",
-    bediener: "Bediener",
-    ja: "Ja",
-    nein: "Nein",
-    identität: "Broadcaster-Identität",
-    verbunden: "Verbunden",
-    zustimmungAusstehend: "Zustimmung ausstehend",
-    zustimmungAusstehendHinweis: "Vollzustimmung ist gesetzt. Der Streamer muss den Einladungslink öffnen und Twitch bestätigen.",
-    laden: "Betreiberdaten werden geladen …",
-    keineKanäle: "Noch kein Kanal freigegeben.",
-    fehler: "Die Betreiberdaten konnten nicht geladen werden.",
-    kanalFreigeben: "Kanal freigeben",
+    manager: "Verwalter",
+    operator: "Bediener",
+    yes: "Ja",
+    no: "Nein",
+    identity: "Broadcaster-Identität",
+    connected: "Verbunden",
+    consentPending: "Zustimmung ausstehend",
+    consentPendingHint: "Vollzustimmung ist gesetzt. Der Streamer muss den Einladungslink öffnen und Twitch bestätigen.",
+    load: "Betreiberdaten werden geladen …",
+    noChannels: "Noch kein Kanal freigegeben.",
+    error: "Die Betreiberdaten konnten nicht geladen werden.",
+    releaseChannel: "Kanal freigeben",
     twitchLogin: "Twitch-Login",
-    suchen: "Nutzer suchen",
-    sucheLäuft: "Suche läuft …",
-    nutzerGefunden: "Gefundener Nutzer",
+    search: "Nutzer suchen",
+    searching: "Suche läuft …",
+    userFound: "Gefundener Nutzer",
     twitchId: (id) => `Twitch-ID ${id}`,
-    vollzustimmungSetzen: "Vollzustimmung setzen",
-    kanalFreigebenFrage: (name) => `Kanal für ${name} freigeben?`,
-    kanalFreigebenBeschreibung: (name, id, withConsent) => `${name} (${id}) wird ${withConsent} Vollzustimmung angelegt.`,
-    endgültigFreigeben: "Endgültig freigeben",
-    einladungslink: "Einladungslink",
-    einladungslinkHinweis: "Diesen Link bekommt der Streamer. Er startet die Twitch-Zustimmung für den gewählten Kanal.",
-    kanalAuswählen: "Wähle zuerst eine Kanalzeile.",
-    linkKopieren: "Link kopieren",
-    linkKopiert: "Link kopiert",
-    kanalBearbeiten: (name) => `Kanal bearbeiten: ${name}`,
-    zustimmungUmschalten: "Vollzustimmung",
-    mitglieder: "Mitglieder",
-    mitgliederLaden: "Mitglieder werden geladen …",
-    keineMitglieder: "Keine zusätzlichen Mitglieder freigegeben.",
-    mitgliedHinzufügen: "Mitglied hinzufügen",
-    rolle: "Rolle",
-    neueRolle: "Rolle für neue Mitgliedschaft",
-    hinzufügen: "Hinzufügen",
-    ändern: "Ändern",
-    entfernen: "Entfernen",
-    broadcasterEntfernenHinweis: "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.",
-    entfernenFrage: (name) => `Zugriff für ${name} wirklich entfernen?`,
-    endgültigEntfernen: "Endgültig entfernen",
+    setFullConsent: "Vollzustimmung setzen",
+    releaseChannelQuestion: (name) => `Kanal für ${name} freigeben?`,
+    releaseChannelDescription: (name, id, withConsent) => `${name} (${id}) wird ${withConsent} Vollzustimmung angelegt.`,
+    confirmRelease: "Endgültig freigeben",
+    invitationLink: "Einladungslink",
+    invitationLinkHint: "Diesen Link bekommt der Streamer. Er startet die Twitch-Zustimmung für den gewählten Kanal.",
+    selectChannel: "Wähle zuerst eine Kanalzeile.",
+    copyLink: "Link kopieren",
+    linkCopied: "Link kopiert",
+    editChannel: (name) => `Kanal bearbeiten: ${name}`,
+    toggleConsent: "Vollzustimmung",
+    members: "Mitglieder",
+    loadMembers: "Mitglieder werden geladen …",
+    noMembers: "Keine zusätzlichen Mitglieder freigegeben.",
+    addMember: "Mitglied hinzufügen",
+    role: "Rolle",
+    newRole: "Rolle für neue Mitgliedschaft",
+    add: "Hinzufügen",
+    change: "Ändern",
+    remove: "Entfernen",
+    removeBroadcasterHint: "Die Broadcaster-Rolle kann der Betreiber nicht entfernen.",
+    removeQuestion: (name) => `Zugriff für ${name} wirklich entfernen?`,
+    confirmRemove: "Endgültig entfernen",
     audit: "Betreiber-Audit",
-    auditLaden: "Audit wird geladen …",
-    auditLeer: "Noch keine Betreiberhandlungen protokolliert.",
-    zeitpunkt: "Zeitpunkt",
-    handlung: "Handlung",
-    akteur: "Akteur",
-    weitereLaden: "Weitere Audit-Einträge laden",
-    weitereWerdenGeladen: "Weitere Audit-Einträge werden geladen …",
-    betreiber: "Betreiber",
-    mitglied: "Mitglied",
-    handlungLabel: {
+    loadAudit: "Audit wird geladen …",
+    auditEmpty: "Noch keine Betreiberhandlungen protokolliert.",
+    timestamp: "Zeitpunkt",
+    action: "Handlung",
+    actor: "Akteur",
+    loadMore: "Weitere Audit-Einträge laden",
+    loadingMore: "Weitere Audit-Einträge werden geladen …",
+    platformAdmin: "Betreiber",
+    member: "Mitglied",
+    actionLabel: {
       "kanal.freigegeben": "Kanal freigegeben",
       "kanal.vollzustimmung_geaendert": "Vollzustimmung geändert",
       "mitglied.hinzugefuegt": "Mitglied hinzugefügt",
@@ -177,65 +177,65 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     },
   },
   en: {
-    titel: "Operator level",
-    untertitel: (count) => `Manage ${count} channels`,
+    title: "Operator level",
+    subtitle: (count) => `Manage ${count} channels`,
     navigation: "Operator",
-    kanalübersicht: "Channel overview",
+    channelOverview: "Channel overview",
     login: "Login",
-    kennung: "Identifier",
+    identifier: "Identifier",
     fullConsent: "Full consent",
     broadcaster: "Broadcaster",
-    verwalter: "Manager",
-    bediener: "Operator",
-    ja: "Yes",
-    nein: "No",
-    identität: "Broadcaster identity",
-    verbunden: "Connected",
-    zustimmungAusstehend: "Consent pending",
-    zustimmungAusstehendHinweis: "Full consent is set. The streamer must open the invitation link and confirm Twitch.",
-    laden: "Loading operator data …",
-    keineKanäle: "No channel has been released yet.",
-    fehler: "Operator data could not be loaded.",
-    kanalFreigeben: "Release channel",
+    manager: "Manager",
+    operator: "Operator",
+    yes: "Yes",
+    no: "No",
+    identity: "Broadcaster identity",
+    connected: "Connected",
+    consentPending: "Consent pending",
+    consentPendingHint: "Full consent is set. The streamer must open the invitation link and confirm Twitch.",
+    load: "Loading operator data …",
+    noChannels: "No channel has been released yet.",
+    error: "Operator data could not be loaded.",
+    releaseChannel: "Release channel",
     twitchLogin: "Twitch login",
-    suchen: "Find user",
-    sucheLäuft: "Searching …",
-    nutzerGefunden: "Found user",
+    search: "Find user",
+    searching: "Searching …",
+    userFound: "Found user",
     twitchId: (id) => `Twitch ID ${id}`,
-    vollzustimmungSetzen: "Set full consent",
-    kanalFreigebenFrage: (name) => `Release the channel for ${name}?`,
-    kanalFreigebenBeschreibung: (name, id, withConsent) => `${name} (${id}) will be created ${withConsent} full consent.`,
-    endgültigFreigeben: "Release permanently",
-    einladungslink: "Invitation link",
-    einladungslinkHinweis: "Give this link to the streamer. It starts Twitch consent for the selected channel.",
-    kanalAuswählen: "Select a channel row first.",
-    linkKopieren: "Copy link",
-    linkKopiert: "Link copied",
-    kanalBearbeiten: (name) => `Edit channel: ${name}`,
-    zustimmungUmschalten: "Full consent",
-    mitglieder: "Members",
-    mitgliederLaden: "Loading members …",
-    keineMitglieder: "No additional members have access.",
-    mitgliedHinzufügen: "Add member",
-    rolle: "Role",
-    neueRolle: "Role for new membership",
-    hinzufügen: "Add",
-    ändern: "Change",
-    entfernen: "Remove",
-    broadcasterEntfernenHinweis: "The operator cannot remove the broadcaster role.",
-    entfernenFrage: (name) => `Remove access for ${name}?`,
-    endgültigEntfernen: "Remove permanently",
+    setFullConsent: "Set full consent",
+    releaseChannelQuestion: (name) => `Release the channel for ${name}?`,
+    releaseChannelDescription: (name, id, withConsent) => `${name} (${id}) will be created ${withConsent} full consent.`,
+    confirmRelease: "Release permanently",
+    invitationLink: "Invitation link",
+    invitationLinkHint: "Give this link to the streamer. It starts Twitch consent for the selected channel.",
+    selectChannel: "Select a channel row first.",
+    copyLink: "Copy link",
+    linkCopied: "Link copied",
+    editChannel: (name) => `Edit channel: ${name}`,
+    toggleConsent: "Full consent",
+    members: "Members",
+    loadMembers: "Loading members …",
+    noMembers: "No additional members have access.",
+    addMember: "Add member",
+    role: "Role",
+    newRole: "Role for new membership",
+    add: "Add",
+    change: "Change",
+    remove: "Remove",
+    removeBroadcasterHint: "The operator cannot remove the broadcaster role.",
+    removeQuestion: (name) => `Remove access for ${name}?`,
+    confirmRemove: "Remove permanently",
     audit: "Operator audit",
-    auditLaden: "Loading audit …",
-    auditLeer: "No operator actions have been logged yet.",
-    zeitpunkt: "Time",
-    handlung: "Action",
-    akteur: "Actor",
-    weitereLaden: "Load more audit entries",
-    weitereWerdenGeladen: "Loading more audit entries …",
-    betreiber: "Operator",
-    mitglied: "Member",
-    handlungLabel: {
+    loadAudit: "Loading audit …",
+    auditEmpty: "No operator actions have been logged yet.",
+    timestamp: "Time",
+    action: "Action",
+    actor: "Actor",
+    loadMore: "Load more audit entries",
+    loadingMore: "Loading more audit entries …",
+    platformAdmin: "Operator",
+    member: "Member",
+    actionLabel: {
       "kanal.freigegeben": "Channel released",
       "kanal.vollzustimmung_geaendert": "Full consent changed",
       "mitglied.hinzugefuegt": "Member added",
@@ -252,7 +252,7 @@ export const platformActionLabel = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
   const texts = platformCatalog[language];
-  return Object.prototype.hasOwnProperty.call(texts.handlungLabel, handlung)
-    ? texts.handlungLabel[handlung as PlatformAction]
+  return Object.prototype.hasOwnProperty.call(texts.actionLabel, handlung)
+    ? texts.actionLabel[handlung as PlatformAction]
     : handlung;
 };

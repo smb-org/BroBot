@@ -117,7 +117,7 @@ export const processTextCommandMessage = async (
   }
 
   if (beanspruchung.befehl.kind === "list") {
-    const commands = (await repository.auflisten(event.channelId))
+    const commands = (await repository.list(event.channelId))
       .filter((command) => command.enabled)
       .sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0

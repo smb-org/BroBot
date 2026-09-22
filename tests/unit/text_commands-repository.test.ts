@@ -31,10 +31,10 @@ describe("Textbefehle-D1-Adapter", () => {
       channelId: "kanal-b", name: "hallo", text: "B", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
-    await expect(repository.auflisten("kanal-a")).resolves.toEqual([expect.objectContaining({
+    await expect(repository.list("kanal-a")).resolves.toEqual([expect.objectContaining({
       channelId: "kanal-a", name: "hallo", text: "A",
     })]);
-    await expect(repository.auflisten("kanal-b")).resolves.toEqual([expect.objectContaining({
+    await expect(repository.list("kanal-b")).resolves.toEqual([expect.objectContaining({
       channelId: "kanal-b", name: "hallo", text: "B",
     })]);
   });
@@ -89,13 +89,13 @@ describe("Textbefehle-D1-Adapter", () => {
     await expect(verweigert.anlegen({
       channelId: "kanal-a", name: "neu", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, foreignActor)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
-    await expect(verweigert.aendern({
+    await expect(verweigert.change({
       channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10, now: NOW,
     }, foreignActor)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
 
-    await expect(verweigert.loeschen("kanal-a", "hallo", foreignActor, NOW))
+    await expect(verweigert.delete("kanal-a", "hallo", foreignActor, NOW))
       .resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
-    await expect(verweigert.loeschen("kanal-a", "fehlt", ACTOR, NOW))
+    await expect(verweigert.delete("kanal-a", "fehlt", ACTOR, NOW))
       .resolves.toEqual({ ok: false, reason: "nicht_gefunden" });
   });
 
@@ -115,10 +115,10 @@ describe("Textbefehle-D1-Adapter", () => {
     }, ACTOR)).resolves.toEqual({ ok: true });
 
     await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
-    await expect(repository.aendern({
+    await expect(repository.change({
       channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
-    await expect(repository.loeschen("kanal-a", "hallo", ACTOR, NOW))
+    await expect(repository.delete("kanal-a", "hallo", ACTOR, NOW))
       .resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
   });
 
@@ -132,7 +132,7 @@ describe("Textbefehle-D1-Adapter", () => {
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
-    await expect(repository.aendern({
+    await expect(repository.change({
       channelId: "kanal-a",
       name: "hallo",
       neuerName: "hallo",
@@ -172,7 +172,7 @@ describe("Textbefehle-D1-Adapter", () => {
       authorizeModuleMutation,
       (entry, changedAt) => prepareModuleAudit(updateDb, ACTOR.userId, changedAt, entry),
     );
-    await expect(updateRepository.aendern({
+    await expect(updateRepository.change({
       channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Antwort", kind: "text",
       enabled: false, cooldownSeconds: 5, now: "2026-09-19T12:01:00.000Z", nurSchalter: true,
     }, ACTOR)).resolves.toEqual({ ok: false, reason: "konflikt" });
@@ -197,7 +197,7 @@ describe("Textbefehle-D1-Adapter", () => {
       authorizeModuleMutation,
       (entry, changedAt) => prepareModuleAudit(deleteDb, ACTOR.userId, changedAt, entry),
     );
-    await expect(deleteRepository.loeschen("kanal-a", "loeschen", ACTOR, "2026-09-19T12:01:00.000Z"))
+    await expect(deleteRepository.delete("kanal-a", "loeschen", ACTOR, "2026-09-19T12:01:00.000Z"))
       .resolves.toEqual({ ok: false, reason: "konflikt" });
     await expect(database.prepare("SELECT response_text, minimum_level FROM text_commands WHERE command_name = 'loeschen'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "vip" });
@@ -220,7 +220,7 @@ describe("Textbefehle-D1-Adapter", () => {
       authorizeModuleMutation,
       (entry, changedAt) => prepareModuleAudit(chatDb, ACTOR.userId, changedAt, entry),
     );
-    await expect(chatRepository.aendern({
+    await expect(chatRepository.change({
       channelId: "kanal-a", name: "chat", neuerName: "chat", text: "Antwort", kind: "text",
       enabled: false, cooldownSeconds: 5, now: "2026-09-19T12:01:00.000Z", nurSchalter: true,
     }, ACTOR)).resolves.toEqual({ ok: true });
@@ -243,7 +243,7 @@ describe("Textbefehle-D1-Adapter", () => {
     await expect(repository.anlegen({
       channelId: "kanal-a", name: "liste", text: "", kind: "list", cooldownSeconds: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
-    await expect(repository.auflisten("kanal-a")).resolves.toEqual([expect.objectContaining({
+    await expect(repository.list("kanal-a")).resolves.toEqual([expect.objectContaining({
       name: "liste", kind: "list", text: "", enabled: true,
     })]);
     expect(() => database.sqlite.prepare(

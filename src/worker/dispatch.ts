@@ -179,7 +179,7 @@ export const dispatchEventSubNotification = async (
       HOST_MODULE_ID,
       event.triggerId,
       null,
-      [{ code: "host.modul.unbekannt", detail: { modulId: moduleId } }],
+      [{ code: "host.modul.unbekannt", detail: { moduleId: moduleId } }],
       event.receivedAt,
     ));
   }

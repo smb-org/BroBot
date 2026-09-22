@@ -76,8 +76,8 @@ describe("Werbung-Panel-Ansicht", () => {
             snoozeCount: 0,
             snoozeRefreshAt: "2026-09-21T12:30:00Z",
           },
-          snoozeScopeVorhanden: false,
-          letzteWerbepausen: [],
+          snoozeScopeAvailable: false,
+          recentAdBreaks: [],
         }));
       }
       return Promise.resolve(jsonResponse({ settings: {
@@ -109,8 +109,8 @@ describe("Werbung-Panel-Ansicht", () => {
             snoozeCount: null,
             snoozeRefreshAt: null,
           },
-          snoozeScopeVorhanden: true,
-          letzteWerbepausen: [{ zeitpunkt: "2026-09-21T11:00:00Z", dauerSekunden: 90 }],
+          snoozeScopeAvailable: true,
+          recentAdBreaks: [{ timestamp: "2026-09-21T11:00:00Z", durationSeconds: 90 }],
         }));
       }
       return Promise.resolve(jsonResponse({ settings: {
@@ -137,7 +137,7 @@ describe("Werbung-Panel-Ansicht", () => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (path.endsWith("/zeitplan")) return Promise.resolve(jsonResponse({
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
-        snoozeScopeVorhanden: true, letzteWerbepausen: [],
+        snoozeScopeAvailable: true, recentAdBreaks: [],
       }));
       if (path.endsWith("/settings") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
         automatic: "auto {duration}", manual: "manuell {duration}", prewarning: true, leadSeconds: 60, prewarningText: "gleich {seconds}",

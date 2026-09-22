@@ -28,7 +28,7 @@ import { useInspectorSelection } from "./inspector-selection";
 import { NavigationIcon, StateRow, type StateTone } from "./module-panels";
 
 interface PlatformPageProperties {
-  beiAnmeldungErforderlich: () => void;
+  onAuthenticationRequired: () => void;
 }
 
 interface LoadState<T> {
@@ -62,36 +62,36 @@ const connectionTone = (channel: PanelPlatformChannelOverview): StateTone =>
 
 const connectionWord = (channel: PanelPlatformChannelOverview): string => {
   const texts = platformTexts();
-  return channel.broadcasterConnected ? texts.verbunden : channel.fullConsent ? texts.zustimmungAusstehend : texts.nein;
+  return channel.broadcasterConnected ? texts.connected : channel.fullConsent ? texts.consentPending : texts.no;
 };
 
 const MembersTable = ({
-  mitglieder: members,
+  members: members,
   angefragteEntfernung,
-  aufRolleÄndern: onRoleChange,
-  aufEntfernen: onRemove,
-  aufEntfernungBestätigen: onConfirmRemoval,
-  aufEntfernungAbbrechen: onCancelRemoval,
-  bestätigungsButton: confirmationButton,
+  onRoleChange: onRoleChange,
+  onRemove: onRemove,
+  onConfirmRemoval: onConfirmRemoval,
+  onCancelRemoval: onCancelRemoval,
+  confirmButton: confirmationButton,
 }: {
-  mitglieder: PanelMember[];
+  members: PanelMember[];
   angefragteEntfernung: string | null;
-  aufRolleÄndern: (member: PanelMember, rolle: "manager" | "operator") => void;
-  aufEntfernen: (member: PanelMember) => void;
-  aufEntfernungBestätigen: (member: PanelMember) => void;
-  aufEntfernungAbbrechen: () => void;
-  bestätigungsButton: RefObject<HTMLButtonElement | null>;
+  onRoleChange: (member: PanelMember, rolle: "manager" | "operator") => void;
+  onRemove: (member: PanelMember) => void;
+  onConfirmRemoval: (member: PanelMember) => void;
+  onCancelRemoval: () => void;
+  confirmButton: RefObject<HTMLButtonElement | null>;
 }): ReactElement => {
   const texts = platformTexts();
-  if (members.length === 0) return <p className="muted">{texts.keineMitglieder}</p>;
+  if (members.length === 0) return <p className="muted">{texts.noMembers}</p>;
   return (
     <div className="tabelle-wrap">
       <table className="tabelle">
         <thead>
           <tr>
             <th scope="col">{texts.login}</th>
-            <th scope="col">{texts.rolle}</th>
-            <th scope="col" className="tabelle__aktion">{texts.entfernen}</th>
+            <th scope="col">{texts.role}</th>
+            <th scope="col" className="tabelle__aktion">{texts.remove}</th>
           </tr>
         </thead>
         <tbody>
@@ -107,7 +107,7 @@ const MembersTable = ({
                 <td>
                   {member.role === "broadcaster" ? <span>{roleLabel(member.role)}</span> : (
                     <select
-                      aria-label={texts.rolle + ": " + memberName(member)}
+                      aria-label={texts.role + ": " + memberName(member)}
                       value={member.role}
                       onChange={(event) => { onRoleChange(member, event.target.value as "manager" | "operator"); }}
                     >
@@ -122,16 +122,16 @@ const MembersTable = ({
                         className="button button--danger"
                         type="button"
                         disabled
-                        title={texts.broadcasterEntfernenHinweis}
+                        title={texts.removeBroadcasterHint}
                         aria-describedby={"betreiber-entfernen-hinweis-" + member.userId}
                       >
-                        {texts.entfernen}
+                        {texts.remove}
                       </button>
-                      <span id={"betreiber-entfernen-hinweis-" + member.userId} className="sr-only">{texts.broadcasterEntfernenHinweis}</span>
+                      <span id={"betreiber-entfernen-hinweis-" + member.userId} className="sr-only">{texts.removeBroadcasterHint}</span>
                     </>
                   ) : (
                     <button className="button button--danger" type="button" onClick={() => { onRemove(member); }}>
-                      {texts.entfernen}
+                      {texts.remove}
                     </button>
                   )}
                 </td>
@@ -139,12 +139,12 @@ const MembersTable = ({
               {angefragteEntfernung === member.userId ? (
                 <tr>
                   <td colSpan={3}>
-                    <div className="inspector-confirmation" role="alertdialog" aria-label={texts.entfernenFrage(memberName(member))}>
-                      <h3>{texts.entfernenFrage(memberName(member))}</h3>
-                      <p>{texts.entfernenFrage(memberName(member))}</p>
+                    <div className="inspector-confirmation" role="alertdialog" aria-label={texts.removeQuestion(memberName(member))}>
+                      <h3>{texts.removeQuestion(memberName(member))}</h3>
+                      <p>{texts.removeQuestion(memberName(member))}</p>
                       <div className="form-actions form-actions--destructive">
                         <button ref={confirmationButton} className="button button--danger" type="button" onClick={() => { onConfirmRemoval(member); }}>
-                          {texts.endgültigEntfernen}
+                          {texts.confirmRemove}
                         </button>
                         <button className="button button--quiet" type="button" onClick={onCancelRemoval}>
                           {dashboardCommonTexts().abbrechen}
@@ -163,14 +163,14 @@ const MembersTable = ({
 };
 
 const ChannelInspector = ({
-  kanal: channel,
-  beiAnmeldungErforderlich: onAuthenticationRequired,
-  aufÜbersichtLaden: onReload,
+  channel: channel,
+  onAuthenticationRequired: onAuthenticationRequired,
+  onReloadOverview: onReload,
   onClose,
 }: {
-  kanal: PanelPlatformChannelOverview;
-  beiAnmeldungErforderlich: () => void;
-  aufÜbersichtLaden: () => Promise<void>;
+  channel: PanelPlatformChannelOverview;
+  onAuthenticationRequired: () => void;
+  onReloadOverview: () => Promise<void>;
   onClose: () => void;
 }): ReactElement => {
   const texts = platformTexts();
@@ -192,7 +192,7 @@ const ChannelInspector = ({
       setMembers(loadedState(await getPlatformMembers(channel.channelId)));
     } catch (error: unknown) {
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-      if (!istAbbruch(error)) setMembers({ status: "error", data: null, error: errorText(error, texts.fehler) });
+      if (!istAbbruch(error)) setMembers({ status: "error", data: null, error: errorText(error, texts.error) });
     }
   };
 
@@ -204,14 +204,14 @@ const ChannelInspector = ({
         if (!abgebrochen) setMembers(loadedState(daten));
       } catch (error: unknown) {
         if (!abgebrochen && !istAbbruch(error)) {
-          setMembers({ status: "error", data: null, error: errorText(error, texts.fehler) });
+          setMembers({ status: "error", data: null, error: errorText(error, texts.error) });
           if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
         }
       }
     };
     void load();
     return () => { abgebrochen = true; };
-  }, [channel.channelId, onAuthenticationRequired, texts.fehler]);
+  }, [channel.channelId, onAuthenticationRequired, texts.error]);
 
   useEffect(() => {
     if (angefragteEntfernung !== null) confirmationButton.current?.focus();
@@ -224,7 +224,7 @@ const ChannelInspector = ({
       await setPlatformFullConsent(channel.channelId, !channel.fullConsent);
       await onReload();
     } catch (error: unknown) {
-      setActionError(errorText(error, texts.fehler));
+      setActionError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setConsentInProgress(false);
@@ -239,7 +239,7 @@ const ChannelInspector = ({
     try {
       setFoundMember((await searchPlatformUser(suchLogin)).user);
     } catch (error: unknown) {
-      setSearchError(errorText(error, texts.fehler));
+      setSearchError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setSearchInProgress(false);
@@ -256,7 +256,7 @@ const ChannelInspector = ({
       setSuchLogin("");
       await loadMembers();
     } catch (error: unknown) {
-      setActionError(errorText(error, texts.fehler));
+      setActionError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setBusyUserId(null);
@@ -270,7 +270,7 @@ const ChannelInspector = ({
       await changePlatformMember(channel.channelId, member.userId, rolle);
       await loadMembers();
     } catch (error: unknown) {
-      setActionError(errorText(error, texts.fehler));
+      setActionError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setBusyUserId(null);
@@ -285,7 +285,7 @@ const ChannelInspector = ({
       setAngefragteEntfernung(null);
       await loadMembers();
     } catch (error: unknown) {
-      setActionError(errorText(error, texts.fehler));
+      setActionError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setBusyUserId(null);
@@ -293,47 +293,47 @@ const ChannelInspector = ({
   };
 
   return (
-    <SubInspector ariaLabel={texts.kanalBearbeiten(channel.displayName)} title={texts.kanalBearbeiten(channel.displayName)} identifier={channel.channelId} closeLabel={dashboardCommonTexts().schliessen} onClose={onClose}>
+    <SubInspector ariaLabel={texts.editChannel(channel.displayName)} title={texts.editChannel(channel.displayName)} identifier={channel.channelId} closeLabel={dashboardCommonTexts().schliessen} onClose={onClose}>
       <StateRow
-        label={texts.identität}
+        label={texts.identity}
         tone={connectionTone(channel)}
         wort={connectionWord(channel)}
-        detail={!channel.broadcasterConnected && channel.fullConsent ? texts.zustimmungAusstehendHinweis : channel.login}
+        detail={!channel.broadcasterConnected && channel.fullConsent ? texts.consentPendingHint : channel.login}
       />
-      <section className="config-section" aria-label={texts.zustimmungUmschalten}>
-        <div className="section-heading"><h3>{texts.zustimmungUmschalten}</h3></div>
+      <section className="config-section" aria-label={texts.toggleConsent}>
+        <div className="section-heading"><h3>{texts.toggleConsent}</h3></div>
         <div className="form-actions">
           <button className="switch" type="button" role="switch" aria-checked={channel.fullConsent} aria-label={texts.fullConsent} aria-busy={consentInProgress} disabled={consentInProgress} onClick={() => { void toggleConsent(); }}>
             <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
           </button>
-          <span className="muted">{channel.fullConsent ? texts.ja : texts.nein}</span>
+          <span className="muted">{channel.fullConsent ? texts.yes : texts.no}</span>
         </div>
       </section>
-      <Einladungslink kanal={channel} />
-      <section className="config-section" aria-label={texts.mitglieder}>
-        <div className="section-heading"><h3>{texts.mitglieder}</h3></div>
-        {members.status === "loading" && members.data === null ? <p className="loading-line">{texts.mitgliederLaden}</p> : null}
+      <Einladungslink channel={channel} />
+      <section className="config-section" aria-label={texts.members}>
+        <div className="section-heading"><h3>{texts.members}</h3></div>
+        {members.status === "loading" && members.data === null ? <p className="loading-line">{texts.loadMembers}</p> : null}
         {members.error === null ? null : <p className="form-error" role="alert">{members.error}</p>}
         {members.data === null ? null : (
           <MembersTable
-            mitglieder={members.data.members}
+            members={members.data.members}
             angefragteEntfernung={angefragteEntfernung}
-            bestätigungsButton={confirmationButton}
-            aufRolleÄndern={(member, rolle) => { void changeRole(member, rolle); }}
-            aufEntfernen={(member) => { setAngefragteEntfernung(member.userId); }}
-            aufEntfernungBestätigen={(member) => { void removeMember(member); }}
-            aufEntfernungAbbrechen={() => { setAngefragteEntfernung(null); }}
+            confirmButton={confirmationButton}
+            onRoleChange={(member, rolle) => { void changeRole(member, rolle); }}
+            onRemove={(member) => { setAngefragteEntfernung(member.userId); }}
+            onConfirmRemoval={(member) => { void removeMember(member); }}
+            onCancelRemoval={() => { setAngefragteEntfernung(null); }}
           />
         )}
       </section>
-      <section className="config-section" aria-label={texts.mitgliedHinzufügen}>
-        <div className="section-heading"><h3>{texts.mitgliedHinzufügen}</h3></div>
+      <section className="config-section" aria-label={texts.addMember}>
+        <div className="section-heading"><h3>{texts.addMember}</h3></div>
         <form className="inspector-form" onSubmit={(event) => { void searchUser(event); }}>
           <label className="config-field config-field--mittel" htmlFor={"betreiber-mitglied-suche-" + channel.channelId}>{texts.twitchLogin}
             <input id={"betreiber-mitglied-suche-" + channel.channelId} value={suchLogin} onChange={(event) => { setSuchLogin(event.target.value); }} autoComplete="off" />
           </label>
           <div className="form-actions">
-            <button className="button" type="submit" disabled={searchInProgress || suchLogin.trim().length === 0}>{searchInProgress ? texts.sucheLäuft : texts.suchen}</button>
+            <button className="button" type="submit" disabled={searchInProgress || suchLogin.trim().length === 0}>{searchInProgress ? texts.searching : texts.search}</button>
           </div>
         </form>
         {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
@@ -343,12 +343,12 @@ const ChannelInspector = ({
               <strong>{userName(foundMember)}</strong>
               <span>@{foundMember.login} · {texts.twitchId(foundMember.userId)}</span>
             </div>
-            <label className="config-field config-field--mittel">{texts.rolle}
-              <select aria-label={texts.neueRolle} value={neueRolle} onChange={(event) => { setNeueRolle(event.target.value as "manager" | "operator"); }}>
+            <label className="config-field config-field--mittel">{texts.role}
+              <select aria-label={texts.newRole} value={neueRolle} onChange={(event) => { setNeueRolle(event.target.value as "manager" | "operator"); }}>
                 {rollenOptionen()}
               </select>
             </label>
-            <button className="button button--primary" type="button" disabled={busyUserId === foundMember.userId} onClick={() => { void addMember(); }}>{texts.hinzufügen}</button>
+            <button className="button button--primary" type="button" disabled={busyUserId === foundMember.userId} onClick={() => { void addMember(); }}>{texts.add}</button>
           </div>
         )}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
@@ -358,12 +358,12 @@ const ChannelInspector = ({
 };
 
 const ChannelRelease = ({
-  aufÜbersichtLaden: onReload,
-  beiAnmeldungErforderlich: onAuthenticationRequired,
+  onReloadOverview: onReload,
+  onAuthenticationRequired: onAuthenticationRequired,
   onClose,
 }: {
-  aufÜbersichtLaden: () => Promise<void>;
-  beiAnmeldungErforderlich: () => void;
+  onReloadOverview: () => Promise<void>;
+  onAuthenticationRequired: () => void;
   onClose: () => void;
 }): ReactElement => {
   const texts = platformTexts();
@@ -390,7 +390,7 @@ const ChannelRelease = ({
     try {
       setFound((await searchPlatformUser(login)).user);
     } catch (error: unknown) {
-      setSearchError(errorText(error, texts.fehler));
+      setSearchError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setSearchInProgress(false);
@@ -408,7 +408,7 @@ const ChannelRelease = ({
       setConfirmation(false);
       await onReload();
     } catch (error: unknown) {
-      setActionError(errorText(error, texts.fehler));
+      setActionError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setReleaseInProgress(false);
@@ -416,35 +416,35 @@ const ChannelRelease = ({
   };
 
   return (
-    <SubInspector ariaLabel={texts.kanalFreigeben} title={texts.kanalFreigeben} closeLabel={dashboardCommonTexts().schliessen} onClose={onClose}>
+    <SubInspector ariaLabel={texts.releaseChannel} title={texts.releaseChannel} closeLabel={dashboardCommonTexts().schliessen} onClose={onClose}>
       <form className="inspector-form" onSubmit={(event) => { void searchUser(event); }}>
         <label className="config-field config-field--mittel" htmlFor="betreiber-kanal-login">{texts.twitchLogin}
           <input id="betreiber-kanal-login" value={login} onChange={(event) => { setLogin(event.target.value); }} autoComplete="off" />
         </label>
         <div className="form-actions">
-          <button className="button" type="submit" disabled={searchInProgress || login.trim().length === 0}>{searchInProgress ? texts.sucheLäuft : texts.suchen}</button>
+          <button className="button" type="submit" disabled={searchInProgress || login.trim().length === 0}>{searchInProgress ? texts.searching : texts.search}</button>
         </div>
       </form>
       {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
       {found === null ? null : (
         <div className="inspector-result">
           <div>
-            <strong>{texts.nutzerGefunden}: {found.displayName}</strong>
+            <strong>{texts.userFound}: {found.displayName}</strong>
             <span>@{found.login} · {texts.twitchId(found.userId)}</span>
           </div>
           <label className="config-field config-field--mittel">
-            <span>{texts.vollzustimmungSetzen}</span>
+            <span>{texts.setFullConsent}</span>
             <input type="checkbox" checked={fullConsent} onChange={(event) => { setFullConsent(event.target.checked); }} />
           </label>
-          <button className="button" type="button" onClick={() => { setActionError(null); setConfirmation(true); }}>{texts.kanalFreigeben}</button>
+          <button className="button" type="button" onClick={() => { setActionError(null); setConfirmation(true); }}>{texts.releaseChannel}</button>
         </div>
       )}
       {confirmation && found !== null ? (
-        <div className="inspector-confirmation" role="alertdialog" aria-label={texts.kanalFreigebenFrage(found.displayName)}>
-          <h3>{texts.kanalFreigebenFrage(found.displayName)}</h3>
-          <p>{texts.kanalFreigebenBeschreibung(found.displayName, found.userId, fullConsent ? texts.ja : texts.nein)}</p>
+        <div className="inspector-confirmation" role="alertdialog" aria-label={texts.releaseChannelQuestion(found.displayName)}>
+          <h3>{texts.releaseChannelQuestion(found.displayName)}</h3>
+          <p>{texts.releaseChannelDescription(found.displayName, found.userId, fullConsent ? texts.yes : texts.no)}</p>
           <div className="form-actions">
-            <button ref={confirmationButton} className="button button--primary" type="button" disabled={releaseInProgress} onClick={() => { void releaseChannel(); }}>{texts.endgültigFreigeben}</button>
+            <button ref={confirmationButton} className="button button--primary" type="button" disabled={releaseInProgress} onClick={() => { void releaseChannel(); }}>{texts.confirmRelease}</button>
             <button className="button button--quiet" type="button" disabled={releaseInProgress} onClick={() => { setConfirmation(false); }}>{dashboardCommonTexts().abbrechen}</button>
           </div>
         </div>
@@ -454,7 +454,7 @@ const ChannelRelease = ({
   );
 };
 
-const Einladungslink = ({ kanal: channel }: { kanal: PanelPlatformChannelOverview }): ReactElement => {
+const Einladungslink = ({ channel: channel }: { channel: PanelPlatformChannelOverview }): ReactElement => {
   const texts = platformTexts();
   const [status, setStatus] = useState<string | null>(null);
   const link = window.location.origin + "/auth/login?channel=" + encodeURIComponent(channel.login);
@@ -463,62 +463,62 @@ const Einladungslink = ({ kanal: channel }: { kanal: PanelPlatformChannelOvervie
     const zwischenablage = Reflect.get(navigator, "clipboard") as { writeText: (text: string) => Promise<void> } | undefined;
     if (zwischenablage === undefined) return;
     await zwischenablage.writeText(link);
-    setStatus(texts.linkKopiert);
+    setStatus(texts.linkCopied);
   };
 
   return (
-    <section className="config-section" aria-label={texts.einladungslink}>
-      <div className="section-heading"><h2>{texts.einladungslink}</h2></div>
-      <p className="muted">{texts.einladungslinkHinweis}</p>
-      <label className="config-field config-field--breit" htmlFor="betreiber-einladungslink">{texts.einladungslink}
+    <section className="config-section" aria-label={texts.invitationLink}>
+      <div className="section-heading"><h2>{texts.invitationLink}</h2></div>
+      <p className="muted">{texts.invitationLinkHint}</p>
+      <label className="config-field config-field--breit" htmlFor="betreiber-einladungslink">{texts.invitationLink}
         <input id="betreiber-einladungslink" readOnly value={link} />
       </label>
       <div className="form-actions">
-        <button className="button" type="button" onClick={() => { void kopieren(); }}>{texts.linkKopieren}</button>
+        <button className="button" type="button" onClick={() => { void kopieren(); }}>{texts.copyLink}</button>
         {status === null ? null : <span className="muted">{status}</span>}
       </div>
-      {!channel.broadcasterConnected && channel.fullConsent ? <StateRow label={texts.identität} tone="warning" wort={texts.zustimmungAusstehend} detail={texts.zustimmungAusstehendHinweis} /> : null}
+      {!channel.broadcasterConnected && channel.fullConsent ? <StateRow label={texts.identity} tone="warning" wort={texts.consentPending} detail={texts.consentPendingHint} /> : null}
     </section>
   );
 };
 
 const PlatformAudit = ({
-  auditZustand: auditState,
-  kanäle: channels,
-  aufWeitereLaden: onLoadMore,
-  weitereLädt: loadingMore,
+  auditState: auditState,
+  channels: channels,
+  onLoadMore: onLoadMore,
+  loadingMore: loadingMore,
 }: {
-  auditZustand: LoadState<PanelPlatformAuditResponse>;
-  kanäle: PanelPlatformChannelOverview[];
-  aufWeitereLaden: () => void;
-  weitereLädt: boolean;
+  auditState: LoadState<PanelPlatformAuditResponse>;
+  channels: PanelPlatformChannelOverview[];
+  onLoadMore: () => void;
+  loadingMore: boolean;
 }): ReactElement => {
   const texts = platformTexts();
   const channelNames = useMemo(() => new Map(channels.map((channel) => [channel.channelId, channel.login])), [channels]);
   const actorName = (entry: PanelPlatformAuditEntry): string =>
     entry.actorDisplayName ?? (entry.actorLogin == null ? entry.actorUserId : `@${entry.actorLogin}`);
   const actor = (entry: PanelPlatformAuditEntry): string =>
-    (entry.actorKind === "platform_admin" ? texts.betreiber : texts.mitglied) + " · " + actorName(entry);
+    (entry.actorKind === "platform_admin" ? texts.platformAdmin : texts.member) + " · " + actorName(entry);
   return (
     <section className="config-section" aria-label={texts.audit}>
       <div className="section-heading"><h2>{texts.audit}</h2></div>
-      {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.auditLaden}</p> : null}
+      {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.loadAudit}</p> : null}
       {auditState.error === null ? null : <p className="form-error" role="alert">{auditState.error}</p>}
-      {auditState.data?.entries.length === 0 ? <p className="muted">{texts.auditLeer}</p> : null}
+      {auditState.data?.entries.length === 0 ? <p className="muted">{texts.auditEmpty}</p> : null}
       {auditState.data === null ? null : auditState.data.entries.length === 0 ? null : (
         <div className="tabelle-wrap">
           <table className="tabelle">
-            <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.handlung}</th><th scope="col">{texts.akteur}</th><th scope="col">{texts.zeitpunkt}</th></tr></thead>
+            <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.action}</th><th scope="col">{texts.actor}</th><th scope="col">{texts.timestamp}</th></tr></thead>
             <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId}><th scope="row">{channelNames.get(entry.channelId) ?? <span className="mono">{entry.channelId}</span>}</th><td>{platformActionLabel(entry.action)}</td><td className="mono">{actor(entry)}</td><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td></tr>)}</tbody>
           </table>
         </div>
       )}
-      {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? texts.weitereWerdenGeladen : texts.weitereLaden}</button>}
+      {auditState.data?.nextCursor === null || auditState.data?.nextCursor === undefined ? null : <button className="button button--secondary" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? texts.loadingMore : texts.loadMore}</button>}
     </section>
   );
 };
 
-export const PlatformPage = ({ beiAnmeldungErforderlich: onAuthenticationRequired }: PlatformPageProperties): ReactElement => {
+export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequired }: PlatformPageProperties): ReactElement => {
   const texts = platformTexts();
   const [overview, setOverview] = useState<LoadState<PanelPlatformChannelOverview[]>>(() => emptyLoadState());
   const [audit, setAudit] = useState<LoadState<PanelPlatformAuditResponse>>(() => emptyLoadState());
@@ -545,7 +545,7 @@ export const PlatformPage = ({ beiAnmeldungErforderlich: onAuthenticationRequire
       setOverview(loadedState(response.channels));
       if (selectedChannelId !== null && !response.channels.some((channel) => channel.channelId === selectedChannelId)) closeChannel();
     } catch (error: unknown) {
-      setOverview({ status: "error", data: null, error: errorText(error, texts.fehler) });
+      setOverview({ status: "error", data: null, error: errorText(error, texts.error) });
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     }
   };
@@ -563,7 +563,7 @@ export const PlatformPage = ({ beiAnmeldungErforderlich: onAuthenticationRequire
         setAudit(loadedState(auditResponse));
       } catch (error: unknown) {
         if (abgebrochen) return;
-        const meldung = errorText(error, texts.fehler);
+        const meldung = errorText(error, texts.error);
         setOverview({ status: "error", data: null, error: meldung });
         setAudit({ status: "error", data: null, error: meldung });
         if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
@@ -571,7 +571,7 @@ export const PlatformPage = ({ beiAnmeldungErforderlich: onAuthenticationRequire
     };
     void load();
     return () => { abgebrochen = true; };
-  }, [onAuthenticationRequired, closeChannel, texts.fehler]);
+  }, [onAuthenticationRequired, closeChannel, texts.error]);
 
   const selectedChannel = overview.data?.find((channel) => channel.channelId === selectedChannelId) ?? null;
 
@@ -582,7 +582,7 @@ export const PlatformPage = ({ beiAnmeldungErforderlich: onAuthenticationRequire
       const nextPage = await getPlatformAudit(audit.data.nextCursor);
       setAudit((aktuell) => aktuell.data === null ? aktuell : loadedState({ entries: aktuell.data.entries.concat(nextPage.entries), nextCursor: nextPage.nextCursor }));
     } catch (error: unknown) {
-      setAudit((aktuell) => ({ ...aktuell, status: "error", error: errorText(error, texts.fehler) }));
+      setAudit((aktuell) => ({ ...aktuell, status: "error", error: errorText(error, texts.error) }));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setAuditLoadingMore(false);
@@ -590,31 +590,31 @@ export const PlatformPage = ({ beiAnmeldungErforderlich: onAuthenticationRequire
   };
 
   return (
-    <section className="module-stack" aria-label={texts.titel}>
+    <section className="module-stack" aria-label={texts.title}>
       <header className="module-detail-heading">
         <div className="module-detail-heading__icon" aria-hidden="true"><NavigationIcon kind="members" className="module-heading-glyph" /></div>
-        <div className="module-detail-heading__copy"><h1>{texts.titel}</h1><p>{texts.untertitel(formatZahl(overview.data?.length ?? 0))}</p></div>
+        <div className="module-detail-heading__copy"><h1>{texts.title}</h1><p>{texts.subtitle(formatZahl(overview.data?.length ?? 0))}</p></div>
       </header>
-      <section className={`config-section inspektor-bereich${selectedChannel === null && !channelReleaseOpen ? "" : " inspektor-bereich--offen"}`} aria-label={texts.kanalübersicht}>
+      <section className={`config-section inspektor-bereich${selectedChannel === null && !channelReleaseOpen ? "" : " inspektor-bereich--offen"}`} aria-label={texts.channelOverview}>
         <div className="inspektor-bereich__liste">
-          <InspectorHeading level="h2" title={texts.kanalübersicht} buttonRef={channelReleaseButton} action={{ kind: "add", label: texts.kanalFreigeben, onClick: openChannelRelease }} />
-          {overview.status === "loading" && overview.data === null ? <p className="loading-line">{texts.laden}</p> : null}
+          <InspectorHeading level="h2" title={texts.channelOverview} buttonRef={channelReleaseButton} action={{ kind: "add", label: texts.releaseChannel, onClick: openChannelRelease }} />
+          {overview.status === "loading" && overview.data === null ? <p className="loading-line">{texts.load}</p> : null}
           {overview.error === null ? null : <p className="form-error" role="alert">{overview.error}</p>}
-          {overview.data?.length === 0 ? <p className="muted">{texts.keineKanäle}</p> : null}
+          {overview.data?.length === 0 ? <p className="muted">{texts.noChannels}</p> : null}
           {overview.data === null ? null : overview.data.length === 0 ? null : (
             <div className="tabelle-wrap">
               <table className="tabelle tabelle--inhalt">
-                <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.kennung}</th><th scope="col">{texts.fullConsent}</th><th scope="col">{texts.broadcaster}</th><th scope="col">{texts.verwalter}</th><th scope="col">{texts.bediener}</th><th scope="col">{texts.identität}</th></tr></thead>
-                <tbody>{overview.data.map((channel) => <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}><th scope="row">{channel.login}</th><td className="mono">{channel.channelId}</td><td>{channel.fullConsent ? texts.ja : texts.nein}</td><td className="zahl">{formatZahl(channel.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(channel.memberCounts.manager)}</td><td className="zahl">{formatZahl(channel.memberCounts.operator)}</td><td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel)}</span></span></td></tr>)}</tbody>
+                <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.identifier}</th><th scope="col">{texts.fullConsent}</th><th scope="col">{texts.broadcaster}</th><th scope="col">{texts.manager}</th><th scope="col">{texts.operator}</th><th scope="col">{texts.identity}</th></tr></thead>
+                <tbody>{overview.data.map((channel) => <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}><th scope="row">{channel.login}</th><td className="mono">{channel.channelId}</td><td>{channel.fullConsent ? texts.yes : texts.no}</td><td className="zahl">{formatZahl(channel.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(channel.memberCounts.manager)}</td><td className="zahl">{formatZahl(channel.memberCounts.operator)}</td><td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel)}</span></span></td></tr>)}</tbody>
               </table>
             </div>
           )}
         </div>
         {selectedChannel === null
-          ? channelReleaseOpen ? <ChannelRelease aufÜbersichtLaden={loadOverview} beiAnmeldungErforderlich={onAuthenticationRequired} onClose={closeChannelRelease} /> : null
-          : <ChannelInspector key={selectedChannel.channelId} kanal={selectedChannel} beiAnmeldungErforderlich={onAuthenticationRequired} aufÜbersichtLaden={loadOverview} onClose={closeChannel} />}
+          ? channelReleaseOpen ? <ChannelRelease onReloadOverview={loadOverview} onAuthenticationRequired={onAuthenticationRequired} onClose={closeChannelRelease} /> : null
+          : <ChannelInspector key={selectedChannel.channelId} channel={selectedChannel} onAuthenticationRequired={onAuthenticationRequired} onReloadOverview={loadOverview} onClose={closeChannel} />}
       </section>
-      <PlatformAudit auditZustand={audit} kanäle={overview.data ?? []} aufWeitereLaden={() => { void ladeWeitereAudit(); }} weitereLädt={auditLoadingMore} />
+      <PlatformAudit auditState={audit} channels={overview.data ?? []} onLoadMore={() => { void ladeWeitereAudit(); }} loadingMore={auditLoadingMore} />
     </section>
   );
 };

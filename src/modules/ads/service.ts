@@ -8,16 +8,16 @@ const diagnoseDetail = (
   if (event.kind === "skip") {
     return {
       reason: event.reason,
-      duration: event.dauerSekunden,
+      duration: event.durationSeconds,
       automatic: event.automatic,
     };
   }
   return {
-    duration: event.event.dauerSekunden,
+    duration: event.event.durationSeconds,
     automatic: event.event.automatic,
-    gestartet: event.event.gestartetAm,
-    endsAt: event.event.endetAm,
-    ausloeser: event.event.ausloeserLogin,
+    gestartet: event.event.startedAt,
+    endsAt: event.event.endsAt,
+    ausloeser: event.event.triggerLogin,
   };
 };
 
@@ -44,7 +44,7 @@ export const processAdBreak = (
 
   const vorlage = entscheidung.event.automatic ? event.settings.automatic : event.settings.manual;
   return {
-    actions: [{ kind: "chat", text: textMitDauer(vorlage, entscheidung.event.dauerSekunden) }],
+    actions: [{ kind: "chat", text: textMitDauer(vorlage, entscheidung.event.durationSeconds) }],
     diagnostics: [{ code: diagnosticCode(entscheidung), detail: diagnoseDetail(entscheidung) }],
   };
 };

@@ -79,7 +79,7 @@ export const createTextCommandRepository = (
   authorizeMutation: AuthorizeModuleMutation,
   prepareModuleAudit?: PrepareModuleAudit,
 ): TextCommandRepository => ({
-  async auflisten(channelId: string): Promise<TextCommand[]> {
+  async list(channelId: string): Promise<TextCommand[]> {
     const result = await db.prepare(
       `SELECT channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
               last_used_at, created_at, updated_at
@@ -137,7 +137,7 @@ export const createTextCommandRepository = (
     return fehlgeschlagen(await this.finden(input.channelId, input.name) === null ? "nicht_berechtigt" : "existiert");
   },
 
-  async aendern(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult> {
+  async change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult> {
     const before = await this.finden(input.channelId, input.name);
     if (before === null) return fehlgeschlagen("nicht_gefunden");
     if (input.nurSchalter !== true && input.neuerName !== input.name && await this.finden(input.channelId, input.neuerName) !== null) {
@@ -224,7 +224,7 @@ export const createTextCommandRepository = (
     return fehlgeschlagen(sameMutationValues(current, before) ? "nicht_berechtigt" : "konflikt");
   },
 
-  async loeschen(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult> {
+  async delete(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult> {
     const before = await this.finden(channelId, name);
     if (before === null) return fehlgeschlagen("nicht_gefunden");
     const authorization = authorizeMutation(channelId, actor, now);

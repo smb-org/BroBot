@@ -259,7 +259,7 @@ const aktionen: readonly Rollenaktion[] = [
       const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleMutation,
-      ).aendern({
+      ).change({
         channelId: "kanal-a",
         name: "hallo",
         neuerName: "hallo",
@@ -282,7 +282,7 @@ const aktionen: readonly Rollenaktion[] = [
       const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleManagementMutation,
-      ).aendern({
+      ).change({
         channelId: "kanal-a",
         name: "hallo",
         neuerName: "hallo-neu",
@@ -324,7 +324,7 @@ const aktionen: readonly Rollenaktion[] = [
       const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleManagementMutation,
-      ).loeschen("kanal-a", "hallo", actor, timestamp);
+      ).delete("kanal-a", "hallo", actor, timestamp);
       return result.ok;
     },
   },

@@ -18,8 +18,8 @@ const leererZeitplan: AdsScheduleResponse = {
     snoozeCount: null,
     snoozeRefreshAt: null,
   },
-  letzteWerbepausen: [],
-  snoozeScopeVorhanden: false,
+  recentAdBreaks: [],
+  snoozeScopeAvailable: false,
 };
 
 const pathFor = (channelId: string): string =>
@@ -54,7 +54,7 @@ export const loadAdsSchedule = async (channelId: string): Promise<AdsScheduleRes
     ...leererZeitplan,
     ...loaded,
     schedule: { ...leererZeitplan.schedule, ...(loaded.schedule ?? {}) },
-    letzteWerbepausen: loaded.letzteWerbepausen ?? [],
+    recentAdBreaks: loaded.recentAdBreaks ?? [],
   };
 };
 

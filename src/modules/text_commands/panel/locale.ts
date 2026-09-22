@@ -14,19 +14,19 @@ interface TextCommandsTexts {
   minimumTier: string;
   minimumTierFuer: (name: string) => string;
   minimumTierGesperrt: string;
-  stufen: Record<TextCommandMinimumTier, string>;
+  tiers: Record<TextCommandMinimumTier, string>;
   schalter: (name: string, enabled: boolean) => string;
   verwaltungGesperrt: string;
-  speichern: (name: string) => string;
-  loeschen: (name: string) => string;
-  loeschenTitel: (name: string) => string;
-  loeschenBestaetigung: (name: string) => string;
-  loeschungBestaetigen: (name: string) => string;
+  save: (name: string) => string;
+  delete: (name: string) => string;
+  deleteTitle: (name: string) => string;
+  deleteConfirmation: (name: string) => string;
+  confirmDeletion: (name: string) => string;
   leer: string;
-  laden: string;
+  load: string;
   fehler: string;
-  speichernFehler: string;
-  loeschenFehler: string;
+  saveError: string;
+  deleteError: string;
   zahlFehlt: string;
   nameHinweis: string;
   details: (name: string) => string;
@@ -34,10 +34,10 @@ interface TextCommandsTexts {
   vorSekunden: (count: number) => string;
   vorMinuten: (count: number) => string;
   vorStunden: (count: number) => string;
-  antwortFehlt: string;
+  responseMissing: string;
   nameFehlt: string;
   nameAntwortFehlt: string;
-  spalten: {
+  columns: {
     name: string;
     kind: string;
     text: string;
@@ -62,19 +62,19 @@ const texts: LocaleCatalog<TextCommandsTexts> = {
     minimumTier: "Mindeststufe",
     minimumTierFuer: (name) => `Mindeststufe für Befehl !${name}`,
     minimumTierGesperrt: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern.",
-    stufen: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
+    tiers: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
     schalter: (name, enabled) => `Befehl !${name}: ${enabled ? "eingeschaltet" : "ausgeschaltet"}`,
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
-    speichern: (name) => `Befehl !${name} speichern`,
-    loeschen: (name) => `Befehl !${name} löschen`,
-    loeschenTitel: (name) => `Befehl !${name} löschen?`,
-    loeschenBestaetigung: (name) => `Der Textbefehl !${name} wird dauerhaft gelöscht. Diese Handlung kann nicht rückgängig gemacht werden.`,
-    loeschungBestaetigen: (name) => `Befehl !${name} endgültig löschen`,
+    save: (name) => `Befehl !${name} speichern`,
+    delete: (name) => `Befehl !${name} löschen`,
+    deleteTitle: (name) => `Befehl !${name} löschen?`,
+    deleteConfirmation: (name) => `Der Textbefehl !${name} wird dauerhaft gelöscht. Diese Handlung kann nicht rückgängig gemacht werden.`,
+    confirmDeletion: (name) => `Befehl !${name} endgültig löschen`,
     leer: "Noch keine Textbefehle angelegt.",
-    laden: "Textbefehle werden geladen …",
+    load: "Textbefehle werden geladen …",
     fehler: "Die Textbefehle konnten nicht geladen werden.",
-    speichernFehler: "Der Textbefehl konnte nicht gespeichert werden.",
-    loeschenFehler: "Der Textbefehl konnte nicht gelöscht werden.",
+    saveError: "Der Textbefehl konnte nicht gespeichert werden.",
+    deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
     zahlFehlt: "Zahl eingeben",
     nameHinweis: "Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.",
     details: (name) => `Eigenschaften von !${name}`,
@@ -82,10 +82,10 @@ const texts: LocaleCatalog<TextCommandsTexts> = {
     vorSekunden: (count) => `vor ${String(count)} s`,
     vorMinuten: (count) => `vor ${String(count)} min`,
     vorStunden: (count) => `vor ${String(count)} h`,
-    antwortFehlt: "Antworttext ausfüllen",
+    responseMissing: "Antworttext ausfüllen",
     nameFehlt: "Namen ausfüllen",
     nameAntwortFehlt: "Name und Antworttext ausfüllen",
-    spalten: { name: "!Name", kind: "Art", text: "Antwort", abkuehlung: "Abkühl.", zuletzt: "Zuletzt", minimumTier: "Mindeststufe", aktiv: "Schalter" },
+    columns: { name: "!Name", kind: "Art", text: "Antwort", abkuehlung: "Abkühl.", zuletzt: "Zuletzt", minimumTier: "Mindeststufe", aktiv: "Schalter" },
   },
   en: {
     titel: "Text commands",
@@ -100,19 +100,19 @@ const texts: LocaleCatalog<TextCommandsTexts> = {
     minimumTier: "Minimum level",
     minimumTierFuer: (name) => `Minimum level for !${name}`,
     minimumTierGesperrt: "Only broadcasters and managers may change minimum levels.",
-    stufen: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
+    tiers: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
     schalter: (name, enabled) => `Command !${name}: ${enabled ? "enabled" : "disabled"}`,
     verwaltungGesperrt: "Only broadcasters and managers may add, edit, or delete commands.",
-    speichern: (name) => `Save !${name}`,
-    loeschen: (name) => `Delete !${name}`,
-    loeschenTitel: (name) => `Delete !${name}?`,
-    loeschenBestaetigung: (name) => `The text command !${name} will be deleted permanently. This action cannot be undone.`,
-    loeschungBestaetigen: (name) => `Delete !${name} permanently`,
+    save: (name) => `Save !${name}`,
+    delete: (name) => `Delete !${name}`,
+    deleteTitle: (name) => `Delete !${name}?`,
+    deleteConfirmation: (name) => `The text command !${name} will be deleted permanently. This action cannot be undone.`,
+    confirmDeletion: (name) => `Delete !${name} permanently`,
     leer: "No text commands yet.",
-    laden: "Loading text commands …",
+    load: "Loading text commands …",
     fehler: "The text commands could not be loaded.",
-    speichernFehler: "The text command could not be saved.",
-    loeschenFehler: "The text command could not be deleted.",
+    saveError: "The text command could not be saved.",
+    deleteError: "The text command could not be deleted.",
     zahlFehlt: "Enter a number",
     nameHinweis: "Lowercase letters, numbers, hyphen and underscore.",
     details: (name) => `Properties for !${name}`,
@@ -120,10 +120,10 @@ const texts: LocaleCatalog<TextCommandsTexts> = {
     vorSekunden: (count) => `${String(count)} s ago`,
     vorMinuten: (count) => `${String(count)} min ago`,
     vorStunden: (count) => `${String(count)} h ago`,
-    antwortFehlt: "Fill in a response",
+    responseMissing: "Fill in a response",
     nameFehlt: "Fill in a name",
     nameAntwortFehlt: "Fill in a name and response",
-    spalten: { name: "!Name", kind: "Type", text: "Response", abkuehlung: "Cooldown", zuletzt: "Last", minimumTier: "Minimum level", aktiv: "Switch" },
+    columns: { name: "!Name", kind: "Type", text: "Response", abkuehlung: "Cooldown", zuletzt: "Last", minimumTier: "Minimum level", aktiv: "Switch" },
   },
 };
 

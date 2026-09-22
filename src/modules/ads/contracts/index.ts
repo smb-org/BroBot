@@ -14,11 +14,11 @@ export const adsSettingsSchema = z.object({
 export type AdsSettings = z.output<typeof adsSettingsSchema>;
 
 export interface AdBreaksEvent {
-  dauerSekunden: number;
-  gestartetAm: string;
-  endetAm: string;
+  durationSeconds: number;
+  startedAt: string;
+  endsAt: string;
   automatic: boolean;
-  ausloeserLogin: string | null;
+  triggerLogin: string | null;
 }
 
 export interface AdsSchedule {
@@ -31,12 +31,12 @@ export interface AdsSchedule {
 }
 
 export interface LastAdBreak {
-  zeitpunkt: string;
-  dauerSekunden: number;
+  timestamp: string;
+  durationSeconds: number;
 }
 
 export interface AdsScheduleResponse {
   schedule: AdsSchedule;
-  letzteWerbepausen: LastAdBreak[];
-  snoozeScopeVorhanden: boolean;
+  recentAdBreaks: LastAdBreak[];
+  snoozeScopeAvailable: boolean;
 }

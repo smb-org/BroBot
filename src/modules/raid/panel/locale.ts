@@ -12,9 +12,9 @@ export interface RaidPanelTexts {
   platzhalterVoll: string;
   platzhalterKlein: string;
   aktionen: string;
-  speichern: string;
+  save: string;
   gespeichert: string;
-  laden: string;
+  load: string;
   fehler: string;
   zahlFehlt: string;
   verwaltungGesperrt: string;
@@ -33,9 +33,9 @@ const katalog: Record<DashboardLanguage, RaidPanelTexts> = {
     platzhalterVoll: "{channel} und {viewers} werden beim Eingang ersetzt.",
     platzhalterKlein: "{channel} und {viewers} werden beim Eingang ersetzt.",
     aktionen: "Aktionen",
-    speichern: "Raid-Einstellungen speichern",
+    save: "Raid-Einstellungen speichern",
     gespeichert: "Raid-Einstellungen gespeichert.",
-    laden: "Raid-Einstellungen werden geladen …",
+    load: "Raid-Einstellungen werden geladen …",
     fehler: "Die Raid-Einstellungen konnten nicht geladen oder gespeichert werden.",
     zahlFehlt: "Zahl eingeben",
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Raid-Einstellungen ändern.",
@@ -52,9 +52,9 @@ const katalog: Record<DashboardLanguage, RaidPanelTexts> = {
     platzhalterVoll: "{channel} and {viewers} are replaced when the raid arrives.",
     platzhalterKlein: "{channel} and {viewers} are replaced when the raid arrives.",
     aktionen: "Actions",
-    speichern: "Save raid settings",
+    save: "Save raid settings",
     gespeichert: "Raid settings saved.",
-    laden: "Loading raid settings …",
+    load: "Loading raid settings …",
     fehler: "The raid settings could not be loaded or saved.",
     zahlFehlt: "Enter a number",
     verwaltungGesperrt: "Only broadcasters and managers may change raid settings.",
