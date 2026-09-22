@@ -1,4 +1,6 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState, type ReactElement } from "react";
+
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
@@ -10,7 +12,10 @@ vi.mock("../../src/modules/registry", () => ({
   ],
 }));
 
+import { UiProvider } from "../../src/dashboard/ui";
 import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
+
+const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
 
 describe("Module panel loader", () => {
   afterEach(() => {
@@ -68,7 +73,7 @@ describe("Module panel loader", () => {
     const fetcher = vi.fn<typeof fetch>();
     const onNavigate = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    render(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} onChanged={vi.fn(() => Promise.resolve())} />);
 
     const taste = screen.getByRole("link", { name: /aktiv.*Läuft/i });
     fireEvent.click(taste);
@@ -77,8 +82,52 @@ describe("Module panel loader", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("toggles a module and reloads the caller's list afterwards", async () => {
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } })));
+    vi.stubGlobal("fetch", fetcher);
+    const onNavigate = vi.fn();
+    const Harness = (): ReactElement => {
+      const [modules, setModules] = useState([{ id: "aktiv", enabled: true, settings: "{}" }]);
+      const onChanged = (): Promise<void> => {
+        setModules([{ id: "aktiv", enabled: false, settings: "{}" }]);
+        return Promise.resolve();
+      };
+      return <ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={modules} onNavigate={onNavigate} onChanged={onChanged} />;
+    };
+    renderWithMantine(<Harness />);
+
+    const toggle = screen.getByRole("switch", { name: /aktiv/i });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() => { expect(screen.getByRole("switch", { name: /aktiv/i })).not.toBeChecked(); });
+    const [url, init] = fetcher.mock.calls.find(([, requestInit]) => requestInit?.method === "PATCH") ?? [];
+    expect(url instanceof URL ? url.pathname : url).toBe("/api/channels/kanal-a/modules/aktiv");
+    expect(init?.body).toBe(JSON.stringify({ enabled: false }));
+  });
+
+  it("sends exactly one PATCH for two rapid clicks on the same switch", async () => {
+    let resolvePatch: ((response: Response) => void) | undefined;
+    const patch = new Promise<Response>((resolve) => { resolvePatch = resolve; });
+    const fetcher = vi.fn<typeof fetch>((_input, init) =>
+      init?.method === "PATCH" ? patch : Promise.resolve(Response.json({ modules: [] })));
+    const onChanged = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={onChanged} />);
+
+    const toggle = screen.getByRole("switch", { name: /aktiv/i });
+    fireEvent.click(toggle);
+    // The switch disables itself while pending, so a second click through
+    // the DOM is a no-op; `fireEvent.click` still lets us assert that.
+    fireEvent.click(toggle);
+
+    resolvePatch?.(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } }));
+    await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
+    expect(fetcher.mock.calls.filter(([, requestInit]) => requestInit?.method === "PATCH")).toHaveLength(1);
+  });
+
   it("shows no kicker above the module heading", () => {
-    render(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
 
     expect(screen.getByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("Tastenraster")).not.toBeInTheDocument();

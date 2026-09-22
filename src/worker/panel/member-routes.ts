@@ -22,8 +22,9 @@ import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
-import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
+import { CHANNEL_ROLES, canManage, type AuditAction, type ChannelRole } from "../../contracts/values";
 import { revokeRealtimeUser } from "../realtime";
+import { helixRequest } from "../twitch/helix";
 
 interface MemberRouteEnvironment {
   Bindings: Env;
@@ -50,7 +51,6 @@ const roleRank: Record<ChannelRole, number> = {
 
 const DEFAULT_MEMBER_LIMIT = 100;
 const MAX_MEMBER_LIMIT = 100;
-const HELIX_TIMEOUT_MS = 5_000;
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -83,7 +83,7 @@ const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
   joinedAt: member.createdAt,
 });
 
-const canManageMembers = (role: ChannelRole): boolean => role !== "operator";
+const canManageMembers = canManage;
 
 /**
  * Only a broadcaster may grant or revoke the `broadcaster` role. Otherwise
@@ -100,8 +100,8 @@ const mayAssignRole = (
   existingRole?: ChannelRole,
 ): boolean => (targetRole !== "broadcaster" && existingRole !== "broadcaster") || actorRole === "broadcaster";
 
-const broadcasterRoleDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
-  context.text("Nur ein Broadcaster darf die Rolle Broadcaster vergeben oder entziehen.", 403);
+const broadcasterRoleDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
+  context.json({ error: "broadcaster_role_change_requires_broadcaster" }, 403);
 
 export const actorOf = (context: { get: (key: "session") => { userId: string; sessionId: string } }) => ({
   userId: context.get("session").userId,
@@ -120,33 +120,10 @@ const readStoredBotAccessToken = async (environment: Env): Promise<string | null
     : null;
 };
 
-const readResponseJson = async (response: Response): Promise<Record<string, unknown>> => {
-  try {
-    const value: unknown = await response.json();
-    return isJsonRecord(value) ? value : {};
-  } catch {
-    return {};
-  }
-};
-
 const readProfileImageUrl = (user: JsonRecord): string | null =>
   typeof user.profile_image_url === "string" && user.profile_image_url.length > 0
     ? user.profile_image_url
     : null;
-
-const fetchWithTimeout = async (
-  fetcher: typeof fetch,
-  input: string,
-  init: RequestInit,
-): Promise<Response> => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => { controller.abort(); }, HELIX_TIMEOUT_MS);
-  try {
-    return await fetcher(input, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-};
 
 export const fetchTwitchUserByLogin = async (
   fetcher: typeof fetch,
@@ -154,21 +131,19 @@ export const fetchTwitchUserByLogin = async (
   login: string,
 ): Promise<TwitchUser | null> => {
   const accessToken = await readStoredBotAccessToken(environment);
-  if (accessToken === null) throw new Error("Bot-Token für Twitch-Nutzersuche fehlt.");
+  if (accessToken === null) throw new Error("Bot token for Twitch user search is missing.");
 
-  const url = new URL("https://api.twitch.tv/helix/users");
-  url.searchParams.set("login", login);
-  const response = await fetchWithTimeout(fetcher, url.toString(), {
-    headers: {
-      "Client-ID": environment.TWITCH_CLIENT_ID,
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const result = await helixRequest<JsonRecord>({
+    url: "https://api.twitch.tv/helix/users",
+    query: { login },
+    accessToken,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
   });
-  const body = await readResponseJson(response);
-  if (!response.ok) throw new Error("Twitch-Nutzersuche ist fehlgeschlagen.");
-  if (!Array.isArray(body.data)) return null;
+  if (!result.ok) throw new Error("Twitch user search failed.");
+  if (!Array.isArray(result.data.data)) return null;
 
-  const first = (body.data as unknown[])[0];
+  const first = (result.data.data as unknown[])[0];
   if (!isJsonRecord(first) || typeof first.id !== "string" || typeof first.login !== "string" ||
       typeof first.display_name !== "string") return null;
   return {
@@ -193,16 +168,14 @@ export const fetchTwitchUsersById = async (
     for (let offset = 0; offset < userIds.length; offset += 100) {
       const url = new URL("https://api.twitch.tv/helix/users");
       for (const userId of userIds.slice(offset, offset + 100)) url.searchParams.append("id", userId);
-      const response = await fetchWithTimeout(fetcher, url.toString(), {
-        headers: {
-          "Client-ID": environment.TWITCH_CLIENT_ID,
-          Authorization: `Bearer ${accessToken}`,
-        },
+      const result = await helixRequest<JsonRecord>({
+        url: url.toString(),
+        accessToken,
+        clientId: environment.TWITCH_CLIENT_ID,
+        fetcher,
       });
-      if (!response.ok) break;
-      const body = await readResponseJson(response);
-      if (!Array.isArray(body.data)) break;
-      for (const entry of body.data as unknown[]) {
+      if (!result.ok || !Array.isArray(result.data.data)) break;
+      for (const entry of result.data.data as unknown[]) {
         if (!isJsonRecord(entry) || typeof entry.id !== "string" || typeof entry.login !== "string" ||
             typeof entry.display_name !== "string") continue;
         resolved.set(entry.id, {
@@ -236,8 +209,8 @@ const parseMemberLimit = (value: string | undefined): number | null => {
   return Number.isSafeInteger(limit) && limit > 0 && limit <= MAX_MEMBER_LIMIT ? limit : null;
 };
 
-const manageDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
-  context.text("Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", 403);
+const manageDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
+  context.json({ error: "member_management_denied" }, 403);
 
 const lastBroadcaster = async (
   db: D1Database,
@@ -256,10 +229,10 @@ memberRouter.use("/api/channels/:channelId/members/*", requireChannelAuthorizati
 memberRouter.get("/api/channels/:channelId/members", async (context) => {
   const channelId = context.req.param("channelId");
   const limit = parseMemberLimit(context.req.query("limit"));
-  if (limit === null) return context.text("Mitglieder-Begrenzung ist ungültig.", 400);
+  if (limit === null) return context.json({ error: "pagination_limit_invalid" }, 400);
   const serializedCursor = context.req.query("cursor");
   const cursor = serializedCursor === undefined ? null : decodeChannelMemberCursor(serializedCursor);
-  if (serializedCursor !== undefined && cursor === null) return context.text("Mitglieder-Cursor ist ungültig.", 400);
+  if (serializedCursor !== undefined && cursor === null) return context.json({ error: "pagination_cursor_invalid" }, 400);
   const page = await listChannelMembers(context.env.DB, channelId, limit, cursor);
   const names = await fetchTwitchUsersById(fetch, context.env, page.members.map((member) => member.userId));
   const broadcasterCount = await countBroadcasterMembers(context.env.DB, channelId);
@@ -274,14 +247,13 @@ memberRouter.get("/api/channels/:channelId/members", async (context) => {
 memberRouter.get("/api/channels/:channelId/members/search", async (context) => {
   if (!canManageMembers(context.get("channelRole"))) return manageDenied(context);
   const login = searchLogin(context.req.query("login"));
-  if (login === null) return context.text("Twitch-Name fehlt oder ist ungültig.", 400);
+  if (login === null) return context.json({ error: "twitch_login_invalid" }, 400);
   try {
     const user = await fetchTwitchUserByLogin(fetch, context.env, login);
-    if (user === null) return context.text("Twitch-Nutzer nicht gefunden.", 404);
+    if (user === null) return context.json({ error: "twitch_user_not_found" }, 404);
     return context.json({ user });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Twitch-Nutzersuche ist fehlgeschlagen.";
-    return context.text(message, 502);
+  } catch {
+    return context.json({ error: "twitch_user_search_failed" }, 502);
   }
 });
 
@@ -292,15 +264,15 @@ memberRouter.post("/api/channels/:channelId/members", async (context) => {
   const body = await readJsonBody(context.req.raw);
   const userId = readUserId(body?.userId);
   const role = readRole(body?.role);
-  if (userId === null || role === null) return context.text("Mitglied oder Rolle ist ungültig.", 400);
+  if (userId === null || role === null) return context.json({ error: "member_or_role_invalid" }, 400);
 
   const channelId = context.req.param("channelId");
   if (userId === context.get("session").userId) {
-    return context.text("Du kannst deine eigene Mitgliedschaft nicht per POST anlegen.", 403);
+    return context.json({ error: "self_membership_denied" }, 403);
   }
   if (!mayAssignRole(channelRole, role)) return broadcasterRoleDenied(context);
   const existing = await getChannelMemberForChannel(context.env.DB, channelId, userId);
-  if (existing !== null) return context.text("Dieses Mitglied ist bereits freigegeben.", 409);
+  if (existing !== null) return context.json({ error: "member_already_exists" }, 409);
 
   const now = nowIso();
   const member: ChannelMemberRecord = {
@@ -314,11 +286,11 @@ memberRouter.post("/api/channels/:channelId/members", async (context) => {
     context.env.DB,
     actorOf(context),
     member,
-    "mitglied.hinzugefügt",
+    "member.added" satisfies AuditAction,
     now,
     actorGuard(requiredActorRoles(member.role)),
   );
-  if (!changed) return context.text("Mitglied konnte nicht hinzugefügt werden.", 409);
+  if (!changed) return context.json({ error: "member_add_failed" }, 409);
   return context.json({ member: memberResponse(member) }, 201);
 });
 
@@ -328,19 +300,19 @@ memberRouter.patch("/api/channels/:channelId/members/:userId", async (context) =
 
   const body = await readJsonBody(context.req.raw);
   const role = readRole(body?.role);
-  if (role === null) return context.text("Rolle ist ungültig.", 400);
+  if (role === null) return context.json({ error: "role_invalid" }, 400);
 
   const channelId = context.req.param("channelId");
   const userId = context.req.param("userId");
   const existing = await getChannelMemberForChannel(context.env.DB, channelId, userId);
-  if (existing === null) return context.text("Mitglied nicht gefunden.", 404);
-  if (existing.role === role) return context.text("Diese Rolle ist bereits gesetzt.", 400);
+  if (existing === null) return context.json({ error: "member_not_found" }, 404);
+  if (existing.role === role) return context.json({ error: "role_already_set" }, 400);
   if (userId === context.get("session").userId && roleRank[role] > roleRank[existing.role]) {
-    return context.text("Du kannst deine eigene Rolle nicht erhöhen.", 403);
+    return context.json({ error: "self_role_escalation_denied" }, 403);
   }
   if (!mayAssignRole(channelRole, role, existing.role)) return broadcasterRoleDenied(context);
   if (await lastBroadcaster(context.env.DB, channelId, existing.role, role)) {
-    return context.text("Der letzte Broadcaster kann nicht herabgestuft werden.", 409);
+    return context.json({ error: "last_broadcaster_cannot_be_demoted" }, 409);
   }
 
   const now = nowIso();
@@ -349,11 +321,11 @@ memberRouter.patch("/api/channels/:channelId/members/:userId", async (context) =
     context.env.DB,
     actorOf(context),
     member,
-    "mitglied.rolle_geändert",
+    "member.role_changed" satisfies AuditAction,
     now,
     actorGuard(requiredActorRoles(member.role, existing.role)),
   );
-  if (!changed) return context.text("Mitglied wurde inzwischen geändert.", 409);
+  if (!changed) return context.json({ error: "member_changed_concurrently" }, 409);
   void revokeRealtimeUser(context.env.CHANNEL, channelId, userId);
   return context.json({ member: memberResponse(member) });
 });
@@ -365,10 +337,10 @@ memberRouter.delete("/api/channels/:channelId/members/:userId", async (context) 
   const channelId = context.req.param("channelId");
   const userId = context.req.param("userId");
   const existing = await getChannelMemberForChannel(context.env.DB, channelId, userId);
-  if (existing === null) return context.text("Mitglied nicht gefunden.", 404);
+  if (existing === null) return context.json({ error: "member_not_found" }, 404);
   if (!mayAssignRole(channelRole, undefined, existing.role)) return broadcasterRoleDenied(context);
   if (await lastBroadcaster(context.env.DB, channelId, existing.role)) {
-    return context.text("Der letzte Broadcaster kann nicht entfernt werden.", 409);
+    return context.json({ error: "last_broadcaster_cannot_be_removed" }, 409);
   }
 
   const changed = await deleteChannelMemberWithAudit(
@@ -376,11 +348,11 @@ memberRouter.delete("/api/channels/:channelId/members/:userId", async (context) 
     actorOf(context),
     channelId,
     userId,
-    "mitglied.entfernt",
+    "member.removed" satisfies AuditAction,
     nowIso(),
     actorGuard(requiredActorRoles(undefined, existing.role)),
   );
-  if (!changed) return context.text("Mitglied wurde inzwischen geändert.", 409);
+  if (!changed) return context.json({ error: "member_changed_concurrently" }, 409);
   void revokeRealtimeUser(context.env.CHANNEL, channelId, userId);
   return context.body(null, 204);
 });

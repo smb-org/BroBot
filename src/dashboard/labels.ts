@@ -1,5 +1,5 @@
 import type { ChannelRole } from "../contracts/values";
-import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { auditActionLabel, catalogString, dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 
 /**
  * Roles are lowercase in the data model. The UI shows the term,
@@ -40,11 +40,11 @@ export const channelPanelTexts = (
 ): ChannelPanelTexts => channelPanelCatalog[language];
 
 export type PlatformAction =
-  | "kanal.freigegeben"
-  | "kanal.vollzustimmung_geaendert"
-  | "mitglied.hinzugefuegt"
-  | "mitglied.rolle_geaendert"
-  | "mitglied.entfernt";
+  | "channel.released"
+  | "channel.full_consent_changed"
+  | "member.added"
+  | "member.role_changed"
+  | "member.removed";
 
 export interface PlatformTexts {
   title: string;
@@ -169,11 +169,11 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     platformAdmin: "Betreiber",
     member: "Mitglied",
     actionLabel: {
-      "kanal.freigegeben": "Kanal freigegeben",
-      "kanal.vollzustimmung_geaendert": "Vollzustimmung geändert",
-      "mitglied.hinzugefuegt": "Mitglied hinzugefügt",
-      "mitglied.rolle_geaendert": "Mitgliedsrolle geändert",
-      "mitglied.entfernt": "Mitglied entfernt",
+      "channel.released": "Kanal freigegeben",
+      "channel.full_consent_changed": "Vollzustimmung geändert",
+      "member.added": "Mitglied hinzugefügt",
+      "member.role_changed": "Mitgliedsrolle geändert",
+      "member.removed": "Mitglied entfernt",
     },
   },
   en: {
@@ -236,11 +236,11 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     platformAdmin: "Operator",
     member: "Member",
     actionLabel: {
-      "kanal.freigegeben": "Channel released",
-      "kanal.vollzustimmung_geaendert": "Full consent changed",
-      "mitglied.hinzugefuegt": "Member added",
-      "mitglied.rolle_geaendert": "Member role changed",
-      "mitglied.entfernt": "Member removed",
+      "channel.released": "Channel released",
+      "channel.full_consent_changed": "Full consent changed",
+      "member.added": "Member added",
+      "member.role_changed": "Member role changed",
+      "member.removed": "Member removed",
     },
   },
 };
@@ -252,7 +252,72 @@ export const platformActionLabel = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
   const texts = platformCatalog[language];
-  return Object.prototype.hasOwnProperty.call(texts.actionLabel, action)
-    ? texts.actionLabel[action as PlatformAction]
-    : action;
+  return catalogString(texts.actionLabel, action) ?? auditActionLabel(action, language);
 };
+
+export interface MembersTexts {
+  managementLocked: string;
+  grantAccessTitle: string;
+  twitchName: string;
+  search: string;
+  searching: string;
+  title: string;
+  count: (count: string) => string;
+  name: string;
+  role: string;
+  accessSince: string;
+  editMember: (name: string) => string;
+  remove: string;
+  lastBroadcaster: string;
+  unresolvable: string;
+  twitchId: (userId: string) => string;
+  roleFor: (name: string) => string;
+  removeAccessFor: (name: string) => string;
+  empty: string;
+  grantAccess: string;
+  newMemberRoleLabel: string;
+  confirmationTitle: (name: string) => string;
+  confirmationText: (role: string) => string;
+  grantPermanently: string;
+  membersWithAccess: string;
+  load: string;
+  loadMore: string;
+  loadingMore: string;
+  sessionInvalid: string;
+  changeFailed: string;
+  removeSelf: string;
+  removeOther: (name: string) => string;
+}
+
+const membersCatalog: LocaleCatalog<MembersTexts> = {
+  de: {
+    managementLocked: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", grantAccessTitle: "Zugriff vergeben",
+    twitchName: "Twitch-Name", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", count: (count) => `${count} Mitglieder`, name: "Name",
+    role: "Rolle", accessSince: "Zugriff seit", editMember: (name) => `Mitglied bearbeiten: ${name}`, remove: "Entziehen",
+    lastBroadcaster: "Letzter Broadcaster", unresolvable: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
+    roleFor: (name) => `Rolle für ${name}`, removeAccessFor: (name) => `Zugriff für ${name} entziehen`,
+    empty: "Für diesen Kanal ist noch niemand zusätzlich freigegeben.", grantAccess: "Zugriff freigeben",
+    newMemberRoleLabel: "Rolle für neue Mitgliedschaft", confirmationTitle: (name) => `Zugriff für ${name} freigeben?`,
+    confirmationText: (role) => `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${role}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt.`,
+    grantPermanently: "Zugriff endgültig freigeben", membersWithAccess: "Freigegebene Mitglieder",
+    load: "Mitglieder werden geladen …", loadMore: "Weitere Mitglieder laden", loadingMore: "Weitere Mitglieder werden geladen …",
+    sessionInvalid: "Deine Sitzung ist nicht mehr gültig.", changeFailed: "Die Mitgliederänderung ist fehlgeschlagen.",
+    removeSelf: "Deinen eigenen Zugang zu diesem Kanal wirklich entziehen? Du sperrst dich damit selbst aus und kommst nur über eine andere berechtigte Person zurück.",
+    removeOther: (name) => `Zugriff für ${name} wirklich entziehen? Die Person verliert den Zugang zu diesem Kanal und allen kanalbezogenen Panel-Daten und -Funktionen.`,
+  },
+  en: {
+    managementLocked: "Only broadcasters and managers may change members.", grantAccessTitle: "Grant access", twitchName: "Twitch name",
+    search: "Search", searching: "Searching …", title: "Members", count: (count) => `${count} members`, name: "Name", role: "Role", accessSince: "Access since",
+    editMember: (name) => `Edit member: ${name}`, remove: "Remove", lastBroadcaster: "Last broadcaster", unresolvable: "Unresolvable",
+    twitchId: (userId) => `Twitch ID ${userId}`, roleFor: (name) => `Role for ${name}`, removeAccessFor: (name) => `Remove access for ${name}`,
+    empty: "No one else has access to this channel yet.", grantAccess: "Grant access", newMemberRoleLabel: "Role for new membership",
+    confirmationTitle: (name) => `Grant access for ${name}?`, confirmationText: (role) => `This person has no Twitch relationship proving access to this channel. The ${role} role grants access to the member list and the channel features allowed by that role.`,
+    grantPermanently: "Grant access permanently", membersWithAccess: "Members with access",
+    load: "Loading members …", loadMore: "Load more members", loadingMore: "Loading more members …",
+    sessionInvalid: "Your session is no longer valid.", changeFailed: "The member change failed.",
+    removeSelf: "Remove your own access to this channel? This locks you out and you can return only through another authorized person.",
+    removeOther: (name) => `Remove access for ${name}? This person will lose access to this channel and all channel-specific panel data and features.`,
+  },
+};
+
+export const membersTexts = (language: DashboardLanguage = dashboardLanguage()): MembersTexts => membersCatalog[language];

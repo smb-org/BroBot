@@ -19,6 +19,8 @@ import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "
 import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 import { truncateTo200Chars } from "../text";
 import { missingBotScopes } from "./auth/oauth";
+import { helixRequest } from "./twitch/helix";
+import type { HelixResult } from "../modules/contract";
 
 export interface TwitchClientEnvironment {
   TWITCH_CLIENT_ID: string;
@@ -92,34 +94,6 @@ export const logMaintenanceError = (
 
 export const MODERATOR_STATUS_REQUEST_TIMEOUT_MS = 5_000;
 
-const fetchWithTimeout = async (
-  fetcher: typeof fetch,
-  input: RequestInfo | URL,
-  init: RequestInit,
-): Promise<Response> => {
-  const controller = new AbortController();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      controller.abort();
-      reject(new TwitchApiError("Die Twitch-Abfrage hat das Zeitlimit überschritten.", 504, "timeout"));
-    }, MODERATOR_STATUS_REQUEST_TIMEOUT_MS);
-  });
-  try {
-    return await Promise.race([
-      fetcher(input, { ...init, signal: controller.signal }),
-      timeout,
-    ]);
-  } catch (error: unknown) {
-    if (controller.signal.aborted) {
-      throw new TwitchApiError("Die Twitch-Abfrage hat das Zeitlimit überschritten.", 504, "timeout");
-    }
-    throw error;
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
-};
-
 const isFinitePositiveNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
 
@@ -161,7 +135,7 @@ export const refreshBotToken = async (
       typeof body.refresh_token !== "string" || body.refresh_token.length === 0 ||
       !isFinitePositiveNumber(body.expires_in)) {
     throw new TwitchApiError(
-      "Twitch-Refresh wurde abgelehnt.",
+      "Twitch refresh was rejected.",
       response.status,
       typeof body.error === "string" ? body.error : null,
     );
@@ -189,13 +163,13 @@ export const validateBotToken = async (
   if (!response.ok || typeof body.user_id !== "string" || typeof body.login !== "string" ||
       !isFinitePositiveNumber(body.expires_in)) {
     throw new TwitchApiError(
-      "Twitch-Token ist ungültig.",
+      "Twitch token is invalid.",
       response.status,
       typeof body.error === "string" ? body.error : null,
     );
   }
   if (typeof body.client_id === "string" && body.client_id !== environment.TWITCH_CLIENT_ID) {
-    throw new TwitchApiError("Twitch-Token gehört zu einer anderen Anwendung.", 502);
+    throw new TwitchApiError("Twitch token belongs to a different application.", 502);
   }
   const scopes = Array.isArray(body.scopes)
     ? body.scopes.filter((scope): scope is string => typeof scope === "string")
@@ -208,6 +182,27 @@ interface ModeratedChannelsPage {
   nextCursor: string | null;
 }
 
+/**
+ * Turns a failed `HelixResult` into the throwing `TwitchApiError` this
+ * file's callers already handle -- `helixRequest` only classifies the
+ * transport outcome, so Twitch's own `error` body field (when present)
+ * still wins over the generic `http_<status>` reason.
+ */
+export const toTwitchApiError = (
+  result: Extract<HelixResult, { ok: false }>,
+  fallbackMessage: string,
+): TwitchApiError => {
+  if (result.reason === "timeout") return new TwitchApiError("The Twitch request timed out.", 504, "timeout");
+  if (result.reason === "network_error") return new TwitchApiError("Twitch is not reachable.", 503, "network_error");
+  if (result.reason === "pagination_loop") {
+    return new TwitchApiError(result.message ?? fallbackMessage, result.status ?? 502, "pagination_loop");
+  }
+  const code = result.reason === "rate_limited"
+    ? "rate_limited"
+    : typeof result.body.error === "string" && result.body.error.length > 0 ? result.body.error : result.reason;
+  return new TwitchApiError(result.message ?? fallbackMessage, result.status ?? 502, code);
+};
+
 const fetchModeratedChannelsPage = async (
   fetcher: typeof fetch,
   clientId: string,
@@ -216,26 +211,18 @@ const fetchModeratedChannelsPage = async (
   cursor: string | null,
   broadcasterId?: string,
 ): Promise<ModeratedChannelsPage> => {
-  const url = new URL("https://api.twitch.tv/helix/moderation/channels");
-  url.searchParams.set("user_id", userId);
-  url.searchParams.set("first", "100");
-  if (cursor !== null) url.searchParams.set("after", cursor);
-  if (broadcasterId !== undefined) url.searchParams.set("broadcaster_id", broadcasterId);
-  const response = await fetchWithTimeout(fetcher, url.toString(), {
-    headers: {
-      "Client-ID": clientId,
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const result = await helixRequest<Record<string, unknown>>({
+    url: "https://api.twitch.tv/helix/moderation/channels",
+    query: { user_id: userId, first: "100", after: cursor ?? undefined, broadcaster_id: broadcasterId },
+    accessToken,
+    clientId,
+    fetcher,
+    timeoutMs: MODERATOR_STATUS_REQUEST_TIMEOUT_MS,
   });
-  const body = await responseJson(response);
-  if (!response.ok || !Array.isArray(body.data)) {
-    throw new TwitchApiError(
-      typeof body.message === "string" && body.message.length > 0
-        ? body.message
-        : "Moderatorstatus konnte nicht gelesen werden.",
-      response.status,
-      typeof body.error === "string" ? body.error : null,
-    );
+  if (!result.ok) throw toTwitchApiError(result, "Moderator status could not be read.");
+  const body = result.data;
+  if (!Array.isArray(body.data)) {
+    throw new TwitchApiError("Moderator status could not be read.", result.status, "invalid_response");
   }
   const data: unknown[] = body.data.map((entry: unknown): unknown => entry);
   const pagination = body.pagination;
@@ -264,7 +251,7 @@ export const fetchModeratedChannels = async (
     const page = await fetchModeratedChannelsPage(fetcher, clientId, userId, accessToken, cursor);
     if (page.nextCursor === null) return page.channelIds;
     if (seenCursors.has(page.nextCursor)) {
-      throw new TwitchApiError("Twitch liefert einen wiederholten Pagination-Cursor.", 502);
+      throw new TwitchApiError("Twitch returned a repeated pagination cursor.", 502);
     }
     seenCursors.add(page.nextCursor);
     return page.channelIds.concat(await fetchPage(page.nextCursor));
@@ -466,7 +453,7 @@ const maintainBotIdentityInternal = async (
     await setBotIdentityStatusIfCurrent(
       env.DB,
       "error",
-      "Token-Ciphertext konnte nicht gelesen werden.",
+      "token_ciphertext_unreadable",
       now,
       identity.accessTokenCiphertext,
       identity.refreshTokenCiphertext,

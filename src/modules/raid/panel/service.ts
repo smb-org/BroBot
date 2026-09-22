@@ -10,7 +10,7 @@ const json = async <T>(response: Response): Promise<T> => {
     response.status,
     typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
       ? body.error
-      : "Anfrage fehlgeschlagen.",
+      : null,
     body,
   );
   return body as T;

@@ -6,25 +6,20 @@ Arbeitsteilung zwischen KI-Agenten in diesem Projekt, damit alle Mitarbeitenden 
 
 | Aufgabe | Modell |
 |---|---|
-| Implementierung, alle Themen | Sonnet |
+| Implementierung, alle Themen | Codex `gpt-6-luna`, Reasoning-Effort `xhigh` (Codex-CLI ≥ 0.155) |
+| Implementierung, wenn Codex nicht verfügbar ist | Sonnet |
 | Leichte Fleißarbeit: Test-Boilerplate, mechanische Edits, Formatierung, Doku-Anpassungen | Haiku oder Sonnet |
 | Review, anspruchsvolle Konzepte, Architekturentscheidungen | Hauptmodell, nicht delegieren |
 
-## Warum nicht Codex
+## Codex-Vorgeschichte
 
-Codex war bis 2026-09-22 als Implementierer vorgesehen. In der Umbenennungsrunde von Epic 1
-ist es an derselben Sache viermal gescheitert, und zwar reproduzierbar: Bei langen Umbenennungen
-über viele Dateien verliert es das Vertrauen in den Arbeitsbaum, hält die **eigenen** wachsenden
-Änderungen für einen fremden Prozess und fängt an, sie zurückzurollen. In einem Lauf hat es
-deswegen `killall -9` auf `node`, `pnpm`, `zsh` und `sh` abgesetzt; in einem anderen zwei Stunden
-lang seinen Diff viermal zurückgenommen und neu aufgetragen, ohne je fertig zu werden.
+Am 2026-09-22 wurde Codex hier vorübergehend gesperrt. Mit den `gpt-5.6`-Modellen ist es in der Umbenennungsrunde
+von Epic 1 viermal an derselben Sache gescheitert: Bei langen Umbenennungen über viele Dateien hielt
+es die **eigenen** wachsenden Änderungen für einen fremden Prozess und rollte sie zurück, einmal bis
+zu `killall -9` auf `node`, `pnpm`, `zsh` und `sh`.
 
-Die Läufe sind an den Aufträgen unter `docs/input/` nachvollziehbar. Sonnet hat dieselben
-Aufgaben in einem Durchgang erledigt.
-
-**Delegiere nicht an Codex**, auch nicht als Unterauftrag aus einem anderen Agenten heraus.
-Dieser Abschnitt steht hier, weil genau das passiert ist: Ein Agent hat die Projektdoku befolgt
-und weiterdelegiert, nachdem die Entscheidung bereits gefallen war.
+Mit `gpt-6-luna` ist Codex wieder der Implementierer. Zeigt ein Lauf dasselbe Muster, wird er
+abgebrochen und die Aufgabe an Sonnet übergeben.
 
 ## Parallelität
 

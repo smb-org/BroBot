@@ -46,7 +46,7 @@ const validEditBody = async (request: Request): Promise<z.infer<typeof editBodyS
 };
 
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
-  context.json({ error: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, ändern oder löschen." }, 403);
+  context.json({ error: "command_management_denied" }, 403);
 
 export const textCommandRoutes = new Hono<ModuleRouteEnvironment>();
 
@@ -60,7 +60,7 @@ textCommandRoutes.get("/commands", async (context) => {
 
 textCommandRoutes.post("/commands", async (context) => {
   const body = await validBody(context.req.raw);
-  if (body === null) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
+  if (body === null) return context.json({ error: "command_data_invalid" }, 400);
   if (context.get("channelRole") === "operator") return managementDenied(context);
   const repository = createTextCommandRepository(
     context.env.DB,
@@ -71,13 +71,13 @@ textCommandRoutes.post("/commands", async (context) => {
   const created = await repository.create({ channelId, ...body, text: body.text ?? "", now: nowIso() }, context.get("actor"));
   if (created.ok) return context.json({ command: { ...body, channelId, lastUsedAt: null } }, 201);
   return created.reason === "existiert"
-    ? context.json({ error: "Der Befehl existiert bereits." }, 409)
-    : context.json({ error: "Der Befehl darf nicht angelegt werden." }, 403);
+    ? context.json({ error: "command_already_exists" }, 409)
+    : context.json({ error: "command_creation_denied" }, 403);
 });
 
 textCommandRoutes.patch("/commands/:name", async (context) => {
   const body = await validEditBody(context.req.raw);
-  if (body === null) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
+  if (body === null) return context.json({ error: "command_data_invalid" }, 400);
   const repository = createTextCommandRepository(
     context.env.DB,
     context.get("authorizeMutation"),
@@ -86,15 +86,15 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const channelId = param(context, "channelId");
   const oldName = param(context, "name");
   const before = await repository.find(channelId, oldName);
-  if (before === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (before === null) return context.json({ error: "command_not_found" }, 404);
   const newName = body.name ?? before.name;
-  if (!validCommandName(newName)) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
+  if (!validCommandName(newName)) return context.json({ error: "command_data_invalid" }, 400);
   const contentChanged = Object.keys(body).some((key) => key !== "enabled");
   if (contentChanged && context.get("channelRole") === "operator") return managementDenied(context);
   const kind = body.kind ?? before.kind;
   const text = kind === "list" ? "" : body.text ?? before.text;
   if (kind === "text" && text.trim().length === 0) {
-    return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
+    return context.json({ error: "command_data_invalid" }, 400);
   }
   const cooldownSeconds = body.cooldownSeconds ?? before.cooldownSeconds;
   const minimumTier = body.minimumTier ?? before.minimumTier;
@@ -118,10 +118,10 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     now: nowIso(),
   }, context.get("actor"));
   if (changed.ok) return context.json({ command: { ...before, ...body, channelId, name: newName, text, kind, cooldownSeconds, minimumTier: minimumTier, enabled: body.enabled ?? before.enabled } });
-  if (changed.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
-  if (changed.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
-  if (changed.reason === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
-  return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
+  if (changed.reason === "nicht_gefunden") return context.json({ error: "command_not_found" }, 404);
+  if (changed.reason === "nicht_berechtigt") return context.json({ error: "command_update_denied" }, 403);
+  if (changed.reason === "konflikt") return context.json({ error: "command_changed_concurrently" }, 409);
+  return context.json({ error: "command_changed_concurrently" }, 409);
 });
 
 textCommandRoutes.delete("/commands/:name", async (context) => {
@@ -132,12 +132,12 @@ textCommandRoutes.delete("/commands/:name", async (context) => {
   );
   const channelId = param(context, "channelId");
   const name = param(context, "name");
-  if (await repository.find(channelId, name) === null) return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (await repository.find(channelId, name) === null) return context.json({ error: "command_not_found" }, 404);
   if (context.get("channelRole") === "operator") return managementDenied(context);
   const deleted = await repository.delete(channelId, name, context.get("actor"), nowIso());
   if (deleted.ok) return new Response(null, { status: 204 });
-  if (deleted.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
-  if (deleted.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);
-  if (deleted.reason === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
-  return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
+  if (deleted.reason === "nicht_gefunden") return context.json({ error: "command_not_found" }, 404);
+  if (deleted.reason === "nicht_berechtigt") return context.json({ error: "command_delete_denied" }, 403);
+  if (deleted.reason === "konflikt") return context.json({ error: "command_changed_concurrently" }, 409);
+  return context.json({ error: "command_changed_concurrently" }, 409);
 });

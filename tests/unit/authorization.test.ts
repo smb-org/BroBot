@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { authorizeChannelAccess } from "../../src/worker/auth/authorization";
-import type { ChannelRole } from "../../src/contracts/values";
+import { MANAGING_ROLES, type ChannelRole } from "../../src/contracts/values";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import {
   requireChannelAuthorization,
@@ -317,9 +317,9 @@ describe("atomic member change and audit", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:00:00.000Z",
       },
-      "mitglied.hinzugefügt",
+      "member.added",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "operator" });
@@ -328,7 +328,7 @@ describe("atomic member change and audit", () => {
         actor_user_id: "actor-1",
         created_at: "2026-09-18T00:01:00.000Z",
         channel_id: "kanal-a",
-        action: "mitglied.hinzugefügt",
+        action: "member.added",
         before_json: "null",
         after_json: JSON.stringify({
           channelId: "kanal-a",
@@ -357,9 +357,9 @@ describe("atomic member change and audit", () => {
         createdAt: "2099-01-01T00:00:00.000Z",
         updatedAt: "2026-09-18T00:03:00.000Z",
       },
-      "mitglied.rolle_geändert",
+      "member.role_changed",
       "2026-09-18T00:03:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({
@@ -406,9 +406,9 @@ describe("atomic member change and audit", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:03:00.000Z",
       },
-      "mitglied.rolle_geändert",
+      "member.role_changed",
       "2026-09-18T00:03:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -440,9 +440,9 @@ describe("atomic member change and audit", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:03:00.000Z",
       },
-      "mitglied.rolle_geändert",
+      "member.role_changed",
       "2026-09-18T00:03:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -468,9 +468,9 @@ describe("atomic member change and audit", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:01:00.000Z",
       },
-      "mitglied.hinzugefügt",
+      "member.added",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -497,9 +497,9 @@ describe("atomic member change and audit", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:01:00.000Z",
       },
-      "mitglied.rolle_geändert",
+      "member.role_changed",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "operator" });
@@ -521,9 +521,9 @@ describe("atomic member change and audit", () => {
       actorContext("actor-1"),
       "kanal-a",
       "user-1",
-      "mitglied.entfernt",
+      "member.removed",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "operator" });
@@ -546,9 +546,9 @@ describe("atomic member change and audit", () => {
       actorContext("actor-1"),
       "kanal-a",
       "broadcaster-1",
-      "mitglied.entfernt",
+      "member.removed",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "broadcaster-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -576,9 +576,9 @@ describe("atomic member change and audit", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:01:00.000Z",
       },
-      "mitglied.rolle_geändert",
+      "member.role_changed",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "broadcaster-1")).resolves.toMatchObject({ role: "broadcaster" });
@@ -601,21 +601,21 @@ describe("atomic member change and audit", () => {
       database as unknown as D1Database,
       actorContext("actor-1"),
       member,
-      "mitglied.hinzugefügt",
+      "member.added",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     )).resolves.toBe(true);
     await expect(createChannelMemberWithAudit(
       database as unknown as D1Database,
       actorContext("actor-1"),
       { ...member, role: "manager" },
-      "mitglied.hinzugefügt",
+      "member.added",
       "2026-09-18T00:02:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     )).resolves.toBe(false);
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toMatchObject({ role: "operator" });
-    await expect(readAudit(database)).resolves.toMatchObject({ results: [expect.objectContaining({ action: "mitglied.hinzugefügt" })] });
+    await expect(readAudit(database)).resolves.toMatchObject({ results: [expect.objectContaining({ action: "member.added" })] });
   });
 
   it("leaves no audit entry on a failed change", async () => {
@@ -633,9 +633,9 @@ describe("atomic member change and audit", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:00:00.000Z",
       },
-      "mitglied.geändert",
+      "member.role_changed",
       "2026-09-18T00:01:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     )).rejects.toThrow();
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -672,9 +672,9 @@ describe("atomic member change and audit", () => {
           createdAt: "2026-09-18T00:01:00.000Z",
           updatedAt: "2026-09-18T00:01:00.000Z",
         },
-        "mitglied.hinzugefügt",
+        "member.added",
         "2026-09-18T00:01:00.000Z",
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       )).rejects.toThrow();
     } finally {
       randomUuid.mockRestore();
@@ -697,9 +697,9 @@ describe("atomic member change and audit", () => {
       actorContext("actor-1"),
       "kanal-a",
       "user-1",
-      "mitglied.entfernt",
+      "member.removed",
       "2026-09-18T00:02:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
@@ -733,9 +733,9 @@ describe("atomic member change and audit", () => {
       actorContext("actor-1"),
       "kanal-a",
       "user-1",
-      "mitglied.entfernt",
+      "member.removed",
       "2026-09-18T00:02:00.000Z",
-      actorGuard("'broadcaster', 'manager'"),
+      actorGuard(MANAGING_ROLES),
     );
 
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();

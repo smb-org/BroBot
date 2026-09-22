@@ -28,6 +28,30 @@ const insertEvent = async (
   ).bind(eventId, channelId, createdAt, actorUserId, triggerId).run();
 };
 
+/** Inserts many rows in one D1 batch -- fast enough to exercise the 10000 cap. */
+const bulkInsertEvents = async (
+  database: TestD1Database,
+  channelId: string,
+  count: number,
+  baseTime: string,
+): Promise<void> => {
+  const statements = Array.from({ length: count }, (_, index) => {
+    const eventId = `${channelId}-${String(index).padStart(5, "0")}`;
+    return database.prepare(
+      `INSERT INTO event_log
+        (event_id, channel_id, created_at, module_id, code, detail_json, actor_user_id, trigger_id)
+       VALUES (?, ?, ?, 'raid', ?, '{}', NULL, ?)`,
+    ).bind(
+      eventId,
+      channelId,
+      new Date(Date.parse(baseTime) + index * 1000).toISOString(),
+      `code-${String(index).padStart(5, "0")}`,
+      eventId,
+    );
+  });
+  await database.batch(statements);
+};
+
 const insertCustomEvent = async (
   database: TestD1Database,
   eventId: string,
@@ -107,7 +131,7 @@ describe("event log", () => {
       "trigger-raid-1",
       null,
       [{
-        code: "shoutout.unterdrueckt",
+        code: "shoutout.suppressed",
         detail: { reason: "raid_erkannt", viewers: 8, threshold: 10 },
       }],
       "2026-09-18T04:00:00.000Z",
@@ -127,7 +151,7 @@ describe("event log", () => {
 
     expect(row).toEqual({
       module_id: "raid",
-      code: "shoutout.unterdrueckt",
+      code: "shoutout.suppressed",
       detail_json: '{"reason":"raid_erkannt","viewers":8,"threshold":10}',
       actor_user_id: null,
       trigger_id: "trigger-raid-1",
@@ -180,34 +204,27 @@ describe("event log", () => {
     ]));
   });
 
- it("keeps only the 500 newest rows per channel when writing", async () => {
+ it("no longer trims on insert, however many rows the channel already has", async () => {
    await insertChannel(database, "kanal-a");
-    await insertChannel(database, "kanal-b");
-    await insertEvent(database, "kanal-b-alt", "kanal-b", "2026-09-17T00:00:00.000Z");
+   const batch = vi.spyOn(database, "batch");
 
-    for (let index = 0; index <= 500; index += 1) {
-      await writeModuleDiagnostics(
-        database as unknown as D1Database,
-        "kanal-a",
-        "raid",
-        `trigger-${String(index)}`,
-        null,
-        [{ code: `code-${String(index).padStart(3, "0")}` }],
-        new Date(Date.parse("2026-09-18T00:00:00.000Z") + index * 1000).toISOString(),
-      );
-    }
+   await writeModuleDiagnostics(
+     database as unknown as D1Database,
+     "kanal-a",
+     "raid",
+     "trigger-1",
+     null,
+     [{ code: "code-a" }, { code: "code-b" }],
+     "2026-09-18T04:00:00.000Z",
+   );
 
-    const rows = await database.prepare(
-      "SELECT code FROM event_log WHERE channel_id = ? ORDER BY created_at",
-    ).bind("kanal-a").all<{ code: string }>();
+   // Exactly one statement per diagnostic in the batch -- no trailing trim.
+   expect(batch.mock.calls[0]?.[0]).toHaveLength(2);
 
-   expect(rows.results).toHaveLength(500);
-   expect(rows.results[0]?.code).toBe("code-001");
-   expect(rows.results.at(-1)?.code).toBe("code-500");
-    const otherChannelRows = await database.prepare(
-      "SELECT event_id FROM event_log WHERE channel_id = ?",
-    ).bind("kanal-b").all<{ event_id: string }>();
-    expect(otherChannelRows.results.map((row) => row.event_id)).toEqual(["kanal-b-alt"]);
+   const rows = await database.prepare(
+     "SELECT code FROM event_log WHERE channel_id = ? ORDER BY created_at",
+   ).bind("kanal-a").all<{ code: string }>();
+   expect(rows.results).toEqual([{ code: "code-a" }, { code: "code-b" }]);
  });
 
   it("cleans up only events older than 14 days in the hourly cron", async () => {
@@ -232,6 +249,52 @@ describe("event log", () => {
       "SELECT event_id FROM event_log ORDER BY event_id",
     ).all<{ event_id: string }>();
     expect(rows.results.map((row) => row.event_id)).toEqual(["grenze", "jung"]);
+  });
+
+  it("trims every channel to the newest 10000 rows, only in its scheduled hour", async () => {
+    vi.useFakeTimers();
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    const base = "2026-09-17T00:00:00.000Z";
+    await bulkInsertEvents(database, "kanal-a", 10003, base);
+    await bulkInsertEvents(database, "kanal-b", 5, base);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ access_token: "scheduled-token", expires_in: 7200 }),
+      { status: 200 },
+    )));
+    const run = async (): Promise<void> => {
+      await scheduled(
+        {} as ScheduledController,
+        makeEnvironment(database),
+        { waitUntil: vi.fn() } as unknown as ExecutionContext,
+      );
+    };
+    const countFor = async (channelId: string): Promise<number> => {
+      const row = await database.prepare(
+        "SELECT COUNT(*) AS count FROM event_log WHERE channel_id = ?",
+      ).bind(channelId).first<{ count: number }>();
+      return row?.count ?? 0;
+    };
+
+    // Outside the daily trim hour: the hourly 14-day purge runs, but the
+    // count trim doesn't -- row counts are untouched.
+    vi.setSystemTime(new Date("2026-09-18T12:00:00.000Z"));
+    await run();
+    expect(await countFor("kanal-a")).toBe(10003);
+    expect(await countFor("kanal-b")).toBe(5);
+
+    // In the trim hour: kanal-a is capped to the newest 10000, kanal-b
+    // (already under the cap) is untouched.
+    vi.setSystemTime(new Date("2026-09-18T03:00:00.000Z"));
+    await run();
+
+    const afterTrim = await database.prepare(
+      "SELECT code FROM event_log WHERE channel_id = ? ORDER BY created_at",
+    ).bind("kanal-a").all<{ code: string }>();
+    expect(afterTrim.results).toHaveLength(10000);
+    expect(afterTrim.results[0]?.code).toBe("code-00003");
+    expect(afterTrim.results.at(-1)?.code).toBe("code-10002");
+    expect(await countFor("kanal-b")).toBe(5);
   });
 
   it("uses the created_at index for event cleanup", async () => {
@@ -370,9 +433,9 @@ describe("event log", () => {
     await insertLoginIdentityAndSession(database, "viewer-1");
     await insertMember(database, "kanal-a", "viewer-1", "operator");
     await insertCustomEvent(database, "channel-event", "kanal-a", "channel_events", "channel_events.raid.incoming");
-    await insertCustomEvent(database, "module-event", "kanal-a", "text_commands", "text_commands.ausgeloest", "person-a");
-    await insertCustomEvent(database, "error-event", "kanal-a", "text_commands", "host.chat.fehlgeschlagen", "person-a");
-    await insertCustomEvent(database, "info-event", "kanal-a", "text_commands", "host.chat.gesendet", "person-b");
+    await insertCustomEvent(database, "module-event", "kanal-a", "text_commands", "text_commands.triggered", "person-a");
+    await insertCustomEvent(database, "error-event", "kanal-a", "text_commands", "host.chat.failed", "person-a");
+    await insertCustomEvent(database, "info-event", "kanal-a", "text_commands", "host.chat.sent", "person-b");
     await insertCustomEvent(database, "other-channel-event", "kanal-b", "channel_events", "channel_events.raid.incoming");
 
     const request = async (query: string) => panelRouter.fetch(
@@ -399,7 +462,7 @@ describe("event log", () => {
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
-    await insertCustomEvent(database, "fremd", "kanal-b", "text_commands", "host.chat.gesendet", "person-a");
+    await insertCustomEvent(database, "fremd", "kanal-b", "text_commands", "host.chat.sent", "person-a");
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-b/events?origin=module&actor=person-a"),

@@ -11,6 +11,7 @@ import {
   channelBotConsentCondition,
   lastBroadcasterGuard,
   lastBroadcasterRoleChangeGuard,
+  sqlRole,
 } from "../../src/worker/db/guards";
 import {
   overlayTokenReturningColumns,
@@ -19,6 +20,7 @@ import {
 } from "../../src/worker/auth/overlay-token-repository";
 import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
+import { MANAGING_ROLES } from "../../src/contracts/values";
 
 interface SchemaObject {
   type: string;
@@ -62,7 +64,10 @@ const sqlGetFixtures = new Map<string, string>([
   ["guardParts.sql", platformSessionGuard(actor, now).sql],
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],
   ["lastBroadcasterGuard", lastBroadcasterGuard],
-  ["actorGuard(\"'broadcaster', 'manager'\")", actorGuard("'broadcaster', 'manager'")],
+  ["actorGuard(MANAGING_ROLES)", actorGuard(MANAGING_ROLES)],
+  ["sqlRole(\"broadcaster\")", sqlRole("broadcaster")],
+  ["sqlRole(\"manager\")", sqlRole("manager")],
+  ["sqlRole(\"operator\")", sqlRole("operator")],
   ["guard.sql", platformSessionGuard(actor, now).sql],
   ["platformRolesSql", platformRolesSql],
   ["placeholders", "?, ?, ?"],

@@ -1,0 +1,145 @@
+import type { ReactElement } from "react";
+
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { UiProvider } from "../../src/dashboard/ui";
+import { ChannelSpotlight } from "../../src/dashboard/spotlight";
+
+const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
+
+const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
+  status,
+  headers: { "Content-Type": "application/json" },
+});
+
+const requestUrl = (input: RequestInfo | URL): URL =>
+  input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);
+
+const stubFetch = (): ReturnType<typeof vi.fn<typeof fetch>> => {
+  const fetcher = vi.fn<typeof fetch>((input, init) => {
+    const path = requestUrl(input).pathname;
+    if (path === "/api/channels/kanal-a/modules/text_commands/commands") {
+      return Promise.resolve(jsonResponse({ commands: [{ channelId: "kanal-a", name: "clip", text: "Clip!", kind: "text", enabled: true, minimumTier: "everyone", cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T00:00:00.000Z", updatedAt: "2026-09-19T00:00:00.000Z" }] }));
+    }
+    if (path === "/api/channels/kanal-a/members") {
+      return Promise.resolve(jsonResponse({ members: [{ userId: "user-1", login: "max", displayName: "Max", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" }], broadcasterCount: 1, viewerUserId: "user-1", nextCursor: null }));
+    }
+    if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+    if (init?.method === "PATCH" || init?.method === "POST") return Promise.resolve(jsonResponse({}));
+    return Promise.resolve(jsonResponse({}, 404));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  return fetcher;
+};
+
+describe("Channel Spotlight", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens with the mod+K shortcut and finds a module by name", async () => {
+    stubFetch();
+    const onNavigate = vi.fn();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={onNavigate} onOpenCommand={vi.fn()} />);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "raid" } });
+    const action = await screen.findByText("Raid-Shoutout");
+    fireEvent.click(action);
+
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "raid" });
+  });
+
+  it("closes on Escape", async () => {
+    stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => { expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); });
+  });
+
+  it("finds a text command by its bang name and opens it in the editor", async () => {
+    stubFetch();
+    const onNavigate = vi.fn();
+    const onOpenCommand = vi.fn();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={onNavigate} onOpenCommand={onOpenCommand} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "!clip" } });
+
+    const action = await screen.findByText("!clip");
+    fireEvent.click(action);
+
+    expect(onOpenCommand).toHaveBeenCalledWith("clip");
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "text_commands" });
+  });
+
+  it("finds a member by login", async () => {
+    stubFetch();
+    const onNavigate = vi.fn();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={onNavigate} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "max" } });
+
+    const action = await screen.findByText("Max");
+    fireEvent.click(action);
+
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "channel", channelId: "kanal-a", section: "members" });
+  });
+
+  it("runs the ads-off registered action for a manager", async () => {
+    const fetcher = stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[{ id: "ads", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "ads off" } });
+    fireEvent.click(await screen.findByText("Werbung aus"));
+
+    await vi.waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) =>
+        requestUrl(input).pathname === "/api/channels/kanal-a/modules/ads" && init?.method === "PATCH")).toBe(true);
+    });
+  });
+
+  it("disables the ads-off action for an operator, with the management-locked reason", async () => {
+    stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="operator" modules={[{ id: "ads", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "ads off" } });
+
+    expect(await screen.findByText("Werbung aus")).toBeInTheDocument();
+    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.")).toBeInTheDocument();
+  });
+
+  it("runs the parametrized shoutout action with the typed login", async () => {
+    const fetcher = stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="operator" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "shoutout streamerin" } });
+    fireEvent.click(await screen.findByText("Shoutout senden"));
+
+    await vi.waitFor(() => {
+      const call = fetcher.mock.calls.find(([input, init]) =>
+        requestUrl(input).pathname === "/api/channels/kanal-a/shoutout" && init?.method === "POST");
+      expect(call).toBeDefined();
+      const body = call?.[1]?.body;
+      expect(JSON.parse(typeof body === "string" ? body : "{}") as unknown).toEqual({ login: "streamerin" });
+    });
+  });
+});

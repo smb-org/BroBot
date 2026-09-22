@@ -59,7 +59,7 @@ const normalizeExpiry = (expiresAt: string | null, createdAt: string): string | 
   const expiresTimestamp = Date.parse(expiresAt);
   const createdTimestamp = Date.parse(createdAt);
   if (!Number.isFinite(expiresTimestamp) || !Number.isFinite(createdTimestamp) || expiresTimestamp <= createdTimestamp) {
-    throw new Error("Overlay-Token-Ablauf muss nach der Ausgabe liegen.");
+    throw new Error("Overlay token expiry must be after issuance.");
   }
   return new Date(expiresTimestamp).toISOString();
 };
@@ -107,7 +107,7 @@ export const authenticateOverlayToken = async (
   if (record === null || !shouldTouchLastUsed(record.lastUsedAt, input.now)) return record;
 
   const nowTimestamp = Date.parse(input.now);
-  if (!Number.isFinite(nowTimestamp)) throw new Error("Nutzungszeitpunkt ist ungültig.");
+  if (!Number.isFinite(nowTimestamp)) throw new Error("Usage timestamp is invalid.");
   const cutoff = new Date(nowTimestamp - LAST_USED_INTERVAL_MS).toISOString();
   let touched: boolean;
   try {

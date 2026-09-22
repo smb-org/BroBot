@@ -1,5 +1,6 @@
 import type { BotModule } from "../contract";
 import { adsSettingsSchema } from "./contracts";
+import { DEFAULT_AUTOMATIC_TEXT, DEFAULT_MANUAL_TEXT, DEFAULT_PREWARNING_TEXT } from "./contracts/chat-defaults";
 import { processAdBreak } from "./service";
 import { adsRoutes } from "./routes";
 
@@ -13,11 +14,11 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   id: "ads",
   settingsSchema: adsSettingsSchema,
   defaultSettings: {
-    automatic: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",
-    manual: "Werbepause: {duration} Sekunden. Bin gleich zurück!",
+    automatic: DEFAULT_AUTOMATIC_TEXT,
+    manual: DEFAULT_MANUAL_TEXT,
     prewarning: true,
     leadSeconds: 60,
-    prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
+    prewarningText: DEFAULT_PREWARNING_TEXT,
   },
   broadcasterScopes: ["channel:read:ads"],
   eventSubTypes: ["stream.online", "channel.ad_break.begin"],

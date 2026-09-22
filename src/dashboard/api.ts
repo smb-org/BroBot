@@ -47,10 +47,10 @@ const resolveRequestUrl = (input: string): URL => {
   try {
     url = new URL(input, window.location.origin);
   } catch {
-    throw new PanelApiError(400, "Die Panel-Anfrage ist nicht erlaubt.");
+    throw new PanelApiError(400, "panel_request_not_allowed");
   }
   if (url.origin !== window.location.origin || hasParentPathSegment(input) || !isAllowedRequestPath(url.pathname)) {
-    throw new PanelApiError(400, "Die Panel-Anfrage ist nicht erlaubt.");
+    throw new PanelApiError(400, "panel_request_not_allowed");
   }
   return url;
 };
@@ -60,19 +60,19 @@ export const requestJson = async <T>(input: string, init?: RequestInit): Promise
   const response = await fetch(url, { ...init, credentials: "same-origin" });
   if (!response.ok) {
     const responseText = await response.text();
-    let message = responseText || "Die Panel-Anfrage ist fehlgeschlagen.";
+    let code: string | null = null;
     let details: unknown = null;
     try {
       const parsed: unknown = JSON.parse(responseText);
       if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
         details = parsed;
         const error = (parsed as Record<string, unknown>).error;
-        if (typeof error === "string" && error.length > 0) message = error;
+        if (typeof error === "string" && error.length > 0) code = error;
       }
     } catch {
-      // Error responses may also be plain text.
+      // Error responses may also be plain text (old worker, proxy, network failure).
     }
-    throw new PanelApiError(response.status, message, details);
+    throw new PanelApiError(response.status, code, details);
   }
   if (response.status === 204) return undefined as T;
   return response.json();
@@ -245,7 +245,7 @@ export const searchTwitchUser = async (
 const requestMutation = <T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
-  body?: Record<string, string | boolean>,
+  body?: Record<string, string | boolean | number>,
 ): Promise<T> => requestJson<{ token: string }>("/api/csrf").then(({ token }) => requestJson<T>(path, {
   method,
   headers: {
@@ -292,6 +292,31 @@ export const refreshModeratorStatus = (
   channelId: string,
 ): Promise<{ moderator: PanelModeratorStatus; nextAllowedAt: string }> => requestMutation(
   channelPath(channelId, "moderator-status"),
+  "POST",
+);
+
+export const startCommercial = (
+  channelId: string,
+  length: number,
+): Promise<{ length: number | null; message: string | null; retryAfter: number | null }> => requestMutation(
+  `${modulePath(channelId, "ads")}/commercial`,
+  "POST",
+  { length },
+);
+
+export const sendManualShoutout = (
+  channelId: string,
+  login: string,
+): Promise<{ sent: true }> => requestMutation(
+  channelPath(channelId, "shoutout"),
+  "POST",
+  { login },
+);
+
+export const createClip = (
+  channelId: string,
+): Promise<{ clipId: string | null; editUrl: string | null }> => requestMutation(
+  channelPath(channelId, "clips"),
   "POST",
 );
 

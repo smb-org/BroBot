@@ -72,7 +72,7 @@ describe("ad prewarning in the channel object", () => {
     const rows = await database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a' ORDER BY rowid",
     ).all<{ code: string }>();
-    expect(rows.results.map((row) => row.code)).toEqual(["ads.vorwarnung.scope_fehlt"]);
+    expect(rows.results.map((row) => row.code)).toEqual(["ads.prewarning.scope_missing"]);
   });
 
   it("doesn't touch the channel binding either when the module is disabled", async () => {

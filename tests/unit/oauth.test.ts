@@ -99,7 +99,7 @@ describe("Twitch OAuth", () => {
       fetcher,
       environment,
       "code",
-    )).rejects.toThrow("Twitch-Code-Tausch wurde abgelehnt.");
+    )).rejects.toThrow("The Twitch code exchange was rejected.");
   });
 
   it("reads the Twitch identity without email scope", async () => {
@@ -112,12 +112,12 @@ describe("Twitch OAuth", () => {
       userId: "user-1",
       login: "tester",
     });
-    expect(fetcher).toHaveBeenCalledWith("https://api.twitch.tv/helix/users", {
+    expect(fetcher).toHaveBeenCalledWith("https://api.twitch.tv/helix/users", expect.objectContaining({
       headers: {
         "Client-ID": "client-id",
         Authorization: "Bearer access-token",
       },
-    });
+    }));
   });
 
   it("does not verify expiring states", async () => {

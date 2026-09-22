@@ -224,13 +224,13 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   const timestamp = context.req.header("Twitch-Eventsub-Message-Timestamp");
   const signature = context.req.header("Twitch-Eventsub-Message-Signature");
   if (messageId === undefined || messageId.length === 0 ||
-      timestamp === undefined || signature === undefined) return response("Ungültige EventSub-Kopfzeilen.", 401);
+      timestamp === undefined || signature === undefined) return response("Invalid EventSub headers.", 401);
 
   const rawBody = await readEventSubBody(context.req.raw);
-  if (rawBody === null) return response("EventSub-Nutzkörper ist zu groß.", 413);
+  if (rawBody === null) return response("EventSub payload is too large.", 413);
   const timestampMs = parseEventSubTimestamp(timestamp);
   if (timestampMs === null || !isEventSubTimestampFresh(timestamp, Date.now())) {
-    return response("EventSub-Zeitstempel ist abgelaufen.", 403);
+    return response("EventSub timestamp has expired.", 403);
   }
   let validSignature: boolean;
   try {
@@ -244,31 +244,31 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   } catch {
     validSignature = false;
   }
-  if (!validSignature) return response("Ungültige EventSub-Signatur.", 403);
+  if (!validSignature) return response("Invalid EventSub signature.", 403);
 
   let body: unknown;
   const decodedBody = decodeEventSubBody(rawBody);
   try {
     body = JSON.parse(decodedBody) as unknown;
   } catch {
-    return response("Ungültiger EventSub-Nutzkörper.", 400);
+    return response("Invalid EventSub payload.", 400);
   }
-  if (!isRecord(body)) return response("Ungültiger EventSub-Nutzkörper.", 400);
+  if (!isRecord(body)) return response("Invalid EventSub payload.", 400);
 
   const messageType = context.req.header("Twitch-Eventsub-Message-Type");
   if (messageType === "webhook_callback_verification") {
     await rememberEventSubMessage(context.env.DB, messageId, new Date().toISOString());
     return typeof body.challenge === "string"
       ? response(body.challenge, 200, "text/plain; charset=UTF-8")
-      : response("Challenge fehlt.", 400);
+      : response("Challenge is missing.", 400);
   }
   if (messageType !== "notification" && messageType !== "revocation") {
-    return response("Unbekannter EventSub-Nachrichtentyp.", 400);
+    return response("Unknown EventSub message type.", 400);
   }
 
   const now = new Date().toISOString();
   const revocation = messageType === "revocation" ? subscriptionRecord(body, now) : null;
-  if (messageType === "revocation" && revocation === null) return response("Ungültiger Widerruf.", 400);
+  if (messageType === "revocation" && revocation === null) return response("Invalid revocation.", 400);
 
   if (revocation !== null) {
     if (await hasEventSubMessage(context.env.DB, messageId)) return response(null, 204);
@@ -288,7 +288,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   if (!isNew) return response(null, 204);
 
   const target = notificationTarget(body);
-  if (target === null) return response("Ungültige EventSub-Benachrichtigung.", 400);
+  if (target === null) return response("Invalid EventSub notification.", 400);
 
   // Deliberately awaited instead of run in the background: a chat call is
   // short, and this keeps the outcome visible in tests. If dispatch later
@@ -305,7 +305,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     try {
       await refreshAdPrewarning(context.env, target.channelId, messageId, now);
     } catch (error: unknown) {
-      console.error("Werbe-Vorwarnung konnte nicht aktualisiert werden.", error);
+      console.error("Ad prewarning could not be refreshed.", error);
     }
   }
   return response(null, 204);

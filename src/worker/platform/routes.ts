@@ -27,7 +27,7 @@ import {
   listPlatformAudit,
   listPlatformChannels,
 } from "./repository";
-import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
+import { CHANNEL_ROLES, PLATFORM_ASSIGNABLE_ROLES, type ChannelRole } from "../../contracts/values";
 
 interface PlatformEnvironment {
   Bindings: Env;
@@ -39,7 +39,7 @@ interface JsonRecord {
 }
 
 const roles = CHANNEL_ROLES;
-const platformRoles = CHANNEL_ROLES.filter((role): role is Exclude<ChannelRole, "broadcaster"> => role !== "broadcaster");
+const platformRoles = PLATFORM_ASSIGNABLE_ROLES;
 const defaultAuditLimit = 50;
 const maximumAuditLimit = 100;
 const defaultMembersLimit = 100;
@@ -99,11 +99,11 @@ const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
   joinedAt: member.createdAt,
 });
 
-const broadcasterRoleDenied = (context: { text: (text: string, status: 403) => Response }): Response =>
-  context.text("Die Rolle Broadcaster darf auf der Betreiberebene nicht geändert werden.", 403);
+const broadcasterRoleDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
+  context.json({ error: "broadcaster_role_immutable" }, 403);
 
-const mutationFailed = (context: { text: (text: string, status: 409) => Response }): Response =>
-  context.text("Die Änderung konnte nicht durchgeführt werden.", 409);
+const mutationFailed = (context: { json: (body: { error: string }, status: 409) => Response }): Response =>
+  context.json({ error: "mutation_failed" }, 409);
 
 export const platformRouter = new Hono<PlatformEnvironment>();
 
@@ -115,15 +115,14 @@ platformRouter.get("/api/platform", async (context) =>
 
 platformRouter.get("/api/platform/users", async (context) => {
   const login = readLogin(context.req.query("login"));
-  if (login === null) return context.text("Twitch-Name fehlt oder ist ungültig.", 400);
+  if (login === null) return context.json({ error: "twitch_login_invalid" }, 400);
   try {
     const user = await fetchTwitchUserByLogin(fetch, context.env, login);
     return user === null
-      ? context.text("Twitch-Nutzer nicht gefunden.", 404)
+      ? context.json({ error: "twitch_user_not_found" }, 404)
       : context.json({ user: user });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Twitch-Nutzersuche ist fehlgeschlagen.";
-    return context.text(message, 502);
+  } catch {
+    return context.json({ error: "twitch_user_search_failed" }, 502);
   }
 });
 
@@ -132,17 +131,16 @@ platformRouter.post("/api/platform/channels", async (context) => {
   const login = typeof body?.login === "string" ? readLogin(body.login) : null;
   const fullConsent = readBoolean(body?.fullConsent);
   if (login === null || fullConsent === null) {
-    return context.text("Login oder Vollzustimmung ist ungültig.", 400);
+    return context.json({ error: "release_input_invalid" }, 400);
   }
 
   let user: TwitchUser | null;
   try {
     user = await fetchTwitchUserByLogin(fetch, context.env, login);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Twitch-Nutzersuche ist fehlgeschlagen.";
-    return context.text(message, 502);
+  } catch {
+    return context.json({ error: "twitch_user_search_failed" }, 502);
   }
-  if (user === null) return context.text("Twitch-Nutzer nicht gefunden.", 404);
+  if (user === null) return context.json({ error: "twitch_user_not_found" }, 404);
 
   try {
     const released = await releasePlatformChannel(
@@ -152,9 +150,9 @@ platformRouter.post("/api/platform/channels", async (context) => {
       fullConsent,
       nowIso(),
     );
-    if (!released) return context.text("Der Kanal ist bereits freigegeben.", 409);
+    if (!released) return context.json({ error: "channel_already_released" }, 409);
   } catch {
-    return context.text("Der Kanal konnte nicht freigegeben werden.", 409);
+    return context.json({ error: "channel_release_failed" }, 409);
   }
   return context.json({
     channel: {
@@ -169,12 +167,12 @@ platformRouter.post("/api/platform/channels", async (context) => {
 platformRouter.patch("/api/platform/channels/:channelId", async (context) => {
   const body = await readJson(context.req.raw);
   const fullConsent = readBoolean(body?.fullConsent);
-  if (fullConsent === null) return context.text("Vollzustimmung ist ungültig.", 400);
+  if (fullConsent === null) return context.json({ error: "full_consent_invalid" }, 400);
 
   const channel = await getPlatformChannel(context.env.DB, context.req.param("channelId"));
-  if (channel === null) return context.text("Kanal nicht gefunden.", 404);
+  if (channel === null) return context.json({ error: "channel_not_found" }, 404);
   if (channel.fullConsent === fullConsent) {
-    return context.text("Diese Vollzustimmung ist bereits gesetzt.", 400);
+    return context.json({ error: "full_consent_already_set" }, 400);
   }
 
   const changed = await changeFullConsent(
@@ -190,13 +188,13 @@ platformRouter.patch("/api/platform/channels/:channelId", async (context) => {
 
 platformRouter.get("/api/platform/channels/:channelId/members", async (context) => {
   const limit = readLimit(context.req.query("limit"), defaultMembersLimit, maximumMembersLimit);
-  if (limit === null) return context.text("Mitglieder-Begrenzung ist ungültig.", 400);
+  if (limit === null) return context.json({ error: "pagination_limit_invalid" }, 400);
   const serializedCursor = context.req.query("cursor");
   const cursor = serializedCursor === undefined
     ? null
     : decodeChannelMemberCursor(serializedCursor);
   if (serializedCursor !== undefined && cursor === null) {
-    return context.text("Mitglieder-Cursor ist ungültig.", 400);
+    return context.json({ error: "pagination_cursor_invalid" }, 400);
   }
 
   const channelId = context.req.param("channelId");
@@ -214,18 +212,18 @@ platformRouter.post("/api/platform/channels/:channelId/members", async (context)
   const body = await readJson(context.req.raw);
   const userId = readUserId(body?.userId);
   const role = readRole(body?.role);
-  if (userId === null || role === null) return context.text("Mitglied oder Rolle ist ungültig.", 400);
+  if (userId === null || role === null) return context.json({ error: "member_or_role_invalid" }, 400);
   if (role === "broadcaster") return broadcasterRoleDenied(context);
 
   const channelId = context.req.param("channelId");
   if (await getPlatformChannel(context.env.DB, channelId) === null) {
-    return context.text("Kanal nicht gefunden.", 404);
+    return context.json({ error: "channel_not_found" }, 404);
   }
   const existing = await getChannelMemberForChannel(context.env.DB, channelId, userId);
   if (existing !== null) {
     return existing.role === "broadcaster"
       ? broadcasterRoleDenied(context)
-      : context.text("Dieses Mitglied ist bereits freigegeben.", 409);
+      : context.json({ error: "member_already_exists" }, 409);
   }
 
   const timestamp = nowIso();
@@ -252,15 +250,15 @@ platformRouter.patch("/api/platform/channels/:channelId/members/:userId", async 
   if (role === null) {
     return typeof body?.role === "string" && body.role === "broadcaster"
       ? broadcasterRoleDenied(context)
-      : context.text("Rolle ist ungültig.", 400);
+      : context.json({ error: "role_invalid" }, 400);
   }
 
   const channelId = context.req.param("channelId");
   const userId = context.req.param("userId");
   const existing = await getChannelMemberForChannel(context.env.DB, channelId, userId);
-  if (existing === null) return context.text("Mitglied nicht gefunden.", 404);
+  if (existing === null) return context.json({ error: "member_not_found" }, 404);
   if (existing.role === "broadcaster") return broadcasterRoleDenied(context);
-  if (existing.role === role) return context.text("Diese Rolle ist bereits gesetzt.", 400);
+  if (existing.role === role) return context.json({ error: "role_already_set" }, 400);
 
   const timestamp = nowIso();
   const changed = await changePlatformMember(
@@ -280,7 +278,7 @@ platformRouter.delete("/api/platform/channels/:channelId/members/:userId", async
   const channelId = context.req.param("channelId");
   const userId = context.req.param("userId");
   const existing = await getChannelMemberForChannel(context.env.DB, channelId, userId);
-  if (existing === null) return context.text("Mitglied nicht gefunden.", 404);
+  if (existing === null) return context.json({ error: "member_not_found" }, 404);
   if (existing.role === "broadcaster") return broadcasterRoleDenied(context);
 
   const removed = await removePlatformMember(
@@ -295,13 +293,13 @@ platformRouter.delete("/api/platform/channels/:channelId/members/:userId", async
 
 platformRouter.get("/api/platform/audit", async (context) => {
   const limit = readLimit(context.req.query("limit"), defaultAuditLimit, maximumAuditLimit);
-  if (limit === null) return context.text("Audit-Begrenzung ist ungültig.", 400);
+  if (limit === null) return context.json({ error: "pagination_limit_invalid" }, 400);
   const serializedCursor = context.req.query("cursor");
   const cursor = serializedCursor === undefined
     ? null
     : decodePlatformAuditCursor(serializedCursor);
   if (serializedCursor !== undefined && cursor === null) {
-    return context.text("Audit-Cursor ist ungültig.", 400);
+    return context.json({ error: "pagination_cursor_invalid" }, 400);
   }
   const audit = await listPlatformAudit(context.env.DB, limit, cursor);
   const actorIds = audit.entries.map((entry) => entry.actorUserId);

@@ -1,5 +1,6 @@
 import type { BotModule } from "../contract";
 import { raidSettingsSchema } from "./contracts";
+import { DEFAULT_TEXT_LONG, DEFAULT_TEXT_SHORT } from "./contracts/chat-defaults";
 import { processRaid } from "./service";
 
 export { decideRaid } from "./domain";
@@ -13,8 +14,8 @@ export const raidModule: BotModule<typeof raidSettingsSchema> = {
     shoutoutEnabled: true,
     shoutoutThreshold: 3,
     textThreshold: 3,
-    textLong: "Willkommen {channel}! Danke für den Raid mit {viewers} Zuschauern — schaut gerne vorbei!",
-    textShort: "Danke für den Raid, {channel}, mit {viewers} Zuschauern!",
+    textLong: DEFAULT_TEXT_LONG,
+    textShort: DEFAULT_TEXT_SHORT,
   },
   eventSubTypes: ["channel.raid"],
   panel: () => import("./panel"),

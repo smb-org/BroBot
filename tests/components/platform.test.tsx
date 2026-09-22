@@ -39,7 +39,7 @@ const setUpPlatform = (
 ): ReturnType<typeof vi.fn<typeof fetch>> => {
   const fetcher = vi.fn<typeof fetch>((input) => {
     const url = requestUrl(input);
-    if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], platformAdmin: platform }));
+    if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], bot: { status: "connected", reason: null, updatedAt: "2026-09-18T00:00:00.000Z" }, platformAdmin: platform }));
     if (url.pathname === "/api/platform") return Promise.resolve(response({ channels: [channel] }));
     if (url.pathname === "/api/platform/audit") return Promise.resolve(response(audit));
     if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(response(members));
@@ -135,7 +135,7 @@ describe("Platform level", () => {
         createdAt: "2026-09-18T00:00:00.000Z",
         channelId: "123",
         moduleId: null,
-        action: "kanal.freigegeben",
+        action: "channel.released",
         before: "{}",
         after: "{}",
       }, {
@@ -147,7 +147,7 @@ describe("Platform level", () => {
         createdAt: "2026-09-18T00:00:01.000Z",
         channelId: "123",
         moduleId: null,
-        action: "kanal.vollzustimmung_geaendert",
+        action: "channel.full_consent_changed",
         before: "{}",
         after: "{}",
       }],
@@ -187,9 +187,12 @@ describe("Platform level", () => {
     const row = await screen.findByRole("row", { name: /alpha_login/ });
     fireEvent.click(row);
     const bereich = screen.getByRole("region", { name: "Kanalübersicht" });
-    expect(bereich.children).toHaveLength(2);
-    expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
-    expect(bereich.children[1]).toHaveClass("sub-inspector");
+    expect(bereich.children).toHaveLength(1);
+    const listDetail = bereich.children[0];
+    expect(listDetail).toHaveClass("list-detail", "list-detail--open");
+    expect(listDetail?.children[0]).toHaveClass("list-detail__list");
+    expect(listDetail?.children[2]).toHaveClass("list-detail__inspector");
+    expect(listDetail?.querySelector(".list-detail__inspector")?.firstElementChild).toHaveClass("sub-inspector");
   });
 
   it("closes the platform channel inspector by button and Escape, returning focus to the row", async () => {
@@ -229,10 +232,11 @@ describe("Platform level", () => {
 
     const bereich = await screen.findByRole("region", { name: "Kanalübersicht" });
     expect(bereich.children).toHaveLength(1);
+    expect(bereich.children[0]).not.toHaveClass("list-detail--open");
     const plus = within(bereich).getByRole("button", { name: "Kanal freigeben" });
     fireEvent.click(plus);
     const freigabe = await screen.findByRole("region", { name: "Kanal freigeben" });
-    expect(bereich.children).toHaveLength(2);
+    expect(bereich.children[0]).toHaveClass("list-detail--open");
 
     const row = await screen.findByRole("row", { name: /alpha_login/ });
     fireEvent.click(row);

@@ -1,6 +1,6 @@
 import { maintainAppAccessToken } from "./app-token";
 import { maintainBotIdentity } from "./bot-maintenance";
-import { purgeOldEventLogEntries } from "./event-log";
+import { EVENT_LOG_DAILY_TRIM_HOUR, purgeOldEventLogEntries, trimEventLogToLimit } from "./event-log";
 import { maintainLoginIdentities } from "./login-maintenance";
 import {
   purgeOldEventSubMessages,
@@ -15,14 +15,18 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
 ) => {
   const now = new Date().toISOString();
   const eventSubCutoff = eventSubMessageCutoff(now);
-  const work = Promise.all([
+  const tasks = [
     purgeOldEventLogEntries(env.DB, now),
     purgeOldEventSubMessages(env.DB, eventSubCutoff),
     maintainLoginIdentities(env, now),
     maintainBotIdentity(env, now),
     maintainAppAccessToken(env, now),
     maintainEventSubSubscriptions(env, now),
-  ]).then(() => undefined);
+  ];
+  // The count trim is a full-table scan (see EVENT_LOG_LIMIT's comment) --
+  // cheap once a day, not something every hourly tick should pay for.
+  if (new Date(now).getUTCHours() === EVENT_LOG_DAILY_TRIM_HOUR) tasks.push(trimEventLogToLimit(env.DB));
+  const work = Promise.all(tasks).then(() => undefined);
   executionContext.waitUntil(work);
   await work;
 };

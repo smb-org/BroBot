@@ -1,61 +1,13 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 test.use({ locale: "de-DE" });
-
-const breadcrumbSegmentKeys = ["brand-mark", "channel", "area", "module"] as const;
-
-const assertBreadcrumbGeometry = async (page: Page): Promise<void> => {
-  const measurement = await page.locator(".topbar__breadcrumb").evaluate((breadcrumb) => {
-    const topbar = breadcrumb.closest<HTMLElement>(".topbar");
-    if (topbar === null) throw new Error("Die Brotkrume liegt nicht in der Kopfleiste.");
-
-    const segmentElements = [
-      { key: "brand-mark", classNames: ["brand-mark"] },
-      { key: "channel", classNames: ["topbar__channel-switch", "topbar__channel-segment"] },
-      { key: "area", classNames: ["topbar__breadcrumb-area"] },
-      { key: "module", classNames: ["topbar__breadcrumb-module"] },
-    ].map(({ key, classNames }) => {
-      const element = Array.from(breadcrumb.children).find((child) => classNames.some((className) => child.classList.contains(className)));
-      if (!(element instanceof HTMLElement)) throw new Error(`Brotkrumen-Segment fehlt: ${key}`);
-      const rect = element.getBoundingClientRect();
-      return { key, left: rect.left, right: rect.right };
-    });
-    const separators = Array.from(breadcrumb.querySelectorAll<HTMLElement>(".topbar__breadcrumb-separator"));
-    const gap = Number.parseFloat(getComputedStyle(breadcrumb).columnGap);
-    const topbarRect = topbar.getBoundingClientRect();
-    return {
-      topbar: { left: topbarRect.left, right: topbarRect.right, width: topbarRect.width },
-      segments: segmentElements,
-      separatorWidths: separators.map((separator) => separator.getBoundingClientRect().width),
-      gap,
-    };
-  });
-
-  expect(measurement.segments.map(({ key }) => key)).toEqual([...breadcrumbSegmentKeys]);
-  expect([...measurement.segments].sort((first, second) => first.left - second.left).map(({ key }) => key)).toEqual([...breadcrumbSegmentKeys]);
-  const leftHalf = measurement.topbar.left + measurement.topbar.width / 2;
-  const maxSeparatorWidth = Math.max(...measurement.separatorWidths);
-  // Two flex gaps and one separator sit between segments; 1px allows for subpixel rounding.
-  const maximumSegmentGap = measurement.gap * 2 + maxSeparatorWidth + 1;
-
-  for (const segment of measurement.segments) {
-    expect(segment.left).toBeGreaterThanOrEqual(measurement.topbar.left);
-    expect(segment.right).toBeLessThanOrEqual(leftHalf);
-    expect(segment.right).toBeLessThanOrEqual(measurement.topbar.right);
-  }
-  for (const [index, segment] of measurement.segments.entries()) {
-    const nextSegment = measurement.segments[index + 1];
-    if (nextSegment === undefined) continue;
-    expect(nextSegment.left - segment.right).toBeLessThanOrEqual(maximumSegmentGap);
-  }
-};
 
 test("dashboard and overlay load as separate surfaces", async ({ page }) => {
   await page.route("**/api/channels", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ channels: [] }),
+      body: JSON.stringify({ channels: [], bot: { status: "connected", reason: null, updatedAt: "2026-09-20T08:00:00.000Z" } }),
     });
   });
   await page.goto("/");
@@ -107,7 +59,7 @@ test("the real worker protects the dashboard and shows the login", async ({ page
   await expect(page.getByRole("link", { name: "Mit Twitch anmelden" })).toBeVisible();
 });
 
-test("the breadcrumb segments stay together at every viewport width", async ({ page }) => {
+test("the sidebar stays reachable across every viewport width -- inline above 768px, behind a burger drawer below it", async ({ page }) => {
   const channel = {
     channelId: "kanal-e2e",
     login: "brotkrumen-kanal",
@@ -130,7 +82,7 @@ test("the breadcrumb segments stay together at every viewport width", async ({ p
   await page.route("**/api/channels**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel] }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel], bot: channel.bot }) });
       return;
     }
     if (pathname === "/api/channels/kanal-e2e/overview") {
@@ -155,8 +107,135 @@ test("the breadcrumb segments stay together at every viewport width", async ({ p
   await page.goto("/channels/kanal-e2e/modules/text_commands");
   await expect(page.getByRole("heading", { name: "Textbefehle", level: 1 })).toBeVisible();
 
+  const sidebar = page.getByRole("navigation", { name: "Hauptnavigation" });
+  const burger = page.getByRole("button", { name: "Seitenleiste öffnen" });
+
+  // Above the md breakpoint (768px): the sidebar sits inline, no burger needed.
   for (const width of [1280, 1920, 3440]) {
     await page.setViewportSize({ width, height: 900 });
-    await assertBreadcrumbGeometry(page);
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeVisible();
+    await expect(burger).toBeHidden();
   }
+
+  // Below it: the sidebar becomes a drawer, off-canvas until the burger
+  // opens it -- Mantine slides it out with a transform rather than
+  // `display: none`, so it stays "visible" by Playwright's own definition
+  // and the check has to be about where it is, not whether it's shown.
+  await page.setViewportSize({ width: 600, height: 900 });
+  await expect(burger).toBeVisible();
+  await expect(sidebar).not.toBeInViewport();
+  await burger.click();
+  await expect(sidebar).toBeInViewport();
+  await expect(sidebar.getByRole("link", { name: "Kanal" })).toBeVisible();
+
+  // The channel select drops to its own full-width row alongside the burger.
+  const brandBox = await page.getByRole("link", { name: "BroBot" }).boundingBox();
+  const channelSelectBox = await page.getByRole("combobox", { name: "Kanal auswählen" }).boundingBox();
+  expect(brandBox).not.toBeNull();
+  expect(channelSelectBox).not.toBeNull();
+  expect(channelSelectBox?.y ?? 0).toBeGreaterThan((brandBox?.y ?? 0) + (brandBox?.height ?? 0) - 1);
+});
+
+test("ListDetail shows the two-column form at 1280px, the second monitor next to OBS the old 1360px threshold missed", async ({ page }) => {
+  const channel = {
+    channelId: "kanal-e2e",
+    login: "brotkrumen-kanal",
+    displayName: "Brotkrumen-Kanal",
+    role: "manager",
+    broadcasterConnection: "connected",
+    channelBotConsent: "granted",
+    bot: { status: "connected", reason: null, updatedAt: "2026-09-20T08:00:00.000Z" },
+    moderator: { isModerator: true, checkedAt: "2026-09-20T08:00:00.000Z", reason: null },
+    chatSubscription: { status: "enabled", subscriptionId: "abo-e2e", reason: null, updatedAt: "2026-09-20T08:00:00.000Z" },
+    tokens: {
+      botExpiresAt: "2099-09-20T08:00:00.000Z",
+      loginStatus: "connected",
+      loginReason: null,
+      loginExpiresAt: "2099-09-20T08:00:00.000Z",
+    },
+    lastError: null,
+  };
+
+  await page.route("**/api/channels**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/channels") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels: [channel], bot: channel.bot }) });
+      return;
+    }
+    if (pathname === "/api/channels/kanal-e2e/overview") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...channel, activeModules: [{ moduleId: "text_commands", settings: "{}" }] }),
+      });
+      return;
+    }
+    if (pathname === "/api/channels/kanal-e2e/modules") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] }),
+      });
+      return;
+    }
+    if (pathname === "/api/channels/kanal-e2e/modules/text_commands/commands") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ commands: [{
+          channelId: "kanal-e2e",
+          name: "hallo",
+          text: "Hallo {user}",
+          kind: "text",
+          enabled: true,
+          minimumTier: "everyone",
+          cooldownSeconds: 5,
+          lastUsedAt: null,
+          createdAt: "2026-09-19T12:00:00.000Z",
+          updatedAt: "2026-09-19T12:00:00.000Z",
+        }] }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+  });
+
+  await page.goto("/channels/kanal-e2e/modules/text_commands");
+  await expect(page.getByRole("heading", { name: "Textbefehle", level: 1 })).toBeVisible();
+
+  const list = page.getByRole("region", { name: "Befehle", exact: true });
+  const row = page.getByRole("row", { name: /!hallo/ });
+  const inspector = page.getByRole("region", { name: "Eigenschaften von !hallo" });
+
+  // At 1280px -- narrower than the old, purely-derived 1360px threshold,
+  // and the actual second monitor next to OBS this fix targets -- selecting
+  // a row must show list and inspector side by side, not the editor
+  // dropping below the list with the right half staying empty.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await row.click();
+  await expect(inspector).toBeVisible();
+  const listBoxDesktop = await list.boundingBox();
+  const inspectorBoxDesktop = await inspector.boundingBox();
+  expect(listBoxDesktop).not.toBeNull();
+  expect(inspectorBoxDesktop).not.toBeNull();
+  // Side by side: the inspector starts at or after the list's right edge,
+  // and roughly on the same row rather than further down the page.
+  expect(inspectorBoxDesktop?.x ?? 0).toBeGreaterThanOrEqual((listBoxDesktop?.x ?? 0) + (listBoxDesktop?.width ?? 0) - 1);
+  expect(Math.abs((inspectorBoxDesktop?.y ?? 0) - (listBoxDesktop?.y ?? 0))).toBeLessThan(80);
+  expect(inspectorBoxDesktop?.width ?? 0).toBeCloseTo(420, -1);
+
+  // Counter-probe: below 1024px the same selection must NOT produce that
+  // two-column form -- the inspector floats over the list as a drawer
+  // instead, sized to the drawer's own 480px rather than the column's
+  // 420px, and overlapping the list horizontally rather than sitting
+  // beside it.
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect(inspector).toBeVisible();
+  const listBoxNarrow = await list.boundingBox();
+  const inspectorBoxNarrow = await inspector.boundingBox();
+  expect(listBoxNarrow).not.toBeNull();
+  expect(inspectorBoxNarrow).not.toBeNull();
+  expect(inspectorBoxNarrow?.width ?? 0).toBeCloseTo(480, -1);
+  expect(inspectorBoxNarrow?.x ?? 0).toBeLessThan((listBoxNarrow?.x ?? 0) + (listBoxNarrow?.width ?? 0));
 });

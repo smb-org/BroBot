@@ -47,10 +47,13 @@ describe("Module route during client-side navigation", () => {
     const secondResponse = new Promise<Response>((resolve) => { resolveSecondResponse = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), window.location.origin).pathname;
-      if (path === "/api/channels") return response({ channels: [channel] });
+      if (path === "/api/channels") return response({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/overview") {
         overviewAufrufe += 1;
         return overviewAufrufe === 1 ? response(activeState) : secondResponse;
+      }
+      if (path === "/api/channels/kanal-a/modules") {
+        return response({ modules: [{ id: "aktiv", enabled: true, settings: "{}" }] });
       }
       return response({}, 404);
     }));

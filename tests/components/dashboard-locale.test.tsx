@@ -32,7 +32,7 @@ describe("Panel document language", () => {
     };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);
-      if (url.pathname === "/api/channels") return Promise.resolve(new Response(JSON.stringify({ channels: [channel] }), { status: 200 }));
+      if (url.pathname === "/api/channels") return Promise.resolve(new Response(JSON.stringify({ channels: [channel], bot: channel.bot }), { status: 200 }));
       if (url.pathname.endsWith("/system")) return Promise.resolve(new Response(JSON.stringify({
         broadcasterConnection: "connected", bot: channel.bot, botPermissions: { missingScopes: [] }, chatSubscription: channel.chatSubscription,
         subscriptions: [{ subscriptionType: "channel.raid", variant: "incoming", version: "1", subscriptionId: "raid-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" }], tokens: channel.tokens,

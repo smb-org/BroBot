@@ -1,6 +1,6 @@
 import type { ChannelRole } from "./contracts/values";
 
-/** Die einzige auf der Strecke verwendete Protokollversion. */
+/** The only protocol version used on the wire. */
 export type RealtimeProtocolVersion = 1;
 
 export type RealtimeMessageType = "system.hello" | "event_log.new";

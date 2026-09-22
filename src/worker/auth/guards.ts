@@ -1,9 +1,10 @@
 import { createMiddleware } from "hono/factory";
 
 import { getPlatformUserIds } from "../config";
+import { oauthError } from "./oauth-error-texts";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../module-authorization";
-import type { AuthorizeModuleMutation, PrepareModuleAudit } from "../../modules/contract";
-import { prepareModuleAudit } from "../module-audit";
+import type { AuthorizeModuleMutation, PrepareModuleAudit, WriteModuleAudit } from "../../modules/contract";
+import { prepareModuleAudit, writeModuleAudit } from "../module-audit";
 import { authorizeChannelAccess } from "./authorization";
 import type { ChannelRole } from "../../contracts/values";
 import { verifyCsrfRequest } from "./csrf";
@@ -22,6 +23,7 @@ export interface ChannelAuthorizationVariables {
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
   prepareModuleAudit: PrepareModuleAudit;
+  writeModuleAudit: WriteModuleAudit;
 }
 
 export interface SessionAuthorizationVariables {
@@ -52,10 +54,20 @@ const csrfExemptMethods = new Set(["GET", "HEAD", "OPTIONS"]);
 
 const nowIso = (): string => new Date().toISOString();
 
-export const requireChannelAuthorization = () => createMiddleware<ChannelAuthorizationEnvironment>(
+const loginRedirectForRequest = (request: Request): string => {
+  const url = new URL(request.url);
+  const returnTo = `${url.pathname}${url.search}`;
+  return `/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
+};
+
+const requireChannelAuthorizationFor = (browserEntry: boolean) => createMiddleware<ChannelAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
-    if (session === null) return context.text("Session fehlt.", 401);
+    if (session === null) {
+      return browserEntry
+        ? context.redirect(loginRedirectForRequest(context.req.raw), 302)
+        : context.json({ error: "session_missing" }, 401);
+    }
 
     if (!csrfExemptMethods.has(context.req.method) && !await verifyCsrfRequest(
       context.req.raw,
@@ -63,15 +75,19 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
       context.env.SESSION_COOKIE_KEYS,
       nowIso(),
     )) {
-      return context.text("CSRF-Token fehlt oder ist ungültig.", 403);
+      return context.json({ error: "csrf_invalid" }, 403);
     }
 
     const channelId = context.req.param("channelId");
     if (channelId === undefined || channelId.length === 0) {
-      return context.text("Kanal fehlt.", 400);
+      return context.json({ error: "channel_missing" }, 400);
     }
     const role = await authorizeChannelAccess(context.env.DB, session, channelId);
-    if (role === null) return context.text("Kanalzugriff verweigert.", 403);
+    if (role === null) {
+      return browserEntry
+        ? oauthError(context, "channel_access_denied", 403)
+        : context.json({ error: "channel_access_denied" }, 403);
+    }
 
     context.set("session", session);
     context.set("channelRole", role);
@@ -80,14 +96,20 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
     context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
     context.set("prepareModuleAudit", (entry, changedAt) =>
       prepareModuleAudit(context.env.DB, session.userId, changedAt, entry));
+    context.set("writeModuleAudit", (entry, changedAt) =>
+      writeModuleAudit(context.env.DB, session.userId, changedAt, entry));
     await next();
   },
 );
 
-export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvironment>(
+const requirePlatformAuthorizationFor = (browserEntry: boolean) => createMiddleware<PlatformAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
-    if (session === null) return context.text("Session fehlt.", 401);
+    if (session === null) {
+      return browserEntry
+        ? context.redirect(loginRedirectForRequest(context.req.raw), 302)
+        : context.json({ error: "session_missing" }, 401);
+    }
 
     if (!csrfExemptMethods.has(context.req.method) && !await verifyCsrfRequest(
       context.req.raw,
@@ -95,11 +117,13 @@ export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvir
       context.env.SESSION_COOKIE_KEYS,
       nowIso(),
     )) {
-      return context.text("CSRF-Token fehlt oder ist ungültig.", 403);
+      return context.json({ error: "csrf_invalid" }, 403);
     }
 
     if (!getPlatformUserIds(context.env).has(session.userId)) {
-      return context.text("Kein Betreiberzugang.", 403);
+      return browserEntry
+        ? oauthError(context, "platform_access_denied", 403)
+        : context.json({ error: "platform_access_denied" }, 403);
     }
 
     context.set("session", session);
@@ -108,10 +132,16 @@ export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvir
   },
 );
 
+export const requireChannelAuthorization = () => requireChannelAuthorizationFor(false);
+export const requireBrowserChannelAuthorization = () => requireChannelAuthorizationFor(true);
+
+export const requirePlatform = () => requirePlatformAuthorizationFor(false);
+export const requireBrowserPlatformAuthorization = () => requirePlatformAuthorizationFor(true);
+
 export const requireSessionAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
-    if (session === null) return context.text("Session fehlt.", 401);
+    if (session === null) return context.json({ error: "session_missing" }, 401);
     context.set("session", session);
     await next();
   },

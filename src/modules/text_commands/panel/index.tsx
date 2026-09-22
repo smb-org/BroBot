@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import { dashboardCommonTexts, type DashboardLanguage } from "../../../dashboard/locale";
+import { ListDetail, SubInspector, useInspectorSelection } from "../../../dashboard/ui";
 import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand, type TextCommandMinimumTier } from "../contracts";
 import { deleteTextCommand, loadTextCommands, createTextCommand, toggleTextCommand, setTextCommandMinimumTier, saveTextCommand } from "./service";
 import { textCommandsTexts } from "./locale";
@@ -21,69 +22,6 @@ interface TextCommandRowProperties {
 }
 
 type TextCommandEditorProperties = Pick<TextCommandRowProperties, "channelId" | "language" | "initial" | "onChanged" | "canManageContent"> & { onClose: () => void };
-
-interface TextCommandsSelection {
-  selectedKey: string | null;
-  select: (key: string) => void;
-  rowRef: (key: string) => (row: HTMLTableRowElement | null) => void;
-  close: () => void;
-}
-
-interface TextCommandsSubInspectorProperties {
-  ariaLabel: string;
-  title: ReactNode;
-  identifier?: ReactNode;
-  onClose: () => void;
-  children: ReactNode;
-}
-
-const TextCommandsSubInspector = ({ ariaLabel, title, identifier, onClose, children }: TextCommandsSubInspectorProperties): ReactElement => (
-  <section className="command-inspector sub-inspector config-section" aria-label={ariaLabel} onKeyDown={(event) => {
-    if (event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    onClose();
-  }}>
-    <div className="inspector-section__heading">
-      <h3>{title}</h3>
-      {identifier === undefined ? null : <span className="mono muted">{identifier}</span>}
-      <button className="button button--quiet inspector-close" type="button" aria-label={dashboardCommonTexts().close} onClick={onClose}>
-        <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M6 6l12 12M18 6 6 18" />
-        </svg>
-      </button>
-    </div>
-    {children}
-  </section>
-);
-
-const useTextCommandsSelection = (): TextCommandsSelection => {
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const selectedKeyRef = useRef<string | null>(null);
-  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
-
-  const select = useCallback((key: string): void => {
-    selectedKeyRef.current = key;
-    setSelectedKey(key);
-  }, []);
-
-  const rowRef = useCallback((key: string) => (row: HTMLTableRowElement | null): void => {
-    if (row === null) {
-      rowRefs.current.delete(key);
-    } else {
-      rowRefs.current.set(key, row);
-    }
-  }, []);
-
-  const close = useCallback((): void => {
-    const key = selectedKeyRef.current;
-    selectedKeyRef.current = null;
-    setSelectedKey(null);
-    if (key !== null) rowRefs.current.get(key)?.focus();
-  }, []);
-
-  return { selectedKey, select, rowRef, close };
-};
 
 const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageContent, onClose }: TextCommandEditorProperties): ReactElement => {
   const labels = textCommandsTexts(language);
@@ -141,8 +79,8 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
   };
 
   return (
-    <TextCommandsSubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.columns.last} {relativeTime(initial.lastUsedAt, labels)}</span>} onClose={onClose}>
-      {!canManageContent ? <p className="sperrgrund">{labels.managementLocked}</p> : null}
+    <SubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.columns.last} {relativeTime(initial.lastUsedAt, labels)}</span>} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={onClose}>
+      {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
       <label className="config-field config-field--mittel">
         {labels.name}
         <input value={name} onChange={(event) => { setName(event.target.value); }} disabled={!canManageContent || busy} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
@@ -187,7 +125,7 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
         </div>
       ) : null}
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-    </TextCommandsSubInspector>
+    </SubInspector>
   );
 };
 
@@ -209,6 +147,14 @@ const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: 
   }
 };
 
+/**
+ * Four columns -- name, response, minimum level, toggle. Kind is readable
+ * from the response itself (a "list" command shows "—", same as before);
+ * cooldown and "last used" moved into the inspector (`TextCommandEditor`'s
+ * cooldown field, and the identifier line above) rather than staying
+ * visible in the list -- an accepted cost, not a gap. See "The
+ * text-commands table loses two columns" in the epic's task description.
+ */
 const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canManageContent, toggleBusy, onToggle, minimumBusy, onMinimumChange }: TextCommandRowProperties): ReactElement => {
   const labels = textCommandsTexts(language);
   const minimumDisabledReason = canManageContent ? undefined : labels.minimumTierLocked;
@@ -216,10 +162,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
   return (
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
-      <td>{initial.kind === "text" ? labels.kindText : labels.kindList}</td>
-      <td className="tabelle__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
-      <td className="mono">{initial.cooldownSeconds}</td>
-      <td className="tabelle__last-used">{relativeTime(initial.lastUsedAt, labels)}</td>
+      <td className="table__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
       <td>
         <select
           aria-label={labels.minimumTierFor(initial.name)}
@@ -251,10 +194,10 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
   );
 };
 
-export const TextCommandsPanel = ({ channelId, language, canManage: canManageContent = true, onCloseInspector }: { channelId: string; language?: DashboardLanguage; canManage?: boolean; onCloseInspector?: () => void }): ReactElement => {
+export const TextCommandsPanel = ({ channelId, language, canManage: canManageContent = true, onCloseInspector, initialSelection }: { channelId: string; language?: DashboardLanguage; canManage?: boolean; onCloseInspector?: () => void; initialSelection?: string }): ReactElement => {
   const labels = textCommandsTexts(language);
   const [commands, setCommands] = useState<TextCommand[]>([]);
-  const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useTextCommandsSelection();
+  const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useInspectorSelection<string>();
   const [createOpen, setCreateOpen] = useState(false);
   const createButton = useRef<HTMLButtonElement | null>(null);
   const [loading, setLoading] = useState(true);
@@ -296,6 +239,12 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
     return () => { active = false; };
   }, [channelId, labels.error]);
 
+  // Spotlight deep link (#164): select the command it named, once it's loaded.
+  useEffect(() => {
+    if (initialSelection === undefined) return;
+    if (commands.some((command) => command.name === initialSelection)) selectName(initialSelection);
+  }, [commands, initialSelection, selectName]);
+
   const selected = useMemo(() => commands.find((command) => command.name === selectedName) ?? null, [commands, selectedName]);
   const closeInspector = useCallback((): void => {
     closeSelection();
@@ -310,6 +259,10 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
     setCreateOpen(false);
     createButton.current?.focus();
   };
+  const closeFloating = useCallback((): void => {
+    if (selected !== null) { closeInspector(); return; }
+    if (createOpen) closeCreate();
+  }, [selected, closeInspector, createOpen]);
   const nameValid = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name.trim());
   const canCreate = nameValid && (kind === "list" || text.trim().length > 0);
 
@@ -362,57 +315,60 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
     }
   };
 
+  const list = (
+    <section className="command-list config-section" aria-label={labels.list}>
+      <div className="section-heading">
+        <h2>{labels.list}</h2>
+        <button ref={createButton} className="button button--quiet inspector-close" type="button" aria-label={labels.add} onClick={openCreate}>
+          <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+      </div>
+      {loading ? <p className="loading-line">{labels.load}</p> : null}
+      {error === null ? null : <p className="form-error" role="alert">{error}</p>}
+      {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
+      {!loading && error === null && commands.length > 0 ? <div className="table-wrap"><table className="table"><thead><tr><th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.text}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setCreateOpen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
+    </section>
+  );
+
+  const inspector = selected !== null ? (
+    <TextCommandEditor key={selected.name} channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} />
+  ) : createOpen ? (
+    <SubInspector ariaLabel={labels.add} title={labels.add} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={closeCreate}>
+      <form className="config-section" aria-busy={creating} onSubmit={(event) => { event.preventDefault(); void create(); }}>
+        <fieldset disabled={!canManageContent || creating}>
+        {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
+        <label className="config-field config-field--mittel">
+          {labels.name}
+          <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />
+          <span className="muted">{labels.nameHint}</span>
+        </label>
+        <label className="config-field config-field--schmal">
+          {labels.kind}
+          <select aria-label={labels.kind} value={kind} onChange={(event) => { setKind(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
+            <option value="text">{labels.kindText}</option>
+            <option value="list">{labels.kindList}</option>
+          </select>
+        </label>
+        {kind === "text" ? <label className="config-field config-field--breit">
+          {labels.text}
+          <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent} />
+        </label> : null}
+        <label className="config-field config-field--schmal">
+          {labels.cooldown}
+          <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSeconds(event.target.value === "" ? "" : Number(event.target.value)); }} />
+          {cooldownError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
+        </label>
+        <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.add}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (kind === "text" ? labels.responseMissing : labels.nameMissing) : (kind === "text" ? labels.nameAndResponseMissing : labels.nameMissing)}</span>}</div>
+        </fieldset>
+      </form>
+    </SubInspector>
+  ) : null;
+
   return (
     <section className="module-stack command-panel" aria-label={labels.title}>
-      <section className={`inspektor-bereich${selected === null && !createOpen ? "" : " inspektor-bereich--offen"}`}>
-        <div className="inspektor-bereich__liste">
-          <section className="command-list config-section" aria-label={labels.list}>
-            <div className="section-heading">
-              <h2>{labels.list}</h2>
-              <button ref={createButton} className="button button--quiet inspector-close" type="button" aria-label={labels.add} onClick={openCreate}>
-                <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              </button>
-            </div>
-            {loading ? <p className="loading-line">{labels.load}</p> : null}
-            {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-            {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-            {!loading && error === null && commands.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.text}</th><th scope="col">{labels.columns.cooldown}</th><th scope="col">{labels.columns.last}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setCreateOpen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
-          </section>
-        </div>
-        {selected !== null ? <TextCommandEditor key={selected.name} channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} /> : createOpen ? (
-          <TextCommandsSubInspector ariaLabel={labels.add} title={labels.add} onClose={closeCreate}>
-            <form className="config-section" aria-busy={creating} onSubmit={(event) => { event.preventDefault(); void create(); }}>
-              <fieldset disabled={!canManageContent || creating}>
-              {!canManageContent ? <p className="sperrgrund">{labels.managementLocked}</p> : null}
-              <label className="config-field config-field--mittel">
-                {labels.name}
-                <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />
-                <span className="muted">{labels.nameHint}</span>
-              </label>
-              <label className="config-field config-field--schmal">
-                {labels.kind}
-                <select aria-label={labels.kind} value={kind} onChange={(event) => { setKind(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
-                  <option value="text">{labels.kindText}</option>
-                  <option value="list">{labels.kindList}</option>
-                </select>
-              </label>
-              {kind === "text" ? <label className="config-field config-field--breit">
-                {labels.text}
-                <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent} />
-              </label> : null}
-              <label className="config-field config-field--schmal">
-                {labels.cooldown}
-                <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSeconds(event.target.value === "" ? "" : Number(event.target.value)); }} />
-                {cooldownError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
-              </label>
-              <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.add}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (kind === "text" ? labels.responseMissing : labels.nameMissing) : (kind === "text" ? labels.nameAndResponseMissing : labels.nameMissing)}</span>}</div>
-              </fieldset>
-            </form>
-          </TextCommandsSubInspector>
-        ) : null}
-      </section>
+      <ListDetail list={list} inspector={inspector} onCloseInspector={closeFloating} />
     </section>
   );
 };

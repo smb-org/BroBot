@@ -7,10 +7,10 @@ const pathFor = (channelId: string, name?: string): string =>
 const json = async <T>(response: Response): Promise<T> => {
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
+    const code = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
       ? body.error
-      : "Anfrage fehlgeschlagen.";
-    throw new PanelApiError(response.status, message, body);
+      : null;
+    throw new PanelApiError(response.status, code, body);
   }
   return body as T;
 };

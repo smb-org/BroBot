@@ -1,4 +1,5 @@
 import { actorGuard, bindActorGuard, type ActorContext } from "./guards";
+import { MANAGING_ROLES, type AuditWriteAction } from "../../contracts/values";
 import { prepareModuleAudit as prepareHostModuleAudit } from "../module-audit";
 
 export interface ChannelModuleRecord {
@@ -62,7 +63,7 @@ export const createChannelModuleWithAudit = async (
   db: D1Database,
   actor: ActorContext,
   module: ChannelModuleRecord,
-  action: string,
+  action: AuditWriteAction,
   changedAt: string,
   dependentMutations: readonly D1PreparedStatement[] = [],
 ): Promise<boolean> => {
@@ -73,7 +74,7 @@ export const createChannelModuleWithAudit = async (
         SELECT 1 FROM channel_modules
          WHERE channel_id = ? AND module_id = ?
       )
-      ${actorGuard("'broadcaster', 'manager'")}`,
+      ${actorGuard(MANAGING_ROLES)}`,
   ).bind(
     module.channelId,
     module.moduleId,
@@ -101,7 +102,7 @@ export const updateChannelModuleWithAudit = async (
   moduleId: string,
   enabled: boolean,
   settings: string,
-  action: string,
+  action: AuditWriteAction,
   changedAt: string,
   dependentMutations: readonly D1PreparedStatement[] = [],
 ): Promise<boolean> => {
@@ -114,7 +115,7 @@ export const updateChannelModuleWithAudit = async (
       WHERE channel_id = ? AND module_id = ?
         AND enabled = ?
         AND settings = ?
-      ${actorGuard("'broadcaster', 'manager'")}`,
+      ${actorGuard(MANAGING_ROLES)}`,
   ).bind(
     after.enabled ? 1 : 0,
     after.settings,
@@ -134,4 +135,3 @@ export const updateChannelModuleWithAudit = async (
   const results = await db.batch([mutation, audit, ...dependentMutations]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };
-

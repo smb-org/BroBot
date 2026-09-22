@@ -46,7 +46,7 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
 const renderModulePage = (modules = moduleStates, channels = [channel]): void => {
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
     const path = requestUrl(input).pathname;
-    if (path === "/api/channels") return jsonResponse({ channels });
+    if (path === "/api/channels") return jsonResponse({ channels, bot: channels[0]?.bot ?? null });
     if (path === "/api/channels/kanal-a/overview") return jsonResponse({ ...channel, activeModules: [] });
     if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules });
     return jsonResponse({}, 404);
@@ -55,46 +55,38 @@ const renderModulePage = (modules = moduleStates, channels = [channel]): void =>
   render(<DashboardApp />);
 };
 
-describe("Module switcher in the breadcrumb", () => {
+// The breadcrumb module switcher this file used to cover is gone -- the
+// sidebar's Modules group is now how a module page is reached and left.
+describe("Module navigation in the sidebar", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it("opens the channel's modules with icon and state text", async () => {
+  it("lists only the active modules with icon and status, not the inactive one", async () => {
     renderModulePage();
 
-    await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
-    const button = screen.getByRole("button", { name: "Modul auswählen: Textbefehle" });
-    fireEvent.click(button);
-
-    const listbox = screen.getByRole("listbox", { name: "Modul auswählen" });
-    expect(within(listbox).getAllByRole("option")).toHaveLength(3);
-    expect(within(listbox).getByRole("option", { name: /Textbefehle/ })).toHaveTextContent("Läuft");
-    expect(within(listbox).getByRole("option", { name: /Kanalereignisse/ })).toHaveTextContent("Aus");
-    expect(within(listbox).getByRole("option", { name: /Werbung/ })).toHaveTextContent("Läuft");
-    expect(within(listbox).queryByRole("option", { name: "Modulübersicht" })).not.toBeInTheDocument();
-    expect(within(listbox).getByRole("option", { name: /Textbefehle/ }).querySelector("svg")).toBeInTheDocument();
+    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getByRole("link", { name: "Textbefehle Läuft" }).querySelector("svg")).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Werbung Läuft" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: /Kanalereignisse/ })).not.toBeInTheDocument();
   });
 
-  it("switches straight from the list to the selected module's detail page", async () => {
+  it("switches straight from the sidebar to the selected module's detail page", async () => {
     renderModulePage(moduleStates, [channel, secondChannel]);
 
-    await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
-    fireEvent.click(screen.getByRole("button", { name: "Modul auswählen: Textbefehle" }));
-    const option = screen.getByRole("option", { name: /Kanalereignisse/ });
-    fireEvent.mouseDown(option);
-    fireEvent.click(option);
+    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
+    fireEvent.click(within(nav).getByRole("link", { name: "Werbung Läuft" }));
 
-    expect(await screen.findByRole("heading", { name: "Kanalereignisse", level: 1 })).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/channels/kanal-a/modules/channel_events");
+    expect(await screen.findByRole("heading", { name: "Werbung", level: 1 })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/channels/kanal-a/modules/ads");
   });
 
-  it("the Modules segment leads to the module overview", async () => {
+  it("the All-modules entry leads to the module overview", async () => {
     renderModulePage();
 
-    await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
-    const moduleLink = within(screen.getByRole("navigation", { name: "Brotkrume" })).getByRole("link", { name: "Module" });
+    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
+    const moduleLink = within(nav).getByRole("link", { name: "Modulübersicht" });
     expect(moduleLink).toHaveAttribute("href", "/channels/kanal-a/modules");
     fireEvent.click(moduleLink);
 
@@ -102,27 +94,11 @@ describe("Module switcher in the breadcrumb", () => {
     expect(window.location.pathname).toBe("/channels/kanal-a/modules");
   });
 
-  it("stays without a dropdown affordance when there is exactly one module", async () => {
+  it("still lists the single active module and the All-modules entry when only one module is active", async () => {
     renderModulePage([moduleStates[0] as typeof moduleStates[number]]);
 
-    await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
-    expect(screen.queryByRole("button", { name: /Modul auswählen/ })).not.toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Brotkrume" })).getByRole("link", { name: "Module" })).toBeInTheDocument();
-    expect(document.querySelector(".topbar__breadcrumb-module")).toHaveTextContent("Textbefehle");
-    expect(document.querySelector(".topbar__channel-chevron")).not.toBeInTheDocument();
-  });
-
-  it("closes the module switcher with Escape and returns focus", async () => {
-    renderModulePage();
-
-    await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
-    const button = screen.getByRole("button", { name: "Modul auswählen: Textbefehle" });
-    fireEvent.keyDown(button, { key: "Enter" });
-    const selectedOption = screen.getByRole("option", { name: /Textbefehle/ });
-    expect(selectedOption).toHaveFocus();
-
-    fireEvent.keyDown(selectedOption, { key: "Escape" });
-    expect(screen.queryByRole("listbox", { name: "Modul auswählen" })).not.toBeInTheDocument();
-    expect(button).toHaveFocus();
+    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getByRole("link", { name: "Textbefehle Läuft" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Modulübersicht" })).toBeInTheDocument();
   });
 });

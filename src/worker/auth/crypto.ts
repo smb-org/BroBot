@@ -25,7 +25,7 @@ export const getTokenEncryptionKeys = (environment: TokenEncryptionEnvironment):
   if (typeof environment.SESSION_ENCRYPTION_KEYS === "string" && environment.SESSION_ENCRYPTION_KEYS.length > 0) {
     return environment.SESSION_ENCRYPTION_KEYS;
   }
-  throw new Error("TOKEN_ENCRYPTION_KEYS fehlt.");
+  throw new Error("TOKEN_ENCRYPTION_KEYS is missing.");
 };
 
 interface EncryptionEnvelope {
@@ -74,7 +74,7 @@ const encodeBase64url = (value: ArrayBuffer | Uint8Array): string => {
 
 const encodeJson = (value: unknown): string => {
   const serialized = JSON.stringify(value);
-  if (typeof serialized !== "string") throw new Error("JSON-Wert konnte nicht serialisiert werden.");
+  if (typeof serialized !== "string") throw new Error("JSON value could not be serialized.");
   return encodeBase64url(encoder.encode(serialized));
 };
 
@@ -89,7 +89,7 @@ const decodeJson = (value: string): unknown => {
 const validateKeyEntry = (value: unknown): KeyEntry => {
   if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 ||
       typeof value.key !== "string" || !isBase64url32Byte(value.key)) {
-    throw new Error("Schlüsselring enthält einen ungültigen Schlüssel.");
+    throw new Error("Key ring contains an invalid key.");
   }
   return { id: value.id, key: value.key };
 };
@@ -99,13 +99,13 @@ export const parseKeyRing = (serialized: string): KeyRing => {
   try {
     value = JSON.parse(serialized) as unknown;
   } catch {
-    throw new Error("Schlüsselring ist kein gültiges JSON.");
+    throw new Error("Key ring is not valid JSON.");
   }
-  if (!isRecord(value)) throw new Error("Schlüsselring muss ein Objekt sein.");
+  if (!isRecord(value)) throw new Error("Key ring must be an object.");
   const active = validateKeyEntry(value.active);
   const retired = Array.isArray(value.retired) ? value.retired.map(validateKeyEntry) : [];
   const ids = new Set([active.id, ...retired.map((entry) => entry.id)]);
-  if (ids.size !== retired.length + 1) throw new Error("Schlüssel-IDs müssen eindeutig sein.");
+  if (ids.size !== retired.length + 1) throw new Error("Key IDs must be unique.");
   return { active, retired };
 };
 
@@ -134,7 +134,7 @@ export const hmacSha256 = async (value: string | Uint8Array, entry: KeyEntry): P
 
 export const hashOverlayToken = async (token: string, pepper: string): Promise<string> => {
   const pepperBytes = decodeBase64url(pepper);
-  if (pepperBytes.byteLength !== 32) throw new Error("Overlay-Pepper muss 32 Byte lang sein.");
+  if (pepperBytes.byteLength !== 32) throw new Error("Overlay pepper must be 32 bytes long.");
   const key = await crypto.subtle.importKey(
     "raw",
     toArrayBuffer(pepperBytes),

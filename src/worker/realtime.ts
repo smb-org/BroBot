@@ -9,6 +9,7 @@ import {
   listChannelIdsForUser,
 } from "./db/channels";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "./realtime-protocol";
+import type { ApiErrorCode } from "../contracts/values";
 
 interface RealtimeRouteEnvironment {
   Bindings: Env;
@@ -67,10 +68,10 @@ realtimeRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     if (!hasExpectedOrigin(context.req.raw, context.env.PUBLIC_ORIGIN)) {
-      return context.text("WebSocket-Herkunft ist ungültig.", 403);
+      return context.json({ error: "websocket_origin_invalid" satisfies ApiErrorCode }, 403);
     }
     if (!protocolOffered(context.req.raw.headers.get("Sec-WebSocket-Protocol"))) {
-      return context.text("Realtime-Protokoll wird nicht unterstützt.", 426);
+      return context.json({ error: "realtime_protocol_unsupported" satisfies ApiErrorCode }, 426);
     }
 
     const channelId = context.req.param("channelId");
@@ -107,7 +108,7 @@ export const revokeRealtimeUser = async (
     const object = channelObject(namespace, channelId);
     if (object !== null) await object.revokeUser(userId);
   } catch (error: unknown) {
-    console.warn("Realtime-Widerruf für Nutzer fehlgeschlagen.", error);
+    console.warn("Realtime revocation for user failed.", error);
   }
 };
 
@@ -120,7 +121,7 @@ export const revokeRealtimeToken = async (
     const object = channelObject(namespace, channelId);
     if (object !== null) await object.revokeToken(tokenId);
   } catch (error: unknown) {
-    console.warn("Realtime-Widerruf für Token fehlgeschlagen.", error);
+    console.warn("Realtime revocation for token failed.", error);
   }
 };
 
@@ -138,6 +139,6 @@ export const revokeRealtimeSessionForUser = async (
       if (object !== null) await object.revokeSession(sessionId);
     }));
   } catch (error: unknown) {
-    console.warn("Realtime-Widerruf für Sitzung fehlgeschlagen.", error);
+    console.warn("Realtime revocation for session failed.", error);
   }
 };

@@ -1,3 +1,4 @@
+import type { EventCode } from "../../contracts/values";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import type { AdsSettings } from "./contracts";
 import { decideAdBreak } from "./domain";
@@ -21,8 +22,8 @@ const diagnoseDetail = (
   };
 };
 
-const diagnosticCode = (event: ReturnType<typeof decideAdBreak>): string =>
-  event.kind === "announce" ? "ads.ankuendigung" : "ads.uebersprungen";
+const diagnosticCode = (event: ReturnType<typeof decideAdBreak>): EventCode =>
+  event.kind === "announce" ? "ads.announcement" : "ads.skipped";
 
 const textWithDuration = (template: string, durationSeconds: number): string => {
   const text = template.trim();

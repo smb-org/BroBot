@@ -115,7 +115,7 @@ describe("Platform admin level", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toBe("Kein Betreiberzugang.");
+    await expect(response.json()).resolves.toEqual({ error: "platform_access_denied" });
   });
 
   it("returns the cross-channel overview and searches users via Helix", async () => {
@@ -198,7 +198,7 @@ describe("Platform admin level", () => {
       {
         actor_user_id: platformId,
         actor_kind: "platform_admin",
-        action: "kanal.freigegeben",
+        action: "channel.released",
         channel_id: "kanal-7",
       },
     ]);
@@ -231,9 +231,9 @@ describe("Platform admin level", () => {
     expect(change.status).toBe(200);
     expect(remove.status).toBe(204);
     await expect(leseAudit(database)).resolves.toEqual(expect.arrayContaining([
-      { actor_user_id: platformId, actor_kind: "platform_admin", action: "mitglied.hinzugefuegt", channel_id: "kanal-a" },
-      { actor_user_id: platformId, actor_kind: "platform_admin", action: "mitglied.rolle_geaendert", channel_id: "kanal-a" },
-      { actor_user_id: platformId, actor_kind: "platform_admin", action: "mitglied.entfernt", channel_id: "kanal-a" },
+      { actor_user_id: platformId, actor_kind: "platform_admin", action: "member.added", channel_id: "kanal-a" },
+      { actor_user_id: platformId, actor_kind: "platform_admin", action: "member.role_changed", channel_id: "kanal-a" },
+      { actor_user_id: platformId, actor_kind: "platform_admin", action: "member.removed", channel_id: "kanal-a" },
     ]));
     await expect(leseAudit(database)).resolves.toHaveLength(3);
   });
@@ -257,7 +257,7 @@ describe("Platform admin level", () => {
       "SELECT full_consent FROM channels WHERE channel_id = ?",
     ).bind("kanal-a").first()).resolves.toEqual({ full_consent: 0 });
     await expect(leseAudit(database)).resolves.toEqual(expect.arrayContaining([
-      { actor_user_id: platformId, actor_kind: "platform_admin", action: "kanal.vollzustimmung_geaendert", channel_id: "kanal-a" },
+      { actor_user_id: platformId, actor_kind: "platform_admin", action: "channel.full_consent_changed", channel_id: "kanal-a" },
     ]));
     await expect(leseAudit(database)).resolves.toHaveLength(2);
   });
@@ -417,17 +417,17 @@ describe("Platform admin level", () => {
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
-    ).bind("audit-mitglied", "mitglied", "2026-09-18T00:00:01.000Z", "kanal-a", "mitglied.entfernt", "member").run();
+    ).bind("audit-mitglied", "mitglied", "2026-09-18T00:00:01.000Z", "kanal-a", "member.removed", "member").run();
     await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
-    ).bind("audit-betreiber-1", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "mitglied.hinzugefuegt", "platform_admin").run();
+    ).bind("audit-betreiber-1", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "member.added", "platform_admin").run();
     await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
-    ).bind("audit-betreiber-2", "betreiber", "2026-09-18T00:00:03.000Z", "kanal-a", "kanal.vollzustimmung_geaendert", "platform_admin").run();
+    ).bind("audit-betreiber-2", "betreiber", "2026-09-18T00:00:03.000Z", "kanal-a", "channel.full_consent_changed", "platform_admin").run();
 
     const firstResponse = await platformRouter.fetch(
       await requestFor(platformId, "/api/platform/audit?limit=1"),
@@ -458,8 +458,8 @@ describe("Platform admin level", () => {
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?), (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
     ).bind(
-      "audit-aufgelöst", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "kanal.freigegeben", "platform_admin",
-      "audit-ungelöst", "gelöscht", "2026-09-18T00:00:01.000Z", "kanal-a", "kanal.vollzustimmung_geaendert", "platform_admin",
+      "audit-aufgelöst", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "channel.released", "platform_admin",
+      "audit-ungelöst", "gelöscht", "2026-09-18T00:00:01.000Z", "kanal-a", "channel.full_consent_changed", "platform_admin",
     ).run();
     const twitch = vi.fn((input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());

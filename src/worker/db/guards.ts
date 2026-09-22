@@ -1,4 +1,17 @@
 import type { ChannelMemberRecord } from "./channel-members";
+import { CHANNEL_ROLES, MANAGING_ROLES, type ChannelRole } from "../../contracts/values";
+
+/**
+ * The only way SQL sees a role. `ChannelRole` is a closed union, so there is
+ * no value that could break out of the quotes -- these two are what "SQL
+ * gets role text only via helpers" means: no call site is allowed to inline
+ * `'broadcaster'` itself. `tests/unit/role-sql.test.ts` proves the rendered
+ * SQL of every guard below is byte-identical to what the literals produced
+ * before this existed, and a scan in the same file fails on a raw quoted
+ * role literal anywhere under `src/worker/`.
+ */
+export const sqlRole = (role: ChannelRole): string => `'${role}'`;
+export const sqlRoleList = (roles: readonly ChannelRole[]): string => roles.map(sqlRole).join(", ");
 
 /**
  * The actor of a mutation. sessionId is part of it because the mutation
@@ -19,7 +32,7 @@ export interface ActorContext {
  *
  * Bind order: sessionId, actorUserId, now, channelId.
  */
-export const actorGuard = (allowedRoles: string): string => `
+export const actorGuard = (allowedRoles: readonly ChannelRole[]): string => `
         AND EXISTS (
           SELECT 1
             FROM auth_sessions AS actor_session
@@ -33,7 +46,7 @@ export const actorGuard = (allowedRoles: string): string => `
              AND actor_session.expires_at > ?
              AND actor_identity.status <> 'revoked'
              AND actor.channel_id = ?
-             AND actor.role IN (${allowedRoles})
+             AND actor.role IN (${sqlRoleList(allowedRoles)})
         )`;
 
 export interface MutationGuard {
@@ -60,14 +73,8 @@ export const platformSessionGuard = (
   values: [actor.sessionId, actor.userId, now],
 });
 
-/**
- * Whoever grants the `broadcaster` role can afterward remove the previous
- * broadcaster — the last-broadcaster protection no longer applies at that
- * point, because two exist in the meantime. That's why only a broadcaster
- * may grant this role. The rule lives here and not only in the handler, so
- * it still applies even if the role changes between guard and mutation.
- */
-export const ANY_MEMBER_ROLES = "'broadcaster', 'manager', 'operator'";
+/** Every channel role -- the "betrieblich" threshold: all reads. */
+export const ANY_MEMBER_ROLES: readonly ChannelRole[] = CHANNEL_ROLES;
 
 /** Shared SQL check for the broadcaster's channel:bot consent. */
 export const channelBotConsentCondition = (channelAlias: string): string => `
@@ -83,12 +90,19 @@ export const channelBotConsentCondition = (channelAlias: string): string => `
              )
         )`;
 
+/**
+ * Whoever grants the `broadcaster` role can afterward remove the previous
+ * broadcaster — the last-broadcaster protection no longer applies at that
+ * point, because two exist in the meantime. That's why only a broadcaster
+ * may grant this role. The rule lives here and not only in the handler, so
+ * it still applies even if the role changes between guard and mutation.
+ */
 export const requiredActorRoles = (
   targetRole: ChannelMemberRecord["role"] | undefined,
   existingRole?: ChannelMemberRecord["role"],
-): string => targetRole === "broadcaster" || existingRole === "broadcaster"
-  ? "'broadcaster'"
-  : "'broadcaster', 'manager'";
+): readonly ChannelRole[] => targetRole === "broadcaster" || existingRole === "broadcaster"
+  ? ["broadcaster"]
+  : MANAGING_ROLES;
 
 export const bindActorGuard = (actor: ActorContext, channelId: string, now: string) =>
   [actor.sessionId, actor.userId, now, channelId] as const;
@@ -97,19 +111,19 @@ const soleBroadcasterPredicate = `
           AND (
             SELECT COUNT(*)
               FROM channel_members
-             WHERE channel_id = ? AND role = 'broadcaster'
+             WHERE channel_id = ? AND role = ${sqlRole("broadcaster")}
           ) <= 1`;
 
 export const lastBroadcasterGuard = `
         AND NOT (
-          role = 'broadcaster'
+          role = ${sqlRole("broadcaster")}
           ${soleBroadcasterPredicate}
         )`;
 
 export const lastBroadcasterRoleChangeGuard = `
         AND NOT (
-          role = 'broadcaster'
-          AND ? <> 'broadcaster'
+          role = ${sqlRole("broadcaster")}
+          AND ? <> ${sqlRole("broadcaster")}
           ${soleBroadcasterPredicate}
         )`;
 

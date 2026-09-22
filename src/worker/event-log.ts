@@ -1,7 +1,21 @@
 import type { ModuleDiagnostic } from "../modules/contract";
 
-const EVENT_LOG_LIMIT = 500;
+/**
+ * Per-channel cap, trimmed once a day (`trimEventLogToLimit`, called from
+ * the scheduled handler), not per insert. Measured: a per-insert trim's
+ * `LIMIT -1 OFFSET n` walks every row of the channel on every insert (query
+ * plan: SEARCH via `event_log_channel_created_idx`, so at this 10000 cap
+ * that's 10000 rows stepped per insert). On Cloudflare's free 5M-rows-read/
+ * day budget, that trim alone would allow roughly 500 events/day
+ * installation-wide before the budget is exhausted. A once-daily trim costs
+ * about one day's total row count once, not once per insert.
+ */
+const EVENT_LOG_LIMIT = 10000;
 const EVENT_LOG_RETENTION_DAYS = 14;
+
+/** UTC hour the scheduled handler runs the count trim in, once a day. The
+ *  14-day purge (`purgeOldEventLogEntries`) stays on every hourly tick. */
+export const EVENT_LOG_DAILY_TRIM_HOUR = 3;
 
 export interface WrittenModuleDiagnostic {
   eventId: string;
@@ -13,8 +27,8 @@ export interface WrittenModuleDiagnostic {
 
 /**
  * Writes module justifications as well as host-side action and outcome
- * diagnostics, and trims the per-channel count to the latest 500 rows
- * within the same D1 transaction.
+ * diagnostics. Does not trim -- see `EVENT_LOG_LIMIT`'s comment for why
+ * that moved off the insert path.
  */
 export const writeModuleDiagnostics = async (
   db: D1Database,
@@ -47,18 +61,7 @@ export const writeModuleDiagnostics = async (
     JSON.stringify(diagnostic.detail ?? {}),
     actorUserId,
   ));
-  const trim = db.prepare(
-    `DELETE FROM event_log
-      WHERE channel_id = ?
-        AND event_id IN (
-          SELECT event_id
-            FROM event_log
-           WHERE channel_id = ?
-           ORDER BY created_at DESC, event_id DESC
-           LIMIT -1 OFFSET ?
-        )`,
-  ).bind(channelId, channelId, EVENT_LOG_LIMIT);
-  await db.batch([...inserts, trim]);
+  await db.batch(inserts);
   return written;
 };
 
@@ -71,4 +74,23 @@ export const purgeOldEventLogEntries = async (db: D1Database, now: string): Prom
     `DELETE FROM event_log
       WHERE created_at < ?`,
   ).bind(cutoff).run();
+};
+
+/**
+ * Trims every channel to its newest `EVENT_LOG_LIMIT` rows, in one query
+ * across all channels via a window function -- called once a day from the
+ * scheduled handler, at `EVENT_LOG_DAILY_TRIM_HOUR`.
+ */
+export const trimEventLogToLimit = async (db: D1Database): Promise<void> => {
+  await db.prepare(
+    `DELETE FROM event_log
+      WHERE event_id IN (
+        SELECT event_id FROM (
+          SELECT event_id,
+                 ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY created_at DESC, event_id DESC) AS rank
+            FROM event_log
+        )
+       WHERE rank > ?
+      )`,
+  ).bind(EVENT_LOG_LIMIT).run();
 };

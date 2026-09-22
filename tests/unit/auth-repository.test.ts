@@ -58,6 +58,7 @@ import type {
 import type {
   ChannelMemberRecord,
 } from "../../src/worker/db/channel-members";
+import { MANAGING_ROLES } from "../../src/contracts/values";
 import { insertAppAccessToken } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
@@ -1244,9 +1245,9 @@ describe("auth D1 repository", () => {
         database,
         { userId: "user-a", sessionId: "session-b" },
         memberFor("kanal-a", "target-user", "operator"),
-        "mitglied.hinzugefügt",
+        "member.added",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1266,9 +1267,9 @@ describe("auth D1 repository", () => {
         database,
         { userId: "user-1", sessionId: "session-1" },
         memberFor("kanal-a", "target-user", "operator"),
-        "mitglied.hinzugefügt",
+        "member.added",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1291,9 +1292,9 @@ describe("auth D1 repository", () => {
         database,
         { userId: "user-1", sessionId: "session-1" },
         { ...memberFor("kanal-a", "target-user", "manager"), updatedAt: jetzt },
-        "mitglied.rolle_geändert",
+        "member.role_changed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1317,9 +1318,9 @@ describe("auth D1 repository", () => {
         { userId: "user-1", sessionId: "session-1" },
         "kanal-a",
         "target-user",
-        "mitglied.entfernt",
+        "member.removed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1341,9 +1342,9 @@ describe("auth D1 repository", () => {
         database,
         { userId: "user-1", sessionId: "session-1" },
         { ...memberFor("kanal-a", "target-user", "manager"), updatedAt: jetzt },
-        "mitglied.rolle_geändert",
+        "member.role_changed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1367,9 +1368,9 @@ describe("auth D1 repository", () => {
         { userId: "user-1", sessionId: "session-1" },
         "kanal-a",
         "target-user",
-        "mitglied.entfernt",
+        "member.removed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1391,9 +1392,9 @@ describe("auth D1 repository", () => {
         database,
         { userId: "user-1", sessionId: "session-1" },
         memberFor("kanal-b", "target-user", "operator"),
-        "mitglied.hinzugefügt",
+        "member.added",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-b", "target-user")).resolves.toBeNull();
@@ -1412,9 +1413,9 @@ describe("auth D1 repository", () => {
         database,
         { userId: "user-1", sessionId: "session-1" },
         memberFor("kanal-a", "target-user", "broadcaster"),
-        "mitglied.hinzugefügt",
+        "member.added",
         jetzt,
-        actorGuard("'broadcaster'"),
+        actorGuard(["broadcaster"]),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toBeNull();
@@ -1436,9 +1437,9 @@ describe("auth D1 repository", () => {
         database,
         { userId: "user-1", sessionId: "session-1" },
         { ...memberFor("kanal-a", "target-user", "broadcaster"), updatedAt: jetzt },
-        "mitglied.rolle_geändert",
+        "member.role_changed",
         jetzt,
-        actorGuard("'broadcaster'"),
+        actorGuard(["broadcaster"]),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1461,7 +1462,7 @@ describe("auth D1 repository", () => {
         database,
         { userId: "user-1", sessionId: "session-1" },
         { ...memberFor("kanal-a", "broadcaster-1", "manager"), updatedAt: jetzt },
-        "mitglied.rolle_geändert",
+        "member.role_changed",
         jetzt,
         actorGuard(requiredActorRoles("manager", "broadcaster")),
       ),
@@ -1487,7 +1488,7 @@ describe("auth D1 repository", () => {
         { userId: "user-1", sessionId: "session-1" },
         "kanal-a",
         "broadcaster-1",
-        "mitglied.entfernt",
+        "member.removed",
         jetzt,
         actorGuard(requiredActorRoles(undefined, "broadcaster")),
       ),
@@ -1512,9 +1513,9 @@ describe("auth D1 repository", () => {
         { userId: "user-1", sessionId: "session-1" },
         "kanal-a",
         "target-user",
-        "mitglied.entfernt",
+        "member.removed",
         jetzt,
-        actorGuard("'broadcaster', 'manager'"),
+        actorGuard(MANAGING_ROLES),
       ),
       async (database) => {
         await expect(readChannelMember(database, "kanal-a", "target-user")).resolves.toMatchObject({ role: "operator" });
@@ -1538,7 +1539,7 @@ describe("auth D1 repository", () => {
         database as unknown as D1Database,
         actor,
         memberFor("kanal-a", "target-user", "manager"),
-        "betreiber.mitglied.hinzugefügt",
+        "member.added",
         jetzt,
         platformSessionGuard(actor, jetzt),
         "platform_admin",
@@ -1547,7 +1548,7 @@ describe("auth D1 repository", () => {
       expect(changed).toBe(true);
       await expect(database.prepare(
         "SELECT actor_kind FROM audit_log WHERE action = ?",
-      ).bind("betreiber.mitglied.hinzugefügt").first()).resolves.toEqual({ actor_kind: "platform_admin" });
+      ).bind("member.added").first()).resolves.toEqual({ actor_kind: "platform_admin" });
     } finally {
       database.close();
     }

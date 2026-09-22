@@ -35,7 +35,7 @@ describe("channel events domain", () => {
       to_broadcaster_user_name: "Ziel",
       to_broadcaster_user_login: "ziel",
     })).toEqual([{
-      code: "channel_events.shoutout.gesendet",
+      code: "channel_events.shoutout.sent",
       detail: { target: "Ziel (@ziel)" },
     }]);
     expect(diagnose("channel.shoutout.receive", {
@@ -43,7 +43,7 @@ describe("channel events domain", () => {
       from_broadcaster_user_login: "quelle",
       viewer_count: 12,
     })).toEqual([{
-      code: "channel_events.shoutout.empfangen",
+      code: "channel_events.shoutout.received",
       detail: { source: "Quelle (@quelle)", viewers: 12 },
     }]);
   });
@@ -86,7 +86,7 @@ describe("channel events domain", () => {
       chatter_user_name: "Mod",
       message: { text: "Wichtige Ansage" },
     })[0]).toEqual({
-      code: "channel_events.chat.ankuendigung",
+      code: "channel_events.chat.announcement",
       detail: { person: "Mod", text: "Wichtige Ansage" },
     });
   });
@@ -94,7 +94,7 @@ describe("channel events domain", () => {
   it("reports an unknown notice_type exactly once and truncates foreign text", () => {
     const noticeType = "x".repeat(240);
     expect(diagnose("channel.chat.notification", { notice_type: noticeType })).toEqual([{
-      code: "channel_events.chat.unbekannt",
+      code: "channel_events.chat.unknown",
       detail: { kind: `${"x".repeat(199)}…` },
     }]);
   });
@@ -184,7 +184,7 @@ describe("channel events domain", () => {
 
   it("reports shared_chat_ban as exactly one unknown moderation action", () => {
     expect(diagnose("channel.moderate", { action: "shared_chat_ban" })).toEqual([{
-      code: "channel_events.moderation.unbekannt",
+      code: "channel_events.moderation.unknown",
       detail: { action: "shared_chat_ban" },
     }]);
   });
@@ -196,7 +196,7 @@ describe("channel events domain", () => {
       category: "aggressive",
       message: { text: "Das ist eine zurückgehaltene Nachricht." },
     })).toEqual([{
-      code: "channel_events.automod.halte",
+      code: "channel_events.automod.held",
       detail: {
         person: "TwitchDev (@twitchdev)",
         reason: "aggressive",
@@ -214,7 +214,7 @@ describe("channel events domain", () => {
       ban_evasion_evaluation: "possible",
       message: { text: "Eine auffällige Nachricht." },
     })).toEqual([{
-      code: "channel_events.verdacht.message",
+      code: "channel_events.suspicious.message",
       detail: {
         person: "Xemdo (@xemdo)",
         einstufung: "active_monitoring / ban_evader / possible",
@@ -231,7 +231,7 @@ describe("channel events domain", () => {
       moderator_user_name: "BlueLava",
       moderator_user_login: "bluelava",
     })).toEqual([{
-      code: "channel_events.verdacht.einstufung",
+      code: "channel_events.suspicious.classified",
       detail: {
         person: "Xemdo (@xemdo)",
         einstufung: "restricted",
@@ -243,7 +243,7 @@ describe("channel events domain", () => {
       low_trust_status: "none",
       moderator_user_name: "BlueLava",
     })).toEqual([{
-      code: "channel_events.verdacht.entwarnung",
+      code: "channel_events.suspicious.cleared",
       detail: {
         person: "Xemdo",
         einstufung: "none",
@@ -254,7 +254,7 @@ describe("channel events domain", () => {
 
   it("omits unknown or missing suspicious-user fields", () => {
     expect(diagnose("automod.message.hold", {})).toEqual([{
-      code: "channel_events.automod.halte",
+      code: "channel_events.automod.held",
       detail: {},
     }]);
     expect(diagnose("channel.suspicious_user.message", {
@@ -263,14 +263,14 @@ describe("channel events domain", () => {
       ban_evasion_evaluation: "unbekannt",
       message: { text: 42 },
     })).toEqual([{
-      code: "channel_events.verdacht.message",
+      code: "channel_events.suspicious.message",
       detail: {},
     }]);
     expect(diagnose("channel.suspicious_user.update", {
       low_trust_status: "unbekannt",
       moderator_user_name: 42,
     })).toEqual([{
-      code: "channel_events.verdacht.einstufung",
+      code: "channel_events.suspicious.classified",
       detail: {},
     }]);
   });
@@ -280,7 +280,7 @@ describe("channel events domain", () => {
       user_name: "Person",
       message: "x".repeat(240),
     })).toEqual([{
-      code: "channel_events.automod.halte",
+      code: "channel_events.automod.held",
       detail: { person: "Person", text: `${"x".repeat(199)}…` },
     }]);
   });

@@ -1,11 +1,11 @@
--- Schema-Baseline. Erzeugt aus den 23 Einzelmigrationen, die bis
--- 0022_token_scopes.sql liefen; sie sind damit abgeloest.
+-- Schema baseline. Generated from the 23 individual migrations that ran up
+-- to 0022_token_scopes.sql; they are superseded by this file.
 --
--- Diese Datei ist die einzige Wahrheit ueber Tabellen-, Spalten- und
--- Constraint-Namen. Sie wurde mit `node scripts/d1-baseline.mjs` erzeugt und
--- danach nur umgebrochen -- `tests/unit/sql-contract.test.ts` prueft jede
--- Abfrage des Projekts gegen sie, `tests/unit/schema-baseline.test.ts` haelt
--- `LATEST_SCHEMA_MIGRATION` an ihrem Dateinamen.
+-- This file is the single source of truth for table, column and constraint
+-- names. It was generated with `node scripts/d1-baseline.mjs` and only
+-- reflowed afterwards -- `tests/unit/sql-contract.test.ts` checks every
+-- query in the project against it, `tests/unit/schema-baseline.test.ts`
+-- keeps `LATEST_SCHEMA_MIGRATION` pointed at its filename.
 
 CREATE TABLE audit_log (
   audit_id TEXT PRIMARY KEY,
@@ -124,8 +124,8 @@ CREATE TABLE event_log (
   module_id TEXT NOT NULL,
   code TEXT NOT NULL,
   detail_json TEXT NOT NULL,
-  -- Null, wenn das Ereignis nicht von einer Person ausgelöst wurde
-  -- (Zeitgeber, EventSub-Nachricht ohne Absender).
+  -- Null when the event wasn't triggered by a person (a timer, an
+  -- EventSub message without a sender).
   actor_user_id TEXT,
   trigger_id TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE

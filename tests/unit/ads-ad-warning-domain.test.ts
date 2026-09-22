@@ -62,11 +62,11 @@ describe("ad prewarning decision", () => {
   });
 
   it.each([
-    ["no schedule", { schedule: { nextAdAt: null, lastAdAt: null } }, "kein_termin"],
-    ["schedule imminent", { nowAtMs: Date.parse("2026-09-21T11:59:57.000Z") }, "zu_spaet"],
-    ["ad break already started", { schedule: { nextAdAt: "2026-09-21T12:05:00.000Z", lastAdAt: "2026-09-21T12:00:01.000Z" } }, "pause_begonnen"],
-    ["shifted schedule", { schedule: { nextAdAt: "2026-09-21T12:05:00.000Z", lastAdAt: null } }, "termin_verschoben"],
-    ["missing scope", { scopeAvailable: false }, "scope_fehlt"],
+    ["no schedule", { schedule: { nextAdAt: null, lastAdAt: null } }, "no_schedule"],
+    ["schedule imminent", { nowAtMs: Date.parse("2026-09-21T11:59:57.000Z") }, "too_late"],
+    ["ad break already started", { schedule: { nextAdAt: "2026-09-21T12:05:00.000Z", lastAdAt: "2026-09-21T12:00:01.000Z" } }, "break_started"],
+    ["shifted schedule", { schedule: { nextAdAt: "2026-09-21T12:05:00.000Z", lastAdAt: null } }, "rescheduled"],
+    ["missing scope", { scopeAvailable: false }, "scope_missing"],
   ] as const)("justifies %s with its own code", (_name, overrides, reason) => {
     expect(decideAdPrewarning(input(overrides))).toMatchObject({ kind: "skip", reason });
   });

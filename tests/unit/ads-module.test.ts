@@ -21,22 +21,22 @@ describe("ads module", () => {
   });
 
   it("distinguishes automatic and manual breaks and states the duration", () => {
-    const automatisch = processAdBreak(event({
+    const automatic = processAdBreak(event({
       duration_seconds: 30,
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: true,
       requester_user_login: "streamer",
     }));
-    const manuell = processAdBreak(event({
+    const manual = processAdBreak(event({
       duration_seconds: 90,
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,
     }));
 
-    expect(automatisch.actions).toEqual([{ kind: "chat", text: "Automatische Werbepause: 30 Sekunden. Bin gleich zurück!" }]);
-    expect(manuell.actions).toEqual([{ kind: "chat", text: "Werbepause: 90 Sekunden. Bin gleich zurück!" }]);
-    expect(automatisch.diagnostics[0]).toEqual({
-      code: "ads.ankuendigung",
+    expect(automatic.actions).toEqual([{ kind: "chat", text: "Automatische Werbepause: 30 Sekunden. Bin gleich zurück!" }]);
+    expect(manual.actions).toEqual([{ kind: "chat", text: "Werbepause: 90 Sekunden. Bin gleich zurück!" }]);
+    expect(automatic.diagnostics[0]).toEqual({
+      code: "ads.announcement",
       detail: {
         duration: 30,
         automatic: true,
@@ -55,7 +55,7 @@ describe("ads module", () => {
     }))).toEqual({
       actions: [],
       diagnostics: [{
-        code: "ads.uebersprungen",
+        code: "ads.skipped",
         detail: { reason: "dauer_null", duration: 0, automatic: false },
       }],
     });

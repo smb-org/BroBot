@@ -1,5 +1,5 @@
 import type { EventSubSubscriptionType } from "../contracts/values";
-import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { catalogString, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 /**
  * Both catalogs are keyed by module id. Completeness is enforced by
  * `tests/unit/module-labels.test.ts`, not by the compiler: enforcing it through the
@@ -25,7 +25,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
 };
 
 const moduleText = (catalog: Record<string, string>, moduleId: string): string | null =>
-  catalog[moduleId] ?? null;
+  catalogString(catalog, moduleId) ?? null;
 
 export const moduleName = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): string => {
   return moduleText(moduleNames[language], moduleId) ?? moduleId;
@@ -159,5 +159,43 @@ export const statusWord = (enabled: boolean, language: DashboardLanguage = dashb
   const texts = moduleStatus[language];
   return enabled ? texts.running : texts.off;
 };
+
+export interface ModuleWorkspaceTexts {
+  status: string;
+  mainSwitch: string;
+  content: string;
+  unknown: (name: string) => string;
+  notActive: (name: string) => string;
+  switchedOff: (name: string) => string;
+  disabled: string;
+  noDescription: string;
+}
+
+const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
+  de: {
+    status: "Modulstatus",
+    mainSwitch: "Hauptschalter",
+    content: "Modulinhalt",
+    unknown: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
+    notActive: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
+    switchedOff: (name) => `Das Modul „${name}“ ist ausgeschaltet.`,
+    disabled: "Deaktiviert",
+    noDescription: "Keine Beschreibung für dieses Modul.",
+  },
+  en: {
+    status: "Module status",
+    mainSwitch: "Main switch",
+    content: "Module content",
+    unknown: (name) => `The module “${name}” is unknown.`,
+    notActive: (name) => `The module “${name}” is not active in this channel.`,
+    switchedOff: (name) => `The module “${name}” is switched off.`,
+    disabled: "Disabled",
+    noDescription: "No description is available for this module.",
+  },
+};
+
+export const moduleWorkspaceTexts = (
+  language: DashboardLanguage = dashboardLanguage(),
+): ModuleWorkspaceTexts => workspaceCatalog[language];
 
 export const disabledStatusWord = (language: DashboardLanguage = dashboardLanguage()): string => moduleStatus[language].disabled;

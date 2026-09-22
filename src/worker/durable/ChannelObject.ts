@@ -162,13 +162,13 @@ export class ChannelObject extends DurableObject<Env> {
 
     const ownChannelId = this.ownChannelId();
     if (principal === null || ownChannelId === null || principal.channelId !== ownChannelId) {
-      return new Response("Kanalzugriff verweigert.", { status: 403 });
+      return new Response("Channel access denied.", { status: 403 });
     }
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-      return new Response("WebSocket-Upgrade erforderlich.", { status: 426 });
+      return new Response("WebSocket upgrade required.", { status: 426 });
     }
     if (request.headers.get("Sec-WebSocket-Protocol") !== REALTIME_PROTOCOL) {
-      return new Response("Realtime-Protokoll wird nicht unterstützt.", { status: 426 });
+      return new Response("Realtime protocol is not supported.", { status: 426 });
     }
 
     const pair = new WebSocketPair();
@@ -190,25 +190,25 @@ export class ChannelObject extends DurableObject<Env> {
   ): void {
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || message.channelId !== ownChannelId) {
-      throw new Error("Realtime-Nachricht gehört zu einem fremden Kanal.");
+      throw new Error("Realtime message belongs to a foreign channel.");
     }
     const now = Date.now();
     const serialized = JSON.stringify(message);
     for (const webSocket of this.ctx.getWebSockets()) {
       const principal = readAttachment(webSocket);
       if (principal === null || principal.channelId !== ownChannelId) {
-        closeSocket(webSocket, SOCKET_REVOKED_CODE, "Prinzipal ungültig");
+        closeSocket(webSocket, SOCKET_REVOKED_CODE, "invalid principal");
         continue;
       }
       if (isExpired(principal, now)) {
-        closeSocket(webSocket, SOCKET_EXPIRED_CODE, "Berechtigung abgelaufen");
+        closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
         continue;
       }
       if (principal.kind !== recipient) continue;
       try {
         webSocket.send(serialized);
       } catch {
-        closeSocket(webSocket, SOCKET_REVOKED_CODE, "Verbindung nicht verfügbar");
+        closeSocket(webSocket, SOCKET_REVOKED_CODE, "connection unavailable");
       }
     }
   }
@@ -259,7 +259,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (securityDue && webSockets.length > 0) try {
       const ownChannelId = this.ownChannelId();
       if (ownChannelId === null) {
-        for (const webSocket of webSockets) closeSocket(webSocket, SOCKET_REVOKED_CODE, "Kanal ungültig");
+        for (const webSocket of webSockets) closeSocket(webSocket, SOCKET_REVOKED_CODE, "invalid channel");
       } else {
         const panelPrincipals = principals.flatMap(({ webSocket, principal }) =>
           principal?.kind === "panel" && !expired.has(webSocket) ? [{ webSocket, principal }] : []);
@@ -313,7 +313,7 @@ export class ChannelObject extends DurableObject<Env> {
     } catch (error: unknown) {
       // On a database error, connections are closed for safety; an alarm
       // must not leave access open that can no longer be verified.
-      console.error("Realtime-Berechtigungsprüfung fehlgeschlagen.", error);
+      console.error("Realtime authorization check failed.", error);
       for (const webSocket of webSockets) expired.add(webSocket);
     }
 
@@ -350,7 +350,7 @@ export class ChannelObject extends DurableObject<Env> {
         );
       } catch (error: unknown) {
         // A flow or D1 error must not swallow the other deadlines that are due.
-        console.error("Werbe-Vorwarnung konnte im Alarm nicht verarbeitet werden.", error);
+        console.error("Ad prewarning could not be processed in the alarm.", error);
       }
     }
     await this.scheduleEarliestAlarm();

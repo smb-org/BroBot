@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { DEFAULT_PREWARNING_TEXT } from "./chat-defaults";
+
 /** Consent for control actions during a live stream; does not block the subscription. */
 export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads"] as const;
 
@@ -8,7 +10,7 @@ export const adsSettingsSchema = z.object({
   manual: z.string().trim().min(1).max(200),
   prewarning: z.boolean().default(true),
   leadSeconds: z.number().int().min(30).max(300).default(60),
-  prewarningText: z.string().trim().min(1).max(200).default("Werbung in {seconds} Sekunden. Bin gleich zurück!"),
+  prewarningText: z.string().trim().min(1).max(200).default(DEFAULT_PREWARNING_TEXT),
 });
 
 export type AdsSettings = z.output<typeof adsSettingsSchema>;

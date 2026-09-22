@@ -38,13 +38,16 @@ describe("Text commands panel view", () => {
     render(<TextCommandsPanel channelId="kanal-a" />);
 
     expect(await screen.findByText("!hallo")).toBeInTheDocument();
+    // Six columns down to four: kind is readable from the response itself,
+    // cooldown and "last used" moved into the inspector -- see below.
     expect(screen.getByRole("columnheader", { name: "!Name" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Art" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Antwort" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Abkühl." })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Zuletzt" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Mindeststufe" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Schalter" })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /!hallo.*vor 1 min/ })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Art" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Abkühl." })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Zuletzt" })).not.toBeInTheDocument();
+    expect(screen.getByRole("row", { name: "!hallo Hallo {user} Alle Befehl !hallo: eingeschaltet" })).toBeInTheDocument();
     expect(screen.queryByDisplayValue("Hallo {user}")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("row", { name: /!hallo/ }));
     expect(screen.getByDisplayValue("Hallo {user}")).toBeInTheDocument();
@@ -435,7 +438,7 @@ describe("Text commands panel view", () => {
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ minimumTier: "moderator" }))).toBe(true);
   });
 
-  it("arranges list and inspector as direct children of the commands region", async () => {
+  it("shows the inspector only once a row is selected, alongside the list", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
@@ -458,13 +461,14 @@ describe("Text commands panel view", () => {
 
     render(<TextCommandsPanel channelId="kanal-a" />);
 
+    const list = await screen.findByRole("region", { name: "Befehle" });
+    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
+
     const row = await screen.findByRole("row", { name: /!hallo/ });
     fireEvent.click(row);
-    const bereich = row.closest(".inspektor-bereich");
-    expect(bereich).not.toBeNull();
-    expect(bereich?.children).toHaveLength(2);
-    expect(bereich?.children[0]).toHaveClass("inspektor-bereich__liste");
-    expect(bereich?.children[1]).toHaveClass("sub-inspector");
+
+    expect(list).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Eigenschaften von !hallo" })).toBeInTheDocument();
   });
 
   it("closes the command inspector by button and Escape, returning focus to the row", async () => {
@@ -540,13 +544,10 @@ describe("Text commands panel view", () => {
     render(<TextCommandsPanel channelId="kanal-a" />);
 
     const list = await screen.findByRole("region", { name: "Befehle" });
-    const bereich = list.parentElement?.parentElement;
-    expect(bereich).not.toBeNull();
-    expect(bereich?.children).toHaveLength(1);
+    expect(screen.queryByRole("region", { name: "Befehl anlegen" })).not.toBeInTheDocument();
     const plus = within(list).getByRole("button", { name: "Befehl anlegen" });
     fireEvent.click(plus);
     await screen.findByRole("region", { name: "Befehl anlegen" });
-    expect(bereich?.children).toHaveLength(2);
 
     const row = await screen.findByRole("row", { name: /!hallo/ });
     fireEvent.click(row);
@@ -597,5 +598,24 @@ describe("Text commands panel view", () => {
     fireEvent.keyDown(await screen.findByRole("region", { name: "Eigenschaften von !hallo" }), { key: "Escape" });
 
     expect(onCloseInspector).toHaveBeenCalledOnce();
+  });
+
+  it("pre-selects the command Spotlight named, once the list has loaded (#164)", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ commands: [
+          { channelId: "kanal-a", name: "clip", text: "Clip!", kind: "text", enabled: true, cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z" },
+          { channelId: "kanal-a", name: "hallo", text: "Hallo", kind: "text", enabled: true, cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z" },
+        ] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+
+    render(<TextCommandsPanel channelId="kanal-a" initialSelection="clip" />);
+
+    expect(await screen.findByDisplayValue("Clip!")).toBeInTheDocument();
   });
 });

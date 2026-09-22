@@ -1,5 +1,7 @@
 import {
   platformSessionGuard,
+  sqlRole,
+  sqlRoleList,
   type ActorContext,
   type MutationGuard,
 } from "../db/guards";
@@ -8,7 +10,7 @@ import {
 } from "../db/channel-members";
 import { prepareAudit } from "../db/audit";
 import { decodeCursor, encodeCursor } from "../db/cursor";
-import type { AuditActorKind } from "../../contracts/values";
+import { PLATFORM_ASSIGNABLE_ROLES, type AuditActorKind } from "../../contracts/values";
 
 export interface PlatformChannel {
   channelId: string;
@@ -51,11 +53,11 @@ export interface PlatformAuditPage {
 }
 
 export type PlatformAction =
-  | "kanal.freigegeben"
-  | "kanal.vollzustimmung_geaendert"
-  | "mitglied.hinzugefuegt"
-  | "mitglied.rolle_geaendert"
-  | "mitglied.entfernt";
+  | "channel.released"
+  | "channel.full_consent_changed"
+  | "member.added"
+  | "member.role_changed"
+  | "member.removed";
 
 interface PlatformChannelRow {
   channel_id: string;
@@ -83,7 +85,7 @@ interface AuditRow {
   after_json: string;
 }
 
-export const platformRolesSql = "'manager', 'operator'";
+export const platformRolesSql = sqlRoleList(PLATFORM_ASSIGNABLE_ROLES);
 
 const mutationGuard = (actor: ActorContext, timestamp: string): MutationGuard =>
   platformSessionGuard(actor, timestamp);
@@ -129,9 +131,9 @@ export const listPlatformChannels = async (
 ): Promise<PlatformChannelOverview[]> => {
   const result = await db.prepare(
     `SELECT channel.channel_id, channel.login, channel.display_name, channel.full_consent,
-            COUNT(CASE WHEN member.role = 'broadcaster' THEN 1 END) AS broadcaster_count,
-            COUNT(CASE WHEN member.role = 'manager' THEN 1 END) AS manager_count,
-            COUNT(CASE WHEN member.role = 'operator' THEN 1 END) AS operator_count,
+            COUNT(CASE WHEN member.role = ${sqlRole("broadcaster")} THEN 1 END) AS broadcaster_count,
+            COUNT(CASE WHEN member.role = ${sqlRole("manager")} THEN 1 END) AS manager_count,
+            COUNT(CASE WHEN member.role = ${sqlRole("operator")} THEN 1 END) AS operator_count,
             CASE WHEN EXISTS (
               SELECT 1
                 FROM twitch_login_identity AS identity
@@ -194,7 +196,7 @@ export const releasePlatformChannel = async (
   );
   const memberMutation = db.prepare(
     `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-     SELECT ?, channel_id, 'broadcaster', ?, ?
+     SELECT ?, channel_id, ${sqlRole("broadcaster")}, ?, ?
        FROM channels
       WHERE channel_id = ?
         AND changes() > 0`,
@@ -210,7 +212,7 @@ export const releasePlatformChannel = async (
     actor.userId,
     timestamp,
     channel.userId,
-    "kanal.freigegeben",
+    "channel.released",
     null,
     after,
   );
@@ -246,7 +248,7 @@ export const changeFullConsent = async (
     actor.userId,
     timestamp,
     channel.channelId,
-    "kanal.vollzustimmung_geaendert",
+    "channel.full_consent_changed",
     before,
     after,
   );
@@ -288,7 +290,7 @@ export const addPlatformMember = async (
     actor.userId,
     timestamp,
     member.channelId,
-    "mitglied.hinzugefuegt",
+    "member.added",
     null,
     member,
   );
@@ -328,7 +330,7 @@ export const changePlatformMember = async (
     actor.userId,
     timestamp,
     after.channelId,
-    "mitglied.rolle_geaendert",
+    "member.role_changed",
     before,
     after,
   );
@@ -362,7 +364,7 @@ export const removePlatformMember = async (
     actor.userId,
     timestamp,
     member.channelId,
-    "mitglied.entfernt",
+    "member.removed",
     member,
     null,
   );

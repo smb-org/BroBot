@@ -1,5 +1,23 @@
 export type OAuthPurpose = "login" | "bot";
 
+/**
+ * Closed for the same reason as `EVENT_CODES`/`AUDIT_ACTIONS`: it stores
+ * into `oauth_transactions.failure_reason`, so a German value here is a
+ * silent leak, not a typo caught by a reviewer skimming English text. Not
+ * shared through `contracts/values.ts` -- nothing outside `worker/auth`
+ * reads this column.
+ */
+export type OAuthTransactionFailureReason =
+  | "authorization_denied"
+  | "authorization_code_missing"
+  | "login_identity_user_mismatch"
+  | "bot_identity_mismatch"
+  | "bot_identity_user_mismatch"
+  | "full_consent_incomplete"
+  | "full_consent_second_attempt_incomplete"
+  | "code_exchange_rejected"
+  | "callback_failed";
+
 export interface OAuthTransactionRecord {
   transactionId: string;
   purpose: OAuthPurpose;
@@ -66,7 +84,7 @@ export const consumeOAuthTransaction = async (
 export const failOAuthTransaction = async (
   db: D1Database,
   transactionId: string,
-  reason: string,
+  reason: OAuthTransactionFailureReason,
 ): Promise<void> => {
   await db.prepare(
     `UPDATE oauth_transactions

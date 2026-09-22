@@ -3,16 +3,9 @@ import {
 } from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
 import { truncateTo200Chars } from "../modules/contract";
+import { helixRequest } from "./twitch/helix";
 
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
-
-/**
- * Twitch expects a response to the EventSub webhook within ten seconds, and
- * this call is awaited there (`dispatch.ts`). Without a timeout, a hanging
- * Helix call costs the subscription. Goes away once the Helix wrapper lands.
- */
-const HELIX_REQUEST_TIMEOUT_MS = 5_000;
-
 
 export interface ChatSendResult {
   sent: boolean;
@@ -21,8 +14,8 @@ export interface ChatSendResult {
   detail: Readonly<Record<string, string | number | boolean | null>>;
 }
 
-const asRecord = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const readText = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
@@ -72,47 +65,26 @@ export const sendChatMessage = async (
   };
   if (replyToMessageId !== undefined) payload.reply_parent_message_id = replyToMessageId;
 
-  let response: Response;
-  try {
-    response = await fetcher(CHAT_MESSAGES_URL, {
-      method: "POST",
-      headers: {
-        "Client-ID": environment.TWITCH_CLIENT_ID,
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(HELIX_REQUEST_TIMEOUT_MS),
-    });
-  } catch (error) {
-    const timedOut = error instanceof Error && error.name === "TimeoutError";
-    return { sent: false, reason: timedOut ? "timeout" : "network_error", detail: textDetail };
+  const result = await helixRequest<Record<string, unknown>>({
+    method: "POST",
+    url: CHAT_MESSAGES_URL,
+    body: payload,
+    accessToken,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
+  });
+
+  if (!result.ok) {
+    return { sent: false, reason: result.reason, detail: { ...textDetail, status: result.status, message: result.message } };
   }
 
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    body = null;
-  }
-
-  if (!response.ok) {
-    const record = asRecord(body);
-    return {
-      sent: false,
-      reason: response.status === 429 ? "rate_limited" : `http_${String(response.status)}`,
-      detail: { ...textDetail, status: response.status, message: readText(record.message) },
-    };
-  }
-
-  const first = asRecord(asRecord(body).data instanceof Array
-    ? (asRecord(body).data as unknown[])[0]
-    : null);
+  const body = isRecord(result.data) ? result.data : {};
+  const first = Array.isArray(body.data) && isRecord(body.data[0]) ? body.data[0] : {};
 
   // If `is_sent` is missing, the outcome is unknown. Unknown counts as not
   // sent here: a silent failure would be worse than a false warning.
   if (first.is_sent !== true) {
-    const dropReason = asRecord(first.drop_reason);
+    const dropReason = isRecord(first.drop_reason) ? first.drop_reason : {};
     return {
       sent: false,
       reason: readText(dropReason.code) ?? "not_sent",

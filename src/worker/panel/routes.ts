@@ -21,6 +21,7 @@ import {
 } from "../db/bot-channel-status";
 import {
   getBotIdentity,
+  getBotIdentityStatus,
 } from "../db/bot-identity";
 import {
   decodeLogCursor,
@@ -31,10 +32,14 @@ import {
   listChannelsForUser,
   type LogCursor,
 } from "./repository";
-import { fetchTwitchUsersById, memberRouter } from "./member-routes";
+import { fetchTwitchUserByLogin, fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
-import { EVENT_TONES, type EventTone } from "../../contracts/values";
+import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
+import { createClip, type CreateClipResult } from "../clip";
+import { sendShoutout } from "../shoutout";
+import { writeModuleAudit } from "../module-audit";
+import { writeModuleDiagnostics } from "../event-log";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -64,8 +69,8 @@ const parseEventFilters = (
   const tone = context.req.query("tone");
   const moduleId = context.req.query("module");
   const actor = context.req.query("actor");
-  if (origin !== undefined && origin !== "channel" && origin !== "module") return context.text("Ereignis-Herkunft ist ungültig.", 400);
-  if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.text("Ereignis-Ton ist ungültig.", 400);
+  if (origin !== undefined && origin !== "channel" && origin !== "module") return context.json({ error: "event_origin_invalid" }, 400);
+  if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.json({ error: "event_tone_invalid" }, 400);
   const validOrigin: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
   const validTone: EventTone | null = tone === undefined ? null : tone as EventTone;
   const module = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
@@ -79,13 +84,12 @@ const parseEventFilters = (
 // stays per route; this helper doesn't merge them in substance.
 const parseLogQuery = (
   context: Context<PanelEnvironment>,
-  errorTexts: { limit: string; cursor: string },
 ): LogQuery | Response => {
   const limit = parseAuditLimit(context.req.query("limit"));
-  if (limit === null) return context.text(errorTexts.limit, 400);
+  if (limit === null) return context.json({ error: "pagination_limit_invalid" }, 400);
   const serializedCursor = context.req.query("cursor");
   const cursor = serializedCursor === undefined ? null : decodeLogCursor(serializedCursor);
-  if (serializedCursor !== undefined && cursor === null) return context.text(errorTexts.cursor, 400);
+  if (serializedCursor !== undefined && cursor === null) return context.json({ error: "pagination_cursor_invalid" }, 400);
   return { limit, cursor };
 };
 
@@ -94,14 +98,21 @@ const nowIso = (): string => new Date().toISOString();
 const laterIso = (now: string, milliseconds: number): string =>
   new Date(Date.parse(now) + milliseconds).toISOString();
 
-const canCheckModeratorStatus = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
-  role !== "operator";
+const canCheckModeratorStatus = canManage;
 
 const readBotCredentials = async (environment: Env): Promise<{ userId: string; accessToken: string } | null> => {
   const identity = await getBotIdentity(environment.DB);
   if (identity === null) return null;
   const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(environment));
   return accessToken === null ? null : { userId: identity.userId, accessToken };
+};
+
+const clipStatusFor = (reason: string | null): 400 | 401 | 429 | 502 | 503 => {
+  if (reason === "not_live") return 400;
+  if (reason === "scope_missing" || reason === "bot_identity_missing") return 401;
+  if (reason === "rate_limited") return 429;
+  if (reason === "network_error") return 503;
+  return 502;
 };
 
 export const panelRouter = new Hono<PanelEnvironment>();
@@ -111,8 +122,17 @@ panelRouter.route("/", moduleRouter);
 
 panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) => {
   const session = context.get("session");
+  const [channels, bot] = await Promise.all([
+    listChannelsForUser(context.env.DB, session.userId),
+    getBotIdentityStatus(context.env.DB),
+  ]);
   return context.json({
-    channels: await listChannelsForUser(context.env.DB, session.userId),
+    channels,
+    // The installation's single bot identity (`bot_identity_status`, id=1),
+    // independent of which channels this viewer can see -- a fresh
+    // installation with zero released channels still needs to tell a
+    // platform admin the bot isn't signed in (#159).
+    bot,
     platformAdmin: getPlatformUserIds(context.env).has(session.userId),
   });
 });
@@ -125,7 +145,7 @@ panelRouter.get(
     const channelId = context.req.param("channelId");
     const overview = await getChannelOverviewForUser(context.env.DB, session.userId, channelId);
     return overview === null
-      ? context.text("Kanal nicht gefunden.", 404)
+      ? context.json({ error: "channel_not_found" }, 404)
       : context.json(overview);
   },
 );
@@ -135,7 +155,7 @@ panelRouter.post(
   requireChannelAuthorization(),
   async (context) => {
     if (!canCheckModeratorStatus(context.get("channelRole"))) {
-      return context.text("Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.", 403);
+      return context.json({ error: "moderator_status_check_denied" }, 403);
     }
 
     const channelId = context.req.param("channelId");
@@ -157,7 +177,7 @@ panelRouter.post(
         : laterIso(lastCheckedAt, MODERATOR_STATUS_CHECK_COOLDOWN_MS);
       const retryAt = lockedUntil ?? statusRetryAt ?? nextAllowedAt;
       return context.json({
-        error: "Der Moderatorstatus wurde für diesen Kanal kürzlich geprüft.",
+        error: "moderator_status_check_rate_limited",
         nextAllowedAt: retryAt,
       }, 429);
     }
@@ -166,7 +186,7 @@ panelRouter.post(
     try {
       const credentials = await readBotCredentials(context.env);
       if (credentials === null) {
-        throw new Error("Bot-Token fehlt oder konnte nicht gelesen werden.");
+        throw new Error("Bot token missing or could not be read.");
       }
       const isModerator = await fetchChannelStatus(
         fetch,
@@ -197,12 +217,103 @@ panelRouter.post(
           // The Twitch-side cause matters more to the user than a failed cleanup.
         }
       }
-      const message = error instanceof Error ? error.message : "Moderatorstatus konnte nicht gelesen werden.";
       const status = error instanceof TwitchApiError && error.status === 504 ? 504
         : error instanceof TwitchApiError ? 502
         : 503;
-      return context.json({ error: message }, status);
+      return context.json({ error: "moderator_status_check_failed" }, status);
     }
+  },
+);
+
+/**
+ * Immediate action, open to any channel member (0006's "Betrieblich" tier,
+ * same reasoning as ads commercial/snooze): creating a clip doesn't
+ * reconfigure the channel. Host-level, not a module route -- the bot's own
+ * identity already carries `clips:edit`, no broadcaster consent needed.
+ */
+panelRouter.post(
+  "/api/channels/:channelId/clips",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    const triggerId = `clip:${crypto.randomUUID()}`;
+    const now = nowIso();
+    const credentials = await readBotCredentials(context.env);
+    const result: CreateClipResult = credentials === null
+      ? { created: false, reason: "bot_identity_missing", detail: {}, clipId: null, editUrl: null }
+      : await createClip(context.env, credentials.accessToken, channelId, fetch);
+
+    if (!result.created) {
+      await writeModuleDiagnostics(context.env.DB, channelId, "host", triggerId, context.get("actor").userId, [
+        { code: "host.clip.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } },
+      ], now);
+      return context.json({
+        error: "clip_create_failed",
+        reason: result.reason,
+        detail: result.detail,
+      }, clipStatusFor(result.reason));
+    }
+
+    await writeModuleAudit(context.env.DB, context.get("actor").userId, now, {
+      channelId,
+      moduleId: null,
+      action: "clip.created",
+      before: null,
+      after: { clipId: result.clipId },
+    });
+
+    return context.json({ clipId: result.clipId, editUrl: result.editUrl });
+  },
+);
+
+const isShoutoutLogin = (value: string | undefined): value is string =>
+  value !== undefined && value.trim().length > 0 && value.trim().length <= 25 && !/\s/.test(value.trim());
+
+const shoutoutStatusFor = (reason: string | null): 400 | 429 | 502 | 503 => {
+  if (reason === "rate_limited") return 429;
+  if (reason === "network_error" || reason === "app_token_unavailable" || reason === "bot_identity_missing") return 503;
+  return 502;
+};
+
+/**
+ * Immediate action, open to any channel member (0006's "Betrieblich" tier,
+ * same reasoning as commercial/clip above). Host-level: it resolves a login
+ * to a Twitch user id, then reuses the same `sendShoutout` the raid module
+ * triggers automatically.
+ */
+panelRouter.post(
+  "/api/channels/:channelId/shoutout",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    const triggerId = `shoutout:${crypto.randomUUID()}`;
+    const now = nowIso();
+    const body: unknown = await context.req.json().catch(() => null);
+    const login = body !== null && typeof body === "object" && "login" in body && typeof body.login === "string"
+      ? body.login
+      : undefined;
+    if (!isShoutoutLogin(login)) return context.json({ error: "twitch_login_invalid" }, 400);
+
+    let targetUserId: string;
+    try {
+      const user = await fetchTwitchUserByLogin(fetch, context.env, login.trim());
+      if (user === null) return context.json({ error: "twitch_user_not_found" }, 404);
+      targetUserId = user.userId;
+    } catch {
+      return context.json({ error: "twitch_user_search_failed" }, 502);
+    }
+
+    const result = await sendShoutout(context.env, channelId, targetUserId, fetch);
+    await writeModuleDiagnostics(context.env.DB, channelId, "host", triggerId, context.get("actor").userId, [
+      result.sent
+        ? { code: "host.shoutout.sent" satisfies EventCode, detail: result.detail }
+        : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } },
+    ], now);
+
+    if (!result.sent) {
+      return context.json({ error: "shoutout_send_failed", reason: result.reason, detail: result.detail }, shoutoutStatusFor(result.reason));
+    }
+    return context.json({ sent: true });
   },
 );
 
@@ -214,7 +325,7 @@ panelRouter.get(
     const channelId = context.req.param("channelId");
     const overview = await getSystemOverviewForUser(context.env.DB, session.userId, channelId);
     return overview === null
-      ? context.text("Kanal nicht gefunden.", 404)
+      ? context.json({ error: "channel_not_found" }, 404)
       : context.json(overview);
   },
 );
@@ -224,10 +335,7 @@ panelRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
-    const parsed = parseLogQuery(context, {
-      limit: "Audit-Begrenzung ist ungültig.",
-      cursor: "Audit-Cursor ist ungültig.",
-    });
+    const parsed = parseLogQuery(context);
     if (parsed instanceof Response) return parsed;
     const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor);
     const actorIds = audit.entries.map((entry) => entry.actorUserId);
@@ -251,10 +359,7 @@ panelRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
-    const parsed = parseLogQuery(context, {
-      limit: "Ereignis-Begrenzung ist ungültig.",
-      cursor: "Ereignis-Cursor ist ungültig.",
-    });
+    const parsed = parseLogQuery(context);
     if (parsed instanceof Response) return parsed;
     const filters = parseEventFilters(context);
     if (filters instanceof Response) return filters;

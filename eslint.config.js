@@ -5,15 +5,29 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+/**
+ * Mantine gehoert hinter die Naht `src/dashboard/ui/`. Die Bauteile dort
+ * sprechen Projektvokabular, nicht Bibliotheksvokabular -- deshalb laesst sich
+ * hinter der Naht ein Bauteil austauschen, ohne dass eine Aufrufstelle sich
+ * aendert. Das Muster haengt an jeder bestehenden Importgrenze statt in einem
+ * eigenen Block: ein spaeterer Block ueberschreibt `no-restricted-imports`
+ * sonst vollstaendig, und die Grenze greift lautlos nicht mehr.
+ */
+const mantineBoundaryPattern = {
+  group: ["@mantine/*"],
+  message: "Mantine nur in src/dashboard/ui/. Panels importieren aus der Naht.",
+};
+
 const moduleIsolationPatterns = [
   {
-    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+dashboard/locale(?:\\.[^/]+)?(?:/|$)|(?:\\.\\./)+contracts|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
+    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?(?:/|$)|(?:\\.\\./)+contracts|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
     message: "Module dürfen kein anderes Modul importieren.",
   },
   {
     regex: "^(?:src/)?modules/",
     message: "Module dürfen kein anderes Modul importieren.",
   },
+  mantineBoundaryPattern,
 ];
 
 const overlayBoundaryPatterns = [
@@ -29,11 +43,12 @@ const overlayBoundaryPatterns = [
     regex: "^zod$",
     message: "Overlay-Ansichten dürfen Zod nicht importieren.",
   },
+  mantineBoundaryPattern,
 ];
 
 const overlayRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
-  ...overlayBoundaryPatterns,
+  ...overlayBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern),
 ];
 
 const panelBoundaryPatterns = [
@@ -49,11 +64,12 @@ const panelBoundaryPatterns = [
     regex: "(^|/)overlay(/|$)",
     message: "Panel-Ansichten dürfen keine Overlay-Ansichten importieren.",
   },
+  mantineBoundaryPattern,
 ];
 
 const panelRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
-  ...panelBoundaryPatterns,
+  ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern),
 ];
 
 export default defineConfig(
@@ -133,6 +149,27 @@ export default defineConfig(
       "no-restricted-imports": [
         "error",
         { patterns: panelBoundaryPatterns },
+      ],
+    },
+  },
+  {
+    // Die Gegenrichtung: ui/ ist Darstellung und kennt weder Module noch
+    // Worker. Sonst waere die Naht nach zwei Modulen keine Naht mehr.
+    //
+    // Dieser Block muss NACH dem Dashboard-Block stehen: ui/ liegt unter
+    // src/dashboard/**, und in der Flat Config gewinnt der spaetere Block.
+    // Davor haette der Dashboard-Block hier Mantine verboten -- also genau
+    // an der einen Stelle, an der es erlaubt sein muss.
+    files: ["src/dashboard/ui/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [{
+            group: ["**/modules/**", "**/worker/**"],
+            message: "ui/ ist Darstellung: keine Module, kein Worker.",
+          }],
+        },
       ],
     },
   },

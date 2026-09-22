@@ -296,6 +296,37 @@ describe("Panel read endpoints", () => {
     ]);
   });
 
+  it("reports the installation's bot status even with zero released channels (#159)", async () => {
+    await insertLoginIdentityAndSession(database, "user-1");
+    await database.prepare(
+      `INSERT INTO bot_identity_status (id, status, reason, updated_at)
+       VALUES (1, 'revoked', 'authorization_revoked', ?)`,
+    ).bind("2026-09-18T01:00:00.000Z").run();
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels"),
+      environment,
+    );
+    const body = await response.json<{ channels: unknown[]; bot: { status: string; reason: string | null } | null }>();
+
+    expect(response.status).toBe(200);
+    expect(body.channels).toEqual([]);
+    expect(body.bot).toEqual({ status: "revoked", reason: "authorization_revoked", updatedAt: "2026-09-18T01:00:00.000Z" });
+  });
+
+  it("reports a null bot status before the bot has ever signed in", async () => {
+    await insertLoginIdentityAndSession(database, "user-1");
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels"),
+      environment,
+    );
+    const body = await response.json<{ bot: unknown }>();
+
+    expect(response.status).toBe(200);
+    expect(body.bot).toBeNull();
+  });
+
   it("checks channel:bot on the broadcaster identity of each channel", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertChannel(database, "kanal-b", "Beta");
@@ -454,8 +485,8 @@ describe("Panel read endpoints", () => {
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
        VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      "audit-1", "user-1", "2026-09-18T03:00:00.000Z", "kanal-a", "mitglied.geändert", "{}", "{}",
-      "audit-2", "user-1", "2026-09-18T02:00:00.000Z", "kanal-a", "mitglied.hinzugefügt", "null", "{}",
+      "audit-1", "user-1", "2026-09-18T03:00:00.000Z", "kanal-a", "member.updated", "{}", "{}",
+      "audit-2", "user-1", "2026-09-18T02:00:00.000Z", "kanal-a", "member.added", "null", "{}",
     ).run();
 
     const response = await panelRouter.fetch(
@@ -678,7 +709,7 @@ describe("manual moderator status check", () => {
     const body = await response.json<{ error: string; nextAllowedAt: string }>();
 
     expect(response.status).toBe(429);
-    expect(body.error).toContain("kürzlich");
+    expect(body.error).toBe("moderator_status_check_rate_limited");
     expect(body.nextAllowedAt).toBe("2026-09-18T04:05:00.000Z");
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -742,7 +773,7 @@ describe("manual moderator status check", () => {
     ).bind("kanal-a").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
 
     expect(response.status).toBe(502);
-    expect(body.error).toBe("Twitch ist vorübergehend nicht erreichbar.");
+    expect(body.error).toBe("moderator_status_check_failed");
     expect(status).toEqual({ is_moderator: 1, checked_at: "2026-09-18T03:00:00.000Z", reason: null });
     expect(await database.prepare("SELECT * FROM bot_channel_status_check_locks WHERE channel_id = ?").bind("kanal-a").first()).toBeNull();
   });
@@ -762,7 +793,7 @@ describe("manual moderator status check", () => {
     const body = await response.json<{ error: string }>();
 
     expect(response.status).toBe(504);
-    expect(body.error).toContain("Zeitlimit");
+    expect(body.error).toBe("moderator_status_check_failed");
     expect(await database.prepare("SELECT * FROM bot_channel_status_check_locks WHERE channel_id = ?").bind("kanal-a").first()).toBeNull();
   });
 });

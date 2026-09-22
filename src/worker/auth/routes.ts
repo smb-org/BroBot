@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 
 import {
+  requireBrowserChannelAuthorization,
+  requireBrowserPlatformAuthorization,
   requireChannelAuthorization,
-  requirePlatform,
   type ChannelAuthorizationVariables,
 } from "./guards";
+import { oauthError } from "./oauth-error-texts";
 import {
   consumeOAuthTransaction,
   failOAuthTransaction,
@@ -62,14 +64,14 @@ import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUserAndModule,
 } from "../module-scopes";
+import { canManage } from "../../contracts/values";
 
 const nowIso = (): string => new Date().toISOString();
 
-const canManageOverlayTokens = (role: ChannelAuthorizationVariables["channelRole"]): boolean =>
-  role === "broadcaster" || role === "manager";
+const canManageOverlayTokens = canManage;
 
-const overlayTokenManageDenied = (context: { text: (body: string, status: 403) => Response }): Response =>
-  context.text("Nur Broadcaster und Verwalter dürfen Overlay-Token verwalten.", 403);
+const overlayTokenManageDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
+  context.json({ error: "overlay_token_manage_denied" }, 403);
 
 const randomId = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(24));
@@ -94,15 +96,23 @@ const isEncodedPathSegment = (segment: string): boolean => {
   }
 };
 
-const isSafeModuleRedirectPath = (path: string | null | undefined): path is string => {
+const isSafeLoginRedirectPath = (path: string | null | undefined): path is string => {
   if (path === undefined || path === null || path.startsWith("//") || !path.startsWith("/")) return false;
-  const segments = path.split("/");
-  return segments.length === 5 && segments[1] === "channels" && segments[3] === "modules" &&
+  const pathOnly = path.split(/[?#]/, 1)[0] ?? path;
+  const segments = pathOnly.split("/");
+  const safeModulePath = segments.length === 5 && segments[1] === "channels" && segments[3] === "modules" &&
     isEncodedPathSegment(segments[2] ?? "") && isEncodedPathSegment(segments[4] ?? "");
+  const safeBotLoginPath = segments.length === 4 && segments[1] === "auth" && segments[2] === "bot" && segments[3] === "login";
+  const safeChannelBotPath = segments.length === 5 && segments[1] === "auth" && segments[2] === "channels" &&
+    isEncodedPathSegment(segments[3] ?? "") && segments[4] === "channel-bot";
+  const safeBroadcasterScopePath = segments.length === 6 && segments[1] === "auth" && segments[2] === "channels" &&
+    isEncodedPathSegment(segments[3] ?? "") && segments[4] === "broadcaster-scopes" &&
+    isEncodedPathSegment(segments[5] ?? "");
+  return safeModulePath || safeBotLoginPath || safeChannelBotPath || safeBroadcasterScopePath;
 };
 
 const redirectAfterLogin = (origin: string, path: string | null | undefined): string =>
-  isSafeModuleRedirectPath(path) ? `${origin.replace(/\/+$/, "")}${path}` : redirectHome(origin);
+  isSafeLoginRedirectPath(path) ? `${origin.replace(/\/+$/, "")}${path}` : redirectHome(origin);
 
 const maintainAfterBotAuthorization = async (env: Env, now: string): Promise<void> => {
   try {
@@ -124,12 +134,6 @@ const maintainAfterBroadcasterAuthorization = async (env: Env, now: string): Pro
     // The reconciliation is retried in the hourly run; the consent remains stored.
   }
 };
-
-const oauthError = (
-  context: { text: (body: string, status: 400 | 403) => Response },
-  message: string,
-  status: 400 | 403 = 400,
-): Response => context.text(message, status);
 
 export const authRouter = new Hono<{ Bindings: Env; Variables: ChannelAuthorizationVariables }>();
 
@@ -201,7 +205,7 @@ const readBearerToken = (authorization: string | undefined): string | null => {
  */
 authRouter.get("/api/csrf", async (context) => {
   const session = await getSessionFromRequest(context.req.raw, context.env);
-  if (session === null) return context.text("Session fehlt.", 401);
+  if (session === null) return context.json({ error: "session_missing" }, 401);
 
   const now = nowIso();
   const existing = readCookieValue(context.req.raw.headers.get("Cookie"), CSRF_COOKIE_NAME);
@@ -227,7 +231,7 @@ authRouter.post(
     const channelId = context.req.param("channelId");
 
     const expiry = await readOverlayTokenExpiry(context.req.raw);
-    if (!expiry.valid) return context.json({ error: "Ablaufzeit ist ungültig." }, 400);
+    if (!expiry.valid) return context.json({ error: "overlay_expiry_invalid" }, 400);
     const now = expiry.checkedAt;
 
     const issued = await issueOverlayToken(context.env.DB, {
@@ -241,7 +245,7 @@ authRouter.post(
       expiresAt: expiry.expiresAt,
       createdAt: now,
     });
-    if (issued === null) return context.text("Kanalzugriff verweigert.", 403);
+    if (issued === null) return context.json({ error: "channel_access_denied" }, 403);
     context.header("Cache-Control", "no-store");
     return context.json(issued, 201);
   },
@@ -255,7 +259,7 @@ authRouter.post(
     const channelId = context.req.param("channelId");
     const tokenId = context.req.param("tokenId");
     const reason = await readRevocationReason(context.req.raw);
-    if (reason === null) return context.json({ error: "Widerrufsgrund fehlt oder ist ungültig." }, 400);
+    if (reason === null) return context.json({ error: "overlay_revocation_reason_invalid" }, 400);
 
     const revoked = await revokeOverlayToken(context.env.DB, {
       channelId,
@@ -267,7 +271,7 @@ authRouter.post(
       reason,
       revokedAt: nowIso(),
     });
-    if (!revoked) return context.text("Overlay-Token nicht gefunden.", 404);
+    if (!revoked) return context.json({ error: "overlay_token_not_found" }, 404);
     void revokeRealtimeToken(context.env.CHANNEL, channelId, tokenId);
     context.header("Cache-Control", "no-store");
     return context.body(null, 204);
@@ -276,14 +280,14 @@ authRouter.post(
 
 authRouter.get("/api/overlay/status", async (context) => {
   const token = readBearerToken(context.req.header("Authorization"));
-  if (token === null) return context.json({ error: "Overlay-Zugang ungültig." }, 401);
+  if (token === null) return context.json({ error: "overlay_token_invalid" }, 401);
 
   const record = await authenticateOverlayToken(context.env.DB, {
     token,
     pepper: context.env.OVERLAY_TOKEN_PEPPER,
     now: nowIso(),
   });
-  if (record === null) return context.json({ error: "Overlay-Zugang ungültig." }, 401);
+  if (record === null) return context.json({ error: "overlay_token_invalid" }, 401);
 
   context.header("Cache-Control", "no-store");
   return context.json({ version: context.env.CF_VERSION_METADATA.id, language: record.language });
@@ -291,6 +295,7 @@ authRouter.get("/api/overlay/status", async (context) => {
 
 authRouter.get("/auth/login", async (context) => {
   const channelLogin = context.req.query("channel");
+  const returnTo = context.req.query("returnTo");
   const fullConsent = channelLogin !== undefined && channelLogin.length > 0 &&
     await hasFullConsentForChannelLogin(context.env.DB, channelLogin);
   const scopes = fullConsent ? listAllBroadcasterScopes() : [];
@@ -300,6 +305,8 @@ authRouter.get("/auth/login", async (context) => {
     "login",
     nowIso(),
     scopes,
+    false,
+    isSafeLoginRedirectPath(returnTo) ? returnTo : null,
   );
   context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);
@@ -312,11 +319,11 @@ authRouter.get("/auth/login", async (context) => {
  */
 authRouter.get(
   "/auth/channels/:channelId/channel-bot",
-  requireChannelAuthorization(),
+  requireBrowserChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
     if (context.get("session").userId !== channelId) {
-      return context.text("Nur der Kanalinhaber darf diese Zustimmung nachfordern.", 403);
+      return oauthError(context, "channel_owner_only_consent_request", 403);
     }
     const started = await startOAuthAuthorization(
       context.env.DB,
@@ -341,14 +348,14 @@ authRouter.get(
  */
 authRouter.get(
   "/auth/channels/:channelId/broadcaster-scopes/:moduleId",
-  requireChannelAuthorization(),
+  requireBrowserChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
     if (context.get("session").userId !== channelId) {
-      return context.text("Nur der Kanalinhaber darf diese Zustimmung erteilen.", 403);
+      return oauthError(context, "channel_owner_only_scope_grant", 403);
     }
     const module = MODULES.find((candidate) => candidate.id === context.req.param("moduleId"));
-    if (module === undefined) return context.text("Modul nicht gefunden.", 404);
+    if (module === undefined) return oauthError(context, "module_not_found", 404);
 
     const scopes = await listRequiredBroadcasterScopesForUserAndModule(
       context.env.DB,
@@ -379,7 +386,7 @@ authRouter.get(
  * so this guard is not what stops a takeover -- it stops the flow from being
  * reachable by the wrong person in the first place.
  */
-authRouter.get("/auth/bot/login", requirePlatform(), async (context) => {
+authRouter.get("/auth/bot/login", requireBrowserPlatformAuthorization(), async (context) => {
   const started = await startOAuthAuthorization(context.env.DB, context.env, "bot", nowIso());
   context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);
@@ -387,7 +394,7 @@ authRouter.get("/auth/bot/login", requirePlatform(), async (context) => {
 
 authRouter.get("/auth/twitch/callback", async (context) => {
   const serializedState = context.req.query("state");
-  if (serializedState === undefined) return oauthError(context, "OAuth-State fehlt.");
+  if (serializedState === undefined) return oauthError(context, "oauth_state_missing");
 
   const now = nowIso();
   const stateNonce = readCookieValue(context.req.raw.headers.get("Cookie"), OAUTH_STATE_COOKIE_NAME);
@@ -400,23 +407,23 @@ authRouter.get("/auth/twitch/callback", async (context) => {
   // The cookie is consumed in any case — even if the check fails — so that
   // an intercepted callback cannot be retried later.
   context.header("Set-Cookie", clearOAuthStateCookie());
-  if (state === null) return oauthError(context, "OAuth-State ist ungültig oder abgelaufen.");
+  if (state === null) return oauthError(context, "oauth_state_invalid");
 
   const transaction = await consumeOAuthTransaction(context.env.DB, state.transactionId, now);
   if (transaction === null || transaction.purpose !== state.purpose) {
-    return oauthError(context, "OAuth-Transaktion ist ungültig oder wurde bereits verwendet.");
+    return oauthError(context, "oauth_transaction_invalid");
   }
 
   const error = context.req.query("error");
   if (error !== undefined) {
     await failOAuthTransaction(context.env.DB, state.transactionId, "authorization_denied");
-    return oauthError(context, "Twitch-Autorisierung wurde abgelehnt.");
+    return oauthError(context, "authorization_denied");
   }
 
   const code = context.req.query("code");
   if (code === undefined || code.length === 0) {
     await failOAuthTransaction(context.env.DB, state.transactionId, "authorization_code_missing");
-    return oauthError(context, "OAuth-Code fehlt.");
+    return oauthError(context, "oauth_code_missing");
   }
 
   try {
@@ -426,13 +433,13 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     if (transaction.expectedUserId !== undefined && transaction.expectedUserId !== null &&
         identity.userId !== transaction.expectedUserId) {
       await failOAuthTransaction(context.env.DB, state.transactionId, "login_identity_user_mismatch");
-      return oauthError(context, "Die Twitch-Identität gehört nicht zum Kanalinhaber.", 403);
+      return oauthError(context, "identity_user_mismatch", 403);
     }
 
     if (state.purpose === "bot") {
       if (identity.login.toLowerCase() !== context.env.TWITCH_BOT_LOGIN.toLowerCase()) {
         await failOAuthTransaction(context.env.DB, state.transactionId, "bot_identity_mismatch");
-        return oauthError(context, "Der Twitch-Login gehört nicht zum konfigurierten Bot.", 403);
+        return oauthError(context, "bot_login_mismatch", 403);
       }
       const current = await getBotIdentity(context.env.DB);
       // The login is changeable and gets reassigned after a rename. If a
@@ -441,11 +448,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       // their account in every channel.
       if (current !== null && current.userId !== identity.userId) {
         await failOAuthTransaction(context.env.DB, state.transactionId, "bot_identity_user_mismatch");
-        return oauthError(
-          context,
-          "Der Twitch-Login gehört nicht zur hinterlegten Bot-Identität.",
-          403,
-        );
+        return oauthError(context, "bot_identity_mismatch", 403);
       }
       const encryptionKeys = getTokenEncryptionKeys(context.env);
       await upsertBotIdentityAndStatus(context.env.DB, {
@@ -486,19 +489,15 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         await failOAuthTransaction(
           context.env.DB,
           state.transactionId,
-          "vollzustimmung_zweiter_versuch_unvollständig",
+          "full_consent_second_attempt_incomplete",
         );
-        return oauthError(
-          context,
-          "Die vollständige Zustimmung für diesen Kanal wurde nicht erteilt.",
-          403,
-        );
+        return oauthError(context, "full_consent_second_attempt_incomplete", 403);
       }
 
       await failOAuthTransaction(
         context.env.DB,
         state.transactionId,
-        "vollzustimmung_unvollständig",
+        "full_consent_incomplete",
       );
       const started = await startOAuthAuthorization(
         context.env.DB,
@@ -569,21 +568,22 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       state.transactionId,
       error instanceof OAuthExchangeError ? "code_exchange_rejected" : "callback_failed",
     );
-    if (error instanceof OAuthExchangeError) return oauthError(context, error.message);
-    return context.text("Twitch-Autorisierung konnte nicht abgeschlossen werden.", 502);
+    return error instanceof OAuthExchangeError
+      ? oauthError(context, "code_exchange_rejected")
+      : oauthError(context, "callback_failed", 502);
   }
 });
 
 authRouter.post("/auth/logout", async (context) => {
   const session = await getSessionFromRequest(context.req.raw, context.env);
-  if (session === null) return context.text("Session fehlt.", 401);
+  if (session === null) return context.json({ error: "session_missing" }, 401);
   if (!await verifyCsrfRequest(
     context.req.raw,
     session.sessionId,
     context.env.SESSION_COOKIE_KEYS,
     nowIso(),
   )) {
-    return context.text("CSRF-Token fehlt oder ist ungültig.", 403);
+    return context.json({ error: "csrf_invalid" }, 403);
   }
   const now = nowIso();
   await revokeSession(context.env.DB, session.sessionId, now, "logout");

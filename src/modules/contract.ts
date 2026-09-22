@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
-import type { ChannelRole } from "../contracts/values";
+import type { AuditWriteAction, ChannelRole } from "../contracts/values";
 
 export { truncateTo200Chars } from "../text";
 
@@ -11,7 +11,7 @@ export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "
 /**
  * A justification for something a module did, or deliberately did not do.
  *
- * `code` is machine-readable and stable (`shoutout.unterdrueckt`), `detail`
+ * `code` is machine-readable and stable (`shoutout.suppressed`), `detail`
  * carries the numbers that explain the case. Together they answer the
  * question that today goes unanswered everywhere: "Raid detected, why was
  * there no shoutout?"
@@ -91,7 +91,7 @@ export type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
 export interface ModuleAuditEntry {
   channelId: string;
   moduleId: string | null;
-  action: string;
+  action: AuditWriteAction;
   before: ModuleAuditSnapshot | null;
   after: ModuleAuditSnapshot | null;
 }
@@ -101,6 +101,17 @@ export type PrepareModuleAudit = (
   entry: ModuleAuditEntry,
   changedAt: string,
 ) => D1PreparedStatement;
+
+/**
+ * Writes an audit entry immediately, for an action with no accompanying D1
+ * mutation to batch it with -- an external Twitch call (start a commercial,
+ * create a clip), not a row change here. `PrepareModuleAudit` above stays
+ * for the batched case.
+ */
+export type WriteModuleAudit = (
+  entry: ModuleAuditEntry,
+  changedAt: string,
+) => Promise<void>;
 
 export type AuthorizeModuleMutation = (
   channelId: string,
@@ -133,6 +144,11 @@ export interface ModulePanelProperties {
   canManage?: boolean;
   /** Called by the host when an inspector is closed. */
   onCloseInspector?: () => void;
+  /** Deep-link target set by the host (Spotlight, #164) -- a module reads
+   *  its own identifier out of this if it wants to pre-select something on
+   *  mount (e.g. text_commands selects the command by name); most modules
+   *  ignore it. */
+  initialSelection?: string;
 }
 
 export type ModuleLanguage = "de" | "en";
@@ -142,6 +158,45 @@ export const browserModuleLanguage = (): ModuleLanguage => {
   return language.toLowerCase().startsWith("de") ? "de" : "en";
 };
 
+/** HTTP method a Helix request may use; `helixRequest` sets no default body encoding beyond JSON. */
+export type HelixMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/**
+ * Base transport-level classification `helixRequest` derives from the raw
+ * response -- nothing about what a status *means* for a given endpoint (a
+ * 401 is a missing scope here, a revoked moderator there). That reading
+ * stays with the caller; see `worker/twitch/helix.ts`'s header comment.
+ */
+export type HelixErrorReason =
+  | "rate_limited" | "network_error" | "timeout" | "invalid_response" | "pagination_loop"
+  | `http_${string}`;
+
+export interface HelixRequestOptions<Data = unknown> {
+  method?: HelixMethod;
+  url: string;
+  query?: Readonly<Record<string, string | undefined>>;
+  body?: unknown;
+  accessToken: string;
+  clientId: string;
+  /** Validates and narrows a successful response body; a mismatch reports as `invalid_response`. */
+  schema?: z.ZodType<Data>;
+  fetcher?: typeof fetch;
+  timeoutMs?: number;
+}
+
+export type HelixResult<Data = unknown> =
+  | { ok: true; status: number; data: Data }
+  | {
+    ok: false;
+    status: number | null;
+    reason: HelixErrorReason;
+    message: string | null;
+    /** Twitch's parsed error body, tolerant of a missing or non-JSON response. */
+    body: Readonly<Record<string, unknown>>;
+  };
+
+export type HelixRequest = <Data = unknown>(options: HelixRequestOptions<Data>) => Promise<HelixResult<Data>>;
+
 export interface ModuleRouteVariables {
   session: { userId: string; sessionId: string };
   channelRole: ChannelRole;
@@ -149,6 +204,7 @@ export interface ModuleRouteVariables {
   authorizeMutation: AuthorizeModuleMutation;
   authorizeManagementMutation: AuthorizeModuleMutation;
   prepareModuleAudit: PrepareModuleAudit;
+  writeModuleAudit: WriteModuleAudit;
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,
@@ -160,6 +216,8 @@ export interface ModuleRouteVariables {
   ) => Promise<unknown>;
   broadcasterHasScope: (db: D1Database, channelId: string, scope: string) => Promise<boolean>;
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
+  /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
+  helixRequest: HelixRequest;
 }
 
 export interface ModuleRouteEnvironment {

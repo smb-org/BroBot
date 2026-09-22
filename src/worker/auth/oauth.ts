@@ -1,5 +1,6 @@
 import { createOAuthTransaction, type OAuthPurpose } from "../db/oauth-transactions";
 import { parseKeyRing, signJson, verifyJson } from "./crypto";
+import { helixRequest } from "../twitch/helix";
 
 export const LOGIN_SCOPES = ["user:read:moderated_channels", "channel:bot"] as const;
 export const BOT_SCOPES = [
@@ -242,10 +243,10 @@ export const exchangeAuthorizationCode = async (
   try {
     body = await response.json();
   } catch {
-    throw new OAuthExchangeError("Twitch-Code-Tausch wurde abgelehnt.");
+    throw new OAuthExchangeError("The Twitch code exchange was rejected.");
   }
   if (!response.ok || !isTwitchTokenResponse(body)) {
-    throw new OAuthExchangeError("Twitch-Code-Tausch wurde abgelehnt.");
+    throw new OAuthExchangeError("The Twitch code exchange was rejected.");
   }
   return {
     accessToken: body.access_token,
@@ -255,42 +256,29 @@ export const exchangeAuthorizationCode = async (
   };
 };
 
-interface TwitchUserApiResponse {
-  data?: unknown;
-}
-
 export const fetchTwitchUser = async (
   fetcher: typeof fetch,
   environment: OAuthEnvironment,
   accessToken: string,
 ): Promise<TwitchUserIdentity> => {
-  const response = await fetcher("https://api.twitch.tv/helix/users", {
-    headers: {
-      "Client-ID": environment.TWITCH_CLIENT_ID,
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const result = await helixRequest<{ data?: unknown }>({
+    url: "https://api.twitch.tv/helix/users",
+    accessToken,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
   });
-  let body: TwitchUserApiResponse;
-  try {
-    const rawBody: unknown = await response.json();
-    if (rawBody !== null && typeof rawBody === "object" && !Array.isArray(rawBody)) {
-      body = { data: "data" in rawBody ? rawBody.data : undefined };
-    } else {
-      body = {};
-    }
-  } catch {
-    throw new Error("Twitch-Identität konnte nicht gelesen werden.");
-  }
-  const data: unknown[] = Array.isArray(body.data)
-    ? body.data.map((entry: unknown): unknown => entry)
+  if (!result.ok) throw new Error("Twitch identity could not be read.");
+
+  const data: unknown[] = Array.isArray(result.data.data)
+    ? result.data.data.map((entry: unknown): unknown => entry)
     : [];
   const first = data[0] ?? null;
   if (first === null || typeof first !== "object") {
-    throw new Error("Twitch-Identität konnte nicht gelesen werden.");
+    throw new Error("Twitch identity could not be read.");
   }
   const user = first as Record<string, unknown>;
-  if (!response.ok || typeof user.id !== "string" || typeof user.login !== "string") {
-    throw new Error("Twitch-Identität konnte nicht gelesen werden.");
+  if (typeof user.id !== "string" || typeof user.login !== "string") {
+    throw new Error("Twitch identity could not be read.");
   }
   return { userId: user.id, login: user.login };
 };

@@ -1,4 +1,4 @@
-import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import type {
@@ -21,7 +21,6 @@ import type {
   PanelSystemResponse,
   PanelTokenStatus,
 } from "../panel-contract";
-import { EVENT_TONES, type EventTone } from "../contracts/values";
 import {
   BOT_MAINTENANCE_INTERVAL_MS,
   BOT_MAINTENANCE_STALE_AFTER_MS,
@@ -39,28 +38,22 @@ import {
   refreshModeratorStatus,
   setChannelModuleEnabled,
 } from "./api";
-import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
-import { SubInspector } from "./inspector";
-import { useInspectorSelection } from "./inspector-selection";
+import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleToggleList, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
+import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
+import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
-import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, eventToneEntries, formatTimestamp as formatTimestampBase, formatNumber, type EventCode, type EventDetail, type EventNumberKey } from "./locale";
-import { disabledStatusWord, eventSubName, moduleName, statusWord } from "./module-labels";
-import { useRealtimeEventFeed, type RealtimeFeedStatus } from "./realtime";
-import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
+import { apiErrorText, auditActionLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
+import { canManage } from "../contracts/values";
+import { eventSubName, moduleName, statusWord } from "./module-labels";
+import { dashboardRoutePath, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
+import { BlockingState, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, Switch as UiSwitch, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { EventsPage } from "./events/EventsPage";
+import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
+import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
-
-interface LoadState<T> {
-  status: "idle" | "loading" | "success" | "error";
-  data: T | null;
-  error: string | null;
-  /** When this response arrived. Drives the data-age display. */
-  loadedAt?: number;
-}
-
-type LoadStateSetter<T> = (value: LoadState<T> | ((current: LoadState<T>) => LoadState<T>)) => void;
 
 interface ModeratorCheckState {
   status: "idle" | "loading" | "error";
@@ -78,29 +71,11 @@ interface EventsRequestState {
   generation: number;
 }
 
-const emptyEventFilter: PanelEventFilters = {
-  origin: null,
-  module: null,
-  tone: null,
-  person: null,
-};
-
-const PERSON_FILTER_DEBOUNCE_MS = 300;
-
 const idleModeratorCheck = (): ModeratorCheckState => ({
   status: "idle",
   error: null,
   nextAllowedAt: null,
 });
-
-const idleState = <T,>(): LoadState<T> => ({ status: "idle", data: null, error: null });
-const loadingState = <T,>(current?: LoadState<T>): LoadState<T> => {
-  const next: LoadState<T> = { status: "loading", data: current?.data ?? null, error: null };
-  if (current?.loadedAt !== undefined) next.loadedAt = current.loadedAt;
-  return next;
-};
-
-const loadedState = <T,>(data: T): LoadState<T> => ({ status: "success", data, error: null, loadedAt: Date.now() });
 
 const statusLabel = (status: PanelBotStatus["status"]): string => {
   const texts = dashboardTexts();
@@ -228,8 +203,8 @@ const broadcasterConnectionLabel = (status: PanelChannelState["broadcasterConnec
 
 const errorMessage = (error: unknown): string => {
   if (error instanceof PanelApiError && error.status === 401) return dashboardTexts().errors.sessionInvalid;
-  if (error instanceof Error && error.message.length > 0) return error.message;
-  return dashboardTexts().errors.dataLoadFailed;
+  const fallback = dashboardTexts().errors.dataLoadFailed;
+  return error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
 };
 
 const nextAllowedAtFromError = (error: unknown): string | null => {
@@ -252,45 +227,6 @@ const mergeModeratorStatus = <T extends { moderator: PanelModeratorStatus | null
   lastError: current.lastError?.source === "moderator" ? moderatorLastError(moderator) : current.lastError,
 });
 
-interface LinkProperties {
-  route: DashboardRoute;
-  current: DashboardRoute;
-  children: ReactNode;
-  onNavigate: (route: DashboardRoute) => void;
-  className?: string;
-}
-
-const RouteLink = ({ route, current, children, onNavigate, className = "nav-link" }: LinkProperties): ReactElement => {
-  const isCurrent = (route.kind === "overview" && current.kind === "overview") ||
-    (route.kind === "betreiber" && current.kind === "betreiber") ||
-    (route.kind === "channel" && current.kind === "channel" &&
-      route.channelId === current.channelId && route.section === current.section) ||
-    (route.kind === "channel" && current.kind === "module" &&
-      route.channelId === current.channelId && route.section === "modules");
-  return (
-    <a
-      className={isCurrent ? `${className} ${className}--active` : className}
-      href={dashboardRoutePath(route)}
-      aria-current={isCurrent ? "page" : undefined}
-      onClick={(event) => {
-        event.preventDefault();
-        onNavigate(route);
-      }}
-    >
-      {children}
-    </a>
-  );
-};
-
-/**
- * The status dot in the navigation shows a problem before you click.
- * The text next to it is for assistive tech: color never informs alone.
- */
-const NavDot = ({ tone }: { tone: "healthy" | "warning" | "error" }): ReactElement | null =>
-  tone === "healthy" ? null : (
-    <span className="nav-dot" data-status={tone} role="img" aria-label={tone === "error" ? dashboardTexts().errors.title : dashboardTexts().errors.warning} />
-  );
-
 const formatTimestamp = (value: string): string => formatTimestampBase(value);
 
 const ErrorPanel = ({ message }: { message: string }): ReactElement => (
@@ -300,45 +236,129 @@ const ErrorPanel = ({ message }: { message: string }): ReactElement => (
   </section>
 );
 
-interface SidebarProperties {
+type PageLoadedAt = Record<"overview" | "system" | "members" | "modules" | "events", number | undefined>;
+
+const loadedAtForRoute = (route: DashboardRoute, loadedAt: PageLoadedAt): number | undefined => {
+  if (route.kind === "overview") return undefined;
+  if (route.kind === "platform") return undefined;
+  if (route.kind === "module") return loadedAt.modules;
+  return loadedAt[route.section];
+};
+
+interface PanelSidebarProperties {
   route: DashboardRoute;
   channels: PanelChannelState[];
   platformAdmin: boolean;
+  moduleStates: PanelModuleState[] | null;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  onEntryNavigate: () => void;
   onNavigate: (route: DashboardRoute) => void;
 }
 
-const Rail = ({ route, channels, platformAdmin: platform, onNavigate }: SidebarProperties): ReactElement => {
+/**
+ * "Seitenleiste" (docs/input/DESIGN-neu.md): four groups, built from the
+ * seam's `Sidebar`. Replaces `Rail` and the breadcrumb switchers.
+ */
+const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, collapsed, onToggleCollapsed, onEntryNavigate, onNavigate }: PanelSidebarProperties): ReactElement => {
   const texts = dashboardTexts();
   const platformTextsValues = platformTexts();
-  const activeChannel = route.kind === "channel" || route.kind === "module"
-    ? channels.find((channel) => channel.channelId === route.channelId)
-    : undefined;
   const navigationChannelId = route.kind === "channel" || route.kind === "module"
     ? route.channelId
     : channels[0]?.channelId ?? "";
+
+  const sectionEntry = (section: "overview" | "system" | "members" | "events", label: string, iconKind: string): SidebarEntry => {
+    const entryRoute: DashboardRoute = { kind: "channel", channelId: navigationChannelId, section };
+    return {
+      id: section,
+      label,
+      icon: <NavigationIcon kind={iconKind} className="sidebar-nav-icon" />,
+      href: dashboardRoutePath(entryRoute),
+      active: route.kind === "channel" && route.section === section,
+      onNavigate: () => { onNavigate(entryRoute); },
+    };
+  };
+
+  const operationGroup: SidebarGroup = {
+    id: "operation",
+    heading: texts.navigation.operationSection,
+    entries: [sectionEntry("events", texts.navigation.events, "events")],
+  };
+  const channelGroup: SidebarGroup = {
+    id: "channel",
+    heading: texts.navigation.channel,
+    entries: [
+      sectionEntry("overview", texts.navigation.channel, "channel"),
+      sectionEntry("system", texts.navigation.system, "system"),
+      sectionEntry("members", texts.navigation.members, "members"),
+    ],
+  };
+
+  // "jedes aktive Modul als Eintrag" -- only modules that are actually on
+  // (enabled, and not held back by a missing broadcaster scope) appear
+  // here; everything else lives in the module list only.
+  const activeModuleEntries: SidebarEntry[] = (moduleStates ?? [])
+    .filter((module) => module.enabled && (module.missingBroadcasterScopes?.length ?? 0) === 0)
+    .map((module) => {
+      const moduleRoute: DashboardRoute = { kind: "module", channelId: navigationChannelId, moduleId: module.id };
+      return {
+        id: module.id,
+        label: moduleName(module.id),
+        icon: <ModuleIcon moduleId={module.id} className="sidebar-nav-icon" />,
+        href: dashboardRoutePath(moduleRoute),
+        active: route.kind === "module" && route.moduleId === module.id,
+        onNavigate: () => { onNavigate(moduleRoute); },
+        led: { status: "green" as const, word: statusWord(true) },
+      };
+    });
+  const allModulesRoute: DashboardRoute = { kind: "channel", channelId: navigationChannelId, section: "modules" };
+  const modulesGroup: SidebarModulesGroup = {
+    heading: texts.navigation.module,
+    icon: <NavigationIcon kind="modules" className="sidebar-nav-icon" />,
+    label: texts.navigation.module,
+    active: route.kind === "module" || (route.kind === "channel" && route.section === "modules"),
+    entries: activeModuleEntries,
+    allEntry: {
+      id: "all-modules",
+      label: texts.module.moduleOverview,
+      icon: <NavigationIcon kind="modules" className="sidebar-nav-icon" />,
+      href: dashboardRoutePath(allModulesRoute),
+      active: route.kind === "channel" && route.section === "modules",
+      onNavigate: () => { onNavigate(allModulesRoute); },
+    },
+  };
+
+  const platformGroup: SidebarGroup | undefined = platform ? {
+    id: "platform",
+    heading: platformTextsValues.navigation,
+    entries: [{
+      id: "platform",
+      label: platformTextsValues.navigation,
+      icon: <NavigationIcon kind="members" className="sidebar-nav-icon" />,
+      href: dashboardRoutePath({ kind: "platform" }),
+      active: route.kind === "platform",
+      onNavigate: () => { onNavigate({ kind: "platform" }); },
+    }],
+  } : undefined;
+
   return (
-    <aside className="rail">
-      <nav className="primary-nav" aria-label={texts.navigation.mainNavigation}>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "overview" }} current={route} onNavigate={onNavigate}>
-          <span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="channel" /><span>{texts.navigation.channel}</span></span>
-          {activeChannel === undefined ? null : <NavDot tone={channelStatus(activeChannel)} />}
-        </RouteLink>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "system" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="system" /><span>{texts.navigation.system}</span></span></RouteLink>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "members" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="members" /><span>{texts.navigation.members}</span></span></RouteLink>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "modules" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="modules" /><span>{texts.navigation.module}</span></span></RouteLink>
-        <RouteLink route={{ kind: "channel", channelId: navigationChannelId, section: "events" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="events" /><span>{texts.navigation.events}</span></span></RouteLink>
-        {platform ? <RouteLink route={{ kind: "betreiber" }} current={route} onNavigate={onNavigate}><span className="rail-link__content"><NavigationIcon className="rail-link__icon" kind="members" /><span>{platformTextsValues.navigation}</span></span></RouteLink> : null}
-      </nav>
-    </aside>
+    <Sidebar
+      groups={[operationGroup, channelGroup]}
+      modules={modulesGroup}
+      platform={platformGroup}
+      collapsed={collapsed}
+      onToggleCollapsed={onToggleCollapsed}
+      onEntryNavigate={onEntryNavigate}
+      collapseLabel={texts.navigation.collapseSidebar}
+      expandLabel={texts.navigation.expandSidebar}
+    />
   );
 };
 
-interface PanelTopbarProperties {
+interface DashboardHeaderProperties {
   route: DashboardRoute;
   channels: PanelChannelState[];
-  platformAdmin: boolean;
   activeChannel: PanelChannelState | undefined;
-  moduleStates: PanelModuleState[] | null;
   loadedAt: number | undefined;
   headerModule: { id: string; enabled: boolean } | undefined;
   headerModuleBusy: boolean;
@@ -348,280 +368,60 @@ interface PanelTopbarProperties {
   loggingOut: boolean;
 }
 
-type PageLoadedAt = Record<"overview" | "system" | "members" | "modules" | "events", number | undefined>;
-
-const loadedAtForRoute = (route: DashboardRoute, loadedAt: PageLoadedAt): number | undefined => {
-  if (route.kind === "overview") return undefined;
-  if (route.kind === "betreiber") return undefined;
-  if (route.kind === "module") return loadedAt.modules;
-  return loadedAt[route.section];
-};
-
-const focusableSelector = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
-
-interface BreadcrumbSwitcherOption {
-  id: string;
-  name: string;
-  icon: ReactNode;
-  secondary?: string;
-  status?: { status: LedStatus; label: string };
-}
-
-const BreadcrumbSwitcher = ({ kind, currentLabel, accessibleCurrentLabel = currentLabel, currentId, currentIcon, options, openable, buttonLabel, listLabel, listboxId, open, onOpenChange, onSelect }: {
-  kind: "channel" | "module";
-  currentLabel: string;
-  accessibleCurrentLabel?: string;
-  currentId: string;
-  currentIcon?: ReactNode;
-  options: BreadcrumbSwitcherOption[];
-  openable: boolean;
-  buttonLabel: string;
-  listLabel: string;
-  listboxId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSelect: (id: string) => void;
-}): ReactElement => {
-  const switcherRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const optionRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const selectedIndex = Math.max(0, options.findIndex((option) => option.id === currentId));
-  const [activeIndex, setActiveIndex] = useState(selectedIndex);
-
-  useEffect(() => {
-    if (!open) return;
-    optionRefs.current[activeIndex]?.focus();
-  }, [activeIndex, open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsideClick = (event: MouseEvent): void => {
-      if (switcherRef.current?.contains(event.target as Node)) return;
-      onOpenChange(false);
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    return () => { document.removeEventListener("mousedown", closeOnOutsideClick); };
-  }, [onOpenChange, open]);
-
-  const closeAndFocusButton = (): void => {
-    onOpenChange(false);
-    buttonRef.current?.focus();
-  };
-
-  const selectOption = (id: string): void => {
-    closeAndFocusButton();
-    onSelect(id);
-  };
-
-  const focusNextControl = (): void => {
-    const button = buttonRef.current;
-    if (button === null) return;
-    const controls = Array.from(document.querySelectorAll<HTMLElement>(focusableSelector));
-    const index = controls.indexOf(button);
-    controls[index + 1]?.focus();
-  };
-
-  const openList = (): void => {
-    setActiveIndex(selectedIndex);
-    onOpenChange(true);
-  };
-
-  if (!openable) {
-    if (kind === "module") {
-      return <span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{currentIcon}</span><span>{currentLabel}</span></span>;
-    }
-    return <span className="topbar__channel-segment topbar__channel-segment--static" data-channel-id={currentId}>{currentLabel}</span>;
-  }
-
-  return (
-    <div className={`topbar__channel-switch${kind === "module" ? " topbar__breadcrumb-module" : ""}`} ref={switcherRef}>
-      <button
-        ref={buttonRef}
-        className={kind === "module" ? "topbar__channel-button topbar__breadcrumb-link topbar__breadcrumb-module" : "topbar__channel-button"}
-        type="button"
-        aria-label={`${buttonLabel}: ${accessibleCurrentLabel}`}
-        aria-current={kind === "module" ? "page" : undefined}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listboxId}
-        onClick={() => { if (open) closeAndFocusButton(); else openList(); }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            openList();
-          }
-        }}
-      >
-        {kind === "module" ? <span className="topbar__breadcrumb-icon" aria-hidden="true">{currentIcon}</span> : null}
-        <span className="topbar__channel-segment">{currentLabel}</span>
-        <svg className="topbar__breadcrumb-glyph topbar__channel-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" /></svg>
-      </button>
-      {open ? <div id={listboxId} className="topbar__channel-list" role="listbox" aria-label={listLabel}>
-        {options.map((option, index) => {
-          return <div
-            key={option.id}
-            ref={(element) => { optionRefs.current[index] = element; }}
-            className="topbar__channel-option"
-            role="option"
-            aria-selected={index === activeIndex}
-            tabIndex={index === activeIndex ? 0 : -1}
-            onClick={() => { selectOption(option.id); }}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setActiveIndex(Math.min(options.length - 1, activeIndex + 1));
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setActiveIndex(Math.max(0, activeIndex - 1));
-              } else if (event.key === "Home") {
-                event.preventDefault();
-                setActiveIndex(0);
-              } else if (event.key === "End") {
-                event.preventDefault();
-                setActiveIndex(options.length - 1);
-              } else if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                selectOption(options[activeIndex]?.id ?? option.id);
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                closeAndFocusButton();
-              } else if (event.key === "Tab") {
-                event.preventDefault();
-                onOpenChange(false);
-                window.setTimeout(focusNextControl, 0);
-              }
-            }}
-          >
-            {option.icon}
-            <span className="topbar__channel-option-copy">
-              <span className="topbar__channel-option-name">{option.name}</span>
-              {option.secondary === undefined ? null : <span className="topbar__channel-option-id mono">{option.secondary}</span>}
-            </span>
-            {option.status === undefined ? null : <Led status={option.status.status} label={option.status.label} />}
-          </div>;
-        })}
-      </div> : null}
-    </div>
-  );
-};
-
-const ChannelSwitcher = ({ channels, activeChannel, open, onOpenChange, onNavigate }: {
-  channels: PanelChannelState[];
-  activeChannel: PanelChannelState | undefined;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onNavigate: (route: DashboardRoute) => void;
-}): ReactElement | null => {
+/**
+ * "Kopfleiste" (docs/input/DESIGN-neu.md): brand, channel `Select` up to
+ * 280px with the Twitch id, connection LED, life-sign, and (on a module
+ * page) the module's main switch -- `ui/Switch`, the same component the
+ * future module list row uses. Sign-out closes it out.
+ *
+ * The channel `Select`'s options carry the Twitch id as plain text next to
+ * the name rather than in a monospace secondary line: `ui/Select` only
+ * renders a flat label per option, and extending it for a two-line,
+ * icon-plus-LED option render is a separate, larger seam change.
+ * ponytail: functional parity (the id stays visible and searchable), not
+ * pixel parity. Upgrade path: a richer `SelectOption` shape in `ui/Select`
+ * if the plain label stops being legible enough.
+ */
+const DashboardHeader = ({ route, channels, activeChannel, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: DashboardHeaderProperties): ReactElement => {
   const texts = dashboardTexts();
-  if (activeChannel === undefined) return null;
-  return <BreadcrumbSwitcher
-    kind="channel"
-    currentLabel={activeChannel.displayName}
-    currentId={activeChannel.channelId}
-    options={channels.map((channel) => ({
-      id: channel.channelId,
-      name: channel.displayName,
-      icon: <NavigationIcon className="topbar__channel-option-icon" kind="channel" />,
-      secondary: channel.channelId,
-      status: {
-        status: channelToneToLedStatus(channelStatus(channel)),
-        label: statusText(channel),
-      },
-    }))}
-    openable={channels.length > 1}
-    buttonLabel={texts.navigation.selectChannel}
-    listLabel={texts.navigation.selectChannel}
-    listboxId="channel-switcher-listbox"
-    open={open}
-    onOpenChange={onOpenChange}
-    onSelect={(channelId) => { onNavigate({ kind: "channel", channelId, section: "overview" }); }}
-  />;
-};
-
-const BreadcrumbAreaLink = ({ route, label, icon, onNavigate }: {
-  route: DashboardRoute;
-  label: string;
-  icon: ReactNode;
-  onNavigate: (route: DashboardRoute) => void;
-}): ReactElement => (
-  <a
-    className="topbar__breadcrumb-link topbar__breadcrumb-area"
-    href={dashboardRoutePath(route)}
-    onClick={(event) => { event.preventDefault(); onNavigate(route); }}
-  >
-    <span className="topbar__breadcrumb-icon" aria-hidden="true">{icon}</span>
-    <span>{label}</span>
-  </a>
-);
-
-const PanelTopbar = ({ route, channels, platformAdmin: platform, activeChannel, moduleStates, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: PanelTopbarProperties): ReactElement => {
-  const texts = dashboardTexts();
-  const platformTextsValues = platformTexts();
-  const [openSwitcher, setOpenSwitcher] = useState<"channel" | "module" | null>(null);
   const tone = activeChannel === undefined ? "neutral" : channelStatus(activeChannel);
   const connectionLabel = activeChannel === undefined
     ? null
     : tone === "healthy" ? texts.header.connectionRunning : statusText(activeChannel);
-  const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
-  const headerSwitch = headerModuleLabel === null ? null : <span className="topbar__module-switch-wrap"><button className="switch topbar__module-switch" type="button" role="switch" aria-label={headerModuleLabel} aria-checked={headerModule?.enabled} aria-busy={headerModuleBusy} disabled={activeChannel?.role === "operator" || headerModuleBusy} title={activeChannel?.role === "operator" ? texts.module.managementLocked : undefined} onClick={onToggleHeaderModule}><span className="topbar__module-switch-label">{headerModuleLabel}</span><span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span></button>{activeChannel?.role === "operator" ? <span className="sperrgrund">{texts.module.managementLocked}</span> : null}</span>;
   const connectionLed = connectionLabel === null ? null : <span className="led" data-status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : "red"}><span className="led__dot" aria-hidden="true" /><span>{connectionLabel}</span></span>;
-  const areaRoute = route.kind === "channel"
-    ? { kind: "channel" as const, channelId: route.channelId, section: route.section }
-    : route.kind === "module"
-      ? { kind: "channel" as const, channelId: route.channelId, section: "modules" as const }
-      : null;
-  const areaLabel = areaRoute === null ? null : areaRoute.section === "overview" ? texts.navigation.channel
-    : areaRoute.section === "system" ? texts.navigation.system
-      : areaRoute.section === "members" ? texts.navigation.members
-        : areaRoute.section === "modules" ? texts.navigation.module : texts.navigation.events;
-  const moduleLabel = route.kind === "module" ? moduleName(route.moduleId) : null;
-  const moduleBreadcrumbIcon = route.kind === "module" ? <ModuleIcon moduleId={route.moduleId} /> : null;
-  const moduleOptions = moduleStates?.map((module): BreadcrumbSwitcherOption => {
-    const missingScopes = module.missingBroadcasterScopes ?? [];
-    const effectiveEnabled = module.enabled && missingScopes.length === 0;
-    return {
-      id: module.id,
-      name: moduleName(module.id),
-      icon: <ModuleIcon moduleId={module.id} className="topbar__channel-option-icon" />,
-      status: {
-        status: missingScopes.length > 0 ? "amber" : effectiveEnabled ? "green" : "off",
-        label: missingScopes.length > 0 ? disabledStatusWord() : statusWord(effectiveEnabled),
-      },
-    };
-  }) ?? [];
-  const moduleArea = route.kind === "module" && areaRoute !== null && areaLabel !== null
-    ? <BreadcrumbAreaLink route={areaRoute} label={areaLabel} icon={<NavigationIcon kind="modules" className="topbar__breadcrumb-glyph" />} onNavigate={onNavigate} />
-    : null;
-  const moduleSwitcher = route.kind === "module" && moduleStates !== null && moduleLabel !== null && moduleBreadcrumbIcon !== null
-    ? <BreadcrumbSwitcher
-        kind="module"
-        currentLabel={moduleLabel}
-        currentId={route.moduleId}
-        currentIcon={moduleBreadcrumbIcon}
-        options={moduleOptions}
-        openable={moduleOptions.length > 1}
-        buttonLabel={texts.navigation.selectModule}
-        listLabel={texts.navigation.selectModule}
-        listboxId="module-switcher-listbox"
-        open={openSwitcher === "module"}
-        onOpenChange={(open) => { setOpenSwitcher(open ? "module" : null); }}
-        onSelect={(id) => { onNavigate({ kind: "module", channelId: route.channelId, moduleId: id }); }}
-      />
-    : null;
+  const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
+  const managementLocked = activeChannel !== undefined && !canManage(activeChannel.role);
   return (
-    <header className={`topbar${headerModuleLabel === null ? "" : " topbar--module-detail"}`}>
-      <nav className={`topbar__breadcrumb${route.kind === "module" ? " topbar__breadcrumb--module" : ""}`} aria-label={texts.navigation.breadcrumb}>
-        <a className="brand-mark" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
-        {activeChannel === undefined ? null : <><span className="topbar__breadcrumb-separator" aria-hidden="true">›</span><ChannelSwitcher channels={channels} activeChannel={activeChannel} open={openSwitcher === "channel"} onOpenChange={(open) => { setOpenSwitcher(open ? "channel" : null); }} onNavigate={onNavigate} /></>}
-        {areaRoute === null || areaLabel === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator topbar__area-separator" aria-hidden="true">›</span>{route.kind === "module" ? moduleArea : <span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind={areaRoute.section === "overview" ? "channel" : areaRoute.section} className="topbar__breadcrumb-glyph" /></span><span>{areaLabel}</span></span>}</>}
-        {route.kind === "betreiber" && platform ? <><span className="topbar__breadcrumb-separator topbar__breadcrumb-area-separator" aria-hidden="true">›</span><span className="topbar__breadcrumb-current topbar__breadcrumb-area" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true"><NavigationIcon kind="members" className="topbar__breadcrumb-glyph" /></span><span>{platformTextsValues.navigation}</span></span></> : null}
-        {moduleLabel === null || moduleBreadcrumbIcon === null ? null : <><span className="topbar__breadcrumb-separator topbar__breadcrumb-module-separator topbar__crumb-area" aria-hidden="true">›</span>{moduleSwitcher ?? <span className="topbar__breadcrumb-current topbar__breadcrumb-module topbar__crumb-last" aria-current="page"><span className="topbar__breadcrumb-icon" aria-hidden="true">{moduleBreadcrumbIcon}</span><span>{moduleLabel}</span></span>}</>}
-      </nav>
-      <span className="topbar__connection">{connectionLed}</span>
-      {loadedAt === undefined ? null : <Datenalter seit={loadedAt} />}
-      {headerSwitch}
-      <button className="button button--quiet topbar__logout" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}</button>
-    </header>
+    <div className="dashboard-header">
+      <a className="brand-mark dashboard-header__brand" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
+      {activeChannel === undefined ? null : (
+        <div className="dashboard-header__channel">
+          <UiSelect
+            value={activeChannel.channelId}
+            onChange={(channelId) => { if (channelId !== null) onNavigate({ kind: "channel", channelId, section: "overview" }); }}
+            options={channels.map((channel) => ({ value: channel.channelId, label: `${channel.displayName} — ${channel.channelId}` }))}
+            ariaLabel={texts.navigation.selectChannel}
+            id="dashboard-channel-select"
+          />
+        </div>
+      )}
+      <div className="dashboard-header__status">
+        {connectionLed}
+        {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
+      </div>
+      {headerModule === undefined || headerModuleLabel === null ? null : (
+        <div className="dashboard-header__switch">
+          <UiSwitch
+            label={headerModuleLabel}
+            checked={headerModule.enabled}
+            onChange={onToggleHeaderModule}
+            pending={headerModuleBusy}
+            {...(managementLocked ? { lockedReason: texts.module.managementLocked } : {})}
+          />
+        </div>
+      )}
+      <button className="button button--quiet dashboard-header__logout" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}</button>
+    </div>
   );
 };
 
@@ -659,8 +459,8 @@ const OverviewPage = ({ channels, onNavigate }: { channels: PanelChannelState[];
  * not in the moderator row, because that row doesn't appear at all in a
  * healthy state — the recheck must still be reachable at all times.
  */
-const relativeZeit = (seit: number, jetzt: number): string => {
-  const s = Math.max(0, Math.round((jetzt - seit) / 1000));
+const relativeTime = (since: number, now: number): string => {
+  const s = Math.max(0, Math.round((now - since) / 1000));
   const texts = dashboardTexts();
   if (s < 60) return texts.time.secondsAgo(s);
   const m = Math.round(s / 60);
@@ -672,35 +472,35 @@ const relativeZeit = (seit: number, jetzt: number): string => {
  * Proves liveness without asserting a status. Deliberately neutral and
  * never in status color.
  */
-const Datenalter = ({ seit }: { seit: number }): ReactElement => {
-  const [jetzt, setJetzt] = useState(() => Date.now());
+const DataAge = ({ since }: { since: number }): ReactElement => {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => { setJetzt(Date.now()); }, 1000);
+    const id = setInterval(() => { setNow(Date.now()); }, 1000);
     return () => { clearInterval(id); };
   }, []);
-  return <span className="datenalter">{dashboardTexts().time.updated(relativeZeit(seit, jetzt))}</span>;
+  return <span className="data-age">{dashboardTexts().time.updated(relativeTime(since, now))}</span>;
 };
 
-const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, dringend, onCheck }: {
+const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, urgent, onCheck }: {
   canCheck: boolean; checking: boolean; checkError: string | null;
-  nextAllowedAt: string | null; dringend: boolean; onCheck: () => void;
+  nextAllowedAt: string | null; urgent: boolean; onCheck: () => void;
 }): ReactElement => {
   const texts = dashboardTexts();
-  const [jetzt, setJetzt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const nextAllowedAtMs = nextAllowedAt === null ? null : Date.parse(nextAllowedAt);
   useEffect(() => {
     if (nextAllowedAtMs === null || !Number.isFinite(nextAllowedAtMs)) return;
-    const timeoutId = window.setTimeout(() => { setJetzt(Date.now()); }, Math.max(0, nextAllowedAtMs - Date.now()));
+    const timeoutId = window.setTimeout(() => { setNow(Date.now()); }, Math.max(0, nextAllowedAtMs - Date.now()));
     return () => { window.clearTimeout(timeoutId); };
   }, [nextAllowedAtMs]);
-  const cooldownActive = nextAllowedAtMs !== null && Number.isFinite(nextAllowedAtMs) && nextAllowedAtMs > jetzt;
+  const cooldownActive = nextAllowedAtMs !== null && Number.isFinite(nextAllowedAtMs) && nextAllowedAtMs > now;
   return (
     <div className="header-action">
-      <button className={dringend ? "button button--primary" : "button"} type="button" onClick={onCheck} disabled={!canCheck || checking || cooldownActive} aria-busy={checking}>
+      <button className={urgent ? "button button--primary" : "button"} type="button" onClick={onCheck} disabled={!canCheck || checking || cooldownActive} aria-busy={checking}>
         {checking ? texts.moderation.checkRunning : texts.moderation.checkModeratorStatus}
       </button>
       {nextAllowedAt === null ? null : <p className="muted moderator-check-time">{texts.moderation.nextCheckFrom(formatTimestamp(nextAllowedAt))}</p>}
-      {!canCheck ? <span className="sperrgrund">{texts.moderation.checkLocked}</span> : null}
+      {!canCheck ? <span className="lock-reason">{texts.moderation.checkLocked}</span> : null}
       {checkError === null ? null : <p className="form-error" role="alert">{checkError}</p>}
     </div>
   );
@@ -716,7 +516,7 @@ const ChannelBotConsentAction = ({ channelId, needed, canRequest }: {
   return (
     <div className="header-action">
       {canRequest ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/channel-bot`}>{texts.moderation.requestBroadcasterConsent}</a> : <button className="button" type="button" disabled>{texts.moderation.requestBroadcasterConsent}</button>}
-      {!canRequest ? <span className="sperrgrund">{texts.moderation.broadcasterReauthorize}</span> : null}
+      {!canRequest ? <span className="lock-reason">{texts.moderation.broadcasterReauthorize}</span> : null}
     </div>
   );
 };
@@ -731,7 +531,7 @@ const BroadcasterConsentAction = ({ login, needed, canRequest }: {
   return (
     <div className="header-action">
       {canRequest ? <a className="button button--primary" href={`/auth/login?channel=${encodeURIComponent(login)}`}>{texts.requestFullConsent}</a> : <button className="button" type="button" disabled>{texts.requestFullConsent}</button>}
-      {!canRequest ? <span className="sperrgrund">{texts.fullConsentLocked}</span> : null}
+      {!canRequest ? <span className="lock-reason">{texts.fullConsentLocked}</span> : null}
     </div>
   );
 };
@@ -751,7 +551,7 @@ const botRow = (bot: PanelBotStatus | null): StatusEntry => {
   const texts = dashboardTexts();
   if (bot === null) return { key: "bot", tone: "neutral", node: <StateRow label={texts.statusCard.botAccount} tone="neutral" word={texts.status.notSetUp} detail={texts.bot.noSavedStatus} /> };
   const tone: StateTone = bot.status === "connected" ? "healthy" : "error";
-  return { key: "bot", tone, node: <StateRow label={texts.statusCard.botAccount} tone={tone} word={statusLabel(bot.status)} detail={bot.reason ?? texts.bot.lastUpdated(formatTimestamp(bot.updatedAt))} /> };
+  return { key: "bot", tone, node: <StateRow label={texts.statusCard.botAccount} tone={tone} word={statusLabel(bot.status)} detail={maintenanceReasonText(bot.reason) ?? texts.bot.lastUpdated(formatTimestamp(bot.updatedAt))} /> };
 };
 
 const broadcasterRow = (status: PanelChannelState["broadcasterConnection"]): StatusEntry => {
@@ -765,7 +565,7 @@ const chatRow = (status: PanelChannelState["chatSubscription"] | undefined, expe
   const current = status ?? null;
   const tone: StateTone = current === null ? expected ? "warning" : "neutral" : current.status === "enabled" ? "healthy" : current.status === "missing" ? "warning" : "error";
   const word = current === null ? expected ? texts.status.missing : texts.status.notChecked : current.status === "enabled" ? texts.status.active : current.status === "missing" ? texts.status.missing : current.status === "revoked" ? texts.status.revoked : texts.status.error;
-  return { key: "chat-subscription", tone, node: <StateRow label={texts.statusCard.chatSubscription} tone={tone} word={word} detail={current?.reason ?? (current === null && expected ? texts.status.chatSubscriptionMissing : undefined)} /> };
+  return { key: "chat-subscription", tone, node: <StateRow label={texts.statusCard.chatSubscription} tone={tone} word={word} detail={maintenanceReasonText(current?.reason) ?? (current === null && expected ? texts.status.chatSubscriptionMissing : undefined)} /> };
 };
 
 const botPermissionsRow = (permissions: PanelBotPermissions | null | undefined): StatusEntry | null => {
@@ -810,7 +610,7 @@ const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | nu
 const tokenRow = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): StatusEntry => {
   const texts = dashboardTexts();
   const token = tokenView(tokens, bot);
-  return { key: "token", tone: token.tone, node: <StateRow label={texts.statusCard.tokenStatus} tone={token.tone} word={token.label} detail={tokens.loginReason ?? undefined} /> };
+  return { key: "token", tone: token.tone, node: <StateRow label={texts.statusCard.tokenStatus} tone={token.tone} word={token.label} detail={maintenanceReasonText(tokens.loginReason) ?? undefined} /> };
 };
 
 const channelBotConsentRow = (status: PanelChannelState["channelBotConsent"]): StatusEntry => {
@@ -825,7 +625,7 @@ const moderatorRow = (moderator: PanelModeratorStatus | null): StatusEntry => {
   const word = moderator === null ? texts.status.notChecked : moderator.isModerator ? texts.status.moderator : texts.status.moderatorRoleMissing;
   const detail = moderator === null
     ? texts.moderation.noCheckForChannel
-    : moderator.reason ?? texts.moderation.lastCheck(formatTimestamp(moderator.checkedAt));
+    : maintenanceReasonText(moderator.reason) ?? texts.moderation.lastCheck(formatTimestamp(moderator.checkedAt));
   return { key: "moderator", tone, node: <StateRow label={texts.statusCard.moderatorStatus} tone={tone} word={word} detail={detail} /> };
 };
 
@@ -833,12 +633,13 @@ const lastErrorRow = (error: PanelLastError | null): StatusEntry => {
   const texts = dashboardTexts();
   const tone: StateTone = error === null ? "healthy" : "error";
   if (error === null) {
-    return { key: "fehler", tone, node: <StateRow label={texts.errors.last} tone={tone} word={texts.status.healthy} detail={texts.errors.noCause} /> };
+    return { key: "error", tone, node: <StateRow label={texts.errors.last} tone={tone} word={texts.status.healthy} detail={texts.errors.noCause} /> };
   }
   const aboName = error.source === "eventsub" && error.subscriptionType !== undefined
     ? eventSubName(error.subscriptionType, error.subscriptionVariant ?? "")
     : null;
-  const reason = aboName === null ? error.reason : `${aboName}: ${error.reason}`;
+  const reasonText = maintenanceReasonText(error.reason) ?? error.reason;
+  const reason = aboName === null ? reasonText : `${aboName}: ${reasonText}`;
   const detail = [
     reason,
     error.message === null || error.message === undefined ? null : truncateTo200Chars(error.message),
@@ -880,16 +681,16 @@ const subscriptionDisplayName = (subscription: PanelEventSubSubscription): strin
 
 const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubSubscription[] }): ReactElement => {
   const texts = dashboardTexts();
-  const leer = "—";
+  const emptyValue = "—";
   const { selectedKey, select, rowRef, close } = useInspectorSelection<string>();
   const selected = subscriptions.find((subscription) => subscriptionKey(subscription) === selectedKey) ?? null;
   return (
-    <section className={`content-section inspektor-bereich${selected === null ? "" : " inspektor-bereich--offen"}`} aria-label={texts.system.subscriptions}>
-      <div className="inspektor-bereich__liste">
-        <div className="section-heading"><h2>{texts.system.subscriptions}</h2><span className="muted zahl">{formatNumber(subscriptions.length)}</span></div>
+    <section className={`content-section inspector-section${selected === null ? "" : " inspector-section--open"}`} aria-label={texts.system.subscriptions}>
+      <div className="inspector-section__list">
+        <div className="section-heading"><h2>{texts.system.subscriptions}</h2><span className="muted number">{formatNumber(subscriptions.length)}</span></div>
         {subscriptions.length === 0 ? <p className="empty-state">{texts.system.noSubscriptions}</p> : (
-          <div className="tabelle-wrap">
-            <table className="tabelle abonnements-tabelle">
+          <div className="table-wrap">
+            <table className="table subscriptions-table">
               <thead><tr><th scope="col">{texts.system.subscription}</th><th scope="col">{texts.system.state}</th><th scope="col">{texts.system.reason}</th></tr></thead>
               <tbody>{subscriptions.map((subscription) => {
                 const key = subscriptionKey(subscription);
@@ -906,21 +707,21 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
                 >
                   <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
                   <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status)} /></td>
-                  <td>{subscription.reason ?? leer}</td>
+                  <td>{maintenanceReasonText(subscription.reason) ?? emptyValue}</td>
                 </tr>;
               })}</tbody>
             </table>
           </div>
         )}
       </div>
-      {selected === null ? null : <SubInspector ariaLabel={texts.system.subscriptionDetails} title={subscriptionDisplayName(selected)} identifier={selected.subscriptionId ?? leer} closeLabel={dashboardCommonTexts().close} onClose={close}>
-        <dl className="eigenschaften">
+      {selected === null ? null : <SubInspector ariaLabel={texts.system.subscriptionDetails} title={subscriptionDisplayName(selected)} identifier={selected.subscriptionId ?? emptyValue} closeLabel={dashboardCommonTexts().close} onClose={close}>
+        <dl className="properties">
           <div><dt>{texts.system.subscriptionRawType}</dt><dd className="mono">{selected.subscriptionType}</dd></div>
           <div><dt>{texts.system.subscriptionVersion}</dt><dd className="mono">{selected.version}</dd></div>
-          <div><dt>{texts.system.subscriptionId}</dt><dd className="mono">{selected.subscriptionId ?? leer}</dd></div>
+          <div><dt>{texts.system.subscriptionId}</dt><dd className="mono">{selected.subscriptionId ?? emptyValue}</dd></div>
           <div><dt>{texts.system.subscriptionUpdated}</dt><dd className="mono">{formatTimestamp(selected.updatedAt)}</dd></div>
-          <div><dt>{texts.system.twitchMessage}</dt><dd>{selected.message ?? leer}</dd></div>
-          <div><dt>{texts.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? leer : String(selected.statusCode)}</dd></div>
+          <div><dt>{texts.system.twitchMessage}</dt><dd>{selected.message ?? emptyValue}</dd></div>
+          <div><dt>{texts.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? emptyValue : String(selected.statusCode)}</dd></div>
         </dl>
       </SubInspector>}
     </section>
@@ -932,9 +733,12 @@ interface ChannelOverviewPageProperties {
   moderatorCheck: ModeratorCheckState;
   onCheckModeratorStatus: () => void;
   onNavigate: (route: DashboardRoute) => void;
+  /** Stream Manager: every module, switchable without a page change. */
+  modules: PanelModuleState[];
+  onModulesChanged: () => Promise<void>;
 }
 
-const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus, onNavigate }: ChannelOverviewPageProperties): ReactElement => {
+const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged }: ChannelOverviewPageProperties): ReactElement => {
   const entries = sortBySeverity([
     broadcasterRow(overview.broadcasterConnection),
     channelBotConsentRow(overview.channelBotConsent),
@@ -953,12 +757,17 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
         kind="channel"
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
-        actions={<><ModeratorCheckAction canCheck={overview.role !== "operator"} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
+        actions={<><ModeratorCheckAction canCheck={canManage(overview.role)} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} urgent={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
       />
-      <div className="zustand-liste">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+      <div className="state-list">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
       <BotPermissionsInspector permissions={overview.botPermissions} />
       <BroadcasterPermissionsInspector permissions={overview.broadcasterPermissions} />
-      <section className="content-section"><div className="section-heading"><h2>{dashboardTexts().overview.activeModules}</h2><span className="muted zahl">{formatNumber(overview.activeModules.length)}</span></div>{overview.activeModules.length === 0 ? <p className="empty-state">{dashboardTexts().module.noneActive}</p> : <div className="module-grid">{overview.activeModules.map(({ moduleId }) => <ModuleTile key={moduleId} channelId={overview.channelId} moduleId={moduleId} enabled onNavigate={onNavigate} />)}</div>}</section>
+      <ImmediateActions channelId={overview.channelId} />
+      <section className="content-section" aria-label={dashboardTexts().navigation.module}>
+        <div className="section-heading"><h2>{dashboardTexts().navigation.module}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>
+        <ModuleToggleList channelId={overview.channelId} ownRole={overview.role} modules={modules} onNavigate={onNavigate} onChanged={onModulesChanged} />
+      </section>
+      <WarningsAndErrorsFeed key={overview.channelId} channelId={overview.channelId} />
     </>
   );
 };
@@ -981,120 +790,66 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
       {system === null && systemState.status === "loading" ? <p className="loading-line">{texts.system.loadState}</p> : null}
       {systemState.error !== null ? <ErrorPanel message={systemState.error} /> : null}
       {system === null ? null : <>
-        <div className="zustand-liste">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+        <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
         <BotPermissionsInspector permissions={system.botPermissions} />
         <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
         <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
         <SystemProperties system={system} />
       </>}
-      <section className={`content-section inspektor-bereich${selectedAudit === null ? "" : " inspektor-bereich--offen"}`}><div className="inspektor-bereich__liste">
-        <div className="section-heading"><h2>{texts.system.auditLog}</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{formatNumber(auditState.data.entries.length)}</span> {texts.system.entries}</span>}</div>
-          {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.system.loadAudit}</p> : null}
-          {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
-          {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="empty-state">{texts.system.noAuditEntries}</p> : null}
-          {auditState.data !== null && auditState.data.entries.length > 0 ? <>
-            <div className={auditState.status === "loading" ? "veraltet" : undefined}>
-              <table className="tabelle audit-tabelle">
-                <thead><tr><th scope="col">{texts.system.time}</th><th scope="col">{texts.system.action}</th><th scope="col">{texts.system.who}</th></tr></thead>
-                <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
-              </table>
-            </div>
-            {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.system.loadingOlderEntries : texts.system.olderEntries}</button>}
-          </> : null}
-        </div>
-        {selectedAudit === null ? null : <SubInspector ariaLabel={texts.system.changeData} title={selectedAudit.action} identifier={selectedAudit.auditId} closeLabel={dashboardCommonTexts().close} onClose={closeAudit}>
-          <dl className="eigenschaften"><div><dt>{texts.system.who}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
-          <div className="inspector-columns"><div><h4>{texts.system.before}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texts.system.after}</h4><pre>{selectedAudit.after}</pre></div></div>
-        </SubInspector>}
-      </section>
+      <ListDetail
+        onCloseInspector={closeAudit}
+        list={
+          <section className="content-section" aria-label={texts.system.auditLog}>
+            <div className="section-heading"><h2>{texts.system.auditLog}</h2>{auditState.data === null ? null : <span className="muted"><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.system.entries}</span>}</div>
+            {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.system.loadAudit}</p> : null}
+            {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
+            {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="empty-state">{texts.system.noAuditEntries}</p> : null}
+            {auditState.data !== null && auditState.data.entries.length > 0 ? <>
+              <div className={auditState.status === "loading" ? "stale" : undefined}>
+                <table className="table audit-table">
+                  <thead><tr><th scope="col">{texts.system.time}</th><th scope="col">{texts.system.action}</th><th scope="col">{texts.system.who}</th></tr></thead>
+                  <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row">{auditActionLabel(entry.action)}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
+                </table>
+              </div>
+              {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.system.loadingOlderEntries : texts.system.olderEntries}</button>}
+            </> : null}
+          </section>
+        }
+        inspector={selectedAudit === null ? null : (
+          <SubInspector ariaLabel={texts.system.changeData} title={selectedAudit.action} identifier={selectedAudit.auditId} closeLabel={dashboardCommonTexts().close} onClose={closeAudit}>
+            <dl className="properties"><div><dt>{texts.system.who}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
+            <div className="inspector-columns"><div><h4>{texts.system.before}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texts.system.after}</h4><pre>{selectedAudit.after}</pre></div></div>
+          </SubInspector>
+        )}
+      />
     </>
   );
 };
 
 const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactElement => {
   const texts = dashboardTexts();
-  const leer = "—";
-  const loginStatus = system.tokens.loginStatus === null ? leer : statusLabel(system.tokens.loginStatus);
+  const emptyValue = "—";
+  const loginStatus = system.tokens.loginStatus === null ? emptyValue : statusLabel(system.tokens.loginStatus);
   return (
     <section className="content-section properties-section" aria-label={texts.system.properties}>
       <div className="section-heading"><h2>{texts.system.properties}</h2></div>
-      <dl className="eigenschaften">
-        <div><dt>{texts.system.botReason}</dt><dd>{system.bot?.reason ?? leer}</dd></div>
-        <div><dt>{texts.system.botUpdated}</dt><dd className="mono">{system.bot === null ? leer : formatTimestamp(system.bot.updatedAt)}</dd></div>
-        <div><dt>{texts.system.chatSubscriptionId}</dt><dd className="mono">{system.chatSubscription?.subscriptionId ?? leer}</dd></div>
-        <div><dt>{texts.system.chatSubscriptionReason}</dt><dd>{system.chatSubscription?.reason ?? leer}</dd></div>
-        <div><dt>{texts.system.chatSubscriptionUpdated}</dt><dd className="mono">{system.chatSubscription == null ? leer : formatTimestamp(system.chatSubscription.updatedAt)}</dd></div>
+      <dl className="properties">
+        <div><dt>{texts.system.botReason}</dt><dd>{maintenanceReasonText(system.bot?.reason) ?? emptyValue}</dd></div>
+        <div><dt>{texts.system.botUpdated}</dt><dd className="mono">{system.bot === null ? emptyValue : formatTimestamp(system.bot.updatedAt)}</dd></div>
+        <div><dt>{texts.system.chatSubscriptionId}</dt><dd className="mono">{system.chatSubscription?.subscriptionId ?? emptyValue}</dd></div>
+        <div><dt>{texts.system.chatSubscriptionReason}</dt><dd>{maintenanceReasonText(system.chatSubscription?.reason) ?? emptyValue}</dd></div>
+        <div><dt>{texts.system.chatSubscriptionUpdated}</dt><dd className="mono">{system.chatSubscription == null ? emptyValue : formatTimestamp(system.chatSubscription.updatedAt)}</dd></div>
         <div><dt>{texts.system.loginStatus}</dt><dd>{loginStatus}</dd></div>
-        <div><dt>{texts.system.loginReason}</dt><dd>{system.tokens.loginReason ?? leer}</dd></div>
-        <div><dt>{texts.system.loginValidUntil}</dt><dd className="mono">{system.tokens.loginExpiresAt === null ? leer : formatTimestamp(system.tokens.loginExpiresAt)}</dd></div>
-        <div><dt>{texts.system.botValidUntil}</dt><dd className="mono">{system.tokens.botExpiresAt === null ? leer : formatTimestamp(system.tokens.botExpiresAt)}</dd></div>
+        <div><dt>{texts.system.loginReason}</dt><dd>{maintenanceReasonText(system.tokens.loginReason) ?? emptyValue}</dd></div>
+        <div><dt>{texts.system.loginValidUntil}</dt><dd className="mono">{system.tokens.loginExpiresAt === null ? emptyValue : formatTimestamp(system.tokens.loginExpiresAt)}</dd></div>
+        <div><dt>{texts.system.botValidUntil}</dt><dd className="mono">{system.tokens.botExpiresAt === null ? emptyValue : formatTimestamp(system.tokens.botExpiresAt)}</dd></div>
       </dl>
     </section>
   );
 };
 
-const eventMetadata = (code: string) =>
-  Object.prototype.hasOwnProperty.call(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
-
-const eventTone = (code: string): EventTone | null =>
-  eventMetadata(code)?.tone ?? null;
-
-const eventToneRang = (tone: EventTone | null): number =>
-  tone === "error" ? 3 : tone === "warning" ? 2 : tone === "info" ? 1 : 0;
-
-const eventToneFromValue = (value: string): EventTone | null =>
-  EVENT_TONES.includes(value as EventTone) ? value as EventTone : null;
-
-interface EventGroup {
-  key: string;
-  entries: PanelEventEntry[];
-  representative: PanelEventEntry;
-}
-
-const eventGroupKey = (entry: PanelEventEntry): string =>
-  typeof entry.triggerId === "string" && entry.triggerId.length > 0
-    ? `trigger:${entry.triggerId}`
-    : `event:${entry.eventId}`;
-
-const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] => {
-  const grouped = new Map<string, [PanelEventEntry, ...PanelEventEntry[]]>();
-  for (const entry of entries) {
-    const key = eventGroupKey(entry);
-    const group = grouped.get(key);
-    if (group === undefined) grouped.set(key, [entry]);
-    else group.push(entry);
-  }
-  return Array.from(grouped, ([key, groupEntries]) => ({
-    key,
-    entries: groupEntries,
-    representative: groupEntries.slice(1).reduce((current, candidate) => {
-      const currentRank = eventToneRang(eventTone(current.code));
-      const candidateRank = eventToneRang(eventTone(candidate.code));
-      return candidateRank > currentRank ||
-        (candidateRank === currentRank && candidate.createdAt < current.createdAt)
-        ? candidate
-        : current;
-    }, groupEntries[0]),
-  }));
-};
-
-const actorLabel = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): string =>
-  entry.actorDisplayName ?? (entry.actorLogin == null
-    ? entry.actorUserId == null ? texts.events.automatic : entry.actorUserId
-    : `@${entry.actorLogin}`);
-
-const actorCell = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): ReactNode =>
-  entry.actorDisplayName ?? (entry.actorLogin == null
-    ? entry.actorUserId == null ? texts.events.automatic : <span className="mono">{entry.actorUserId}</span>
-    : `@${entry.actorLogin}`);
-
 const auditActorLabel = (entry: PanelAuditEntry): string =>
   entry.actorDisplayName ?? (entry.actorLogin == null ? entry.actorUserId : `@${entry.actorLogin}`);
-
-const moduleLabel = (entry: PanelEventEntry): string => moduleName(entry.moduleId);
-
-const chronologisch = (left: PanelEventEntry, right: PanelEventEntry): number =>
-  left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId);
 
 const mergeEventEntries = (
   current: readonly PanelEventEntry[],
@@ -1103,256 +858,7 @@ const mergeEventEntries = (
   const byId = new Map<string, PanelEventEntry>();
   for (const entry of current) byId.set(entry.eventId, entry);
   for (const entry of incoming) byId.set(entry.eventId, entry);
-  return Array.from(byId.values()).sort((left, right) => chronologisch(right, left));
-};
-
-const eventDetail = (detail: string): EventDetail => {
-  try {
-    const parsed: unknown = JSON.parse(detail);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? parsed as EventDetail
-      : {};
-  } catch {
-    return {};
-  }
-};
-
-const eventChipNumber = (detail: EventDetail, key: EventNumberKey): string | null => {
-  if (key === null) return null;
-  const value = detail[key];
-  if (key === "tier") {
-    const tier = typeof value === "number" ? String(value) : value;
-    if (typeof tier !== "string") return null;
-    if (tier === "1000") return "T1";
-    if (tier === "2000") return "T2";
-    if (tier === "3000") return "T3";
-    if (tier.toLowerCase() === "prime") return "Prime";
-    return null;
-  }
-  if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return null;
-  if (key === "count") return `${formatNumber(value)}x`;
-  if (key === "duration" || key === "remainingSeconds") return `${formatNumber(value)} s`;
-  return formatNumber(value);
-};
-
-const EventChipPair = ({ code, detail, texts: texts }: { code: string; detail: EventDetail; texts: ReturnType<typeof dashboardTexts> }): ReactElement => {
-  const metadata = eventMetadata(code);
-  if (metadata === null) {
-    return <span className="event-chip-pair"><span className="event-chip" data-stufe="gezeichnet">{texts.events.unknown}</span></span>;
-  }
-  const number = eventChipNumber(detail, metadata.numberKey);
-  return <span className="event-chip-pair">
-    {number === null ? null : <span className="event-chip event-chip--number">{number}</span>}
-    <span className="event-chip" data-familie={metadata.family} data-stufe={metadata.tier} data-ton={metadata.tone}>{metadata.word[dashboardLanguage()]}</span>
-  </span>;
-};
-
-const formatEventDetail = (detail: string): string => {
-  try {
-    return JSON.stringify(JSON.parse(detail), null, 2);
-  } catch {
-    return detail;
-  }
-};
-
-const eventFilterIsActive = (filters: PanelEventFilters): boolean =>
-  filters.origin !== null || filters.module !== null || filters.tone !== null || filters.person !== null;
-
-const EventFilterBar = ({
-  filters,
-  moduleOptions,
-  onChange,
-}: {
-  filters: PanelEventFilters;
-  moduleOptions: readonly PanelModuleState[];
-  onChange: (filters: PanelEventFilters) => void;
-}): ReactElement => {
-  const texts = dashboardTexts();
-  const [personDraft, setPersonDraft] = useState(filters.person ?? "");
-  // The applied filter is the source of truth; the draft follows along when it
-  // changes from outside (reset, navigation, second tab). This happens
-  // during render instead of in an effect: an effect would show a second
-  // pass with a stale value, and React forbids that pattern.
-  const [zuletztAngewendet, setZuletztAngewendet] = useState(filters.person);
-  if (zuletztAngewendet !== filters.person) {
-    setZuletztAngewendet(filters.person);
-    setPersonDraft(filters.person ?? "");
-  }
-  const commitPerson = useCallback((draft: string): void => {
-    const value = draft.trim();
-    onChange({ ...filters, person: value.length === 0 ? null : value });
-  }, [filters, onChange]);
-  useEffect(() => {
-    if (personDraft.trim() === (filters.person ?? "")) return;
-    const timeout = window.setTimeout(() => { commitPerson(personDraft); }, PERSON_FILTER_DEBOUNCE_MS);
-    return () => { window.clearTimeout(timeout); };
-  }, [commitPerson, filters.person, personDraft]);
-  const activeFilter: string[] = [];
-  if (filters.origin === "channel") activeFilter.push(texts.events.channelEvents);
-  if (filters.origin === "module") activeFilter.push(texts.events.moduleDiagnostics);
-  if (filters.module !== null) activeFilter.push(moduleName(filters.module));
-  if (filters.tone !== null) activeFilter.push(filters.tone === "info" ? texts.events.info : filters.tone === "warning" ? texts.events.notice : texts.events.error);
-  if (filters.person !== null) activeFilter.push(filters.person);
-  return <div className="ereignis-filter" aria-label={texts.events.filter}>
-    <div className="ereignis-filter__controls">
-      <label>{texts.events.origin}<select aria-label={texts.events.origin} value={filters.origin ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}>
-        <option value="">{texts.events.all}</option><option value="channel">{texts.events.channelEvents}</option><option value="module">{texts.events.moduleDiagnostics}</option>
-      </select></label>
-      <label>{texts.events.moduleFilter}<select aria-label={texts.events.moduleFilter} value={filters.module ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, module: value.length === 0 ? null : value }); }}>
-        <option value="">{texts.events.all}</option>{moduleOptions.map((module) => <option key={module.id} value={module.id}>{moduleName(module.id)}</option>)}
-      </select></label>
-      <label>{texts.events.tone}<select aria-label={texts.events.tone} value={filters.tone ?? ""} onChange={(event) => { onChange({ ...filters, tone: eventToneFromValue(event.target.value) }); }}>
-        <option value="">{texts.events.all}</option><option value="info">{texts.events.info}</option><option value="warning">{texts.events.notice}</option><option value="error">{texts.events.error}</option>
-      </select></label>
-      <label>{texts.events.person}<input aria-label={texts.events.person} value={personDraft} onChange={(event) => { setPersonDraft(event.target.value); }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }} /></label>
-    </div>
-    {activeFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texts.events.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyEventFilter); }}>{texts.events.resetFilters}</button></div>}
-  </div>;
-};
-
-const EventFeedEnd = ({
-  nextCursor,
-  loadingNextPage,
-  onNextPage,
-}: {
-  nextCursor: string | null;
-  loadingNextPage: boolean;
-  onNextPage: () => void;
-}): ReactElement => {
-  const texts = dashboardTexts();
-  const feedEndRef = useRef<HTMLDivElement | null>(null);
-  const loadNextPage = useCallback((): void => {
-    if (nextCursor !== null && !loadingNextPage) onNextPage();
-  }, [loadingNextPage, nextCursor, onNextPage]);
-  useEffect(() => {
-    if (nextCursor === null) return;
-    const onScroll = (): void => {
-      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 1) loadNextPage();
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    const end = feedEndRef.current;
-    if (end !== null && "IntersectionObserver" in window) {
-      const observer = new IntersectionObserver(([entry]) => {
-        if (entry?.isIntersecting) loadNextPage();
-      });
-      observer.observe(end);
-      return () => { observer.disconnect(); window.removeEventListener("scroll", onScroll); };
-    }
-    return () => { window.removeEventListener("scroll", onScroll); };
-  }, [loadNextPage, nextCursor]);
-  return <div
-    ref={feedEndRef}
-    className="ereignis-feed__end"
-    tabIndex={nextCursor === null ? -1 : 0}
-    aria-label={nextCursor === null ? undefined : texts.events.loadMoreAtEnd}
-    onFocus={loadNextPage}
-    onKeyDown={(event) => {
-      if (event.key === "End" || event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        loadNextPage();
-      }
-    }}
-  >
-    {loadingNextPage ? <p className="loading-line" role="status">{texts.events.loadingOlder}</p> : nextCursor === null ? <p className="empty-state">{texts.events.feedEnd}</p> : <p className="muted">{texts.events.loadMoreAtEnd}</p>}
-  </div>;
-};
-
-const realtimeLedStatus = (status: RealtimeFeedStatus): LedStatus =>
-  status === "connected" ? "green" : status === "renew" ? "red" : status === "offline" ? "off" : "amber";
-
-const RealtimeFeedStatus = ({ status }: { status: RealtimeFeedStatus }): ReactElement => {
-  const texts = dashboardTexts();
-  const label = status === "connected"
-    ? texts.events.realtimeConnected
-    : status === "connecting"
-      ? texts.events.realtimeConnecting
-      : status === "reconnecting"
-        ? texts.events.realtimeReconnecting
-        : status === "renew" ? texts.events.realtimeRenewSession : texts.events.realtimeOffline;
-  return <span className="realtime-status" aria-live="polite"><Led status={realtimeLedStatus(status)} label={label} />{status === "renew" ? <a className="profile-link" href="/auth/login">{texts.events.realtimeRenewSession}</a> : null}</span>;
-};
-
-const EventsPage = ({
-  channelId,
-  eventsState,
-  filters,
-  moduleOptions,
-  onFiltersChange,
-  onRefreshFirstPage,
-  onNextPage,
-  loadingNextPage,
-}: {
-  channelId: string;
-  eventsState: LoadState<PanelEventsResponse>;
-  filters: PanelEventFilters;
-  moduleOptions: readonly PanelModuleState[];
-  onFiltersChange: (filters: PanelEventFilters) => void;
-  onRefreshFirstPage: (channelId: string, filters: PanelEventFilters) => Promise<void>;
-  onNextPage: () => void;
-  loadingNextPage: boolean;
-}): ReactElement => {
-  const texts = dashboardTexts();
-  const feedRef = useRef<HTMLDivElement | null>(null);
-  const atBeginning = useCallback((): boolean => {
-    const feed = feedRef.current;
-    if (feed === null) return true;
-    const feedStart = feed.getBoundingClientRect().top + window.scrollY;
-    return window.scrollY <= feedStart + 8;
-  }, []);
-  const scrollToBeginning = useCallback((): void => {
-    const feed = feedRef.current;
-    if (feed === null) return;
-    const feedStart = feed.getBoundingClientRect().top + window.scrollY;
-    window.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
-  }, []);
-  const realtime = useRealtimeEventFeed({
-    channelId,
-    filters,
-    atBeginning,
-    refreshFirstPage: () => onRefreshFirstPage(channelId, filters),
-    scrollToBeginning,
-  });
-  const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>();
-  const groups = eventsState.data === null ? [] : eventGroups(eventsState.data.entries);
-  const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
-  const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronologisch);
-  const eventEntries = eventsState.data?.entries ?? [];
-  return (
-    <>
-      <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} />
-      <section className={`content-section inspektor-bereich${selectedGroup === null ? "" : " inspektor-bereich--offen"}`}><div className="inspektor-bereich__liste">
-        <div className="section-heading"><h2>{texts.events.log}</h2><RealtimeFeedStatus status={realtime.status} /></div>
-          <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
-          {realtime.pendingCount === 0 ? null : <button className="button realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite">{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
-          {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texts.events.load}</p> : null}
-          {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
-          {eventsState.data !== null && eventEntries.length === 0 ? <p className="empty-state">{eventFilterIsActive(filters) ? texts.events.noMatches : texts.events.none}</p> : null}
-          {eventsState.data !== null ? <>
-            {eventEntries.length === 0 ? null : <div ref={feedRef} className="ereignis-feed">
-              <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
-                <table className="tabelle ereignis-tabelle">
-                  <thead><tr><th scope="col">{texts.events.time}</th><th scope="col">{texts.events.event}</th><th scope="col">{texts.events.module}</th><th scope="col">{texts.events.who}</th></tr></thead>
-                  <tbody>{groups.map((group) => {
-                    const entry = group.representative;
-                    const eventLabel = eventText(entry.code, eventDetail(entry.detail));
-                    return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texts)}</td></tr>;
-                  })}</tbody>
-                </table>
-              </div>
-            </div>}
-            <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
-          </> : null}
-        </div>
-        {selectedGroup === null ? null : <SubInspector ariaLabel={texts.events.detail} title={texts.events.operation} identifier={selectedGroup.representative.triggerId || selectedGroup.representative.eventId} closeLabel={dashboardCommonTexts().close} onClose={closeGroup}>
-          <dl className="eigenschaften"><div><dt>{texts.events.timestamp}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texts.events.module}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texts.events.participants}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texts)))).join(", ")}</dd></div></dl>
-          <div className="inspector-section__heading"><h3>{texts.events.history}</h3></div>
-          <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
-            return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
-          })}</ol>
-        </SubInspector>}
-      </section>
-    </>
-  );
+  return Array.from(byId.values()).sort((left, right) => chronological(right, left));
 };
 
 export const DashboardApp = (): ReactElement => {
@@ -1363,6 +869,9 @@ export const DashboardApp = (): ReactElement => {
   const [route, navigate] = useDashboardRoute();
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
   const [isPlatform, setIsPlatform] = useState(false);
+  // The installation's single bot identity, independent of which channels
+  // this viewer can see -- present even with zero released channels (#159).
+  const [installationBot, setInstallationBot] = useState<PanelBotStatus | null>(null);
   const [overview, setOverview] = useState<LoadState<PanelChannelOverview>>(() => idleState());
   const [overviewRoutePath, setOverviewRoutePath] = useState<string | null>(null);
   const [moderatorCheck, setModeratorCheck] = useState<ModeratorCheckState>(() => idleModeratorCheck());
@@ -1383,6 +892,14 @@ export const DashboardApp = (): ReactElement => {
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [headerModuleBusy, setHeaderModuleBusy] = useState(false);
+  // Guards `reloadModules` against out-of-order responses: two reloads can
+  // be in flight together (a toggle's own reload racing a Stream Manager
+  // poll), and without this an older response can overwrite a newer one.
+  const modulesRequestGeneration = useRef(0);
+  // Spotlight (#164): set right before navigating to a module so its panel
+  // can pre-select something on mount (e.g. a text command by name). Not
+  // part of the route/URL -- see the deep-link discussion in that commit.
+  const [pendingModuleSelection, setPendingModuleSelection] = useState<string | null>(null);
   const requestLogin = useCallback((): void => { setAuthenticationRequired(true); }, []);
 
   const startMembersRequest = useCallback((): { controller: AbortController; generation: number } => {
@@ -1460,6 +977,7 @@ export const DashboardApp = (): ReactElement => {
     cancelMembersRequest();
     setChannels({ status: "success", data: [], error: null });
     setIsPlatform(false);
+    setInstallationBot(null);
     setOverview(idleState());
     setOverviewRoutePath(null);
     setModeratorCheck(idleModeratorCheck());
@@ -1487,6 +1005,7 @@ export const DashboardApp = (): ReactElement => {
         if (!cancelled) {
           setChannels({ status: "success", data: response.channels, error: null });
           setIsPlatform(response.platformAdmin);
+          setInstallationBot(response.bot);
           setAuthenticationRequired(false);
         }
       } catch (error) {
@@ -1501,10 +1020,17 @@ export const DashboardApp = (): ReactElement => {
   }, []);
 
   useEffect(() => {
-    if (route.kind === "betreiber" && channels.status === "success" && !isPlatform) {
+    if (route.kind === "platform" && channels.status === "success" && !isPlatform) {
       navigate({ kind: "overview" });
     }
   }, [channels.status, isPlatform, navigate, route.kind]);
+
+  useEffect(() => {
+    if (route.kind !== "overview" || channels.status !== "success" || channels.data?.length !== 1) return;
+    const channel = channels.data[0];
+    if (channel === undefined) return;
+    replaceDashboardRoute({ kind: "channel", channelId: channel.channelId, section: "overview" });
+  }, [channels, route.kind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1538,11 +1064,29 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "channel" && route.kind !== "module") return cleanup;
     const expectedOverviewPath = dashboardRoutePath(route);
 
+    // The sidebar's Modules group lists the active modules on every
+    // channel/module route, not only the ones that already fetch this for
+    // their own page (the module detail page, the module list, the event
+    // filters) -- one fetch here covers all of them; those keep their own
+    // fetch removed below instead of doing it twice.
+    const loadSidebarModules = async (): Promise<void> => {
+      setModules(loadingState());
+      try {
+        const response = await fetchModules(route.channelId, controller.signal);
+        if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
+      } catch (error) {
+        if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+          setModules({ status: "error", data: null, error: errorMessage(error) });
+          if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+        }
+      }
+    };
+    void loadSidebarModules();
+
     const load = async (): Promise<void> => {
       // The module page shows the same channel header as the overview and
       // therefore needs the same data.
       if (route.kind === "module" || route.section === "overview") {
-        if (route.kind === "module") setModules(loadingState());
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
           if (!cancelled) {
@@ -1553,17 +1097,6 @@ export const DashboardApp = (): ReactElement => {
           if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
             setOverview({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        }
-        if (route.kind === "module") {
-          try {
-            const response = await fetchModules(route.channelId, controller.signal);
-            if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
-          } catch (error) {
-            if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-              setModules({ status: "error", data: null, error: errorMessage(error) });
-              if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-            }
           }
         }
         return;
@@ -1588,22 +1121,11 @@ export const DashboardApp = (): ReactElement => {
         return;
       }
       if (route.section === "modules") {
-        setModules(loadingState());
-        try {
-          const response = await fetchModules(route.channelId, controller.signal);
-          if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
-        } catch (error) {
-          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-            setModules({ status: "error", data: null, error: errorMessage(error) });
-            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        }
         return;
       }
       if (route.section === "events") {
         setEvents(loadingState());
         setEventsChannelId(route.channelId);
-        setModules(loadingState());
         const request = startEventsRequest();
         const filters = route.filters ?? emptyEventFilter;
         try {
@@ -1619,14 +1141,6 @@ export const DashboardApp = (): ReactElement => {
           }
         } finally {
           finishEventsRequest(request.generation);
-        }
-        try {
-          const response = await fetchModules(route.channelId, controller.signal);
-          if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
-        } catch (error) {
-          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-            setModules({ status: "error", data: null, error: errorMessage(error) });
-          }
         }
         return;
       }
@@ -1721,15 +1235,23 @@ export const DashboardApp = (): ReactElement => {
     }
   };
 
-  const reloadData = async <T,>(routePath: string, setState: LoadStateSetter<T>, fetchData: () => Promise<T>, preserveDataOnError: boolean, afterLoad?: () => void): Promise<void> => {
+  const reloadData = async <T,>(
+    routePath: string,
+    setState: LoadStateSetter<T>,
+    fetchData: () => Promise<T>,
+    preserveDataOnError: boolean,
+    afterLoad?: () => void,
+    /** Lets a superseded call discard its own response instead of overwriting a newer one. */
+    isCurrent: () => boolean = () => true,
+  ): Promise<void> => {
     setState((current) => loadingState(current));
     try {
       const response = await fetchData();
-      if (window.location.pathname !== routePath) return;
+      if (!isCurrent() || window.location.pathname !== routePath) return;
       setState(loadedState(response));
       afterLoad?.();
     } catch (error) {
-      if (window.location.pathname !== routePath) return;
+      if (!isCurrent() || window.location.pathname !== routePath) return;
       setState((current) => current.loadedAt === undefined
         ? { status: "error", data: null, error: errorMessage(error) }
         : { status: "error", data: preserveDataOnError ? current.data : null, error: errorMessage(error), loadedAt: current.loadedAt });
@@ -1738,10 +1260,19 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const reloadModules = async (): Promise<void> => {
-    if (route.kind !== "module" && (route.kind !== "channel" || route.section !== "modules")) return;
+    if (route.kind !== "module" && (route.kind !== "channel" || (route.section !== "modules" && route.section !== "overview"))) return;
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
-    await reloadData(routePath, setModules, () => fetchModules(channelId), false);
+    const generation = modulesRequestGeneration.current + 1;
+    modulesRequestGeneration.current = generation;
+    await reloadData(
+      routePath,
+      setModules,
+      () => fetchModules(channelId),
+      false,
+      undefined,
+      () => modulesRequestGeneration.current === generation,
+    );
   };
 
   const reloadOverview = async (): Promise<void> => {
@@ -1755,7 +1286,7 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" || modules.data === null) return;
     const targetModuleId = route.moduleId;
     const state = modules.data.modules.find((module) => module.id === targetModuleId);
-    if (state === undefined || selectedChannel?.role === "operator" || headerModuleBusy) return;
+    if (state === undefined || (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusy) return;
     setHeaderModuleBusy(true);
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);
@@ -1909,33 +1440,70 @@ export const DashboardApp = (): ReactElement => {
 
   if (authenticationRequired) {
     const texts = dashboardTexts();
-    return <main className="auth-screen"><div className="auth-card"><h1>{texts.signIn.required}</h1><p>{texts.signIn.explanation}</p><a className="button" href="/auth/login">{texts.signIn.signInWithTwitch}</a></div></main>;
+    return <UiProvider><main className="auth-screen"><div className="auth-card"><h1>{texts.signIn.required}</h1><p>{texts.signIn.explanation}</p><a className="button" href="/auth/login">{texts.signIn.signInWithTwitch}</a></div></main></UiProvider>;
   }
 
+  const sidebarModuleStates = route.kind === "channel" || route.kind === "module" ? modules.data?.modules ?? null : null;
+
+  const botSignedIn = installationBot?.status === "connected";
+  const isChannelOrModuleRoute = route.kind === "channel" || route.kind === "module";
+  // Installation-wide, so it applies wherever page content depends on the
+  // bot -- including the overview, the first page everyone lands on (a
+  // fresh installation with zero released channels has nowhere else to
+  // say it). The system page (bot status + sign-in live there) and the
+  // platform page (releases channels) must stay reachable, or the block
+  // would also lock the only places that fix it.
+  const botBlockingApplies = route.kind === "overview" || route.kind === "module" || (route.kind === "channel" && route.section !== "system");
+  const showBotBlocking = botBlockingApplies && channels.status === "success" && !botSignedIn;
+  // Per-user/channel authorization, not an outage -- loses to the bot state
+  // above: installation-wide beats per-viewer, and without the bot nothing
+  // works on any channel regardless of whether this one is released.
+  const showChannelNotReleased = !showBotBlocking && isChannelOrModuleRoute && selectedChannel === null && channels.status === "success";
+
   return (
-    <div className="app-shell">
-      <PanelTopbar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} activeChannel={selectedChannel ?? undefined} moduleStates={route.kind === "module" ? modules.data?.modules ?? null : null} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />
-      <div className="app-body">
-        <Rail route={route} channels={channels.data ?? []} platformAdmin={isPlatform} onNavigate={navigate} />
-        <main className="main-content">
+    <UiProvider>
+      <Shell
+        header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />}
+        navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
+        navLabel={dashboardTexts().navigation.mainNavigation}
+        openSidebarLabel={dashboardTexts().navigation.openSidebar}
+        closeSidebarLabel={dashboardTexts().navigation.closeSidebar}
+      >
+        <div className="main-content">
         {channels.status === "loading" ? <p className="loading-line">{dashboardTexts().signIn.checkChannelAccess}</p> : null}
         {channels.error !== null ? <ErrorPanel message={channels.error} /> : null}
-        {route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} onNavigate={navigate} /> : null}
-        {route.kind === "betreiber" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
-        {(route.kind === "channel" || route.kind === "module") && selectedChannel === null && channels.status === "success" ? <ErrorPanel message={dashboardTexts().errors.channelNotReleased} /> : null}
-        {route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
-        {route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} /> : null}
-        {route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
-        {route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} /> : null}
-        {route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
-        {route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} /> : null}
-        {route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
-        {route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
-        </main>
-      </div>
-    </div>
+        {!showBotBlocking && route.kind === "overview" && channels.data !== null ? <OverviewPage channels={channels.data} onNavigate={navigate} /> : null}
+        {route.kind === "platform" && isPlatform ? <PlatformPage onAuthenticationRequired={requestLogin} /> : null}
+        {showChannelNotReleased ? <BlockingState
+          tone="neutral"
+          title={dashboardTexts().blocking.channelTitle}
+          description={dashboardTexts().blocking.channelDescription}
+          {...(isPlatform
+            ? { action: { label: dashboardTexts().blocking.channelAction, onClick: () => { navigate({ kind: "platform" }); } } }
+            : { contact: dashboardTexts().blocking.channelContact })}
+        /> : null}
+        {showBotBlocking ? <BlockingState
+          tone="error"
+          title={dashboardTexts().blocking.botTitle}
+          description={isPlatform ? dashboardTexts().blocking.botDescriptionAdmin : dashboardTexts().blocking.botDescriptionViewer}
+          {...(isPlatform
+            ? { action: { label: dashboardTexts().blocking.botAction, onClick: () => { window.location.href = "/auth/bot/login"; } } }
+            : { contact: dashboardTexts().blocking.botContact })}
+        /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
+        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} /> : null}
+        </div>
+      </Shell>
+    </UiProvider>
   );
 };
 

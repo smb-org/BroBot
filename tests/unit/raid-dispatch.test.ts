@@ -75,8 +75,8 @@ describe("Raid dispatch", () => {
       const rows = await database.prepare("SELECT code, detail_json FROM event_log ORDER BY rowid").all<{ code: string; detail_json: string }>();
       expect(rows.results.map((row) => row.code)).toEqual([
         "raid.shoutout",
-        "host.shoutout.fehlgeschlagen",
-        "host.chat.gesendet",
+        "host.shoutout.failed",
+        "host.chat.sent",
       ]);
       expect(jsonRecord(rows.results[1]?.detail_json ?? "{}")).toMatchObject({ cause: "rate_limited", status: 429 });
       expect(jsonRecord(rows.results[2]?.detail_json ?? "{}").text).toEqual(expect.stringContaining("quelle"));

@@ -1,3 +1,4 @@
+import type { AuditAction } from "../../../contracts/values";
 import type {
   NewTextCommand,
   TextCommand,
@@ -129,7 +130,7 @@ export const createTextCommandRepository = (
     const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
-      action: "text_commands.befehl.angelegt",
+      action: "text_commands.command.created" satisfies AuditAction,
       before: null,
       after: auditValues({ ...input, minimumTier: minimumTier, enabled: true }),
     }, input.now);
@@ -211,7 +212,7 @@ export const createTextCommandRepository = (
     const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
-      action: "text_commands.befehl.geändert",
+      action: "text_commands.command.updated" satisfies AuditAction,
       before: auditValues(before),
       after: auditValues(after),
     }, input.now);
@@ -247,7 +248,7 @@ export const createTextCommandRepository = (
     const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId,
       moduleId: MODULE_ID,
-      action: "text_commands.befehl.entfernt",
+      action: "text_commands.command.removed" satisfies AuditAction,
       before: auditValues(before),
       after: null,
     }, now);
@@ -306,7 +307,7 @@ export const initializeListCommand = async (
     prepareModuleAudit({
       channelId,
       moduleId: MODULE_ID,
-      action: "text_commands.befehl.angelegt",
+      action: "text_commands.command.created" satisfies AuditAction,
       before: null,
       after: { name: "befehle", kind: "list", enabled: true, minimumTier: "everyone", text: "", cooldownSeconds: 5 },
     }, now),

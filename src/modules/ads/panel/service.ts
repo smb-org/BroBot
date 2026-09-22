@@ -1,4 +1,5 @@
 import type { AdsSettings, AdsScheduleResponse } from "../contracts";
+import { DEFAULT_PREWARNING_TEXT } from "../contracts/chat-defaults";
 import { PanelApiError } from "../../../contracts/panel-error";
 
 const emptySettings: AdsSettings = {
@@ -6,7 +7,7 @@ const emptySettings: AdsSettings = {
   manual: "",
   prewarning: true,
   leadSeconds: 60,
-  prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
+  prewarningText: DEFAULT_PREWARNING_TEXT,
 };
 
 const emptySchedule: AdsScheduleResponse = {
@@ -31,7 +32,7 @@ const json = async <T>(response: Response): Promise<T> => {
     response.status,
     typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
       ? body.error
-      : "Anfrage fehlgeschlagen.",
+      : null,
     body,
   );
   return body as T;

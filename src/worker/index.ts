@@ -40,7 +40,7 @@ app.get("/healthz", async (context) => {
  * "Unexpected token '<'" instead of a missing route. Every renamed or mistyped
  * endpoint turns into that riddle.
  */
-app.all("/api/*", (context) => context.json({ error: "Unbekannte API-Route." }, 404));
+app.all("/api/*", (context) => context.json({ error: "unknown_api_route" }, 404));
 
 app.all("*", (context) => context.env.ASSETS.fetch(context.req.raw));
 

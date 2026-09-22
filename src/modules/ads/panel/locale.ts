@@ -1,6 +1,6 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
 
-interface AdsPanelTexts {
+export interface AdsPanelTexts {
   title: string;
   scheduleSection: string;
   noAdBreak: string;
@@ -16,6 +16,8 @@ interface AdsPanelTexts {
   snoozeScopeMissing: string;
   snoozeNone: string;
   snoozeUnknown: string;
+  snoozeSuccess: string;
+  snoozeError: string;
   recentSection: string;
   noRecent: string;
   recentDuration: (duration: string) => string;
@@ -27,6 +29,8 @@ interface AdsPanelTexts {
   manual: string;
   durationPlaceholderHint: string;
   save: string;
+  discard: string;
+  saving: string;
   saved: string;
   load: string;
   error: string;
@@ -50,6 +54,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     snoozeScopeMissing: "Snooze ist deaktiviert: channel:manage:ads fehlt.",
     snoozeNone: "Snooze ist deaktiviert: keine Verschiebung mehr verfügbar.",
     snoozeUnknown: "Snooze ist deaktiviert: der Twitch-Zähler ist nicht verfügbar.",
+    snoozeSuccess: "Die nächste Werbepause wurde verschoben.",
+    snoozeError: "Die nächste Werbepause konnte nicht verschoben werden.",
     recentSection: "Letzte Werbepausen",
     noRecent: "Noch keine Werbepausen im Ereignisprotokoll.",
     recentDuration: (duration) => `${duration} Sekunden`,
@@ -61,6 +67,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     manual: "Manuell gestartete Werbepause",
     durationPlaceholderHint: "{duration} wird durch die Dauer in Sekunden ersetzt.",
     save: "Ansagen speichern",
+    discard: "Verwerfen",
+    saving: "Wird gespeichert …",
     saved: "Ansagen gespeichert.",
     load: "Werbeeinstellungen werden geladen …",
     error: "Die Werbeeinstellungen konnten nicht geladen oder gespeichert werden.",
@@ -82,6 +90,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     snoozeScopeMissing: "Snooze is disabled: channel:manage:ads is missing.",
     snoozeNone: "Snooze is disabled: no postponements remain.",
     snoozeUnknown: "Snooze is disabled: Twitch did not provide a counter.",
+    snoozeSuccess: "The next ad break was postponed.",
+    snoozeError: "The next ad break could not be postponed.",
     recentSection: "Recent ad breaks",
     noRecent: "No ad breaks are in the event log yet.",
     recentDuration: (duration) => `${duration} seconds`,
@@ -93,6 +103,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     manual: "Manually started ad break",
     durationPlaceholderHint: "{duration} is replaced with the duration in seconds.",
     save: "Save announcements",
+    discard: "Discard",
+    saving: "Saving …",
     saved: "Announcements saved.",
     load: "Loading ad break settings …",
     error: "The ad break settings could not be loaded or saved.",

@@ -131,7 +131,7 @@ describe("ChannelObject realtime path", () => {
 
     expect(() => {
       object.publish({ ...eventMessage, channelId: "kanal-b" });
-    }).toThrow(/fremden Kanal/);
+    }).toThrow(/foreign channel/);
   });
 
   it("sends nothing more to an expired connection", () => {
@@ -142,7 +142,7 @@ describe("ChannelObject realtime path", () => {
     object.publish(eventMessage);
 
     expect(expired.send.mock.calls).toHaveLength(0);
-    expect(expired.close.mock.calls).toEqual([[4001, "Berechtigung abgelaufen"]]);
+    expect(expired.close.mock.calls).toEqual([[4001, "authorization expired"]]);
     expect(valid.send.mock.calls).toHaveLength(1);
   });
 

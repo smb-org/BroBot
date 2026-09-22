@@ -1,10 +1,11 @@
 import { prepareAudit } from "./audit";
-import type { AuditActorKind, ChannelRole } from "../../contracts/values";
+import type { AuditAction, AuditActorKind, ChannelRole } from "../../contracts/values";
 import { decodeCursor, encodeCursor } from "./cursor";
 import {
   bindActorGuard,
   lastBroadcasterGuard,
   lastBroadcasterRoleChangeGuard,
+  sqlRole,
   type ActorContext,
   type MutationGuard,
 } from "./guards";
@@ -59,7 +60,7 @@ const prepareMemberAudit = (
   actorUserId: string,
   changedAt: string,
   channelId: string,
-  action: string,
+  action: AuditAction,
   before: ChannelMemberRecord | null,
   after: ChannelMemberRecord | null,
   actorKind: AuditActorKind = "member",
@@ -144,7 +145,7 @@ export const countBroadcasterMembers = async (
   const row = await db.prepare(
     `SELECT COUNT(*) AS count
        FROM channel_members
-      WHERE channel_id = ? AND role = 'broadcaster'`,
+      WHERE channel_id = ? AND role = ${sqlRole("broadcaster")}`,
   ).bind(channelId).first<{ count: number }>();
   return row?.count ?? 0;
 };
@@ -153,7 +154,7 @@ export const createChannelMemberWithAudit = async (
   db: D1Database,
   actor: ActorContext,
   member: ChannelMemberRecord,
-  action: string,
+  action: AuditAction,
   changedAt: string,
   guard: string | MutationGuard,
   actorKind: AuditActorKind = "member",
@@ -195,7 +196,7 @@ export const updateChannelMemberWithAudit = async (
   db: D1Database,
   actor: ActorContext,
   member: ChannelMemberRecord,
-  action: string,
+  action: AuditAction,
   changedAt: string,
   guard: string | MutationGuard,
   actorKind: AuditActorKind = "member",
@@ -244,7 +245,7 @@ export const deleteChannelMemberWithAudit = async (
   actor: ActorContext,
   channelId: string,
   userId: string,
-  action: string,
+  action: AuditAction,
   changedAt: string,
   guard: string | MutationGuard,
   actorKind: AuditActorKind = "member",

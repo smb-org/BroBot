@@ -1,4 +1,4 @@
-import type { ModuleRouteVariables } from "../contract";
+import type { HelixRequest, ModuleRouteVariables } from "../contract";
 
 export const AD_SCHEDULE_URL = "https://api.twitch.tv/helix/channels/ads";
 export const SNOOZE_NEXT_AD_URL = "https://api.twitch.tv/helix/channels/ads/schedule/snooze";
@@ -30,15 +30,6 @@ type GetAppAccessToken = ModuleRouteVariables["getAppAccessToken"];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-const responseJson = async (response: Response): Promise<Record<string, unknown>> => {
-  try {
-    const value: unknown = await response.json();
-    return isRecord(value) ? value : {};
-  } catch {
-    return {};
-  }
-};
 
 const textOrNull = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
@@ -81,12 +72,17 @@ const twitchErrorStatus = (error: unknown): number | null => {
   return typeof status === "number" ? status : null;
 };
 
+/** The status-to-reason mapping is this endpoint's own business meaning, not `helixRequest`'s. */
+const scheduleReasonFor = (status: number): string =>
+  status === 429 ? "rate_limited" : status === 401 ? "unauthorized" : `http_${String(status)}`;
+
 /** Fetches Get Ad Schedule using the app token; an empty schedule counts as success. */
 export const getAdSchedule = async (
   environment: Env,
   channelId: string,
   now: string,
   getAppAccessToken: GetAppAccessToken,
+  helixRequest: HelixRequest,
   fetcher: typeof fetch = fetch,
 ): Promise<AdScheduleResult> => {
   let accessToken: string;
@@ -101,33 +97,25 @@ export const getAdSchedule = async (
     return failure("app_token_unavailable", { status: null, message: error instanceof Error ? error.message : String(error) });
   }
 
-  const url = new URL(AD_SCHEDULE_URL);
-  url.searchParams.set("broadcaster_id", channelId);
-  let response: Response;
-  try {
-    response = await fetcher(url.toString(), {
-      headers: {
-        "Client-ID": environment.TWITCH_CLIENT_ID,
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-  } catch (error: unknown) {
-    return failure("network_error", { status: null, message: error instanceof Error ? error.message : String(error) });
+  const result = await helixRequest<Record<string, unknown>>({
+    url: AD_SCHEDULE_URL,
+    query: { broadcaster_id: channelId },
+    accessToken,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
+  });
+  if (!result.ok) {
+    if (result.reason === "timeout" || result.reason === "network_error") {
+      return failure(result.reason, { status: null, message: result.message });
+    }
+    return failure(scheduleReasonFor(result.status ?? 0), { status: result.status, message: result.message });
   }
 
-  const body = await responseJson(response);
-  const message = textOrNull(body.message);
-  if (!response.ok) {
-    return failure(
-      response.status === 429 ? "rate_limited" : response.status === 401 ? "unauthorized" : `http_${String(response.status)}`,
-      { status: response.status, message },
-    );
-  }
-
+  const body = isRecord(result.data) ? result.data : {};
   return {
     fetched: true,
     reason: null,
-    detail: { status: response.status, message },
+    detail: { status: result.status, message: textOrNull(body.message) },
     schedule: scheduleFrom(body),
   };
 };
@@ -138,6 +126,7 @@ export const snoozeNextAd = async (
   channelId: string,
   now: string,
   getAppAccessToken: GetAppAccessToken,
+  helixRequest: HelixRequest,
   fetcher: typeof fetch = fetch,
 ): Promise<SnoozeNextAdResult> => {
   let accessToken: string;
@@ -152,36 +141,32 @@ export const snoozeNextAd = async (
     return snoozeFailure("app_token_unavailable", { status: null, message: error instanceof Error ? error.message : String(error) });
   }
 
-  const url = new URL(SNOOZE_NEXT_AD_URL);
-  url.searchParams.set("broadcaster_id", channelId);
-  let response: Response;
-  try {
-    response = await fetcher(url.toString(), {
-      method: "POST",
-      headers: {
-        "Client-ID": environment.TWITCH_CLIENT_ID,
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-  } catch (error: unknown) {
-    return snoozeFailure("network_error", { status: null, message: error instanceof Error ? error.message : String(error) });
-  }
-
-  const body = await responseJson(response);
-  const message = textOrNull(body.message);
-  if (!response.ok) {
-    const reason = response.status === 429
+  const result = await helixRequest<Record<string, unknown>>({
+    method: "POST",
+    url: SNOOZE_NEXT_AD_URL,
+    query: { broadcaster_id: channelId },
+    accessToken,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
+  });
+  if (!result.ok) {
+    if (result.reason === "timeout" || result.reason === "network_error") {
+      return snoozeFailure(result.reason, { status: null, message: result.message });
+    }
+    const status = result.status ?? 0;
+    const reason = status === 429
       ? "rate_limited"
-      : response.status === 401 && missingScopeMessage(message)
+      : status === 401 && missingScopeMessage(result.message)
         ? "scope_missing"
-        : response.status === 401 ? "unauthorized" : `http_${String(response.status)}`;
-    return snoozeFailure(reason, { status: response.status, message });
+        : status === 401 ? "unauthorized" : `http_${String(status)}`;
+    return snoozeFailure(reason, { status: result.status, message: result.message });
   }
 
+  const body = isRecord(result.data) ? result.data : {};
   return {
     snoozed: true,
     reason: null,
-    detail: { status: response.status, message },
+    detail: { status: result.status, message: textOrNull(body.message) },
     schedule: scheduleFrom(body),
   };
 };

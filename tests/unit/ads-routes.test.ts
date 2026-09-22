@@ -43,6 +43,7 @@ const requestFor = async (
   userId: string,
   path: string,
   method = "GET",
+  body?: unknown,
 ): Promise<Request> => {
   const sessionId = `session-${userId}`;
   const cookie = await createSessionCookie(
@@ -56,7 +57,9 @@ const requestFor = async (
     headers: {
       Cookie: `__Host-brobot_session=${cookie}; __Host-brobot_csrf=${csrf}`,
       "X-CSRF-Token": csrf,
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 };
 
@@ -164,7 +167,7 @@ describe("ad routes", () => {
     expect(response.status).toBe(429);
     await expect(database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ code: "ads.vorwarnung.zeitplan_fehler" });
+    ).first()).resolves.toEqual({ code: "ads.prewarning.schedule_error" });
   });
 
   it("handles an empty successful schedule without an event", async () => {
@@ -179,5 +182,128 @@ describe("ad routes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ schedule: { nextAdAt: null } });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first()).resolves.toEqual({ count: 0 });
+  });
+});
+
+describe("start commercial", () => {
+  let database: TestD1Database;
+  let schedule: ReturnType<typeof vi.fn>;
+  let clear: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    database = new TestD1Database();
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(tokenKeys)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-20T00:00:00.000Z",
+      "2026-09-20T00:00:00.000Z",
+    );
+    schedule = vi.fn<() => void>();
+    clear = vi.fn<() => void>();
+  });
+
+  afterEach(() => {
+    database.close();
+    vi.unstubAllGlobals();
+  });
+
+  const setup = async (role: "broadcaster" | "manager" | "operator", scopes: string[] = ["channel:edit:commercial"]): Promise<Env> => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", scopes);
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", role);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
+    ).run();
+    return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void);
+  };
+
+  // "Betrieblich" per 0006: an immediate action open to every channel role,
+  // the same as ads snooze -- an operator may run it without escalation.
+  it("lets an operator start a commercial and writes an audit entry", async () => {
+    const environment = await setup("operator");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ data: [{ length: 90, message: "", retry_after: 480 }] }),
+      { status: 200 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ length: 90, message: null, retryAfter: 480 });
+    await expect(database.prepare(
+      "SELECT action, module_id FROM audit_log WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ action: "ads.commercial_started", module_id: "ads" });
+  });
+
+  it("reports a missing channel:edit:commercial scope without calling Twitch", async () => {
+    const environment = await setup("operator", []);
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "commercial_start_failed", reason: "scope_missing" });
+    expect(fetcher).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 1 });
+  });
+
+  it("reports Twitch's rate limit as its own outcome", async () => {
+    const environment = await setup("manager");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "slow down" }),
+      { status: 429 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toMatchObject({ error: "commercial_start_failed", reason: "rate_limited" });
+  });
+
+  it("rejects an invalid length before calling Twitch", async () => {
+    const environment = await setup("operator");
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 45 }),
+      environment,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "commercial_length_invalid" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects a request from someone who isn't a channel member", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:edit:commercial"]);
+    await insertLoginIdentityAndSession(database, "outsider");
+    const environment = environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void);
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("outsider", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
