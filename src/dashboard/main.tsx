@@ -1,4 +1,4 @@
-import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import type {
@@ -21,7 +21,6 @@ import type {
   PanelSystemResponse,
   PanelTokenStatus,
 } from "../panel-contract";
-import { EVENT_TONES, type EventTone } from "../contracts/values";
 import {
   BOT_MAINTENANCE_INTERVAL_MS,
   BOT_MAINTENANCE_STALE_AFTER_MS,
@@ -43,23 +42,15 @@ import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, Mo
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
-import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, eventToneEntries, formatTimestamp as formatTimestampBase, formatNumber, type EventCode, type EventDetail, type EventNumberKey } from "./locale";
+import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber } from "./locale";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
-import { useRealtimeEventFeed, type RealtimeFeedStatus } from "./realtime";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
 import { BlockingState, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, Switch as UiSwitch, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { EventsPage } from "./events/EventsPage";
+import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
+import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
-
-interface LoadState<T> {
-  status: "idle" | "loading" | "success" | "error";
-  data: T | null;
-  error: string | null;
-  /** When this response arrived. Drives the data-age display. */
-  loadedAt?: number;
-}
-
-type LoadStateSetter<T> = (value: LoadState<T> | ((current: LoadState<T>) => LoadState<T>)) => void;
 
 interface ModeratorCheckState {
   status: "idle" | "loading" | "error";
@@ -77,29 +68,11 @@ interface EventsRequestState {
   generation: number;
 }
 
-const emptyEventFilter: PanelEventFilters = {
-  origin: null,
-  module: null,
-  tone: null,
-  person: null,
-};
-
-const PERSON_FILTER_DEBOUNCE_MS = 300;
-
 const idleModeratorCheck = (): ModeratorCheckState => ({
   status: "idle",
   error: null,
   nextAllowedAt: null,
 });
-
-const idleState = <T,>(): LoadState<T> => ({ status: "idle", data: null, error: null });
-const loadingState = <T,>(current?: LoadState<T>): LoadState<T> => {
-  const next: LoadState<T> = { status: "loading", data: current?.data ?? null, error: null };
-  if (current?.loadedAt !== undefined) next.loadedAt = current.loadedAt;
-  return next;
-};
-
-const loadedState = <T,>(data: T): LoadState<T> => ({ status: "success", data, error: null, loadedAt: Date.now() });
 
 const statusLabel = (status: PanelBotStatus["status"]): string => {
   const texts = dashboardTexts();
@@ -863,68 +836,8 @@ const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactEle
   );
 };
 
-const eventMetadata = (code: string) =>
-  Object.prototype.hasOwnProperty.call(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
-
-const eventTone = (code: string): EventTone | null =>
-  eventMetadata(code)?.tone ?? null;
-
-const eventToneRank = (tone: EventTone | null): number =>
-  tone === "error" ? 3 : tone === "warning" ? 2 : tone === "info" ? 1 : 0;
-
-const eventToneFromValue = (value: string): EventTone | null =>
-  EVENT_TONES.includes(value as EventTone) ? value as EventTone : null;
-
-interface EventGroup {
-  key: string;
-  entries: PanelEventEntry[];
-  representative: PanelEventEntry;
-}
-
-const eventGroupKey = (entry: PanelEventEntry): string =>
-  typeof entry.triggerId === "string" && entry.triggerId.length > 0
-    ? `trigger:${entry.triggerId}`
-    : `event:${entry.eventId}`;
-
-const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] => {
-  const grouped = new Map<string, [PanelEventEntry, ...PanelEventEntry[]]>();
-  for (const entry of entries) {
-    const key = eventGroupKey(entry);
-    const group = grouped.get(key);
-    if (group === undefined) grouped.set(key, [entry]);
-    else group.push(entry);
-  }
-  return Array.from(grouped, ([key, groupEntries]) => ({
-    key,
-    entries: groupEntries,
-    representative: groupEntries.slice(1).reduce((current, candidate) => {
-      const currentRank = eventToneRank(eventTone(current.code));
-      const candidateRank = eventToneRank(eventTone(candidate.code));
-      return candidateRank > currentRank ||
-        (candidateRank === currentRank && candidate.createdAt < current.createdAt)
-        ? candidate
-        : current;
-    }, groupEntries[0]),
-  }));
-};
-
-const actorLabel = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): string =>
-  entry.actorDisplayName ?? (entry.actorLogin == null
-    ? entry.actorUserId == null ? texts.events.automatic : entry.actorUserId
-    : `@${entry.actorLogin}`);
-
-const actorCell = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): ReactNode =>
-  entry.actorDisplayName ?? (entry.actorLogin == null
-    ? entry.actorUserId == null ? texts.events.automatic : <span className="mono">{entry.actorUserId}</span>
-    : `@${entry.actorLogin}`);
-
 const auditActorLabel = (entry: PanelAuditEntry): string =>
   entry.actorDisplayName ?? (entry.actorLogin == null ? entry.actorUserId : `@${entry.actorLogin}`);
-
-const moduleLabel = (entry: PanelEventEntry): string => moduleName(entry.moduleId);
-
-const chronological = (left: PanelEventEntry, right: PanelEventEntry): number =>
-  left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId);
 
 const mergeEventEntries = (
   current: readonly PanelEventEntry[],
@@ -934,261 +847,6 @@ const mergeEventEntries = (
   for (const entry of current) byId.set(entry.eventId, entry);
   for (const entry of incoming) byId.set(entry.eventId, entry);
   return Array.from(byId.values()).sort((left, right) => chronological(right, left));
-};
-
-const eventDetail = (detail: string): EventDetail => {
-  try {
-    const parsed: unknown = JSON.parse(detail);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? parsed as EventDetail
-      : {};
-  } catch {
-    return {};
-  }
-};
-
-const eventChipNumber = (detail: EventDetail, key: EventNumberKey): string | null => {
-  if (key === null) return null;
-  const value = detail[key];
-  if (key === "tier") {
-    const tier = typeof value === "number" ? String(value) : value;
-    if (typeof tier !== "string") return null;
-    if (tier === "1000") return "T1";
-    if (tier === "2000") return "T2";
-    if (tier === "3000") return "T3";
-    if (tier.toLowerCase() === "prime") return "Prime";
-    return null;
-  }
-  if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return null;
-  if (key === "count") return `${formatNumber(value)}x`;
-  if (key === "duration" || key === "remainingSeconds") return `${formatNumber(value)} s`;
-  return formatNumber(value);
-};
-
-const EventChipPair = ({ code, detail, texts: texts }: { code: string; detail: EventDetail; texts: ReturnType<typeof dashboardTexts> }): ReactElement => {
-  const metadata = eventMetadata(code);
-  if (metadata === null) {
-    return <span className="event-chip-pair"><span className="event-chip" data-stufe="gezeichnet">{texts.events.unknown}</span></span>;
-  }
-  const number = eventChipNumber(detail, metadata.numberKey);
-  return <span className="event-chip-pair">
-    {number === null ? null : <span className="event-chip event-chip--number">{number}</span>}
-    <span className="event-chip" data-familie={metadata.family} data-stufe={metadata.tier} data-ton={metadata.tone}>{metadata.word[dashboardLanguage()]}</span>
-  </span>;
-};
-
-const formatEventDetail = (detail: string): string => {
-  try {
-    return JSON.stringify(JSON.parse(detail), null, 2);
-  } catch {
-    return detail;
-  }
-};
-
-const eventFilterIsActive = (filters: PanelEventFilters): boolean =>
-  filters.origin !== null || filters.module !== null || filters.tone !== null || filters.person !== null;
-
-const EventFilterBar = ({
-  filters,
-  moduleOptions,
-  onChange,
-}: {
-  filters: PanelEventFilters;
-  moduleOptions: readonly PanelModuleState[];
-  onChange: (filters: PanelEventFilters) => void;
-}): ReactElement => {
-  const texts = dashboardTexts();
-  const [personDraft, setPersonDraft] = useState(filters.person ?? "");
-  // The applied filter is the source of truth; the draft follows along when it
-  // changes from outside (reset, navigation, second tab). This happens
-  // during render instead of in an effect: an effect would show a second
-  // pass with a stale value, and React forbids that pattern.
-  const [zuletztAngewendet, setZuletztAngewendet] = useState(filters.person);
-  if (zuletztAngewendet !== filters.person) {
-    setZuletztAngewendet(filters.person);
-    setPersonDraft(filters.person ?? "");
-  }
-  const commitPerson = useCallback((draft: string): void => {
-    const value = draft.trim();
-    onChange({ ...filters, person: value.length === 0 ? null : value });
-  }, [filters, onChange]);
-  useEffect(() => {
-    if (personDraft.trim() === (filters.person ?? "")) return;
-    const timeout = window.setTimeout(() => { commitPerson(personDraft); }, PERSON_FILTER_DEBOUNCE_MS);
-    return () => { window.clearTimeout(timeout); };
-  }, [commitPerson, filters.person, personDraft]);
-  const activeFilter: string[] = [];
-  if (filters.origin === "channel") activeFilter.push(texts.events.channelEvents);
-  if (filters.origin === "module") activeFilter.push(texts.events.moduleDiagnostics);
-  if (filters.module !== null) activeFilter.push(moduleName(filters.module));
-  if (filters.tone !== null) activeFilter.push(filters.tone === "info" ? texts.events.info : filters.tone === "warning" ? texts.events.notice : texts.events.error);
-  if (filters.person !== null) activeFilter.push(filters.person);
-  return <div className="event-filter" aria-label={texts.events.filter}>
-    <div className="event-filter__controls">
-      <label>{texts.events.origin}<select aria-label={texts.events.origin} value={filters.origin ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}>
-        <option value="">{texts.events.all}</option><option value="channel">{texts.events.channelEvents}</option><option value="module">{texts.events.moduleDiagnostics}</option>
-      </select></label>
-      <label>{texts.events.moduleFilter}<select aria-label={texts.events.moduleFilter} value={filters.module ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, module: value.length === 0 ? null : value }); }}>
-        <option value="">{texts.events.all}</option>{moduleOptions.map((module) => <option key={module.id} value={module.id}>{moduleName(module.id)}</option>)}
-      </select></label>
-      <label>{texts.events.tone}<select aria-label={texts.events.tone} value={filters.tone ?? ""} onChange={(event) => { onChange({ ...filters, tone: eventToneFromValue(event.target.value) }); }}>
-        <option value="">{texts.events.all}</option><option value="info">{texts.events.info}</option><option value="warning">{texts.events.notice}</option><option value="error">{texts.events.error}</option>
-      </select></label>
-      <label>{texts.events.person}<input aria-label={texts.events.person} value={personDraft} onChange={(event) => { setPersonDraft(event.target.value); }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }} /></label>
-    </div>
-    {activeFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texts.events.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyEventFilter); }}>{texts.events.resetFilters}</button></div>}
-  </div>;
-};
-
-const EventFeedEnd = ({
-  nextCursor,
-  loadingNextPage,
-  onNextPage,
-}: {
-  nextCursor: string | null;
-  loadingNextPage: boolean;
-  onNextPage: () => void;
-}): ReactElement => {
-  const texts = dashboardTexts();
-  const feedEndRef = useRef<HTMLDivElement | null>(null);
-  const loadNextPage = useCallback((): void => {
-    if (nextCursor !== null && !loadingNextPage) onNextPage();
-  }, [loadingNextPage, nextCursor, onNextPage]);
-  useEffect(() => {
-    if (nextCursor === null) return;
-    const onScroll = (): void => {
-      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 1) loadNextPage();
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    const end = feedEndRef.current;
-    if (end !== null && "IntersectionObserver" in window) {
-      const observer = new IntersectionObserver(([entry]) => {
-        if (entry?.isIntersecting) loadNextPage();
-      });
-      observer.observe(end);
-      return () => { observer.disconnect(); window.removeEventListener("scroll", onScroll); };
-    }
-    return () => { window.removeEventListener("scroll", onScroll); };
-  }, [loadNextPage, nextCursor]);
-  return <div
-    ref={feedEndRef}
-    className="event-feed__end"
-    tabIndex={nextCursor === null ? -1 : 0}
-    aria-label={nextCursor === null ? undefined : texts.events.loadMoreAtEnd}
-    onFocus={loadNextPage}
-    onKeyDown={(event) => {
-      if (event.key === "End" || event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        loadNextPage();
-      }
-    }}
-  >
-    {loadingNextPage ? <p className="loading-line" role="status">{texts.events.loadingOlder}</p> : nextCursor === null ? <p className="empty-state">{texts.events.feedEnd}</p> : <p className="muted">{texts.events.loadMoreAtEnd}</p>}
-  </div>;
-};
-
-const realtimeLedStatus = (status: RealtimeFeedStatus): LedStatus =>
-  status === "connected" ? "green" : status === "renew" ? "red" : status === "offline" ? "off" : "amber";
-
-const RealtimeFeedStatus = ({ status }: { status: RealtimeFeedStatus }): ReactElement => {
-  const texts = dashboardTexts();
-  const label = status === "connected"
-    ? texts.events.realtimeConnected
-    : status === "connecting"
-      ? texts.events.realtimeConnecting
-      : status === "reconnecting"
-        ? texts.events.realtimeReconnecting
-        : status === "renew" ? texts.events.realtimeRenewSession : texts.events.realtimeOffline;
-  return <span className="realtime-status" aria-live="polite"><Led status={realtimeLedStatus(status)} label={label} />{status === "renew" ? <a className="profile-link" href="/auth/login">{texts.events.realtimeRenewSession}</a> : null}</span>;
-};
-
-const EventsPage = ({
-  channelId,
-  eventsState,
-  filters,
-  moduleOptions,
-  onFiltersChange,
-  onRefreshFirstPage,
-  onNextPage,
-  loadingNextPage,
-}: {
-  channelId: string;
-  eventsState: LoadState<PanelEventsResponse>;
-  filters: PanelEventFilters;
-  moduleOptions: readonly PanelModuleState[];
-  onFiltersChange: (filters: PanelEventFilters) => void;
-  onRefreshFirstPage: (channelId: string, filters: PanelEventFilters) => Promise<void>;
-  onNextPage: () => void;
-  loadingNextPage: boolean;
-}): ReactElement => {
-  const texts = dashboardTexts();
-  const feedRef = useRef<HTMLDivElement | null>(null);
-  const atBeginning = useCallback((): boolean => {
-    const feed = feedRef.current;
-    if (feed === null) return true;
-    const feedStart = feed.getBoundingClientRect().top + window.scrollY;
-    return window.scrollY <= feedStart + 8;
-  }, []);
-  const scrollToBeginning = useCallback((): void => {
-    const feed = feedRef.current;
-    if (feed === null) return;
-    const feedStart = feed.getBoundingClientRect().top + window.scrollY;
-    window.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
-  }, []);
-  const realtime = useRealtimeEventFeed({
-    channelId,
-    filters,
-    atBeginning,
-    refreshFirstPage: () => onRefreshFirstPage(channelId, filters),
-    scrollToBeginning,
-  });
-  const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>();
-  const groups = eventsState.data === null ? [] : eventGroups(eventsState.data.entries);
-  const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
-  const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronological);
-  const eventEntries = eventsState.data?.entries ?? [];
-  return (
-    <>
-      <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} />
-      <ListDetail
-        onCloseInspector={closeGroup}
-        list={
-          <section className="content-section" aria-label={texts.events.log}>
-            <div className="section-heading"><h2>{texts.events.log}</h2><RealtimeFeedStatus status={realtime.status} /></div>
-            <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
-            {realtime.pendingCount === 0 ? null : <button className="button realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite">{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
-            {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texts.events.load}</p> : null}
-            {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
-            {eventsState.data !== null && eventEntries.length === 0 ? <p className="empty-state">{eventFilterIsActive(filters) ? texts.events.noMatches : texts.events.none}</p> : null}
-            {eventsState.data !== null ? <>
-              {eventEntries.length === 0 ? null : <div ref={feedRef} className="event-feed">
-                <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
-                  <table className="tabelle event-table">
-                    <thead><tr><th scope="col">{texts.events.time}</th><th scope="col">{texts.events.event}</th><th scope="col">{texts.events.module}</th><th scope="col">{texts.events.who}</th></tr></thead>
-                    <tbody>{groups.map((group) => {
-                      const entry = group.representative;
-                      const eventLabel = eventText(entry.code, eventDetail(entry.detail));
-                      return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texts)}</td></tr>;
-                    })}</tbody>
-                  </table>
-                </div>
-              </div>}
-              <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
-            </> : null}
-          </section>
-        }
-        inspector={selectedGroup === null ? null : (
-          <SubInspector ariaLabel={texts.events.detail} title={texts.events.operation} identifier={selectedGroup.representative.triggerId || selectedGroup.representative.eventId} closeLabel={dashboardCommonTexts().close} onClose={closeGroup}>
-            <dl className="properties"><div><dt>{texts.events.timestamp}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texts.events.module}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texts.events.participants}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texts)))).join(", ")}</dd></div></dl>
-            <div className="inspector-section__heading"><h3>{texts.events.history}</h3></div>
-            <ol className="event-history">{selectedHistory.map((entry) => {
-              return <li key={entry.eventId}><div className="event-history__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
-            })}</ol>
-          </SubInspector>
-        )}
-      />
-    </>
-  );
 };
 
 export const DashboardApp = (): ReactElement => {
