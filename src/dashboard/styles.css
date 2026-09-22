@@ -24,6 +24,7 @@
   --taste: var(--erhoben);
   --inspektor: #1a1917;
   --rinne: #100f0e;
+  --tiefe: #0a0908;
   --linie: #312e2b;
   --linie-stark: #403c38;
   --linie-hell: #68615a;
@@ -442,15 +443,18 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .command-panel .tabelle { width: 100%; max-width: 100%; min-width: 0; table-layout: fixed; }
 .command-panel .tabelle th, .command-panel .tabelle td { font-size: 12px; }
 .command-panel .tabelle thead th { height: 30px; }
-/* Unter 640px Listenbreite steht „zuletzt" als Metazeile im Unter-Inspektor
-   der gewählten Zeile. */
+/* Four columns (name, response, minimum level, toggle) -- kind and cooldown
+   moved into the inspector, "zuletzt" is its identifier line. The response
+   column is `auto`, not a fixed px width: that's the fix for the
+   overlapping header and the truncated response text the six-column table
+   had at its root ("Tabelle" in docs/input/DESIGN-neu.md -- "eine Spalte
+   für langen Text ist minmax(0, 1fr), nie eine Festbreite"; a table's fixed
+   layout gives that same behaviour to its one `auto` column). */
 .command-panel .tabelle thead th:nth-child(1) { width: 116px; }
 .command-panel .tabelle thead th:nth-child(2) { width: auto; }
-.command-panel .tabelle thead th:nth-child(3) { width: 64px; }
-.command-panel .tabelle thead th:nth-child(4) { width: 88px; }
-.command-panel .tabelle tbody th:nth-child(1),
-.command-panel .tabelle tbody td:nth-child(3),
-.command-panel .tabelle tbody td:nth-child(4) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.command-panel .tabelle thead th:nth-child(3) { width: 150px; }
+.command-panel .tabelle thead th:nth-child(4) { width: 64px; }
+.command-panel .tabelle tbody th:nth-child(1) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .command-inspector__meta { display: none; margin-left: auto; font-size: 11.5px; }
 .command-panel .tabelle tbody tr[tabindex] { cursor: pointer; }
 .command-panel .tabelle tbody tr[tabindex]:hover { background: var(--erhoben); }
@@ -488,11 +492,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .module-taste { width: 132px; height: 132px; }
 }
 
-@container liste (max-width: 640px) {
-  .command-panel .tabelle th:nth-child(5),
-  .command-panel .tabelle td:nth-child(5) { display: none; }
-}
-
 @container inspektor (max-width: 640px) {
   .command-inspector__meta { display: inline; }
 }
@@ -523,6 +522,33 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .header-action .form-error { margin-top: 4px; }
 .inspektor-bereich { width: min(var(--seiten-breite), 100%); display: grid; gap: 16px; min-width: 0; }
 .inspektor-bereich__liste { width: min(var(--dashboard-content-width), 100%); min-width: 0; container: liste / inline-size; }
+
+/* ui/ListDetail: from 1024px a fixed 420px inspector column beside the
+   list; below that the inspector floats from the right (480px, full width
+   under 768px) instead of stacking under the list. Replaces
+   `.inspektor-bereich`'s 1360px derivation for panels built on `ListDetail`
+   -- see the component's own doc comment for why. The inspector keeps
+   `.sub-inspector`'s own padding/border/radius/surface/named-container;
+   these rules only ever position it. */
+.list-detail { width: min(var(--seiten-breite), 100%); min-width: 0; }
+.list-detail__list { min-width: 0; }
+.list-detail__backdrop { display: none; }
+
+@media (max-width: 1023px) {
+  .list-detail--open .list-detail__backdrop {
+    display: block; position: fixed; inset: 0; z-index: 20; border: 0; padding: 0; margin: 0;
+    background: color-mix(in srgb, var(--tiefe) 60%, transparent); cursor: default;
+  }
+  .list-detail--open .list-detail__inspector {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 21; width: min(480px, 100%); overflow-y: auto;
+  }
+  .list-detail--open .list-detail__inspector > .sub-inspector { min-height: 100%; border-radius: 0; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+}
+
+@media (min-width: 1024px) {
+  .list-detail--open { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; align-items: start; }
+  .list-detail--open .list-detail__inspector { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+}
 .zustand-liste { display: grid; gap: 8px; width: min(960px, 100%); }
 .zustand-zeile {
   display: grid; grid-template-columns: var(--zustand-label) auto minmax(0, 1fr) auto; align-items: center;

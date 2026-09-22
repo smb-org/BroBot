@@ -23,8 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { InspectorHeading, SubInspector } from "./inspector";
-import { useInspectorSelection } from "./inspector-selection";
+import { InspectorHeading, SubInspector, useInspectorSelection } from "./ui";
 import { NavigationIcon, StateRow, type StateTone } from "./module-panels";
 
 interface PlatformPageProperties {

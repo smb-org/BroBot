@@ -40,8 +40,6 @@ import {
   setChannelModuleEnabled,
 } from "./api";
 import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, ModuleWorkspace, NavigationIcon, StateRow, type LedStatus, type StateTone } from "./module-panels";
-import { SubInspector } from "./inspector";
-import { useInspectorSelection } from "./inspector-selection";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
@@ -50,7 +48,7 @@ import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus } from "./realtime";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
-import { Select as UiSelect, Shell, Sidebar, Switch as UiSwitch, UiProvider, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { Select as UiSelect, Shell, Sidebar, SubInspector, Switch as UiSwitch, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import "./styles.css";
 
 interface LoadState<T> {
