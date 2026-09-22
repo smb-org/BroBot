@@ -18,7 +18,7 @@ describe("Kanalereignisse-Domain", () => {
       viewers: 42,
     }, "incoming")).toEqual([{
       code: "channel_events.raid.incoming",
-      detail: { quelle: "Quelle Name (@quelle_login)", viewers: 42 },
+      detail: { source: "Quelle Name (@quelle_login)", viewers: 42 },
     }]);
     expect(diagnose("channel.raid", {
       to_broadcaster_user_name: "Ziel Name",
@@ -26,7 +26,7 @@ describe("Kanalereignisse-Domain", () => {
       viewers: 17,
     }, "outgoing")).toEqual([{
       code: "channel_events.raid.outgoing",
-      detail: { ziel: "Ziel Name (@ziel_login)", viewers: 17 },
+      detail: { target: "Ziel Name (@ziel_login)", viewers: 17 },
     }]);
   });
 
@@ -36,7 +36,7 @@ describe("Kanalereignisse-Domain", () => {
       to_broadcaster_user_login: "ziel",
     })).toEqual([{
       code: "channel_events.shoutout.gesendet",
-      detail: { ziel: "Ziel (@ziel)" },
+      detail: { target: "Ziel (@ziel)" },
     }]);
     expect(diagnose("channel.shoutout.receive", {
       from_broadcaster_user_name: "Quelle",
@@ -44,7 +44,7 @@ describe("Kanalereignisse-Domain", () => {
       viewer_count: 12,
     })).toEqual([{
       code: "channel_events.shoutout.empfangen",
-      detail: { quelle: "Quelle (@quelle)", viewers: 12 },
+      detail: { source: "Quelle (@quelle)", viewers: 12 },
     }]);
   });
 
@@ -59,7 +59,7 @@ describe("Kanalereignisse-Domain", () => {
       [noticeType]: { sub_tier: "1000" },
     })).toEqual([{
       code,
-      detail: { person: "Alice (@alice)", stufe: "1000" },
+      detail: { person: "Alice (@alice)", tier: "1000" },
     }]);
   });
 
@@ -71,7 +71,7 @@ describe("Kanalereignisse-Domain", () => {
       sub_gift: { sub_tier: "1000" },
     })[0]).toEqual({
       code: "channel_events.chat.gift_sub",
-      detail: { spender: "Giftperson", empfaenger: "Empfänger", stufe: "1000" },
+      detail: { gifter: "Giftperson", recipient: "Empfänger", tier: "1000" },
     });
     expect(diagnose("channel.chat.notification", {
       notice_type: "community_sub_gift",
@@ -79,7 +79,7 @@ describe("Kanalereignisse-Domain", () => {
       community_sub_gift: { total: 5, sub_tier: "prime" },
     })[0]).toEqual({
       code: "channel_events.chat.community_gift",
-      detail: { spender: "Giftperson", count: 5, stufe: "prime" },
+      detail: { gifter: "Giftperson", count: 5, tier: "prime" },
     });
     expect(diagnose("channel.chat.notification", {
       notice_type: "announcement",
@@ -137,8 +137,8 @@ describe("Kanalereignisse-Domain", () => {
         person: "Betroffene Person",
         moderator: "Moderation",
         reason: "Zu viele Nachrichten",
-        ende: "2026-09-20T10:05:00.000Z",
-        dauer: 300,
+        endsAt: "2026-09-20T10:05:00.000Z",
+        duration: 300,
       },
     }]);
   });
@@ -185,7 +185,7 @@ describe("Kanalereignisse-Domain", () => {
   it("meldet shared_chat_ban als genau eine unbekannte Moderationsaktion", () => {
     expect(diagnose("channel.moderate", { action: "shared_chat_ban" })).toEqual([{
       code: "channel_events.moderation.unbekannt",
-      detail: { aktion: "shared_chat_ban" },
+      detail: { action: "shared_chat_ban" },
     }]);
   });
 

@@ -32,11 +32,11 @@ describe("Dashboard-Locale", () => {
 
     expect(eventText("text_commands.ausgeloest", { name: "wiki" })).toBe("Befehl !wiki ausgeführt");
     expect(eventText("text_commands.ausgeloest")).toBe("Befehl ausgeführt");
-    expect(eventText("text_commands.abgekuehlt", { name: "wiki", restSekunden: 4 })).toBe("Befehl !wiki abgekühlt, noch 4 s");
+    expect(eventText("text_commands.abgekuehlt", { name: "wiki", remainingSeconds: 4 })).toBe("Befehl !wiki abgekühlt, noch 4 s");
     expect(eventText("text_commands.abgekuehlt", { name: "wiki" })).toBe("Textbefehl abgekühlt");
     expect(eventText("text_commands.unbekannt", { name: "wiki" })).toBe("Textbefehl !wiki unbekannt");
     expect(eventText("text_commands.deaktiviert", { name: "wiki" })).toBe("Textbefehl !wiki ausgeschaltet");
-    expect(eventText("text_commands.berechtigung", { name: "wiki", geforderteStufe: "moderator", vorhandeneStufe: ["viewer"] })).toBe("Befehl !wiki nicht ausgelöst: Mindeststufe Moderatoren, vorhanden Zuschauer");
+    expect(eventText("text_commands.berechtigung", { name: "wiki", requiredTier: "moderator", currentTier: ["viewer"] })).toBe("Befehl !wiki nicht ausgelöst: Mindeststufe Moderatoren, vorhanden Zuschauer");
     expect(eventText("host.chat.gesendet", { name: "wiki" })).toBe("Chat-Nachricht gesendet");
   });
 
@@ -44,37 +44,37 @@ describe("Dashboard-Locale", () => {
     setBrowserLanguage("en-US");
 
     expect(eventText("text_commands.ausgeloest", { name: "wiki" })).toBe("Command !wiki executed");
-    expect(eventText("text_commands.abgekuehlt", { name: "wiki", restSekunden: 4 })).toBe("Command !wiki on cooldown, 4s left");
+    expect(eventText("text_commands.abgekuehlt", { name: "wiki", remainingSeconds: 4 })).toBe("Command !wiki on cooldown, 4s left");
     expect(eventText("text_commands.bereits_vorhanden", { name: "wiki" })).toBe("Text command !wiki already exists");
     expect(eventText("text_commands.unbekannt", { name: "wiki" })).toBe("Unknown text command !wiki");
     expect(eventText("text_commands.deaktiviert", { name: "wiki" })).toBe("Text command !wiki disabled");
-    expect(eventText("text_commands.berechtigung", { name: "wiki", geforderteStufe: "moderator", vorhandeneStufe: ["viewer"] })).toBe("Command !wiki not executed: minimum level moderators, present viewer");
+    expect(eventText("text_commands.berechtigung", { name: "wiki", requiredTier: "moderator", currentTier: ["viewer"] })).toBe("Command !wiki not executed: minimum level moderators, present viewer");
   });
 
   it("unterscheidet abgeschalteten Shoutout von der Schwelle", () => {
     setBrowserLanguage("de-DE");
     expect(eventText("shoutout.unterdrueckt", { reason: "abgeschaltet" })).toBe("Shoutout abgeschaltet");
-    expect(eventText("shoutout.unterdrueckt", { reason: "unter_schwelle", viewers: 2, schwelle: 3 }))
+    expect(eventText("shoutout.unterdrueckt", { reason: "unter_schwelle", viewers: 2, threshold: 3 }))
       .toBe("Shoutout unter der Schwelle (2 von 3 Zuschauern)");
 
     setBrowserLanguage("en-US");
     expect(eventText("shoutout.unterdrueckt", { reason: "abgeschaltet" })).toBe("Shoutout disabled");
-    expect(eventText("shoutout.unterdrueckt", { reason: "unter_schwelle", viewers: 2, schwelle: 3 }))
+    expect(eventText("shoutout.unterdrueckt", { reason: "unter_schwelle", viewers: 2, threshold: 3 }))
       .toBe("Shoutout below threshold (2 of 3 viewers)");
   });
 
   it("rendert Moderationsdetails zweisprachig mit Bedeutungston", () => {
     setBrowserLanguage("de-DE");
     expect(eventText("channel_events.moderation.timeout", {
-      person: "Alice", moderator: "Mod", dauer: 300, reason: "Spam",
+      person: "Alice", moderator: "Mod", duration: 300, reason: "Spam",
     })).toBe("Alice für 300 Sekunden getimeoutet von Mod: Spam");
-    expect(eventToneEntries["channel_events.moderation.timeout"]).toMatchObject({ familie: "moderation", stufe: "voll", zahlSchluessel: "dauer" });
-    expect(eventToneEntries["channel_events.moderation.untimeout"]).toMatchObject({ familie: "moderation", stufe: "gezeichnet" });
-    expect(eventToneEntries["channel_events.moderation.unban"]).toMatchObject({ familie: "moderation", stufe: "gezeichnet" });
-    expect(eventToneEntries["channel_events.moderation.unbekannt"]).toMatchObject({ familie: "moderation", stufe: "voll" });
+    expect(eventToneEntries["channel_events.moderation.timeout"]).toMatchObject({ familie: "moderation", tier: "voll", zahlSchluessel: "duration" });
+    expect(eventToneEntries["channel_events.moderation.untimeout"]).toMatchObject({ familie: "moderation", tier: "gezeichnet" });
+    expect(eventToneEntries["channel_events.moderation.unban"]).toMatchObject({ familie: "moderation", tier: "gezeichnet" });
+    expect(eventToneEntries["channel_events.moderation.unbekannt"]).toMatchObject({ familie: "moderation", tier: "voll" });
 
     setBrowserLanguage("en-US");
-    expect(eventText("channel_events.moderation.unbekannt", { aktion: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
+    expect(eventText("channel_events.moderation.unbekannt", { action: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
   });
 
   it("führt für jeden bekannten Ereigniscode Familie, Stufe, Wort und Zahl-Schlüssel", () => {
@@ -97,16 +97,16 @@ describe("Dashboard-Locale", () => {
 
     expect(Object.keys(eventToneEntries).sort()).toEqual([...codes].sort());
     expect(eventToneEntries["channel_events.chat.community_gift"]).toEqual({
-      familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "count",
+      familie: "gemeinschaft", tier: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "count",
     });
     expect(eventToneEntries["channel_events.raid.incoming"]).toEqual({
-      familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "viewers",
+      familie: "raid", tier: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "viewers",
     });
     expect(eventToneEntries["channel_events.moderation.untimeout"]).toEqual({
-      familie: "moderation", stufe: "gezeichnet", wort: { de: "Entsperrt", en: "Untimeout" }, zahlSchluessel: null,
+      familie: "moderation", tier: "gezeichnet", wort: { de: "Entsperrt", en: "Untimeout" }, zahlSchluessel: null,
     });
     expect(eventToneEntries["host.chat.gesendet"]).toEqual({
-      familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, tone: "info",
+      familie: "betrieb", tier: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, tone: "info",
     });
     for (const code of codes) {
       expect(eventToneEntries[code].wort.de.length).toBeLessThanOrEqual(12);
@@ -142,10 +142,10 @@ describe("Dashboard-Locale", () => {
     expect(eventText("channel_events.verdacht.entwarnung", {
       person: "Alice", einstufung: "none", moderator: "Mod",
     })).toBe("Einstufung von Alice aufgehoben von Mod");
-    expect(eventToneEntries["channel_events.automod.halte"]).toMatchObject({ familie: "moderation", stufe: "voll" });
-    expect(eventToneEntries["channel_events.verdacht.nachricht"]).toMatchObject({ familie: "moderation", stufe: "voll" });
-    expect(eventToneEntries["channel_events.verdacht.einstufung"]).toMatchObject({ familie: "moderation", stufe: "voll" });
-    expect(eventToneEntries["channel_events.verdacht.entwarnung"]).toMatchObject({ familie: "moderation", stufe: "gezeichnet" });
+    expect(eventToneEntries["channel_events.automod.halte"]).toMatchObject({ familie: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.verdacht.nachricht"]).toMatchObject({ familie: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.verdacht.einstufung"]).toMatchObject({ familie: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.verdacht.entwarnung"]).toMatchObject({ familie: "moderation", tier: "gezeichnet" });
 
     setBrowserLanguage("en-US");
     expect(eventText("channel_events.automod.halte", {

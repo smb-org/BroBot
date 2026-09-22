@@ -38,10 +38,10 @@ describe("Werbung-Modul", () => {
     expect(automatisch.diagnostics[0]).toEqual({
       code: "ads.ankuendigung",
       detail: {
-        dauer: 30,
+        duration: 30,
         automatic: true,
         gestartet: "2026-09-20T10:00:00.000Z",
-        ende: "2026-09-20T10:00:30.000Z",
+        endsAt: "2026-09-20T10:00:30.000Z",
         ausloeser: "streamer",
       },
     });
@@ -56,7 +56,7 @@ describe("Werbung-Modul", () => {
       actions: [],
       diagnostics: [{
         code: "ads.uebersprungen",
-        detail: { reason: "dauer_null", dauer: 0, automatic: false },
+        detail: { reason: "dauer_null", duration: 0, automatic: false },
       }],
     });
   });

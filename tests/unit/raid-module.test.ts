@@ -76,7 +76,7 @@ describe("Raid-Modul", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.unterdrueckt",
-      detail: { reason: "abgeschaltet", viewers: 8, schwelle: 3 },
+      detail: { reason: "abgeschaltet", viewers: 8, threshold: 3 },
     }]);
   });
 
@@ -94,7 +94,7 @@ describe("Raid-Modul", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.unterdrueckt",
-      detail: { reason: "unter_schwelle", viewers: 2, schwelle: 3 },
+      detail: { reason: "unter_schwelle", viewers: 2, threshold: 3 },
     }]);
   });
 
@@ -112,7 +112,7 @@ describe("Raid-Modul", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.unterdrueckt",
-      detail: { reason: "unter_schwelle", viewers: 10, schwelle: 50 },
+      detail: { reason: "unter_schwelle", viewers: 10, threshold: 50 },
     }]);
   });
 
@@ -156,7 +156,7 @@ describe("Raid-Modul", () => {
 
     expect(result.diagnostics).toEqual([{
       code: "shoutout.unterdrueckt",
-      detail: { reason: "unter_schwelle", viewers: 2, schwelle: 3 },
+      detail: { reason: "unter_schwelle", viewers: 2, threshold: 3 },
     }]);
   });
 

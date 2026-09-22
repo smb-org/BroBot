@@ -40,7 +40,7 @@ const diagnoseAusgeloest = (
       ...(argumente === undefined || argumente.length === 0
         ? {}
         : { argumente: kuerzeAuf200Zeichen(argumente) }),
-      antwort: kuerzeAuf200Zeichen(response),
+      response: kuerzeAuf200Zeichen(response),
     },
   } as const;
 };
@@ -90,8 +90,8 @@ export const processTextCommandMessage = async (
         code: "text_commands.berechtigung",
         detail: {
           name: eingabe.name,
-          geforderteStufe: command.minimumTier,
-          vorhandeneStufe: event.chatStatus,
+          requiredTier: command.minimumTier,
+          currentTier: event.chatStatus,
         },
       }],
     };
@@ -112,7 +112,7 @@ export const processTextCommandMessage = async (
     );
     return {
       actions: [],
-      diagnostics: [{ code: "text_commands.abgekuehlt", detail: { name: eingabe.name, restSekunden } }],
+      diagnostics: [{ code: "text_commands.abgekuehlt", detail: { name: eingabe.name, remainingSeconds: restSekunden } }],
     };
   }
 

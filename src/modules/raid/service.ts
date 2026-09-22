@@ -45,7 +45,7 @@ export const processRaid = (
         detail: {
           reason: event.settings.shoutoutEnabled ? "unter_schwelle" : "abgeschaltet",
           viewers: entscheidung.viewers,
-          schwelle: event.settings.shoutoutThreshold,
+          threshold: event.settings.shoutoutThreshold,
         },
       }],
     };
@@ -53,15 +53,15 @@ export const processRaid = (
 
   return {
     actions: [
-      { kind: "shoutout", targetChannelId: entscheidung.quelleKanalId },
+      { kind: "shoutout", targetChannelId: entscheidung.sourceChannelId },
       { kind: "chat", text: chatText },
     ],
     diagnostics: [{
       code: "raid.shoutout",
       detail: {
-        quelleKanalId: entscheidung.quelleKanalId,
+        sourceChannelId: entscheidung.sourceChannelId,
         viewers: entscheidung.viewers,
-        schwelle: event.settings.shoutoutThreshold,
+        threshold: event.settings.shoutoutThreshold,
       },
     }],
   };

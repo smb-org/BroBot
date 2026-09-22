@@ -62,7 +62,7 @@ describe("Textbefehle-Service", () => {
     }]);
     expect(result.diagnostics).toEqual([{
       code: "text_commands.ausgeloest",
-      detail: { name: "hallo", antwort: "Hallo alice in kanal-a-login" },
+      detail: { name: "hallo", response: "Hallo alice in kanal-a-login" },
     }]);
   });
 
@@ -74,7 +74,7 @@ describe("Textbefehle-Service", () => {
 
     expect(result.diagnostics).toEqual([{
       code: "text_commands.ausgeloest",
-      detail: { name: "hallo", argumente: "erster   zweiter", antwort: "Antwort für alice" },
+      detail: { name: "hallo", argumente: "erster   zweiter", response: "Antwort für alice" },
     }]);
   });
 
@@ -86,7 +86,7 @@ describe("Textbefehle-Service", () => {
 
     expect(result.diagnostics).toEqual([{
       code: "text_commands.ausgeloest",
-      detail: { name: "wiki", argumente: "foo bar", antwort: "Antwort" },
+      detail: { name: "wiki", argumente: "foo bar", response: "Antwort" },
     }]);
   });
 
@@ -103,10 +103,10 @@ describe("Textbefehle-Service", () => {
     );
 
     expect(exakt.diagnostics[0]?.detail).toEqual({
-      name: "hallo", argumente: exaktZweihundert, antwort: exaktZweihundert,
+      name: "hallo", argumente: exaktZweihundert, response: exaktZweihundert,
     });
     expect(gekuerzt.diagnostics[0]?.detail).toEqual({
-      name: "hallo", argumente: `${"y".repeat(199)}…`, antwort: `${"y".repeat(199)}…`,
+      name: "hallo", argumente: `${"y".repeat(199)}…`, response: `${"y".repeat(199)}…`,
     });
   });
 

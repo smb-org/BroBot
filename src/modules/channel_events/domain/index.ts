@@ -69,14 +69,14 @@ const raidDiagnose = (
     ? {
       code: "channel_events.raid.outgoing",
       detail: detail({
-        ziel: person(payload, "to_broadcaster"),
+        target: person(payload, "to_broadcaster"),
         viewers: numberValue(feld(payload, "viewers")),
       }),
     }
     : {
       code: "channel_events.raid.incoming",
       detail: detail({
-        quelle: person(payload, "from_broadcaster"),
+        source: person(payload, "from_broadcaster"),
         viewers: numberValue(feld(payload, "viewers")),
       }),
     };
@@ -88,12 +88,12 @@ const shoutoutDiagnose = (
 ): ChannelEventDiagnostic => subscriptionType === "channel.shoutout.create"
   ? {
     code: "channel_events.shoutout.gesendet",
-    detail: detail({ ziel: person(payload, "to_broadcaster") }),
+    detail: detail({ target: person(payload, "to_broadcaster") }),
   }
   : {
     code: "channel_events.shoutout.empfangen",
     detail: detail({
-      quelle: person(payload, "from_broadcaster"),
+      source: person(payload, "from_broadcaster"),
       ...(numberValue(feld(payload, "viewer_count")) === null
         ? {}
         : { viewers: numberValue(feld(payload, "viewer_count")) }),
@@ -110,22 +110,22 @@ const chatNotificationDiagnose = (
   if (typ === "sub") {
     return {
       code: "channel_events.chat.sub",
-      detail: detail({ person: chatter, stufe: tier }),
+      detail: detail({ person: chatter, tier: tier }),
     };
   }
   if (typ === "resub") {
     return {
       code: "channel_events.chat.resub",
-      detail: detail({ person: chatter, stufe: tier }),
+      detail: detail({ person: chatter, tier: tier }),
     };
   }
   if (typ === "sub_gift") {
     return {
       code: "channel_events.chat.gift_sub",
       detail: detail({
-        spender: person(payload, "gifter"),
-        empfaenger: person(payload, "recipient"),
-        stufe: tier,
+        gifter: person(payload, "gifter"),
+        recipient: person(payload, "recipient"),
+        tier: tier,
       }),
     };
   }
@@ -133,9 +133,9 @@ const chatNotificationDiagnose = (
     return {
       code: "channel_events.chat.community_gift",
       detail: detail({
-        spender: person(payload, "gifter"),
+        gifter: person(payload, "gifter"),
         count: numberValue(nestedFeld(payload, typ, "total")),
-        stufe: tier,
+        tier: tier,
       }),
     };
   }
@@ -179,7 +179,7 @@ const moderationDiagnose = (
     const ende = textValue(actionData.ends_at);
     return {
       code: "channel_events.moderation.timeout",
-      detail: detail({ ...common, ende, dauer: dauerInSekunden(ende, eventTime) }),
+      detail: detail({ ...common, endsAt: ende, duration: dauerInSekunden(ende, eventTime) }),
     };
   }
   if (actionName === "untimeout") {
@@ -199,7 +199,7 @@ const moderationDiagnose = (
   }
   return {
     code: "channel_events.moderation.unbekannt",
-    detail: detail({ aktion: actionName }),
+    detail: detail({ action: actionName }),
   };
 };
 

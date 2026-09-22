@@ -8,15 +8,15 @@ const diagnoseDetail = (
   if (event.kind === "skip") {
     return {
       reason: event.reason,
-      dauer: event.dauerSekunden,
+      duration: event.dauerSekunden,
       automatic: event.automatic,
     };
   }
   return {
-    dauer: event.event.dauerSekunden,
+    duration: event.event.dauerSekunden,
     automatic: event.event.automatic,
     gestartet: event.event.gestartetAm,
-    ende: event.event.endetAm,
+    endsAt: event.event.endetAm,
     ausloeser: event.event.ausloeserLogin,
   };
 };

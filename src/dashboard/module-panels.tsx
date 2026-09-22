@@ -78,12 +78,12 @@ export const Led = ({ status, label }: { status: LedStatus; label: string }): Re
   </span>
 );
 
-export const StateRow = ({ label, tone, wort, detail, aktion, icon }: {
+export const StateRow = ({ label, tone, wort, detail, action: aktion, icon }: {
   label: string;
   tone: StateTone;
   wort: string;
   detail?: ReactNode;
-  aktion?: ReactNode;
+  action?: ReactNode;
   icon?: ReactNode;
 }): ReactElement => {
   const status: LedStatus = tone === "healthy" ? "green" : tone === "warning" ? "amber" : tone === "error" ? "red" : "off";

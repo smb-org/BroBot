@@ -243,7 +243,7 @@ describe("Textbefehle-Modul", () => {
       ).first<{ code: string; detail_json: string }>();
       expect(denied?.code).toBe("text_commands.berechtigung");
       expect(JSON.parse(denied?.detail_json ?? "{}" )).toEqual({
-        name: "hallo", geforderteStufe: "moderator", vorhandeneStufe: ["viewer"],
+        name: "hallo", requiredTier: "moderator", currentTier: ["viewer"],
       });
     } finally {
       database.close();

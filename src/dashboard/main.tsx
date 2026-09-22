@@ -995,7 +995,7 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
           {auditState.data !== null && auditState.data.entries.length > 0 ? <>
             <div className={auditState.status === "loading" ? "veraltet" : undefined}>
               <table className="tabelle audit-tabelle">
-                <thead><tr><th scope="col">{texts.system.zeit}</th><th scope="col">{texts.system.aktion}</th><th scope="col">{texts.system.wer}</th></tr></thead>
+                <thead><tr><th scope="col">{texts.system.zeit}</th><th scope="col">{texts.system.action}</th><th scope="col">{texts.system.wer}</th></tr></thead>
                 <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
               </table>
             </div>
@@ -1120,7 +1120,7 @@ const eventDetail = (detail: string): EventDetail => {
 const eventChipNumber = (detail: EventDetail, key: EventNumberKey): string | null => {
   if (key === null) return null;
   const value = detail[key];
-  if (key === "stufe") {
+  if (key === "tier") {
     const tier = typeof value === "number" ? String(value) : value;
     if (typeof tier !== "string") return null;
     if (tier === "1000") return "T1";
@@ -1131,7 +1131,7 @@ const eventChipNumber = (detail: EventDetail, key: EventNumberKey): string | nul
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return null;
   if (key === "count") return `${formatZahl(value)}x`;
-  if (key === "dauer" || key === "restSekunden") return `${formatZahl(value)} s`;
+  if (key === "duration" || key === "remainingSeconds") return `${formatZahl(value)} s`;
   return formatZahl(value);
 };
 
@@ -1143,7 +1143,7 @@ const EventChipPair = ({ code, detail, texte: texts }: { code: string; detail: E
   const number = eventChipNumber(detail, metadata.zahlSchluessel);
   return <span className="event-chip-pair">
     {number === null ? null : <span className="event-chip event-chip--number">{number}</span>}
-    <span className="event-chip" data-familie={metadata.familie} data-stufe={metadata.stufe} data-ton={metadata.tone}>{metadata.wort[dashboardLanguage()]}</span>
+    <span className="event-chip" data-familie={metadata.familie} data-stufe={metadata.tier} data-ton={metadata.tone}>{metadata.wort[dashboardLanguage()]}</span>
   </span>;
 };
 

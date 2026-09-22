@@ -7,7 +7,7 @@ const viewerValue = (value: unknown): number | null =>
 export type RaidEntscheidung =
   | {
     kind: "incoming";
-    quelleKanalId: string;
+    sourceChannelId: string;
     quelleKanalName: string;
     viewers: number;
     voll: boolean;
@@ -42,7 +42,7 @@ export const entscheideRaid = (
 
   return {
     kind: "incoming",
-    quelleKanalId: fromId,
+    sourceChannelId: fromId,
     quelleKanalName: textValue(payload.from_broadcaster_user_name) ?? textValue(payload.from_broadcaster_user_login) ?? fromId,
     viewers: zuschauer,
     voll: zuschauer >= textThreshold,

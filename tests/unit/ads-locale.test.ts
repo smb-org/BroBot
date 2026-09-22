@@ -11,14 +11,14 @@ describe("Werbung-Lokalisierung", () => {
     expect(moduleName("ads", language)).toBe(name);
     expect(moduleDescription("ads", language)).toBe(description);
     expect(eventSubName("channel.ad_break.begin", "", language)).toBe(eventName);
-    expect(eventTextFor("ads.ankuendigung", { dauer: 30, automatic: true }, language)).toBe(eventText);
+    expect(eventTextFor("ads.ankuendigung", { duration: 30, automatic: true }, language)).toBe(eventText);
     expect(moduleScopePurpose("ads", "channel:read:ads", language)).toBe(
       language === "de" ? "Werbepausen erkennen" : "Detect ad breaks",
     );
   });
 
   it("ordnet Ansage und Überspringen getrennten Tönen zu", () => {
-    expect(eventToneEntries["ads.ankuendigung"]).toMatchObject({ familie: "betrieb", stufe: "gezeichnet", tone: "info", zahlSchluessel: "dauer" });
-    expect(eventToneEntries["ads.uebersprungen"]).toMatchObject({ familie: "betrieb", stufe: "gezeichnet", tone: "warning", zahlSchluessel: null });
+    expect(eventToneEntries["ads.ankuendigung"]).toMatchObject({ familie: "betrieb", tier: "gezeichnet", tone: "info", zahlSchluessel: "duration" });
+    expect(eventToneEntries["ads.uebersprungen"]).toMatchObject({ familie: "betrieb", tier: "gezeichnet", tone: "warning", zahlSchluessel: null });
   });
 });

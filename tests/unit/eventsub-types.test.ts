@@ -13,9 +13,9 @@ import { EVENTSUB_SUBSCRIPTION_DEFINITIONS } from "../../src/worker/eventsub-sub
  */
 describe("EventSub-Abotypen", () => {
   it("hält Tupel und Definitionstabelle deckungsgleich", () => {
-    const ausTabelle = [...new Set(
+    const fromTable = [...new Set(
       EVENTSUB_SUBSCRIPTION_DEFINITIONS.map((definition) => definition.subscriptionType),
     )].sort();
-    expect(ausTabelle).toEqual([...EVENTSUB_SUBSCRIPTION_TYPES].sort());
+    expect(fromTable).toEqual([...EVENTSUB_SUBSCRIPTION_TYPES].sort());
   });
 });

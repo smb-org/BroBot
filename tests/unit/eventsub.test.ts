@@ -493,7 +493,7 @@ describe("EventSub-Eingang", () => {
       channel_id: "channel-condition",
       module_id: "channel_events",
       code: "channel_events.raid.incoming",
-      detail_json: JSON.stringify({ quelle: "Quelle", viewers: 23 }),
+      detail_json: JSON.stringify({ source: "Quelle", viewers: 23 }),
     });
   });
 

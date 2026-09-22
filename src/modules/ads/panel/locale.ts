@@ -5,7 +5,7 @@ interface AdsPanelTexts {
   zeitplanAbschnitt: string;
   keineWerbung: string;
   naechsteWerbung: string;
-  dauer: string;
+  duration: string;
   vorwarnungAbschnitt: string;
   vorwarnungAktiv: string;
   leadSeconds: string;
@@ -39,7 +39,7 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     zeitplanAbschnitt: "Nächste Werbung",
     keineWerbung: "Derzeit ist keine Werbung geplant.",
     naechsteWerbung: "Zeitpunkt",
-    dauer: "Dauer",
+    duration: "Dauer",
     vorwarnungAbschnitt: "Vorwarnung",
     vorwarnungAktiv: "Vorwarnung vor der Werbung",
     leadSeconds: "Vorlaufzeit (Sekunden)",
@@ -71,7 +71,7 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     zeitplanAbschnitt: "Next ad break",
     keineWerbung: "No ad break is currently scheduled.",
     naechsteWerbung: "Time",
-    dauer: "Duration",
+    duration: "Duration",
     vorwarnungAbschnitt: "Warning",
     vorwarnungAktiv: "Warn before the ad break",
     leadSeconds: "Lead time (seconds)",

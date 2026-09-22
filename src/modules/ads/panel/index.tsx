@@ -102,7 +102,7 @@ export const AdsPanel = ({
         {zeitplan.schedule.nextAdAt === null ? <p className="empty-state">{labels.keineWerbung}</p> : (
           <div className="tabelle-wrap">
             <table className="tabelle" aria-label={labels.zeitplanAbschnitt}>
-              <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.dauer}</th></tr></thead>
+              <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody><tr>
                 <td className="zahl">{formatTimestamp(zeitplan.schedule.nextAdAt, resolvedLanguage)}</td>
                 <td className="zahl">{zeitplan.schedule.duration === null ? "—" : `${String(zeitplan.schedule.duration)} s`}</td>
@@ -195,7 +195,7 @@ export const AdsPanel = ({
         {zeitplan.letzteWerbepausen.length === 0 ? <p className="empty-state">{labels.keineLetzte}</p> : (
           <div className="tabelle-wrap">
             <table className="tabelle" aria-label={labels.letzteAbschnitt}>
-              <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.dauer}</th></tr></thead>
+              <thead><tr><th scope="col">{labels.naechsteWerbung}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody>{zeitplan.letzteWerbepausen.map((pause) => (
                 <tr key={`${pause.zeitpunkt}-${String(pause.dauerSekunden)}`}>
                   <td className="zahl">{labels.letzteZeit(formatTimestamp(pause.zeitpunkt, resolvedLanguage))}</td>

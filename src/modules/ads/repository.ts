@@ -34,7 +34,7 @@ export const listLastAdBreaks = async (
       return [];
     }
     if (!record(parsed)) return [];
-    const duration = dauer(parsed.dauer);
+    const duration = dauer(parsed.duration);
     if (duration === null) return [];
     const startedAt = typeof parsed.gestartet === "string" && parsed.gestartet.length > 0
       ? parsed.gestartet
