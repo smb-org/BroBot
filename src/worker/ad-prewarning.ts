@@ -11,6 +11,7 @@ import { sendChatMessage } from "./chat";
 import { writeModuleDiagnostics } from "./event-log";
 import { getAppAccessToken } from "./app-token";
 import { getAdSchedule, type AdScheduleResult } from "../modules/ads/adapters/ad-schedule";
+import { helixRequest } from "./twitch/helix";
 
 const MODULE_ID = "ads";
 const WARNING_SCOPE = "channel:read:ads";
@@ -195,6 +196,7 @@ export const refreshAdPrewarning = async (
     channelId,
     now,
     getAppAccessToken,
+    helixRequest,
     fetcher,
   );
   if (!result.fetched || result.schedule === null) {
@@ -237,6 +239,7 @@ export const processAdPrewarning = async (
     channelId,
     now,
     getAppAccessToken,
+    helixRequest,
     fetcher,
   );
   if (!result.fetched || result.schedule === null) {

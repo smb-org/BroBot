@@ -69,7 +69,14 @@ export const adsRoutes = new Hono<ModuleRouteEnvironment>();
 adsRoutes.get("/schedule", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const now = nowIso();
-  const result = await getAdSchedule(context.env, channelId, now, context.get("getAppAccessToken"), fetch);
+  const result = await getAdSchedule(
+    context.env,
+    channelId,
+    now,
+    context.get("getAppAccessToken"),
+    context.get("helixRequest"),
+    fetch,
+  );
   if (!result.fetched || result.schedule === null) {
     const diagnostic = scheduleFailureDiagnostic(result);
     await log(context, channelId, `werbung-zeitplan:${crypto.randomUUID()}`, diagnostic.code, diagnostic.detail);
@@ -96,7 +103,14 @@ adsRoutes.post("/snooze", async (context) => {
   const triggerId = `werbung-snooze:${crypto.randomUUID()}`;
   const scopeAvailable = await context.get("broadcasterHasScope")(context.env.DB, channelId, MANAGE_ADS_SCOPE);
   const result: SnoozeNextAdResult = scopeAvailable
-    ? await snoozeNextAd(context.env, channelId, now, context.get("getAppAccessToken"), fetch)
+    ? await snoozeNextAd(
+      context.env,
+      channelId,
+      now,
+      context.get("getAppAccessToken"),
+      context.get("helixRequest"),
+      fetch,
+    )
     : {
       snoozed: false,
       reason: "scope_missing",

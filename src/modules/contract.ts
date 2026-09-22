@@ -142,6 +142,45 @@ export const browserModuleLanguage = (): ModuleLanguage => {
   return language.toLowerCase().startsWith("de") ? "de" : "en";
 };
 
+/** HTTP method a Helix request may use; `helixRequest` sets no default body encoding beyond JSON. */
+export type HelixMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/**
+ * Base transport-level classification `helixRequest` derives from the raw
+ * response -- nothing about what a status *means* for a given endpoint (a
+ * 401 is a missing scope here, a revoked moderator there). That reading
+ * stays with the caller; see `worker/twitch/helix.ts`'s header comment.
+ */
+export type HelixErrorReason =
+  | "rate_limited" | "network_error" | "timeout" | "invalid_response" | "pagination_loop"
+  | `http_${string}`;
+
+export interface HelixRequestOptions<Data = unknown> {
+  method?: HelixMethod;
+  url: string;
+  query?: Readonly<Record<string, string | undefined>>;
+  body?: unknown;
+  accessToken: string;
+  clientId: string;
+  /** Validates and narrows a successful response body; a mismatch reports as `invalid_response`. */
+  schema?: z.ZodType<Data>;
+  fetcher?: typeof fetch;
+  timeoutMs?: number;
+}
+
+export type HelixResult<Data = unknown> =
+  | { ok: true; status: number; data: Data }
+  | {
+    ok: false;
+    status: number | null;
+    reason: HelixErrorReason;
+    message: string | null;
+    /** Twitch's parsed error body, tolerant of a missing or non-JSON response. */
+    body: Readonly<Record<string, unknown>>;
+  };
+
+export type HelixRequest = <Data = unknown>(options: HelixRequestOptions<Data>) => Promise<HelixResult<Data>>;
+
 export interface ModuleRouteVariables {
   session: { userId: string; sessionId: string };
   channelRole: ChannelRole;
@@ -160,6 +199,8 @@ export interface ModuleRouteVariables {
   ) => Promise<unknown>;
   broadcasterHasScope: (db: D1Database, channelId: string, scope: string) => Promise<boolean>;
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
+  /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
+  helixRequest: HelixRequest;
 }
 
 export interface ModuleRouteEnvironment {

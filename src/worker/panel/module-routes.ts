@@ -20,12 +20,13 @@ import { actorOf, readJsonBody } from "./member-routes";
 import { broadcasterHasScope } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
 import { writeModuleDiagnostics } from "../event-log";
+import { helixRequest } from "../twitch/helix";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
   Variables: ChannelAuthorizationVariables & Pick<
     ModuleRouteVariables,
-    "writeModuleDiagnostics" | "broadcasterHasScope" | "getAppAccessToken"
+    "writeModuleDiagnostics" | "broadcasterHasScope" | "getAppAccessToken" | "helixRequest"
   >;
 }
 
@@ -72,6 +73,7 @@ moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);
   context.set("getAppAccessToken", getAppAccessToken);
+  context.set("helixRequest", helixRequest);
   return next();
 });
 

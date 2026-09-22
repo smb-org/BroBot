@@ -17,8 +17,11 @@ import {
 import {
   logMaintenanceError,
   maintenanceErrorDetails,
+  toTwitchApiError,
   TwitchApiError,
 } from "./bot-maintenance";
+import { helixPages, helixRequest } from "./twitch/helix";
+import type { HelixResult } from "../modules/contract";
 import type {
   EventSubAuthorizationIdentity,
   EventSubSubscriptionType,
@@ -209,76 +212,27 @@ interface EventSubRemoteSubscription {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const responseJson = async (response: Response): Promise<Record<string, unknown>> => {
-  try {
-    const body: unknown = await response.json();
-    return isRecord(body) ? body : {};
-  } catch {
-    return {};
+const asSubscriptionsPage = (
+  body: unknown,
+  status: number,
+): HelixResult<{ data: unknown[]; pagination?: { cursor?: string } }> => {
+  if (!isRecord(body) || !Array.isArray(body.data)) {
+    return {
+      ok: false,
+      status,
+      reason: "invalid_response",
+      message: "Twitch EventSub returned no subscription list.",
+      body: isRecord(body) ? body : {},
+    };
   }
-};
-
-const fetchWithTimeout = async (
-  fetcher: typeof fetch,
-  input: RequestInfo | URL,
-  init: RequestInit,
-): Promise<Response> => {
-  const controller = new AbortController();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      controller.abort();
-      reject(new TwitchApiError("The EventSub request timed out.", 504, "timeout"));
-    }, EVENTSUB_REQUEST_TIMEOUT_MS);
-  });
-  try {
-    return await Promise.race([fetcher(input, { ...init, signal: controller.signal }), timeout]);
-  } catch (error: unknown) {
-    if (controller.signal.aborted) {
-      throw new TwitchApiError("The EventSub request timed out.", 504, "timeout");
-    }
-    throw error;
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
-};
-
-const requestEventSubApi = async (
-  fetcher: typeof fetch,
-  appAccessToken: string,
-  clientId: string,
-  // Deliberately narrower than `RequestInfo`: a `Request` has no usable
-  // string form and would end up as `[object Object]` in the URL.
-  input: string | URL,
-  init: RequestInit = {},
-): Promise<{ response: Response; body: Record<string, unknown> }> => {
-  let response: Response;
-  try {
-    const headers = new Headers(init.headers);
-    headers.set("Client-ID", clientId);
-    headers.set("Authorization", `Bearer ${appAccessToken}`);
-    response = await fetchWithTimeout(fetcher, input.toString(), {
-      ...init,
-      headers,
-    });
-  } catch (error: unknown) {
-    if (error instanceof TwitchApiError) throw error;
-    throw new TwitchApiError("Twitch EventSub is not reachable.", 503, "network_error");
-  }
-  const body = await responseJson(response);
-  if (!response.ok) {
-    const code = response.status === 429
-      ? "rate_limited"
-      : typeof body.error === "string" && body.error.length > 0 ? body.error : `http_${String(response.status)}`;
-    throw new TwitchApiError(
-      typeof body.message === "string" && body.message.length > 0
-        ? body.message
-        : "Twitch EventSub rejected the request.",
-      response.status,
-      code,
-    );
-  }
-  return { response, body };
+  const cursor = isRecord(body.pagination) && typeof body.pagination.cursor === "string"
+    ? body.pagination.cursor
+    : undefined;
+  return {
+    ok: true,
+    status,
+    data: { data: body.data, pagination: cursor === undefined ? {} : { cursor } },
+  };
 };
 
 /** Determines the desired state solely from enabled modules and consent. */
@@ -346,33 +300,25 @@ export const fetchEventSubSubscriptions = async (
   clientId: string,
   appAccessToken: string,
 ): Promise<EventSubRemoteSubscription[]> => {
-  const subscriptions: EventSubRemoteSubscription[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | null = null;
-  for (;;) {
-    const url = new URL(EVENTSUB_SUBSCRIPTIONS_URL);
-    url.searchParams.set("first", "100");
-    if (cursor !== null) url.searchParams.set("after", cursor);
-    const { body } = await requestEventSubApi(fetcher, appAccessToken, clientId, url);
-    if (!Array.isArray(body.data)) {
-      throw new TwitchApiError("Twitch EventSub returned no subscription list.", 502, "invalid_response");
+  const result = await helixPages<unknown>(async (cursor) => {
+    const page = await helixRequest({
+      url: EVENTSUB_SUBSCRIPTIONS_URL,
+      query: { first: "100", after: cursor ?? undefined },
+      accessToken: appAccessToken,
+      clientId,
+      fetcher,
+      timeoutMs: EVENTSUB_REQUEST_TIMEOUT_MS,
+    });
+    return page.ok ? asSubscriptionsPage(page.data, page.status) : page;
+  });
+  if (!result.ok) throw toTwitchApiError(result, "Twitch EventSub returned no subscription list.");
+  return result.data.map((value) => {
+    const subscription = parseRemoteSubscription(value);
+    if (subscription === null) {
+      throw new TwitchApiError("Twitch EventSub returned an invalid subscription.", 502, "invalid_response");
     }
-    for (const value of body.data) {
-      const subscription = parseRemoteSubscription(value);
-      if (subscription === null) {
-        throw new TwitchApiError("Twitch EventSub returned an invalid subscription.", 502, "invalid_response");
-      }
-      subscriptions.push(subscription);
-    }
-    const pagination = body.pagination;
-    const next = isRecord(pagination) && typeof pagination.cursor === "string" && pagination.cursor.length > 0
-      ? pagination.cursor
-      : null;
-    if (next === null) return subscriptions;
-    if (seenCursors.has(next)) throw new TwitchApiError("Twitch returned a repeated pagination cursor.", 502, "pagination_loop");
-    seenCursors.add(next);
-    cursor = next;
-  }
+    return subscription;
+  });
 };
 
 const callbackUrl = (publicOrigin: string): string => `${publicOrigin}${EVENTSUB_CALLBACK_PATH}`;
@@ -441,27 +387,26 @@ const createSubscription = async (
   if (definition === null) {
     throw new TwitchApiError("Unknown EventSub target type.", 500, "invalid_target");
   }
-  const { body } = await requestEventSubApi(
-    fetcher,
-    appAccessToken,
-    env.TWITCH_CLIENT_ID,
-    EVENTSUB_SUBSCRIPTIONS_URL,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: target.subscriptionType,
-        version: target.version,
-        condition: definition.buildCondition(target.channelId, botUserId),
-        transport: {
-          method: "webhook",
-          callback: callbackUrl(env.PUBLIC_ORIGIN),
-          secret: ring.active.key,
-        },
-      }),
+  const result = await helixRequest<Record<string, unknown>>({
+    method: "POST",
+    url: EVENTSUB_SUBSCRIPTIONS_URL,
+    body: {
+      type: target.subscriptionType,
+      version: target.version,
+      condition: definition.buildCondition(target.channelId, botUserId),
+      transport: {
+        method: "webhook",
+        callback: callbackUrl(env.PUBLIC_ORIGIN),
+        secret: ring.active.key,
+      },
     },
-  );
-  const subscription = parseRemoteSubscription(Array.isArray(body.data) ? body.data[0] : null);
+    accessToken: appAccessToken,
+    clientId: env.TWITCH_CLIENT_ID,
+    fetcher,
+    timeoutMs: EVENTSUB_REQUEST_TIMEOUT_MS,
+  });
+  if (!result.ok) throw toTwitchApiError(result, "Twitch EventSub rejected the request.");
+  const subscription = parseRemoteSubscription(Array.isArray(result.data.data) ? result.data.data[0] : null);
   if (subscription === null) {
     throw new TwitchApiError("Twitch EventSub returned no created subscription.", 502, "invalid_response");
   }
@@ -477,14 +422,17 @@ const deleteSubscription = async (
   appAccessToken: string,
   subscriptionId: string,
 ): Promise<void> => {
-  const url = new URL(EVENTSUB_SUBSCRIPTIONS_URL);
-  url.searchParams.set("id", subscriptionId);
-  try {
-    await requestEventSubApi(fetcher, appAccessToken, clientId, url, { method: "DELETE" });
-  } catch (error: unknown) {
-    // Twitch may have already removed a revoked subscription between the GET and the DELETE.
-    if (!(error instanceof TwitchApiError) || error.status !== 404) throw error;
-  }
+  const result = await helixRequest({
+    method: "DELETE",
+    url: EVENTSUB_SUBSCRIPTIONS_URL,
+    query: { id: subscriptionId },
+    accessToken: appAccessToken,
+    clientId,
+    fetcher,
+    timeoutMs: EVENTSUB_REQUEST_TIMEOUT_MS,
+  });
+  // Twitch may have already removed a revoked subscription between the GET and the DELETE.
+  if (!result.ok && result.status !== 404) throw toTwitchApiError(result, "Twitch EventSub rejected the request.");
 };
 
 export const reconcileEventSubSubscriptions = async (

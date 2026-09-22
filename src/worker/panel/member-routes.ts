@@ -24,6 +24,7 @@ import {
 } from "../auth/guards";
 import { CHANNEL_ROLES, canManage, type AuditAction, type ChannelRole } from "../../contracts/values";
 import { revokeRealtimeUser } from "../realtime";
+import { helixRequest } from "../twitch/helix";
 
 interface MemberRouteEnvironment {
   Bindings: Env;
@@ -50,7 +51,6 @@ const roleRank: Record<ChannelRole, number> = {
 
 const DEFAULT_MEMBER_LIMIT = 100;
 const MAX_MEMBER_LIMIT = 100;
-const HELIX_TIMEOUT_MS = 5_000;
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -120,33 +120,10 @@ const readStoredBotAccessToken = async (environment: Env): Promise<string | null
     : null;
 };
 
-const readResponseJson = async (response: Response): Promise<Record<string, unknown>> => {
-  try {
-    const value: unknown = await response.json();
-    return isJsonRecord(value) ? value : {};
-  } catch {
-    return {};
-  }
-};
-
 const readProfileImageUrl = (user: JsonRecord): string | null =>
   typeof user.profile_image_url === "string" && user.profile_image_url.length > 0
     ? user.profile_image_url
     : null;
-
-const fetchWithTimeout = async (
-  fetcher: typeof fetch,
-  input: string,
-  init: RequestInit,
-): Promise<Response> => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => { controller.abort(); }, HELIX_TIMEOUT_MS);
-  try {
-    return await fetcher(input, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-};
 
 export const fetchTwitchUserByLogin = async (
   fetcher: typeof fetch,
@@ -156,19 +133,17 @@ export const fetchTwitchUserByLogin = async (
   const accessToken = await readStoredBotAccessToken(environment);
   if (accessToken === null) throw new Error("Bot token for Twitch user search is missing.");
 
-  const url = new URL("https://api.twitch.tv/helix/users");
-  url.searchParams.set("login", login);
-  const response = await fetchWithTimeout(fetcher, url.toString(), {
-    headers: {
-      "Client-ID": environment.TWITCH_CLIENT_ID,
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const result = await helixRequest<JsonRecord>({
+    url: "https://api.twitch.tv/helix/users",
+    query: { login },
+    accessToken,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
   });
-  const body = await readResponseJson(response);
-  if (!response.ok) throw new Error("Twitch user search failed.");
-  if (!Array.isArray(body.data)) return null;
+  if (!result.ok) throw new Error("Twitch user search failed.");
+  if (!Array.isArray(result.data.data)) return null;
 
-  const first = (body.data as unknown[])[0];
+  const first = (result.data.data as unknown[])[0];
   if (!isJsonRecord(first) || typeof first.id !== "string" || typeof first.login !== "string" ||
       typeof first.display_name !== "string") return null;
   return {
@@ -193,16 +168,14 @@ export const fetchTwitchUsersById = async (
     for (let offset = 0; offset < userIds.length; offset += 100) {
       const url = new URL("https://api.twitch.tv/helix/users");
       for (const userId of userIds.slice(offset, offset + 100)) url.searchParams.append("id", userId);
-      const response = await fetchWithTimeout(fetcher, url.toString(), {
-        headers: {
-          "Client-ID": environment.TWITCH_CLIENT_ID,
-          Authorization: `Bearer ${accessToken}`,
-        },
+      const result = await helixRequest<JsonRecord>({
+        url: url.toString(),
+        accessToken,
+        clientId: environment.TWITCH_CLIENT_ID,
+        fetcher,
       });
-      if (!response.ok) break;
-      const body = await readResponseJson(response);
-      if (!Array.isArray(body.data)) break;
-      for (const entry of body.data as unknown[]) {
+      if (!result.ok || !Array.isArray(result.data.data)) break;
+      for (const entry of result.data.data as unknown[]) {
         if (!isJsonRecord(entry) || typeof entry.id !== "string" || typeof entry.login !== "string" ||
             typeof entry.display_name !== "string") continue;
         resolved.set(entry.id, {

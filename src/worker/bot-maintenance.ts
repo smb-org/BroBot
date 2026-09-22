@@ -19,6 +19,8 @@ import { decryptJson, encryptJson, getTokenEncryptionKeys, parseKeyRing } from "
 import { BOT_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 import { truncateTo200Chars } from "../text";
 import { missingBotScopes } from "./auth/oauth";
+import { helixRequest } from "./twitch/helix";
+import type { HelixResult } from "../modules/contract";
 
 export interface TwitchClientEnvironment {
   TWITCH_CLIENT_ID: string;
@@ -91,34 +93,6 @@ export const logMaintenanceError = (
 };
 
 export const MODERATOR_STATUS_REQUEST_TIMEOUT_MS = 5_000;
-
-const fetchWithTimeout = async (
-  fetcher: typeof fetch,
-  input: RequestInfo | URL,
-  init: RequestInit,
-): Promise<Response> => {
-  const controller = new AbortController();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      controller.abort();
-      reject(new TwitchApiError("The Twitch request timed out.", 504, "timeout"));
-    }, MODERATOR_STATUS_REQUEST_TIMEOUT_MS);
-  });
-  try {
-    return await Promise.race([
-      fetcher(input, { ...init, signal: controller.signal }),
-      timeout,
-    ]);
-  } catch (error: unknown) {
-    if (controller.signal.aborted) {
-      throw new TwitchApiError("The Twitch request timed out.", 504, "timeout");
-    }
-    throw error;
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
-};
 
 const isFinitePositiveNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -208,6 +182,27 @@ interface ModeratedChannelsPage {
   nextCursor: string | null;
 }
 
+/**
+ * Turns a failed `HelixResult` into the throwing `TwitchApiError` this
+ * file's callers already handle -- `helixRequest` only classifies the
+ * transport outcome, so Twitch's own `error` body field (when present)
+ * still wins over the generic `http_<status>` reason.
+ */
+export const toTwitchApiError = (
+  result: Extract<HelixResult, { ok: false }>,
+  fallbackMessage: string,
+): TwitchApiError => {
+  if (result.reason === "timeout") return new TwitchApiError("The Twitch request timed out.", 504, "timeout");
+  if (result.reason === "network_error") return new TwitchApiError("Twitch is not reachable.", 503, "network_error");
+  if (result.reason === "pagination_loop") {
+    return new TwitchApiError(result.message ?? fallbackMessage, result.status ?? 502, "pagination_loop");
+  }
+  const code = result.reason === "rate_limited"
+    ? "rate_limited"
+    : typeof result.body.error === "string" && result.body.error.length > 0 ? result.body.error : result.reason;
+  return new TwitchApiError(result.message ?? fallbackMessage, result.status ?? 502, code);
+};
+
 const fetchModeratedChannelsPage = async (
   fetcher: typeof fetch,
   clientId: string,
@@ -216,26 +211,18 @@ const fetchModeratedChannelsPage = async (
   cursor: string | null,
   broadcasterId?: string,
 ): Promise<ModeratedChannelsPage> => {
-  const url = new URL("https://api.twitch.tv/helix/moderation/channels");
-  url.searchParams.set("user_id", userId);
-  url.searchParams.set("first", "100");
-  if (cursor !== null) url.searchParams.set("after", cursor);
-  if (broadcasterId !== undefined) url.searchParams.set("broadcaster_id", broadcasterId);
-  const response = await fetchWithTimeout(fetcher, url.toString(), {
-    headers: {
-      "Client-ID": clientId,
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const result = await helixRequest<Record<string, unknown>>({
+    url: "https://api.twitch.tv/helix/moderation/channels",
+    query: { user_id: userId, first: "100", after: cursor ?? undefined, broadcaster_id: broadcasterId },
+    accessToken,
+    clientId,
+    fetcher,
+    timeoutMs: MODERATOR_STATUS_REQUEST_TIMEOUT_MS,
   });
-  const body = await responseJson(response);
-  if (!response.ok || !Array.isArray(body.data)) {
-    throw new TwitchApiError(
-      typeof body.message === "string" && body.message.length > 0
-        ? body.message
-        : "Moderator status could not be read.",
-      response.status,
-      typeof body.error === "string" ? body.error : null,
-    );
+  if (!result.ok) throw toTwitchApiError(result, "Moderator status could not be read.");
+  const body = result.data;
+  if (!Array.isArray(body.data)) {
+    throw new TwitchApiError("Moderator status could not be read.", result.status, "invalid_response");
   }
   const data: unknown[] = body.data.map((entry: unknown): unknown => entry);
   const pagination = body.pagination;
