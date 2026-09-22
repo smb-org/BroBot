@@ -2835,4 +2835,71 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
     expect(row).toHaveFocus();
   });
+
+  describe("blocking states (#159)", () => {
+    it("blocks a channel page and offers the sign-in action to a platform admin when the bot is not signed in", async () => {
+      const channel = { ...healthyChannel("kanal-a", "Alpha"), bot: { status: "revoked", reason: "authorization_revoked", updatedAt: relativeIso(0) } };
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], platformAdmin: true });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a");
+
+      render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Bot anmelden" })).toBeInTheDocument();
+      expect(screen.queryByText("Wende dich an den Betreiber der Installation.")).not.toBeInTheDocument();
+    });
+
+    it("blocks a channel page without an action for a broadcaster or manager when the bot is not signed in", async () => {
+      const channel = { ...healthyChannel("kanal-a", "Alpha"), bot: null };
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], platformAdmin: false });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a");
+
+      render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "Der Bot ist nicht angemeldet", level: 1 })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Bot anmelden" })).not.toBeInTheDocument();
+      expect(screen.getByText("Wende dich an den Betreiber der Installation.")).toBeInTheDocument();
+    });
+
+    it("shows a neutral, non-outage state for a channel not released to this account", async () => {
+      const other = healthyChannel("kanal-b", "Beta");
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [other], platformAdmin: false });
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a");
+
+      render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "Kanal nicht freigegeben", level: 1 })).toBeInTheDocument();
+      expect(screen.getByText("Nur der Betreiber kann diesen Kanal für dein Konto freigeben.")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Der Bot ist nicht angemeldet" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the system page reachable, without the blocking state, while the bot is not signed in", async () => {
+      const channel = { ...healthyChannel("kanal-a", "Alpha"), bot: { status: "revoked", reason: "authorization_revoked", updatedAt: relativeIso(0) } };
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const path = requestUrl(input).pathname;
+        if (path === "/api/channels") return jsonResponse({ channels: [channel], platformAdmin: true });
+        if (path.endsWith("/system")) return jsonResponse(systemFor("authorization_revoked"));
+        if (path.endsWith("/audit-log")) return jsonResponse(audit);
+        return jsonResponse({}, 404);
+      }));
+      window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+      render(<DashboardApp />);
+
+      expect(await screen.findByRole("heading", { name: "System", level: 1 })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Der Bot ist nicht angemeldet" })).not.toBeInTheDocument();
+    });
+  });
 });

@@ -138,7 +138,6 @@ export interface DashboardTexts {
     dataLoadFailed: string;
     last: string;
     noCause: string;
-    channelNotReleased: string;
   };
   statusCard: {
     yourRole: string;
@@ -276,6 +275,19 @@ export interface DashboardTexts {
     scopeMissing: string;
     scopeGranted: string;
   };
+  /** Full-page states from #159: they replace page content (navigation
+   *  stays usable) instead of stacking another red box on a normal page. */
+  blocking: {
+    botTitle: string;
+    botDescriptionAdmin: string;
+    botDescriptionViewer: string;
+    botAction: string;
+    botContact: string;
+    channelTitle: string;
+    channelDescription: string;
+    channelAction: string;
+    channelContact: string;
+  };
 }
 
 const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
@@ -339,7 +351,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     errors: {
       title: "Fehler", warning: "Warnung", sessionInvalid: "Deine Sitzung ist nicht mehr gültig.",
       dataLoadFailed: "Die Daten konnten nicht geladen werden.", last: "Letzter Fehler",
-      noCause: "Keine gespeicherte Ursache", channelNotReleased: "Dieser Kanal ist für dein Konto nicht freigegeben.",
+      noCause: "Keine gespeicherte Ursache",
     },
     statusCard: {
       yourRole: "Deine Rolle", broadcasterOauth: "Broadcaster-OAuth", chatConsent: "Chat-Zustimmung",
@@ -397,6 +409,17 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeGranted: "Erteilt",
       unknown: (name) => `Das Modul „${name}“ ist nicht bekannt.`,
     },
+    blocking: {
+      botTitle: "Der Bot ist nicht angemeldet",
+      botDescriptionAdmin: "Ohne Bot-Identität empfängt kein Kanal Ereignisse: EventSub, Chat, Shoutouts und die Mitgliedersuche funktionieren nirgends. Melde den Bot an, um alles wieder in Betrieb zu setzen.",
+      botDescriptionViewer: "Der Bot ist nicht verbunden. Das betrifft jeden Kanal: EventSub, Chat, Shoutouts und die Mitgliedersuche funktionieren nirgends. Das kann nur der Betreiber der Installation beheben.",
+      botAction: "Bot anmelden",
+      botContact: "Wende dich an den Betreiber der Installation.",
+      channelTitle: "Kanal nicht freigegeben",
+      channelDescription: "Dieser Kanal ist für dein Konto nicht freigegeben. Andere Kanäle sind davon nicht betroffen.",
+      channelAction: "Zur Betreiberansicht",
+      channelContact: "Nur der Betreiber kann diesen Kanal für dein Konto freigeben.",
+    },
   },
   en: {
     header: {
@@ -452,7 +475,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     errors: {
       title: "Error", warning: "Warning", sessionInvalid: "Your session is no longer valid.", dataLoadFailed: "The data could not be loaded.",
-      last: "Last error", noCause: "No saved cause", channelNotReleased: "This channel is not available to your account.",
+      last: "Last error", noCause: "No saved cause",
     },
     statusCard: {
       yourRole: "Your role", broadcasterOauth: "Broadcaster OAuth", chatConsent: "Chat consent", botAccount: "Bot account", botPermissions: "Bot permissions",
@@ -505,6 +528,17 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeList: "Required broadcaster permissions",
       scopeMissing: "Missing",
       scopeGranted: "Granted",
+    },
+    blocking: {
+      botTitle: "The bot is not signed in",
+      botDescriptionAdmin: "Without a bot identity no channel receives events: EventSub, chat, shoutouts, and member search all fail everywhere. Sign the bot in to bring everything back.",
+      botDescriptionViewer: "The bot is not connected. This affects every channel: EventSub, chat, shoutouts, and member search fail everywhere. Only the installation's operator can fix this.",
+      botAction: "Sign in the bot",
+      botContact: "Contact the installation's operator.",
+      channelTitle: "Channel not released",
+      channelDescription: "This channel is not released to your account. Other channels are not affected.",
+      channelAction: "Go to the operator view",
+      channelContact: "Only the operator can release this channel to your account.",
     },
   },
 };

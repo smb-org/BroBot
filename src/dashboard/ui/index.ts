@@ -50,6 +50,9 @@ export type { EmptyStateProps, EmptyStateAction } from "./EmptyState";
 export { ErrorPanel } from "./ErrorPanel";
 export type { ErrorPanelProps, ErrorPanelAction } from "./ErrorPanel";
 
+export { BlockingState } from "./BlockingState";
+export type { BlockingStateProps, BlockingStateAction } from "./BlockingState";
+
 export { InspectorHeading, SubInspector } from "./Inspector";
 
 export { useInspectorSelection } from "./inspector-selection";
