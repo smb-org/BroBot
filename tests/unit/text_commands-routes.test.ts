@@ -142,9 +142,9 @@ describe("Text commands panel", () => {
     );
 
     expect(edit.status).toBe(404);
-    await expect(edit.json()).resolves.toEqual({ error: "Der Befehl wurde nicht gefunden." });
+    await expect(edit.json()).resolves.toEqual({ error: "command_not_found" });
     expect(remove.status).toBe(404);
-    await expect(remove.json()).resolves.toEqual({ error: "Der Befehl wurde nicht gefunden." });
+    await expect(remove.json()).resolves.toEqual({ error: "command_not_found" });
   });
 
   it("denies non-members a command in a foreign channel", async () => {

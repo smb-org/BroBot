@@ -65,8 +65,8 @@ const parseEventFilters = (
   const tone = context.req.query("tone");
   const moduleId = context.req.query("module");
   const actor = context.req.query("actor");
-  if (origin !== undefined && origin !== "channel" && origin !== "module") return context.text("Ereignis-Herkunft ist ungültig.", 400);
-  if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.text("Ereignis-Ton ist ungültig.", 400);
+  if (origin !== undefined && origin !== "channel" && origin !== "module") return context.json({ error: "event_origin_invalid" }, 400);
+  if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.json({ error: "event_tone_invalid" }, 400);
   const validOrigin: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
   const validTone: EventTone | null = tone === undefined ? null : tone as EventTone;
   const module = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
@@ -80,13 +80,12 @@ const parseEventFilters = (
 // stays per route; this helper doesn't merge them in substance.
 const parseLogQuery = (
   context: Context<PanelEnvironment>,
-  errorTexts: { limit: string; cursor: string },
 ): LogQuery | Response => {
   const limit = parseAuditLimit(context.req.query("limit"));
-  if (limit === null) return context.text(errorTexts.limit, 400);
+  if (limit === null) return context.json({ error: "pagination_limit_invalid" }, 400);
   const serializedCursor = context.req.query("cursor");
   const cursor = serializedCursor === undefined ? null : decodeLogCursor(serializedCursor);
-  if (serializedCursor !== undefined && cursor === null) return context.text(errorTexts.cursor, 400);
+  if (serializedCursor !== undefined && cursor === null) return context.json({ error: "pagination_cursor_invalid" }, 400);
   return { limit, cursor };
 };
 
@@ -135,7 +134,7 @@ panelRouter.get(
     const channelId = context.req.param("channelId");
     const overview = await getChannelOverviewForUser(context.env.DB, session.userId, channelId);
     return overview === null
-      ? context.text("Kanal nicht gefunden.", 404)
+      ? context.json({ error: "channel_not_found" }, 404)
       : context.json(overview);
   },
 );
@@ -145,7 +144,7 @@ panelRouter.post(
   requireChannelAuthorization(),
   async (context) => {
     if (!canCheckModeratorStatus(context.get("channelRole"))) {
-      return context.text("Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.", 403);
+      return context.json({ error: "moderator_status_check_denied" }, 403);
     }
 
     const channelId = context.req.param("channelId");
@@ -167,7 +166,7 @@ panelRouter.post(
         : laterIso(lastCheckedAt, MODERATOR_STATUS_CHECK_COOLDOWN_MS);
       const retryAt = lockedUntil ?? statusRetryAt ?? nextAllowedAt;
       return context.json({
-        error: "Der Moderatorstatus wurde für diesen Kanal kürzlich geprüft.",
+        error: "moderator_status_check_rate_limited",
         nextAllowedAt: retryAt,
       }, 429);
     }
@@ -176,7 +175,7 @@ panelRouter.post(
     try {
       const credentials = await readBotCredentials(context.env);
       if (credentials === null) {
-        throw new Error("Bot-Token fehlt oder konnte nicht gelesen werden.");
+        throw new Error("Bot token missing or could not be read.");
       }
       const isModerator = await fetchChannelStatus(
         fetch,
@@ -207,11 +206,10 @@ panelRouter.post(
           // The Twitch-side cause matters more to the user than a failed cleanup.
         }
       }
-      const message = error instanceof Error ? error.message : "Moderatorstatus konnte nicht gelesen werden.";
       const status = error instanceof TwitchApiError && error.status === 504 ? 504
         : error instanceof TwitchApiError ? 502
         : 503;
-      return context.json({ error: message }, status);
+      return context.json({ error: "moderator_status_check_failed" }, status);
     }
   },
 );
@@ -224,7 +222,7 @@ panelRouter.get(
     const channelId = context.req.param("channelId");
     const overview = await getSystemOverviewForUser(context.env.DB, session.userId, channelId);
     return overview === null
-      ? context.text("Kanal nicht gefunden.", 404)
+      ? context.json({ error: "channel_not_found" }, 404)
       : context.json(overview);
   },
 );
@@ -234,10 +232,7 @@ panelRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
-    const parsed = parseLogQuery(context, {
-      limit: "Audit-Begrenzung ist ungültig.",
-      cursor: "Audit-Cursor ist ungültig.",
-    });
+    const parsed = parseLogQuery(context);
     if (parsed instanceof Response) return parsed;
     const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor);
     const actorIds = audit.entries.map((entry) => entry.actorUserId);
@@ -261,10 +256,7 @@ panelRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
-    const parsed = parseLogQuery(context, {
-      limit: "Ereignis-Begrenzung ist ungültig.",
-      cursor: "Ereignis-Cursor ist ungültig.",
-    });
+    const parsed = parseLogQuery(context);
     if (parsed instanceof Response) return parsed;
     const filters = parseEventFilters(context);
     if (filters instanceof Response) return filters;

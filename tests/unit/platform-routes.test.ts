@@ -115,7 +115,7 @@ describe("Platform admin level", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toBe("Kein Betreiberzugang.");
+    await expect(response.json()).resolves.toEqual({ error: "platform_access_denied" });
   });
 
   it("returns the cross-channel overview and searches users via Helix", async () => {

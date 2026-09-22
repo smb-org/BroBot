@@ -1,4 +1,4 @@
-import type { ChannelRole, EventCode, EventTone } from "../contracts/values";
+import type { ApiErrorCode, ChannelRole, EventCode, EventTone } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -830,6 +830,154 @@ export function eventText(
   }
   return code;
 }
+
+/**
+ * DE/EN text for every `ApiErrorCode` the worker (or the dashboard's own
+ * request guard) can send back as `{ "error": "<code>" }`. `Record<ApiErrorCode,
+ * string>` per language, the same reasoning as `eventTexts`: adding a code in
+ * `contracts/values.ts` without a matching entry here fails the build.
+ */
+export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
+  de: {
+    session_missing: "Sitzung fehlt.",
+    csrf_invalid: "CSRF-Token fehlt oder ist ungültig.",
+    channel_missing: "Kanal fehlt.",
+    channel_access_denied: "Kanalzugriff verweigert.",
+    platform_access_denied: "Kein Betreiberzugang.",
+    panel_request_not_allowed: "Die Panel-Anfrage ist nicht erlaubt.",
+    pagination_limit_invalid: "Die Begrenzung ist ungültig.",
+    pagination_cursor_invalid: "Der Cursor ist ungültig.",
+    twitch_login_invalid: "Twitch-Name fehlt oder ist ungültig.",
+    twitch_user_not_found: "Twitch-Nutzer nicht gefunden.",
+    twitch_user_search_failed: "Twitch-Nutzersuche ist fehlgeschlagen.",
+    channel_not_found: "Kanal nicht gefunden.",
+    broadcaster_role_immutable: "Die Rolle Broadcaster darf auf der Betreiberebene nicht geändert werden.",
+    broadcaster_role_change_requires_broadcaster: "Nur ein Broadcaster darf die Rolle Broadcaster vergeben oder entziehen.",
+    mutation_failed: "Die Änderung konnte nicht durchgeführt werden.",
+    member_changed_concurrently: "Mitglied wurde inzwischen geändert.",
+    release_input_invalid: "Login oder Vollzustimmung ist ungültig.",
+    channel_already_released: "Der Kanal ist bereits freigegeben.",
+    channel_release_failed: "Der Kanal konnte nicht freigegeben werden.",
+    full_consent_invalid: "Vollzustimmung ist ungültig.",
+    full_consent_already_set: "Diese Vollzustimmung ist bereits gesetzt.",
+    member_or_role_invalid: "Mitglied oder Rolle ist ungültig.",
+    member_already_exists: "Dieses Mitglied ist bereits freigegeben.",
+    member_management_denied: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.",
+    self_membership_denied: "Du kannst deine eigene Mitgliedschaft nicht per POST anlegen.",
+    member_add_failed: "Mitglied konnte nicht hinzugefügt werden.",
+    role_invalid: "Rolle ist ungültig.",
+    member_not_found: "Mitglied nicht gefunden.",
+    role_already_set: "Diese Rolle ist bereits gesetzt.",
+    self_role_escalation_denied: "Du kannst deine eigene Rolle nicht erhöhen.",
+    last_broadcaster_cannot_be_demoted: "Der letzte Broadcaster kann nicht herabgestuft werden.",
+    last_broadcaster_cannot_be_removed: "Der letzte Broadcaster kann nicht entfernt werden.",
+    event_origin_invalid: "Ereignis-Herkunft ist ungültig.",
+    event_tone_invalid: "Ereignis-Ton ist ungültig.",
+    moderator_status_check_denied: "Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.",
+    moderator_status_check_rate_limited: "Der Moderatorstatus wurde für diesen Kanal kürzlich geprüft.",
+    moderator_status_check_failed: "Moderatorstatus konnte nicht gelesen werden.",
+    module_management_denied: "Nur Broadcaster und Verwalter dürfen Module ändern.",
+    module_unknown: "Unbekanntes Modul.",
+    module_not_configured: "Modul ist in diesem Kanal nicht eingerichtet.",
+    module_settings_invalid: "Moduleinstellungen sind ungültig.",
+    module_settings_changed_concurrently: "Moduleinstellungen wurden inzwischen geändert.",
+    module_enabled_field_invalid: "Feld enabled ist ungültig.",
+    module_changed_concurrently: "Modul wurde inzwischen geändert.",
+    command_management_denied: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, ändern oder löschen.",
+    command_data_invalid: "Befehlsdaten sind ungültig.",
+    command_already_exists: "Der Befehl existiert bereits.",
+    command_creation_denied: "Der Befehl darf nicht angelegt werden.",
+    command_not_found: "Der Befehl wurde nicht gefunden.",
+    command_update_denied: "Der Befehl darf nicht geändert werden.",
+    command_changed_concurrently: "Der Befehl wurde inzwischen geändert.",
+    command_delete_denied: "Der Befehl darf nicht gelöscht werden.",
+    ad_schedule_read_failed: "Der Werbezeitplan konnte nicht gelesen werden.",
+    ad_snooze_failed: "Die nächste Werbepause konnte nicht verschoben werden.",
+    overlay_token_manage_denied: "Nur Broadcaster und Verwalter dürfen Overlay-Token verwalten.",
+    overlay_expiry_invalid: "Ablaufzeit ist ungültig.",
+    overlay_revocation_reason_invalid: "Widerrufsgrund fehlt oder ist ungültig.",
+    overlay_token_not_found: "Overlay-Token nicht gefunden.",
+    overlay_token_invalid: "Overlay-Zugang ungültig.",
+    unknown_api_route: "Unbekannte API-Route.",
+  },
+  en: {
+    session_missing: "Session missing.",
+    csrf_invalid: "CSRF token missing or invalid.",
+    channel_missing: "Channel missing.",
+    channel_access_denied: "Channel access denied.",
+    platform_access_denied: "No operator access.",
+    panel_request_not_allowed: "This panel request is not allowed.",
+    pagination_limit_invalid: "The limit is invalid.",
+    pagination_cursor_invalid: "The cursor is invalid.",
+    twitch_login_invalid: "Twitch name missing or invalid.",
+    twitch_user_not_found: "Twitch user not found.",
+    twitch_user_search_failed: "Twitch user search failed.",
+    channel_not_found: "Channel not found.",
+    broadcaster_role_immutable: "The broadcaster role cannot be changed at the operator level.",
+    broadcaster_role_change_requires_broadcaster: "Only a broadcaster can grant or revoke the broadcaster role.",
+    mutation_failed: "The change could not be made.",
+    member_changed_concurrently: "The member has since changed.",
+    release_input_invalid: "Login or full consent is invalid.",
+    channel_already_released: "The channel is already released.",
+    channel_release_failed: "The channel could not be released.",
+    full_consent_invalid: "Full consent is invalid.",
+    full_consent_already_set: "This full consent is already set.",
+    member_or_role_invalid: "Member or role is invalid.",
+    member_already_exists: "This member is already added.",
+    member_management_denied: "Only broadcasters and managers may change members.",
+    self_membership_denied: "You cannot add your own membership by POST.",
+    member_add_failed: "The member could not be added.",
+    role_invalid: "Role is invalid.",
+    member_not_found: "Member not found.",
+    role_already_set: "This role is already set.",
+    self_role_escalation_denied: "You cannot raise your own role.",
+    last_broadcaster_cannot_be_demoted: "The last broadcaster cannot be demoted.",
+    last_broadcaster_cannot_be_removed: "The last broadcaster cannot be removed.",
+    event_origin_invalid: "Event origin is invalid.",
+    event_tone_invalid: "Event tone is invalid.",
+    moderator_status_check_denied: "Only broadcasters and managers may check the moderator status.",
+    moderator_status_check_rate_limited: "The moderator status for this channel was checked recently.",
+    moderator_status_check_failed: "The moderator status could not be read.",
+    module_management_denied: "Only broadcasters and managers may change modules.",
+    module_unknown: "Unknown module.",
+    module_not_configured: "This module is not set up for this channel.",
+    module_settings_invalid: "The module settings are invalid.",
+    module_settings_changed_concurrently: "The module settings have since changed.",
+    module_enabled_field_invalid: "The enabled field is invalid.",
+    module_changed_concurrently: "The module has since changed.",
+    command_management_denied: "Only broadcasters and managers may create, change, or remove commands.",
+    command_data_invalid: "Command data is invalid.",
+    command_already_exists: "This command already exists.",
+    command_creation_denied: "This command may not be created.",
+    command_not_found: "This command was not found.",
+    command_update_denied: "This command may not be changed.",
+    command_changed_concurrently: "This command has since changed.",
+    command_delete_denied: "This command may not be removed.",
+    ad_schedule_read_failed: "The ad schedule could not be read.",
+    ad_snooze_failed: "The next ad break could not be postponed.",
+    overlay_token_manage_denied: "Only broadcasters and managers may manage overlay tokens.",
+    overlay_expiry_invalid: "Expiry is invalid.",
+    overlay_revocation_reason_invalid: "Revocation reason missing or invalid.",
+    overlay_token_not_found: "Overlay token not found.",
+    overlay_token_invalid: "Overlay access invalid.",
+    unknown_api_route: "Unknown API route.",
+  },
+};
+
+/**
+ * Looks a server error code up in `apiErrorTexts`. Falls back to the
+ * caller's own generic text -- never to raw server text -- for a code an
+ * old worker, a proxy's HTML error page, or a network failure didn't give
+ * us, or gave us one this build doesn't know.
+ */
+export const apiErrorText = (
+  code: string | null,
+  fallback: string,
+  language: DashboardLanguage = dashboardLanguage(),
+): string => {
+  const catalog: Record<string, string> = apiErrorTexts[language];
+  return (code !== null ? catalog[code] : undefined) ?? fallback;
+};
 
 export const dashboardTexts = (): DashboardTexts => dashboardTextsCatalog[dashboardLanguage()];
 

@@ -5,7 +5,7 @@ import type { ModulePanelProperties } from "../modules/contract";
 import type { ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState } from "../panel-contract";
 import { PanelApiError, setChannelModuleEnabled } from "./api";
-import { dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage, type LocaleCatalog } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { Switch } from "./ui";
@@ -315,7 +315,13 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
       await setChannelModuleEnabled(channelId, moduleId, nextEnabled);
       await onChanged();
     } catch (toggleFailure: unknown) {
-      setToggleError(toggleFailure instanceof PanelApiError && toggleFailure.status === 401 ? texts.errors.sessionInvalid : texts.errors.changeFailed);
+      if (toggleFailure instanceof PanelApiError && toggleFailure.status === 401) {
+        setToggleError(texts.errors.sessionInvalid);
+      } else {
+        setToggleError(toggleFailure instanceof PanelApiError
+          ? apiErrorText(toggleFailure.code, texts.errors.changeFailed)
+          : texts.errors.changeFailed);
+      }
     } finally {
       setPendingEnabled((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== moduleId)));
       setBusyModuleId(null);

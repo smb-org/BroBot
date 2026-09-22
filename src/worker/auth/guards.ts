@@ -55,7 +55,7 @@ const nowIso = (): string => new Date().toISOString();
 export const requireChannelAuthorization = () => createMiddleware<ChannelAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
-    if (session === null) return context.text("Session fehlt.", 401);
+    if (session === null) return context.json({ error: "session_missing" }, 401);
 
     if (!csrfExemptMethods.has(context.req.method) && !await verifyCsrfRequest(
       context.req.raw,
@@ -63,15 +63,15 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
       context.env.SESSION_COOKIE_KEYS,
       nowIso(),
     )) {
-      return context.text("CSRF-Token fehlt oder ist ungültig.", 403);
+      return context.json({ error: "csrf_invalid" }, 403);
     }
 
     const channelId = context.req.param("channelId");
     if (channelId === undefined || channelId.length === 0) {
-      return context.text("Kanal fehlt.", 400);
+      return context.json({ error: "channel_missing" }, 400);
     }
     const role = await authorizeChannelAccess(context.env.DB, session, channelId);
-    if (role === null) return context.text("Kanalzugriff verweigert.", 403);
+    if (role === null) return context.json({ error: "channel_access_denied" }, 403);
 
     context.set("session", session);
     context.set("channelRole", role);
@@ -87,7 +87,7 @@ export const requireChannelAuthorization = () => createMiddleware<ChannelAuthori
 export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
-    if (session === null) return context.text("Session fehlt.", 401);
+    if (session === null) return context.json({ error: "session_missing" }, 401);
 
     if (!csrfExemptMethods.has(context.req.method) && !await verifyCsrfRequest(
       context.req.raw,
@@ -95,11 +95,11 @@ export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvir
       context.env.SESSION_COOKIE_KEYS,
       nowIso(),
     )) {
-      return context.text("CSRF-Token fehlt oder ist ungültig.", 403);
+      return context.json({ error: "csrf_invalid" }, 403);
     }
 
     if (!getPlatformUserIds(context.env).has(session.userId)) {
-      return context.text("Kein Betreiberzugang.", 403);
+      return context.json({ error: "platform_access_denied" }, 403);
     }
 
     context.set("session", session);
@@ -111,7 +111,7 @@ export const requirePlatform = () => createMiddleware<PlatformAuthorizationEnvir
 export const requireSessionAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
   async (context, next) => {
     const session = await getSessionFromRequest(context.req.raw, context.env);
-    if (session === null) return context.text("Session fehlt.", 401);
+    if (session === null) return context.json({ error: "session_missing" }, 401);
     context.set("session", session);
     await next();
   },

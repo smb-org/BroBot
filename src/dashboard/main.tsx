@@ -42,7 +42,7 @@ import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, Mo
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
-import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber } from "./locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber } from "./locale";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
@@ -200,8 +200,8 @@ const broadcasterConnectionLabel = (status: PanelChannelState["broadcasterConnec
 
 const errorMessage = (error: unknown): string => {
   if (error instanceof PanelApiError && error.status === 401) return dashboardTexts().errors.sessionInvalid;
-  if (error instanceof Error && error.message.length > 0) return error.message;
-  return dashboardTexts().errors.dataLoadFailed;
+  const fallback = dashboardTexts().errors.dataLoadFailed;
+  return error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
 };
 
 const nextAllowedAtFromError = (error: unknown): string | null => {

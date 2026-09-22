@@ -133,3 +133,79 @@ export const AUDIT_ACTIONS = [
   "text_commands.command.removed",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+/**
+ * The closed vocabulary of `{ "error": "<code>" }` responses the worker
+ * (and, client-side, `dashboard/api.ts`'s own request guard) sends instead
+ * of German prose. `dashboard/locale.ts`'s `apiErrorTexts` is a
+ * `Record<ApiErrorCode, string>` per language, the same reasoning as
+ * `EVENT_CODES` above: the compiler refuses a build where a code here has
+ * no catalogue entry. An unrecognized or missing code (old worker, a proxy's
+ * HTML error page, a network failure) is not a type error at the response
+ * boundary -- `PanelApiError.code` is `string | null` -- so the dashboard
+ * falls back to a generic, per-call-site localized text instead of ever
+ * showing raw server text.
+ */
+export const API_ERROR_CODES = [
+  "session_missing",
+  "csrf_invalid",
+  "channel_missing",
+  "channel_access_denied",
+  "platform_access_denied",
+  "panel_request_not_allowed",
+  "pagination_limit_invalid",
+  "pagination_cursor_invalid",
+  "twitch_login_invalid",
+  "twitch_user_not_found",
+  "twitch_user_search_failed",
+  "channel_not_found",
+  "broadcaster_role_immutable",
+  "broadcaster_role_change_requires_broadcaster",
+  "mutation_failed",
+  "member_changed_concurrently",
+  "release_input_invalid",
+  "channel_already_released",
+  "channel_release_failed",
+  "full_consent_invalid",
+  "full_consent_already_set",
+  "member_or_role_invalid",
+  "member_already_exists",
+  "member_management_denied",
+  "self_membership_denied",
+  "member_add_failed",
+  "role_invalid",
+  "member_not_found",
+  "role_already_set",
+  "self_role_escalation_denied",
+  "last_broadcaster_cannot_be_demoted",
+  "last_broadcaster_cannot_be_removed",
+  "event_origin_invalid",
+  "event_tone_invalid",
+  "moderator_status_check_denied",
+  "moderator_status_check_rate_limited",
+  "moderator_status_check_failed",
+  "module_management_denied",
+  "module_unknown",
+  "module_not_configured",
+  "module_settings_invalid",
+  "module_settings_changed_concurrently",
+  "module_enabled_field_invalid",
+  "module_changed_concurrently",
+  "command_management_denied",
+  "command_data_invalid",
+  "command_already_exists",
+  "command_creation_denied",
+  "command_not_found",
+  "command_update_denied",
+  "command_changed_concurrently",
+  "command_delete_denied",
+  "ad_schedule_read_failed",
+  "ad_snooze_failed",
+  "overlay_token_manage_denied",
+  "overlay_expiry_invalid",
+  "overlay_revocation_reason_invalid",
+  "overlay_token_not_found",
+  "overlay_token_invalid",
+  "unknown_api_route",
+] as const;
+export type ApiErrorCode = (typeof API_ERROR_CODES)[number];

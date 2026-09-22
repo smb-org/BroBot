@@ -709,7 +709,7 @@ describe("manual moderator status check", () => {
     const body = await response.json<{ error: string; nextAllowedAt: string }>();
 
     expect(response.status).toBe(429);
-    expect(body.error).toContain("kürzlich");
+    expect(body.error).toBe("moderator_status_check_rate_limited");
     expect(body.nextAllowedAt).toBe("2026-09-18T04:05:00.000Z");
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -773,7 +773,7 @@ describe("manual moderator status check", () => {
     ).bind("kanal-a").first<{ is_moderator: number; checked_at: string; reason: string | null }>();
 
     expect(response.status).toBe(502);
-    expect(body.error).toBe("Twitch ist vorübergehend nicht erreichbar.");
+    expect(body.error).toBe("moderator_status_check_failed");
     expect(status).toEqual({ is_moderator: 1, checked_at: "2026-09-18T03:00:00.000Z", reason: null });
     expect(await database.prepare("SELECT * FROM bot_channel_status_check_locks WHERE channel_id = ?").bind("kanal-a").first()).toBeNull();
   });
@@ -793,7 +793,7 @@ describe("manual moderator status check", () => {
     const body = await response.json<{ error: string }>();
 
     expect(response.status).toBe(504);
-    expect(body.error).toContain("Zeitlimit");
+    expect(body.error).toBe("moderator_status_check_failed");
     expect(await database.prepare("SELECT * FROM bot_channel_status_check_locks WHERE channel_id = ?").bind("kanal-a").first()).toBeNull();
   });
 });

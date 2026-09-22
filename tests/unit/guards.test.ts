@@ -192,7 +192,7 @@ describe("channel-scoped route guard", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toBe("Kein Betreiberzugang.");
+    await expect(response.json()).resolves.toEqual({ error: "platform_access_denied" });
   });
 
   it("doesn't let an operator without a member row through on the channel route", async () => {

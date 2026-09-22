@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } f
 import { CHANNEL_ROLES, type ChannelRole } from "../contracts/values";
 import type { PanelMember, PanelTwitchUser } from "../panel-contract";
 import { roleLabel } from "./labels";
-import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatDate } from "./locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
 import { ListDetail, SubInspector, useInspectorSelection } from "./ui";
 import {
@@ -105,8 +105,8 @@ const membersTexts = (language: DashboardLanguage = dashboardLanguage()): Member
 
 const errorMessage = (error: unknown): string => {
   if (error instanceof PanelApiError && error.status === 401) return membersTexts().sessionInvalid;
-  if (error instanceof Error && error.message.length > 0) return error.message;
-  return membersTexts().changeFailed;
+  const fallback = membersTexts().changeFailed;
+  return error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
 };
 
 const canManage = (role: ChannelRole): boolean => role !== "operator";

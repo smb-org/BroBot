@@ -74,7 +74,7 @@ adsRoutes.get("/schedule", async (context) => {
     const diagnostic = scheduleFailureDiagnostic(result);
     await log(context, channelId, `werbung-zeitplan:${crypto.randomUUID()}`, diagnostic.code, diagnostic.detail);
     return context.json({
-      error: "Der Werbezeitplan konnte nicht gelesen werden.",
+      error: "ad_schedule_read_failed",
       reason: result.reason,
       detail: result.detail,
     }, statusFor(result.reason));
@@ -107,7 +107,7 @@ adsRoutes.post("/snooze", async (context) => {
 
   if (!result.snoozed || result.schedule === null) {
     return context.json({
-      error: "Die nächste Werbepause konnte nicht verschoben werden.",
+      error: "ad_snooze_failed",
       reason: result.reason,
       detail: result.detail,
     }, statusFor(result.reason));

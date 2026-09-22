@@ -2266,7 +2266,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({ error: "Twitch ist vorübergehend nicht erreichbar." }, 502));
+      if (url.pathname === "/api/channels/kanal-a/moderator-status") return Promise.resolve(jsonResponse({ error: "moderator_status_check_failed" }, 502));
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -2275,7 +2275,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Moderatorstatus prüfen" }));
 
-    expect(await screen.findByText("Twitch ist vorübergehend nicht erreichbar.", { selector: "p" })).toBeInTheDocument();
+    expect(await screen.findByText("Moderatorstatus konnte nicht gelesen werden.", { selector: "p" })).toBeInTheDocument();
     expect(screen.queryByText("Nicht geprüft")).not.toBeInTheDocument();
     expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
   });

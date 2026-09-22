@@ -387,7 +387,7 @@ describe("Member management", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toContain("eigene Rolle");
+    await expect(response.json()).resolves.toEqual({ error: "self_role_escalation_denied" });
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
@@ -404,7 +404,7 @@ describe("Member management", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.text()).resolves.toContain("eigene Mitgliedschaft");
+    await expect(response.json()).resolves.toEqual({ error: "self_membership_denied" });
     await expect(database.prepare(
       "SELECT user_id FROM channel_members WHERE channel_id = ? AND user_id = ?",
     ).bind("kanal-a", "user-1").first()).resolves.toEqual({ user_id: "user-1" });
@@ -494,7 +494,8 @@ describe("Member management", () => {
 
     expect(changeResponse.status).toBe(409);
     expect(removeResponse.status).toBe(409);
-    await expect(changeResponse.text()).resolves.toContain("letzte Broadcaster");
+    await expect(changeResponse.json()).resolves.toEqual({ error: "last_broadcaster_cannot_be_demoted" });
+    await expect(removeResponse.json()).resolves.toEqual({ error: "last_broadcaster_cannot_be_removed" });
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
@@ -556,7 +557,7 @@ describe("Member management", () => {
     );
 
     expect(response.status).toBe(404);
-    await expect(response.text()).resolves.toContain("Twitch-Nutzer nicht gefunden");
+    await expect(response.json()).resolves.toEqual({ error: "twitch_user_not_found" });
     await expect(auditCount(database)).resolves.toBe(0);
   });
 

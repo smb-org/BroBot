@@ -22,7 +22,7 @@ import {
   searchPlatformUser,
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
-import { dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
+import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
 import { InspectorHeading, ListDetail, SubInspector, Switch, useInspectorSelection } from "./ui";
 import { NavigationIcon, StateRow, type StateTone } from "./module-panels";
 
@@ -41,7 +41,7 @@ const loadState = <T,>(): LoadState<T> => ({ status: "loading", data: null, erro
 const loadedState = <T,>(data: T): LoadState<T> => ({ status: "success", data, error: null });
 
 const errorText = (error: unknown, fallback: string): string =>
-  error instanceof Error && error.message.length > 0 ? error.message : fallback;
+  error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
 
 const isAbort = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
