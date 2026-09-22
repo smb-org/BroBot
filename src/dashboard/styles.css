@@ -542,7 +542,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .list-detail--open .list-detail__inspector {
     position: fixed; top: 0; right: 0; bottom: 0; z-index: 21; width: min(480px, 100%); overflow-y: auto;
   }
-  .list-detail--open .list-detail__inspector > .sub-inspector { min-height: 100%; border-radius: 0; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+  .list-detail--open .list-detail__inspector > .sub-inspector { min-height: 100%; border-radius: 0; box-shadow: var(--mantine-shadow-xs); }
 }
 
 @media (min-width: 1024px) {
