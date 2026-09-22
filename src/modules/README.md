@@ -66,7 +66,7 @@ Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
 3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
 4. Prüfen: `pnpm run check`.
 
-Das erste Modul ist `src/modules/textbefehle/`. Es ist in der Registry als
+Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und besitzt die
 zentrale Migration `migrations/0010_modul_textbefehle.sql`. Die Tabelle
 `text_commands` ist kanalgebunden; der D1-Adapter dieses Moduls liest

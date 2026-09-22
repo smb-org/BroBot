@@ -1,6 +1,6 @@
 import type { ModuleDiagnostic } from "../modules/contract";
-import { werbungModul } from "../modules/werbung";
-import { entscheideWerbevorwarnung, type WerbevorwarnungsEntscheidung } from "../modules/werbung/domain";
+import { werbungModul } from "../modules/ads";
+import { entscheideWerbevorwarnung, type WerbevorwarnungsEntscheidung } from "../modules/ads/domain";
 import {
   getChannelModuleForChannel,
   type ChannelModuleRecord,
@@ -9,7 +9,7 @@ import { moduleBroadcasterScopeState } from "./module-scopes";
 import { sendChatMessage } from "./chat";
 import { writeModuleDiagnostics } from "./event-log";
 import { getAppAccessToken } from "./app-token";
-import { getAdSchedule, type AdScheduleResult } from "../modules/werbung/adapters/ad-schedule";
+import { getAdSchedule, type AdScheduleResult } from "../modules/ads/adapters/ad-schedule";
 
 const MODULE_ID = "ads";
 const WARNING_SCOPE = "channel:read:ads";

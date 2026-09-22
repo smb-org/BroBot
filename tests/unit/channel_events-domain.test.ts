@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EventSubSubscriptionType } from "../../src/contracts/values";
-import { diagnostiziereKanalereignis } from "../../src/modules/kanalereignisse/domain";
+import { diagnostiziereKanalereignis } from "../../src/modules/channel_events/domain";
 
 const diagnose = (
   subscriptionType: EventSubSubscriptionType,

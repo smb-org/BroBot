@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { entscheideWerbevorwarnung } from "../../src/modules/werbung/domain";
+import { entscheideWerbevorwarnung } from "../../src/modules/ads/domain";
 
 const jetztAmMs = Date.parse("2026-09-21T11:59:00.000Z");
 const geplanterTerminAmMs = Date.parse("2026-09-21T12:00:00.000Z");

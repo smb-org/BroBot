@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
+import { createTextbefehlRepository } from "../../src/modules/text_commands/adapters/d1";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";

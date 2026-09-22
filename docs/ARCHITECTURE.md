@@ -30,7 +30,7 @@ für HTTP und die Module.
 
 Ein Modul ist ein Feature-Slice unter `src/modules/<id>` mit `contracts/`,
 `domain/`, `service.ts`, `repository.ts`, `adapters/`, `overlay/` und
-`panel/`. Das erste konkrete Modul ist `src/modules/textbefehle/`. Es
+`panel/`. Das erste konkrete Modul ist `src/modules/text_commands/`. Es
 ergänzt den Contract um den vom Host aufgelösten `ModuleEvent.actor`, den
 `ModuleExecutionContext` für den eigenen D1-Adapter und typisierte Props für
 seine lazy Panel-Ansicht. Die Migration liegt als

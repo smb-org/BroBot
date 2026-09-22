@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { kanalereignisseModul } from "../../src/modules/kanalereignisse";
+import { kanalereignisseModul } from "../../src/modules/channel_events";
 import type { ModuleEvent } from "../../src/modules/contract";
 
 const event = (subscriptionType: string, payload: Record<string, unknown>, subscriptionVariant?: string): ModuleEvent<Record<string, never>> => ({

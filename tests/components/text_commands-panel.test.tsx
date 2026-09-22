@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { TextbefehlePanel } from "../../src/modules/textbefehle/panel";
+import { TextbefehlePanel } from "../../src/modules/text_commands/panel";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,

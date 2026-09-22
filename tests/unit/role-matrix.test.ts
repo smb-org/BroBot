@@ -17,7 +17,7 @@ import {
   updateChannelModuleWithAudit,
 } from "../../src/worker/db/channel-modules";
 import { createOverlayToken, revokeOverlayToken } from "../../src/worker/auth/overlay-token-repository";
-import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
+import { createTextbefehlRepository } from "../../src/modules/text_commands/adapters/d1";
 import {
   ändereBetreiberMitglied,
   ändereVollzustimmung,

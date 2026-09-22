@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { werbungModul, verarbeiteWerbepause } from "../../src/modules/werbung";
+import { werbungModul, verarbeiteWerbepause } from "../../src/modules/ads";
 import type { ModuleEvent } from "../../src/modules/contract";
 
 const event = (payload: Record<string, unknown>, settings = werbungModul.defaultSettings): ModuleEvent<typeof settings> => ({

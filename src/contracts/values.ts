@@ -16,7 +16,7 @@ export type EventSubAuthorizationIdentity =
 
 /**
  * Die Abotypen, die der Bot bei Twitch fuehrt. Sie stehen hier und nicht beim
- * Worker, weil `modules/kanalereignisse` und `dashboard/module-labels` sie
+ * Worker, weil `modules/channel_events` und `dashboard/module-labels` sie
  * brauchen und die Modulgrenze sie nicht aus `worker/` holen laesst. Die
  * Bedingungen zum Anlegen bleiben dagegen im Worker -- nur er baut sie.
  * `tests/unit/eventsub-types.test.ts` haelt Tupel und Tabelle deckungsgleich.

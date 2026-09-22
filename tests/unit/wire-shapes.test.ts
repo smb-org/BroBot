@@ -33,9 +33,9 @@ import type {
   PanelEventOrigin,
 } from "../../src/panel-contract";
 import { MODULES } from "../../src/modules/registry";
-import { TEXTBEFEHL_MINDESTSTUFEN } from "../../src/modules/textbefehle/contracts";
-import type { TextbefehlArt } from "../../src/modules/textbefehle/contracts";
-import { werbungModul } from "../../src/modules/werbung";
+import { TEXTBEFEHL_MINDESTSTUFEN } from "../../src/modules/text_commands/contracts";
+import type { TextbefehlArt } from "../../src/modules/text_commands/contracts";
+import { werbungModul } from "../../src/modules/ads";
 import type {
   ModuleActor,
   ModuleAction,

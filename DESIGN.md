@@ -287,7 +287,7 @@ components:
 <!-- impeccable:design-schema 1 -->
 
 <!-- Aus dem gebauten Artefakt aufgezeichnet (src/dashboard/styles.css, main.tsx,
-     members.tsx, module-panels.tsx, modules.tsx, locale.ts, src/modules/textbefehle/panel).
+     members.tsx, module-panels.tsx, modules.tsx, locale.ts, src/modules/text_commands/panel).
      Richtungsvertrag: .impeccable/surfaces/src-dashboard-main-tsx.md, Welt „Stream Deck“,
      Seed f31be6ec. Phase 1 (Module, Modulseite) am 19./20. September 2026, Phase 2
      (Übersicht, Kanal, System, Mitglieder, Ereignisse; Issue #81) am 20. September 2026.

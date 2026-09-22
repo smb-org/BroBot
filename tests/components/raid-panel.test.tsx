@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { WerbungPanel } from "../../src/modules/werbung/panel";
-import { ladeWerbungseinstellungen } from "../../src/modules/werbung/panel/service";
+import { WerbungPanel } from "../../src/modules/ads/panel";
+import { ladeWerbungseinstellungen } from "../../src/modules/ads/panel/service";
 import { ladeRaidEinstellungen } from "../../src/modules/raid/panel/service";
 import { RaidPanel } from "../../src/modules/raid/panel";
-import { ladeTextbefehle } from "../../src/modules/textbefehle/panel/service";
+import { ladeTextbefehle } from "../../src/modules/text_commands/panel/service";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { werbungModul } from "../../src/modules/werbung";
+import { werbungModul } from "../../src/modules/ads";
 import { LOGIN_SCOPES } from "../../src/worker/auth/oauth";
 import {
   listeAlleBroadcasterScopes,

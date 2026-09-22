@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { textbefehlModul, type TextbefehlMindeststufe } from "../../src/modules/textbefehle";
-import { createTextbefehlRepository } from "../../src/modules/textbefehle/adapters/d1";
+import { textbefehlModul, type TextbefehlMindeststufe } from "../../src/modules/text_commands";
+import { createTextbefehlRepository } from "../../src/modules/text_commands/adapters/d1";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,

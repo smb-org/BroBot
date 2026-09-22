@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { BotModule, ModuleEvent } from "../../src/modules/contract";
-import { werbungModul } from "../../src/modules/werbung";
+import { werbungModul } from "../../src/modules/ads";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";

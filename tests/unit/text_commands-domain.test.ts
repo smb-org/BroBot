@@ -6,7 +6,7 @@ import {
   cooldownRestzeit,
   chatStatusErfuelltStufe,
   gueltigerBefehlsname,
-} from "../../src/modules/textbefehle/domain";
+} from "../../src/modules/text_commands/domain";
 
 describe("Textbefehle-Domain", () => {
   it("erkennt ein generisches !-Wort ohne Sonderfall", () => {

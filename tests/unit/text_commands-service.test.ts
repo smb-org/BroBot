@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { ModuleEvent, ModuleResult } from "../../src/modules/contract";
-import { verarbeiteTextbefehlNachricht } from "../../src/modules/textbefehle/service";
-import type { Textbefehl, TextbefehlRepository } from "../../src/modules/textbefehle";
+import { verarbeiteTextbefehlNachricht } from "../../src/modules/text_commands/service";
+import type { Textbefehl, TextbefehlRepository } from "../../src/modules/text_commands";
 
 const JETZT = "2026-09-19T12:00:00.000Z";
 

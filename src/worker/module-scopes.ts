@@ -1,5 +1,5 @@
 import { MODULES } from "../modules/registry";
-import { WERBUNG_OPTIONALE_BROADCASTER_SCOPES } from "../modules/werbung/contracts";
+import { WERBUNG_OPTIONALE_BROADCASTER_SCOPES } from "../modules/ads/contracts";
 import type { BotModule } from "../modules/contract";
 import { LOGIN_SCOPES } from "./auth/oauth";
 
