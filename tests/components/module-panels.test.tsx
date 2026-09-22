@@ -1,3 +1,5 @@
+import type { ReactElement } from "react";
+
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -10,7 +12,10 @@ vi.mock("../../src/modules/registry", () => ({
   ],
 }));
 
+import { UiProvider } from "../../src/dashboard/ui";
 import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
+
+const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
 
 describe("Module panel loader", () => {
   afterEach(() => {
@@ -68,7 +73,7 @@ describe("Module panel loader", () => {
     const fetcher = vi.fn<typeof fetch>();
     const onNavigate = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    render(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} />);
 
     const taste = screen.getByRole("link", { name: /aktiv.*Läuft/i });
     fireEvent.click(taste);
@@ -78,7 +83,7 @@ describe("Module panel loader", () => {
   });
 
   it("shows no kicker above the module heading", () => {
-    render(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("Tastenraster")).not.toBeInTheDocument();

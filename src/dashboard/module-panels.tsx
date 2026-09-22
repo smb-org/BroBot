@@ -1,12 +1,14 @@
-import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
+import { lazy, Suspense, useState, type ComponentType, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
 import type { ChannelRole } from "../contracts/values";
 import type { PanelActiveModule, PanelModuleState } from "../panel-contract";
+import { PanelApiError, setChannelModuleEnabled } from "./api";
 import { dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage, type LocaleCatalog } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
+import { Switch } from "./ui";
 
 const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
 
@@ -230,6 +232,8 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true }:
   );
 };
 
+const canManageModules = (role: ChannelRole): boolean => role !== "operator";
+
 interface ModuleWorkspaceProperties {
   channelId: string;
   ownRole: ChannelRole;
@@ -239,14 +243,98 @@ interface ModuleWorkspaceProperties {
   onNavigate: (route: DashboardRoute) => void;
 }
 
+const ModuleWorkspaceRow = ({
+  channelId,
+  moduleId,
+  rawEnabled,
+  missingScopes,
+  manageable,
+  busy,
+  onToggle,
+  onNavigate,
+}: {
+  channelId: string;
+  moduleId: string;
+  rawEnabled: boolean;
+  missingScopes: string[];
+  manageable: boolean;
+  busy: boolean;
+  onToggle: (nextEnabled: boolean) => void;
+  onNavigate: (route: DashboardRoute) => void;
+}): ReactElement => {
+  const labels = workspaceTexts();
+  const texts = dashboardTexts();
+  const details = moduleDetails(moduleId);
+  const effectiveEnabled = rawEnabled && missingScopes.length === 0;
+  const state = missingScopes.length > 0 ? labels.disabled : statusWord(effectiveEnabled);
+  const route: DashboardRoute = { kind: "module", channelId, moduleId };
+
+  return (
+    <StateRow
+      label={details.name}
+      tone={missingScopes.length > 0 ? "warning" : effectiveEnabled ? "healthy" : "neutral"}
+      word={state}
+      icon={<ModuleIcon moduleId={moduleId} className="scope-zeile__icon" />}
+      detail={details.description}
+      action={
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <Switch
+            checked={rawEnabled}
+            ariaLabel={`${details.name}: ${statusWord(rawEnabled)}`}
+            pending={busy}
+            onChange={onToggle}
+            {...(manageable ? {} : { lockedReason: texts.module.managementLocked })}
+          />
+          <a
+            className="module-list-link"
+            href={dashboardRoutePath(route)}
+            onClick={(event) => { event.preventDefault(); onNavigate(route); }}
+          >{`${details.name} · ${statusWord(effectiveEnabled)}`}</a>
+        </div>
+      }
+    />
+  );
+};
+
 export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate }: ModuleWorkspaceProperties): ReactElement => {
-  void ownRole;
-  const registeredModules = MODULES.map((module) => ({
-    id: module.id,
-    enabled: modules.find((moduleState) => moduleState.id === module.id)?.enabled === true &&
-      (modules.find((moduleState) => moduleState.id === module.id)?.missingBroadcasterScopes?.length ?? 0) === 0,
-    missing: modules.find((moduleState) => moduleState.id === module.id)?.missingBroadcasterScopes ?? [],
-  }));
+  const texts = dashboardTexts();
+  const manageable = canManageModules(ownRole);
+  // The `modules` prop is owned by the caller and only refreshes on its own
+  // schedule; a toggle here has nowhere to report back to that would make it
+  // refetch. This tracks the in-flight/just-sent value per module so the row
+  // reflects the click immediately, and drops the override again once the
+  // caller's own data catches up to it (or reverts it, on failure).
+  const [pendingEnabled, setPendingEnabled] = useState<Record<string, boolean>>({});
+  const [busyModuleId, setBusyModuleId] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+
+  // "Adjusting state when a prop changes" (react.dev/learn/you-might-not-need-an-effect):
+  // done here, during render, rather than in an effect -- once the caller's
+  // own data catches up to an override, it drops without an extra render.
+  const [reconciledAgainst, setReconciledAgainst] = useState(modules);
+  if (modules !== reconciledAgainst) {
+    setReconciledAgainst(modules);
+    setPendingEnabled((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([moduleId, optimistic]) => modules.find((state) => state.id === moduleId)?.enabled !== optimistic),
+      );
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }
+
+  const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
+    setBusyModuleId(moduleId);
+    setToggleError(null);
+    setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
+    try {
+      await setChannelModuleEnabled(channelId, moduleId, nextEnabled);
+    } catch (toggleFailure: unknown) {
+      setPendingEnabled((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== moduleId)));
+      setToggleError(toggleFailure instanceof PanelApiError && toggleFailure.status === 401 ? texts.errors.sessionInvalid : texts.errors.changeFailed);
+    } finally {
+      setBusyModuleId(null);
+    }
+  };
 
   return (
     <section className="module-workspace" aria-label={dashboardTexts().navigation.module}>
@@ -256,22 +344,30 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
           {loading ? <span className="muted">{dashboardTexts().module.load}</span> : null}
         </header>
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        <div className="module-grid">
-          {registeredModules.map(({ id, enabled, missing }) => <ModuleTile
-            key={id}
-            channelId={channelId}
-            moduleId={id}
-            enabled={enabled}
-            {...(missing.length === 0 ? {} : { ledStatus: "amber" as const, ledLabel: workspaceTexts().disabled })}
-            onNavigate={onNavigate}
-          />)}
+        {toggleError === null ? null : <p className="form-error" role="alert">{toggleError}</p>}
+        <div className="zustand-liste">
+          {MODULES.map((module) => {
+            const state = modules.find((candidate) => candidate.id === module.id);
+            const rawEnabled = pendingEnabled[module.id] ?? state?.enabled === true;
+            return (
+              <ModuleWorkspaceRow
+                key={module.id}
+                channelId={channelId}
+                moduleId={module.id}
+                rawEnabled={rawEnabled}
+                missingScopes={state?.missingBroadcasterScopes ?? []}
+                manageable={manageable}
+                busy={busyModuleId === module.id}
+                onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
+                onNavigate={onNavigate}
+              />
+            );
+          })}
         </div>
       </div>
     </section>
   );
 };
-
-const canManageModules = (role: ChannelRole): boolean => role !== "operator";
 
 const ModuleListLink = ({ channelId, onNavigate }: { channelId: string; onNavigate: (route: DashboardRoute) => void }): ReactElement => {
   const route: DashboardRoute = { kind: "channel", channelId, section: "modules" };
