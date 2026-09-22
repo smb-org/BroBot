@@ -19,7 +19,7 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   headers: { "Content-Type": "application/json" },
 });
 
-describe("Dashboard-API-Requestgrenze", () => {
+describe("dashboard API request boundary", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
   });
@@ -28,7 +28,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     vi.unstubAllGlobals();
   });
 
-  it("weist eine absolute URL auf eine fremde Origin zurück, ohne fetch aufzurufen", async () => {
+  it("rejects an absolute URL to a foreign origin without calling fetch", async () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
 
@@ -36,7 +36,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("weist eine protokollrelative URL zurück, ohne fetch aufzurufen", async () => {
+  it("rejects a protocol-relative URL without calling fetch", async () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
 
@@ -44,7 +44,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("weist einen Pfad zurück, der über .. aus dem erlaubten Bereich führt", async () => {
+  it("rejects a path that escapes the allowed area via ..", async () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
 
@@ -52,7 +52,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("behält Sonderzeichen in Kanal-IDs und Audit-Cursor bei regulären Aufrufen bei", async () => {
+  it("preserves special characters in channel IDs and audit cursors on regular calls", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ channelId: "kanal/sonder?#" }))
       .mockResolvedValueOnce(jsonResponse({ entries: [], nextCursor: null }))
@@ -86,7 +86,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     );
   });
 
-  it("lädt Mitglieder und sucht einen Twitch-Nutzer kanalgebunden", async () => {
+  it("loads members and looks up a Twitch user, scoped to the channel", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ members: [] }))
       .mockResolvedValueOnce(jsonResponse({ user: { userId: "123", login: "neue-person", displayName: "Neue Person" } }));
@@ -107,7 +107,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     );
   });
 
-  it("überträgt Mitglieder-Cursor und Abbruchsignal", async () => {
+  it("forwards the member cursor and the abort signal", async () => {
     const controller = new AbortController();
     const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse({ members: [], nextCursor: null }));
     vi.stubGlobal("fetch", fetcher);
@@ -120,7 +120,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     );
   });
 
-  it("überträgt alle Ereignisfilter zusammen mit Cursor und Abbruchsignal", async () => {
+  it("forwards all event filters together with the cursor and the abort signal", async () => {
     const controller = new AbortController();
     const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse({ entries: [], nextCursor: null }));
     vi.stubGlobal("fetch", fetcher);
@@ -147,7 +147,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     );
   });
 
-  it("holt vor jeder Mitgliederänderung CSRF und sendet die passende Mutation", async () => {
+  it("fetches CSRF before every member change and sends the matching mutation", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ token: "csrf-token" }))
       .mockResolvedValueOnce(jsonResponse({ member: { userId: "123", role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" } }, 201))
@@ -187,7 +187,7 @@ describe("Dashboard-API-Requestgrenze", () => {
     );
   });
 
-  it("holt vor der Moderatorstatus-Prüfung CSRF und sendet nur den Zielkanal", async () => {
+  it("fetches CSRF before the moderator status check and sends only the target channel", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ token: "csrf-token" }))
       .mockResolvedValueOnce(jsonResponse({

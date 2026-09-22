@@ -55,13 +55,13 @@ const renderModulePage = (modules = moduleStates, channels = [channel]): void =>
   render(<DashboardApp />);
 };
 
-describe("Modulumschalter in der Brotkrume", () => {
+describe("Module switcher in the breadcrumb", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it("öffnet die Module des Kanals mit Symbol und Zustandstext", async () => {
+  it("opens the channel's modules with icon and state text", async () => {
     renderModulePage();
 
     await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
@@ -77,7 +77,7 @@ describe("Modulumschalter in der Brotkrume", () => {
     expect(within(listbox).getByRole("option", { name: /Textbefehle/ }).querySelector("svg")).toBeInTheDocument();
   });
 
-  it("wechselt aus der Liste direkt auf die gewählte Moduldetailseite", async () => {
+  it("switches straight from the list to the selected module's detail page", async () => {
     renderModulePage(moduleStates, [channel, secondChannel]);
 
     await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
@@ -90,7 +90,7 @@ describe("Modulumschalter in der Brotkrume", () => {
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/channel_events");
   });
 
-  it("führt das Segment Module zur Modulübersicht", async () => {
+  it("the Modules segment leads to the module overview", async () => {
     renderModulePage();
 
     await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
@@ -102,7 +102,7 @@ describe("Modulumschalter in der Brotkrume", () => {
     expect(window.location.pathname).toBe("/channels/kanal-a/modules");
   });
 
-  it("bleibt bei genau einem Modul ohne Aufklapp-Merkmal stehen", async () => {
+  it("stays without a dropdown affordance when there is exactly one module", async () => {
     renderModulePage([moduleStates[0] as typeof moduleStates[number]]);
 
     await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
@@ -112,7 +112,7 @@ describe("Modulumschalter in der Brotkrume", () => {
     expect(document.querySelector(".topbar__channel-chevron")).not.toBeInTheDocument();
   });
 
-  it("schließt den Modulumschalter mit Escape und gibt den Fokus zurück", async () => {
+  it("closes the module switcher with Escape and returns focus", async () => {
     renderModulePage();
 
     await screen.findByRole("switch", { name: "Textbefehle · Läuft" });

@@ -182,8 +182,8 @@ const makeEnvironment = async (
   };
 };
 
-describe("Login-Token-Wartung", () => {
-  it("schreibt auch im Widerrufs-Bestätigungspfad die Scopes des erfolgreichen Refreshs", async () => {
+describe("Login token maintenance", () => {
+  it("writes the scopes of a successful refresh even on the revocation-confirmation path", async () => {
     const database = new TestD1Database();
     try {
       const keys = parseKeyRing(keyRingSerialized);
@@ -229,7 +229,7 @@ describe("Login-Token-Wartung", () => {
     }
   });
 
-  it("schreibt die Scopes aus einer erfolgreichen Validate-Antwort in den Token-Umfang", async () => {
+  it("writes the scopes from a successful validate response into the token scope", async () => {
     const { environment, read } = await makeEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({
@@ -247,7 +247,7 @@ describe("Login-Token-Wartung", () => {
     expect(read().token_scopes_json).toBe('["channel:read:ads"]');
   });
 
-  it("schreibt die Scopes aus einem erfolgreichen Wartungs-Refresh in den Token-Umfang", async () => {
+  it("writes the scopes from a successful maintenance refresh into the token scope", async () => {
     const { environment, read } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -270,7 +270,7 @@ describe("Login-Token-Wartung", () => {
     expect(read().token_scopes_json).toBe('["channel:read:ads"]');
   });
 
-  it("validiert weit entfernte Login-Tokens, erneuert sie aber noch nicht", async () => {
+  it("validates login tokens with a distant expiry but doesn't renew them yet", async () => {
     const { environment } = await makeEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 7200 }),
@@ -284,7 +284,7 @@ describe("Login-Token-Wartung", () => {
     expect(fetcher.mock.calls[0]?.[0]).toBe("https://id.twitch.tv/oauth2/validate");
   });
 
-  it("ersetzt bei baldiger Ablaufzeit Access- und Refresh-Token gemeinsam", async () => {
+  it("replaces both access and refresh token together when expiry is imminent", async () => {
     const {
       environment,
       read,
@@ -310,7 +310,7 @@ describe("Login-Token-Wartung", () => {
     expect(read().updated_at).toBe("2026-09-18T00:00:00.000Z");
   });
 
-  it("wiederholt den D1-Write nach erfolgreichem Login-Refresh", async () => {
+  it("retries the D1 write after a successful login refresh", async () => {
     const { environment, getTokenWriteAttempts } = await makeEnvironment(
       "2026-09-18T00:59:59.000Z",
       { failTokenWriteOnce: true },
@@ -331,7 +331,7 @@ describe("Login-Token-Wartung", () => {
     expect(getTokenWriteAttempts()).toBe(2);
   });
 
-  it("behält einen bereits geschriebenen Login-Token, wenn die D1-Antwort verloren geht", async () => {
+  it("keeps an already-written login token when the D1 response is lost", async () => {
     const {
       environment,
       read,
@@ -363,7 +363,7 @@ describe("Login-Token-Wartung", () => {
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("klassifiziert invalid_client als vorübergehenden Refresh-Fehler", async () => {
+  it("classifies invalid_client as a temporary refresh error", async () => {
     const { environment, read } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -379,7 +379,7 @@ describe("Login-Token-Wartung", () => {
     expect(read().reason).toBe("invalid_client");
   });
 
-  it("widerruft bei invalid_grant die Identität und ihre bestehenden Sessions", async () => {
+  it("revokes the identity and its existing sessions on invalid_grant", async () => {
     const { environment, read, readSessions } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -404,7 +404,7 @@ describe("Login-Token-Wartung", () => {
     }]);
   });
 
-  it("refresh’t auch nach einem 401 bei noch weit entferntem Ablauf genau einmal", async () => {
+  it("refreshes exactly once even after a 401 when expiry is still far off", async () => {
     const { environment, read, getInitialAccessTokenCiphertext, getInitialRefreshTokenCiphertext } = await makeEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -425,7 +425,7 @@ describe("Login-Token-Wartung", () => {
     expect(read().refresh_token_ciphertext).not.toBe(getInitialRefreshTokenCiphertext());
   });
 
-  it("setzt bei einem frischen 401 nur nach dem fehlgeschlagenen Refresh auf revoked", async () => {
+  it("sets to revoked on a fresh 401 only after the refresh has failed", async () => {
     const { environment, read, readSessions } = await makeEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -445,7 +445,7 @@ describe("Login-Token-Wartung", () => {
     expect(readSessions()[0]?.revoked_at).toBe("2026-09-18T00:00:00.000Z");
   });
 
-  it("lässt eine erfolgreiche Rotation trotz parallelem Status-Update bestehen", async () => {
+  it("lets a successful rotation stand despite a concurrent status update", async () => {
     const { environment, read } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     let releaseValidation!: (response: Response) => void;
     let markValidationStarted!: () => void;
@@ -475,7 +475,7 @@ describe("Login-Token-Wartung", () => {
     expect(read().status).toBe("connected");
   });
 
-  it("setzt den erfolgreichen Stand nicht auf revoked, wenn ein paralleler Lauf mit altem Token invalid_grant erhält", async () => {
+  it("doesn't set the successful state to revoked when a parallel run gets invalid_grant with the old token", async () => {
     let markRotationCommitted!: () => void;
     const rotationCommitted = new Promise<void>((resolve) => { markRotationCommitted = resolve; });
     const { environment, read, readSessions, getInitialAccessTokenCiphertext } = await makeEnvironment(
@@ -509,7 +509,7 @@ describe("Login-Token-Wartung", () => {
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("setzt den Loginstand nach einem vor dem Speichern eintreffenden invalid_grant nicht dauerhaft auf revoked", async () => {
+  it("doesn't permanently set the login state to revoked after an invalid_grant that arrives before the save", async () => {
     let releaseTokenWrite!: () => void;
     let markTokenWriteStarted!: () => void;
     const tokenWriteStarted = new Promise<void>((resolve) => { markTokenWriteStarted = resolve; });
@@ -548,7 +548,7 @@ describe("Login-Token-Wartung", () => {
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("setzt revoked nicht durch eine bereits laufende erfolgreiche Rotation wieder auf connected", async () => {
+  it("doesn't let an already-running successful rotation reset revoked back to connected", async () => {
     const { environment, read, readSessions } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     let releaseRefresh!: (response: Response) => void;
     let markRefreshStarted!: () => void;
@@ -578,7 +578,7 @@ describe("Login-Token-Wartung", () => {
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("wartet nur Login-Identitäten mit mindestens einer aktiven Session", async () => {
+  it("maintains only login identities with at least one active session", async () => {
     const database = new TestD1Database();
     try {
       const addIdentity = async (userId: string, status: "connected" | "revoked", withSession: boolean) => {
@@ -638,7 +638,7 @@ describe("Login-Token-Wartung", () => {
     }
   });
 
-  it("begrenzt parallele Login-Wartung auf vier aktive Identitäten", async () => {
+  it("limits parallel login maintenance to four active identities", async () => {
     const database = new TestD1Database();
     try {
       const keys = parseKeyRing(keyRingSerialized);

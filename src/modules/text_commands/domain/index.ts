@@ -34,9 +34,9 @@ export const cooldownRestzeit = (zuletztVerwendet: string | null, jetzt: string,
 };
 
 /**
- * Die Stufen sind absichtlich keine Zahlenleiter. Die Statusliste kann mehrere
- * Badges enthalten: Moderator und Broadcaster erfüllen auch „Abonnent“ und
- * „VIP“, ein VIP aber nicht „Abonnent“.
+ * The tiers are deliberately not a numeric ladder. The status list can
+ * contain multiple badges: moderator and broadcaster also satisfy
+ * "subscriber" and "VIP", but a VIP does not satisfy "subscriber".
  */
 const statusForTier: Record<TextCommandMinimumTier, readonly ModuleChatStatus[]> = {
   everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],

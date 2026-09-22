@@ -84,7 +84,7 @@ const requestUrl = (input: RequestInfo | URL): URL => input instanceof URL
   ? input
   : typeof input === "string" ? new URL(input) : new URL(input.url);
 
-describe("Ereignisprotokoll", () => {
+describe("event log", () => {
   let database: TestD1Database;
 
   beforeEach(() => {
@@ -97,7 +97,7 @@ describe("Ereignisprotokoll", () => {
     vi.useRealTimers();
   });
 
-  it("protokolliert eine Entscheidung ohne Aktion mit ihrer Begründung", async () => {
+  it("logs a decision without an action along with its justification", async () => {
     await insertChannel(database, "kanal-a");
 
     await writeModuleDiagnostics(
@@ -134,7 +134,7 @@ describe("Ereignisprotokoll", () => {
     });
   });
 
-  it("legt bei leeren Diagnosen keine Zeile an und startet keinen Batch", async () => {
+  it("creates no row on empty diagnostics and starts no batch", async () => {
     await insertChannel(database, "kanal-a");
     const batch = vi.spyOn(database, "batch");
 
@@ -153,7 +153,7 @@ describe("Ereignisprotokoll", () => {
     expect(row?.count).toBe(0);
   });
 
-  it("speichert denselben Auslöser für mehrere Host-Diagnosen", async () => {
+  it("stores the same trigger for multiple host diagnostics", async () => {
     await insertChannel(database, "kanal-a");
 
     await writeModuleDiagnostics(
@@ -180,7 +180,7 @@ describe("Ereignisprotokoll", () => {
     ]));
   });
 
- it("behält beim Schreiben je Kanal nur die 500 neuesten Zeilen", async () => {
+ it("keeps only the 500 newest rows per channel when writing", async () => {
    await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertEvent(database, "kanal-b-alt", "kanal-b", "2026-09-17T00:00:00.000Z");
@@ -210,7 +210,7 @@ describe("Ereignisprotokoll", () => {
     expect(otherChannelRows.results.map((row) => row.event_id)).toEqual(["kanal-b-alt"]);
  });
 
-  it("räumt im stündlichen Cron nur Ereignisse älter als 14 Tage auf", async () => {
+  it("cleans up only events older than 14 days in the hourly cron", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-18T12:00:00.000Z"));
     await insertChannel(database, "kanal-a");
@@ -234,7 +234,7 @@ describe("Ereignisprotokoll", () => {
     expect(rows.results.map((row) => row.event_id)).toEqual(["grenze", "jung"]);
   });
 
-  it("verwendet für das Ereignis-Aufräumen den created_at-Index", async () => {
+  it("uses the created_at index for event cleanup", async () => {
     const preparedSql: string[] = [];
     const tracedDatabase = {
       prepare: (sql: string) => {
@@ -254,7 +254,7 @@ describe("Ereignisprotokoll", () => {
     expect(details).not.toContain("SCAN event_log");
   });
 
- it("lässt einen Bediener Ereignisse seitenweise lesen", async () => {
+ it("lets an operator read events page by page", async () => {
    await insertChannel(database, "kanal-a");
    await insertLoginIdentityAndSession(database, "user-1");
    await insertMember(database, "kanal-a", "user-1", "operator");
@@ -315,7 +315,7 @@ describe("Ereignisprotokoll", () => {
     expect(third.nextCursor).toBeNull();
  });
 
-  it("löst einen gespeicherten Akteur über Twitch auf und behält die ID", async () => {
+  it("resolves a stored actor via Twitch and keeps the ID", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "viewer-1");
     await insertMember(database, "kanal-a", "viewer-1", "operator");
@@ -342,7 +342,7 @@ describe("Ereignisprotokoll", () => {
     }));
   });
 
-  it("fällt bei fehlender Twitch-Auflösung auf die Akteur-ID zurück", async () => {
+  it("falls back to the actor ID when Twitch resolution is missing", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "viewer-1");
     await insertMember(database, "kanal-a", "viewer-1", "operator");
@@ -364,7 +364,7 @@ describe("Ereignisprotokoll", () => {
     }));
   });
 
-  it("filtert Herkunft, Modul, Ton und Person in der kanalgebundenen Abfrage", async () => {
+  it("filters origin, module, tone, and person in the channel-scoped query", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "viewer-1");
@@ -394,7 +394,7 @@ describe("Ereignisprotokoll", () => {
     await expect(eventIds("module=werbung&actor=person-a")).resolves.toEqual([]);
   });
 
-  it("hält auch eine gefilterte Ereignisabfrage strikt im angeforderten Kanal", async () => {
+  it("keeps even a filtered event query strictly within the requested channel", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -409,7 +409,7 @@ describe("Ereignisprotokoll", () => {
     expect(response.status).toBe(403);
   });
 
-  it("verweigert Ereignisse aus einem fremden Kanal mit 403", async () => {
+  it("denies events from a different channel with 403", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");

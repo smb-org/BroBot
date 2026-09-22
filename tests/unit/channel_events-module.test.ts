@@ -15,8 +15,8 @@ const event = (subscriptionType: string, payload: Record<string, unknown>, subsc
   chatStatus: null,
 });
 
-describe("Kanalereignisse-Modul", () => {
-  it("gibt für alle Ereignisarten niemals Aktionen zurück", async () => {
+describe("channel events module", () => {
+  it("never returns actions for any event kind", async () => {
     const events = [
       event("channel.raid", { viewers: 4 }, "incoming"),
       event("channel.raid", { viewers: 4 }, "outgoing"),

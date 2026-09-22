@@ -10,8 +10,8 @@ const diagnose = (
   receivedAt?: string,
 ) => diagnoseChannelEvent(subscriptionType, payload, "kanal-a", variant, receivedAt);
 
-describe("Kanalereignisse-Domain", () => {
-  it("bildet eingehende und ausgehende Raids mit Quelle/Ziel und Zuschauern ab", () => {
+describe("channel events domain", () => {
+  it("maps incoming and outgoing raids with source/target and viewers", () => {
     expect(diagnose("channel.raid", {
       from_broadcaster_user_name: "Quelle Name",
       from_broadcaster_user_login: "quelle_login",
@@ -30,7 +30,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("bildet gesendete und empfangene Shoutouts ab", () => {
+  it("maps sent and received shoutouts", () => {
     expect(diagnose("channel.shoutout.create", {
       to_broadcaster_user_name: "Ziel",
       to_broadcaster_user_login: "ziel",
@@ -51,7 +51,7 @@ describe("Kanalereignisse-Domain", () => {
   it.each([
     ["sub", "channel_events.chat.sub"],
     ["resub", "channel_events.chat.resub"],
-  ])("bildet %s mit der beteiligten Person ab", (noticeType, code) => {
+  ])("maps %s with the person involved", (noticeType, code) => {
     expect(diagnose("channel.chat.notification", {
       notice_type: noticeType,
       chatter_user_name: "Alice",
@@ -63,7 +63,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("bildet Gift-Sub, Community-Gift und Ankündigung mit Beteiligten ab", () => {
+  it("maps gift sub, community gift, and announcement with participants", () => {
     expect(diagnose("channel.chat.notification", {
       notice_type: "sub_gift",
       gifter_user_name: "Giftperson",
@@ -91,7 +91,7 @@ describe("Kanalereignisse-Domain", () => {
     });
   });
 
-  it("meldet unbekannte notice_type genau einmal und kürzt fremden Text", () => {
+  it("reports an unknown notice_type exactly once and truncates foreign text", () => {
     const noticeType = "x".repeat(240);
     expect(diagnose("channel.chat.notification", { notice_type: noticeType })).toEqual([{
       code: "channel_events.chat.unbekannt",
@@ -102,7 +102,7 @@ describe("Kanalereignisse-Domain", () => {
   it.each([
     ["ban", "channel_events.moderation.ban"],
     ["warn", "channel_events.moderation.warn"],
-  ])("bildet %s mit betroffener und ausführender Person sowie Grund ab", (action, code) => {
+  ])("maps %s with the affected and acting person plus a reason", (action, code) => {
     expect(diagnose("channel.moderate", {
       action,
       moderator_user_name: "Moderation",
@@ -122,7 +122,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("berechnet die Timeout-Dauer aus Ereigniszeit und ends_at", () => {
+  it("computes the timeout duration from the event time and ends_at", () => {
     expect(diagnose("channel.moderate", {
       action: "timeout",
       moderator_user_name: "Moderation",
@@ -143,7 +143,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("gibt einen Ban mit ends_at nicht als Timeout aus", () => {
+  it("doesn't report a ban with ends_at as a timeout", () => {
     expect(diagnose("channel.moderate", {
       action: "ban",
       ban: { user_name: "Betroffene Person", ends_at: "2026-09-20T10:05:00.000Z" },
@@ -153,7 +153,7 @@ describe("Kanalereignisse-Domain", () => {
   it.each([
     ["untimeout", "channel_events.moderation.untimeout"],
     ["unban", "channel_events.moderation.unban"],
-  ])("bildet %s ohne Grund als Rücknahme ab", (action, code) => {
+  ])("maps %s without a reason as a reversal", (action, code) => {
     expect(diagnose("channel.moderate", {
       action,
       moderator_user_name: "Moderation",
@@ -164,7 +164,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("bildet die gelöschte Nachricht ab und kürzt Fremdtexte", () => {
+  it("maps the deleted message and truncates foreign text", () => {
     expect(diagnose("channel.moderate", {
       action: "delete",
       moderator_user_name: "Moderation",
@@ -182,14 +182,14 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("meldet shared_chat_ban als genau eine unbekannte Moderationsaktion", () => {
+  it("reports shared_chat_ban as exactly one unknown moderation action", () => {
     expect(diagnose("channel.moderate", { action: "shared_chat_ban" })).toEqual([{
       code: "channel_events.moderation.unbekannt",
       detail: { action: "shared_chat_ban" },
     }]);
   });
 
-  it("bildet einen AutoMod-Haltevorgang mit Person, Kategorie und Nachricht ab", () => {
+  it("maps an AutoMod hold with person, category, and message", () => {
     expect(diagnose("automod.message.hold", {
       user_name: "TwitchDev",
       user_login: "twitchdev",
@@ -205,7 +205,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("bildet eine Verdachtsnachricht mit dokumentierter Einstufung und Text ab", () => {
+  it("maps a suspicious-user message with documented classification and text", () => {
     expect(diagnose("channel.suspicious_user.message", {
       user_name: "Xemdo",
       user_login: "xemdo",
@@ -223,7 +223,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("trennt verschärfte Einstufung und Entwarnung samt ausführender Person", () => {
+  it("distinguishes an escalated classification from a clearance, including the acting person", () => {
     expect(diagnose("channel.suspicious_user.update", {
       user_name: "Xemdo",
       user_login: "xemdo",
@@ -252,7 +252,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("lässt unbekannte oder fehlende Verdachtsfelder weg", () => {
+  it("omits unknown or missing suspicious-user fields", () => {
     expect(diagnose("automod.message.hold", {})).toEqual([{
       code: "channel_events.automod.halte",
       detail: {},
@@ -275,7 +275,7 @@ describe("Kanalereignisse-Domain", () => {
     }]);
   });
 
-  it("kürzt den zurückgehaltenen AutoMod-Text sichtbar", () => {
+  it("visibly truncates the held-back AutoMod text", () => {
     expect(diagnose("automod.message.hold", {
       user_name: "Person",
       message: "x".repeat(240),

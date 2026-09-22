@@ -4,15 +4,16 @@ import { EVENTSUB_SUBSCRIPTION_TYPES } from "../../src/contracts/values";
 import { EVENTSUB_SUBSCRIPTION_DEFINITIONS } from "../../src/worker/eventsub-subscriptions";
 
 /**
- * Die Abotypen stehen in `contracts/`, weil die Module sie brauchen und nicht
- * aus `worker/` importieren dürfen; die Bedingungen zum Anlegen stehen im
- * Worker, weil nur er sie baut. Zwei Orte heißt: sie können auseinanderlaufen.
- * Der Compiler merkt nur die eine Richtung — ein Typ in der Tabelle, den das
- * Tupel nicht kennt, ist ein Typfehler. Die andere Richtung, ein Tupeleintrag
- * ohne Abo, bliebe stumm: der Bot würde ihn nie bei Twitch anlegen.
+ * The subscription types live in `contracts/`, because the modules need
+ * them and aren't allowed to import from `worker/`; the conditions for
+ * creating them live in the worker, because only it builds them. Two
+ * locations means they can drift apart. The compiler only catches one
+ * direction — a type in the table that the tuple doesn't know is a type
+ * error. The other direction, a tuple entry without a subscription, would
+ * stay silent: the bot would never create it on Twitch.
  */
-describe("EventSub-Abotypen", () => {
-  it("hält Tupel und Definitionstabelle deckungsgleich", () => {
+describe("EventSub subscription types", () => {
+  it("keeps the tuple and the definition table congruent", () => {
     const fromTable = [...new Set(
       EVENTSUB_SUBSCRIPTION_DEFINITIONS.map((definition) => definition.subscriptionType),
     )].sort();

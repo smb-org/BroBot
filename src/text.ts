@@ -1,6 +1,6 @@
 const EVENT_TEXT_MAXIMUM_LENGTH = 200;
 
-/** Kürzt protokollierte Texte sichtbar auf höchstens 200 Zeichen. */
+/** Truncates logged text visibly to at most 200 characters. */
 export const kuerzeAuf200Zeichen = (text: string): string =>
   text.length <= EVENT_TEXT_MAXIMUM_LENGTH
     ? text

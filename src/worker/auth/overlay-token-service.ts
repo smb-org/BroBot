@@ -89,8 +89,8 @@ export const issueOverlayToken = async (
     revocationReason: null,
     lastUsedAt: null,
   }, input.actor);
-  // Die Mitgliedschaft oder die Session ist zwischen Guard und Mutation
-  // erloschen. Es gibt kein Token, also auch keine URL.
+  // The membership or the session expired between the guard and the
+  // mutation. There's no token, so no URL either.
   if (!issued) return null;
 
   const overlayUrl = new URL("/overlay", input.publicOrigin);

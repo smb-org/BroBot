@@ -106,7 +106,7 @@ const makeRequest = async (
   return new Request(`https://brobot.example${path}`, { method, headers });
 };
 
-describe("Panel-Leseendpunkte", () => {
+describe("Panel read endpoints", () => {
   let database: TestD1Database;
   let environment: Env;
 
@@ -121,7 +121,7 @@ describe("Panel-Leseendpunkte", () => {
     vi.useRealTimers();
   });
 
-  it("weist eine kanalgebundene Les Anfrage ohne Session ab", async () => {
+  it("rejects a channel-bound read request without a session", async () => {
     await insertChannel(database, "kanal-a");
 
     const response = await panelRouter.fetch(
@@ -132,7 +132,7 @@ describe("Panel-Leseendpunkte", () => {
     expect(response.status).toBe(401);
   });
 
-  it("weist die nicht kanalgebundene Kanalliste ohne Session ab", async () => {
+  it("rejects the non-channel-bound channel list without a session", async () => {
     const response = await panelRouter.fetch(
       await makeRequest(null, "/api/channels"),
       environment,
@@ -141,7 +141,7 @@ describe("Panel-Leseendpunkte", () => {
     expect(response.status).toBe(401);
   });
 
-  it("weist eine vorhandene, aber nicht zugehörige Kanalroute ab", async () => {
+  it("rejects an existing but unrelated channel route", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -185,7 +185,7 @@ describe("Panel-Leseendpunkte", () => {
     expect(foreignResponses.map((response) => response.status)).toEqual([403, 403, 403]);
   });
 
-  it("liefert einen berechtigten Kanal ohne Broadcaster-Verbindung in Liste, Übersicht und System", async () => {
+  it("returns an authorized channel without a broadcaster connection in the list, overview, and system", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -216,7 +216,7 @@ describe("Panel-Leseendpunkte", () => {
     expect(system.broadcasterConnection).toBe("not_connected");
   });
 
-  it("liefert den gespeicherten Scope-Zustand und alle EventSub-Abos im System-Contract", async () => {
+  it("returns the stored scope state and all EventSub subscriptions in the system contract", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -252,7 +252,7 @@ describe("Panel-Leseendpunkte", () => {
     });
   });
 
-  it("liefert fehlende Broadcaster-Scopes nur für markierte Kanäle aus dem Worker", async () => {
+  it("returns missing broadcaster scopes from the worker only for flagged channels", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await database.prepare("UPDATE channels SET full_consent = 1 WHERE channel_id = ?").bind("kanal-a").run();
     await insertLoginIdentityAndSession(database, "user-1");
@@ -271,7 +271,7 @@ describe("Panel-Leseendpunkte", () => {
     );
   });
 
-  it("liefert ausschließlich die Kanäle mit einer Mitgliedszeile des Benutzers", async () => {
+  it("returns only the channels with a membership row for the user", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertChannel(database, "kanal-b", "Beta");
     await insertChannel(database, "kanal-c", "Gamma");
@@ -296,7 +296,7 @@ describe("Panel-Leseendpunkte", () => {
     ]);
   });
 
-  it("prüft channel:bot bei der Broadcaster-Identität jedes Kanals", async () => {
+  it("checks channel:bot on the broadcaster identity of each channel", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertChannel(database, "kanal-b", "Beta");
     await insertLoginIdentityAndSession(database, "user-1", ["channel:bot"]);
@@ -320,7 +320,7 @@ describe("Panel-Leseendpunkte", () => {
     ]);
   });
 
-  it("aktualisiert die Zustimmung nach einer erneuten Broadcaster-Anmeldung", async () => {
+  it("updates the consent after a renewed broadcaster login", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertLoginIdentityAndSession(database, "kanal-a");
@@ -344,7 +344,7 @@ describe("Panel-Leseendpunkte", () => {
     expect((await after.json<{ channelBotConsent: string }>()).channelBotConsent).toBe("granted");
   });
 
-  it("zeigt ein fehlgeschlagenes Chat-Abo im Kanalzustand", async () => {
+  it("shows a failed chat subscription in the channel state", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -388,7 +388,7 @@ describe("Panel-Leseendpunkte", () => {
     });
   });
 
-  it("zeigt auch die Ablehnung des Moderations-Abos als letzten Fehler", async () => {
+  it("also shows the moderation subscription's rejection as the last error", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -422,7 +422,7 @@ describe("Panel-Leseendpunkte", () => {
     });
   });
 
-  it("liefert den tatsächlichen Kanalzustand, aktive Module und gespeicherte Ursachen", async () => {
+  it("returns the actual channel state, active modules, and stored reasons", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
@@ -489,7 +489,7 @@ describe("Panel-Leseendpunkte", () => {
     });
   });
 
-  it("begrenzt das Audit-Log und blättert mit dem gelieferten Cursor", async () => {
+  it("limits the audit log and paginates with the supplied cursor", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -526,7 +526,7 @@ describe("Panel-Leseendpunkte", () => {
     expect(second.nextCursor).toBeNull();
   });
 
-  it("löst Audit-Akteure seitenweise in einem Twitch-Aufruf auf und behält ungelöste IDs", async () => {
+  it("resolves audit actors page by page in a single Twitch call and keeps unresolved ids", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -562,7 +562,7 @@ describe("Panel-Leseendpunkte", () => {
   });
 });
 
-describe("manuelle Moderatorstatus-Prüfung", () => {
+describe("manual moderator status check", () => {
   let database: TestD1Database;
   let environment: Env;
 
@@ -583,7 +583,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     vi.useRealTimers();
   });
 
-  it("weist einen Bediener im Worker ab", async () => {
+  it("rejects an operator in the worker", async () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
@@ -597,7 +597,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("weist ein gültiges Mitglied eines fremden Kanals ab", async () => {
+  it("rejects a valid member of a foreign channel", async () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
@@ -611,7 +611,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("weist eine Mutation ohne CSRF-Token vor der Twitch-Abfrage ab", async () => {
+  it("rejects a mutation without a CSRF token before the Twitch call", async () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
@@ -625,7 +625,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("aktualisiert bei Erfolg nur den aufgerufenen Kanal und startet keine Wartung", async () => {
+  it("updates only the requested channel on success and starts no maintenance run", async () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     await insertBotChannelStatus(database, "kanal-a", false, "2026-09-18T03:00:00.000Z", "moderator_entfernt");
     await insertBotChannelStatus(database, "kanal-b", false, "2026-09-18T03:00:00.000Z", "moderator_entfernt");
@@ -659,7 +659,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(fetcher.mock.calls.some((call) => String(call[0]).includes("channel-b"))).toBe(false);
   });
 
-  it("weist eine Prüfung innerhalb des Cooldowns ab und nennt den frühesten Zeitpunkt", async () => {
+  it("rejects a check within the cooldown and states the earliest allowed time", async () => {
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ data: [{ broadcaster_id: "kanal-a" }] }),
@@ -683,7 +683,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("blockiert einen parallelen Auslöser desselben Kanals atomar", async () => {
+  it("atomically blocks a concurrent trigger for the same channel", async () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     let releaseTwitch!: (response: Response) => void;
     const twitchResponse = new Promise<Response>((resolve) => { releaseTwitch = (response) => { resolve(response); }; });
@@ -707,7 +707,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("berücksichtigt auch eine frische Prüfung aus dem Wartungslauf", async () => {
+  it("also honors a fresh check from the maintenance run", async () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     await insertBotChannelStatus(database, "kanal-a", true, "2026-09-18T03:57:00.000Z", null);
     const fetcher = vi.fn();
@@ -724,7 +724,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("lässt den bisherigen Wert bei einem Twitch-Fehler unverändert und gibt die Ursache zurück", async () => {
+  it("leaves the previous value unchanged on a Twitch error and returns the reason", async () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     await insertBotChannelStatus(database, "kanal-a", true, "2026-09-18T03:00:00.000Z", null);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
@@ -747,7 +747,7 @@ describe("manuelle Moderatorstatus-Prüfung", () => {
     expect(await database.prepare("SELECT * FROM bot_channel_status_check_locks WHERE channel_id = ?").bind("kanal-a").first()).toBeNull();
   });
 
-  it("beendet eine hängende Twitch-Prüfung nach dem Zeitlimit und räumt nur ihre Sperre auf", async () => {
+  it("ends a hanging Twitch check after the timeout and cleans up only its own lock", async () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     const fetcher = vi.fn().mockReturnValue(new Promise<Response>(() => undefined));
     vi.stubGlobal("fetch", fetcher);

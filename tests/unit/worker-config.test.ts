@@ -50,8 +50,8 @@ const environment = (
   ...overrides,
 } as Env);
 
-describe("Healthcheck-Bindingvalidierung", () => {
-  it("meldet einen 31-Byte-Overlay-Pepper als Fehlkonfiguration", async () => {
+describe("Health check binding validation", () => {
+  it("reports a 31-byte overlay pepper as misconfigured", async () => {
     const health = await getHealthStatus(
       environment(Buffer.alloc(31, 4).toString("base64url")),
     );
@@ -63,7 +63,7 @@ describe("Healthcheck-Bindingvalidierung", () => {
     });
   });
 
-  it("akzeptiert einen kanonischen 32-Byte-Overlay-Pepper", () => {
+  it("accepts a canonical 32-byte overlay pepper", () => {
     const missingBindings = getMissingBindings(
       environment(Buffer.alloc(32, 4).toString("base64url")),
     );
@@ -71,7 +71,7 @@ describe("Healthcheck-Bindingvalidierung", () => {
     expect(missingBindings).toEqual([]);
   });
 
-  it("akzeptiert ein leeres Betreiber-Array und liest gültige IDs als Set", () => {
+  it("accepts an empty operator array and reads valid ids as a set", () => {
     const validPepper = Buffer.alloc(32, 4).toString("base64url");
     const env = environment(validPepper, {
       BETREIBER_USER_IDS: '["26876135", "42"]',
@@ -83,7 +83,7 @@ describe("Healthcheck-Bindingvalidierung", () => {
     expect(getPlatformUserIds({})).toEqual(new Set());
   });
 
-  it("meldet ein ungültiges Betreiber-Secret und liefert dafür ein leeres Set", () => {
+  it("reports an invalid operator secret and returns an empty set for it", () => {
     const validPepper = Buffer.alloc(32, 4).toString("base64url");
     const env = environment(validPepper, { BETREIBER_USER_IDS: '["nicht-numerisch"]' });
 
@@ -91,7 +91,7 @@ describe("Healthcheck-Bindingvalidierung", () => {
     expect(getPlatformUserIds(env)).toEqual(new Set());
   });
 
-  it("meldet fehlende Ressourcen-Bindings und eine ungültige Origin", () => {
+  it("reports missing resource bindings and an invalid origin", () => {
     const validPepper = Buffer.alloc(32, 4).toString("base64url");
     const missingBindings = getMissingBindings(environment(validPepper, {
       DB: undefined,
@@ -101,14 +101,14 @@ describe("Healthcheck-Bindingvalidierung", () => {
     expect(missingBindings).toEqual(["DB", "PUBLIC_ORIGIN"]);
   });
 
-  it("akzeptiert eine absolute Origin ohne Pfad oder Query", () => {
+  it("accepts an absolute origin without path or query", () => {
     const validPepper = Buffer.alloc(32, 4).toString("base64url");
     expect(getMissingBindings(environment(validPepper, {
       PUBLIC_ORIGIN: "http://localhost:5173",
     }))).toEqual([]);
   });
 
-  it("meldet eine nicht angewandte jüngste Migration als DB-Schemafehler", async () => {
+  it("reports an unapplied latest migration as a DB schema error", async () => {
     const validPepper = Buffer.alloc(32, 4).toString("base64url");
     const health = await getHealthStatus(environment(validPepper, {
       DB: schemaDatabase({
@@ -124,7 +124,7 @@ describe("Healthcheck-Bindingvalidierung", () => {
     });
   });
 
-  it("verlangt den Sentinel-Tisch der jüngsten Migration", async () => {
+  it("requires the sentinel table of the latest migration", async () => {
     const validPepper = Buffer.alloc(32, 4).toString("base64url");
     const health = await getHealthStatus(environment(validPepper, {
       DB: schemaDatabase({

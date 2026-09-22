@@ -6,7 +6,7 @@ export interface EventSubRevocationRecord {
   subscriptionId: string;
   channelId: string;
   subscriptionType: EventSubSubscriptionType;
-  /** Leer bei einem eindeutigen Ziel; wird nur für den lokalen Abo-Zustand benötigt. */
+  /** Empty for an unambiguous target; only needed for the local subscription state. */
   variant?: string;
   version?: string;
   status: string;
@@ -72,7 +72,7 @@ export const rememberEventSubMessage = async (
   return result.meta.changes > 0;
 };
 
-/** Liest den Deduplizierungsstand ohne die Message-ID vorab zu verbrauchen. */
+/** Reads the deduplication state without consuming the message ID up front. */
 export const hasEventSubMessage = async (
   db: D1Database,
   messageId: string,

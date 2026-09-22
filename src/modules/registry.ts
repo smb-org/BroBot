@@ -4,5 +4,5 @@ import { raidModule } from "./raid";
 import { textCommandModule } from "./text_commands";
 import { adsModule } from "./ads";
 
-// Dies ist die einzige Stelle, die alle Module kennt.
+// This is the only place that knows all modules.
 export const MODULES: readonly BotModule[] = [textCommandModule, channelEventsModule, adsModule, raidModule];

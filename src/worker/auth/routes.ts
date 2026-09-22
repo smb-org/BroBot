@@ -108,12 +108,12 @@ const maintainAfterBotAuthorization = async (env: Env, now: string): Promise<voi
   try {
     await maintainBotIdentity(env, now);
   } catch {
-    // Die Autorisierung ist bereits gespeichert; der Stundenlauf bleibt das Sicherheitsnetz.
+    // The authorization is already stored; the hourly run remains the safety net.
   }
   try {
     await maintainEventSubSubscriptions(env, now);
   } catch {
-    // Fehler werden vom Wartungslauf protokolliert und duerfen den Callback nicht kippen.
+    // Errors are logged by the maintenance run and must not break the callback.
   }
 };
 
@@ -121,7 +121,7 @@ const maintainAfterBroadcasterAuthorization = async (env: Env, now: string): Pro
   try {
     await maintainEventSubSubscriptions(env, now);
   } catch {
-    // Der Abgleich wird im Stundenlauf erneut versucht; die Zustimmung bleibt gespeichert.
+    // The reconciliation is retried in the hourly run; the consent remains stored.
   }
 };
 
@@ -193,11 +193,11 @@ const readBearerToken = (authorization: string | undefined): string | null => {
 };
 
 /**
- * Gibt ein bereits gueltiges Token unveraendert zurueck, statt bei jedem Aufruf
- * ein neues auszustellen. Cookie und Header muessen uebereinstimmen; holen zwei
- * Tabs zeitversetzt je ein eigenes Token, ueberschreibt der zweite Aufruf das
- * gemeinsame Cookie und der erste Tab scheitert danach mit 403 — unter anderem
- * beim Logout, der dann nichts widerruft, obwohl die Oberflaeche es meldet.
+ * Returns an already-valid token unchanged instead of issuing a new one on
+ * every call. Cookie and header must match; if two tabs each fetch their own
+ * token at different times, the second call overwrites the shared cookie
+ * and the first tab then fails with 403 — among other things during logout,
+ * which then revokes nothing even though the UI reports success.
  */
 authRouter.get("/api/csrf", async (context) => {
   const session = await getSessionFromRequest(context.req.raw, context.env);
@@ -306,9 +306,9 @@ authRouter.get("/auth/login", async (context) => {
 });
 
 /**
- * Die fehlende channel:bot-Zustimmung kann nur der Kanalinhaber nachfordern.
- * Die Mitgliedsrolle reicht dafür nicht: Ein Broadcaster darf weiterhin einen
- * Vertreter benennen, aber Twitch bindet die Zustimmung an die Identität.
+ * Only the channel owner can re-request the missing channel:bot consent.
+ * The member role is not enough for this: a broadcaster may still appoint a
+ * delegate, but Twitch ties the consent to the identity.
  */
 authRouter.get(
   "/auth/channels/:channelId/channel-bot",
@@ -335,9 +335,9 @@ authRouter.get(
 );
 
 /**
- * Holt die Scopes des angeforderten Registry-Moduls sowie die Zusatz-Scopes
- * aus den aktivierten Modulen der eigenen Broadcaster-Kanäle. Der Request darf
- * keine Scope-Liste vorgeben.
+ * Fetches the scopes of the requested registry module plus the additional
+ * scopes from the enabled modules of the user's own broadcaster channels.
+ * The request must not specify a scope list itself.
  */
 authRouter.get(
   "/auth/channels/:channelId/broadcaster-scopes/:moduleId",
@@ -372,8 +372,8 @@ authRouter.get(
 );
 
 /**
- * Verlangt eine Session: Ohne diese Pruefung kann jeder den Bot-Verbindungsfluss
- * starten und damit bestimmen, welches Twitch-Konto der Bot benutzt.
+ * Requires a session: without this check, anyone could start the bot
+ * connection flow and thereby determine which Twitch account the bot uses.
  */
 authRouter.get("/auth/bot/login", requireSessionAuthorization(), async (context) => {
   const started = await startOAuthAuthorization(context.env.DB, context.env, "bot", nowIso());
@@ -393,8 +393,8 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     now,
     stateNonce,
   );
-  // Das Cookie ist in jedem Fall verbraucht — auch wenn die Pruefung scheitert,
-  // damit ein abgefangener Callback nicht spaeter erneut versucht werden kann.
+  // The cookie is consumed in any case — even if the check fails — so that
+  // an intercepted callback cannot be retried later.
   context.header("Set-Cookie", clearOAuthStateCookie());
   if (state === null) return oauthError(context, "OAuth-State ist ungültig oder abgelaufen.");
 
@@ -431,10 +431,10 @@ authRouter.get("/auth/twitch/callback", async (context) => {
         return oauthError(context, "Der Twitch-Login gehört nicht zum konfigurierten Bot.", 403);
       }
       const current = await getBotIdentity(context.env.DB);
-      // Der Login ist aenderbar und wird nach einer Umbenennung neu vergeben.
-      // Steht bereits eine Bot-Identitaet, ist ihre User-ID massgeblich: sonst
-      // koennte sich jemand den frei gewordenen Namen sichern und den Bot in
-      // allen Kanaelen aus seinem Konto posten lassen.
+      // The login is changeable and gets reassigned after a rename. If a
+      // bot identity already exists, its user ID is authoritative: otherwise
+      // someone could claim the freed-up name and have the bot post from
+      // their account in every channel.
       if (current !== null && current.userId !== identity.userId) {
         await failOAuthTransaction(context.env.DB, state.transactionId, "bot_identity_user_mismatch");
         return oauthError(
@@ -465,7 +465,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
       try {
         context.executionCtx.waitUntil(maintenance);
       } catch {
-        // In Tests oder anderen runtimes ohne ExecutionContext laeuft die Arbeit weiter.
+        // In tests or other runtimes without an ExecutionContext, the work continues running anyway.
         void maintenance;
       }
       return context.redirect(redirectHome(context.env.PUBLIC_ORIGIN), 302);

@@ -29,7 +29,7 @@ const insertChannel = async (database: TestD1Database, channelId: string): Promi
   ).run();
 };
 
-/** Der Akteur, unter dem die Tests Token ausgeben; passt zu insertActor. */
+/** The actor under which the tests issue tokens; matches insertActor. */
 const TEST_ACTOR = { userId: "user-1", sessionId: "session-user-1" };
 
 const insertActor = async (database: TestD1Database, channelId: string): Promise<void> => {
@@ -56,7 +56,7 @@ const insertActor = async (database: TestD1Database, channelId: string): Promise
   ).bind(channelId, TEST_ACTOR.userId, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
 };
 
-/** Gibt ein Token aus und schlaegt fehl, wenn die Ausgabe verweigert wurde. */
+/** Issues a token and fails if the issuance was denied. */
 const issueTestToken = async (
   database: TestD1Database,
   input: Omit<IssueOverlayTokenInput, "actor">,
@@ -110,7 +110,7 @@ const readAudits = async (database: TestD1Database) => database.prepare(
   after_json: string;
 }>();
 
-describe("Overlay-Token-Service", () => {
+describe("Overlay token service", () => {
   let database: TestD1Database;
 
   beforeEach(async () => {
@@ -123,7 +123,7 @@ describe("Overlay-Token-Service", () => {
     database.close();
   });
 
-  it("bindet den Hash an den Pepper statt den Token wiederzuerkennen", async () => {
+  it("ties the hash to the pepper instead of recognizing the token", async () => {
     const first = await hashOverlayToken("tokenwert", pepper(4));
     const same = await hashOverlayToken("tokenwert", pepper(4));
     const otherPepper = await hashOverlayToken("tokenwert", pepper(5));
@@ -132,7 +132,7 @@ describe("Overlay-Token-Service", () => {
     expect(otherPepper).not.toBe(first);
   });
 
-  it("gibt einen langen Token ohne Ablauf aus und akzeptiert ihn nur mit demselben Pepper", async () => {
+  it("issues a long token without expiry and accepts it only with the same pepper", async () => {
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
@@ -156,7 +156,7 @@ describe("Overlay-Token-Service", () => {
     })).resolves.toBeNull();
   });
 
-  it("weist einen abgelaufenen Token ab", async () => {
+  it("rejects an expired token", async () => {
     const token = "abgelaufen-token";
     await insertStoredToken(database, token, "kanal-a", "2026-09-18T00:00:00.000Z");
 
@@ -167,7 +167,7 @@ describe("Overlay-Token-Service", () => {
     })).resolves.toBeNull();
   });
 
-  it("weist einen Token nach dem Widerruf ab", async () => {
+  it("rejects a token after revocation", async () => {
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
@@ -191,7 +191,7 @@ describe("Overlay-Token-Service", () => {
     })).resolves.toBeNull();
   });
 
-  it("auditiert Ausgabe und Widerruf ohne das Token und nur bei Erfolg", async () => {
+  it("audits issuance and revocation without the token, and only on success", async () => {
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
@@ -275,7 +275,7 @@ describe("Overlay-Token-Service", () => {
     expect(finalAudits.results).toHaveLength(2);
   });
 
-  it("verweigert dem Bediener Ausgabe und Widerruf im Mutations-Guard", async () => {
+  it("denies the operator issuance and revocation in the mutation guard", async () => {
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
@@ -303,7 +303,7 @@ describe("Overlay-Token-Service", () => {
     })).resolves.toBe(false);
   });
 
-  it("weist einen Token ohne freigegebenen Kanal ab", async () => {
+  it("rejects a token without an approved channel", async () => {
     const token = "nicht-freigegeben-token";
     database.sqlite.exec("PRAGMA foreign_keys = OFF");
     await insertStoredToken(database, token, "nicht-freigegeben", null);
@@ -316,7 +316,7 @@ describe("Overlay-Token-Service", () => {
     })).resolves.toBeNull();
   });
 
-  it("weist einen Token nach dem Löschen seines Kanals ab", async () => {
+  it("rejects a token after its channel is deleted", async () => {
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
@@ -334,7 +334,7 @@ describe("Overlay-Token-Service", () => {
     })).resolves.toBeNull();
   });
 
-  it("schreibt last_used_at höchstens alle fünf Minuten", async () => {
+  it("writes last_used_at at most every five minutes", async () => {
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
@@ -365,10 +365,10 @@ describe("Overlay-Token-Service", () => {
     expect(third?.lastUsedAt).toBe("2026-09-18T00:06:00.000Z");
   });
 
-  it("gibt kein Token aus, wenn die Mitgliedschaft zwischen Guard und Mutation entzogen wird", async () => {
-    // Zwischen dem Guard und der Ausgabe liegt request.text(). Ein Client kann
-    // den Body offen lassen, bis ihm der Zugriff entzogen wurde. Nachgestellt
-    // wurde eine Ausgabe nach entzogener Mitgliedschaft — Token unbefristet.
+  it("issues no token when membership is revoked between the guard and the mutation", async () => {
+    // request.text() sits between the guard and the issuance. A client can
+    // keep the body open until its access has been revoked. This reproduces
+    // an issuance after membership was revoked — an unbounded token.
     await database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
       .bind("kanal-a", TEST_ACTOR.userId).run();
 
@@ -385,7 +385,7 @@ describe("Overlay-Token-Service", () => {
       .first<{ count: number }>()).resolves.toEqual({ count: 0 });
   });
 
-  it("gibt kein Token aus, wenn die Session widerrufen ist", async () => {
+  it("issues no token when the session is revoked", async () => {
     await database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ?")
       .bind("2026-09-18T00:30:00.000Z", TEST_ACTOR.sessionId).run();
 
@@ -402,7 +402,7 @@ describe("Overlay-Token-Service", () => {
       .first<{ count: number }>()).resolves.toEqual({ count: 0 });
   });
 
-  it("widerruft kein Token, wenn die Session widerrufen ist", async () => {
+  it("doesn't revoke a token when the session is revoked", async () => {
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),

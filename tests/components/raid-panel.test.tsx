@@ -12,13 +12,13 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   headers: { "Content-Type": "application/json" },
 });
 
-describe("Raid-Panel-Ansicht", () => {
+describe("Raid panel view", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it("zeigt die Einstellungen zweisprachig an", async () => {
+  it("shows the settings bilingually", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
@@ -37,7 +37,7 @@ describe("Raid-Panel-Ansicht", () => {
     expect(screen.getByLabelText("Small raid message")).toHaveValue("Klein {channel} {viewers}");
   });
 
-  it("zeigt Felder für Bediener, deaktiviert sie aber mit Begründung", async () => {
+  it("shows fields for operators but disables them with a reason", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
@@ -57,7 +57,7 @@ describe("Raid-Panel-Ansicht", () => {
     expect(screen.getByRole("button", { name: "Raid-Einstellungen speichern" })).toBeDisabled();
   });
 
-  it("zeigt die abgeschaltete Shoutout-Schwelle deaktiviert, lässt die Text-Schwelle aber bedienbar", async () => {
+  it("shows the disabled shoutout threshold as disabled but leaves the text threshold usable", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
       shoutoutEnabled: false,
       shoutoutThreshold: 50,
@@ -73,7 +73,7 @@ describe("Raid-Panel-Ansicht", () => {
     expect(screen.getByLabelText("Text-Schwelle (Zuschauer)")).toBeEnabled();
   });
 
-  it("blendet die Erfolgsmeldung nach einer weiteren Änderung in beiden Panels aus", async () => {
+  it("hides the success message after a further change in both panels", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/raid/settings")) return Promise.resolve(jsonResponse({ settings: {
@@ -109,7 +109,7 @@ describe("Raid-Panel-Ansicht", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("behandelt ein geleertes Raid-Zahlenfeld als Feldfehler statt als null", async () => {
+  it("treats a cleared raid number field as a field error, not null", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/raid/settings") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
@@ -130,7 +130,7 @@ describe("Raid-Panel-Ansicht", () => {
     expect((field as HTMLInputElement).value).toBe("");
   });
 
-  it("reicht abgelaufene Sessions aller drei Panel-Services als PanelApiError mit Status 401 weiter", async () => {
+  it("propagates expired sessions from all three panel services as PanelApiError with status 401", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ error: "Sitzung abgelaufen" }, 401)));
 
     for (const load of [

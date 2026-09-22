@@ -154,7 +154,7 @@ export const ModuleTile = ({ channelId, moduleId, enabled, onNavigate, name, ico
   );
 };
 
-/** Kompatibler Navigationsbaustein für ältere Modul-Tests; die Seiten verwenden das Tastenraster. */
+/** Compatibility navigation component for older module tests; the pages use the tile grid. */
 export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
   channelId: string;
   activeModules: PanelActiveModule[];

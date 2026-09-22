@@ -1,14 +1,15 @@
 /**
- * Fehler einer Panel-Anfrage samt HTTP-Status.
+ * Error from a panel request, including the HTTP status.
  *
- * Liegt in `contracts/`, weil Dashboard **und** Module ihn brauchen: Das Dashboard
- * erkennt eine abgelaufene Sitzung am Status 401, und die Modul-Panels müssen ihn
- * dorthin weiterreichen können. In `dashboard/` wäre er für Module unerreichbar —
- * die Modulgrenze in `eslint.config.js` lässt dorthin nur `dashboard/locale` durch.
+ * Lives in `contracts/` because both the dashboard **and** modules need it: the
+ * dashboard recognizes an expired session by status 401, and the module panels
+ * need to be able to pass it on to there. In `dashboard/` it would be unreachable
+ * for modules — the module boundary in `eslint.config.js` only lets `dashboard/locale`
+ * through to there.
  *
- * Die Alternative wäre gewesen, `dashboard/api` für Module freizugeben. Das hätte
- * ihnen den Zugriff auf die gesamte Panel-Schnittstelle geöffnet statt auf diesen
- * einen Vertrag.
+ * The alternative would have been to expose `dashboard/api` to modules. That would
+ * have opened up access to the entire panel interface for them, instead of just
+ * this one contract.
  */
 export class PanelApiError extends Error {
   public constructor(

@@ -22,11 +22,11 @@ const mockedMaintainBotIdentity = vi.mocked(maintainBotIdentity);
 const mockedMaintainEventSubSubscriptions = vi.mocked(maintainEventSubSubscriptions);
 
 /**
- * Ein CSRF-Token fuer den Jetzt-Zeitpunkt. Ein festes Datum waere eine
- * Zeitbombe: Die geprueften Routen verwenden die echte Uhr, also liefe das
- * Token sieben Tage spaeter ab und der Test wuerde rot, ohne dass jemand
- * etwas geaendert haette. Den Ablauf selbst prueft csrf.test.ts mit
- * ausdruecklich uebergebenen Zeitpunkten.
+ * A CSRF token for the current moment. A fixed date would be a time bomb:
+ * the routes under test use the real clock, so the token would expire seven
+ * days later and the test would go red without anyone having changed
+ * anything. csrf.test.ts tests the expiry itself with explicitly passed
+ * timestamps.
  */
 const freshTimestamp = (): string => new Date().toISOString();
 
@@ -48,12 +48,12 @@ const sessionRowFor = (userId: string) => ({
 });
 
 /**
- * `sessionRow` beantwortet gezielt die Session-Abfrage, `botIdentityRow` die
- * Abfrage der Bot-Identitaet; alle uebrigen Abfragen liefern `firstResult`.
- * Ohne diese Trennung kaeme dieselbe Zeile als Session UND als Bot-Identitaet
- * zurueck, was Pruefungen auf einem Mock-Artefakt statt auf Verhalten testet.
- * Nicht gesetzte Zeilen fallen auf `firstResult` zurueck, damit bestehende
- * Tests unveraendert weiterlaufen.
+ * `sessionRow` specifically answers the session query, `botIdentityRow` the
+ * bot identity query; all other queries return `firstResult`. Without this
+ * separation, the same row would come back as both the session AND the bot
+ * identity, which tests against a mock artifact instead of actual behavior.
+ * Rows that aren't set fall back to `firstResult`, so existing tests keep
+ * running unchanged.
  */
 const makeEnvironment = (
   firstResult: unknown = null,
@@ -95,13 +95,13 @@ const makeEnvironment = (
   return { environment, statement };
 };
 
-/** Liest den Nonce aus dem State-Cookie, das der Login-Start gesetzt hat. */
+/** Reads the nonce from the state cookie that the login start set. */
 const stateNonceFrom = (response: Response): string => {
   const cookie = response.headers.get("set-cookie") ?? "";
   return /__Host-brobot_oauth_state=([^;]*)/.exec(cookie)?.[1] ?? "";
 };
 
-/** Baut den Callback samt State-Cookie, also so, wie der startende Browser ihn schickt. */
+/** Builds the callback together with the state cookie, the way the browser that started the flow would send it. */
 const callbackRequest = (login: Response, query = "&code=code"): Request => {
   const loginUrl = new URL(login.headers.get("location") ?? "https://invalid");
   const state = encodeURIComponent(loginUrl.searchParams.get("state") ?? "");
@@ -167,27 +167,27 @@ const countRows = async (database: TestD1Database, tabelle: string): Promise<num
   return zeile?.count ?? 0;
 };
 
-describe("Auth-Routen", () => {
+describe("auth routes", () => {
   beforeEach(() => {
     mockedMaintainBotIdentity.mockReset();
     mockedMaintainEventSubSubscriptions.mockReset();
   });
 
-  it("startet Login mit einem Twitch-Redirect und bindet den State an den Browser", async () => {
+  it("starts login with a Twitch redirect and binds the state to the browser", async () => {
     const { environment } = makeEnvironment();
     const response = await authRouter.fetch(new Request("https://brobot.example/auth/login"), environment);
     const cookie = response.headers.get("set-cookie") ?? "";
 
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toContain("https://id.twitch.tv/oauth2/authorize");
-    // Kein Session-Cookie — der Login ist noch nicht abgeschlossen.
+    // No session cookie — the login isn't complete yet.
     expect(cookie).not.toContain("__Host-brobot_session=");
     expect(cookie).toContain("__Host-brobot_oauth_state=");
     expect(cookie).toContain("HttpOnly; Secure; SameSite=Lax");
     expect(stateNonceFrom(response).length).toBeGreaterThan(0);
   });
 
-  it("gibt einem markierten Kanal beim Einladungslink den vollständigen Umfang", async () => {
+  it("gives a flagged channel the full scope via the invite link", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-voll");
@@ -208,7 +208,7 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("gibt einem unmarkierten Kanal beim Einladungslink nur den bisherigen Login-Umfang", async () => {
+  it("gives an unflagged channel only the previous login scope via the invite link", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-normal");
@@ -228,7 +228,7 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("ignoriert einen unbekannten Einladungslink-Kanal vollständig", async () => {
+  it("ignores an unknown invite-link channel entirely", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-voll");
@@ -250,7 +250,7 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("speichert bei unvollständigem Token weder Identität noch Sitzung und startet den zweiten Versuch", async () => {
+  it("stores neither identity nor session on an incomplete token and starts the second attempt", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-voll");
@@ -278,7 +278,7 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("beendet den zweiten unvollständigen Rücklauf mit 403 statt in einer Schleife", async () => {
+  it("ends the second incomplete callback with 403 instead of looping", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-voll");
@@ -313,7 +313,7 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("legt ein vollständiges Token ohne zweite Umleitung an", async () => {
+  it("creates a complete token without a second redirect", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-voll");
@@ -340,7 +340,7 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("weist einen falschen State zurück", async () => {
+  it("rejects an incorrect state", async () => {
     const { environment } = makeEnvironment();
     const response = await authRouter.fetch(
       new Request("https://brobot.example/auth/twitch/callback?state=manipuliert&code=code"),
@@ -350,7 +350,7 @@ describe("Auth-Routen", () => {
     expect(response.status).toBe(400);
   });
 
-  it("legt nach erfolgreichem Login eine serverseitige Session ohne Token im Cookie an", async () => {
+  it("creates a server-side session without a token in the cookie after a successful login", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "login",
@@ -379,7 +379,7 @@ describe("Auth-Routen", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("führt einen serverseitig hinterlegten Modul-Rückweg aus", async () => {
+  it("follows a server-stored module return path", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "login",
@@ -400,7 +400,7 @@ describe("Auth-Routen", () => {
     expect(response.headers.get("location")).toBe("https://brobot.example/channels/kanal-a/modules/ads");
   });
 
-  it("ignoriert ein nicht einfaches hinterlegtes Rückwegziel", async () => {
+  it("ignores a stored return target that isn't a simple path", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "login",
@@ -421,7 +421,7 @@ describe("Auth-Routen", () => {
     expect(response.headers.get("location")).toBe("https://brobot.example/");
   });
 
-  it("legt bei der Betreiberautorisierung nur die globale Bot-Identität an", async () => {
+  it("creates only the global bot identity during operator authorization", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "bot",
@@ -446,7 +446,7 @@ describe("Auth-Routen", () => {
     );
 
     expect(response.status).toBe(403);
-    // Das verbrauchte State-Cookie wird geräumt; eine Session entsteht nicht.
+    // The consumed state cookie gets cleared; no session is created.
     expect(response.headers.get("set-cookie") ?? "").not.toContain("__Host-brobot_session=");
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("foreign-user") || args.includes("someone-else"))).toBe(false);
     expect(statement.bind.mock.calls.some((args: unknown[]) => args[0] === "bot_identity_mismatch")).toBe(true);
@@ -454,7 +454,7 @@ describe("Auth-Routen", () => {
     expect(mockedMaintainEventSubSubscriptions).not.toHaveBeenCalled();
   });
 
-  it("akzeptiert den konfigurierten Bot-Login case-insensitiv", async () => {
+  it("accepts the configured bot login case-insensitively", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "bot",
@@ -479,12 +479,12 @@ describe("Auth-Routen", () => {
     );
 
     expect(response.status).toBe(302);
-    // Die Betreiberautorisierung legt keine Anmeldesession an.
+    // Operator authorization doesn't create a login session.
     expect(response.headers.get("set-cookie") ?? "").not.toContain("__Host-brobot_session=");
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("bot-user") && args.includes("BROBOT"))).toBe(true);
   });
 
-  it("stößt nach erfolgreicher Bot-Autorisierung beide globalen Wartungsläufe sequenziell an", async () => {
+  it("kicks off both global maintenance runs sequentially after successful bot authorization", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "bot",
@@ -530,7 +530,7 @@ describe("Auth-Routen", () => {
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("bot-user") && args.includes("brobot"))).toBe(true);
   });
 
-  it("wartet bei der Weiterleitung nicht auf die Wartung", async () => {
+  it("doesn't wait for maintenance during the redirect", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "bot",
@@ -573,7 +573,7 @@ describe("Auth-Routen", () => {
   });
 
   it.each(["Bot-Identität", "EventSub-Abos"])(
-    "lässt die Weiterleitung und die gespeicherte Identität bei einem Fehler im Lauf %s gültig",
+    "keeps the redirect and the stored identity valid when the %s run fails",
     async (failedRun) => {
       const transaction = {
         transaction_id: "transaction-1",
@@ -614,7 +614,7 @@ describe("Auth-Routen", () => {
     },
   );
 
-  it("stößt beim Login-Rückweg keine Bot-Wartung an", async () => {
+  it("doesn't kick off bot maintenance on the login return path", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "login",
@@ -635,7 +635,7 @@ describe("Auth-Routen", () => {
     expect(mockedMaintainEventSubSubscriptions).not.toHaveBeenCalled();
   });
 
-  it("stellt einer gültigen Session ein gebundenes CSRF-Token aus", async () => {
+  it("issues a bound CSRF token for a valid session", async () => {
     const { environment } = makeEnvironment({
       session_id: "session-1",
       user_id: "user-1",
@@ -666,7 +666,7 @@ describe("Auth-Routen", () => {
     expect(response.headers.get("set-cookie")).not.toContain("HttpOnly");
   });
 
-  it("weist einen schreibenden Logout ohne CSRF-Token zurück", async () => {
+  it("rejects a mutating logout without a CSRF token", async () => {
     const { environment } = makeEnvironment({
       session_id: "session-1",
       user_id: "user-1",
@@ -694,7 +694,7 @@ describe("Auth-Routen", () => {
     expect(response.status).toBe(403);
   });
 
-  it("beendet eine Session serverseitig und löscht das Cookie mit CSRF-Token", async () => {
+  it("ends a session server-side and clears the cookie, with a CSRF token", async () => {
     const { environment } = makeEnvironment({
       session_id: "session-1",
       user_id: "user-1",
@@ -734,7 +734,7 @@ describe("Auth-Routen", () => {
   it.each([
     ["nicht parsebarer", "kein-datum"],
     ["tatsächlich abgelaufener", "2000-01-01T00:00:00.000Z"],
-  ])("verwirft eine %s Session-Ablaufzeit aus der Datenbank", async (_description, expiresAt) => {
+  ])("rejects a %s session expiry from the database", async (_description, expiresAt) => {
     const { environment } = makeEnvironment({
       session_id: "session-1",
       user_id: "user-1",
@@ -759,7 +759,7 @@ describe("Auth-Routen", () => {
     )).resolves.toBeNull();
   });
 
-  it("akzeptiert den CSRF-Token nach dem Logout nicht erneut", async () => {
+  it("doesn't accept the CSRF token again after logout", async () => {
     const { environment, statement } = makeEnvironment({
       session_id: "session-1",
       user_id: "user-1",
@@ -816,7 +816,7 @@ describe("Auth-Routen", () => {
     await expect(authRouter.fetch(request, environment)).resolves.toHaveProperty("status", 401);
   });
 
-  it("liefert die Identität aus der D1-Session und nicht aus dem Cookie", async () => {
+  it("returns the identity from the D1 session, not from the cookie", async () => {
     const { environment } = makeEnvironment({
       session_id: "session-1",
       user_id: "db-user",
@@ -844,7 +844,7 @@ describe("Auth-Routen", () => {
     )).resolves.toMatchObject({ userId: "db-user", login: "db-login" });
   });
 
-  it("akzeptiert keine Session mit widerrufener Login-Identität über den echten SQLite-Join", async () => {
+  it("doesn't accept a session with a revoked login identity, via the real SQLite join", async () => {
     const database = new TestD1Database();
     try {
       await database.prepare(
@@ -891,7 +891,7 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("meldet einen abgelehnten Code-Tausch ohne Tokeninhalte", async () => {
+  it("reports a rejected code exchange without token contents", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "login",
@@ -911,10 +911,10 @@ describe("Auth-Routen", () => {
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("code_exchange_rejected"))).toBe(true);
   });
 
-  it("meldet niemanden an, wenn der Callback ohne State-Cookie aufgerufen wird", async () => {
-    // Nachgestellt: Der Angreifer startet den Login für sein Konto, fängt die
-    // unverbrauchte Callback-URL ab und lässt das Opfer sie öffnen. Ohne
-    // Browser-Bindung wäre das Opfer danach als Angreifer angemeldet.
+  it("logs no one in when the callback is called without a state cookie", async () => {
+    // Reenacted: the attacker starts the login for their own account, intercepts
+    // the unused callback URL, and gets the victim to open it. Without the
+    // browser binding, the victim would then be logged in as the attacker.
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "login",
@@ -938,11 +938,11 @@ describe("Auth-Routen", () => {
 
     expect(response.status).toBe(400);
     expect(response.headers.get("set-cookie") ?? "").not.toContain("__Host-brobot_session=");
-    // Der Code wird gar nicht erst eingelöst.
+    // The code never even gets redeemed.
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("meldet niemanden an, wenn das State-Cookie aus einem anderen Login stammt", async () => {
+  it("logs no one in when the state cookie comes from a different login", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "login",
@@ -971,8 +971,8 @@ describe("Auth-Routen", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("verlangt für den Start der Bot-Verbindung eine Session", async () => {
-    // Sonst bestimmt jeder Unangemeldete, welches Twitch-Konto der Bot benutzt.
+  it("requires a session to start the bot connection", async () => {
+    // Otherwise anyone unauthenticated could decide which Twitch account the bot uses.
     const { environment } = makeEnvironment();
     const response = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login"),
@@ -983,7 +983,7 @@ describe("Auth-Routen", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
-  it("lässt einen Verwalter die channel:bot-Zustimmung nicht für den Broadcaster starten", async () => {
+  it("doesn't let a manager start the channel:bot consent on behalf of the broadcaster", async () => {
     const { environment } = makeEnvironment(
       { role: "manager" },
       sessionRowFor("verwalter"),
@@ -999,7 +999,7 @@ describe("Auth-Routen", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
-  it("startet die channel:bot-Nachforderung für den Broadcaster des Kanals", async () => {
+  it("starts the channel:bot follow-up request for the channel's broadcaster", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -1023,7 +1023,7 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("verwirft den Callback mit einer anderen Kanalinhaber-Identität ohne Speicherung", async () => {
+  it("discards the callback with a different channel-owner identity without storing anything", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -1058,11 +1058,11 @@ describe("Auth-Routen", () => {
     }
   });
 
-  it("übernimmt keine Bot-Identität mit abweichender Twitch-User-ID", async () => {
-    // Logins lassen sich ändern und neu vergeben. Wird der Bot-Account
-    // umbenannt und jemand registriert den frei gewordenen Namen, darf er die
-    // Bot-Identität nicht übernehmen — sonst postet der Bot in allen Kanälen
-    // aus einem fremden Konto.
+  it("doesn't adopt a bot identity with a differing Twitch user ID", async () => {
+    // Logins can be changed and reassigned. If the bot account gets renamed
+    // and someone registers the name that became free, they must not be able
+    // to take over the bot identity — otherwise the bot would post in every
+    // channel from a stranger's account.
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "bot",
@@ -1092,7 +1092,7 @@ describe("Auth-Routen", () => {
     );
     fetchWith(
       new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
-      // Gleicher Login, andere User-ID: der Name wurde neu vergeben.
+      // Same login, different user ID: the name was reassigned.
       new Response(JSON.stringify({ data: [{ id: "uebernehmer", login: "brobot" }] }), { status: 200 }),
     );
 
@@ -1105,9 +1105,9 @@ describe("Auth-Routen", () => {
     expect(mockedMaintainEventSubSubscriptions).not.toHaveBeenCalled();
   });
 
-  it("gibt zwei Abrufen dasselbe CSRF-Token, damit ein zweiter Tab den ersten nicht entwertet", async () => {
-    // Überschreibt jeder Abruf das gemeinsame Cookie, scheitert der Logout des
-    // ersten Tabs mit 403 — der Worker widerruft dann nichts.
+  it("gives two fetches the same CSRF token, so a second tab doesn't invalidate the first", async () => {
+    // If every fetch overwrote the shared cookie, the first tab's logout would
+    // fail with 403 — and the worker would revoke nothing.
     const { environment } = makeEnvironment(sessionRowFor("user-1"));
     const cookieHeader = await sessionCookieHeaderFor("user-1");
 
@@ -1126,7 +1126,7 @@ describe("Auth-Routen", () => {
     const secondToken = await csrfTokenFrom(zweiter);
 
     expect(secondToken).toBe(firstToken);
-    // Kein neues Cookie, also bleibt das Token des ersten Tabs gültig.
+    // No new cookie, so the first tab's token stays valid.
     expect(zweiter.headers.get("set-cookie")).toBeNull();
   });
 });

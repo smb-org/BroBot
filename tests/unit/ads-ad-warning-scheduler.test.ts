@@ -5,15 +5,15 @@ import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 /**
- * Läuft die Vorwarnung im Durable Object, darf sie das Kanalobjekt niemals über
- * dessen eigene Bindung ansprechen. Das wäre ein Selbstaufruf: Das Input-Gate
- * stellt die Anfrage hinter den laufenden Alarm, der auf sie wartet.
+ * When the prewarning runs inside the Durable Object, it must never address the
+ * channel object through its own binding. That would be a self-call: the input
+ * gate queues the request behind the running alarm that is waiting on it.
  *
- * Diese Tests halten die Regel fest, indem die Bindung beim Zugriff wirft und
- * `idFromName` mitgezählt wird — sie fallen, sobald jemand wieder einen Stub
- * baut, statt den übergebenen Planer zu benutzen.
+ * These tests pin down the rule by making the binding throw on access and
+ * counting `idFromName` calls — they fail as soon as someone builds a stub
+ * again instead of using the scheduler that was passed in.
  */
-describe("Werbe-Vorwarnung im Kanalobjekt", () => {
+describe("ad prewarning in the channel object", () => {
   let database: TestD1Database;
 
   afterEach(() => { database.close(); });
@@ -43,12 +43,12 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
     };
   };
 
-  it("löscht den Wecker über den übergebenen Planer, nicht über die Kanalbindung", async () => {
+  it("clears the alarm through the scheduler passed in, not through the channel binding", async () => {
     database = new TestD1Database();
     idFromName.mockClear();
     await insertChannel(database, "kanal-a");
-    // Der Broadcaster hat channel:read:ads nicht erteilt: genau der Pfad,
-    // der den Wecker löschen will.
+    // The broadcaster hasn't granted channel:read:ads: exactly the path
+    // that wants to clear the alarm.
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
@@ -75,7 +75,7 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
     expect(zeilen.results.map((zeile) => zeile.code)).toEqual(["ads.vorwarnung.scope_fehlt"]);
   });
 
-  it("rührt die Kanalbindung auch dann nicht an, wenn das Modul abgeschaltet ist", async () => {
+  it("doesn't touch the channel binding either when the module is disabled", async () => {
     database = new TestD1Database();
     idFromName.mockClear();
     await insertChannel(database, "kanal-a");

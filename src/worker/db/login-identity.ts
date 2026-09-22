@@ -109,7 +109,7 @@ export const upsertLoginIdentity = async (
   db: D1Database,
   identity: LoginIdentityRecord,
 ): Promise<void> => {
-  // scopes_json wächst als historische Zustimmung; token_scopes_json beschreibt nur das gespeicherte Token und ersetzt.
+  // scopes_json grows as a historical record of consent; token_scopes_json describes only the stored token and gets replaced.
   await db.prepare(
     `INSERT INTO twitch_login_identity
       (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext,

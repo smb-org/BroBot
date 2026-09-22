@@ -9,9 +9,10 @@ import {
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-// Deckt die Zusicherungen aus Issue #63 direkt am Repository ab: Rollenschwelle,
-// Mandantentrennung und Audit-Kopplung im actorGuard selbst, unabhaengig von
-// Handler-Vorabpruefungen und ohne ein Modul in der Registry zu brauchen.
+// Covers the guarantees from issue #63 directly at the repository level: role
+// threshold, tenant separation, and audit coupling in actorGuard itself,
+// independent of handler precondition checks and without needing a module in
+// the registry.
 
 const NOW = "2026-09-19T00:00:00.000Z";
 const SETTINGS = '{"betrag":42}';
@@ -32,9 +33,9 @@ const auditCount = async (database: TestD1Database): Promise<number> => {
   return row?.count ?? 0;
 };
 
-// Gemeinsamer Ablauf der Verweigerungs-Faelle: Mitgliedschaft mit einer Rolle
-// in einem Kanal anlegen, Aktivierung in einem (moeglicherweise anderen)
-// Zielkanal versuchen, Ablehnung und unveraenderten Endzustand pruefen.
+// Common flow for the rejection cases: create a membership with a role in
+// one channel, attempt activation in a (possibly different) target channel,
+// verify the rejection and the unchanged final state.
 const expectDeniedCreate = async (
   database: TestD1Database,
   options: {
@@ -64,13 +65,13 @@ const expectDeniedCreate = async (
   await expect(auditCount(database)).resolves.toBe(0);
 };
 
-describe("Modulaktivierung im Repository", () => {
+describe("module activation in the repository", () => {
   let database: TestD1Database;
 
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
-  it("aktiviert ein Modul für einen Broadcaster mit genau einem Audit-Eintrag", async () => {
+  it("activates a module for a broadcaster with exactly one audit entry", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
@@ -89,7 +90,7 @@ describe("Modulaktivierung im Repository", () => {
     await expect(auditCount(database)).resolves.toBe(1);
   });
 
-  it("verweigert die Aktivierung durch einen Bediener und legt keine Zeile an", async () => {
+  it("denies activation by an operator and creates no row", async () => {
     await expectDeniedCreate(database, {
       memberChannelId: "kanal-a",
       role: "operator",
@@ -97,7 +98,7 @@ describe("Modulaktivierung im Repository", () => {
     });
   });
 
-  it("verweigert die Aktivierung in einem fremden Kanal trotz gültiger Session", async () => {
+  it("denies activation in a different channel despite a valid session", async () => {
     await expectDeniedCreate(database, {
       memberChannelId: "kanal-a",
       role: "broadcaster",
@@ -106,7 +107,7 @@ describe("Modulaktivierung im Repository", () => {
     });
   });
 
-  it("deaktiviert ein bestehendes Modul für einen Verwalter mit genau einem weiteren Audit-Eintrag", async () => {
+  it("deactivates an existing module for a manager with exactly one more audit entry", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -135,7 +136,7 @@ describe("Modulaktivierung im Repository", () => {
     await expect(auditCount(database)).resolves.toBe(2);
   });
 
-  it("verweigert eine Statusänderung durch einen Bediener und hinterlässt keinen weiteren Audit-Eintrag", async () => {
+  it("denies a status change by an operator and leaves no further audit entry", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
@@ -166,7 +167,7 @@ describe("Modulaktivierung im Repository", () => {
     await expect(auditCount(database)).resolves.toBe(1);
   });
 
-  it("verweigert die Deaktivierung eines Moduls in einem fremden Kanal", async () => {
+  it("denies deactivating a module in a different channel", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");

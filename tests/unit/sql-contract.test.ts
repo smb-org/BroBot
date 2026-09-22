@@ -49,10 +49,10 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
   })
   .sort();
 
-// Jede Luecke wird mit dem **echten** Produktionsfragment gefuellt, nicht mit einer
-// Attrappe. Eine Attrappe wuerde genau die Abfrage aus der Pruefung nehmen, die sie
-// ersetzt -- bei `channelStateQuery` waere das die groesste Abfrage des Projekts.
-// Nur `placeholders` ist zur Laufzeit gebildet und hat kein Produktionsliteral.
+// Every gap is filled with the **real** production fragment, not a
+// stand-in. A stand-in would take exactly the query from the check it
+// replaces -- for `channelStateQuery` that would be the project's largest query.
+// Only `placeholders` is built at runtime and has no production literal.
 const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["prepareModuleAudit === undefined ? \"\" : \"AND changes() > 0\"", "AND changes() > 0"],
@@ -70,7 +70,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
 ]);
 
-// Wrangler führt diese Tabelle selbst und legt sie nicht über unsere Migrationen an.
+// Wrangler manages this table itself and doesn't create it via our migrations.
 const schemaExceptions = [
   { fileName: "src/worker/config.ts", tableName: "d1_migrations" },
 ] as const;
@@ -127,8 +127,8 @@ const prepareBaseline = (): DatabaseSync => {
 const hasSchemaException = (query: SqlContractQuery): boolean => schemaExceptions.some((exception) =>
   exception.fileName === query.fileName && query.sql.includes(exception.tableName));
 
-describe("SQL-Vertrag", () => {
-  it("erzeugt die erwartete Baseline aus allen Migrationen", () => {
+describe("SQL contract", () => {
+  it("produces the expected baseline from all migrations", () => {
     const database = prepareBaseline();
     try {
       const objects = database.prepare(
@@ -142,12 +142,12 @@ describe("SQL-Vertrag", () => {
     }
   });
 
-  it("bereitet jede bekannte SQL-Abfrage gegen die Baseline vor", () => {
+  it("prepares every known SQL query against the baseline", () => {
     const database = prepareBaseline();
     try {
       const queries = collectPreparedQueries();
-      // Ohne diese Schranke waere der Test gruen, wenn der AST-Lauf nichts mehr
-      // findet -- etwa weil sich der Aufrufname aendert. Er pruefte dann nichts.
+      // Without this floor, the test would pass if the AST run no longer
+      // finds anything -- for example because the call name changes. It would then test nothing.
       expect(queries.length).toBeGreaterThanOrEqual(100);
       for (const query of queries) {
         if (hasSchemaException(query)) continue;

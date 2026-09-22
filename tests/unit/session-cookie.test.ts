@@ -21,8 +21,8 @@ const payload = {
   sessionId: "session-1",
 };
 
-describe("Session-Cookie", () => {
-  it("verwirft ein manipuliertes Cookie", async () => {
+describe("Session cookie", () => {
+  it("rejects a tampered cookie", async () => {
     const cookie = await createSessionCookie(
       payload,
       keyRing("cookie-v1", 1),
@@ -36,7 +36,7 @@ describe("Session-Cookie", () => {
     )).resolves.toBeNull();
   });
 
-  it("akzeptiert ausgemusterte Schlüssel beim Lesen und nutzt aktive Schlüssel beim Neuausstellen", async () => {
+  it("accepts retired keys when reading and uses active keys when reissuing", async () => {
     const oldCookieKeys = keyRing("cookie-v1", 1);
     const oldEncryptionKeys = keyRing("encryption-v1", 2);
     const rotatedCookieKeys = keyRing("cookie-v2", 3, [["cookie-v1", 1]]);
@@ -51,7 +51,7 @@ describe("Session-Cookie", () => {
     expect(newCookie).not.toBe(oldCookie);
   });
 
-  it("serialisiert HttpOnly-, Secure- und SameSite-Lax-Attribute", () => {
+  it("serializes HttpOnly, Secure, and SameSite=Lax attributes", () => {
     const serialized = serializeSessionCookie("signed-value", 604800);
 
     expect(serialized).toBe(

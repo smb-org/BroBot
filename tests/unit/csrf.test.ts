@@ -17,8 +17,8 @@ const keyRing = JSON.stringify({
   retired: [],
 });
 
-describe("CSRF-Token", () => {
-  it("akzeptiert ein gültiges Token nur für seine Session", async () => {
+describe("CSRF token", () => {
+  it("accepts a valid token only for its own session", async () => {
     const token = await createCsrfToken("session-1", keyRing, "2026-09-18T00:00:00.000Z");
 
     await expect(verifyCsrfToken(token, "session-1", keyRing, "2026-09-18T00:01:00.000Z"))
@@ -27,7 +27,7 @@ describe("CSRF-Token", () => {
       .resolves.toBe(false);
   });
 
-  it("weist ein abgelaufenes oder manipuliertes Token zurück", async () => {
+  it("rejects an expired or tampered token", async () => {
     const token = await createCsrfToken("session-1", keyRing, "2026-09-18T00:00:00.000Z");
 
     await expect(verifyCsrfToken(token, "session-1", keyRing, "2026-09-25T00:00:01.000Z"))
@@ -36,7 +36,7 @@ describe("CSRF-Token", () => {
       .resolves.toBe(false);
   });
 
-  it("stellt ein nicht-HttpOnly-Cookie für das Double-Submit-Verfahren aus", () => {
+  it("issues a non-HttpOnly cookie for the double-submit scheme", () => {
     expect(serializeCsrfCookie("token")).toBe(
       "__Host-brobot_csrf=token; Max-Age=604800; Path=/; Secure; SameSite=Lax",
     );

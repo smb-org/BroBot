@@ -81,7 +81,7 @@ const twitchErrorStatus = (error: unknown): number | null => {
   return typeof status === "number" ? status : null;
 };
 
-/** Holt Get Ad Schedule mit dem App-Token; ein leerer Termin ist Erfolg. */
+/** Fetches Get Ad Schedule using the app token; an empty schedule counts as success. */
 export const getAdSchedule = async (
   environment: Env,
   channelId: string,
@@ -132,7 +132,7 @@ export const getAdSchedule = async (
   };
 };
 
-/** Verschiebt die nächste automatische Werbung mit dem App-Token. */
+/** Postpones the next automatic ad break using the app token. */
 export const snoozeNextAd = async (
   environment: Env,
   channelId: string,

@@ -105,7 +105,7 @@ const broadcasterSubscriptionDefinition = <SubscriptionType extends string>(
     : noConsentingIdentity,
 });
 
-/** Eine Tabelle, weil dieselben Bedingungen beim Anlegen und Empfangen gelten. */
+/** A single table, because the same conditions apply when creating and when receiving. */
 export const EVENTSUB_SUBSCRIPTION_DEFINITIONS = [
   userSubscriptionDefinition("channel.chat.message", "1"),
   {
@@ -151,7 +151,7 @@ export const EVENTSUB_REQUEST_TIMEOUT_MS = 5_000;
 export interface EventSubTarget {
   channelId: string;
   subscriptionType: EventSubSubscriptionType;
-  /** Leer bei EventSub-Typen mit genau einem Ziel; Raid unterscheidet die Richtungen. */
+  /** Empty for EventSub types with exactly one target; raid distinguishes the two directions. */
   variant: string;
   version: string;
 }
@@ -247,8 +247,8 @@ const requestEventSubApi = async (
   fetcher: typeof fetch,
   appAccessToken: string,
   clientId: string,
-  // Bewusst enger als `RequestInfo`: Ein `Request` hat keine brauchbare
-  // Zeichenkettenform und landete als `[object Object]` in der Adresse.
+  // Deliberately narrower than `RequestInfo`: a `Request` has no usable
+  // string form and would end up as `[object Object]` in the URL.
   input: string | URL,
   init: RequestInit = {},
 ): Promise<{ response: Response; body: Record<string, unknown> }> => {
@@ -281,7 +281,7 @@ const requestEventSubApi = async (
   return { response, body };
 };
 
-/** Ermittelt den Sollstand ausschließlich aus aktivierten Modulen und Zustimmung. */
+/** Determines the desired state solely from enabled modules and consent. */
 export const listDesiredEventSubTargets = async (
   db: D1Database,
   channelId?: string,
@@ -482,7 +482,7 @@ const deleteSubscription = async (
   try {
     await requestEventSubApi(fetcher, appAccessToken, clientId, url, { method: "DELETE" });
   } catch (error: unknown) {
-    // Twitch kann ein widerrufenes Abo zwischen GET und DELETE bereits entfernt haben.
+    // Twitch may have already removed a revoked subscription between the GET and the DELETE.
     if (!(error instanceof TwitchApiError) || error.status !== 404) throw error;
   }
 };
@@ -648,7 +648,7 @@ export const reconcileEventSubSubscriptions = async (
   })));
 };
 
-/** Führt genau einen Abgleich aus; Fehler werden als Zustand gespeichert. */
+/** Runs exactly one reconciliation pass; errors are stored as state. */
 export const maintainEventSubSubscriptions = async (
   env: Env,
   now: string,

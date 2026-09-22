@@ -19,7 +19,7 @@ const encryptionKeys = JSON.stringify({
   retired: [],
 });
 
-describe("App-Access-Token", () => {
+describe("app access token", () => {
   let database: TestD1Database;
   const environment = () => ({
     DB: database as unknown as D1Database,
@@ -36,7 +36,7 @@ describe("App-Access-Token", () => {
     database.close();
   });
 
-  it("gibt eine Ablehnung der Client-Credentials als TwitchApiError weiter", async () => {
+  it("passes through a client credentials rejection as a TwitchApiError", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ error: "invalid_client", message: "bad credentials" }),
       { status: 401 },
@@ -57,7 +57,7 @@ describe("App-Access-Token", () => {
     ).first()).resolves.toBeNull();
   });
 
-  it("weist eine unerwartete JSON-Form mit einem TwitchApiError zurück", async () => {
+  it("rejects an unexpected JSON shape with a TwitchApiError", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response("null", { status: 200 }));
     const result = requestAppAccessToken(fetcher, environment());
 
@@ -68,7 +68,7 @@ describe("App-Access-Token", () => {
     });
   });
 
-  it("weist eine fehlerhafte JSON-Antwort als TwitchApiError zurück", async () => {
+  it("rejects a malformed JSON response as a TwitchApiError", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response("kein-json", { status: 200 }));
     const result = requestAppAccessToken(fetcher, environment());
 
@@ -87,7 +87,7 @@ describe("App-Access-Token", () => {
     ["negativ", { expires_in: -1 }],
     ["Text", { expires_in: "7200" }],
     ["unendlich", { expires_in: Number.POSITIVE_INFINITY }],
-  ])("weist eine %s Ablaufdauer zurück", async (_name, extra) => {
+  ])("rejects a %s expiry", async (_name, extra) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ access_token: "app-access", ...extra }),
       { status: 200 },
@@ -96,7 +96,7 @@ describe("App-Access-Token", () => {
     await expect(requestAppAccessToken(fetcher, environment())).rejects.toBeInstanceOf(TwitchApiError);
   });
 
-  it("gibt einen Netzwerkfehler beim Erneuern unverändert weiter", async () => {
+  it("passes a network error through unchanged during renewal", async () => {
     const networkError = new Error("DNS fehlgeschlagen");
     const fetcher = vi.fn().mockRejectedValue(networkError);
 
@@ -110,7 +110,7 @@ describe("App-Access-Token", () => {
     ).first()).resolves.toBeNull();
   });
 
-  it("holt den App-Token über Client-Credentials und speichert ihn verschlüsselt", async () => {
+  it("fetches the app token via client credentials and stores it encrypted", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ access_token: "app-access", expires_in: 7200, token_type: "bearer" }),
       { status: 200 },
@@ -146,7 +146,7 @@ describe("App-Access-Token", () => {
     )).resolves.toEqual({ token: "app-access" });
   });
 
-  it("wartet den App-Token auch mit dem alten Übergangs-Secret-Namen", async () => {
+  it("maintains the app token even with the old transitional secret name", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ access_token: "legacy-app-access", expires_in: 7200 }),
       { status: 200 },
@@ -161,7 +161,7 @@ describe("App-Access-Token", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("verwendet den Cache und erneuert erst im Vorlauf vor Ablauf", async () => {
+  it("uses the cache and only refreshes in the lead time before expiry", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "first", expires_in: 7200 }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "second", expires_in: 7200 }), { status: 200 }));
@@ -173,7 +173,7 @@ describe("App-Access-Token", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("gibt die vollständige erfolgreiche Client-Credentials-Antwort zurück", async () => {
+  it("returns the full successful client credentials response", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ access_token: "app-access", expires_in: 7200 }),
       { status: 200 },
@@ -185,7 +185,7 @@ describe("App-Access-Token", () => {
     });
   });
 
-  it("wiederholt eine fehlgeschlagene D1-Rotation einmal", async () => {
+  it("retries a failed D1 rotation once", async () => {
     const firstError = new Error("temporärer D1-Fehler");
     const database = appTokenRotationDatabase([firstError, 1]);
     const env = { ...environment(), DB: database };
@@ -197,7 +197,7 @@ describe("App-Access-Token", () => {
     await expect(getAppAccessToken(env, "2026-09-19T10:00:00.000Z", fetcher)).resolves.toBe("retried");
   });
 
-  it("gibt bei zwei fehlgeschlagenen D1-Rotationen den ersten Fehler weiter", async () => {
+  it("passes through the first error on two failed D1 rotations", async () => {
     const firstError = new Error("erster D1-Fehler");
     const database = appTokenRotationDatabase([firstError, new Error("zweiter D1-Fehler")]);
     const env = { ...environment(), DB: database };
@@ -209,7 +209,7 @@ describe("App-Access-Token", () => {
     await expect(getAppAccessToken(env, "2026-09-19T10:00:00.000Z", fetcher)).rejects.toBe(firstError);
   });
 
-  it("meldet einen fehlenden aktuellen Token nach verlorener Rotation als Fehler", async () => {
+  it("reports a missing current token after a lost rotation as an error", async () => {
     const database = appTokenRotationDatabase([0, 0]);
     const env = { ...environment(), DB: database };
     const fetcher = vi.fn().mockResolvedValue(new Response(
@@ -222,7 +222,7 @@ describe("App-Access-Token", () => {
     );
   });
 
-  it("liefert bei paralleler Rotation beiden Läufen den CAS-Gewinner", async () => {
+  it("gives both runs the CAS winner on parallel rotation", async () => {
     let release!: () => void;
     let resolveBothStarted!: () => void;
     let started = 0;
@@ -249,7 +249,7 @@ describe("App-Access-Token", () => {
     expect(["parallel-eins", "parallel-zwei"]).toContain(values[0]);
   });
 
-  it("bewahrt bei einer Erneuerung den ursprünglichen Erstellzeitpunkt", async () => {
+  it("preserves the original creation time across a renewal", async () => {
     const oldCreatedAt = "2026-09-18T00:00:00.000Z";
     await insertAppAccessToken(
       database,
@@ -269,7 +269,7 @@ describe("App-Access-Token", () => {
     ).first<{ created_at: string }>()).resolves.toEqual({ created_at: oldCreatedAt });
   });
 
-  it("behandelt unbekannte oder abgelaufene Zeitwerte als erneuerungsbedürftig", () => {
+  it("treats unknown or expired time values as needing a refresh", () => {
     expect(shouldRefreshAppAccessToken("kein-datum", "2026-09-19T10:00:00.000Z")).toBe(true);
     expect(shouldRefreshAppAccessToken("2026-09-19T11:00:01.000Z", "2026-09-19T10:00:00.000Z")).toBe(false);
     expect(shouldRefreshAppAccessToken("2026-09-19T11:00:00.000Z", "2026-09-19T10:00:00.000Z")).toBe(true);

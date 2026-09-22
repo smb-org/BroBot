@@ -10,9 +10,10 @@ import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
-// Beim Reset wird die Durable-Object-Klasse verworfen; deshalb sind neue Schlüssel
-// sicher. Ohne diesen Reset fände scheduleEarliestAlarm() alte Fristen nicht,
-// löschte den Wecker lautlos, und Sicherheitsrunde sowie Werbevorwarnung fielen aus.
+// On reset, the Durable Object class instance is discarded, so new keys are
+// safe. Without this reset, scheduleEarliestAlarm() would not find the old
+// deadlines, would silently delete the alarm, and both the security round
+// and the ad prewarning would stop firing.
 const SECURITY_DEADLINE_KEY = "security_round";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
 const SOCKET_EXPIRED_CODE = 4001;
@@ -66,7 +67,7 @@ const closeSocket = (webSocket: WebSocket, code: number, reason: string): void =
   try {
     webSocket.close(code, reason);
   } catch {
-    // Der Socket kann zwischen Auswahl und close bereits geschlossen worden sein.
+    // The socket may already have closed between selection and close.
   }
 };
 
@@ -87,10 +88,10 @@ const envelopeFor = (
 });
 
 /**
- * Kanalgebundener Echtzeitraum. Hibernation ist hier eine harte Invariante:
- * kein Klassenfeld enthält Zustand, der nach dem Wecken noch stimmen muss.
- * Prinzipale und Tags leben am Socket, die einzige periodische Arbeit im
- * Wecker und die Berechtigungsdaten liegen in D1.
+ * Channel-bound realtime room. Hibernation is a hard invariant here: no
+ * class field holds state that still needs to be correct after waking up.
+ * Principals and tags live on the socket; the only periodic work is in the
+ * alarm, and the authorization data lives in D1.
  */
 export class ChannelObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -182,7 +183,7 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
-  /** Verteilt nur im eigenen Kanal und nur an Prinzipale der gewünschten Art. */
+  /** Distributes only within its own channel and only to principals of the requested kind. */
   public publish(
     message: RealtimeEnvelope,
     recipient: RealtimeRecipientKind = "panel",
@@ -310,8 +311,8 @@ export class ChannelObject extends DurableObject<Env> {
         }
       }
     } catch (error: unknown) {
-      // Bei einem Datenbankfehler wird aus Sicherheitsgründen geschlossen;
-      // ein Alarm darf keinen nicht mehr prüfbaren Zugriff offen lassen.
+      // On a database error, connections are closed for safety; an alarm
+      // must not leave access open that can no longer be verified.
       console.error("Realtime-Berechtigungsprüfung fehlgeschlagen.", error);
       for (const webSocket of webSockets) expired.add(webSocket);
     }
@@ -340,15 +341,15 @@ export class ChannelObject extends DurableObject<Env> {
           undefined,
           nowIso,
           fetch,
-          // Eigener Planer statt Stub: Ein Stub auf dieses Objekt waere aus
-          // alarm() heraus ein Selbstaufruf und kaeme nie zurueck.
+          // Own scheduler instead of a stub: a stub to this same object would
+          // be a self-call from within alarm() and would never return.
           {
             schedule: async (dueAtMs) => { await this.scheduleAdPrewarning(dueAtMs); },
             clear: async () => { await this.clearAdPrewarning(); },
           },
         );
       } catch (error: unknown) {
-        // Ein Ablauf- oder D1-Fehler darf die übrigen fälligen Fristen nicht verschlucken.
+        // A flow or D1 error must not swallow the other deadlines that are due.
         console.error("Werbe-Vorwarnung konnte im Alarm nicht verarbeitet werden.", error);
       }
     }
@@ -356,7 +357,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   override webSocketMessage(webSocket: WebSocket, message: string | ArrayBuffer): void {
-    // Die Strecke ist einseitig; eingehende Nachrichten werden ignoriert.
+    // The channel is one-way; incoming messages are ignored.
     void webSocket;
     void message;
   }

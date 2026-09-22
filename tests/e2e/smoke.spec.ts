@@ -35,7 +35,7 @@ const assertBreadcrumbGeometry = async (page: Page): Promise<void> => {
   expect([...measurement.segments].sort((first, second) => first.left - second.left).map(({ key }) => key)).toEqual([...breadcrumbSegmentKeys]);
   const leftHalf = measurement.topbar.left + measurement.topbar.width / 2;
   const maxSeparatorWidth = Math.max(...measurement.separatorWidths);
-  // Zwischen Segmenten liegen zwei Flex-Gaps und ein Trennzeichen; 1px erlaubt Subpixel-Rundung.
+  // Two flex gaps and one separator sit between segments; 1px allows for subpixel rounding.
   const maximumSegmentGap = measurement.gap * 2 + maxSeparatorWidth + 1;
 
   for (const segment of measurement.segments) {
@@ -50,7 +50,7 @@ const assertBreadcrumbGeometry = async (page: Page): Promise<void> => {
   }
 };
 
-test("Dashboard und Overlay laden als getrennte Oberflächen", async ({ page }) => {
+test("dashboard and overlay load as separate surfaces", async ({ page }) => {
   await page.route("**/api/channels", async (route) => {
     await route.fulfill({
       status: 200,
@@ -92,9 +92,9 @@ test("Dashboard und Overlay laden als getrennte Oberflächen", async ({ page }) 
   await overlayPage.close();
 });
 
-test("der echte Worker schützt das Dashboard und zeigt die Anmeldung", async ({ page }) => {
-  // Ohne Session beendet der Worker die Route vor jedem D1-Zugriff mit 401;
-  // der Test hängt deshalb nicht vom Migrationsstand des E2E-Speichers ab.
+test("the real worker protects the dashboard and shows the login", async ({ page }) => {
+  // Without a session, the worker terminates the route with 401 before any D1 access;
+  // the test therefore doesn't depend on the migration state of the e2e store.
   const channelsResponsePromise = page.waitForResponse((response) => {
     return new URL(response.url()).pathname === "/api/channels";
   });
@@ -107,7 +107,7 @@ test("der echte Worker schützt das Dashboard und zeigt die Anmeldung", async ({
   await expect(page.getByRole("link", { name: "Mit Twitch anmelden" })).toBeVisible();
 });
 
-test("die Brotkrumensegmente bleiben bei jeder Fensterbreite zusammen", async ({ page }) => {
+test("the breadcrumb segments stay together at every viewport width", async ({ page }) => {
   const channel = {
     channelId: "kanal-e2e",
     login: "brotkrumen-kanal",

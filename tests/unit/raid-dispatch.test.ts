@@ -21,8 +21,8 @@ const jsonRecord = (value: string): Record<string, unknown> => {
     : {};
 };
 
-describe("Raid-Ausführung", () => {
-  it("sendet den vollen Chattext trotz fehlgeschlagenem Shoutout", async () => {
+describe("Raid dispatch", () => {
+  it("sends the full chat text despite a failed shoutout", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");

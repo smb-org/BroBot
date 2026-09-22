@@ -96,9 +96,9 @@ export interface PanelModuleState {
   id: string;
   enabled: boolean;
   settings: string;
-  /** Vom Modul deklarierte Zustimmung, vor einer Weiterleitung angezeigt. */
+  /** Consent declared by the module, shown before a redirect. */
   requiredBroadcasterScopes?: string[];
-  /** Deklarierte Scopes, die die Broadcaster-Identität aktuell noch nicht nachweist. */
+  /** Declared scopes the broadcaster identity does not currently prove. */
   missingBroadcasterScopes?: string[];
 }
 
@@ -170,15 +170,15 @@ export interface PanelMembersResponse {
   members: PanelMember[];
   nextCursor: string | null;
   /**
-   * Broadcaster im gesamten Kanal, nicht auf dieser Seite. Die Oberfläche
-   * braucht die Zahl, um den letzten Broadcaster zu erkennen, und darf sie
-   * bei seitenweiser Liste nicht selbst ermitteln.
+   * Broadcasters across the whole channel, not on this page. The UI
+   * needs this number to recognize the last broadcaster, and must not
+   * determine it itself from a paginated list.
    */
   broadcasterCount: number;
   /**
-   * Twitch-User-ID der abrufenden Person. Die Oberfläche muss den eigenen
-   * Eintrag erkennen, um Selbstentzug und Selbstherabstufung richtig
-   * darzustellen; sie kennt ihn sonst nirgends.
+   * Twitch user id of the requesting person. The UI must recognize its
+   * own entry to correctly render self-removal and self-demotion; it has
+   * no other way of knowing it.
    */
   viewerUserId: string;
 }

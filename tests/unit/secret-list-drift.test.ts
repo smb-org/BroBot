@@ -5,19 +5,19 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-// @ts-expect-error Das Konfigurationsskript stellt den Drift-Prüf-Hook als ESM-Export bereit.
+// @ts-expect-error The configuration script exposes the drift-check hook as an ESM export.
 import { checkSecretListDrift } from "../../scripts/verify-deployment-config.mjs";
 import { getTokenEncryptionKeys } from "../../src/worker/auth/crypto";
 
 type CheckSecretListDrift = (config: object, failures: string[]) => Promise<void>;
 const checkSecretListDriftTyped = checkSecretListDrift as unknown as CheckSecretListDrift;
 
-// Regressionsschutz: REQUIRED_SECRET_NAMES (src/worker/index.ts),
-// secrets.required (wrangler.jsonc) und deploymentBindings
-// (scripts/verify-deployment-config.mjs) müssen übereinstimmen. Ruft direkt
-// das Verify-Script auf statt die Extraktion hier nachzubauen.
-describe("Secret-Namen-Drift", () => {
-  it("meldet eine Abweichung in einer Secret-Liste", async () => {
+// Regression guard: REQUIRED_SECRET_NAMES (src/worker/index.ts),
+// secrets.required (wrangler.jsonc), and deploymentBindings
+// (scripts/verify-deployment-config.mjs) must match. Calls the
+// verify script directly instead of rebuilding the extraction here.
+describe("Secret name drift", () => {
+  it("reports a mismatch in a secret list", async () => {
     const required = [
       "TWITCH_CLIENT_ID",
       "TWITCH_CLIENT_SECRET",
@@ -46,7 +46,7 @@ describe("Secret-Namen-Drift", () => {
     ]));
   });
 
-  it("scheitert, wenn die drei Secret-Listen auseinanderlaufen", () => {
+  it("fails when the three secret lists diverge", () => {
     const result = spawnSync("node", ["scripts/verify-deployment-config.mjs"], {
       cwd: path.resolve(import.meta.dirname, "../.."),
       encoding: "utf8",
@@ -54,7 +54,7 @@ describe("Secret-Namen-Drift", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it("weist im Preflight einen 31-Byte-Overlay-Pepper ab", () => {
+  it("rejects a 31-byte overlay pepper in the preflight", () => {
     const key = Buffer.alloc(32, 1).toString("base64url");
     const malformedPepper = Buffer.alloc(31, 4).toString("base64url");
     const keyRing = JSON.stringify({ active: { id: "test-key", key }, retired: [] });
@@ -85,7 +85,7 @@ describe("Secret-Namen-Drift", () => {
     }
   });
 
-  it("weist einen als Schlüsselring missbrauchten Overlay-Pepper ab", () => {
+  it("rejects an overlay pepper misused as a key ring", () => {
     const key = Buffer.alloc(32, 1).toString("base64url");
     const keyRing = JSON.stringify({ active: { id: "pepper-v2", key }, retired: [] });
     const tokenKeyRing = JSON.stringify({ active: { id: "token-v1", key }, retired: [] });
@@ -116,7 +116,7 @@ describe("Secret-Namen-Drift", () => {
     }
   });
 
-  it("weist im Preflight eine nicht absolute PUBLIC_ORIGIN ab", () => {
+  it("rejects a non-absolute PUBLIC_ORIGIN in the preflight", () => {
     const key = Buffer.alloc(32, 1).toString("base64url");
     const keyRing = JSON.stringify({ active: { id: "test-key", key }, retired: [] });
     const directory = mkdtempSync(path.join(os.tmpdir(), "brobot-config-origin-"));
@@ -146,7 +146,7 @@ describe("Secret-Namen-Drift", () => {
     }
   });
 
-  it("akzeptiert den alten Token-Schlüssel während der Übergangsphase", () => {
+  it("accepts the old token key during the transition period", () => {
     const keyRing = JSON.stringify({
       active: { id: "legacy", key: Buffer.alloc(32, 1).toString("base64url") },
       retired: [],
@@ -159,7 +159,7 @@ describe("Secret-Namen-Drift", () => {
     })).toBe("neu");
   });
 
-  it("akzeptiert den alten Token-Schlüsselnamen auch im Deployment-Preflight", () => {
+  it("accepts the old token key name in the deployment preflight too", () => {
     const key = Buffer.alloc(32, 1).toString("base64url");
     const keyRing = JSON.stringify({ active: { id: "test-key", key }, retired: [] });
     const directory = mkdtempSync(path.join(os.tmpdir(), "brobot-config-legacy-key-"));

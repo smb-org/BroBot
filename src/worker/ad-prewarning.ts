@@ -25,12 +25,12 @@ export interface AdPrewarningEnvironment {
 }
 
 /**
- * Wecker-Zugriff auf das Kanalobjekt.
+ * Alarm access to the channel object.
  *
- * Läuft dieser Ablauf **im** Durable Object (aus `alarm()` heraus), muss der
- * eigene Planer übergeben werden. Ein Stub auf das eigene Objekt wäre ein
- * Selbstaufruf: Das Input-Gate stellt die Anfrage hinter den laufenden Alarm,
- * der auf sie wartet — der Alarm käme nie zurück.
+ * When this flow runs **inside** the Durable Object (from within `alarm()`),
+ * its own scheduler must be passed in. A stub to the object's own self would
+ * be a self-call: the input gate would queue the request behind the running
+ * alarm that is waiting for it — the alarm would never return.
  */
 export interface AdScheduler {
   schedule: (dueAtMs: number) => Promise<void>;
@@ -166,7 +166,7 @@ const replanFromSchedule = async (
   await schedule(scheduler, nextAdAtMs - settings.leadSeconds * 1000);
 };
 
-/** Holt den Zeitplan bei einem EventSub-Anlass und stellt den Vorwarnungswecker. */
+/** Fetches the schedule on an EventSub occasion and sets the prewarning alarm. */
 export const refreshAdPrewarning = async (
   environment: AdPrewarningEnvironment,
   channelId: string,
@@ -211,7 +211,7 @@ export const refreshAdPrewarning = async (
   await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
 };
 
-/** Führt die fällige Vorwarnung nach einem frischen Zeitplan-Abruf aus. */
+/** Runs the due prewarning after a fresh schedule fetch. */
 export const processAdPrewarning = async (
   environment: AdPrewarningEnvironment,
   channelId: string,

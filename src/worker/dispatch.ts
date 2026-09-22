@@ -22,7 +22,7 @@ export interface DispatchEnvironment {
   CHANNEL?: Env["CHANNEL"];
 }
 
-/** Der Host protokolliert Handeln und dessen Ausgang; Module begründen Nicht-Handeln. */
+/** The host logs actions and their outcome; modules justify inaction. */
 const HOST_MODULE_ID = "host";
 
 const errorMessage = (error: unknown): string =>
@@ -47,9 +47,9 @@ const chatStatusFor = (
       return typeof setId === "string" ? [setId] : [];
     })
     : [];
-  // Mehrere Badges sind gleichzeitig möglich. VIP und Abonnent bleiben daher
-  // getrennte Status; `founder` zählt weiterhin als Abonnent. Ohne besondere
-  // Badges bleibt die Liste für jedes Chatereignis mit `viewer` nicht leer.
+  // Multiple badges can apply at once. VIP and subscriber therefore stay
+  // separate statuses; `founder` still counts as subscriber. Without any
+  // special badges, the list is never empty for a chat event — it gets `viewer`.
   const statuses: ModuleChatStatus[] = [];
   if (badgeIds.includes("broadcaster")) statuses.push("broadcaster");
   if (badgeIds.includes("moderator")) statuses.push("moderator");
@@ -71,13 +71,12 @@ const actorForEvent = async (
 };
 
 /**
- * Ermittelt die Module, die dieses Ereignis in diesem Kanal sehen dürfen:
- * aktiviert in `channel_modules`, bekannt in der Registry, zuständig laut
+ * Determines the modules allowed to see this event in this channel: enabled
+ * in `channel_modules`, known in the registry, responsible per
  * `eventSubTypes`.
  *
- * Eine `module_id`, die die Registry nicht kennt, ist ein sichtbarer
- * Fehlerzustand und kein Absturz — sie entsteht, wenn ein Modul entfernt
- * wurde, die Aktivierungszeile aber blieb.
+ * A `module_id` the registry doesn't know is a visible error state, not a
+ * crash — it happens when a module is removed but its activation row stays.
  */
 export const selectModulesForEvent = (
   activations: readonly { moduleId: string; enabled: boolean; settings: string }[],
@@ -107,8 +106,8 @@ const ausfuehren = async (
   fetcher: typeof fetch,
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
-  // Reihenfolge bleibt erhalten: Eine Antwort nach einer Ansage ergibt eine
-  // andere Unterhaltung als umgekehrt.
+  // Order is preserved: a reply after an announcement reads as a different
+  // conversation than the reverse.
   for (const action of actions) {
     try {
       if (action.kind === "chat") {
@@ -131,16 +130,15 @@ const ausfuehren = async (
           : { code: "host.shoutout.fehlgeschlagen", detail: { ursache: result.reason, ...result.detail } });
         continue;
       }
-      // Die Realtime-Strecke ist #7. Bis dahin verschwindet eine
-      // Overlay-Aktion nicht stillschweigend, sondern wird als unausgeführt
-      // protokolliert.
+      // The realtime path is #7. Until then, an overlay action doesn't
+      // silently vanish — it's logged as not executed.
       diagnostics.push({
         code: "host.overlay.nicht_ausgefuehrt",
         detail: { typ: action.type },
       });
     } catch (error: unknown) {
-      // Eine fehlgeschlagene Aktion darf die nachfolgenden geordneten
-      // Aktionen nicht unterdrücken, etwa den Chat nach einem Shoutout.
+      // A failed action must not suppress the subsequent ordered actions,
+      // e.g. the chat message after a shoutout.
       diagnostics.push({ code: "host.aktion.fehler", detail: { meldung: errorMessage(error) } });
     }
   }
@@ -148,11 +146,11 @@ const ausfuehren = async (
 };
 
 /**
- * Verteilt ein geprüftes EventSub-Ereignis an die zuständigen Module und führt
- * deren Aktionen aus.
+ * Dispatches a verified EventSub event to the responsible modules and runs
+ * their actions.
  *
- * Der Zielkanal stammt aus dem Ereignis, nicht aus dem Modul — ein Modul kann
- * dadurch nicht in einen fremden Kanal wirken.
+ * The target channel comes from the event, not from the module — this
+ * means a module can't act on a channel other than its own.
  */
 export const dispatchEventSubNotification = async (
   environment: DispatchEnvironment,
@@ -208,8 +206,8 @@ export const dispatchEventSubNotification = async (
           authorizeMutation: authorizeModuleMutation,
         });
     } catch (error: unknown) {
-      // Ein geworfenes Modul reißt weder den Worker noch die übrigen Module
-      // mit. Der Fehler wird sichtbar, nicht verschluckt.
+      // A module that throws doesn't take down the worker or the other
+      // modules with it. The error becomes visible, not swallowed.
       diagnostics.push({ code: "host.modul.fehler", detail: { meldung: errorMessage(error) } });
     }
 
@@ -253,8 +251,8 @@ export const dispatchEventSubNotification = async (
   try {
     await publishRealtimeMessage(environment.CHANNEL, realtimeMessage);
   } catch (error: unknown) {
-    // Der Feed ist ein Hinweis; D1 bleibt der verbindliche Stand und die
-    // Ereignisverarbeitung darf nicht an einem geschlossenen Socket scheitern.
+    // The feed is a hint; D1 stays the authoritative state, and event
+    // processing must not fail because a socket happens to be closed.
     console.warn("Realtime-Hinweis konnte nicht gesendet werden.", error);
   }
 };

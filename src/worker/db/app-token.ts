@@ -31,8 +31,8 @@ export const getAppAccessToken = async (
 };
 
 /**
- * Ersetzt den globalen App-Token nur, wenn der gelesene Ciphertext noch
- * aktuell ist. Ein fehlender Datensatz darf genau einmal angelegt werden.
+ * Replaces the global app token only if the ciphertext that was read is
+ * still current. A missing record may be created exactly once.
  */
 export const rotateAppAccessToken = async (
   db: D1Database,
@@ -60,5 +60,5 @@ export const rotateAppAccessToken = async (
   return result.meta.changes > 0;
 };
 
-/** Dedupliziert EventSub-Nachrichten atomar über Twitchs Message-ID. */
+/** Atomically deduplicates EventSub messages via Twitch's message ID. */
 

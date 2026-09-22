@@ -6,10 +6,10 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
-// MODULES ist in der Registry bewusst leer (siehe src/modules/registry.ts).
-// Diese Tests brauchen ein registriertes Modul, um Aktivierung end-to-end
-// durch die Route zu prüfen — daher ein kleines Doppel statt eines echten
-// Moduls, gemockt bevor die Route es importiert.
+// MODULES is deliberately empty in the registry (see src/modules/registry.ts).
+// These tests need a registered module to verify activation end-to-end
+// through the route — hence a small double instead of a real
+// module, mocked before the route imports it.
 const testModuleSchema = z.object({ betrag: z.number() });
 let prepareEnableCommand = false;
 const testModule: BotModule<typeof testModuleSchema> = {
@@ -120,9 +120,9 @@ const remoteSubscription = (channelId: string, id: string) => ({
   transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
 });
 
-// Gemeinsamer Ablauf der Verweigerungs-Faelle: Mitgliedschaft mit einer Rolle
-// in einem Kanal anlegen, PATCH auf einen (moeglicherweise anderen) Zielkanal
-// versuchen, erwarteten Fehlerstatus und unveraenderten Endzustand pruefen.
+// Shared flow for the denial cases: create membership with a role
+// in a channel, attempt a PATCH against a (possibly different) target channel,
+// check the expected error status and unchanged final state.
 const expectDeniedPatch = async (
   database: TestD1Database,
   environment: Env,
@@ -150,7 +150,7 @@ const expectDeniedPatch = async (
   await expect(auditCount(database)).resolves.toBe(0);
 };
 
-describe("Modulverwaltung im Panel", () => {
+describe("Module management in the panel", () => {
   let database: TestD1Database;
   let environment: Env;
 
@@ -165,7 +165,7 @@ describe("Modulverwaltung im Panel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("liefert im Leerzustand die Registry-Module mit Default-Einstellungen", async () => {
+  it("returns the registry modules with default settings in the empty state", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -180,7 +180,7 @@ describe("Modulverwaltung im Panel", () => {
     expect(body.modules).toEqual([{ id: "test-modul", enabled: false, settings: '{"betrag":42}' }]);
   });
 
-  it("aktiviert ein Modul für einen Broadcaster und schreibt genau einen Audit-Eintrag", async () => {
+  it("enables a module for a broadcaster and writes exactly one audit entry", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
@@ -203,7 +203,7 @@ describe("Modulverwaltung im Panel", () => {
     expect(list.modules).toEqual([{ id: "test-modul", enabled: true, settings: '{"betrag":42}' }]);
   });
 
-  it("bindet die Aktivierung und den abhängigen Listenbefehl atomar", async () => {
+  it("binds the activation and the dependent list command atomically", async () => {
     prepareEnableCommand = true;
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -250,7 +250,7 @@ describe("Modulverwaltung im Panel", () => {
     await expect(auditCount(database)).resolves.toBe(beforeFailedAudit);
   });
 
-  it("legt beim Aktivieren das Chat-Abo sofort an", async () => {
+  it("creates the chat subscription immediately when enabling", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
@@ -273,7 +273,7 @@ describe("Modulverwaltung im Panel", () => {
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-a", reason: null });
   });
 
-  it("entfernt beim Deaktivieren das Chat-Abo sofort", async () => {
+  it("removes the chat subscription immediately when disabling", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
@@ -308,7 +308,7 @@ describe("Modulverwaltung im Panel", () => {
     ).first()).resolves.toEqual({ status: "missing", subscription_id: null });
   });
 
-  it("antwortet beim fehlgeschlagenen sofortigen Anlegen weiter mit 200 und speichert den Fehler", async () => {
+  it("still responds with 200 on a failed immediate creation and stores the error", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
@@ -330,7 +330,7 @@ describe("Modulverwaltung im Panel", () => {
     ).first()).resolves.toEqual({ status: "error", subscription_id: null, reason: "network_error" });
   });
 
-  it("legt ohne channel:bot-Zustimmung kein Abo an und speichert keinen Twitch-Fehler", async () => {
+  it("doesn't create a subscription without channel:bot consent and stores no Twitch error", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
@@ -361,7 +361,7 @@ describe("Modulverwaltung im Panel", () => {
     ).first()).resolves.toEqual({ status: "missing", subscription_id: null, reason: "channel_or_consent_missing" });
   });
 
-  it("verweigert einem Bediener das Aktivieren eines Moduls", async () => {
+  it("denies an operator the ability to enable a module", async () => {
     await expectDeniedPatch(database, environment, {
       memberChannelId: "kanal-a",
       role: "operator",
@@ -370,7 +370,7 @@ describe("Modulverwaltung im Panel", () => {
     });
   });
 
-  it("lehnt ein der Registry unbekanntes Modul ab", async () => {
+  it("rejects a module unknown to the registry", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
@@ -384,7 +384,7 @@ describe("Modulverwaltung im Panel", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("verweigert die Aktivierung in einem fremden Kanal trotz gültiger Session", async () => {
+  it("denies activation in a foreign channel despite a valid session", async () => {
     await expectDeniedPatch(database, environment, {
       memberChannelId: "kanal-a",
       role: "broadcaster",
@@ -394,7 +394,7 @@ describe("Modulverwaltung im Panel", () => {
     });
   });
 
-  it("behält beim Deaktivieren die zuvor geschriebenen Einstellungen", async () => {
+  it("keeps previously written settings when disabling", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");

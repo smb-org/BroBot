@@ -131,6 +131,6 @@ const ModulesPage = ({
   );
 };
 
-// Diese Legacy-Ansicht ist nicht mehr Teil des Dashboard-Routings. Die Datei
-// bleibt als Übergang erhalten; ihr unreferenzierter Export ist entfernt.
+// This legacy view is no longer part of dashboard routing. The file
+// stays as a transition; its unreferenced export has been removed.
 void ModulesPage;

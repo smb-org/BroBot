@@ -14,10 +14,9 @@ export interface TokenEncryptionEnvironment {
 }
 
 /**
- * Liest während der Übergangsphase den neuen Namen bevorzugt und akzeptiert
- * danach noch den alten Namen. Der Fallback wird später in einem eigenen
- * Schritt entfernt, damit kein Deployment ohne Entschlüsselungsschlüssel
- * entsteht.
+ * Reads the new name preferentially during the transition period and still
+ * accepts the old name afterward. The fallback will be removed later in a
+ * separate step, so that no deployment ends up without a decryption key.
  */
 export const getTokenEncryptionKeys = (environment: TokenEncryptionEnvironment): string => {
   if (typeof environment.TOKEN_ENCRYPTION_KEYS === "string" && environment.TOKEN_ENCRYPTION_KEYS.length > 0) {
@@ -121,8 +120,8 @@ const importAesKey = async (entry: KeyEntry): Promise<CryptoKey> =>
 const importHmacKey = async (entry: KeyEntry): Promise<CryptoKey> =>
   crypto.subtle.importKey("raw", toArrayBuffer(decodeBase64url(entry.key)), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 
-// Twitch verwendet transport.secret als ASCII-Schlüssel. Dieser EventSub-HMAC
-// darf deshalb nicht denselben Base64url-Decoder wie Verschlüsselung nutzen.
+// Twitch uses transport.secret as an ASCII key. This EventSub HMAC must
+// therefore not use the same base64url decoder as encryption.
 const importEventSubHmacKey = async (entry: KeyEntry): Promise<CryptoKey> =>
   crypto.subtle.importKey("raw", toArrayBuffer(encoder.encode(entry.key)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 

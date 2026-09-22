@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-// @ts-expect-error Das ausführbare Healthcheck-Skript stellt Test-Hooks als ESM-Exports bereit.
+// @ts-expect-error The executable healthcheck script exposes test hooks as ESM exports.
 import { checkHealth, resolveDeploymentOriginFromConfig } from "../../scripts/check-health.mjs";
 
 type DeploymentConfig = { env?: Record<string, { routes?: Array<{ pattern?: string }> }> };
@@ -74,8 +74,8 @@ const rejectedRoutes = [
   { pattern: "https://secure.example?version=1", reason: "Query" },
 ] as const;
 
-describe("Deployment-Healthcheck", () => {
-  it("löst die Staging-Origin aus wrangler.jsonc auf", () => {
+describe("deployment healthcheck", () => {
+  it("resolves the staging origin from wrangler.jsonc", () => {
     const result = runOrigin("staging");
 
     expect(result.status, result.stderr).toBe(0);
@@ -84,7 +84,7 @@ describe("Deployment-Healthcheck", () => {
     );
   });
 
-  it("akzeptiert einen nachgestellten Kommentar hinter dem Routenmuster", () => {
+  it("accepts a trailing comment after the route pattern", () => {
     withTemporaryConfig(`{
       "env": {
         "staging": {
@@ -99,7 +99,7 @@ describe("Deployment-Healthcheck", () => {
     });
   });
 
-  it("akzeptiert ein überzähliges Komma in der JSONC-Konfiguration", () => {
+  it("accepts a trailing comma in the JSONC configuration", () => {
     withTemporaryConfig(`{
       "env": {
         "production": {
@@ -114,7 +114,7 @@ describe("Deployment-Healthcheck", () => {
     });
   });
 
-  it("scheitert klar, wenn alle Healthcheck-Versuche fehlschlagen", () => {
+  it("fails clearly when all healthcheck attempts fail", () => {
     const result = runHealth("https://127.0.0.1:1");
 
     expect(result.status).not.toBe(0);
@@ -123,7 +123,7 @@ describe("Deployment-Healthcheck", () => {
     );
   });
 
-  it("weist ein krankes Payload trotz HTTP 200 zurück", async () => {
+  it("rejects an unhealthy payload despite HTTP 200", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       status: "misconfigured",
       missingBindings: ["DB_SCHEMA"],
@@ -140,7 +140,7 @@ describe("Deployment-Healthcheck", () => {
   });
 
   it.each(rejectedRoutes)(
-    "weist eine Route mit $reason ab, bevor fetch aufgerufen wird",
+    "rejects a route with $reason before fetch is called",
     async ({ pattern, reason }) => {
       expect(() => resolveDeploymentOriginFromConfigTyped(configForRoute(pattern), "staging"))
         .toThrow(`Konfiguration wrangler.jsonc`);

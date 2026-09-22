@@ -1,9 +1,9 @@
 import type { ChannelMemberRecord } from "./channel-members";
 
 /**
- * Der Akteur einer Mutation. Die sessionId gehoert dazu, weil die Mutation
- * selbst pruefen muss, ob die Session noch lebt — die Rolle allein genuegt
- * nicht.
+ * The actor of a mutation. sessionId is part of it because the mutation
+ * itself has to check whether the session is still alive — the role alone
+ * is not enough.
  */
 export interface ActorContext {
   userId: string;
@@ -11,13 +11,13 @@ export interface ActorContext {
 }
 
 /**
- * Der Handler prueft die Berechtigung, bevor er den Request-Body liest. Zwischen
- * Guard und Mutation liegt aber ein beliebig langes Fenster: Ein Client kann den
- * Body offen lassen, bis seine Session widerrufen wurde, und ihn erst danach
- * schliessen. Deshalb wiederholt jede Mutation die vollstaendige Pruefung im
- * selben D1-Batch — nicht nur die Kanalrolle, sondern auch die Session selbst.
+ * The handler checks the authorization before reading the request body. But
+ * an arbitrarily long window lies between guard and mutation: a client can
+ * leave the body open until its session has been revoked, and only close
+ * it afterward. That's why every mutation repeats the full check in the
+ * same D1 batch — not just the channel role, but the session itself too.
  *
- * Bindereihenfolge: sessionId, actorUserId, now, channelId.
+ * Bind order: sessionId, actorUserId, now, channelId.
  */
 export const actorGuard = (allowedRoles: string): string => `
         AND EXISTS (
@@ -61,16 +61,15 @@ export const platformSessionGuard = (
 });
 
 /**
- * Wer die Rolle `broadcaster` vergibt, kann den bisherigen Broadcaster
- * anschliessend entfernen — der Schutz des letzten Broadcasters greift dann
- * nicht mehr, weil zwischenzeitlich zwei existieren. Deshalb darf nur ein
- * Broadcaster diese Rolle vergeben. Die Regel steht hier und nicht nur im
- * Handler, damit sie auch dann gilt, wenn sich die Rolle zwischen Guard und
- * Mutation aendert.
+ * Whoever grants the `broadcaster` role can afterward remove the previous
+ * broadcaster — the last-broadcaster protection no longer applies at that
+ * point, because two exist in the meantime. That's why only a broadcaster
+ * may grant this role. The rule lives here and not only in the handler, so
+ * it still applies even if the role changes between guard and mutation.
  */
 export const ANY_MEMBER_ROLES = "'broadcaster', 'manager', 'operator'";
 
-/** Gemeinsame SQL-Prüfung der Broadcaster-Zustimmung für channel:bot. */
+/** Shared SQL check for the broadcaster's channel:bot consent. */
 export const channelBotConsentCondition = (channelAlias: string): string => `
         EXISTS (
           SELECT 1

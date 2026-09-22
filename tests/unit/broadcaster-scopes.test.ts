@@ -32,7 +32,7 @@ const loginIdentity = (userId: string, scopes: string[], status: "connected" | "
   updatedAt: "2026-09-18T00:00:00.000Z",
 } as const);
 
-describe("Broadcaster-Scopes", () => {
+describe("broadcaster scopes", () => {
   let database: TestD1Database;
 
   afterEach(() => {
@@ -40,7 +40,7 @@ describe("Broadcaster-Scopes", () => {
     vi.restoreAllMocks();
   });
 
-  it("vereinigt Login-Scopes und verliert sie bei einer kleineren späteren Antwort nicht", async () => {
+  it("unions login scopes and doesn't lose them on a smaller later response", async () => {
     database = new TestD1Database();
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:read:ads"]));
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot"]));
@@ -49,7 +49,7 @@ describe("Broadcaster-Scopes", () => {
       .resolves.toEqual({ scopes_json: '["channel:bot","channel:read:ads"]' });
   });
 
-  it("ersetzt beim kleineren Zweit-Login die Token-Scopes und behält die erteilte Vereinigung", async () => {
+  it("replaces the token scopes on a smaller second login and keeps the granted union", async () => {
     database = new TestD1Database();
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:read:ads"]));
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot"]));
@@ -62,7 +62,7 @@ describe("Broadcaster-Scopes", () => {
     });
   });
 
-  it("leitet den vollständigen Broadcaster-Umfang aus Login, Modulen und Abschnitt 7 ab", () => {
+  it("derives the full broadcaster scope from login, modules, and section 7", () => {
     database = new TestD1Database();
     expect(new Set(listAllBroadcasterScopes())).toEqual(new Set([
       ...LOGIN_SCOPES,
@@ -70,7 +70,7 @@ describe("Broadcaster-Scopes", () => {
     ]));
   });
 
-  it("leert die gespeicherten Scopes beim Widerruf", async () => {
+  it("clears the stored scopes on revocation", async () => {
     database = new TestD1Database();
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:read:ads"]));
     await setLoginIdentityStatus(asD1(database), "user-1", "revoked", "authorization_revoked", "2026-09-20T10:00:00.000Z");
@@ -79,7 +79,7 @@ describe("Broadcaster-Scopes", () => {
       .resolves.toEqual({ status: "revoked", scopes_json: "[]" });
   });
 
-  it("leert beim Widerruf auch die Token-Scopes", async () => {
+  it("also clears the token scopes on revocation", async () => {
     database = new TestD1Database();
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:read:ads"]));
     await setLoginIdentityStatus(asD1(database), "user-1", "revoked", "authorization_revoked", "2026-09-20T10:00:00.000Z");
@@ -89,7 +89,7 @@ describe("Broadcaster-Scopes", () => {
     ).first()).resolves.toEqual({ scopes_json: "[]", token_scopes_json: "[]" });
   });
 
-  it("ermittelt die Autorisierung nur aus aktivierten Modulen eigener Broadcaster-Kanäle", async () => {
+  it("determines authorization only from enabled modules of the user's own broadcaster channels", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
@@ -103,7 +103,7 @@ describe("Broadcaster-Scopes", () => {
     await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual(["channel:read:ads"]);
   });
 
-  it("ignoriert ein fremdes Kanalmodul trotz Broadcaster-Rolle des Nutzers", async () => {
+  it("ignores a different channel's module despite the user's broadcaster role", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
@@ -116,7 +116,7 @@ describe("Broadcaster-Scopes", () => {
     await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual([]);
   });
 
-  it("meldet fehlende und vorhandene Modul-Scopes getrennt", async () => {
+  it("reports missing and present module scopes separately", async () => {
     database = new TestD1Database();
     await expect(moduleBroadcasterScopeState(asD1(database), "kanal-a", adsModule)).resolves.toEqual({
       required: ["channel:read:ads"],
@@ -129,7 +129,7 @@ describe("Broadcaster-Scopes", () => {
     });
   });
 
-  it("kennzeichnet channel:manage:ads am Werbemodul als optionalen Scope", () => {
+  it("flags channel:manage:ads on the ads module as an optional scope", () => {
     database = new TestD1Database();
     expect(moduleOptionalBroadcasterScopes(adsModule)).toEqual(["channel:manage:ads"]);
   });

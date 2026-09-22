@@ -79,7 +79,9 @@ Format:
 
 **Body:** Bullet Points, nach Art gruppiert, jede Gruppe mit ihrem eigenen Icon und Unterpunkten, zum Beispiel eine Gruppe `- 🐛 Defects:` mit darunterliegenden Punkten. Konkret statt allgemein: Funktion, Wert und beobachtetes Verhalten benennen. Nur was ein Leser braucht, kompakt. Issue- oder Ticketnummer referenzieren, falls vorhanden.
 
-Keine Attribution-Trailer und keine `claude.ai/code`- oder `session_`-URLs in Commits, Pull Requests oder Dateien. Commit-Messages und Projektdokumentation sind auf Deutsch; technische Bezeichner bleiben unverändert.
+Keine Attribution-Trailer und keine `claude.ai/code`- oder `session_`-URLs in Commits, Pull Requests oder Dateien.
+
+**Sprachen.** Commit-Messages, Issues und Pull Requests sind seit dem 22. September 2026 englisch; ältere bleiben, wie sie sind. Der Quelltext ist durchgehend englisch — Bezeichner, Kommentare, JSDoc und Testnamen. Ausgenommen sind allein die deutschen Hälften der zweisprachigen Kataloge (`src/dashboard/locale.ts`, `src/dashboard/labels.ts`, Modul-Sprachkataloge): das sind Übersetzungen für Nutzer. Diese Dokumentation ist noch deutsch, die Umstellung steht aus.
 
 **Icon-Legende:**
 

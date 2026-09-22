@@ -34,7 +34,7 @@ const clearPrewarning = async (scheduler: AdPrewarningScheduler | null): Promise
   await scheduler?.clear();
 };
 
-/** Hält den Vorwarnungswecker nach einem im Panel gelesenen Zeitplan aktuell. */
+/** Keeps the prewarning alarm in sync with a schedule read for the panel. */
 export const refreshAdPrewarningAlarm = async (
   environment: AdPrewarningEnvironment,
   channelId: string,

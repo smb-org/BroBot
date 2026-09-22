@@ -76,7 +76,7 @@ export const maintenanceErrorDetails = (
   }
   : { message: null, status: null, code: fallbackCode };
 
-/** Schreibt nur strukturierte Wartungsdaten, niemals Request- oder Token-Inhalte. */
+/** Writes only structured maintenance data, never request or token contents. */
 export const logMaintenanceError = (
   context: MaintenanceLogContext,
   error: unknown,
@@ -343,7 +343,7 @@ export interface IdentityAuthorizationRecord {
   status?: IdentityStatus;
 }
 
-/** Gemeinsamer Ablauf zur Bestätigung eines widerrufenen Identitätstokens. */
+/** Shared flow for confirming a revoked identity token. */
 export const confirmIdentityAuthorization = async (
   env: Env,
   expectedUserId: string,
@@ -401,7 +401,7 @@ export const confirmIdentityAuthorization = async (
   }
 };
 
-/** Bestätigt einen Bot-Widerruf, ohne den Widerrufszustand selbst zu schreiben. */
+/** Confirms a bot revocation without writing the revocation state itself. */
 export const confirmBotIdentityAuthorization = async (
   env: Env,
   expectedUserId: string,

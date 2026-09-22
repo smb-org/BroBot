@@ -112,7 +112,7 @@ const rotateWithRetry = async (
   }
 };
 
-/** Holt den verschlüsselten App-Token oder erneuert ihn per Client-Credentials. */
+/** Fetches the encrypted app token or renews it via client credentials. */
 export const getAppAccessToken = async (
   env: Env,
   now: string,
@@ -141,8 +141,8 @@ export const getAppAccessToken = async (
   );
   if (replaced) return requested.accessToken;
 
-  // Ein anderer Worker war schneller. Den gerade gespeicherten Wert lesen,
-  // statt einen möglicherweise veralteten Token an den Aufrufer zu geben.
+  // Another worker was faster. Read the value that was just stored instead
+  // of handing the caller a token that might already be stale.
   const current = await getStoredAppAccessToken(env.DB);
   if (current !== null) {
     const currentToken = await decryptAppAccessToken(current.accessTokenCiphertext, encryptionKeys);

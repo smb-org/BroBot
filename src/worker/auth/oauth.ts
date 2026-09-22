@@ -25,7 +25,7 @@ export const BOT_SCOPES = [
   "moderator:read:suspicious_users",
 ] as const;
 
-/** Liefert die verlangten Bot-Scopes, die Twitch nicht erteilt hat. */
+/** Returns the required bot scopes that Twitch did not grant. */
 export const missingBotScopes = (grantedScopes: readonly string[]): string[] => {
   const granted = new Set(grantedScopes);
   return BOT_SCOPES.filter((scope) => !granted.has(scope));
@@ -50,19 +50,19 @@ export interface OAuthStart {
   url: string;
   state: string;
   transactionId: string;
-  /** Gehoert in ein kurzlebiges Cookie; siehe OAUTH_STATE_COOKIE_NAME. */
+  /** Belongs in a short-lived cookie; see OAUTH_STATE_COOKIE_NAME. */
   stateNonce: string;
 }
 
 /**
- * Der signierte `state` allein schuetzt nur gegen Wiederholung, nicht gegen
- * Unterschieben: Ein Angreifer kann seinen eigenen Login starten, die noch
- * unverbrauchte Callback-URL abfangen und das Opfer darauf schicken — das Opfer
- * ist danach als Angreifer angemeldet. Laut Spezifikation leistet der `state`
- * seinen CSRF-Schutz nur mit Bindung an den Browser.
+ * The signed `state` alone only protects against replay, not against
+ * substitution: an attacker can start their own login, intercept the
+ * still-unused callback URL, and send the victim to it — the victim then
+ * ends up signed in as the attacker. Per spec, `state` only provides its
+ * CSRF protection when bound to the browser.
  *
- * Deshalb traegt der `state` einen Nonce, dessen Gegenstueck nur im Browser des
- * Startenden liegt. Der Callback verlangt beides.
+ * That's why `state` carries a nonce whose counterpart lives only in the
+ * browser of whoever started the flow. The callback requires both.
  */
 export const OAUTH_STATE_COOKIE_NAME = "__Host-brobot_oauth_state";
 export const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
@@ -124,8 +124,7 @@ const isSignedOAuthState = (value: unknown): value is SignedOAuthState => {
 };
 
 /**
- * Vergleich in konstanter Zeit, damit der Nonce nicht ueber die Laufzeit
- * erraten werden kann.
+ * Constant-time comparison, so the nonce can't be guessed via timing.
  */
 const equalsConstantTime = (left: string, right: string): boolean => {
   if (left.length !== right.length) return false;
@@ -184,8 +183,8 @@ export const startOAuthAuthorization = async (
 };
 
 /**
- * `cookieNonce` stammt aus OAUTH_STATE_COOKIE_NAME. Fehlt er oder passt er
- * nicht, stammt der Aufruf nicht aus dem Browser, der den Login gestartet hat.
+ * `cookieNonce` comes from OAUTH_STATE_COOKIE_NAME. If it's missing or
+ * doesn't match, the call did not come from the browser that started the login.
  */
 export const verifyOAuthState = async (
   serialized: string,

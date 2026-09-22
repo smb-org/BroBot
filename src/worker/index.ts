@@ -29,9 +29,9 @@ app.get("/healthz", async (context) => {
   );
 });
 
-// Ereignisse erreichen Module über den EventSub-Eingang und `dispatch.ts`.
-// Modulrouten werden in `panel/module-routes.ts` aus der Registry kanalgebunden
-// unter `/api/channels/:channelId/modules/<id>` eingehängt.
+// Events reach modules via the EventSub inbound handler and `dispatch.ts`.
+// Module routes are mounted channel-scoped from the registry in
+// `panel/module-routes.ts` under `/api/channels/:channelId/modules/<id>`.
 
 app.all("*", (context) => context.env.ASSETS.fetch(context.req.raw));
 

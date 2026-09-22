@@ -12,7 +12,7 @@ vi.mock("../../src/modules/registry", () => ({
 
 import { ModulePage } from "../../src/dashboard/module-panels";
 
-describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
+describe("Broadcaster scope notice in the module panel", () => {
   afterEach(() => {
     cleanup();
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
@@ -26,7 +26,7 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
     missingBroadcasterScopes: ["channel:read:ads"],
   }];
 
-  it("zeigt dem Broadcaster die aktiven Zustimmungsschaltfläche und Begründung", () => {
+  it("shows the broadcaster the active consent button and reasoning", () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="ads"
@@ -45,7 +45,7 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
     );
   });
 
-  it.each(["manager", "operator"] as const)("zeigt %s denselben Bedarf, aber keinen auslösbaren Knopf", (ownRole) => {
+  it.each(["manager", "operator"] as const)("shows %s the same requirement, but no actionable button", (ownRole) => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="ads"
@@ -63,7 +63,7 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
   it.each([
     ["de-DE", "Benötigte Broadcaster-Berechtigungen", "Werbepausen erkennen", "Fehlt", "Erteilt", "Broadcaster-Berechtigungen erteilen", "Das Modul „Werbung“ ist deaktiviert, weil Broadcaster-Berechtigungen fehlen."],
     ["en-US", "Required broadcaster permissions", "Detect ad breaks", "Missing", "Granted", "Grant broadcaster permissions", "The module “Ad breaks” is disabled because broadcaster permissions are missing."],
-  ] as const)("zeigt jede Berechtigung mit Zweck, Bezeichner und LED-Wort auf %s", async (language, heading, purpose, missing, granted, action, notice) => {
+  ] as const)("shows each permission with purpose, identifier and LED word in %s", async (language, heading, purpose, missing, granted, action, notice) => {
     Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
     render(<ModulePage
       channelId="kanal-a"
@@ -93,7 +93,7 @@ describe("Broadcaster-Scope-Hinweis im Modulpanel", () => {
     expect(document.querySelector(".module-state__icon")).toBeInTheDocument();
   });
 
-  it("blendet die Zustimmungsfläche aus, wenn alle Berechtigungen erteilt sind", async () => {
+  it("hides the consent area when all permissions are granted", async () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="ads"

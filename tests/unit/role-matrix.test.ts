@@ -450,9 +450,9 @@ const setupActor = async (database: TestD1Database, role: Zeile): Promise<void> 
   if (role !== "kein Mitglied") await insertMember(database, "kanal-a", "actor", role);
 };
 
-describe("Rollen-mal-Aktion-Matrix", () => {
-  it("führt jede Guard-geschützte Schreibaktion für jede Kanalrolle aus", async () => {
-    // Ohne diese Schranke waere der Test gruen, wenn die Tabelle leer liefe.
+describe("Role-times-action matrix", () => {
+  it("runs every guard-protected write action for every channel role", async () => {
+    // Without this floor, the test would pass if the table ran empty.
     expect(aktionen.length).toBeGreaterThanOrEqual(20);
     for (const action of aktionen) {
       for (const row of rollen) {

@@ -1,11 +1,11 @@
 import type { EventSubSubscriptionType } from "../contracts/values";
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 /**
- * Beide Kataloge sind nach Modulkennung geschlüsselt. Die Vollständigkeit
- * sichert `tests/unit/module-labels.test.ts`, nicht der Compiler: Sie über den
- * Typ zu erzwingen, verlangte eine heterogene Literal-Registry und damit einen
- * bivarianten `handleEvent` — das lockerte den Modulvertrag an der Stelle, an
- * der Schema und Handler auseinanderlaufen können.
+ * Both catalogs are keyed by module id. Completeness is enforced by
+ * `tests/unit/module-labels.test.ts`, not by the compiler: enforcing it through the
+ * type would require a heterogeneous literal registry and, with it, a
+ * bivariant `handleEvent` — that would loosen the module contract exactly where
+ * schema and handler can drift apart.
  */
 type ModuleNames = Record<string, string>;
 

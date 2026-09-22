@@ -270,7 +270,7 @@ export const createTextCommandRepository = (
   },
 });
 
-/** Legt den eingebauten Listenbefehl beim Aktivieren einmalig als normale Zeile an. */
+/** Creates the built-in list command as a normal row once, when the module is enabled. */
 export const initializeListCommand = async (
   db: D1Database,
   channelId: string,
