@@ -243,6 +243,14 @@ export interface DashboardTexts {
     realtimeOffline: string;
     realtimeRenewSession: string;
     realtimeNew: (count: string) => string;
+    connectionLost: string;
+    retry: string;
+    technicalDetails: string;
+    copyId: string;
+    copied: string;
+    trigger: string;
+    moderator: string;
+    affectedPerson: string;
   };
   signIn: {
     required: string;
@@ -388,6 +396,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedEnd: "Ende des Ereignisverlaufs erreicht.",
       realtimeConnecting: "Verbindet …", realtimeConnected: "Verbunden", realtimeReconnecting: "Verbindet neu …",
       realtimeOffline: "Offline", realtimeRenewSession: "Sitzung erneuern", realtimeNew: (count) => `${count} neue Ereignisse`,
+      connectionLost: "Verbindung unterbrochen. Die Ereignisse konnten nicht geladen werden.",
+      retry: "Erneut versuchen", technicalDetails: "Technische Details", copyId: "ID kopieren", copied: "Kopiert",
+      trigger: "Auslöser", moderator: "Moderator", affectedPerson: "Betroffene Person",
     },
     signIn: {
       required: "Anmeldung erforderlich", explanation: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -511,6 +522,9 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedEnd: "End of the event history reached.",
       realtimeConnecting: "Connecting …", realtimeConnected: "Connected", realtimeReconnecting: "Reconnecting …",
       realtimeOffline: "Offline", realtimeRenewSession: "Renew session", realtimeNew: (count) => `${count} new events`,
+      connectionLost: "Connection lost. The events could not be loaded.",
+      retry: "Retry", technicalDetails: "Technical details", copyId: "Copy ID", copied: "Copied",
+      trigger: "Trigger", moderator: "Moderator", affectedPerson: "Affected person",
     },
     signIn: {
       required: "Sign-in required", explanation: "Sign in with your Twitch account to see available channels.",

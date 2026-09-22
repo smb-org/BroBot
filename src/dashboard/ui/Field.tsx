@@ -1,4 +1,5 @@
 import { TextInput } from "@mantine/core";
+import type { KeyboardEvent } from "react";
 
 export interface FieldProps {
   label: string;
@@ -11,6 +12,9 @@ export interface FieldProps {
   required?: boolean;
   name?: string;
   id?: string;
+  /** A caller that commits its own debounced draft on Enter (see the
+   *  events person filter, #157) -- optional, nothing else needs it. */
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
 }
 
 /**
@@ -20,7 +24,7 @@ export interface FieldProps {
  * `×` and the border stays "Linie-Stark" (wired in the theme's `Input`
  * override, not here).
  */
-export function Field({ label, hint, error, value, onChange, placeholder, disabled = false, required = false, name, id }: FieldProps) {
+export function Field({ label, hint, error, value, onChange, placeholder, disabled = false, required = false, name, id, onKeyDown }: FieldProps) {
   return (
     <TextInput
       label={label}
@@ -28,6 +32,7 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
       error={error ? `× ${error}` : undefined}
       value={value}
       onChange={(event) => onChange(event.currentTarget.value)}
+      onKeyDown={onKeyDown}
       placeholder={placeholder}
       disabled={disabled}
       required={required}

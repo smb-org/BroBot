@@ -291,6 +291,29 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
   });
 
+  it("groups rows by day, newest day first, each with its own table", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path.endsWith("/events")) return jsonResponse({
+        entries: [
+          { eventId: "today", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "raid", code: "raid.shoutout", detail: "{}", actorUserId: null },
+          { eventId: "yesterday", createdAt: "2026-09-17T04:00:00.000Z", moduleId: "raid", code: "raid.outgoing", detail: "{}", actorUserId: null },
+        ],
+        nextCursor: null,
+      });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const headings = (await screen.findAllByRole("heading", { level: 3 })).map((heading) => heading.textContent);
+    expect(headings).toEqual(["18.09.2026", "17.09.2026"]);
+    expect(screen.getAllByRole("table")).toHaveLength(2);
+  });
+
   it("shows the event chip pair with family, tier, number and time tooltip", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -330,9 +353,9 @@ describe("Dashboard skeleton", () => {
     expect(sentRow.querySelector(".event-chip[data-stufe='voll']")).toBeNull();
     expect(unknownRow.querySelector(".event-chip")).toHaveTextContent("Unbekannt");
     expect(unknownRow.querySelector(".event-label > .mono")).toHaveTextContent("plugin.anderes");
-    const firstCell = giftRow.querySelector("td");
-    if (firstCell === null) throw new Error("Zeitspalte fehlt");
-    expect(firstCell.getAttribute("title")).toBe("2026-09-18T04:00:00.000Z");
+    const timeCell = giftRow.querySelector("td:last-child");
+    if (timeCell === null) throw new Error("Zeitspalte fehlt");
+    expect(timeCell.getAttribute("title")).toBe("2026-09-18T04:00:00.000Z");
   });
 
   it("shows subscription tiers in the number chip as T1/T2/T3/Prime instead of raw, unknown values without a chip", async () => {
@@ -794,6 +817,81 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByText("Noch keine Ereignisse protokolliert.")).toBeInTheDocument();
   });
 
+  it("shows a connection-lost state with a retry action when the first page fails to load", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let eventAttempts = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path.endsWith("/events")) {
+        eventAttempts += 1;
+        return eventAttempts === 1 ? jsonResponse({}, 500) : jsonResponse({ entries: [], nextCursor: null });
+      }
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Verbindung unterbrochen. Die Ereignisse konnten nicht geladen werden.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+    expect(await screen.findByText("Noch keine Ereignisse protokolliert.")).toBeInTheDocument();
+    expect(eventAttempts).toBe(2);
+  });
+
+  it("shows participant roles, a copyable id, and puts the raw detail behind a technical-details disclosure", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
+    Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+    const entry = {
+      eventId: "event-1",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      moduleId: "channel_events",
+      triggerId: "trigger-1",
+      code: "channel_events.moderation.ban",
+      detail: '{"person":"troll","moderator":"alice","reason":"spam"}',
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path.endsWith("/events")) return jsonResponse({ entries: [entry], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    const row = (await screen.findByText(/gebannt von alice/)).closest("tr");
+    if (row === null) throw new Error("Ereignis-Zeile fehlt");
+    fireEvent.click(row);
+
+    const inspector = await screen.findByRole("region", { name: "Detail" });
+    // Event text and chip come before the internal code, both inside and outside the inspector.
+    const historyHeading = within(inspector).getByText(/gebannt von alice/).closest(".event-history__heading");
+    if (historyHeading === null) throw new Error("Verlaufskopf fehlt");
+    const headingText = historyHeading.textContent;
+    expect(headingText.indexOf("gebannt")).toBeLessThan(headingText.indexOf("channel_events.moderation.ban"));
+
+    expect(within(inspector).getByText("Auslöser")).toBeInTheDocument();
+    expect(within(inspector).getByText("Alice")).toBeInTheDocument();
+    expect(within(inspector).getByText("Moderator")).toBeInTheDocument();
+    expect(within(inspector).getByText("Betroffene Person")).toBeInTheDocument();
+    expect(within(inspector).getByText("troll")).toBeInTheDocument();
+
+    // The raw detail JSON sits behind a disclosure, not open by default.
+    const disclosure = inspector.querySelector("details");
+    if (disclosure === null) throw new Error("Technische Details fehlen");
+    expect(disclosure.open).toBe(false);
+    expect(within(inspector).getByText("Technische Details")).toBeInTheDocument();
+
+    fireEvent.click(within(inspector).getByRole("button", { name: "ID kopieren" }));
+    expect(clipboard.writeText).toHaveBeenCalledWith("trigger-1");
+    expect(await within(inspector).findByRole("button", { name: "Kopiert" })).toBeInTheDocument();
+  });
+
   it("shows active filters, combines them, and reports a no-results empty state", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const channelEntry = { eventId: "channel", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":21}', actorUserId: null, actorLogin: null, actorDisplayName: null };
@@ -828,31 +926,37 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
-    const herkunft = screen.getByRole("combobox", { name: "Herkunft" });
+    const herkunftGroup = screen.getByRole("group", { name: "Herkunft" });
+    const tonGroup = screen.getByRole("group", { name: "Ton" });
     const module = screen.getByRole("combobox", { name: "Modul" });
-    const ton = screen.getByRole("combobox", { name: "Ton" });
     const person = screen.getByRole("textbox", { name: "Person" });
-    expect(herkunft).toBeInTheDocument();
+    expect(herkunftGroup).toBeInTheDocument();
     expect(module).toBeInTheDocument();
-    expect(ton).toBeInTheDocument();
+    expect(tonGroup).toBeInTheDocument();
     expect(person).toBeInTheDocument();
 
-    fireEvent.change(herkunft, { target: { value: "channel" } });
+    fireEvent.click(within(herkunftGroup).getByRole("radio", { name: "Kanalereignisse" }));
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.queryByText("Befehl !hilfe ausgeführt")).not.toBeInTheDocument();
     expect(screen.getByText(/Aktive Filter:/)).toHaveTextContent("Kanalereignisse");
 
-    fireEvent.click(screen.getByRole("button", { name: "Filter zurücksetzen" }));
-    fireEvent.change(module, { target: { value: "text_commands" } });
-    fireEvent.change(ton, { target: { value: "error" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Filter zurücksetzen" })[0] as HTMLElement);
+    // The sidebar's module list refetches on every navigate() -- including
+    // the reset above -- so its options can briefly be empty; wait for them
+    // rather than opening the dropdown mid-fetch.
+    await waitFor(() => { expect(screen.getByRole("option", { name: "Textbefehle", hidden: true })).toBeInTheDocument(); });
+    fireEvent.click(module);
+    fireEvent.click(screen.getByRole("option", { name: "Textbefehle", hidden: true }));
+    fireEvent.click(within(tonGroup).getByRole("radio", { name: "Fehler" }));
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
     fireEvent.change(person, { target: { value: "person-a" } });
     expect(await screen.findByText("Alice")).toBeInTheDocument();
 
-    fireEvent.change(module, { target: { value: "ads" } });
+    fireEvent.click(module);
+    fireEvent.click(screen.getByRole("option", { name: "Werbung", hidden: true }));
     expect(await screen.findByText("Keine Ereignisse passen zu den Filtern.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Filter zurücksetzen" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Filter zurücksetzen" })[0] as HTMLElement);
     expect(await screen.findByText("Raid von unbekannt mit 21 Zuschauern")).toBeInTheDocument();
     expect(screen.queryByText("Keine Ereignisse passen zu den Filtern.")).not.toBeInTheDocument();
   });

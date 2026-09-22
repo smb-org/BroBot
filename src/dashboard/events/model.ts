@@ -1,6 +1,6 @@
 import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
-import { eventToneEntries, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
+import { eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
 import { moduleName } from "../module-labels";
 
 export const emptyEventFilter: PanelEventFilters = {
@@ -70,6 +70,46 @@ export const actorLabel = (entry: PanelEventEntry, texts: ReturnType<typeof dash
     : `@${entry.actorLogin}`);
 
 export const moduleLabel = (entry: PanelEventEntry): string => moduleName(entry.moduleId);
+
+const stringDetail = (detail: EventDetail, key: string): string | null => {
+  const value = detail[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+};
+
+/** The person the action was done to or about -- never invented when absent. */
+export const affectedPersonLabel = (detail: EventDetail): string | null => stringDetail(detail, "person");
+
+/** The moderator who acted, when the code's detail carries one. */
+export const moderatorLabel = (detail: EventDetail): string | null => stringDetail(detail, "moderator");
+
+export interface EventDayGroup {
+  key: string;
+  label: string;
+  groups: readonly EventGroup[];
+}
+
+/** The viewer's local calendar day, matching `formatTimestamp`'s zone. */
+const dayKey = (createdAt: string): string => {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return createdAt;
+  return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
+
+/** Groups already-sorted event groups by day, newest day first, preserving order within a day. */
+export const eventDayGroups = (groups: readonly EventGroup[]): EventDayGroup[] => {
+  const days = new Map<string, EventGroup[]>();
+  for (const group of groups) {
+    const key = dayKey(group.representative.createdAt);
+    const existing = days.get(key);
+    if (existing === undefined) days.set(key, [group]);
+    else existing.push(group);
+  }
+  return Array.from(days, ([key, dayGroups]) => ({
+    key,
+    label: formatDate(dayGroups[0]?.representative.createdAt ?? key),
+    groups: dayGroups,
+  }));
+};
 
 export const eventDetail = (detail: string): EventDetail => {
   try {

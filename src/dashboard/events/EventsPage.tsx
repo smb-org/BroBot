@@ -5,30 +5,25 @@ import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, for
 import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
-import { ListDetail, SubInspector, useInspectorSelection } from "../ui";
+import { ChipGroup, EmptyState, ErrorPanel, Field, ListDetail, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   actorLabel,
+  affectedPersonLabel,
   chronological,
   emptyEventFilter,
   eventChipNumber,
+  eventDayGroups,
   eventDetail,
   eventFilterIsActive,
   eventGroups,
   eventMetadata,
   eventToneFromValue,
   formatEventDetail,
+  moderatorLabel,
   moduleLabel,
   PERSON_FILTER_DEBOUNCE_MS,
 } from "./model";
-
-/** Kept identical to `main.tsx`'s local `ErrorPanel` so this move changes no behaviour. */
-const ErrorPanel = ({ message }: { message: string }): ReactElement => (
-  <section className="error-panel" data-status="error" role="alert">
-    <strong>{dashboardTexts().errors.title}</strong>
-    <p>{message}</p>
-  </section>
-);
 
 const actorCell = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTexts>): ReactNode =>
   entry.actorDisplayName ?? (entry.actorLogin == null
@@ -44,6 +39,21 @@ const EventChipPair = ({ code, detail, texts: texts }: { code: string; detail: R
   return <span className="event-chip-pair">
     {number === null ? null : <span className="event-chip event-chip--number">{number}</span>}
     <span className="event-chip" data-familie={metadata.family} data-stufe={metadata.tier} data-ton={metadata.tone}>{metadata.word[dashboardLanguage()]}</span>
+  </span>;
+};
+
+/** Copies to the clipboard when it exists (never in a test/jsdom environment) -- same guard as platform.tsx's invitation link. */
+const CopyableId = ({ id, texts }: { id: string; texts: ReturnType<typeof dashboardTexts> }): ReactElement => {
+  const [copied, setCopied] = useState(false);
+  const copyToClipboard = async (): Promise<void> => {
+    const clipboard = Reflect.get(navigator, "clipboard") as { writeText: (text: string) => Promise<void> } | undefined;
+    if (clipboard === undefined) return;
+    await clipboard.writeText(id);
+    setCopied(true);
+  };
+  return <span className="event-inspector-id">
+    {id}
+    <button type="button" className="button button--quiet" onClick={() => { void copyToClipboard(); }}>{copied ? texts.events.copied : texts.events.copyId}</button>
   </span>;
 };
 
@@ -82,18 +92,43 @@ const EventFilterBar = ({
   if (filters.module !== null) activeFilter.push(moduleName(filters.module));
   if (filters.tone !== null) activeFilter.push(filters.tone === "info" ? texts.events.info : filters.tone === "warning" ? texts.events.notice : texts.events.error);
   if (filters.person !== null) activeFilter.push(filters.person);
+  const moduleSelectOptions: SelectOption[] = moduleOptions.map((module) => ({ value: module.id, label: moduleName(module.id) }));
   return <div className="event-filter" aria-label={texts.events.filter}>
     <div className="event-filter__controls">
-      <label>{texts.events.origin}<select aria-label={texts.events.origin} value={filters.origin ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}>
-        <option value="">{texts.events.all}</option><option value="channel">{texts.events.channelEvents}</option><option value="module">{texts.events.moduleDiagnostics}</option>
-      </select></label>
-      <label>{texts.events.moduleFilter}<select aria-label={texts.events.moduleFilter} value={filters.module ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, module: value.length === 0 ? null : value }); }}>
-        <option value="">{texts.events.all}</option>{moduleOptions.map((module) => <option key={module.id} value={module.id}>{moduleName(module.id)}</option>)}
-      </select></label>
-      <label>{texts.events.tone}<select aria-label={texts.events.tone} value={filters.tone ?? ""} onChange={(event) => { onChange({ ...filters, tone: eventToneFromValue(event.target.value) }); }}>
-        <option value="">{texts.events.all}</option><option value="info">{texts.events.info}</option><option value="warning">{texts.events.notice}</option><option value="error">{texts.events.error}</option>
-      </select></label>
-      <label>{texts.events.person}<input aria-label={texts.events.person} value={personDraft} onChange={(event) => { setPersonDraft(event.target.value); }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }} /></label>
+      <ChipGroup
+        ariaLabel={texts.events.origin}
+        value={filters.origin}
+        onChange={(value) => { onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}
+        options={[
+          { value: "", label: texts.events.all },
+          { value: "channel", label: texts.events.channelEvents },
+          { value: "module", label: texts.events.moduleDiagnostics },
+        ]}
+      />
+      <ChipGroup
+        ariaLabel={texts.events.tone}
+        value={filters.tone}
+        onChange={(value) => { onChange({ ...filters, tone: eventToneFromValue(value ?? "") }); }}
+        options={[
+          { value: "", label: texts.events.all },
+          { value: "error", label: texts.events.error },
+          { value: "warning", label: texts.events.notice },
+          { value: "info", label: texts.events.info },
+        ]}
+      />
+      <UiSelect
+        label={texts.events.moduleFilter}
+        value={filters.module}
+        onChange={(value) => { onChange({ ...filters, module: value }); }}
+        options={moduleSelectOptions}
+        placeholder={texts.events.all}
+      />
+      <Field
+        label={texts.events.person}
+        value={personDraft}
+        onChange={setPersonDraft}
+        onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
+      />
     </div>
     {activeFilter.length === 0 ? null : <div className="form-actions"><p className="muted" aria-live="polite">{texts.events.activeFilters} {activeFilter.join(" · ")}</p><button className="button button--quiet" type="button" onClick={() => { setPersonDraft(""); onChange(emptyEventFilter); }}>{texts.events.resetFilters}</button></div>}
   </div>;
@@ -203,9 +238,18 @@ export const EventsPage = ({
   });
   const { selectedKey: selectedGroupKey, select: selectGroup, rowRef: groupRowRef, close: closeGroup } = useInspectorSelection<string>();
   const groups = eventsState.data === null ? [] : eventGroups(eventsState.data.entries);
+  const dayGroups = eventDayGroups(groups);
   const selectedGroup = groups.find((group) => group.key === selectedGroupKey) ?? null;
   const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronological);
+  const triggerNames = Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texts))));
+  const moderatorNames = Array.from(new Set(
+    selectedHistory.map((entry) => moderatorLabel(eventDetail(entry.detail))).filter((name): name is string => name !== null),
+  ));
+  const affectedNames = Array.from(new Set(
+    selectedHistory.map((entry) => affectedPersonLabel(eventDetail(entry.detail))).filter((name): name is string => name !== null),
+  ));
   const eventEntries = eventsState.data?.entries ?? [];
+  const filterActive = eventFilterIsActive(filters);
   return (
     <>
       <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} />
@@ -217,19 +261,51 @@ export const EventsPage = ({
             <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
             {realtime.pendingCount === 0 ? null : <button className="button realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite">{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
             {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texts.events.load}</p> : null}
-            {eventsState.error !== null ? <ErrorPanel message={eventsState.error} /> : null}
-            {eventsState.data !== null && eventEntries.length === 0 ? <p className="empty-state">{eventFilterIsActive(filters) ? texts.events.noMatches : texts.events.none}</p> : null}
+            {/* Connection lost: nothing could ever be loaded -- distinct from a background refresh failing once data already exists. */}
+            {eventsState.status === "error" && eventsState.data === null ? (
+              <ErrorPanel
+                title={texts.events.connectionLost}
+                reason={eventsState.error ?? ""}
+                action={{ label: texts.events.retry, onClick: () => { void onRefreshFirstPage(channelId, filters); } }}
+              />
+            ) : null}
+            {eventsState.error !== null && eventsState.data !== null ? <p className="muted" role="alert">{eventsState.error}</p> : null}
+            {eventsState.data !== null && eventEntries.length === 0 ? (
+              filterActive ? (
+                <EmptyState
+                  title={texts.events.noMatches}
+                  description={`${texts.events.activeFilters} ${[
+                    filters.origin === "channel" ? texts.events.channelEvents : null,
+                    filters.origin === "module" ? texts.events.moduleDiagnostics : null,
+                    filters.module === null ? null : moduleName(filters.module),
+                    filters.tone === null ? null : (filters.tone === "info" ? texts.events.info : filters.tone === "warning" ? texts.events.notice : texts.events.error),
+                    filters.person,
+                  ].filter((value): value is string => value !== null).join(" · ")}`}
+                  action={{ label: texts.events.resetFilters, onClick: () => { onFiltersChange(emptyEventFilter); } }}
+                />
+              ) : <p className="empty-state">{texts.events.none}</p>
+            ) : null}
             {eventsState.data !== null ? <>
               {eventEntries.length === 0 ? null : <div ref={feedRef} className="event-feed">
                 <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
-                  <table className="tabelle event-table">
-                    <thead><tr><th scope="col">{texts.events.time}</th><th scope="col">{texts.events.event}</th><th scope="col">{texts.events.module}</th><th scope="col">{texts.events.who}</th></tr></thead>
-                    <tbody>{groups.map((group) => {
-                      const entry = group.representative;
-                      const eventLabel = eventText(entry.code, eventDetail(entry.detail));
-                      return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td><td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td><td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td><td>{actorCell(entry, texts)}</td></tr>;
-                    })}</tbody>
-                  </table>
+                  {dayGroups.map((day) => (
+                    <section key={day.key} className="event-day">
+                      <h3 className="event-day__heading">{day.label}</h3>
+                      <table className="tabelle event-table">
+                        <thead><tr><th scope="col">{texts.events.event}</th><th scope="col">{texts.events.module}</th><th scope="col">{texts.events.who}</th><th scope="col">{texts.events.time}</th></tr></thead>
+                        <tbody>{day.groups.map((group) => {
+                          const entry = group.representative;
+                          const eventLabel = eventText(entry.code, eventDetail(entry.detail));
+                          return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}>
+                            <td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td>
+                            <td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td>
+                            <td>{actorCell(entry, texts)}</td>
+                            <td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td>
+                          </tr>;
+                        })}</tbody>
+                      </table>
+                    </section>
+                  ))}
                 </div>
               </div>}
               <EventFeedEnd nextCursor={eventsState.data.nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
@@ -237,11 +313,32 @@ export const EventsPage = ({
           </section>
         }
         inspector={selectedGroup === null ? null : (
-          <SubInspector ariaLabel={texts.events.detail} title={texts.events.operation} identifier={selectedGroup.representative.triggerId || selectedGroup.representative.eventId} closeLabel={dashboardCommonTexts().close} onClose={closeGroup}>
-            <dl className="properties"><div><dt>{texts.events.timestamp}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texts.events.module}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texts.events.participants}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texts)))).join(", ")}</dd></div></dl>
+          <SubInspector
+            ariaLabel={texts.events.detail}
+            title={texts.events.operation}
+            identifier={<CopyableId id={selectedGroup.representative.triggerId || selectedGroup.representative.eventId} texts={texts} />}
+            closeLabel={dashboardCommonTexts().close}
+            onClose={closeGroup}
+          >
+            <dl className="properties">
+              <div><dt>{texts.events.timestamp}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div>
+              <div><dt>{texts.events.module}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div>
+              <div><dt>{texts.events.trigger}</dt><dd>{triggerNames.join(", ")}</dd></div>
+              {moderatorNames.length === 0 ? null : <div><dt>{texts.events.moderator}</dt><dd>{moderatorNames.join(", ")}</dd></div>}
+              {affectedNames.length === 0 ? null : <div><dt>{texts.events.affectedPerson}</dt><dd>{affectedNames.join(", ")}</dd></div>}
+            </dl>
             <div className="inspector-section__heading"><h3>{texts.events.history}</h3></div>
             <ol className="event-history">{selectedHistory.map((entry) => {
-              return <li key={entry.eventId}><div className="event-history__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
+              return <li key={entry.eventId}>
+                <div className="event-history__heading">
+                  <span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventText(entry.code, eventDetail(entry.detail))}</span></span>
+                  <span className="mono muted">{entry.code}</span>
+                </div>
+                <details>
+                  <summary>{texts.events.technicalDetails}</summary>
+                  <pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre>
+                </details>
+              </li>;
             })}</ol>
           </SubInspector>
         )}

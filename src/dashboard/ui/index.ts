@@ -35,6 +35,9 @@ export type { LedProps, LedStatus } from "./Led";
 export { Chip } from "./Chip";
 export type { ChipProps, ChipTone } from "./Chip";
 
+export { ChipGroup } from "./ChipGroup";
+export type { ChipGroupOption, ChipGroupProps } from "./ChipGroup";
+
 export { ConfirmDialog } from "./ConfirmDialog";
 export type { ConfirmDialogProps } from "./ConfirmDialog";
 

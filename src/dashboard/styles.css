@@ -582,11 +582,15 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .audit-table th:nth-child(1), .audit-table td:nth-child(1) { width: 22%; }
 .audit-table th:nth-child(2), .audit-table td:nth-child(2) { width: 48%; }
 .audit-table th:nth-child(3), .audit-table td:nth-child(3) { width: 30%; }
-.event-table th:nth-child(1), .event-table td:nth-child(1) { width: 22%; }
-.event-table th:nth-child(2), .event-table td:nth-child(2) { width: 40%; }
-.event-table th:nth-child(3), .event-table td:nth-child(3) { width: 18%; }
-.event-table th:nth-child(4), .event-table td:nth-child(4) { width: 20%; }
-.event-table td:nth-child(2) { overflow: hidden; }
+.event-table th:nth-child(1), .event-table td:nth-child(1) { width: 40%; }
+.event-table th:nth-child(2), .event-table td:nth-child(2) { width: 18%; }
+.event-table th:nth-child(3), .event-table td:nth-child(3) { width: 20%; }
+.event-table th:nth-child(4), .event-table td:nth-child(4) { width: 22%; }
+.event-table td:nth-child(1) { overflow: hidden; }
+.event-day { margin-top: var(--s6); }
+.event-day:first-child { margin-top: 0; }
+.event-day__heading { margin: 0 0 var(--s2); color: var(--text-3); font-size: 13px; font-weight: 600; }
+.event-inspector-id { display: inline-flex; align-items: center; gap: var(--s2); }
 .abonnements-tabelle th:nth-child(1), .abonnements-tabelle td:nth-child(1) { width: 38%; }
 .abonnements-tabelle th:nth-child(2), .abonnements-tabelle td:nth-child(2) { width: 22%; }
 .abonnements-tabelle th:nth-child(3), .abonnements-tabelle td:nth-child(3) { width: 40%; overflow: hidden; text-overflow: ellipsis; }
