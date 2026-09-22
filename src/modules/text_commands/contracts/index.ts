@@ -6,7 +6,7 @@ export interface Textbefehl {
   channelId: string;
   name: string;
   text: string;
-  art: TextbefehlArt;
+  kind: TextbefehlArt;
   enabled: boolean;
   mindeststufe: TextbefehlMindeststufe;
   cooldownSekunden: number;
@@ -19,7 +19,7 @@ export interface NeuerTextbefehl {
   channelId: string;
   name: string;
   text: string;
-  art: TextbefehlArt;
+  kind: TextbefehlArt;
   mindeststufe?: TextbefehlMindeststufe;
   cooldownSekunden: number;
   now: string;
@@ -30,7 +30,7 @@ export interface TextbefehlAenderung {
   name: string;
   neuerName: string;
   text: string;
-  art: TextbefehlArt;
+  kind: TextbefehlArt;
   enabled: boolean;
   nurSchalter?: boolean;
   mindeststufe?: TextbefehlMindeststufe;

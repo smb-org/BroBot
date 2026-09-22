@@ -18,7 +18,7 @@ describe("Kanalereignisse-Domain", () => {
       viewers: 42,
     }, "incoming")).toEqual([{
       code: "channel_events.raid.incoming",
-      detail: { quelle: "Quelle Name (@quelle_login)", zuschauer: 42 },
+      detail: { quelle: "Quelle Name (@quelle_login)", viewers: 42 },
     }]);
     expect(diagnose("channel.raid", {
       to_broadcaster_user_name: "Ziel Name",
@@ -26,7 +26,7 @@ describe("Kanalereignisse-Domain", () => {
       viewers: 17,
     }, "outgoing")).toEqual([{
       code: "channel_events.raid.outgoing",
-      detail: { ziel: "Ziel Name (@ziel_login)", zuschauer: 17 },
+      detail: { ziel: "Ziel Name (@ziel_login)", viewers: 17 },
     }]);
   });
 
@@ -44,7 +44,7 @@ describe("Kanalereignisse-Domain", () => {
       viewer_count: 12,
     })).toEqual([{
       code: "channel_events.shoutout.empfangen",
-      detail: { quelle: "Quelle (@quelle)", zuschauer: 12 },
+      detail: { quelle: "Quelle (@quelle)", viewers: 12 },
     }]);
   });
 
@@ -79,7 +79,7 @@ describe("Kanalereignisse-Domain", () => {
       community_sub_gift: { total: 5, sub_tier: "prime" },
     })[0]).toEqual({
       code: "channel_events.chat.community_gift",
-      detail: { spender: "Giftperson", anzahl: 5, stufe: "prime" },
+      detail: { spender: "Giftperson", count: 5, stufe: "prime" },
     });
     expect(diagnose("channel.chat.notification", {
       notice_type: "announcement",
@@ -95,7 +95,7 @@ describe("Kanalereignisse-Domain", () => {
     const noticeType = "x".repeat(240);
     expect(diagnose("channel.chat.notification", { notice_type: noticeType })).toEqual([{
       code: "channel_events.chat.unbekannt",
-      detail: { art: `${"x".repeat(199)}…` },
+      detail: { kind: `${"x".repeat(199)}…` },
     }]);
   });
 
@@ -117,7 +117,7 @@ describe("Kanalereignisse-Domain", () => {
       detail: {
         person: "Betroffene Person (@betroffen)",
         moderator: "Moderation (@mod)",
-        grund: "Regelverstoß",
+        reason: "Regelverstoß",
       },
     }]);
   });
@@ -136,7 +136,7 @@ describe("Kanalereignisse-Domain", () => {
       detail: {
         person: "Betroffene Person",
         moderator: "Moderation",
-        grund: "Zu viele Nachrichten",
+        reason: "Zu viele Nachrichten",
         ende: "2026-09-20T10:05:00.000Z",
         dauer: 300,
       },
@@ -199,7 +199,7 @@ describe("Kanalereignisse-Domain", () => {
       code: "channel_events.automod.halte",
       detail: {
         person: "TwitchDev (@twitchdev)",
-        grund: "aggressive",
+        reason: "aggressive",
         text: "Das ist eine zurückgehaltene Nachricht.",
       },
     }]);

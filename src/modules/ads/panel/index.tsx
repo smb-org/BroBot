@@ -11,7 +11,7 @@ interface WerbungPanelProperties {
   canManage?: boolean;
 }
 
-type WerbungPanelSettings = Omit<WerbungSettings, "vorlaufSekunden"> & { vorlaufSekunden: number | "" };
+type WerbungPanelSettings = Omit<WerbungSettings, "leadSeconds"> & { leadSeconds: number | "" };
 
 const formatZeitpunkt = (value: string | null, language: DashboardLanguage): string => {
   if (value === null) return "—";
@@ -53,7 +53,7 @@ export const WerbungPanel = ({
   if (settings === null || zeitplan === null) return <p className="loading-line">{error ?? labels.laden}</p>;
 
   const save = async (): Promise<void> => {
-    if (settings.vorlaufSekunden === "") {
+    if (settings.leadSeconds === "") {
       setVorlaufError(true);
       return;
     }
@@ -62,7 +62,7 @@ export const WerbungPanel = ({
     setError(null);
     setSaved(false);
     try {
-      await speichereWerbungseinstellungen(channelId, { ...settings, vorlaufSekunden: settings.vorlaufSekunden });
+      await speichereWerbungseinstellungen(channelId, { ...settings, leadSeconds: settings.leadSeconds });
       setSaved(true);
     } catch {
       setError(labels.fehler);
@@ -115,11 +115,11 @@ export const WerbungPanel = ({
       <section className="config-section" aria-label={labels.automatischAbschnitt}>
         <div className="section-heading"><h2>{labels.automatischAbschnitt}</h2></div>
         <label className="config-field config-field--breit">
-          {labels.automatisch}
+          {labels.automatic}
           <textarea
-            value={settings.automatisch}
+            value={settings.automatic}
             disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setSettings({ ...settings, automatisch: event.target.value }); }}
+            onChange={(event) => { setSaved(false); setSettings({ ...settings, automatic: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.platzhalter}</span>
         </label>
@@ -128,11 +128,11 @@ export const WerbungPanel = ({
       <section className="config-section" aria-label={labels.manuellAbschnitt}>
         <div className="section-heading"><h2>{labels.manuellAbschnitt}</h2></div>
         <label className="config-field config-field--breit">
-          {labels.manuell}
+          {labels.manual}
           <textarea
-            value={settings.manuell}
+            value={settings.manual}
             disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setSettings({ ...settings, manuell: event.target.value }); }}
+            onChange={(event) => { setSaved(false); setSettings({ ...settings, manual: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.platzhalter}</span>
         </label>
@@ -147,34 +147,34 @@ export const WerbungPanel = ({
             type="button"
             role="switch"
             aria-label={labels.vorwarnungAktiv}
-            aria-checked={settings.vorwarnung}
+            aria-checked={settings.prewarning}
             disabled={!canManage || busy}
-            onClick={() => { setSaved(false); setSettings({ ...settings, vorwarnung: !settings.vorwarnung }); }}
+            onClick={() => { setSaved(false); setSettings({ ...settings, prewarning: !settings.prewarning }); }}
           >
             <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
           </button>
         </label>
         <label className="config-field config-field--schmal">
-          {labels.vorlaufSekunden}
+          {labels.leadSeconds}
           <input
             type="number"
             min="30"
             max="300"
             step="1"
-            value={settings.vorlaufSekunden}
+            value={settings.leadSeconds}
             aria-invalid={vorlaufError}
             disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setVorlaufError(false); setSettings({ ...settings, vorlaufSekunden: event.target.value === "" ? "" : Number(event.target.value) }); }}
+            onChange={(event) => { setSaved(false); setVorlaufError(false); setSettings({ ...settings, leadSeconds: event.target.value === "" ? "" : Number(event.target.value) }); }}
           />
           {vorlaufError ? <span className="form-error" role="alert">{labels.zahlFehlt}</span> : null}
         </label>
         <label className="config-field config-field--breit">
-          {labels.vorwarnungText}
+          {labels.prewarningText}
           <input
             type="search"
-            value={settings.vorwarnungText}
+            value={settings.prewarningText}
             disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setSettings({ ...settings, vorwarnungText: event.target.value }); }}
+            onChange={(event) => { setSaved(false); setSettings({ ...settings, prewarningText: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.platzhalterVorwarnung}</span>
         </label>

@@ -8,7 +8,7 @@ const nonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
 export type WerbepausenEntscheidung =
-  | { kind: "skip"; reason: "dauer_null" | "dauer_ungueltig" | "start_ungueltig"; dauerSekunden: number | null; automatisch: boolean }
+  | { kind: "skip"; reason: "dauer_null" | "dauer_ungueltig" | "start_ungueltig"; dauerSekunden: number | null; automatic: boolean }
   | { kind: "announce"; event: WerbepausenEreignis };
 
 export const entscheideWerbepause = (
@@ -17,14 +17,14 @@ export const entscheideWerbepause = (
   const dauer = finiteNumber(payload.duration_seconds) ? payload.duration_seconds : null;
   const automatisch = payload.is_automatic === true;
   if (dauer === null || dauer < 0) {
-    return { kind: "skip", reason: "dauer_ungueltig", dauerSekunden: dauer, automatisch };
+    return { kind: "skip", reason: "dauer_ungueltig", dauerSekunden: dauer, automatic: automatisch };
   }
-  if (dauer === 0) return { kind: "skip", reason: "dauer_null", dauerSekunden: 0, automatisch };
+  if (dauer === 0) return { kind: "skip", reason: "dauer_null", dauerSekunden: 0, automatic: automatisch };
 
   const gestartetAm = nonEmptyString(payload.started_at);
   const start = gestartetAm === null ? Number.NaN : Date.parse(gestartetAm);
   if (gestartetAm === null || !Number.isFinite(start)) {
-    return { kind: "skip", reason: "start_ungueltig", dauerSekunden: dauer, automatisch };
+    return { kind: "skip", reason: "start_ungueltig", dauerSekunden: dauer, automatic: automatisch };
   }
 
   const ausloeserLogin = nonEmptyString(payload.requester_user_login) ??
@@ -35,7 +35,7 @@ export const entscheideWerbepause = (
       dauerSekunden: dauer,
       gestartetAm,
       endetAm: new Date(start + dauer * 1000).toISOString(),
-      automatisch,
+      automatic: automatisch,
       ausloeserLogin,
     },
   };
@@ -47,7 +47,7 @@ export interface WerbevorwarnungsZeitplan {
 }
 
 export interface WerbevorwarnungsEingabe {
-  settings: Pick<WerbungSettings, "vorwarnung" | "vorlaufSekunden" | "vorwarnungText">;
+  settings: Pick<WerbungSettings, "prewarning" | "leadSeconds" | "prewarningText">;
   scopeVorhanden: boolean;
   jetztAmMs: number;
   geplantAmMs: number;
@@ -83,7 +83,7 @@ const skip = (
 export const entscheideWerbevorwarnung = (
   input: WerbevorwarnungsEingabe,
 ): WerbevorwarnungsEntscheidung => {
-  if (!input.settings.vorwarnung) return skip("vorwarnung_aus");
+  if (!input.settings.prewarning) return skip("vorwarnung_aus");
   if (!input.scopeVorhanden) return skip("scope_fehlt", { scope: "channel:read:ads" });
 
   const nextAdAtMs = dateMs(input.schedule.nextAdAt);
@@ -111,7 +111,7 @@ export const entscheideWerbevorwarnung = (
   const sekunden = Math.round(verbleibend / 1000);
   return {
     kind: "announce",
-    text: input.settings.vorwarnungText.replaceAll("{seconds}", String(sekunden)),
+    text: input.settings.prewarningText.replaceAll("{seconds}", String(sekunden)),
     sekunden,
     terminAm: input.schedule.nextAdAt ?? new Date(nextAdAtMs).toISOString(),
   };

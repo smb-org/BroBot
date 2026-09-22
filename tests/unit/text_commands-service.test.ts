@@ -10,7 +10,7 @@ const befehl = (name: string, text: string, zuletztVerwendetAt: string | null = 
   channelId: "kanal-a",
   name,
   text,
-  art: "text",
+  kind: "text",
   enabled: true,
   mindeststufe: "everyone",
   cooldownSekunden: 5,
@@ -151,7 +151,7 @@ describe("Textbefehle-Service", () => {
     const result = await verarbeiteTextbefehlNachricht(
       eventFuer("!befehle"),
       repositoryFuer([
-        { ...befehl("befehle", ""), art: "list" },
+        { ...befehl("befehle", ""), kind: "list" },
         { ...befehl("aktiv", "Antwort") },
         { ...befehl("aus", "Antwort"), enabled: false },
       ]),
@@ -167,7 +167,7 @@ describe("Textbefehle-Service", () => {
   it("wendet die Abkühlzeit auch auf Listenzeilen an", async () => {
     const result = await verarbeiteTextbefehlNachricht(
       eventFuer("!befehle"),
-      repositoryFuer([{ ...befehl("befehle", "", JETZT), art: "list" }]),
+      repositoryFuer([{ ...befehl("befehle", "", JETZT), kind: "list" }]),
     );
 
     expect(result.actions).toEqual([]);

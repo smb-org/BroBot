@@ -29,7 +29,7 @@ const channelFuer = (event: ModuleEvent): string =>
   textWert(event.payload.broadcaster_user_login) ?? event.channelId;
 
 const diagnoseAusgeloest = (
-  eingabe: Exclude<TextbefehlEingabe, { art: "unbekannt" }>,
+  eingabe: Exclude<TextbefehlEingabe, { kind: "unbekannt" }>,
   antwort: string,
 ) => {
   const argumente = eingabe.argumente;
@@ -45,7 +45,7 @@ const diagnoseAusgeloest = (
   } as const;
 };
 
-const antwort = (event: ModuleEvent, eingabe: Exclude<TextbefehlEingabe, { art: "unbekannt" }>, text: string): ModuleResult => {
+const antwort = (event: ModuleEvent, eingabe: Exclude<TextbefehlEingabe, { kind: "unbekannt" }>, text: string): ModuleResult => {
   const replyToMessageId = textWert(event.payload.message_id);
   return {
     actions: [{
@@ -66,7 +66,7 @@ export const verarbeiteTextbefehlNachricht = async (
   const eingabe = befehlAusNachricht(text);
   if (eingabe === null) return { actions: [], diagnostics: [] };
 
-  if (eingabe.art === "unbekannt") {
+  if (eingabe.kind === "unbekannt") {
     return { actions: [], diagnostics: [{ code: "text_commands.unbekannt" }] };
   }
 
@@ -116,7 +116,7 @@ export const verarbeiteTextbefehlNachricht = async (
     };
   }
 
-  if (beanspruchung.befehl.art === "list") {
+  if (beanspruchung.befehl.kind === "list") {
     const befehle = (await repository.auflisten(event.channelId))
       .filter((befehl) => befehl.enabled)
       .sort((left, right) => left.name.localeCompare(right.name));

@@ -22,7 +22,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo {user}",
-          art: "text",
+          kind: "text",
           enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: new Date(Date.now() - 60_000).toISOString(),
@@ -117,11 +117,11 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it("setzt beim Wechsel zu einem anderen Befehl die Entwurfswerte neu", async () => {
     const befehle = [
       {
-        channelId: "kanal-a", name: "alpha", text: "Antwort A", art: "text" as const, enabled: true,
+        channelId: "kanal-a", name: "alpha", text: "Antwort A", kind: "text" as const, enabled: true,
         cooldownSekunden: 5, zuletztVerwendetAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       },
       {
-        channelId: "kanal-a", name: "beta", text: "Antwort B", art: "text" as const, enabled: true,
+        channelId: "kanal-a", name: "beta", text: "Antwort B", kind: "text" as const, enabled: true,
         cooldownSekunden: 10, zuletztVerwendetAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
       },
     ];
@@ -151,7 +151,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
-          art: "text",
+          kind: "text",
           enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
@@ -229,7 +229,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
-          art: "text",
+          kind: "text",
           enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
@@ -271,7 +271,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
-          art: "text",
+          kind: "text",
           enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
@@ -336,7 +336,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
     expect(add).toBeEnabled();
     fireEvent.click(add);
-    await waitFor(() => expect(createdBody).toEqual({ name: "befehle", art: "list", cooldownSekunden: 5 }));
+    await waitFor(() => expect(createdBody).toEqual({ name: "befehle", kind: "list", cooldownSekunden: 5 }));
   });
 
   it("zeigt Bedienern den Schalter offen und Inhaltsaktionen sichtbar, aber gesperrt", async () => {
@@ -348,7 +348,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Antwort",
-          art: "text",
+          kind: "text",
           enabled,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
@@ -404,7 +404,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Antwort",
-          art: "text",
+          kind: "text",
           enabled: true,
           mindeststufe,
           cooldownSekunden: 5,
@@ -443,7 +443,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
-          art: "text",
+          kind: "text",
           enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
@@ -475,7 +475,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
-          art: "text",
+          kind: "text",
           enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
@@ -524,7 +524,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
-          art: "text",
+          kind: "text",
           enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,
@@ -577,7 +577,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
           channelId: "kanal-a",
           name: "hallo",
           text: "Hallo",
-          art: "text",
+          kind: "text",
           enabled: true,
           cooldownSekunden: 5,
           zuletztVerwendetAt: null,

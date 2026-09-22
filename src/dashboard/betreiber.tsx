@@ -58,11 +58,11 @@ const rollenOptionen = (): ReactElement[] => CHANNEL_ROLES.filter((rolle) => rol
 ));
 
 const verbindungsTon = (kanal: PanelBetreiberKanalÜbersicht): ZustandsTon =>
-  kanal.broadcasterConnected ? "healthy" : kanal.vollzustimmung ? "warning" : "neutral";
+  kanal.broadcasterConnected ? "healthy" : kanal.fullConsent ? "warning" : "neutral";
 
 const verbindungswort = (kanal: PanelBetreiberKanalÜbersicht): string => {
   const texte = betreiberTexte();
-  return kanal.broadcasterConnected ? texte.verbunden : kanal.vollzustimmung ? texte.zustimmungAusstehend : texte.nein;
+  return kanal.broadcasterConnected ? texte.verbunden : kanal.fullConsent ? texte.zustimmungAusstehend : texte.nein;
 };
 
 const MitgliederTabelle = ({
@@ -221,7 +221,7 @@ const KanalInspector = ({
     setZustimmungLäuft(true);
     setAktionsfehler(null);
     try {
-      await setzeBetreiberVollzustimmung(kanal.channelId, !kanal.vollzustimmung);
+      await setzeBetreiberVollzustimmung(kanal.channelId, !kanal.fullConsent);
       await aufÜbersichtLaden();
     } catch (fehler: unknown) {
       setAktionsfehler(fehlertext(fehler, texte.fehler));
@@ -298,15 +298,15 @@ const KanalInspector = ({
         label={texte.identität}
         tone={verbindungsTon(kanal)}
         wort={verbindungswort(kanal)}
-        detail={!kanal.broadcasterConnected && kanal.vollzustimmung ? texte.zustimmungAusstehendHinweis : kanal.login}
+        detail={!kanal.broadcasterConnected && kanal.fullConsent ? texte.zustimmungAusstehendHinweis : kanal.login}
       />
       <section className="config-section" aria-label={texte.zustimmungUmschalten}>
         <div className="section-heading"><h3>{texte.zustimmungUmschalten}</h3></div>
         <div className="form-actions">
-          <button className="switch" type="button" role="switch" aria-checked={kanal.vollzustimmung} aria-label={texte.vollzustimmung} aria-busy={zustimmungLäuft} disabled={zustimmungLäuft} onClick={() => { void schalteZustimmung(); }}>
+          <button className="switch" type="button" role="switch" aria-checked={kanal.fullConsent} aria-label={texte.fullConsent} aria-busy={zustimmungLäuft} disabled={zustimmungLäuft} onClick={() => { void schalteZustimmung(); }}>
             <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
           </button>
-          <span className="muted">{kanal.vollzustimmung ? texte.ja : texte.nein}</span>
+          <span className="muted">{kanal.fullConsent ? texte.ja : texte.nein}</span>
         </div>
       </section>
       <Einladungslink kanal={kanal} />
@@ -457,7 +457,7 @@ const KanalFreigabe = ({
 const Einladungslink = ({ kanal }: { kanal: PanelBetreiberKanalÜbersicht }): ReactElement => {
   const texte = betreiberTexte();
   const [status, setStatus] = useState<string | null>(null);
-  const link = window.location.origin + "/auth/login?kanal=" + encodeURIComponent(kanal.login);
+  const link = window.location.origin + "/auth/login?channel=" + encodeURIComponent(kanal.login);
 
   const kopieren = async (): Promise<void> => {
     const zwischenablage = Reflect.get(navigator, "clipboard") as { writeText: (text: string) => Promise<void> } | undefined;
@@ -477,7 +477,7 @@ const Einladungslink = ({ kanal }: { kanal: PanelBetreiberKanalÜbersicht }): Re
         <button className="button" type="button" onClick={() => { void kopieren(); }}>{texte.linkKopieren}</button>
         {status === null ? null : <span className="muted">{status}</span>}
       </div>
-      {!kanal.broadcasterConnected && kanal.vollzustimmung ? <ZustandZeile label={texte.identität} tone="warning" wort={texte.zustimmungAusstehend} detail={texte.zustimmungAusstehendHinweis} /> : null}
+      {!kanal.broadcasterConnected && kanal.fullConsent ? <ZustandZeile label={texte.identität} tone="warning" wort={texte.zustimmungAusstehend} detail={texte.zustimmungAusstehendHinweis} /> : null}
     </section>
   );
 };
@@ -604,8 +604,8 @@ export const BetreiberSeite = ({ beiAnmeldungErforderlich }: BetreiberSeitenEige
           {übersicht.data === null ? null : übersicht.data.length === 0 ? null : (
             <div className="tabelle-wrap">
               <table className="tabelle tabelle--inhalt">
-                <thead><tr><th scope="col">{texte.login}</th><th scope="col">{texte.kennung}</th><th scope="col">{texte.vollzustimmung}</th><th scope="col">{texte.broadcaster}</th><th scope="col">{texte.verwalter}</th><th scope="col">{texte.bediener}</th><th scope="col">{texte.identität}</th></tr></thead>
-                <tbody>{übersicht.data.map((kanal) => <tr key={kanal.channelId} ref={kanalRowRef(kanal.channelId)} tabIndex={0} aria-selected={kanal.channelId === ausgewählterKanalId} onClick={() => { setKanalFreigabeOffen(false); selectKanal(kanal.channelId); }} onKeyDown={(ereignis) => { if (ereignis.key === "Enter" || ereignis.key === " ") { ereignis.preventDefault(); setKanalFreigabeOffen(false); selectKanal(kanal.channelId); } }}><th scope="row">{kanal.login}</th><td className="mono">{kanal.channelId}</td><td>{kanal.vollzustimmung ? texte.ja : texte.nein}</td><td className="zahl">{formatZahl(kanal.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(kanal.memberCounts.verwalter)}</td><td className="zahl">{formatZahl(kanal.memberCounts.bediener)}</td><td><span className="led" data-status={verbindungsTon(kanal) === "healthy" ? "green" : verbindungsTon(kanal) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{verbindungswort(kanal)}</span></span></td></tr>)}</tbody>
+                <thead><tr><th scope="col">{texte.login}</th><th scope="col">{texte.kennung}</th><th scope="col">{texte.fullConsent}</th><th scope="col">{texte.broadcaster}</th><th scope="col">{texte.verwalter}</th><th scope="col">{texte.bediener}</th><th scope="col">{texte.identität}</th></tr></thead>
+                <tbody>{übersicht.data.map((kanal) => <tr key={kanal.channelId} ref={kanalRowRef(kanal.channelId)} tabIndex={0} aria-selected={kanal.channelId === ausgewählterKanalId} onClick={() => { setKanalFreigabeOffen(false); selectKanal(kanal.channelId); }} onKeyDown={(ereignis) => { if (ereignis.key === "Enter" || ereignis.key === " ") { ereignis.preventDefault(); setKanalFreigabeOffen(false); selectKanal(kanal.channelId); } }}><th scope="row">{kanal.login}</th><td className="mono">{kanal.channelId}</td><td>{kanal.fullConsent ? texte.ja : texte.nein}</td><td className="zahl">{formatZahl(kanal.memberCounts.broadcaster)}</td><td className="zahl">{formatZahl(kanal.memberCounts.manager)}</td><td className="zahl">{formatZahl(kanal.memberCounts.operator)}</td><td><span className="led" data-status={verbindungsTon(kanal) === "healthy" ? "green" : verbindungsTon(kanal) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{verbindungswort(kanal)}</span></span></td></tr>)}</tbody>
               </table>
             </div>
           )}

@@ -60,7 +60,7 @@ export const aktualisiereWerbevorwarnungswecker = async (
     return;
   }
   const settings = werbungSettingsSchema.safeParse(rawSettings);
-  if (!settings.success || !settings.data.vorwarnung || !await broadcasterHasScope(
+  if (!settings.success || !settings.data.prewarning || !await broadcasterHasScope(
     environment.DB,
     channelId,
     WARNING_SCOPE,
@@ -78,5 +78,5 @@ export const aktualisiereWerbevorwarnungswecker = async (
     await loesche(planer);
     return;
   }
-  await planer?.plane(nextAdAtMs - settings.data.vorlaufSekunden * 1000);
+  await planer?.plane(nextAdAtMs - settings.data.leadSeconds * 1000);
 };

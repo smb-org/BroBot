@@ -2,11 +2,11 @@ import type { WerbungSettings, WerbungZeitplanAntwort } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 
 const leereEinstellungen: WerbungSettings = {
-  automatisch: "",
-  manuell: "",
-  vorwarnung: true,
-  vorlaufSekunden: 60,
-  vorwarnungText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
+  automatic: "",
+  manual: "",
+  prewarning: true,
+  leadSeconds: 60,
+  prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
 };
 
 const leererZeitplan: WerbungZeitplanAntwort = {

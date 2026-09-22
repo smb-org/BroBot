@@ -213,8 +213,8 @@ const panelBetreiberKanal: PanelBetreiberKanalÜbersicht = {
   channelId: "kanal-a",
   login: "kanal-a",
   displayName: "Kanal A",
-  vollzustimmung: true,
-  memberCounts: { broadcaster: 1, verwalter: 1, bediener: 1 },
+  fullConsent: true,
+  memberCounts: { broadcaster: 1, manager: 1, operator: 1 },
   broadcasterConnected: true,
 };
 
@@ -230,7 +230,7 @@ const panelForms = {
   activeModule: panelActiveModule,
   moduleState: panelModuleState,
   modulesResponse: { modules: [panelModuleState] } satisfies PanelModulesResponse,
-  channelsResponse: { channels: [panelChannelState], betreiber: false },
+  channelsResponse: { channels: [panelChannelState], platformAdmin: false },
   betreiberKanal: panelBetreiberKanal,
   betreiberOverview: { channels: [panelBetreiberKanal] } satisfies PanelBetreiberÜbersichtResponse,
   betreiberMembers: {
@@ -265,9 +265,9 @@ const panelForms = {
   } satisfies PanelBetreiberAuditResponse,
   eventEntry: panelEventEntry,
   eventFilters: {
-    herkunft: "modul",
-    modul: "raid",
-    ton: "info",
+    origin: "module",
+    module: "raid",
+    tone: "info",
     person: "user-1",
   } satisfies PanelEventFilters,
   eventsResponse: { entries: [panelEventEntry], nextCursor: null } satisfies PanelEventsResponse,
@@ -275,13 +275,13 @@ const panelForms = {
 
 const moduleActions: readonly ModuleAction[] = [
   { kind: "chat", text: "Hallo", replyToMessageId: "message-1" },
-  { kind: "shoutout", zielKanalId: "kanal-b" },
+  { kind: "shoutout", targetChannelId: "kanal-b" },
   { kind: "overlay", type: "warning", payload: { text: "Hallo" } },
 ];
 
 const moduleDiagnostic: ModuleDiagnostic = {
   code: "raid.shoutout",
-  detail: { grund: "raid_erkannt", zuschauer: 5, erlaubt: true, fehlend: null },
+  detail: { reason: "raid_erkannt", viewers: 5, allowed: true, missing: null },
 };
 
 const moduleActor: ModuleActor = { userId: "user-1", login: "person", role: "manager" };
@@ -309,7 +309,7 @@ const moduleForms = {
     moduleId: "raid",
     action: "modul.aktiviert",
     before: null,
-    after: { enabled: true, anzahl: 1, name: "raid" },
+    after: { enabled: true, count: 1, name: "raid" },
   },
   event: moduleEvent,
 };
@@ -351,19 +351,19 @@ const realtimeForms = {
 const expectedModuleSettings = {
   channel_events: {},
   raid: {
-    shoutoutAktiv: true,
-    shoutoutSchwelle: 3,
-    textSchwelle: 3,
-    textVoll: "Willkommen {channel}! Danke für den Raid mit {viewers} Zuschauern — schaut gerne vorbei!",
-    textKlein: "Danke für den Raid, {channel}, mit {viewers} Zuschauern!",
+    shoutoutEnabled: true,
+    shoutoutThreshold: 3,
+    textThreshold: 3,
+    textLong: "Willkommen {channel}! Danke für den Raid mit {viewers} Zuschauern — schaut gerne vorbei!",
+    textShort: "Danke für den Raid, {channel}, mit {viewers} Zuschauern!",
   },
   text_commands: {},
   ads: {
-    automatisch: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",
-    manuell: "Werbepause: {duration} Sekunden. Bin gleich zurück!",
-    vorwarnung: true,
-    vorlaufSekunden: 60,
-    vorwarnungText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
+    automatic: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",
+    manual: "Werbepause: {duration} Sekunden. Bin gleich zurück!",
+    prewarning: true,
+    leadSeconds: 60,
+    prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
   },
 };
 
@@ -408,7 +408,7 @@ const alleChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscribe
 const alleAktionsarten: Record<ModuleAction["kind"], true> = { chat: true, shoutout: true, overlay: true };
 const alleSprachen: Record<ModuleLanguage, true> = { de: true, en: true };
 const alleTextbefehlArten: Record<TextbefehlArt, true> = { text: true, list: true };
-const alleEreignisherkuenfte: Record<PanelEventOrigin, true> = { kanal: true, modul: true };
+const alleEreignisherkuenfte: Record<PanelEventOrigin, true> = { channel: true, module: true };
 const alleTonlagen: Record<EventTone, true> = { info: true, warning: true, error: true };
 
 describe("serialisierte Vertragsformen", () => {
@@ -492,14 +492,14 @@ describe("serialisierte Vertragsformen", () => {
         "$: modules,panel,realtime",
         "$.modules: action,actor,auditEntry,diagnostic,event,mutationActor,mutationAuthorization,result",
         "$.modules.action[]: kind,replyToMessageId,text",
-        "$.modules.action[]: kind,zielKanalId",
+        "$.modules.action[]: kind,targetChannelId",
         "$.modules.action[]: kind,payload,type",
         "$.modules.action[].payload: text",
         "$.modules.actor: login,role,userId",
         "$.modules.auditEntry: action,after,before,channelId,moduleId",
-        "$.modules.auditEntry.after: anzahl,enabled,name",
+        "$.modules.auditEntry.after: count,enabled,name",
         "$.modules.diagnostic: code,detail",
-        "$.modules.diagnostic.detail: erlaubt,fehlend,grund,zuschauer",
+        "$.modules.diagnostic.detail: allowed,missing,reason,viewers",
         "$.modules.event: actor,channelId,chatStatus,payload,receivedAt,settings,subscriptionType,subscriptionVariant,triggerId",
         "$.modules.event.actor: login,role,userId",
         "$.modules.event.payload: message_id",
@@ -508,11 +508,11 @@ describe("serialisierte Vertragsformen", () => {
         "$.modules.mutationAuthorization: sql,values",
         "$.modules.result: actions,diagnostics",
         "$.modules.result.actions[]: kind,replyToMessageId,text",
-        "$.modules.result.actions[]: kind,zielKanalId",
+        "$.modules.result.actions[]: kind,targetChannelId",
         "$.modules.result.actions[]: kind,payload,type",
         "$.modules.result.actions[].payload: text",
         "$.modules.result.diagnostics[]: code,detail",
-        "$.modules.result.diagnostics[].detail: erlaubt,fehlend,grund,zuschauer",
+        "$.modules.result.diagnostics[].detail: allowed,missing,reason,viewers",
         "$.panel: activeModule,auditEntry,auditResponse,betreiberAuditEntry,betreiberAuditResponse,betreiberKanal,betreiberMembers,betreiberOverview,channelOverview,channelState,channelsResponse,eventEntry,eventFilters,eventsResponse,member,membersResponse,moduleState,modulesResponse,system,twitchUser",
         "$.panel.activeModule: moduleId,settings",
         "$.panel.auditEntry: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,createdAt,moduleId",
@@ -521,13 +521,13 @@ describe("serialisierte Vertragsformen", () => {
         "$.panel.betreiberAuditEntry: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId",
         "$.panel.betreiberAuditResponse: entries,nextCursor",
         "$.panel.betreiberAuditResponse.entries[]: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId",
-        "$.panel.betreiberKanal: broadcasterConnected,channelId,displayName,login,memberCounts,vollzustimmung",
-        "$.panel.betreiberKanal.memberCounts: bediener,broadcaster,verwalter",
+        "$.panel.betreiberKanal: broadcasterConnected,channelId,displayName,fullConsent,login,memberCounts",
+        "$.panel.betreiberKanal.memberCounts: broadcaster,manager,operator",
         "$.panel.betreiberMembers: broadcasterCount,members,nextCursor,viewerUserId",
         "$.panel.betreiberMembers.members[]: displayName,joinedAt,login,profileImageUrl,role,userId",
         "$.panel.betreiberOverview: channels",
-        "$.panel.betreiberOverview.channels[]: broadcasterConnected,channelId,displayName,login,memberCounts,vollzustimmung",
-        "$.panel.betreiberOverview.channels[].memberCounts: bediener,broadcaster,verwalter",
+        "$.panel.betreiberOverview.channels[]: broadcasterConnected,channelId,displayName,fullConsent,login,memberCounts",
+        "$.panel.betreiberOverview.channels[].memberCounts: broadcaster,manager,operator",
         "$.panel.channelOverview: activeModules,bot,botPermissions,broadcasterConnection,broadcasterPermissions,channelBotConsent,channelId,chatSubscription,displayName,lastError,login,moderator,role,tokens",
         "$.panel.channelOverview.activeModules[]: moduleId,settings",
         "$.panel.channelOverview.bot: reason,status,updatedAt",
@@ -537,7 +537,7 @@ describe("serialisierte Vertragsformen", () => {
         "$.panel.channelOverview.lastError: at,message,reason,source,status,subscriptionType,subscriptionVariant",
         "$.panel.channelOverview.moderator: checkedAt,isModerator,reason",
         "$.panel.channelOverview.tokens: botExpiresAt,loginExpiresAt,loginReason,loginStatus",
-        "$.panel.channelsResponse: betreiber,channels",
+        "$.panel.channelsResponse: channels,platformAdmin",
         "$.panel.channelsResponse.channels[]: bot,botPermissions,broadcasterConnection,broadcasterPermissions,channelBotConsent,channelId,chatSubscription,displayName,lastError,login,moderator,role,tokens",
         "$.panel.channelsResponse.channels[].bot: reason,status,updatedAt",
         "$.panel.channelsResponse.channels[].botPermissions: missingScopes",
@@ -555,7 +555,7 @@ describe("serialisierte Vertragsformen", () => {
         "$.panel.channelState.moderator: checkedAt,isModerator,reason",
         "$.panel.channelState.tokens: botExpiresAt,loginExpiresAt,loginReason,loginStatus",
         "$.panel.eventEntry: actorDisplayName,actorLogin,actorUserId,code,createdAt,detail,eventId,moduleId,triggerId",
-        "$.panel.eventFilters: herkunft,modul,person,ton",
+        "$.panel.eventFilters: module,origin,person,tone",
         "$.panel.eventsResponse: entries,nextCursor",
         "$.panel.eventsResponse.entries[]: actorDisplayName,actorLogin,actorUserId,code,createdAt,detail,eventId,moduleId,triggerId",
         "$.panel.member: displayName,joinedAt,login,profileImageUrl,role,userId",
@@ -606,7 +606,7 @@ describe("serialisierte Vertragsformen", () => {
       expect(Object.keys(alleAktionsarten).sort()).toEqual(["chat", "overlay", "shoutout"]);
       expect(Object.keys(alleSprachen).sort()).toEqual(["de", "en"]);
       expect(Object.keys(alleTextbefehlArten).sort()).toEqual(["list", "text"]);
-      expect(Object.keys(alleEreignisherkuenfte).sort()).toEqual(["kanal", "modul"]);
+      expect(Object.keys(alleEreignisherkuenfte).sort()).toEqual(["channel", "module"]);
       expect(Object.keys(alleTonlagen).sort()).toEqual(["error", "info", "warning"]);
     } finally {
       principalDatabase.close();

@@ -8,8 +8,8 @@ interface WerbungPanelTexte {
   dauer: string;
   vorwarnungAbschnitt: string;
   vorwarnungAktiv: string;
-  vorlaufSekunden: string;
-  vorwarnungText: string;
+  leadSeconds: string;
+  prewarningText: string;
   platzhalterVorwarnung: string;
   snoozeAbschnitt: string;
   snoozeButton: (anzahl: string, aufladung: string) => string;
@@ -23,8 +23,8 @@ interface WerbungPanelTexte {
   automatischAbschnitt: string;
   manuellAbschnitt: string;
   aktionen: string;
-  automatisch: string;
-  manuell: string;
+  automatic: string;
+  manual: string;
   platzhalter: string;
   speichern: string;
   gespeichert: string;
@@ -42,8 +42,8 @@ const texte: LocaleCatalog<WerbungPanelTexte> = {
     dauer: "Dauer",
     vorwarnungAbschnitt: "Vorwarnung",
     vorwarnungAktiv: "Vorwarnung vor der Werbung",
-    vorlaufSekunden: "Vorlaufzeit (Sekunden)",
-    vorwarnungText: "Vorwarnungstext",
+    leadSeconds: "Vorlaufzeit (Sekunden)",
+    prewarningText: "Vorwarnungstext",
     platzhalterVorwarnung: "{seconds} bleibt als englischer Platzhalter und wird durch die verbleibenden Sekunden ersetzt.",
     snoozeAbschnitt: "Snooze",
     snoozeButton: (anzahl, aufladung) => `Snooze · ${anzahl} verfügbar · Aufladung ${aufladung}`,
@@ -57,8 +57,8 @@ const texte: LocaleCatalog<WerbungPanelTexte> = {
     automatischAbschnitt: "Automatische Ansage",
     manuellAbschnitt: "Manuelle Ansage",
     aktionen: "Aktionen",
-    automatisch: "Automatische Werbepause",
-    manuell: "Manuell gestartete Werbepause",
+    automatic: "Automatische Werbepause",
+    manual: "Manuell gestartete Werbepause",
     platzhalter: "{duration} wird durch die Dauer in Sekunden ersetzt.",
     speichern: "Ansagen speichern",
     gespeichert: "Ansagen gespeichert.",
@@ -74,8 +74,8 @@ const texte: LocaleCatalog<WerbungPanelTexte> = {
     dauer: "Duration",
     vorwarnungAbschnitt: "Warning",
     vorwarnungAktiv: "Warn before the ad break",
-    vorlaufSekunden: "Lead time (seconds)",
-    vorwarnungText: "Warning text",
+    leadSeconds: "Lead time (seconds)",
+    prewarningText: "Warning text",
     platzhalterVorwarnung: "{seconds} stays as the English placeholder and is replaced with the remaining seconds.",
     snoozeAbschnitt: "Snooze",
     snoozeButton: (anzahl, aufladung) => `Snooze · ${anzahl} available · refresh ${aufladung}`,
@@ -89,8 +89,8 @@ const texte: LocaleCatalog<WerbungPanelTexte> = {
     automatischAbschnitt: "Automatic announcement",
     manuellAbschnitt: "Manual announcement",
     aktionen: "Actions",
-    automatisch: "Automatic ad break",
-    manuell: "Manually started ad break",
+    automatic: "Automatic ad break",
+    manual: "Manually started ad break",
     platzhalter: "{duration} is replaced with the duration in seconds.",
     speichern: "Save announcements",
     gespeichert: "Announcements saved.",

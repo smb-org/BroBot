@@ -79,9 +79,9 @@ interface EventsRequestState {
 }
 
 const leereEreignisFilter: PanelEventFilters = {
-  herkunft: null,
-  modul: null,
-  ton: null,
+  origin: null,
+  module: null,
+  tone: null,
   person: null,
 };
 
@@ -115,7 +115,7 @@ const subscriptionTone = (status: PanelEventSubSubscription["status"]): Zustands
 const subscriptionStatusLabel = (status: PanelEventSubSubscription["status"]): string => {
   const texte = dashboardTexte();
   if (status === "enabled") return texte.status.aktiv;
-  if (status === "missing") return texte.status.fehlend;
+  if (status === "missing") return texte.status.missing;
   if (status === "pending") return texte.status.ausstehend;
   if (status === "revoked") return texte.status.widerrufen;
   return texte.status.fehler;
@@ -730,7 +730,7 @@ const BroadcasterConsentAction = ({ login, needed, canRequest }: {
   const texte = kanalPanelTexte();
   return (
     <div className="header-action">
-      {canRequest ? <a className="button button--primary" href={`/auth/login?kanal=${encodeURIComponent(login)}`}>{texte.vollzustimmungAnfordern}</a> : <button className="button" type="button" disabled>{texte.vollzustimmungAnfordern}</button>}
+      {canRequest ? <a className="button button--primary" href={`/auth/login?channel=${encodeURIComponent(login)}`}>{texte.vollzustimmungAnfordern}</a> : <button className="button" type="button" disabled>{texte.vollzustimmungAnfordern}</button>}
       {!canRequest ? <span className="sperrgrund">{texte.vollzustimmungGesperrt}</span> : null}
     </div>
   );
@@ -764,7 +764,7 @@ const chatRow = (status: PanelChannelState["chatSubscription"] | undefined, expe
   const texte = dashboardTexte();
   const current = status ?? null;
   const tone: ZustandsTon = current === null ? expected ? "warning" : "neutral" : current.status === "enabled" ? "healthy" : current.status === "missing" ? "warning" : "error";
-  const wort = current === null ? expected ? texte.status.fehlend : texte.status.nichtGeprueft : current.status === "enabled" ? texte.status.aktiv : current.status === "missing" ? texte.status.fehlend : current.status === "revoked" ? texte.status.widerrufen : texte.status.fehler;
+  const wort = current === null ? expected ? texte.status.missing : texte.status.nichtGeprueft : current.status === "enabled" ? texte.status.aktiv : current.status === "missing" ? texte.status.missing : current.status === "revoked" ? texte.status.widerrufen : texte.status.fehler;
   return { key: "chat-subscription", tone, node: <ZustandZeile label={texte.statusKarte.chatAbo} tone={tone} wort={wort} detail={current?.reason ?? (current === null && expected ? texte.status.chatAboFehlt : undefined)} /> };
 };
 
@@ -890,7 +890,7 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
         {subscriptions.length === 0 ? <p className="empty-state">{texte.system.keineAbonnements}</p> : (
           <div className="tabelle-wrap">
             <table className="tabelle abonnements-tabelle">
-              <thead><tr><th scope="col">{texte.system.abo}</th><th scope="col">{texte.system.zustand}</th><th scope="col">{texte.system.grund}</th></tr></thead>
+              <thead><tr><th scope="col">{texte.system.abo}</th><th scope="col">{texte.system.zustand}</th><th scope="col">{texte.system.reason}</th></tr></thead>
               <tbody>{subscriptions.map((subscription) => {
                 const key = subscriptionKey(subscription);
                 const name = subscriptionDisplayName(subscription);
@@ -1037,7 +1037,7 @@ const eventMetadata = (code: string) =>
   Object.prototype.hasOwnProperty.call(ereignisTon, code) ? ereignisTon[code as EreignisCode] : null;
 
 const eventTone = (code: string): EventTone | null =>
-  eventMetadata(code)?.ton ?? null;
+  eventMetadata(code)?.tone ?? null;
 
 const eventToneRang = (tone: EventTone | null): number =>
   tone === "error" ? 3 : tone === "warning" ? 2 : tone === "info" ? 1 : 0;
@@ -1080,12 +1080,12 @@ const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] => {
 
 const actorLabel = (entry: PanelEventEntry, texte: ReturnType<typeof dashboardTexte>): string =>
   entry.actorDisplayName ?? (entry.actorLogin == null
-    ? entry.actorUserId == null ? texte.ereignisse.automatisch : entry.actorUserId
+    ? entry.actorUserId == null ? texte.ereignisse.automatic : entry.actorUserId
     : `@${entry.actorLogin}`);
 
 const actorCell = (entry: PanelEventEntry, texte: ReturnType<typeof dashboardTexte>): ReactNode =>
   entry.actorDisplayName ?? (entry.actorLogin == null
-    ? entry.actorUserId == null ? texte.ereignisse.automatisch : <span className="mono">{entry.actorUserId}</span>
+    ? entry.actorUserId == null ? texte.ereignisse.automatic : <span className="mono">{entry.actorUserId}</span>
     : `@${entry.actorLogin}`);
 
 const auditActorLabel = (entry: PanelAuditEntry): string =>
@@ -1130,7 +1130,7 @@ const eventChipNumber = (detail: EreignisDetail, key: EreignisZahlSchluessel): s
     return null;
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return null;
-  if (key === "anzahl") return `${formatZahl(value)}x`;
+  if (key === "count") return `${formatZahl(value)}x`;
   if (key === "dauer" || key === "restSekunden") return `${formatZahl(value)} s`;
   return formatZahl(value);
 };
@@ -1143,7 +1143,7 @@ const EventChipPair = ({ code, detail, texte }: { code: string; detail: Ereignis
   const number = eventChipNumber(detail, metadata.zahlSchluessel);
   return <span className="event-chip-pair">
     {number === null ? null : <span className="event-chip event-chip--number">{number}</span>}
-    <span className="event-chip" data-familie={metadata.familie} data-stufe={metadata.stufe} data-ton={metadata.ton}>{metadata.wort[dashboardLanguage()]}</span>
+    <span className="event-chip" data-familie={metadata.familie} data-stufe={metadata.stufe} data-ton={metadata.tone}>{metadata.wort[dashboardLanguage()]}</span>
   </span>;
 };
 
@@ -1156,7 +1156,7 @@ const formatEventDetail = (detail: string): string => {
 };
 
 const eventFilterIsActive = (filters: PanelEventFilters): boolean =>
-  filters.herkunft !== null || filters.modul !== null || filters.ton !== null || filters.person !== null;
+  filters.origin !== null || filters.module !== null || filters.tone !== null || filters.person !== null;
 
 const EventFilterBar = ({
   filters,
@@ -1188,20 +1188,20 @@ const EventFilterBar = ({
     return () => { window.clearTimeout(timeout); };
   }, [commitPerson, filters.person, personDraft]);
   const aktiveFilter: string[] = [];
-  if (filters.herkunft === "kanal") aktiveFilter.push(texte.ereignisse.kanalereignisse);
-  if (filters.herkunft === "modul") aktiveFilter.push(texte.ereignisse.moduldiagnosen);
-  if (filters.modul !== null) aktiveFilter.push(moduleName(filters.modul));
-  if (filters.ton !== null) aktiveFilter.push(filters.ton === "info" ? texte.ereignisse.info : filters.ton === "warning" ? texte.ereignisse.hinweis : texte.ereignisse.fehler);
+  if (filters.origin === "channel") aktiveFilter.push(texte.ereignisse.kanalereignisse);
+  if (filters.origin === "module") aktiveFilter.push(texte.ereignisse.moduldiagnosen);
+  if (filters.module !== null) aktiveFilter.push(moduleName(filters.module));
+  if (filters.tone !== null) aktiveFilter.push(filters.tone === "info" ? texte.ereignisse.info : filters.tone === "warning" ? texte.ereignisse.hinweis : texte.ereignisse.fehler);
   if (filters.person !== null) aktiveFilter.push(filters.person);
   return <div className="ereignis-filter" aria-label={texte.ereignisse.filter}>
     <div className="ereignis-filter__controls">
-      <label>{texte.ereignisse.herkunft}<select aria-label={texte.ereignisse.herkunft} value={filters.herkunft ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, herkunft: value === "kanal" || value === "modul" ? value : null }); }}>
-        <option value="">{texte.ereignisse.alle}</option><option value="kanal">{texte.ereignisse.kanalereignisse}</option><option value="modul">{texte.ereignisse.moduldiagnosen}</option>
+      <label>{texte.ereignisse.origin}<select aria-label={texte.ereignisse.origin} value={filters.origin ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}>
+        <option value="">{texte.ereignisse.alle}</option><option value="channel">{texte.ereignisse.kanalereignisse}</option><option value="module">{texte.ereignisse.moduldiagnosen}</option>
       </select></label>
-      <label>{texte.ereignisse.modulFilter}<select aria-label={texte.ereignisse.modulFilter} value={filters.modul ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, modul: value.length === 0 ? null : value }); }}>
+      <label>{texte.ereignisse.modulFilter}<select aria-label={texte.ereignisse.modulFilter} value={filters.module ?? ""} onChange={(event) => { const value = event.target.value; onChange({ ...filters, module: value.length === 0 ? null : value }); }}>
         <option value="">{texte.ereignisse.alle}</option>{moduleOptions.map((module) => <option key={module.id} value={module.id}>{moduleName(module.id)}</option>)}
       </select></label>
-      <label>{texte.ereignisse.ton}<select aria-label={texte.ereignisse.ton} value={filters.ton ?? ""} onChange={(event) => { onChange({ ...filters, ton: eventToneFromValue(event.target.value) }); }}>
+      <label>{texte.ereignisse.tone}<select aria-label={texte.ereignisse.tone} value={filters.tone ?? ""} onChange={(event) => { onChange({ ...filters, tone: eventToneFromValue(event.target.value) }); }}>
         <option value="">{texte.ereignisse.alle}</option><option value="info">{texte.ereignisse.info}</option><option value="warning">{texte.ereignisse.hinweis}</option><option value="error">{texte.ereignisse.fehler}</option>
       </select></label>
       <label>{texte.ereignisse.person}<input aria-label={texte.ereignisse.person} value={personDraft} onChange={(event) => { setPersonDraft(event.target.value); }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }} /></label>
@@ -1319,7 +1319,7 @@ const EventsPage = ({
   const eventEntries = eventsState.data?.entries ?? [];
   return (
     <>
-      <ModuleHeading kind="events" title={texte.ereignisse.titel} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texte.ereignisse.anzahl} />} />
+      <ModuleHeading kind="events" title={texte.ereignisse.titel} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texte.ereignisse.count} />} />
       <section className={`content-section inspektor-bereich${selectedGroup === null ? "" : " inspektor-bereich--offen"}`}><div className="inspektor-bereich__liste">
         <div className="section-heading"><h2>{texte.ereignisse.protokoll}</h2><RealtimeFeedStatus status={realtime.status} /></div>
           <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
@@ -1331,7 +1331,7 @@ const EventsPage = ({
             {eventEntries.length === 0 ? null : <div ref={feedRef} className="ereignis-feed">
               <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
                 <table className="tabelle ereignis-tabelle">
-                  <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.modul}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
+                  <thead><tr><th scope="col">{texte.ereignisse.zeit}</th><th scope="col">{texte.ereignisse.ereignis}</th><th scope="col">{texte.ereignisse.module}</th><th scope="col">{texte.ereignisse.wer}</th></tr></thead>
                   <tbody>{groups.map((group) => {
                     const entry = group.representative;
                     const eventLabel = ereignisText(entry.code, eventDetail(entry.detail));
@@ -1344,7 +1344,7 @@ const EventsPage = ({
           </> : null}
         </div>
         {selectedGroup === null ? null : <SubInspector ariaLabel={texte.ereignisse.detail} title={texte.ereignisse.vorgang} identifier={selectedGroup.representative.triggerId || selectedGroup.representative.eventId} closeLabel={dashboardGemeinsameTexte().schliessen} onClose={closeGroup}>
-          <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.modul}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
+          <dl className="eigenschaften"><div><dt>{texte.ereignisse.zeitstempel}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div><div><dt>{texte.ereignisse.module}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div><div><dt>{texte.ereignisse.beteiligte}</dt><dd>{Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texte)))).join(", ")}</dd></div></dl>
           <div className="inspector-section__heading"><h3>{texte.ereignisse.verlauf}</h3></div>
           <ol className="ereignis-verlauf">{selectedHistory.map((entry) => {
             return <li key={entry.eventId}><div className="ereignis-verlauf__heading"><span className="mono">{entry.code}</span><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texte={texte} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{ereignisText(entry.code, eventDetail(entry.detail))}</span></span></div><pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre></li>;
@@ -1486,7 +1486,7 @@ export const DashboardApp = (): ReactElement => {
         const response = await fetchChannels();
         if (!cancelled) {
           setChannels({ status: "success", data: response.channels, error: null });
-          setIstBetreiber(response.betreiber);
+          setIstBetreiber(response.platformAdmin);
           setAuthenticationRequired(false);
         }
       } catch (error) {

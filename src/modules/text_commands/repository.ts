@@ -14,7 +14,7 @@ export type TextbefehlMutationsgrund =
 
 export type TextbefehlMutationsergebnis =
   | { ok: true }
-  | { ok: false; grund: TextbefehlMutationsgrund };
+  | { ok: false; reason: TextbefehlMutationsgrund };
 
 export interface TextbefehlRepository {
   auflisten(channelId: string): Promise<Textbefehl[]>;

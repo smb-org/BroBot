@@ -105,7 +105,7 @@ export const gibBetreiberKanalFrei = (
 ): Promise<{ channel: PanelBetreiberÜbersichtResponse["channels"][number] }> => requestMutation(
   "/api/platform/channels",
   "POST",
-  { login, vollzustimmung },
+  { login, fullConsent: vollzustimmung },
 );
 
 export const setzeBetreiberVollzustimmung = (
@@ -114,7 +114,7 @@ export const setzeBetreiberVollzustimmung = (
 ): Promise<{ channel: PanelBetreiberÜbersichtResponse["channels"][number] }> => requestMutation(
   `/api/platform/channels/${encodeURIComponent(channelId)}`,
   "PATCH",
-  { vollzustimmung },
+  { fullConsent: vollzustimmung },
 );
 
 export const holeBetreiberMitglieder = (
@@ -200,11 +200,11 @@ export const fetchEvents = (
 ): Promise<PanelEventsResponse> => {
   const params = new URLSearchParams();
   if (cursor !== null) params.set("cursor", cursor);
-  if (filters?.herkunft !== null && filters?.herkunft !== undefined) {
-    params.set("origin", filters.herkunft === "kanal" ? "channel" : "module");
+  if (filters?.origin !== null && filters?.origin !== undefined) {
+    params.set("origin", filters.origin);
   }
-  if (filters?.modul !== null && filters?.modul !== undefined) params.set("module", filters.modul);
-  if (filters?.ton !== null && filters?.ton !== undefined) params.set("tone", filters.ton);
+  if (filters?.module !== null && filters?.module !== undefined) params.set("module", filters.module);
+  if (filters?.tone !== null && filters?.tone !== undefined) params.set("tone", filters.tone);
   if (filters?.person !== null && filters?.person !== undefined) params.set("actor", filters.person);
   const query = params.toString();
   return requestJson<PanelEventsResponse>(

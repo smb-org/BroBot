@@ -160,7 +160,7 @@ export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
   activeModules: PanelActiveModule[];
   onNavigate: (route: DashboardRoute) => void;
 }): ReactElement => (
-  <nav className="module-navigation" aria-label={dashboardTexte().module.modul}>
+  <nav className="module-navigation" aria-label={dashboardTexte().module.module}>
     {activeModules.map(({ moduleId }) => {
       const route: DashboardRoute = { kind: "module", channelId, moduleId };
       return <a className="nav-link" href={dashboardRoutePath(route)} key={moduleId} onClick={(event) => { event.preventDefault(); onNavigate(route); }}>{moduleName(moduleId)}</a>;
@@ -215,7 +215,7 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true }:
   if (registeredPanels.length === 0) {
     const texte = dashboardTexte();
     return (
-      <section className="module-empty" aria-label={texte.module.modul}>
+      <section className="module-empty" aria-label={texte.module.module}>
         <p>{activeModules.length === 0 ? texte.module.keineAktiv : texte.module.keineAnsicht}</p>
       </section>
     );
@@ -377,7 +377,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             </section>
           )
         ) : (
-          <section className={`module-state module-state--${stateTone}`} aria-label={texte.module.modul}>
+          <section className={`module-state module-state--${stateTone}`} aria-label={texte.module.module}>
             <div className="module-state__summary">
               <NavigationIcon kind="permission" className="module-state__icon" />
               <p>{stateMessage}</p>

@@ -130,7 +130,7 @@ betreiberRouter.get("/api/platform/users", async (kontext) => {
 betreiberRouter.post("/api/platform/channels", async (kontext) => {
   const rumpf = await leseJson(kontext.req.raw);
   const login = typeof rumpf?.login === "string" ? leseLogin(rumpf.login) : null;
-  const vollzustimmung = leseBoolean(rumpf?.vollzustimmung);
+  const vollzustimmung = leseBoolean(rumpf?.fullConsent);
   if (login === null || vollzustimmung === null) {
     return kontext.text("Login oder Vollzustimmung ist ungültig.", 400);
   }
@@ -161,19 +161,19 @@ betreiberRouter.post("/api/platform/channels", async (kontext) => {
       channelId: nutzer.userId,
       login: nutzer.login,
       displayName: nutzer.displayName,
-      vollzustimmung,
+      fullConsent: vollzustimmung,
     },
   }, 201);
 });
 
 betreiberRouter.patch("/api/platform/channels/:channelId", async (kontext) => {
   const rumpf = await leseJson(kontext.req.raw);
-  const vollzustimmung = leseBoolean(rumpf?.vollzustimmung);
+  const vollzustimmung = leseBoolean(rumpf?.fullConsent);
   if (vollzustimmung === null) return kontext.text("Vollzustimmung ist ungültig.", 400);
 
   const kanal = await holeBetreiberKanal(kontext.env.DB, kontext.req.param("channelId"));
   if (kanal === null) return kontext.text("Kanal nicht gefunden.", 404);
-  if (kanal.vollzustimmung === vollzustimmung) {
+  if (kanal.fullConsent === vollzustimmung) {
     return kontext.text("Diese Vollzustimmung ist bereits gesetzt.", 400);
   }
 
@@ -185,7 +185,7 @@ betreiberRouter.patch("/api/platform/channels/:channelId", async (kontext) => {
     jetztIso(),
   );
   if (!geändert) return mutationFehlgeschlagen(kontext);
-  return kontext.json({ channel: { ...kanal, vollzustimmung } });
+  return kontext.json({ channel: { ...kanal, fullConsent: vollzustimmung } });
 });
 
 betreiberRouter.get("/api/platform/channels/:channelId/members", async (kontext) => {

@@ -122,7 +122,7 @@ const scheduleFailureDiagnostic = (result: AdScheduleResult): ModuleDiagnostic =
   code: result.reason === "unauthorized"
     ? "ads.vorwarnung.scope_fehlt"
     : "ads.vorwarnung.zeitplan_fehler",
-  detail: { grund: result.reason, ...result.detail },
+  detail: { reason: result.reason, ...result.detail },
 });
 
 const settingRecord = async (
@@ -157,13 +157,13 @@ const shouldReplan = (decision: WerbevorwarnungsEntscheidung): boolean =>
 
 const replanFromSchedule = async (
   planer: Werbeplaner | null,
-  settings: { vorlaufSekunden: number },
+  settings: { leadSeconds: number },
   nextAdAt: string | null,
 ): Promise<void> => {
   if (nextAdAt === null) return;
   const nextAdAtMs = Date.parse(nextAdAt);
   if (!Number.isFinite(nextAdAtMs)) return;
-  await plane(planer, nextAdAtMs - settings.vorlaufSekunden * 1000);
+  await plane(planer, nextAdAtMs - settings.leadSeconds * 1000);
 };
 
 /** Holt den Zeitplan bei einem EventSub-Anlass und stellt den Vorwarnungswecker. */
@@ -178,7 +178,7 @@ export const aktualisiereWerbevorwarnung = async (
 ): Promise<void> => {
   const planer = planerFuer(environment, channelId);
   const configured = await settingRecord(environment, channelId, triggerId, now, planer, diagnosenSchreiben);
-  if (configured === null || !configured.settings.vorwarnung) {
+  if (configured === null || !configured.settings.prewarning) {
     await clear(planer);
     return;
   }
@@ -223,7 +223,7 @@ export const verarbeiteWerbevorwarnung = async (
 ): Promise<void> => {
   const planer = planerFuer(environment, channelId, eigenerPlaner);
   const configured = await settingRecord(environment, channelId, triggerId, now, planer);
-  if (configured === null || !configured.settings.vorwarnung) return;
+  if (configured === null || !configured.settings.prewarning) return;
 
   const result = await getAdSchedule(
     environment as unknown as Env,
@@ -245,7 +245,7 @@ export const verarbeiteWerbevorwarnung = async (
     settings: configured.settings,
     scopeVorhanden: true,
     jetztAmMs: nowMsFrom(now),
-    geplantAmMs: geplantFaelligAmMs + configured.settings.vorlaufSekunden * 1000,
+    geplantAmMs: geplantFaelligAmMs + configured.settings.leadSeconds * 1000,
     schedule: {
       nextAdAt: result.schedule.nextAdAt,
       lastAdAt: result.schedule.lastAdAt,
@@ -260,7 +260,7 @@ export const verarbeiteWerbevorwarnung = async (
     const sent = await sendChatMessage(environment, channelId, entscheidung.text, undefined, fetcher);
     diagnostics.push(sent.sent
       ? { code: "host.chat.gesendet", detail: sent.detail }
-      : { code: "host.chat.fehlgeschlagen", detail: { grund: sent.reason, ...sent.detail } });
+      : { code: "host.chat.fehlgeschlagen", detail: { reason: sent.reason, ...sent.detail } });
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 

@@ -4,8 +4,8 @@ import type { TextbefehlMindeststufe } from "../contracts";
 export const BEFEHLSNAME_MUSTER = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 export type TextbefehlEingabe =
-  | { art: "befehl"; name: string; argumente?: string }
-  | { art: "unbekannt" };
+  | { kind: "befehl"; name: string; argumente?: string }
+  | { kind: "unbekannt" };
 
 export const gueltigerBefehlsname = (name: string): boolean => BEFEHLSNAME_MUSTER.test(name);
 
@@ -14,10 +14,10 @@ export const befehlAusNachricht = (message: string): TextbefehlEingabe | null =>
   const erstesWort = trimmed.split(/\s+/u)[0];
   if (erstesWort === undefined || !erstesWort.startsWith("!")) return null;
   const name = erstesWort.slice(1);
-  if (!gueltigerBefehlsname(name)) return { art: "unbekannt" };
+  if (!gueltigerBefehlsname(name)) return { kind: "unbekannt" };
   const argumente = trimmed.slice(erstesWort.length).trim();
   return {
-    art: "befehl",
+    kind: "befehl",
     name,
     ...(argumente.length === 0 ? {} : { argumente }),
   };

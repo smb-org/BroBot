@@ -6,7 +6,7 @@ interface TextbefehleTexte {
   liste: string;
   anlegen: string;
   name: string;
-  art: string;
+  kind: string;
   artText: string;
   artListe: string;
   text: string;
@@ -39,7 +39,7 @@ interface TextbefehleTexte {
   nameAntwortFehlt: string;
   spalten: {
     name: string;
-    art: string;
+    kind: string;
     text: string;
     abkuehlung: string;
     zuletzt: string;
@@ -54,7 +54,7 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     liste: "Befehle",
     anlegen: "Befehl anlegen",
     name: "Name",
-    art: "Art",
+    kind: "Art",
     artText: "Antworttext",
     artListe: "Befehlsliste",
     text: "Antworttext",
@@ -85,14 +85,14 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     antwortFehlt: "Antworttext ausfüllen",
     nameFehlt: "Namen ausfüllen",
     nameAntwortFehlt: "Name und Antworttext ausfüllen",
-    spalten: { name: "!Name", art: "Art", text: "Antwort", abkuehlung: "Abkühl.", zuletzt: "Zuletzt", mindeststufe: "Mindeststufe", aktiv: "Schalter" },
+    spalten: { name: "!Name", kind: "Art", text: "Antwort", abkuehlung: "Abkühl.", zuletzt: "Zuletzt", mindeststufe: "Mindeststufe", aktiv: "Schalter" },
   },
   en: {
     titel: "Text commands",
     liste: "Commands",
     anlegen: "Add command",
     name: "Name",
-    art: "Type",
+    kind: "Type",
     artText: "Response text",
     artListe: "Command list",
     text: "Response text",
@@ -123,7 +123,7 @@ const texte: LocaleCatalog<TextbefehleTexte> = {
     antwortFehlt: "Fill in a response",
     nameFehlt: "Fill in a name",
     nameAntwortFehlt: "Fill in a name and response",
-    spalten: { name: "!Name", art: "Type", text: "Response", abkuehlung: "Cooldown", zuletzt: "Last", mindeststufe: "Minimum level", aktiv: "Switch" },
+    spalten: { name: "!Name", kind: "Type", text: "Response", abkuehlung: "Cooldown", zuletzt: "Last", mindeststufe: "Minimum level", aktiv: "Switch" },
   },
 };
 

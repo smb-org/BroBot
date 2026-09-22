@@ -24,13 +24,13 @@ const parseEventFilters = (search: string): PanelEventFilters | undefined => {
   const tone = params.get("tone");
   const moduleId = params.get("module");
   const actor = params.get("actor");
-  const herkunft: PanelEventOrigin | null = origin === "channel" ? "kanal" : origin === "module" ? "modul" : null;
+  const herkunft: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
   const ton: EventTone | null = tone !== null && EVENT_TONES.includes(tone as EventTone) ? tone as EventTone : null;
   const modul = moduleId === null || moduleId.length === 0 ? null : moduleId;
   const person = actor === null || actor.length === 0 ? null : actor;
   return herkunft === null && ton === null && modul === null && person === null
     ? undefined
-    : { herkunft, modul, ton, person };
+    : { origin: herkunft, module: modul, tone: ton, person };
 };
 
 export const parseDashboardRoute = (pathname: string, search = ""): DashboardRoute => {
@@ -70,9 +70,9 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   const path = `${base}/${route.section}`;
   if (route.section !== "events" || route.filters === undefined) return path;
   const params = new URLSearchParams();
-  if (route.filters.herkunft !== null) params.set("origin", route.filters.herkunft === "kanal" ? "channel" : "module");
-  if (route.filters.modul !== null) params.set("module", route.filters.modul);
-  if (route.filters.ton !== null) params.set("tone", route.filters.ton);
+  if (route.filters.origin !== null) params.set("origin", route.filters.origin);
+  if (route.filters.module !== null) params.set("module", route.filters.module);
+  if (route.filters.tone !== null) params.set("tone", route.filters.tone);
   if (route.filters.person !== null) params.set("actor", route.filters.person);
   const query = params.toString();
   return query.length === 0 ? path : `${path}?${query}`;

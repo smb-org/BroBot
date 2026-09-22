@@ -11,12 +11,12 @@ describe("Werbung-Einstellungsdefaults", () => {
 
   afterEach(() => { database.close(); });
 
-  it("nimmt altes gespeichertes JSON ohne Vorwarnungsfelder mit Defaults an", async () => {
+  it("nimmt gespeichertes JSON ohne Vorwarnungsfelder mit Defaults an", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'ads', 1, '{"automatisch":"auto","manuell":"manuell"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell"}')`,
     ).run();
 
     let geleseneEinstellungen: unknown;
@@ -46,11 +46,11 @@ describe("Werbung-Einstellungsdefaults", () => {
     );
 
     expect(geleseneEinstellungen).toEqual({
-      automatisch: "auto",
-      manuell: "manuell",
-      vorwarnung: true,
-      vorlaufSekunden: 60,
-      vorwarnungText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
+      automatic: "auto",
+      manual: "manuell",
+      prewarning: true,
+      leadSeconds: 60,
+      prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
     });
   });
 });

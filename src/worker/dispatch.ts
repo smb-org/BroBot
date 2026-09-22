@@ -121,11 +121,11 @@ const ausfuehren = async (
         );
         diagnostics.push(ergebnis.sent
           ? { code: "host.chat.gesendet", detail: ergebnis.detail }
-          : { code: "host.chat.fehlgeschlagen", detail: { grund: ergebnis.reason, ...ergebnis.detail } });
+          : { code: "host.chat.fehlgeschlagen", detail: { reason: ergebnis.reason, ...ergebnis.detail } });
         continue;
       }
       if (action.kind === "shoutout") {
-        const ergebnis = await sendShoutout(environment, channelId, action.zielKanalId, fetcher);
+        const ergebnis = await sendShoutout(environment, channelId, action.targetChannelId, fetcher);
         diagnostics.push(ergebnis.sent
           ? { code: "host.shoutout.gesendet", detail: ergebnis.detail }
           : { code: "host.shoutout.fehlgeschlagen", detail: { ursache: ergebnis.reason, ...ergebnis.detail } });

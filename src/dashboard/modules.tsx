@@ -14,7 +14,7 @@ interface ModulesTexte {
   verfuegbar: string;
   laden: string;
   registriert: string;
-  modul: string;
+  module: string;
   aktiv: string;
   inaktiv: string;
   aktivieren: string;
@@ -27,13 +27,13 @@ const texte: LocaleCatalog<ModulesTexte> = {
   de: {
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Module ändern.", titel: "Module", liste: "Modulliste",
     verfuegbar: "Verfügbare Module", laden: "Module werden geladen …", registriert: "Für diesen Bot ist noch kein Modul registriert.",
-    modul: "Modul", aktiv: "Aktiv", inaktiv: "Inaktiv", aktivieren: "aktivieren", deaktivieren: "deaktivieren",
+    module: "Modul", aktiv: "Aktiv", inaktiv: "Inaktiv", aktivieren: "aktivieren", deaktivieren: "deaktivieren",
     sitzungUngueltig: "Deine Sitzung ist nicht mehr gültig.", aenderungFehlgeschlagen: "Die Moduländerung ist fehlgeschlagen.",
   },
   en: {
     verwaltungGesperrt: "Only broadcasters and managers may change modules.", titel: "Modules", liste: "Module list",
     verfuegbar: "Available modules", laden: "Loading modules …", registriert: "No module is registered for this bot yet.",
-    modul: "Module", aktiv: "Active", inaktiv: "Inactive", aktivieren: "enable", deaktivieren: "disable",
+    module: "Module", aktiv: "Active", inaktiv: "Inactive", aktivieren: "enable", deaktivieren: "disable",
     sitzungUngueltig: "Your session is no longer valid.", aenderungFehlgeschlagen: "The module change failed.",
   },
 };
@@ -101,7 +101,7 @@ const ModulesPage = ({
         ) : (
           <div className="tabelle-wrap">
             <table className="tabelle">
-              <thead><tr><th scope="col">{texte.modul}</th><th scope="col">{texte.aktiv}</th></tr></thead>
+              <thead><tr><th scope="col">{texte.module}</th><th scope="col">{texte.aktiv}</th></tr></thead>
               <tbody>
                 {modules.map((module) => (
                   <tr key={module.id}>

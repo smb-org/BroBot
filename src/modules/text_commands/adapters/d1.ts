@@ -10,9 +10,9 @@ import type { TextbefehlMutationsergebnis, TextbefehlRepository } from "../repos
 
 const MODULE_ID = "text_commands";
 
-const auditWerte = (befehl: Pick<Textbefehl, "name" | "text" | "art" | "enabled" | "mindeststufe" | "cooldownSekunden">) => ({
+const auditWerte = (befehl: Pick<Textbefehl, "name" | "text" | "kind" | "enabled" | "mindeststufe" | "cooldownSekunden">) => ({
   name: befehl.name,
-  art: befehl.art,
+  kind: befehl.kind,
   enabled: befehl.enabled,
   mindeststufe: befehl.mindeststufe,
   text: kuerzeAuf200Zeichen(befehl.text),
@@ -20,20 +20,20 @@ const auditWerte = (befehl: Pick<Textbefehl, "name" | "text" | "art" | "enabled"
 });
 
 const gleicheMutationswerte = (
-  links: Pick<Textbefehl, "name" | "text" | "art" | "enabled" | "mindeststufe" | "cooldownSekunden">,
-  rechts: Pick<Textbefehl, "name" | "text" | "art" | "enabled" | "mindeststufe" | "cooldownSekunden">,
+  links: Pick<Textbefehl, "name" | "text" | "kind" | "enabled" | "mindeststufe" | "cooldownSekunden">,
+  rechts: Pick<Textbefehl, "name" | "text" | "kind" | "enabled" | "mindeststufe" | "cooldownSekunden">,
 ): boolean => links.name === rechts.name &&
   links.text === rechts.text &&
-  links.art === rechts.art &&
+  links.kind === rechts.kind &&
   links.enabled === rechts.enabled &&
   links.mindeststufe === rechts.mindeststufe &&
   links.cooldownSekunden === rechts.cooldownSekunden;
 
 const erfolgreich = (): TextbefehlMutationsergebnis => ({ ok: true });
 
-const fehlgeschlagen = (grund: Exclude<TextbefehlMutationsergebnis, { ok: true }>["grund"]): TextbefehlMutationsergebnis => ({
+const fehlgeschlagen = (grund: Exclude<TextbefehlMutationsergebnis, { ok: true }>["reason"]): TextbefehlMutationsergebnis => ({
   ok: false,
-  grund,
+  reason: grund,
 });
 
 const mutationAusfuehren = async (
@@ -65,7 +65,7 @@ const mapTextbefehl = (row: TextbefehlRow): Textbefehl => ({
   channelId: row.channel_id,
   name: row.command_name,
   text: row.response_text,
-  art: row.kind,
+  kind: row.kind,
   enabled: row.enabled === 1,
   mindeststufe: row.minimum_level,
   cooldownSekunden: row.cooldown_seconds,
@@ -117,7 +117,7 @@ export const createTextbefehlRepository = (
       input.channelId,
       input.name,
       input.text,
-      input.art,
+      input.kind,
       mindeststufe,
       input.cooldownSekunden,
       input.now,
@@ -160,7 +160,7 @@ export const createTextbefehlRepository = (
         input.channelId,
         input.name,
         before.text,
-        before.art,
+        before.kind,
         before.enabled ? 1 : 0,
         beforeMindeststufe,
         before.cooldownSekunden,
@@ -180,7 +180,7 @@ export const createTextbefehlRepository = (
       ).bind(
         input.neuerName,
         input.text,
-        input.art,
+        input.kind,
         input.enabled ? 1 : 0,
         mindeststufe,
         input.cooldownSekunden,
@@ -188,7 +188,7 @@ export const createTextbefehlRepository = (
         input.channelId,
         input.name,
         before.text,
-        before.art,
+        before.kind,
         before.enabled ? 1 : 0,
         beforeMindeststufe,
         before.cooldownSekunden,
@@ -203,7 +203,7 @@ export const createTextbefehlRepository = (
         ...before,
         name: input.neuerName,
         text: input.text,
-        art: input.art,
+        kind: input.kind,
         enabled: input.enabled,
         mindeststufe,
         cooldownSekunden: input.cooldownSekunden,
@@ -238,7 +238,7 @@ export const createTextbefehlRepository = (
       channelId,
       name,
       before.text,
-      before.art,
+      before.kind,
       before.enabled ? 1 : 0,
       before.mindeststufe,
       before.cooldownSekunden,
@@ -308,7 +308,7 @@ export const initialisiereListenbefehl = async (
       moduleId: MODULE_ID,
       action: "text_commands.befehl.angelegt",
       before: null,
-      after: { name: "befehle", art: "list", enabled: true, mindeststufe: "everyone", text: "", cooldownSekunden: 5 },
+      after: { name: "befehle", kind: "list", enabled: true, mindeststufe: "everyone", text: "", cooldownSekunden: 5 },
     }, now),
   ];
 };

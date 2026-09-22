@@ -65,7 +65,7 @@ const legeBefehlAn = async (database: TestD1Database, name = "hallo", mindeststu
     channelId: "kanal-a",
     name,
     text: "Hallo {user}",
-    art: "text",
+    kind: "text",
     mindeststufe,
     cooldownSekunden: 5,
     now: JETZT,
@@ -280,9 +280,9 @@ describe("Textbefehle-Modul", () => {
         database as unknown as D1Database,
         () => ({ sql: "AND 1 = 1", values: [] as const }),
       );
-      await repository.anlegen({ channelId: "kanal-a", name: "befehle", text: "", art: "list", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
-      await repository.anlegen({ channelId: "kanal-a", name: "aktiv", text: "Antwort", art: "text", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
-      await repository.anlegen({ channelId: "kanal-a", name: "aus", text: "Antwort", art: "text", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
+      await repository.anlegen({ channelId: "kanal-a", name: "befehle", text: "", kind: "list", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
+      await repository.anlegen({ channelId: "kanal-a", name: "aktiv", text: "Antwort", kind: "text", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
+      await repository.anlegen({ channelId: "kanal-a", name: "aus", text: "Antwort", kind: "text", cooldownSekunden: 5, now: JETZT }, { userId: "user-1" });
       await database.prepare("UPDATE text_commands SET enabled = 0 WHERE command_name = 'aus'").run();
       const fetcher = fetcherFuerChat();
 

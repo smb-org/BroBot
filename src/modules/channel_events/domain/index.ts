@@ -70,14 +70,14 @@ const raidDiagnose = (
       code: "channel_events.raid.outgoing",
       detail: detail({
         ziel: person(payload, "to_broadcaster"),
-        zuschauer: zahlWert(feld(payload, "viewers")),
+        viewers: zahlWert(feld(payload, "viewers")),
       }),
     }
     : {
       code: "channel_events.raid.incoming",
       detail: detail({
         quelle: person(payload, "from_broadcaster"),
-        zuschauer: zahlWert(feld(payload, "viewers")),
+        viewers: zahlWert(feld(payload, "viewers")),
       }),
     };
 };
@@ -96,7 +96,7 @@ const shoutoutDiagnose = (
       quelle: person(payload, "from_broadcaster"),
       ...(zahlWert(feld(payload, "viewer_count")) === null
         ? {}
-        : { zuschauer: zahlWert(feld(payload, "viewer_count")) }),
+        : { viewers: zahlWert(feld(payload, "viewer_count")) }),
     }),
   };
 
@@ -134,7 +134,7 @@ const chatNotificationDiagnose = (
       code: "channel_events.chat.community_gift",
       detail: detail({
         spender: person(payload, "gifter"),
-        anzahl: zahlWert(nestedFeld(payload, typ, "total")),
+        count: zahlWert(nestedFeld(payload, typ, "total")),
         stufe: tier,
       }),
     };
@@ -148,7 +148,7 @@ const chatNotificationDiagnose = (
   }
   return {
     code: "channel_events.chat.unbekannt",
-    detail: detail({ art: kuerzeAuf200Zeichen(typ) }),
+    detail: detail({ kind: kuerzeAuf200Zeichen(typ) }),
   };
 };
 
@@ -170,7 +170,7 @@ const moderationDiagnose = (
   const beteiligt = personAusObjekt(actionData, "user");
   const moderator = person(payload, "moderator");
   const grund = textWert(actionData.reason);
-  const common = { person: beteiligt, moderator, grund };
+  const common = { person: beteiligt, moderator, reason: grund };
 
   if (actionName === "ban") {
     return { code: "channel_events.moderation.ban", detail: detail(common) };
@@ -244,7 +244,7 @@ const automodDiagnose = (payload: Readonly<Record<string, unknown>>): Kanalereig
   code: "channel_events.automod.halte",
   detail: detail({
     ...optionaleTextDetail("person", personAusObjekt(payload, "user")),
-    ...optionaleTextDetail("grund", textWert(feld(payload, "category"))),
+    ...optionaleTextDetail("reason", textWert(feld(payload, "category"))),
     ...optionaleTextDetail("text", messageText(payload)),
   }),
 });

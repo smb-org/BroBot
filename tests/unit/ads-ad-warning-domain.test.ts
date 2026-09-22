@@ -5,9 +5,9 @@ import { entscheideWerbevorwarnung } from "../../src/modules/ads/domain";
 const jetztAmMs = Date.parse("2026-09-21T11:59:00.000Z");
 const geplanterTerminAmMs = Date.parse("2026-09-21T12:00:00.000Z");
 const einstellungen = {
-  vorwarnung: true,
-  vorlaufSekunden: 60,
-  vorwarnungText: "Werbung in {seconds} Sekunden.",
+  prewarning: true,
+  leadSeconds: 60,
+  prewarningText: "Werbung in {seconds} Sekunden.",
 };
 
 const eingabe = (overrides: Partial<Parameters<typeof entscheideWerbevorwarnung>[0]> = {}) => ({
@@ -43,7 +43,7 @@ describe("Werbe-Vorwarnungsentscheidung", () => {
 
   it("ignoriert den deutschen Altname für Sekunden", () => {
     const result = entscheideWerbevorwarnung(eingabe({
-      settings: { ...einstellungen, vorwarnungText: "Werbung in {sekunden} Sekunden." },
+      settings: { ...einstellungen, prewarningText: "Werbung in {sekunden} Sekunden." },
     }));
 
     expect(result).toMatchObject({ kind: "announce", text: "Werbung in {sekunden} Sekunden." });

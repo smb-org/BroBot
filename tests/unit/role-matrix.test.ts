@@ -264,7 +264,7 @@ const aktionen: readonly Rollenaktion[] = [
         name: "hallo",
         neuerName: "hallo",
         text: "Hallo {user}",
-        art: "text",
+        kind: "text",
         enabled: false,
         nurSchalter: true,
         cooldownSekunden: 5,
@@ -287,7 +287,7 @@ const aktionen: readonly Rollenaktion[] = [
         name: "hallo",
         neuerName: "hallo-neu",
         text: "Neu",
-        art: "text",
+        kind: "text",
         enabled: true,
         cooldownSekunden: 5,
         mindeststufe: "everyone",
@@ -308,7 +308,7 @@ const aktionen: readonly Rollenaktion[] = [
         channelId: "kanal-a",
         name: "neu",
         text: "Neu",
-        art: "text",
+        kind: "text",
         cooldownSekunden: 5,
         now: zeitpunkt,
       }, akteur);
@@ -386,7 +386,7 @@ const aktionen: readonly Rollenaktion[] = [
         channelId: "kanal-b",
         login: "kanal-b",
         displayName: "Kanal B",
-        vollzustimmung: true,
+        fullConsent: true,
       };
       return ändereVollzustimmung(database as unknown as D1Database, akteur, channel, false, zeitpunkt);
     },

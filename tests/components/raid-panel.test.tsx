@@ -20,11 +20,11 @@ describe("Raid-Panel-Ansicht", () => {
 
   it("zeigt die Einstellungen zweisprachig an", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "Voll {channel} {viewers}",
-      textKlein: "Klein {channel} {viewers}",
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "Voll {channel} {viewers}",
+      textShort: "Klein {channel} {viewers}",
     } })));
 
     render(<RaidPanel channelId="kanal-a" language="en" />);
@@ -39,11 +39,11 @@ describe("Raid-Panel-Ansicht", () => {
 
   it("zeigt Felder für Bediener, deaktiviert sie aber mit Begründung", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
-      shoutoutAktiv: true,
-      shoutoutSchwelle: 3,
-      textSchwelle: 3,
-      textVoll: "voll",
-      textKlein: "klein",
+      shoutoutEnabled: true,
+      shoutoutThreshold: 3,
+      textThreshold: 3,
+      textLong: "voll",
+      textShort: "klein",
     } })));
 
     render(<RaidPanel channelId="kanal-a" language="de" canManage={false} />);
@@ -59,11 +59,11 @@ describe("Raid-Panel-Ansicht", () => {
 
   it("zeigt die abgeschaltete Shoutout-Schwelle deaktiviert, lässt die Text-Schwelle aber bedienbar", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
-      shoutoutAktiv: false,
-      shoutoutSchwelle: 50,
-      textSchwelle: 5,
-      textVoll: "voll",
-      textKlein: "klein",
+      shoutoutEnabled: false,
+      shoutoutThreshold: 50,
+      textThreshold: 5,
+      textLong: "voll",
+      textShort: "klein",
     } })));
 
     render(<RaidPanel channelId="kanal-a" language="de" />);
@@ -77,14 +77,14 @@ describe("Raid-Panel-Ansicht", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/raid/settings")) return Promise.resolve(jsonResponse({ settings: {
-        shoutoutAktiv: true, shoutoutSchwelle: 3, textSchwelle: 3, textVoll: "voll", textKlein: "klein",
+        shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "voll", textShort: "klein",
       } }));
       if (url.pathname.endsWith("/ads/zeitplan")) return Promise.resolve(jsonResponse({
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
         snoozeScopeVorhanden: true, letzteWerbepausen: [],
       }));
       if (url.pathname.endsWith("/ads/settings")) return Promise.resolve(jsonResponse({ settings: {
-        automatisch: "auto {duration}", manuell: "manuell {duration}", vorwarnung: true, vorlaufSekunden: 60, vorwarnungText: "gleich {seconds}",
+        automatic: "auto {duration}", manual: "manuell {duration}", prewarning: true, leadSeconds: 60, prewarningText: "gleich {seconds}",
       } }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
       if (init?.method === "PATCH") return Promise.resolve(jsonResponse({}));
@@ -113,7 +113,7 @@ describe("Raid-Panel-Ansicht", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/raid/settings") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
-        shoutoutAktiv: true, shoutoutSchwelle: 3, textSchwelle: 3, textVoll: "voll", textKlein: "klein",
+        shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "voll", textShort: "klein",
       } }));
       return Promise.resolve(jsonResponse({}));
     });

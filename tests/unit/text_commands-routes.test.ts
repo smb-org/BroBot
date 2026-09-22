@@ -103,22 +103,22 @@ describe("Textbefehle-Panel", () => {
         module_id: "text_commands",
         action: "text_commands.befehl.angelegt",
         before_json: "null",
-        after_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "everyone", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.befehl.geändert",
-        before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "everyone", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
-        after_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "everyone", text: "Neue Antwort", cooldownSekunden: 10 }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: `${"A".repeat(199)}…`, cooldownSekunden: 5 }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: "Neue Antwort", cooldownSekunden: 10 }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.befehl.entfernt",
-        before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "everyone", text: "Neue Antwort", cooldownSekunden: 10 }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: "Neue Antwort", cooldownSekunden: 10 }),
         after_json: "null",
       }),
     ]));
@@ -173,13 +173,13 @@ describe("Textbefehle-Panel", () => {
 
     const liste = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "befehle", art: "list", cooldownSekunden: 5,
+        name: "befehle", kind: "list", cooldownSekunden: 5,
       }),
       environment,
     );
     const text = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "leer", art: "text", cooldownSekunden: 5,
+        name: "leer", kind: "text", cooldownSekunden: 5,
       }),
       environment,
     );
@@ -201,7 +201,7 @@ describe("Textbefehle-Panel", () => {
 
     const create = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5,
+        name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5,
       }),
       environment,
     );
@@ -221,8 +221,8 @@ describe("Textbefehle-Panel", () => {
       "SELECT action, before_json, after_json FROM audit_log WHERE action = 'text_commands.befehl.geändert'",
     ).first()).resolves.toEqual({
       action: "text_commands.befehl.geändert",
-      before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
-      after_json: JSON.stringify({ name: "hallo", art: "text", enabled: false, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
     });
   });
 
@@ -355,8 +355,8 @@ describe("Textbefehle-Panel", () => {
     await expect(database.prepare(
       "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.befehl.geändert'",
     ).first()).resolves.toEqual({
-      before_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
-      after_json: JSON.stringify({ name: "hallo", art: "text", enabled: true, mindeststufe: "moderator", text: "Antwort", cooldownSekunden: 5 }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5 }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, mindeststufe: "moderator", text: "Antwort", cooldownSekunden: 5 }),
     });
   });
 });

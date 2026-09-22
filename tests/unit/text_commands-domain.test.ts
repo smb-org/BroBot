@@ -10,7 +10,7 @@ import {
 
 describe("Textbefehle-Domain", () => {
   it("erkennt ein generisches !-Wort ohne Sonderfall", () => {
-    expect(befehlAusNachricht("!befehle")).toEqual({ art: "befehl", name: "befehle" });
+    expect(befehlAusNachricht("!befehle")).toEqual({ kind: "befehl", name: "befehle" });
   });
 
   it("erlaubt nur einfache kleingeschriebene Befehlsnamen", () => {

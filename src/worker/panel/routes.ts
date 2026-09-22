@@ -66,11 +66,11 @@ const parseEventFilters = (
   const actor = context.req.query("actor");
   if (origin !== undefined && origin !== "channel" && origin !== "module") return context.text("Ereignis-Herkunft ist ungültig.", 400);
   if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.text("Ereignis-Ton ist ungültig.", 400);
-  const herkunft: PanelEventOrigin | null = origin === "channel" ? "kanal" : origin === "module" ? "modul" : null;
+  const herkunft: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
   const ton: EventTone | null = tone === undefined ? null : tone as EventTone;
   const modul = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
   const person = actor === undefined || actor.length === 0 ? null : actor;
-  return { herkunft, modul, ton, person };
+  return { origin: herkunft, module: modul, tone: ton, person };
 };
 
 // Teilt sich nur die Parse-/Fehlermechanik zwischen Audit- und Ereignisprotokoll.
@@ -113,7 +113,7 @@ panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) 
   const session = context.get("session");
   return context.json({
     channels: await listChannelsForUser(context.env.DB, session.userId),
-    betreiber: getBetreiberUserIds(context.env).has(session.userId),
+    platformAdmin: getBetreiberUserIds(context.env).has(session.userId),
   });
 });
 

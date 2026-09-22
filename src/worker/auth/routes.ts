@@ -290,7 +290,7 @@ authRouter.get("/api/overlay/status", async (context) => {
 });
 
 authRouter.get("/auth/login", async (context) => {
-  const kanalLogin = context.req.query("kanal");
+  const kanalLogin = context.req.query("channel");
   const vollzustimmung = kanalLogin !== undefined && kanalLogin.length > 0 &&
     await hatVollzustimmungFürKanalLogin(context.env.DB, kanalLogin);
   const scopes = vollzustimmung ? listeAlleBroadcasterScopes() : [];

@@ -7,14 +7,14 @@ const diagnoseDetail = (
 ): Record<string, string | number | boolean | null> => {
   if (event.kind === "skip") {
     return {
-      grund: event.reason,
+      reason: event.reason,
       dauer: event.dauerSekunden,
-      automatisch: event.automatisch,
+      automatic: event.automatic,
     };
   }
   return {
     dauer: event.event.dauerSekunden,
-    automatisch: event.event.automatisch,
+    automatic: event.event.automatic,
     gestartet: event.event.gestartetAm,
     ende: event.event.endetAm,
     ausloeser: event.event.ausloeserLogin,
@@ -42,7 +42,7 @@ export const verarbeiteWerbepause = (
     };
   }
 
-  const vorlage = entscheidung.event.automatisch ? event.settings.automatisch : event.settings.manuell;
+  const vorlage = entscheidung.event.automatic ? event.settings.automatic : event.settings.manual;
   return {
     actions: [{ kind: "chat", text: textMitDauer(vorlage, entscheidung.event.dauerSekunden) }],
     diagnostics: [{ code: diagnosticCode(entscheidung), detail: diagnoseDetail(entscheidung) }],

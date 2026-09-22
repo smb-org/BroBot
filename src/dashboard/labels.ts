@@ -53,7 +53,7 @@ export interface BetreiberTexte {
   kanalübersicht: string;
   login: string;
   kennung: string;
-  vollzustimmung: string;
+  fullConsent: string;
   broadcaster: string;
   verwalter: string;
   bediener: string;
@@ -116,7 +116,7 @@ const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
     kanalübersicht: "Kanalübersicht",
     login: "Login",
     kennung: "Kennung",
-    vollzustimmung: "Vollzustimmung",
+    fullConsent: "Vollzustimmung",
     broadcaster: "Broadcaster",
     verwalter: "Verwalter",
     bediener: "Bediener",
@@ -183,7 +183,7 @@ const betreiberKatalog: LocaleCatalog<BetreiberTexte> = {
     kanalübersicht: "Channel overview",
     login: "Login",
     kennung: "Identifier",
-    vollzustimmung: "Full consent",
+    fullConsent: "Full consent",
     broadcaster: "Broadcaster",
     verwalter: "Manager",
     bediener: "Operator",

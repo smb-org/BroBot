@@ -108,7 +108,7 @@ describe("Ereignisprotokoll", () => {
       null,
       [{
         code: "shoutout.unterdrueckt",
-        detail: { grund: "raid_erkannt", zuschauer: 8, schwelle: 10 },
+        detail: { reason: "raid_erkannt", viewers: 8, schwelle: 10 },
       }],
       "2026-09-18T04:00:00.000Z",
     );
@@ -128,7 +128,7 @@ describe("Ereignisprotokoll", () => {
     expect(row).toEqual({
       module_id: "raid",
       code: "shoutout.unterdrueckt",
-      detail_json: '{"grund":"raid_erkannt","zuschauer":8,"schwelle":10}',
+      detail_json: '{"reason":"raid_erkannt","viewers":8,"schwelle":10}',
       actor_user_id: null,
       trigger_id: "trigger-raid-1",
     });

@@ -163,8 +163,8 @@ const identitätsAntwort = (userId: string, login: string): Response => new Resp
 );
 
 const anzahlZeilen = async (datenbank: TestD1Database, tabelle: string): Promise<number> => {
-  const zeile = await datenbank.prepare(`SELECT COUNT(*) AS anzahl FROM ${tabelle}`).first<{ anzahl: number }>();
-  return zeile?.anzahl ?? 0;
+  const zeile = await datenbank.prepare(`SELECT COUNT(*) AS count FROM ${tabelle}`).first<{ count: number }>();
+  return zeile?.count ?? 0;
 };
 
 describe("Auth-Routen", () => {
@@ -195,7 +195,7 @@ describe("Auth-Routen", () => {
       const umgebung = umgebungFürDatenbank(datenbank);
 
       const antwort = await authRouter.fetch(
-        new Request("https://brobot.example/auth/login?kanal=KANAL-VOLL"),
+        new Request("https://brobot.example/auth/login?channel=KANAL-VOLL"),
         umgebung,
       );
       const umfang = new URL(antwort.headers.get("location") ?? "https://ungültig").searchParams
@@ -215,7 +215,7 @@ describe("Auth-Routen", () => {
       const umgebung = umgebungFürDatenbank(datenbank);
 
       const antwort = await authRouter.fetch(
-        new Request("https://brobot.example/auth/login?kanal=kanal-normal"),
+        new Request("https://brobot.example/auth/login?channel=kanal-normal"),
         umgebung,
       );
       const umfang = new URL(antwort.headers.get("location") ?? "https://ungültig").searchParams
@@ -237,7 +237,7 @@ describe("Auth-Routen", () => {
       const erfundenerLogin = "kanal-voll-aber-erfunden";
 
       const antwort = await authRouter.fetch(
-        new Request(`https://brobot.example/auth/login?kanal=${erfundenerLogin}`),
+        new Request(`https://brobot.example/auth/login?channel=${erfundenerLogin}`),
         umgebung,
       );
       const url = new URL(antwort.headers.get("location") ?? "https://ungültig");
@@ -320,7 +320,7 @@ describe("Auth-Routen", () => {
       await setzeVollzustimmung(datenbank, "kanal-voll");
       const umgebung = umgebungFürDatenbank(datenbank);
       const login = await authRouter.fetch(
-        new Request("https://brobot.example/auth/login?kanal=kanal-voll"),
+        new Request("https://brobot.example/auth/login?channel=kanal-voll"),
         umgebung,
       );
       const fetcher = fetchWith(

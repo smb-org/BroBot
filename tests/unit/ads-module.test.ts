@@ -39,7 +39,7 @@ describe("Werbung-Modul", () => {
       code: "ads.ankuendigung",
       detail: {
         dauer: 30,
-        automatisch: true,
+        automatic: true,
         gestartet: "2026-09-20T10:00:00.000Z",
         ende: "2026-09-20T10:00:30.000Z",
         ausloeser: "streamer",
@@ -56,7 +56,7 @@ describe("Werbung-Modul", () => {
       actions: [],
       diagnostics: [{
         code: "ads.uebersprungen",
-        detail: { grund: "dauer_null", dauer: 0, automatisch: false },
+        detail: { reason: "dauer_null", dauer: 0, automatic: false },
       }],
     });
   });
@@ -67,11 +67,11 @@ describe("Werbung-Modul", () => {
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,
     }, {
-      automatisch: "auto",
-      manuell: "Pause läuft",
-      vorwarnung: true,
-      vorlaufSekunden: 60,
-      vorwarnungText: "Vorwarnung {seconds}",
+      automatic: "auto",
+      manual: "Pause läuft",
+      prewarning: true,
+      leadSeconds: 60,
+      prewarningText: "Vorwarnung {seconds}",
     }));
 
     expect(result.actions).toEqual([{ kind: "chat", text: "Pause läuft (45 Sekunden)" }]);
@@ -83,11 +83,11 @@ describe("Werbung-Modul", () => {
       started_at: "2026-09-20T10:00:00.000Z",
       is_automatic: false,
     }, {
-      automatisch: "auto {duration}",
-      manuell: "Pause {dauer}",
-      vorwarnung: true,
-      vorlaufSekunden: 60,
-      vorwarnungText: "Vorwarnung {seconds}",
+      automatic: "auto {duration}",
+      manual: "Pause {dauer}",
+      prewarning: true,
+      leadSeconds: 60,
+      prewarningText: "Vorwarnung {seconds}",
     }));
 
     expect(result.actions).toEqual([{ kind: "chat", text: "Pause {dauer} (45 Sekunden)" }]);

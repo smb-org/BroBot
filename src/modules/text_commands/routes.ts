@@ -8,7 +8,7 @@ import { gueltigerBefehlsname } from "./domain";
 
 const bodySchema = z.object({
   name: z.string(),
-  art: z.enum(["text", "list"]).default("text"),
+  kind: z.enum(["text", "list"]).default("text"),
   mindeststufe: z.enum(TEXTBEFEHL_MINDESTSTUFEN).default("everyone"),
   text: z.string().optional(),
   cooldownSekunden: z.number().int().min(0).max(86400),
@@ -16,7 +16,7 @@ const bodySchema = z.object({
 const editBodySchema = z.object({
   name: z.string().optional(),
   text: z.string().optional(),
-  art: z.enum(["text", "list"]).optional(),
+  kind: z.enum(["text", "list"]).optional(),
   cooldownSekunden: z.number().int().min(0).max(86400).optional(),
   mindeststufe: z.enum(TEXTBEFEHL_MINDESTSTUFEN).optional(),
   enabled: z.boolean().optional(),
@@ -35,8 +35,8 @@ const readBody = async (request: Request): Promise<unknown> => {
 const validBody = async (request: Request): Promise<z.infer<typeof bodySchema> | null> => {
   const parsed = bodySchema.safeParse(await readBody(request));
   if (!parsed.success || !gueltigerBefehlsname(parsed.data.name)) return null;
-  if (parsed.data.art === "text" && (parsed.data.text === undefined || parsed.data.text.trim().length === 0)) return null;
-  return { ...parsed.data, text: parsed.data.art === "list" ? "" : parsed.data.text ?? "" };
+  if (parsed.data.kind === "text" && (parsed.data.text === undefined || parsed.data.text.trim().length === 0)) return null;
+  return { ...parsed.data, text: parsed.data.kind === "list" ? "" : parsed.data.text ?? "" };
 };
 
 const validEditBody = async (request: Request): Promise<z.infer<typeof editBodySchema> | null> => {
@@ -70,7 +70,7 @@ textbefehlRoutes.post("/commands", async (context) => {
   const channelId = param(context, "channelId");
   const angelegt = await repository.anlegen({ channelId, ...body, text: body.text ?? "", now: nowIso() }, context.get("actor"));
   if (angelegt.ok) return context.json({ befehl: { ...body, channelId, zuletztVerwendetAt: null } }, 201);
-  return angelegt.grund === "existiert"
+  return angelegt.reason === "existiert"
     ? context.json({ error: "Der Befehl existiert bereits." }, 409)
     : context.json({ error: "Der Befehl darf nicht angelegt werden." }, 403);
 });
@@ -91,7 +91,7 @@ textbefehlRoutes.patch("/commands/:name", async (context) => {
   if (!gueltigerBefehlsname(newName)) return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
   const contentChanged = Object.keys(body).some((key) => key !== "enabled");
   if (contentChanged && context.get("channelRole") === "operator") return managementDenied(context);
-  const art = body.art ?? before.art;
+  const art = body.kind ?? before.kind;
   const text = art === "list" ? "" : body.text ?? before.text;
   if (art === "text" && text.trim().length === 0) {
     return context.json({ error: "Befehlsdaten sind ungültig." }, 400);
@@ -110,17 +110,17 @@ textbefehlRoutes.patch("/commands/:name", async (context) => {
     name: oldName,
     neuerName: newName,
     text,
-    art,
+    kind: art,
     cooldownSekunden,
     mindeststufe,
     enabled: body.enabled ?? before.enabled,
     nurSchalter: !contentChanged,
     now: nowIso(),
   }, context.get("actor"));
-  if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, art, cooldownSekunden, mindeststufe, enabled: body.enabled ?? before.enabled } });
-  if (geaendert.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
-  if (geaendert.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
-  if (geaendert.grund === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
+  if (geaendert.ok) return context.json({ befehl: { ...before, ...body, channelId, name: newName, text, kind: art, cooldownSekunden, mindeststufe, enabled: body.enabled ?? before.enabled } });
+  if (geaendert.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (geaendert.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht geändert werden." }, 403);
+  if (geaendert.reason === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });
 
@@ -136,8 +136,8 @@ textbefehlRoutes.delete("/commands/:name", async (context) => {
   if (context.get("channelRole") === "operator") return managementDenied(context);
   const geloescht = await repository.loeschen(channelId, name, context.get("actor"), nowIso());
   if (geloescht.ok) return new Response(null, { status: 204 });
-  if (geloescht.grund === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
-  if (geloescht.grund === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);
-  if (geloescht.grund === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
+  if (geloescht.reason === "nicht_gefunden") return context.json({ error: "Der Befehl wurde nicht gefunden." }, 404);
+  if (geloescht.reason === "nicht_berechtigt") return context.json({ error: "Der Befehl darf nicht gelöscht werden." }, 403);
+  if (geloescht.reason === "konflikt") return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
   return context.json({ error: "Der Befehl wurde inzwischen geändert." }, 409);
 });

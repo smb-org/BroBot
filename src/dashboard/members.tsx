@@ -42,7 +42,7 @@ interface MembersTexte {
   suchen: string;
   sucheLaeuft: string;
   titel: string;
-  anzahl: (anzahl: string) => string;
+  count: (anzahl: string) => string;
   name: string;
   rolle: string;
   zugriffSeit: string;
@@ -72,7 +72,7 @@ interface MembersTexte {
 const texte: LocaleCatalog<MembersTexte> = {
   de: {
     verwaltungGesperrt: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", zugriffVergeben: "Zugriff vergeben",
-    twitchName: "Twitch-Name", suchen: "Suchen", sucheLaeuft: "Suche läuft …", titel: "Mitglieder", anzahl: (anzahl) => `${anzahl} Mitglieder`, name: "Name",
+    twitchName: "Twitch-Name", suchen: "Suchen", sucheLaeuft: "Suche läuft …", titel: "Mitglieder", count: (anzahl) => `${anzahl} Mitglieder`, name: "Name",
     rolle: "Rolle", zugriffSeit: "Zugriff seit", aktionen: "Aktionen", entziehen: "Entziehen",
     letzterBroadcaster: "Letzter Broadcaster", nichtAufloesbar: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
     rolleFuer: (name) => `Rolle für ${name}`, zugriffEntziehen: (name) => `Zugriff für ${name} entziehen`,
@@ -87,7 +87,7 @@ const texte: LocaleCatalog<MembersTexte> = {
   },
   en: {
     verwaltungGesperrt: "Only broadcasters and managers may change members.", zugriffVergeben: "Grant access", twitchName: "Twitch name",
-    suchen: "Search", sucheLaeuft: "Searching …", titel: "Members", anzahl: (anzahl) => `${anzahl} members`, name: "Name", rolle: "Role", zugriffSeit: "Access since",
+    suchen: "Search", sucheLaeuft: "Searching …", titel: "Members", count: (anzahl) => `${anzahl} members`, name: "Name", rolle: "Role", zugriffSeit: "Access since",
     aktionen: "Actions", entziehen: "Remove", letzterBroadcaster: "Last broadcaster", nichtAufloesbar: "Unresolvable",
     twitchId: (userId) => `Twitch ID ${userId}`, rolleFuer: (name) => `Role for ${name}`, zugriffEntziehen: (name) => `Remove access for ${name}`,
     leer: "No one else has access to this channel yet.", zugriffFreigeben: "Grant access", neueRolle: "Role for new membership",
@@ -349,7 +349,7 @@ export const MembersPage = ({
 
   return (
     <>
-      <ModuleHeading kind="members" title={texte.titel} subtitle={<ModuleCount count={members.length} label={texte.anzahl} />} />
+      <ModuleHeading kind="members" title={texte.titel} subtitle={<ModuleCount count={members.length} label={texte.count} />} />
       <section className="inspector-section inspector-form" aria-label={texte.zugriffVergeben}>
         <div className="section-heading"><h2>{texte.zugriffVergeben}</h2></div>
         {!canManageMembers ? <p className="sperrgrund">{texte.verwaltungGesperrt}</p> : null}

@@ -9,17 +9,17 @@ export type RaidEntscheidung =
     kind: "incoming";
     quelleKanalId: string;
     quelleKanalName: string;
-    zuschauer: number;
+    viewers: number;
     voll: boolean;
   }
   | {
     kind: "outgoing";
-    zielKanalId: string | null;
-    zuschauer: number | null;
+    targetChannelId: string | null;
+    viewers: number | null;
   }
   | {
     kind: "ungueltig";
-    grund: "ziel_ungueltig" | "quelle_ungueltig" | "zuschauer_ungueltig";
+    reason: "ziel_ungueltig" | "quelle_ungueltig" | "zuschauer_ungueltig";
   };
 
 /** Unterscheidet die beiden EventSub-Raid-Richtungen anhand desselben Musters wie Kanalereignisse. */
@@ -35,16 +35,16 @@ export const entscheideRaid = (
   const outgoing = subscriptionVariant === "outgoing" ||
     (subscriptionVariant !== "incoming" && fromId === channelId);
 
-  if (outgoing) return { kind: "outgoing", zielKanalId: toId, zuschauer };
-  if (toId !== channelId) return { kind: "ungueltig", grund: "ziel_ungueltig" };
-  if (fromId === null) return { kind: "ungueltig", grund: "quelle_ungueltig" };
-  if (zuschauer === null) return { kind: "ungueltig", grund: "zuschauer_ungueltig" };
+  if (outgoing) return { kind: "outgoing", targetChannelId: toId, viewers: zuschauer };
+  if (toId !== channelId) return { kind: "ungueltig", reason: "ziel_ungueltig" };
+  if (fromId === null) return { kind: "ungueltig", reason: "quelle_ungueltig" };
+  if (zuschauer === null) return { kind: "ungueltig", reason: "zuschauer_ungueltig" };
 
   return {
     kind: "incoming",
     quelleKanalId: fromId,
     quelleKanalName: textwert(payload.from_broadcaster_user_name) ?? textwert(payload.from_broadcaster_user_login) ?? fromId,
-    zuschauer,
+    viewers: zuschauer,
     voll: zuschauer >= textSchwelle,
   };
 };

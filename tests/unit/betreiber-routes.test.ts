@@ -151,16 +151,16 @@ describe("Betreiberebene", () => {
         channelId: "kanal-a",
         login: "kanal-a",
         displayName: "Alpha",
-        vollzustimmung: true,
-        memberCounts: { broadcaster: 1, verwalter: 1, bediener: 1 },
+        fullConsent: true,
+        memberCounts: { broadcaster: 1, manager: 1, operator: 1 },
         broadcasterConnected: true,
       },
       {
         channelId: "kanal-b",
         login: "kanal-b",
         displayName: "Beta",
-        vollzustimmung: false,
-        memberCounts: { broadcaster: 1, verwalter: 0, bediener: 0 },
+        fullConsent: false,
+        memberCounts: { broadcaster: 1, manager: 0, operator: 0 },
         broadcasterConnected: false,
       },
     ]);
@@ -180,7 +180,7 @@ describe("Betreiberebene", () => {
     const antwort = await betreiberRouter.fetch(
       await anfrageFür(betreiberId, "/api/platform/channels", "POST", {
         login: "kanal-sieben",
-        vollzustimmung: true,
+        fullConsent: true,
       }),
       umgebung,
     );
@@ -243,11 +243,11 @@ describe("Betreiberebene", () => {
     await insertChannel(datenbank, "kanal-a");
 
     const setzen = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a", "PATCH", { vollzustimmung: true }),
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a", "PATCH", { fullConsent: true }),
       umgebung,
     );
     const lösen = await betreiberRouter.fetch(
-      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a", "PATCH", { vollzustimmung: false }),
+      await anfrageFür(betreiberId, "/api/platform/channels/kanal-a", "PATCH", { fullConsent: false }),
       umgebung,
     );
 

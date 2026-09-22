@@ -18,7 +18,7 @@ const scheduleFailureDiagnostic = (result: AdScheduleResult): {
   detail: Readonly<Record<string, string | number | boolean | null>>;
 } => ({
   code: result.reason === "unauthorized" ? "ads.vorwarnung.scope_fehlt" : "ads.vorwarnung.zeitplan_fehler",
-  detail: { grund: result.reason, ...result.detail },
+  detail: { reason: result.reason, ...result.detail },
 });
 
 const statusFor = (reason: string | null): 403 | 429 | 502 | 503 => {
@@ -59,7 +59,7 @@ const log = async (
 
 const snoozeOutcome = (result: SnoozeNextAdResult): WerbeDetail => ({
   ausgang: result.snoozed ? "erfolgreich" : "fehlgeschlagen",
-  grund: result.reason,
+  reason: result.reason,
   ...result.detail,
 });
 

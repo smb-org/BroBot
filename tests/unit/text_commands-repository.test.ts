@@ -25,10 +25,10 @@ describe("Textbefehle-D1-Adapter", () => {
     const repository = createTextbefehlRepository(database as unknown as D1Database, authorize);
 
     await expect(repository.anlegen({
-      channelId: "kanal-a", name: "hallo", text: "A", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "hallo", text: "A", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
     await expect(repository.anlegen({
-      channelId: "kanal-b", name: "hallo", text: "B", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-b", name: "hallo", text: "B", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
     await expect(repository.auflisten("kanal-a")).resolves.toEqual([expect.objectContaining({
@@ -45,7 +45,7 @@ describe("Textbefehle-D1-Adapter", () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const repository = createTextbefehlRepository(database as unknown as D1Database, authorize);
     await repository.anlegen({
-      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR);
 
     await expect(repository.beanspruchen("kanal-a", "hallo", NOW)).resolves.toMatchObject({ beansprucht: true });
@@ -61,7 +61,7 @@ describe("Textbefehle-D1-Adapter", () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const repository = createTextbefehlRepository(database as unknown as D1Database, authorize);
     await repository.anlegen({
-      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR);
     const tables = await database.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'text_%' ORDER BY name",
@@ -80,23 +80,23 @@ describe("Textbefehle-D1-Adapter", () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const erlaubt = createTextbefehlRepository(database as unknown as D1Database, authorize);
     await erlaubt.anlegen({
-      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR);
 
     const verweigert = createTextbefehlRepository(database as unknown as D1Database, authorizeModuleMutation);
     const fremderAkteur = { userId: "user-2", sessionId: "session-user-2" };
 
     await expect(verweigert.anlegen({
-      channelId: "kanal-a", name: "neu", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
-    }, fremderAkteur)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+      channelId: "kanal-a", name: "neu", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
+    }, fremderAkteur)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
     await expect(verweigert.aendern({
-      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", art: "text", enabled: true, cooldownSekunden: 10, now: NOW,
-    }, fremderAkteur)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSekunden: 10, now: NOW,
+    }, fremderAkteur)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
 
     await expect(verweigert.loeschen("kanal-a", "hallo", fremderAkteur, NOW))
-      .resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+      .resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
     await expect(verweigert.loeschen("kanal-a", "fehlt", ACTOR, NOW))
-      .resolves.toEqual({ ok: false, grund: "nicht_gefunden" });
+      .resolves.toEqual({ ok: false, reason: "nicht_gefunden" });
   });
 
   it("sichert Inhaltsmutationen mit der verwaltenden SQL-Schwelle ab", async () => {
@@ -106,20 +106,20 @@ describe("Textbefehle-D1-Adapter", () => {
     const repository = createTextbefehlRepository(database as unknown as D1Database, authorizeModuleManagementMutation);
 
     await expect(repository.anlegen({
-      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
-    }, ACTOR)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
 
     await database.prepare("UPDATE channel_members SET role = 'manager' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     await expect(repository.anlegen({
-      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
     await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     await expect(repository.aendern({
-      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", art: "text", enabled: true, cooldownSekunden: 10, now: NOW,
-    }, ACTOR)).resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSekunden: 10, now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
     await expect(repository.loeschen("kanal-a", "hallo", ACTOR, NOW))
-      .resolves.toEqual({ ok: false, grund: "nicht_berechtigt" });
+      .resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
   });
 
   it("schaltet nur enabled und schreibt keine veralteten Inhaltswerte zurück", async () => {
@@ -129,7 +129,7 @@ describe("Textbefehle-D1-Adapter", () => {
     const repository = createTextbefehlRepository(database as unknown as D1Database, authorizeModuleMutation);
 
     await expect(repository.anlegen({
-      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
     await expect(repository.aendern({
@@ -137,7 +137,7 @@ describe("Textbefehle-D1-Adapter", () => {
       name: "hallo",
       neuerName: "hallo",
       text: "Veraltete Antwort",
-      art: "text",
+      kind: "text",
       enabled: false,
       cooldownSekunden: 999,
       now: "2026-09-19T12:01:00.000Z",
@@ -155,7 +155,7 @@ describe("Textbefehle-D1-Adapter", () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const baseRepository = createTextbefehlRepository(database as unknown as D1Database, authorizeModuleMutation);
     await expect(baseRepository.anlegen({
-      channelId: "kanal-a", name: "hallo", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
 
     const updateDb = {
@@ -173,15 +173,15 @@ describe("Textbefehle-D1-Adapter", () => {
       (entry, changedAt) => prepareModuleAudit(updateDb, ACTOR.userId, changedAt, entry),
     );
     await expect(updateRepository.aendern({
-      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Antwort", art: "text",
+      channelId: "kanal-a", name: "hallo", neuerName: "hallo", text: "Antwort", kind: "text",
       enabled: false, cooldownSekunden: 5, now: "2026-09-19T12:01:00.000Z", nurSchalter: true,
-    }, ACTOR)).resolves.toEqual({ ok: false, grund: "konflikt" });
+    }, ACTOR)).resolves.toEqual({ ok: false, reason: "konflikt" });
     await expect(database.prepare("SELECT response_text, minimum_level, enabled FROM text_commands WHERE command_name = 'hallo'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "moderator", enabled: 1 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
 
     await expect(baseRepository.anlegen({
-      channelId: "kanal-a", name: "loeschen", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "loeschen", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
     const deleteDb = {
       prepare: database.prepare.bind(database),
@@ -198,13 +198,13 @@ describe("Textbefehle-D1-Adapter", () => {
       (entry, changedAt) => prepareModuleAudit(deleteDb, ACTOR.userId, changedAt, entry),
     );
     await expect(deleteRepository.loeschen("kanal-a", "loeschen", ACTOR, "2026-09-19T12:01:00.000Z"))
-      .resolves.toEqual({ ok: false, grund: "konflikt" });
+      .resolves.toEqual({ ok: false, reason: "konflikt" });
     await expect(database.prepare("SELECT response_text, minimum_level FROM text_commands WHERE command_name = 'loeschen'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "vip" });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
 
     await expect(baseRepository.anlegen({
-      channelId: "kanal-a", name: "chat", text: "Antwort", art: "text", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "chat", text: "Antwort", kind: "text", cooldownSekunden: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
     const chatDb = {
       prepare: database.prepare.bind(database),
@@ -221,16 +221,16 @@ describe("Textbefehle-D1-Adapter", () => {
       (entry, changedAt) => prepareModuleAudit(chatDb, ACTOR.userId, changedAt, entry),
     );
     await expect(chatRepository.aendern({
-      channelId: "kanal-a", name: "chat", neuerName: "chat", text: "Antwort", art: "text",
+      channelId: "kanal-a", name: "chat", neuerName: "chat", text: "Antwort", kind: "text",
       enabled: false, cooldownSekunden: 5, now: "2026-09-19T12:01:00.000Z", nurSchalter: true,
     }, ACTOR)).resolves.toEqual({ ok: true });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 1 });
     const audit = await database.prepare("SELECT before_json, after_json FROM audit_log").first<{ before_json: string; after_json: string }>();
     expect(JSON.parse(audit?.before_json ?? "null") as unknown).toEqual({
-      name: "chat", art: "text", enabled: true, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5,
+      name: "chat", kind: "text", enabled: true, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5,
     });
     expect(JSON.parse(audit?.after_json ?? "null") as unknown).toEqual({
-      name: "chat", art: "text", enabled: false, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5,
+      name: "chat", kind: "text", enabled: false, mindeststufe: "everyone", text: "Antwort", cooldownSekunden: 5,
     });
   });
 
@@ -241,10 +241,10 @@ describe("Textbefehle-D1-Adapter", () => {
     const repository = createTextbefehlRepository(database as unknown as D1Database, authorize);
 
     await expect(repository.anlegen({
-      channelId: "kanal-a", name: "liste", text: "", art: "list", cooldownSekunden: 5, now: NOW,
+      channelId: "kanal-a", name: "liste", text: "", kind: "list", cooldownSekunden: 5, now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: true });
     await expect(repository.auflisten("kanal-a")).resolves.toEqual([expect.objectContaining({
-      name: "liste", art: "list", text: "", enabled: true,
+      name: "liste", kind: "list", text: "", enabled: true,
     })]);
     expect(() => database.sqlite.prepare(
       `INSERT INTO text_commands

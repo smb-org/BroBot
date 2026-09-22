@@ -18,8 +18,8 @@ const kanal = {
   channelId: "123",
   login: "alpha_login",
   displayName: "Alpha",
-  vollzustimmung: true,
-  memberCounts: { broadcaster: 1, verwalter: 1, bediener: 0 },
+  fullConsent: true,
+  memberCounts: { broadcaster: 1, manager: 1, operator: 0 },
   broadcasterConnected: false,
 };
 
@@ -39,7 +39,7 @@ const richteBetreiberEin = (
 ): ReturnType<typeof vi.fn<typeof fetch>> => {
   const fetcher = vi.fn<typeof fetch>((input) => {
     const url = anfrageUrl(input);
-    if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], betreiber }));
+    if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], platformAdmin: betreiber }));
     if (url.pathname === "/api/platform") return Promise.resolve(antwort({ channels: [kanal] }));
     if (url.pathname === "/api/platform/audit") return Promise.resolve(antwort(audit));
     if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(antwort(mitglieder));
@@ -121,7 +121,7 @@ describe("Betreiberebene", () => {
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
     const link = await screen.findByRole("textbox", { name: "Einladungslink" });
 
-    expect(link).toHaveValue("http://localhost:3000/auth/login?kanal=alpha_login");
+    expect(link).toHaveValue("http://localhost:3000/auth/login?channel=alpha_login");
   });
 
   it("zeigt im Betreiber-Audit den Anzeigenamen und bei fehlender Auflösung die ID", async () => {
@@ -260,7 +260,7 @@ describe("Betreiberebene", () => {
     const freigegeben = { ...kanal };
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const url = anfrageUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], betreiber: true }));
+      if (url.pathname === "/api/channels") return Promise.resolve(antwort({ channels: [], platformAdmin: true }));
       if (url.pathname === "/api/platform") return Promise.resolve(antwort({ channels: [freigegeben] }));
       if (url.pathname === "/api/platform/audit") return Promise.resolve(antwort({ entries: [], nextCursor: null }));
       if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(antwort(mitglieder));

@@ -89,7 +89,7 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
   const labels = textbefehleTexte(language);
   const [name, setName] = useState(initial.name);
   const [text, setText] = useState(initial.text);
-  const [art, setArt] = useState(initial.art);
+  const [art, setArt] = useState(initial.kind);
   const [cooldownSekunden, setCooldownSekunden] = useState<number | "">(initial.cooldownSekunden);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,7 +114,7 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
       await speichereTextbefehl(channelId, {
         oldName: initial.name,
         name: name.trim(),
-        art,
+        kind: art,
         ...(art === "text" ? { text } : {}),
         cooldownSekunden,
       });
@@ -148,8 +148,8 @@ const TextbefehlEditor = ({ channelId, language, initial, onChanged, canManageCo
         <input value={name} onChange={(event) => { setName(event.target.value); }} disabled={!canManageContent || busy} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
       </label>
       <label className="config-field config-field--schmal">
-        {labels.art}
-        <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "list"); }} disabled={!canManageContent || busy}>
+        {labels.kind}
+        <select aria-label={labels.kind} value={art} onChange={(event) => { setArt(event.target.value as "text" | "list"); }} disabled={!canManageContent || busy}>
           <option value="text">{labels.artText}</option>
           <option value="list">{labels.artListe}</option>
         </select>
@@ -216,8 +216,8 @@ const TextbefehlZeile = ({ initial, language, selected, onSelect, rowRef, canMan
   return (
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
-      <td>{initial.art === "text" ? labels.artText : labels.artListe}</td>
-      <td className="tabelle__answer" title={initial.art === "text" ? initial.text : undefined}>{initial.art === "text" ? initial.text : "—"}</td>
+      <td>{initial.kind === "text" ? labels.artText : labels.artListe}</td>
+      <td className="tabelle__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
       <td className="mono">{initial.cooldownSekunden}</td>
       <td className="tabelle__last-used">{relativeZeit(initial.zuletztVerwendetAt, labels)}</td>
       <td>
@@ -323,7 +323,7 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
     setError(null);
     setCreating(true);
     try {
-      await legeTextbefehlAn(channelId, { name: name.trim(), art, ...(art === "text" ? { text } : {}), cooldownSekunden });
+      await legeTextbefehlAn(channelId, { name: name.trim(), kind: art, ...(art === "text" ? { text } : {}), cooldownSekunden });
       setName("");
       setText("");
       setArt("text");
@@ -378,7 +378,7 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
             {loading ? <p className="loading-line">{labels.laden}</p> : null}
             {error === null ? null : <p className="form-error" role="alert">{error}</p>}
             {!loading && error === null && befehle.length === 0 ? <p className="empty-state">{labels.leer}</p> : null}
-            {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.art}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setAnlegenOffen(false); selectName(befehl.name); }} rowRef={rowRef(befehl.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
+            {!loading && error === null && befehle.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.spalten.name}</th><th scope="col">{labels.spalten.kind}</th><th scope="col">{labels.spalten.text}</th><th scope="col">{labels.spalten.abkuehlung}</th><th scope="col">{labels.spalten.zuletzt}</th><th scope="col">{labels.spalten.mindeststufe}</th><th scope="col">{labels.spalten.aktiv}</th></tr></thead><tbody>{befehle.map((befehl) => <TextbefehlZeile key={befehl.name} channelId={channelId} language={language} initial={befehl} selected={selectedName === befehl.name} onSelect={() => { setAnlegenOffen(false); selectName(befehl.name); }} rowRef={rowRef(befehl.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === befehl.name} onToggle={() => toggle(befehl)} minimumBusy={minimumBusyName === befehl.name} onMinimumChange={(mindeststufe) => changeMinimum(befehl, mindeststufe)} />)}</tbody></table></div> : null}
           </section>
         </div>
         {selected !== null ? <TextbefehlEditor key={selected.name} channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} /> : anlegenOffen ? (
@@ -392,8 +392,8 @@ export const TextbefehlePanel = ({ channelId, language, canManage: canManageCont
                 <span className="muted">{labels.nameHinweis}</span>
               </label>
               <label className="config-field config-field--schmal">
-                {labels.art}
-                <select aria-label={labels.art} value={art} onChange={(event) => { setArt(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
+                {labels.kind}
+                <select aria-label={labels.kind} value={art} onChange={(event) => { setArt(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
                   <option value="text">{labels.artText}</option>
                   <option value="list">{labels.artListe}</option>
                 </select>

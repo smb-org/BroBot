@@ -52,7 +52,7 @@ describe("Werbe-Vorwarnung im Kanalobjekt", () => {
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'ads', 1, '{"automatisch":"a","manuell":"m","vorwarnung":true,"vorlaufSekunden":60,"vorwarnungText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
     ).run();
 
     const planer = planerAttrappe();

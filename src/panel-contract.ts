@@ -108,21 +108,21 @@ export interface PanelModulesResponse {
 
 export interface PanelChannelsResponse {
   channels: PanelChannelState[];
-  betreiber: boolean;
+  platformAdmin: boolean;
 }
 
 export interface PanelBetreiberKanal {
   channelId: string;
   login: string;
   displayName: string;
-  vollzustimmung: boolean;
+  fullConsent: boolean;
 }
 
 export interface PanelBetreiberKanalÜbersicht extends PanelBetreiberKanal {
   memberCounts: {
     broadcaster: number;
-    verwalter: number;
-    bediener: number;
+    manager: number;
+    operator: number;
   };
   broadcasterConnected: boolean;
 }
@@ -230,11 +230,11 @@ export interface PanelEventEntry {
   actorDisplayName: string | null;
 }
 
-export type PanelEventOrigin = "kanal" | "modul";
+export type PanelEventOrigin = "channel" | "module";
 export interface PanelEventFilters {
-  herkunft: PanelEventOrigin | null;
-  modul: string | null;
-  ton: EventTone | null;
+  origin: PanelEventOrigin | null;
+  module: string | null;
+  tone: EventTone | null;
   person: string | null;
 }
 

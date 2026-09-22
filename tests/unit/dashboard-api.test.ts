@@ -129,12 +129,12 @@ describe("Dashboard-API-Requestgrenze", () => {
       channelId: string,
       cursor: string | null,
       signal: AbortSignal,
-      filters: { herkunft: "kanal" | "modul" | null; modul: string | null; ton: "info" | "warning" | "error" | null; person: string | null },
+      filters: { origin: "channel" | "module" | null; module: string | null; tone: "info" | "warning" | "error" | null; person: string | null },
     ) => Promise<unknown>;
     await fetchEventsWithFilters("kanal-a", "cursor /?#&", controller.signal, {
-      herkunft: "modul",
-      modul: "text_commands",
-      ton: "error",
+      origin: "module",
+      module: "text_commands",
+      tone: "error",
       person: "person /?#&",
     });
 

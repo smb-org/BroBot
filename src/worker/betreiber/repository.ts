@@ -14,14 +14,14 @@ export interface BetreiberKanal {
   channelId: string;
   login: string;
   displayName: string;
-  vollzustimmung: boolean;
+  fullConsent: boolean;
 }
 
 export interface BetreiberKanalÜbersicht extends BetreiberKanal {
   memberCounts: {
     broadcaster: number;
-    verwalter: number;
-    bediener: number;
+    manager: number;
+    operator: number;
   };
   broadcasterConnected: boolean;
 }
@@ -112,7 +112,7 @@ const mapKanal = (zeile: BetreiberKanalZeile): BetreiberKanal => ({
   channelId: zeile.channel_id,
   login: zeile.login,
   displayName: zeile.display_name,
-  vollzustimmung: zeile.full_consent === 1,
+  fullConsent: zeile.full_consent === 1,
 });
 
 export const decodeBetreiberAuditCursor = (serialized: string): BetreiberAuditCursor | null => decodeCursor(serialized, (value) => {
@@ -147,8 +147,8 @@ export const listeBetreiberKanäle = async (
     ...mapKanal(zeile),
     memberCounts: {
       broadcaster: zeile.broadcaster_count,
-      verwalter: zeile.verwalter_count,
-      bediener: zeile.bediener_count,
+      manager: zeile.verwalter_count,
+      operator: zeile.bediener_count,
     },
     broadcasterConnected: zeile.broadcaster_connected === 1,
   }));
@@ -203,7 +203,7 @@ export const freigebenBetreiberKanal = async (
     channelId: kanal.userId,
     login: kanal.login,
     displayName: kanal.displayName,
-    vollzustimmung,
+    fullConsent: vollzustimmung,
   };
   const audit = vorbereiteAudit(
     db,
@@ -227,7 +227,7 @@ export const ändereVollzustimmung = async (
 ): Promise<boolean> => {
   const schutz = mutationsschutz(akteur, zeitpunkt);
   const vorher: BetreiberKanal = { ...kanal };
-  const nachher: BetreiberKanal = { ...kanal, vollzustimmung };
+  const nachher: BetreiberKanal = { ...kanal, fullConsent: vollzustimmung };
   const mutation = db.prepare(
     `UPDATE channels
         SET full_consent = ?, updated_at = ?

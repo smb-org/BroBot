@@ -3,9 +3,9 @@ import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/lo
 export interface RaidPanelTexte {
   titel: string;
   schwelleAbschnitt: string;
-  shoutoutAktiv: string;
-  shoutoutSchwelle: string;
-  textSchwelle: string;
+  shoutoutEnabled: string;
+  shoutoutThreshold: string;
+  textThreshold: string;
   schalter: (aktiv: boolean) => string;
   vollerText: string;
   kurzerText: string;
@@ -24,9 +24,9 @@ const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
   de: {
     titel: "Raid-Shoutout",
     schwelleAbschnitt: "Shoutout und Nachrichten",
-    shoutoutAktiv: "Helix-Shoutout automatisch senden",
-    shoutoutSchwelle: "Shoutout-Schwelle (Zuschauer)",
-    textSchwelle: "Text-Schwelle (Zuschauer)",
+    shoutoutEnabled: "Helix-Shoutout automatisch senden",
+    shoutoutThreshold: "Shoutout-Schwelle (Zuschauer)",
+    textThreshold: "Text-Schwelle (Zuschauer)",
     schalter: (aktiv) => `Helix-Shoutout automatisch senden: ${aktiv ? "eingeschaltet" : "ausgeschaltet"}`,
     vollerText: "Voller Raid-Text",
     kurzerText: "Kurzer Dankestext",
@@ -43,9 +43,9 @@ const katalog: Record<DashboardLanguage, RaidPanelTexte> = {
   en: {
     titel: "Raid shoutout",
     schwelleAbschnitt: "Shoutout and messages",
-    shoutoutAktiv: "Send automatic Helix shoutouts",
-    shoutoutSchwelle: "Shoutout threshold (viewers)",
-    textSchwelle: "Text threshold (viewers)",
+    shoutoutEnabled: "Send automatic Helix shoutouts",
+    shoutoutThreshold: "Shoutout threshold (viewers)",
+    textThreshold: "Text threshold (viewers)",
     schalter: (aktiv) => `Automatic Helix shoutout: ${aktiv ? "enabled" : "disabled"}`,
     vollerText: "Full raid message",
     kurzerText: "Small raid message",

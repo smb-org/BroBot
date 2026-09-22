@@ -103,7 +103,7 @@ describe("Werbung-Routen", () => {
     await insertMember(database, "kanal-a", "user-1", role);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
-       VALUES ('kanal-a', 'ads', 1, '{"automatisch":"auto","manuell":"manuell","vorwarnung":true,"vorlaufSekunden":60,"vorwarnungText":"gleich {seconds}"}')`,
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
     ).run();
     return environmentFor(database, plane as unknown as () => void, loesche as unknown as () => void);
   };

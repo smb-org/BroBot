@@ -53,20 +53,20 @@ describe("Dashboard-Locale", () => {
 
   it("unterscheidet abgeschalteten Shoutout von der Schwelle", () => {
     setBrowserLanguage("de-DE");
-    expect(ereignisText("shoutout.unterdrueckt", { grund: "abgeschaltet" })).toBe("Shoutout abgeschaltet");
-    expect(ereignisText("shoutout.unterdrueckt", { grund: "unter_schwelle", zuschauer: 2, schwelle: 3 }))
+    expect(ereignisText("shoutout.unterdrueckt", { reason: "abgeschaltet" })).toBe("Shoutout abgeschaltet");
+    expect(ereignisText("shoutout.unterdrueckt", { reason: "unter_schwelle", viewers: 2, schwelle: 3 }))
       .toBe("Shoutout unter der Schwelle (2 von 3 Zuschauern)");
 
     setBrowserLanguage("en-US");
-    expect(ereignisText("shoutout.unterdrueckt", { grund: "abgeschaltet" })).toBe("Shoutout disabled");
-    expect(ereignisText("shoutout.unterdrueckt", { grund: "unter_schwelle", zuschauer: 2, schwelle: 3 }))
+    expect(ereignisText("shoutout.unterdrueckt", { reason: "abgeschaltet" })).toBe("Shoutout disabled");
+    expect(ereignisText("shoutout.unterdrueckt", { reason: "unter_schwelle", viewers: 2, schwelle: 3 }))
       .toBe("Shoutout below threshold (2 of 3 viewers)");
   });
 
   it("rendert Moderationsdetails zweisprachig mit Bedeutungston", () => {
     setBrowserLanguage("de-DE");
     expect(ereignisText("channel_events.moderation.timeout", {
-      person: "Alice", moderator: "Mod", dauer: 300, grund: "Spam",
+      person: "Alice", moderator: "Mod", dauer: 300, reason: "Spam",
     })).toBe("Alice für 300 Sekunden getimeoutet von Mod: Spam");
     expect(ereignisTon["channel_events.moderation.timeout"]).toMatchObject({ familie: "moderation", stufe: "voll", zahlSchluessel: "dauer" });
     expect(ereignisTon["channel_events.moderation.untimeout"]).toMatchObject({ familie: "moderation", stufe: "gezeichnet" });
@@ -97,16 +97,16 @@ describe("Dashboard-Locale", () => {
 
     expect(Object.keys(ereignisTon).sort()).toEqual([...codes].sort());
     expect(ereignisTon["channel_events.chat.community_gift"]).toEqual({
-      familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "anzahl",
+      familie: "gemeinschaft", stufe: "voll", wort: { de: "Gift", en: "Gift" }, zahlSchluessel: "count",
     });
     expect(ereignisTon["channel_events.raid.incoming"]).toEqual({
-      familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "zuschauer",
+      familie: "raid", stufe: "voll", wort: { de: "Raid", en: "Raid" }, zahlSchluessel: "viewers",
     });
     expect(ereignisTon["channel_events.moderation.untimeout"]).toEqual({
       familie: "moderation", stufe: "gezeichnet", wort: { de: "Entsperrt", en: "Untimeout" }, zahlSchluessel: null,
     });
     expect(ereignisTon["host.chat.gesendet"]).toEqual({
-      familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, ton: "info",
+      familie: "betrieb", stufe: "gezeichnet", wort: { de: "Info", en: "Info" }, zahlSchluessel: null, tone: "info",
     });
     for (const code of codes) {
       expect(ereignisTon[code].wort.de.length).toBeLessThanOrEqual(12);
@@ -131,7 +131,7 @@ describe("Dashboard-Locale", () => {
   it("rendert AutoMod- und Verdachtsereignisse zweisprachig mit ihrem Bedeutungston", () => {
     setBrowserLanguage("de-DE");
     expect(ereignisText("channel_events.automod.halte", {
-      person: "Alice", grund: "aggressive", text: "Nachricht",
+      person: "Alice", reason: "aggressive", text: "Nachricht",
     })).toBe("AutoMod hielt die Nachricht von Alice wegen aggressive: Nachricht");
     expect(ereignisText("channel_events.verdacht.nachricht", {
       person: "Alice", einstufung: "restricted / ban_evader / possible", text: "Nachricht",
@@ -149,7 +149,7 @@ describe("Dashboard-Locale", () => {
 
     setBrowserLanguage("en-US");
     expect(ereignisText("channel_events.automod.halte", {
-      person: "Alice", grund: "aggressive", text: "Message",
+      person: "Alice", reason: "aggressive", text: "Message",
     })).toBe("AutoMod held a message from Alice for aggressive: Message");
     expect(ereignisText("channel_events.verdacht.entwarnung", {
       person: "Alice", moderator: "Mod",

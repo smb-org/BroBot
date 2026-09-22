@@ -86,22 +86,22 @@ export const realtimeHintMatchesFilters = (
   hint: RealtimeEventLogHint,
   filters: PanelEventFilters,
 ): boolean => {
-  if (filters.modul !== null && hint.moduleId !== filters.modul) return false;
+  if (filters.module !== null && hint.moduleId !== filters.module) return false;
   if (filters.person !== null && hint.actorUserId !== filters.person) return false;
   const metadata = eventMetadata(hint.code);
-  if (filters.herkunft !== null) {
+  if (filters.origin !== null) {
     if (metadata === null) return false;
     const istModuldiagnose = metadata.familie === "betrieb";
-    if (filters.herkunft === "modul" !== istModuldiagnose) return false;
+    if (filters.origin === "module" !== istModuldiagnose) return false;
   }
-  if (filters.ton !== null && (metadata === null || metadata.ton !== filters.ton)) return false;
+  if (filters.tone !== null && (metadata === null || metadata.tone !== filters.tone)) return false;
   return true;
 };
 
 const filterKey = (filters: PanelEventFilters): string => [
-  filters.herkunft ?? "",
-  filters.modul ?? "",
-  filters.ton ?? "",
+  filters.origin ?? "",
+  filters.module ?? "",
+  filters.tone ?? "",
   filters.person ?? "",
 ].join("\u001f");
 
