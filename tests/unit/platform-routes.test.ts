@@ -31,7 +31,7 @@ const environmentFor = (database: TestD1Database, platform = [platformId]): Env 
   TWITCH_CLIENT_SECRET: "client-secret",
   TWITCH_BOT_LOGIN: "brobot",
   PUBLIC_ORIGIN: "https://brobot.example",
-  BETREIBER_USER_IDS: JSON.stringify(platform),
+  PLATFORM_USER_IDS: JSON.stringify(platform),
   ...environmentKey,
 } as unknown as Env);
 

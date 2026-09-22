@@ -5,4 +5,4 @@ PUBLIC_ORIGIN=http://localhost:5173
 SESSION_COOKIE_KEYS={"active":{"id":"local-v2","key":"replace-with-32-byte-base64url-key"},"retired":[{"id":"local-v1","key":"replace-with-retired-32-byte-base64url-key"}]}
 TOKEN_ENCRYPTION_KEYS={"active":{"id":"local-v2","key":"replace-with-32-byte-base64url-key"},"retired":[{"id":"local-v1","key":"replace-with-retired-32-byte-base64url-key"}]}
 OVERLAY_TOKEN_PEPPER=replace-with-32-byte-base64url-key
-BETREIBER_USER_IDS=[]
+PLATFORM_USER_IDS=[]

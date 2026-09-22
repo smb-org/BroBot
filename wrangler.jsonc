@@ -41,7 +41,7 @@
       "SESSION_COOKIE_KEYS",
       "TOKEN_ENCRYPTION_KEYS",
       "OVERLAY_TOKEN_PEPPER",
-      "BETREIBER_USER_IDS"
+      "PLATFORM_USER_IDS"
     ]
   },
   "observability": {
@@ -90,7 +90,7 @@
           "SESSION_COOKIE_KEYS",
           "TOKEN_ENCRYPTION_KEYS",
           "OVERLAY_TOKEN_PEPPER",
-          "BETREIBER_USER_IDS"
+          "PLATFORM_USER_IDS"
         ]
       },
       "observability": {
@@ -139,7 +139,7 @@
           "SESSION_COOKIE_KEYS",
           "TOKEN_ENCRYPTION_KEYS",
           "OVERLAY_TOKEN_PEPPER",
-          "BETREIBER_USER_IDS"
+          "PLATFORM_USER_IDS"
         ]
       },
       "observability": {
