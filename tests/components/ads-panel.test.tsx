@@ -25,8 +25,8 @@ describe("Ad panel view", () => {
   it("shares field styling with the panel shell", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
 
-    expect(styles).toMatch(/\.inspector-form label,\s*\.content-section label,\s*\.module-stack label/);
-    expect(styles).toMatch(/\.module-stack label\s*\{ display: grid/);
+    expect(styles).toMatch(/\.inspector-form label(?::not\([^)]*\))?,\s*\.content-section label(?::not\([^)]*\))?,\s*\.module-stack label/);
+    expect(styles).toMatch(/\.module-stack label(?::not\([^)]*\))?\s*\{ display: grid/);
     expect(styles).toMatch(/:is\(\.inspector-form, \.content-section, \.module-stack\) input/);
     expect(styles).toMatch(/:is\(\.inspector-form, \.content-section, \.module-stack\) textarea/);
     expect(styles).toMatch(/:is\(\.inspector-form, \.content-section, \.module-stack\) select/);

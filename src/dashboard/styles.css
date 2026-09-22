@@ -188,9 +188,11 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 /* ── Formulare ───────────────────────────────────────────── */
 
 .inspector-form { display: grid; gap: 14px; max-width: 40rem; }
-.inspector-form label,
-.content-section label,
-.module-stack label { display: grid; gap: 6px; max-width: var(--config-field-breit); color: var(--text-2); font-size: 12px; font-weight: 500; }
+/* Legacy form labels. Mantine renders some controls (Chip) as a <label>
+   itself; these rules must not reach inside the seam's components. */
+.inspector-form label:not([class*="mantine-"]),
+.content-section label:not([class*="mantine-"]),
+.module-stack label:not([class*="mantine-"]) { display: grid; gap: 6px; max-width: var(--config-field-breit); color: var(--text-2); font-size: 12px; font-weight: 500; }
 .form-row { display: flex; gap: var(--s2); }
 .form-row input { flex: 1; }
 .inspector-result {
@@ -200,7 +202,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 }
 .inspector-result > .avatar-row { flex: 1; }
 .inspector-result span { color: var(--text-3); font-size: 12.5px; }
-.inspector-result label { display: grid; gap: var(--s1); }
+.inspector-result label:not([class*="mantine-"]) { display: grid; gap: var(--s1); }
 .inspector-confirmation {
   display: grid; gap: var(--s3); margin-top: var(--s4);
   border: 1px solid var(--linie-stark); border-radius: var(--r-container);
