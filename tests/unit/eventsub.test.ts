@@ -37,10 +37,10 @@ const independentSignature = (
   .digest("hex");
 
 /*
- * Unabhängiger Twitch-Testvektor, einmal offline mit
- * node:crypto/createHmac berechnet. Dieser Wert darf nicht aus
- * hmacSha256 stammen, weil der Test genau diesen Helfer gegen eine falsche
- * Interpretation von transport.secret absichern soll.
+ * Independent Twitch test vector, computed once offline with
+ * node:crypto/createHmac. This value must not come from hmacSha256,
+ * because the test is meant to guard exactly this helper against a wrong
+ * interpretation of transport.secret.
  */
 const INDEPENDENT_VECTOR = {
   messageId: "message-independent",
@@ -139,7 +139,7 @@ const failingBatchDatabase = (database: TestD1Database): D1Database => ({
   },
 } as unknown as D1Database);
 
-describe("EventSub-Eingang", () => {
+describe("EventSub inbound", () => {
   let database: TestD1Database;
   const secret = secretRing(3);
   const environment = () => ({
@@ -162,7 +162,7 @@ describe("EventSub-Eingang", () => {
     vi.useRealTimers();
   });
 
-  it("gibt eine gültige Verifizierungs-Challenge als Klartext zurück", async () => {
+  it("returns a valid verification challenge as plain text", async () => {
     const body = JSON.stringify({ challenge: "challenge-wert", subscription: {} });
     const response = await eventSubRouter.fetch(
       signedRequest(secret, "webhook_callback_verification", body),
@@ -174,7 +174,7 @@ describe("EventSub-Eingang", () => {
     expect(response.headers.get("content-type")).toContain("text/plain");
   });
 
-  it("prüft einen unabhängig berechneten Twitch-Signaturvektor", async () => {
+  it("verifies an independently computed Twitch signature vector", async () => {
     const response = await eventSubRouter.fetch(
       new Request("https://brobot.example/api/twitch/eventsub", {
         method: "POST",
@@ -193,7 +193,7 @@ describe("EventSub-Eingang", () => {
     expect(await response.text()).toBe("unabhaengig");
   });
 
-  it("lehnt eine Verifizierungsnachricht ohne Challenge ab", async () => {
+  it("rejects a verification message without a challenge", async () => {
     const body = JSON.stringify({ subscription: {} });
     const response = await eventSubRouter.fetch(
       signedRequest(secret, "webhook_callback_verification", body, "message-no-challenge"),
@@ -203,7 +203,7 @@ describe("EventSub-Eingang", () => {
     expect(response.status).toBe(400);
   });
 
-  it("prüft Signatur und Zeitstempel vor dem JSON-Körper", async () => {
+  it("verifies signature and timestamp before the JSON body", async () => {
     const request = new Request("https://brobot.example/api/twitch/eventsub", {
       method: "POST",
       body: "kein-json",
@@ -222,7 +222,7 @@ describe("EventSub-Eingang", () => {
     expect(row?.count).toBe(0);
   });
 
-  it("weist Nachrichten ab, die älter als zehn Minuten sind", async () => {
+  it("rejects messages older than ten minutes", async () => {
     const timestamp = "2026-09-19T09:49:29.999999999Z";
     const body = JSON.stringify({ subscription: {}, event: {} });
     const response = await eventSubRouter.fetch(
@@ -234,7 +234,7 @@ describe("EventSub-Eingang", () => {
     await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 0 });
   });
 
-  it("erkennt eine Nachricht innerhalb des Wiederholungsfensters erneut als Wiederholung", async () => {
+  it("recognizes a message within the retry window as a repeat again", async () => {
     await insertChannel(database, "channel-replay");
     const body = JSON.stringify({
       subscription: { type: "channel.chat.message", condition: { broadcaster_user_id: "channel-replay" } },
@@ -255,7 +255,7 @@ describe("EventSub-Eingang", () => {
     await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 1 });
   });
 
-  it("weist einen zu weit in der Zukunft liegenden Zeitstempel ab", async () => {
+  it("rejects a timestamp too far in the future", async () => {
     const timestamp = "2026-09-19T10:10:30.001Z";
     const body = JSON.stringify({ challenge: "zukünftig" });
     const response = await eventSubRouter.fetch(
@@ -266,7 +266,7 @@ describe("EventSub-Eingang", () => {
     expect(response.status).toBe(403);
   });
 
-  it("weist einen Nutzkörper oberhalb der harten Grenze vor dem JSON-Lesen ab", async () => {
+  it("rejects a payload above the hard limit before reading it as JSON", async () => {
     const body = new Uint8Array(EVENTSUB_MAX_BODY_BYTES + 1).fill(65);
     const response = await eventSubRouter.fetch(
       new Request("https://brobot.example/api/twitch/eventsub", {
@@ -287,7 +287,7 @@ describe("EventSub-Eingang", () => {
     expect(row?.count).toBe(0);
   });
 
-  it("prüft die Signatur über die empfangenen Rohbytes statt über dekodierten Text", async () => {
+  it("verifies the signature over the received raw bytes instead of decoded text", async () => {
     const body = JSON.stringify({ challenge: "bom" });
     const bodyWithBom = new Uint8Array([
       0xef,
@@ -312,7 +312,7 @@ describe("EventSub-Eingang", () => {
     expect(response.status).toBe(403);
   });
 
-  it("akzeptiert einen ausgemusterten Signaturschlüssel", async () => {
+  it("accepts a retired signing key", async () => {
     const ring = secretRing(3, 4);
     const body = JSON.stringify({ challenge: "rotations-challenge" });
     const timestamp = "2026-09-19T10:00:00.000Z";
@@ -336,7 +336,7 @@ describe("EventSub-Eingang", () => {
     expect(response.status).toBe(200);
   });
 
-  it("verarbeitet dieselbe Message-ID nur einmal", async () => {
+  it("processes the same message ID only once", async () => {
     await insertChannel(database, "channel-dedupe");
     const body = JSON.stringify({
       subscription: {
@@ -367,7 +367,7 @@ describe("EventSub-Eingang", () => {
     expect(row).toEqual(firstRow);
   });
 
-  it("sperrt bei bestätigtem Widerruf des Moderatoren-Abos die Bot-Identität", async () => {
+  it("locks the bot identity on a confirmed revocation of the moderator subscription", async () => {
     await insertChannel(database, "200");
     await insertLoginIdentityAndSession(database, "200", ["channel:read:ads"]);
     await database.prepare(
@@ -397,7 +397,7 @@ describe("EventSub-Eingang", () => {
     });
   });
 
-  it("sperrt trotz Widerrufsnachricht nicht, wenn das Bot-Token noch gültig ist", async () => {
+  it("doesn't lock despite a revocation message when the bot token is still valid", async () => {
     await insertChannel(database, "200");
     await insertLoginIdentityAndSession(database, "200", ["channel:bot"]);
     await insertBotIdentity(database);
@@ -428,7 +428,7 @@ describe("EventSub-Eingang", () => {
     ).first()).resolves.toEqual({ status: "connected", scopes_json: JSON.stringify(["channel:bot"]) });
   });
 
-  it("wendet die Identitätswirkung einer bekannten Message-ID nach der Wiederverbindung nicht erneut an", async () => {
+  it("doesn't reapply the identity effect of a known message ID after reconnecting", async () => {
     await insertChannel(database, "200");
     await insertLoginIdentityAndSession(database, "200", ["channel:bot"]);
     await insertBotIdentity(database);
@@ -460,7 +460,7 @@ describe("EventSub-Eingang", () => {
     ).first()).resolves.toEqual({ status: "connected", scopes_json: JSON.stringify(["channel:bot"]) });
   });
 
-  it("ordnet ein Raid trotz fremder Kanal-ID im Ereignisrumpf dem Abo-Kanal zu", async () => {
+  it("attributes a raid to the subscription's channel despite a different channel ID in the event body", async () => {
     await insertChannel(database, "channel-condition");
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
@@ -497,7 +497,7 @@ describe("EventSub-Eingang", () => {
     });
   });
 
-  it("verbraucht bei einem fehlgeschlagenen Widerrufsspeichern die Message-ID nicht", async () => {
+  it("doesn't consume the message ID when storing a revocation fails", async () => {
     await insertChannel(database, "200");
     await insertLoginIdentityAndSession(database, "200", ["channel:bot"]);
     await insertBotIdentity(database);
@@ -531,7 +531,7 @@ describe("EventSub-Eingang", () => {
     ).first()).resolves.toEqual({ status: "revoked", reason: "authorization_revoked" });
   });
 
-  it("speichert einen Widerruf kanalgebunden für das spätere Panel", async () => {
+  it("stores a revocation scoped to the channel for the later panel", async () => {
     await insertChannel(database, "channel-42");
     await insertLoginIdentityAndSession(database, "channel-42", ["channel:bot"]);
     const body = JSON.stringify({
@@ -573,7 +573,7 @@ describe("EventSub-Eingang", () => {
     ).first()).resolves.toEqual({ status: "connected", scopes_json: JSON.stringify(["channel:bot"]) });
   });
 
-  it("gewinnt den Kanal eines Shoutout-Widerrufs über die gemeinsame Bedingungsdefinition zurück", async () => {
+  it("recovers the channel of a shoutout revocation via the shared condition definition", async () => {
     await insertChannel(database, "channel-shoutout");
     const body = JSON.stringify({
       subscription: {
@@ -609,7 +609,7 @@ describe("EventSub-Eingang", () => {
     });
   });
 
-  it("bewahrt einen Widerruf für einen unbekannten Kanal sichtbar auf", async () => {
+  it("keeps a revocation for an unknown channel visibly preserved", async () => {
     const body = revocationBody("channel-unknown", "subscription-unknown");
     const response = await eventSubRouter.fetch(
       signedRequest(secret, "revocation", body, "message-unknown"),
@@ -629,7 +629,7 @@ describe("EventSub-Eingang", () => {
     ).first()).resolves.toEqual({ count: 0 });
   });
 
-  it("parst Nanosekunden und lehnt ungültige Zeitstempel ab", () => {
+  it("parses nanoseconds and rejects invalid timestamps", () => {
     expect(parseEventSubTimestamp("2026-09-19T10:00:00.123456789Z")).toBe(
       Date.parse("2026-09-19T10:00:00.123Z"),
     );
@@ -640,14 +640,14 @@ describe("EventSub-Eingang", () => {
     expect(isEventSubTimestampFresh("2026-09-19T10:10:30.001Z", Date.parse("2026-09-19T10:00:00.000Z"))).toBe(false);
   });
 
-  it("leitet die Aufbewahrung aus dem jeweils gesetzten Wiederholungsfenster ab", () => {
+  it("derives the retention from whichever retry window is set", () => {
     const now = "2026-09-19T10:00:00.000Z";
 
     expect(eventSubMessageCutoff(now, 10 * 60 * 1000)).toBe("2026-09-19T09:40:00.000Z");
     expect(eventSubMessageCutoff(now, 60 * 60 * 1000)).toBe("2026-09-19T08:00:00.000Z");
   });
 
-  it("verwendet für das EventSub-Aufräumen den Zeitindex", async () => {
+  it("uses the time index for EventSub cleanup", async () => {
     const preparedSql: string[] = [];
     const databaseProxy = {
       prepare: (sql: string): TestPreparedStatement => {
@@ -668,7 +668,7 @@ describe("EventSub-Eingang", () => {
   });
 
 
-  it("räumt alte Message-IDs im stündlichen Cron auf", async () => {
+  it("cleans up old message IDs in the hourly cron", async () => {
     await database.prepare(
       "INSERT INTO eventsub_messages (message_id, received_at) VALUES (?, ?), (?, ?)",
     ).bind(

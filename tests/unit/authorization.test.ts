@@ -183,7 +183,7 @@ const databaseRacingBeforeBatch = (
   },
 } as unknown as D1Database);
 
-describe("kanalgebundene Autorisierung", () => {
+describe("channel-scoped authorization", () => {
   let database: TestD1Database;
 
   beforeEach(() => {
@@ -194,7 +194,7 @@ describe("kanalgebundene Autorisierung", () => {
     database.close();
   });
 
-  it("akzeptiert ein Mitglied nur im angeforderten, vorhandenen Kanal", async () => {
+  it("accepts a member only in the requested, existing channel", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "user-1", "manager");
 
@@ -202,14 +202,14 @@ describe("kanalgebundene Autorisierung", () => {
       .resolves.toBe("manager");
   });
 
-  it("lehnt ein Nichtmitglied ab", async () => {
+  it("rejects a non-member", async () => {
     await seedChannel(database, "kanal-a");
 
     await expect(authorizeChannelAccess(database as unknown as D1Database, session("user-1"), "kanal-a"))
       .resolves.toBeNull();
   });
 
-  it("lehnt eine Mitgliedschaft in einem anderen Kanal ab", async () => {
+  it("rejects membership in a different channel", async () => {
     await seedChannel(database, "kanal-a");
     await seedChannel(database, "kanal-b");
     await seedMember(database, "kanal-a", "user-1", "broadcaster");
@@ -218,7 +218,7 @@ describe("kanalgebundene Autorisierung", () => {
       .resolves.toBeNull();
   });
 
-  it("lehnt einen unbekannten Kanal unabhängig von Mitgliedschaften ab", async () => {
+  it("rejects an unknown channel regardless of memberships", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "user-1", "broadcaster");
 
@@ -226,7 +226,7 @@ describe("kanalgebundene Autorisierung", () => {
       .resolves.toBeNull();
   });
 
-  it("akzeptiert einen unbekannten Rollenwert aus der Datenbank nicht", async () => {
+  it("doesn't accept an unknown role value from the database", async () => {
     const database = {
       prepare: () => ({
         bind: () => ({ first: () => Promise.resolve({ role: "administrator" }) }),
@@ -239,7 +239,7 @@ describe("kanalgebundene Autorisierung", () => {
 
 
 
-  it("stellt beide fachlichen channel_members-Indizes nach der Migration wieder her", () => {
+  it("restores both functional channel_members indexes after the migration", () => {
     const migrationDatabase = new TestD1Database();
     const indexes = migrationDatabase.sqlite.prepare("PRAGMA index_list('channel_members')").all() as Array<{ name: string }>;
 
@@ -250,7 +250,7 @@ describe("kanalgebundene Autorisierung", () => {
     migrationDatabase.close();
   });
 
-  it("weist einen Rollenwert außerhalb des festen Satzes über SQLite ab", async () => {
+  it("rejects a role value outside the fixed set via SQLite", async () => {
     await seedChannel(database, "kanal-a");
 
     await expect(database.prepare(
@@ -265,7 +265,7 @@ describe("kanalgebundene Autorisierung", () => {
     ).run()).rejects.toThrow();
   });
 
-  it("behält den Cascade-Fremdschlüssel zum Kanal bei", async () => {
+  it("keeps the cascading foreign key to the channel", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "user-1", "operator");
 
@@ -276,7 +276,7 @@ describe("kanalgebundene Autorisierung", () => {
     await expect(readMember(database, "kanal-a", "user-1")).resolves.toBeNull();
   });
 
-  it("schließt einen Request-Body-Rollenwert aus der Autorisierungsentscheidung aus", async () => {
+  it("excludes a request-body role value from the authorization decision", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "user-1", "operator");
     await seedSession(database, "user-1");
@@ -291,7 +291,7 @@ describe("kanalgebundene Autorisierung", () => {
   });
 });
 
-describe("atomare Mitgliedsänderung und Audit", () => {
+describe("atomic member change and audit", () => {
   let database: TestD1Database;
 
   beforeEach(() => {
@@ -302,7 +302,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     database.close();
   });
 
-  it("schreibt Änderung und Audit-Eintrag gemeinsam", async () => {
+  it("writes the change and the audit entry together", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
@@ -341,7 +341,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     });
   });
 
-  it("auditiert eine Rollenänderung mit dem tatsächlichen Vorher-Zustand", async () => {
+  it("audits a role change with the actual before state", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "user-1", "operator");
@@ -374,7 +374,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     });
   });
 
-  it("schreibt bei einer konkurrierenden Änderung keinen veralteten Audit-Vorzustand", async () => {
+  it("doesn't write a stale audit before-state on a concurrent change", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "user-1", "operator");
@@ -415,7 +415,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("legt bei einer konkurrierenden Löschung durch PATCH kein Mitglied neu an", async () => {
+  it("doesn't recreate a member via PATCH on a concurrent delete", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "user-1", "operator");
@@ -449,7 +449,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("verweigert INSERT, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
+  it("denies INSERT when the actor loses their role between check and mutation", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
@@ -477,7 +477,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("verweigert UPDATE, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
+  it("denies UPDATE when the actor loses their role between check and mutation", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "user-1", "operator");
@@ -506,7 +506,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("verweigert DELETE, wenn der Actor zwischen Prüfung und Mutation seine Rolle verliert", async () => {
+  it("denies DELETE when the actor loses their role between check and mutation", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "user-1", "operator");
@@ -530,7 +530,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("schützt zwei gleichzeitige Löschungen bei genau zwei Broadcastern atomar", async () => {
+  it("protects two simultaneous deletions atomically when there are exactly two broadcasters", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "broadcaster-1", "broadcaster");
@@ -555,7 +555,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("schützt zwei gleichzeitige Herabstufungen bei genau zwei Broadcastern atomar", async () => {
+  it("protects two simultaneous demotions atomically when there are exactly two broadcasters", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "broadcaster-1", "broadcaster");
@@ -585,7 +585,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("verwandelt einen zweiten Create nicht in ein UPDATE", async () => {
+  it("doesn't turn a second create into an update", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
@@ -618,7 +618,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [expect.objectContaining({ action: "mitglied.hinzugefügt" })] });
   });
 
-  it("hinterlässt bei einer fehlgeschlagenen Änderung keinen Audit-Eintrag", async () => {
+  it("leaves no audit entry on a failed change", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
@@ -642,7 +642,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     await expect(readAudit(database)).resolves.toMatchObject({ results: [] });
   });
 
-  it("rollt eine erfolgreiche Mitgliedsänderung zurück, wenn der Audit-Schritt scheitert", async () => {
+  it("rolls back a successful member change when the audit step fails", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedSession(database, "actor-1");
@@ -686,7 +686,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     });
   });
 
-  it("auditiert das Entfernen mit Vorher- und Nachher-Zustand", async () => {
+  it("audits the removal with before and after state", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "user-1", "operator");
@@ -713,7 +713,7 @@ describe("atomare Mitgliedsänderung und Audit", () => {
     expect(audit.results[0]?.after_json).toBe("null");
   });
 
-  it("schreibt nach einer konkurrierenden Löschung keinen Audit-Eintrag", async () => {
+  it("doesn't write an audit entry after a concurrent delete", async () => {
     await seedChannel(database, "kanal-a");
     await seedMember(database, "kanal-a", "actor-1", "manager");
     await seedMember(database, "kanal-a", "user-1", "operator");

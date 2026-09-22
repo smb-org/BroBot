@@ -5,38 +5,38 @@ import type { ChannelRole } from "../contracts/values";
 
 export { kuerzeAuf200Zeichen } from "../text";
 
-/** Aus Twitch-Badges abgeleiteter Status der chatseitig auslösenden Person. */
+/** Status of the chat-triggering person, derived from Twitch badges. */
 export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";
 
 /**
- * Eine Begründung für etwas, das ein Modul getan oder bewusst nicht getan hat.
+ * A justification for something a module did, or deliberately did not do.
  *
- * `code` ist maschinenlesbar und stabil (`shoutout.unterdrueckt`), `detail`
- * trägt die Zahlen, die den Fall erklären. Zusammen beantworten sie die Frage,
- * die heute nirgends beantwortet wird: „Raid erkannt, warum kam kein
- * Shoutout?"
+ * `code` is machine-readable and stable (`shoutout.unterdrueckt`), `detail`
+ * carries the numbers that explain the case. Together they answer the
+ * question that today goes unanswered everywhere: "Raid detected, why was
+ * there no shoutout?"
  */
 export interface ModuleDiagnostic {
   code: string;
   detail?: Readonly<Record<string, string | number | boolean | null | readonly ModuleChatStatus[]>>;
 }
 
-/** Eine vom Host auszuführende, semantisch klar benannte Modulaktion. */
+/** A semantically well-named module action for the host to execute. */
 export type ModuleAction =
   | { kind: "chat"; text: string; replyToMessageId?: string }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "overlay"; type: string; payload: Readonly<Record<string, unknown>> };
 
 /**
- * Was ein Modul als Ergebnis einer Verarbeitung beschreibt. Es führt nichts
- * aus — gemäß Entscheidung 0001 §13 beschreibt es nur gewünschte Aktionen,
- * und erst der Worker führt sie über Twitch, D1 oder Durable Objects aus.
+ * What a module describes as the result of processing. It executes nothing
+ * — per decision 0001 §13 it only describes desired actions, and only the
+ * worker then executes them via Twitch, D1, or Durable Objects.
  *
- * Die Aktionen stehen in einer gemeinsamen Liste, damit ihre Reihenfolge
- * erhalten bleibt. Neue semantische Aktionsarten können später additiv
- * ergänzt werden, ohne bestehende Module durch neue Pflichtfelder zu brechen.
- * `diagnostics` beschreibt fachliche Gründe für Handeln oder Nicht-Handeln;
- * ausgeführte Aktionen und deren Ausgang protokolliert der Host.
+ * The actions live in a shared list so their order is preserved. New
+ * semantic action kinds can be added later, additively, without breaking
+ * existing modules through new required fields. `diagnostics` describes the
+ * business reasons for acting or not acting; the host logs executed actions
+ * and their outcome.
  */
 export interface ModuleResult {
   actions: readonly ModuleAction[];
@@ -61,7 +61,7 @@ export interface ModuleMutationAuthorization {
 
 export type ModuleAuditValue = string | number | boolean | null;
 
-/** Fachliche, von einem Modul ausdrücklich für das Audit freigegebene Werte. */
+/** Business values a module has explicitly cleared for the audit. */
 export type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
 
 export interface ModuleAuditEntry {
@@ -72,7 +72,7 @@ export interface ModuleAuditEntry {
   after: ModuleAuditSnapshot | null;
 }
 
-/** Der Host bereitet den Audit-Teil derselben D1-Mutation vor. */
+/** The host prepares the audit part of the same D1 mutation. */
 export type PrepareModuleAudit = (
   entry: ModuleAuditEntry,
   changedAt: string,
@@ -84,30 +84,30 @@ export type AuthorizeModuleMutation = (
   now: string,
 ) => ModuleMutationAuthorization;
 
-/** Infrastruktur, die der Host einem Modul für seinen eigenen Adapter gibt. */
+/** Infrastructure the host gives a module for its own adapter. */
 export interface ModuleExecutionContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
 }
 
-/** Infrastruktur für einmalige Initialdaten beim Aktivieren eines Moduls. */
+/** Infrastructure for one-time initial data when a module is enabled. */
 export interface ModuleEnableContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
-  /** Bereitet ein erfolgsgekoppeltes Audit für vorbereitete Initialdaten vor. */
+  /** Prepares a success-coupled audit entry for prepared initial data. */
   prepareModuleAudit?: PrepareModuleAudit;
   actor: ModuleMutationActor;
   now: string;
 }
 
-/** Gemeinsame Props für lazy geladene Panel-Ansichten. */
+/** Shared props for lazily loaded panel views. */
 export interface ModulePanelProperties {
   channelId: string;
-  /** Die vom Host aufgelöste Panel-Sprache; optional für alte Module. */
+  /** The panel language resolved by the host; optional for legacy modules. */
   language?: ModuleLanguage;
-  /** Darf die Ansicht verwaltende Bedienelemente ausführen? */
+  /** May the view execute management controls? */
   canManage?: boolean;
-  /** Wird beim Schließen eines Inspektors vom Host ausgeführt. */
+  /** Called by the host when an inspector is closed. */
   onCloseInspector?: () => void;
 }
 
@@ -144,24 +144,23 @@ export interface ModuleRouteEnvironment {
 }
 
 /**
- * Was ein Modul über das auslösende Ereignis erfährt. Bewusst schmal: Der
- * Kanal kommt aus dem geprüften Ereignis und nicht vom Modul, damit ein Modul
- * nicht in einen fremden Kanal wirken kann. `triggerId` ist die Message-ID von
- * Twitch und verbindet alle Zeilen im Ereignisprotokoll, die zu demselben
- * Auslöser gehören.
+ * What a module learns about the triggering event. Deliberately narrow: the
+ * channel comes from the verified event, not from the module, so a module
+ * cannot act on a foreign channel. `triggerId` is Twitch's message ID and
+ * links all rows in the event log that belong to the same trigger.
  */
 export interface ModuleEvent<Settings = unknown> {
   channelId: string;
   subscriptionType: string;
-  /** Die Variante stammt wie der Kanal aus der EventSub-Abo-Bedingung. */
+  /** The variant, like the channel, comes from the EventSub subscription condition. */
   subscriptionVariant?: string;
   triggerId: string;
   payload: Readonly<Record<string, unknown>>;
   settings: Settings;
   receivedAt: string;
-  /** Die Rolle stammt aus channel_members; `null` bedeutet kein Mitglied. */
+  /** The role comes from channel_members; `null` means not a member. */
   actor: ModuleActor | null;
-  /** Ereignisse ohne Chatbezug tragen hier `null`; Chatereignisse alle zutreffenden Status. */
+  /** Events unrelated to chat carry `null` here; chat events carry all matching statuses. */
   chatStatus: readonly ModuleChatStatus[] | null;
 }
 
@@ -169,41 +168,41 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
-  /** Broadcaster-Zustimmung, die der Host vor dem EventSub-Abo nachweist. */
+  /** Broadcaster consent the host verifies before the EventSub subscription. */
   broadcasterScopes?: readonly string[];
   eventSubTypes?: readonly string[];
   routes?: Hono<ModuleRouteEnvironment>;
   /**
-   * Der fachliche Einstiegspunkt. Eine reine Funktion: Sie beschreibt, was
-   * geschehen soll, und führt nichts aus. Der Host führt die Aktionen aus und
-   * protokolliert ihren Ausgang; das Modul begründet mit `diagnostics`, warum
-   * es gehandelt oder eben nicht gehandelt hat (Entscheidung 0004).
+   * The business entry point. A pure function: it describes what should
+   * happen and executes nothing. The host executes the actions and logs
+   * their outcome; the module justifies with `diagnostics` why it acted or
+   * did not act (decision 0004).
    *
-   * Wirft die Funktion, hält das weder den Worker noch die übrigen Module auf
-   * — der Fehler landet als Diagnose im Ereignisprotokoll.
+   * If the function throws, this blocks neither the worker nor the other
+   * modules — the error ends up as a diagnostic in the event log.
    */
   handleEvent?: (
     event: ModuleEvent<z.output<SettingsSchema>>,
     context: ModuleExecutionContext,
   ) => ModuleResult | Promise<ModuleResult>;
-  /** Wird vor dem Einschalten aufgerufen, um modulare Initialdaten anzulegen. */
+  /** Called before enabling to create module-specific initial data. */
   onEnable?: (
     context: ModuleEnableContext,
     channelId: string,
   ) => readonly D1PreparedStatement[] | undefined | Promise<readonly D1PreparedStatement[] | undefined>;
-  // Modulmigrationen und weitere Aktionsarten treten dem Contract bei, sobald
-  // das erste Modul sie benötigt. Die Command-Verarbeitung ist mit
-  // ModuleResult angetreten.
+  // Module migrations and further action kinds join the contract once the
+  // first module needs them. Command processing launched with
+  // ModuleResult.
   /**
-   * Absichtlich nur ein Lazy-Import: Vite kann eigene Chunks schneiden und
-   * ein deaktiviertes Modul kostet dadurch null Overlay-Bytes. Nicht in einen
-   * direkten Import umwandeln.
+   * Deliberately just a lazy import: Vite can cut its own chunk, so a
+   * disabled module costs zero overlay bytes. Do not turn this into a
+   * direct import.
    */
   overlay?: () => Promise<{ default: ComponentType }>;
   /**
-   * Auch diese Ansicht bleibt bewusst lazy: Ein deaktiviertes Modul soll
-   * ebenso im Panel-Bundle null Bytes kosten. Nicht in einen direkten Import
-   * umwandeln.
+   * This view also stays deliberately lazy: a disabled module should
+   * likewise cost zero bytes in the panel bundle. Do not turn this into a
+   * direct import.
    */
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
 };

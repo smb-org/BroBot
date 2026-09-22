@@ -70,7 +70,7 @@ export const requestJson = async <T>(input: string, init?: RequestInit): Promise
         if (typeof error === "string" && error.length > 0) message = error;
       }
     } catch {
-      // Fehlerantworten dürfen auch reiner Text sein.
+      // Error responses may also be plain text.
     }
     throw new PanelApiError(response.status, message, details);
   }

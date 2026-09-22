@@ -16,10 +16,10 @@ import {
 interface MembersPageProperties {
   channelId: string;
   ownRole: ChannelRole;
-  /** Eigene Twitch-User-ID, um den eigenen Eintrag zu erkennen. */
+  /** Own Twitch user id, to recognize the own entry. */
   eigeneUserId: string;
   members: PanelMember[];
-  /** Broadcaster im gesamten Kanal, nicht auf dieser Seite. */
+  /** Broadcasters across the whole channel, not on this page. */
   broadcasterCount: number;
   nextCursor: string | null;
   loading: boolean;
@@ -32,7 +32,7 @@ interface MembersPageProperties {
 
 const manageableRoles = CHANNEL_ROLES;
 
-/** Der Beitritt liegt Tage bis Jahre zurück; die Uhrzeit trägt dort nichts bei. */
+/** The join date is days to years in the past; the time of day adds nothing there. */
 const formatJoinDate = (value: string): string => formatDatum(value);
 
 interface MembersTexts {
@@ -111,15 +111,15 @@ const errorMessage = (error: unknown): string => {
 const canManage = (role: ChannelRole): boolean => role !== "operator";
 
 /**
- * Was der Worker ablehnen würde, bietet die Oberfläche nicht als Möglichkeit
- * an. Ein Knopf, der garantiert scheitert, sieht aus wie eine Option — man
- * muss ihn drücken, um zu erfahren, dass es keine ist.
+ * The UI does not offer as an option what the worker would reject anyway.
+ * A button that's guaranteed to fail looks like an option — you'd have
+ * to press it to find out it isn't one.
  *
- * Gesperrt wird mit Begründung statt versteckt: Ein verschwundener Knopf wirft
- * die Frage auf, ob etwas kaputt ist; ein gesperrter mit Grund beantwortet sie.
+ * Disabled with a reason instead of hidden: a vanished button raises the
+ * question of whether something is broken; a disabled one with a reason answers it.
  *
- * Die Prüfung im Worker bleibt davon unberührt. Das hier ist Komfort, keine
- * Sicherheitsgrenze.
+ * The check in the worker is unaffected by this. This here is a convenience,
+ * not a security boundary.
  */
 const letzterBroadcaster = (member: PanelMember, broadcasterCount: number): boolean =>
   member.role === "broadcaster" && broadcasterCount <= 1;
@@ -130,8 +130,8 @@ const entzugGesperrt = (member: PanelMember, broadcasterCount: number): string |
     : null;
 
 /**
- * Rollenwerte, die für diesen Eintrag tatsächlich durchgehen. Die eigene Rolle
- * lässt sich nicht erhöhen, und der letzte Broadcaster nicht herabstufen.
+ * Role values that actually go through for this entry. The own role
+ * cannot be raised, and the last broadcaster cannot be demoted.
  */
 const waehlbareRollen = (
   member: PanelMember,
@@ -154,9 +154,9 @@ const accessConfirmation = (role: ChannelRole): string =>
   membersTexts().bestaetigung(roleLabel(role));
 
 /**
- * `src` darf auch fehlen, nicht nur `null` sein: Während eines Deploys kann
- * ein neues Panel-Bündel mit einem älteren Worker sprechen, der das Feld noch
- * nicht liefert. Ein fehlendes Bild darf die Seite nicht abräumen.
+ * `src` may also be missing, not just `null`: during a deploy, a new panel
+ * bundle can talk to an older worker that doesn't supply the field yet.
+ * A missing image must not take down the page.
  */
 const MemberAvatar = ({ src }: { src: string | null | undefined }): ReactElement => {
   const [failedSource, setFailedSource] = useState<string | null>(null);
@@ -269,9 +269,9 @@ export const MembersPage = ({
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
 
   /**
-   * `role="alertdialog"` verlangt, dass der Fokus tatsächlich hinein wandert —
-   * sonst bemerkt weder Tastatur- noch Screenreader-Bedienung die wichtigste
-   * Sicherheitsabfrage des Formulars.
+   * `role="alertdialog"` requires focus to actually move into it —
+   * otherwise neither keyboard nor screen reader use notices the form's
+   * most important safety prompt.
    */
   useEffect(() => {
     if (confirmingAdd) confirmButtonRef.current?.focus();

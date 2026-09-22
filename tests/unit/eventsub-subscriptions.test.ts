@@ -42,7 +42,7 @@ const insertAppToken = async (database: TestD1Database): Promise<void> => {
   ).bind(ciphertext, "2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
 };
 
-describe("EventSub-Abgleich", () => {
+describe("EventSub reconciliation", () => {
   let database: TestD1Database;
 
   beforeEach(() => {
@@ -55,7 +55,7 @@ describe("EventSub-Abgleich", () => {
     vi.unstubAllGlobals();
   });
 
-  it("nimmt nur aktivierte Module mit channel:bot-Zustimmung in den Sollstand", async () => {
+  it("includes only enabled modules with channel:bot consent in the target state", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertChannel(database, "kanal-c");
@@ -78,7 +78,7 @@ describe("EventSub-Abgleich", () => {
     ]);
   });
 
-  it("liest die Twitch-Aboliste durchpaginiert und stoppt bei einem Cursor-Kreis", async () => {
+  it("reads the Twitch subscription list through pagination and stops on a cursor loop", async () => {
     const subscription = {
       id: "subscription-1",
       type: "channel.chat.message",
@@ -95,15 +95,15 @@ describe("EventSub-Abgleich", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(String(fetcher.mock.calls[1]?.[0])).toContain("after=seite-2");
 
-    // Jeder Aufruf braucht eine eigene Response: Ein Körper laesst sich nur
-    // einmal lesen, und ein geteiltes Objekt scheitert beim zweiten Mal schon
-    // am leeren Körper — die Kreiserkennung wuerde dann gar nicht erreicht.
+    // Every call needs its own Response: a body can only be read once, and a
+    // shared object would already fail on the second call with an empty
+    // body — the loop detection would then never even be reached.
     const loopingFetcher = vi.fn().mockImplementation(() =>
       Promise.resolve(new Response(JSON.stringify({ data: [], pagination: { cursor: "immer" } }), { status: 200 })));
     await expect(fetchEventSubSubscriptions(loopingFetcher, "client-id", "app-token")).rejects.toMatchObject({ code: "pagination_loop" });
   });
 
-  it("legt ein fehlendes Chat-Abo mit App-Token, Bot-ID und Broadcaster-ID an", async () => {
+  it("creates a missing chat subscription with app token, bot ID, and broadcaster ID", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
@@ -153,7 +153,7 @@ describe("EventSub-Abgleich", () => {
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-1" });
   });
 
-  it("legt channel.moderate mit Version 2 und moderator_user_id an", async () => {
+  it("creates channel.moderate with version 2 and moderator_user_id", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
@@ -196,7 +196,7 @@ describe("EventSub-Abgleich", () => {
     ).first()).resolves.toEqual({ version: "2", status: "enabled", subscription_id: "moderation-subscription" });
   });
 
-  it("erkennt ein vorhandenes channel.moderate-v2-Abo, aber kein v1-Abo als passend", async () => {
+  it("recognizes an existing channel.moderate v2 subscription, but not a v1 subscription, as matching", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
@@ -237,7 +237,7 @@ describe("EventSub-Abgleich", () => {
     expect(parsedReplacementBody).toMatchObject({ version: "2" });
   });
 
-  it("speichert einen unterscheidbaren Twitch-Ablehnungsgrund je v2-Ziel", async () => {
+  it("stores a distinguishable Twitch rejection reason per v2 target", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
@@ -289,7 +289,7 @@ describe("EventSub-Abgleich", () => {
     errorLog.mockRestore();
   });
 
-  it("erkennt ein bestehendes Shoutout-Abo mit Moderator-ID wieder und lässt es bei Folgeabgleichen unverändert", async () => {
+  it("recognizes an existing shoutout subscription with a moderator ID and leaves it unchanged on follow-up reconciliations", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
@@ -326,7 +326,7 @@ describe("EventSub-Abgleich", () => {
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "shoutout-subscription" });
   });
 
-  it("merkt Twitch-Fehler je Kanal und arbeitet mit dem nächsten Kanal weiter", async () => {
+  it("records Twitch errors per channel and continues with the next channel", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
@@ -363,7 +363,7 @@ describe("EventSub-Abgleich", () => {
     });
   });
 
-  it("fasst ein gefilterter Lauf keine EventSub-Abos eines zweiten Kanals an", async () => {
+  it("doesn't touch a second channel's EventSub subscriptions during a filtered run", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
@@ -415,7 +415,7 @@ describe("EventSub-Abgleich", () => {
     });
   });
 
-  it("räumt ein Abo nach dem Entzug der Broadcaster-Zustimmung auf", async () => {
+  it("cleans up a subscription after the broadcaster consent is revoked", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(

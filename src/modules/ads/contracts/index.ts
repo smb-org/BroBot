@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Zustimmung für Bedienhandlungen im laufenden Stream; blockiert kein Abo. */
+/** Consent for control actions during a live stream; does not block the subscription. */
 export const ADS_OPTIONAL_BROADCASTER_SCOPES = ["channel:manage:ads"] as const;
 
 export const adsSettingsSchema = z.object({

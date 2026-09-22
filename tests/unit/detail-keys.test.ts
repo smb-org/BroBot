@@ -5,13 +5,13 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
- * Die Diagnose-Details sind `Record<string, unknown>` — sie haben keine
- * Typdeklaration, deren Schlüssel man einfrieren könnte. Genau deshalb sind
- * hier dreimal unbemerkt deutsche Schlüssel liegengeblieben, obwohl sie in
- * `event_log.detail_json` landen und die Oberfläche sie ausliest.
+ * Diagnostic details are `Record<string, unknown>` — they have no type
+ * declaration whose keys could be frozen. That's exactly why German keys
+ * have slipped through unnoticed three times here, even though they land in
+ * `event_log.detail_json` and the UI reads them out.
  *
- * Dieser Test sammelt sie aus dem Quelltext ein. Ein neuer Schlüssel muss hier
- * eingetragen werden — und wer ihn einträgt, sieht die englischen Nachbarn.
+ * This test collects them from the source. A new key has to be entered
+ * here — and whoever enters it sees its English neighbors.
  */
 const moduleSources = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
   .flatMap((entry) => {
@@ -47,8 +47,8 @@ const detailKeys = (): string[] => {
   return [...found].sort();
 };
 
-describe("Diagnose-Detailschlüssel", () => {
-  it("friert die Schlüsselmenge ein, die auf der Leitung landet", () => {
+describe("diagnostic detail keys", () => {
+  it("freezes the set of keys that land on the wire", () => {
     expect(detailKeys()).toEqual([
       "action", "count", "currentTier", "duration", "endsAt", "gifter", "kind",
       "message", "moderator", "name", "person", "reason", "recipient",
@@ -58,7 +58,7 @@ describe("Diagnose-Detailschlüssel", () => {
     ]);
   });
 
-  it("lässt keinen deutschen Schlüssel durch", () => {
+  it("lets no German key through", () => {
     const suspicious = detailKeys().filter((name) => /[äöüÄÖÜß]|^(stufe|quelle|dauer|aktion|schwelle|ziel|spender|antwort|ende|empfaenger|restSekunden|anzahl|grund|zuschauer)$/.test(name));
     expect(suspicious).toEqual([]);
   });

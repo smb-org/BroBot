@@ -4,18 +4,18 @@ import { MODULES } from "../../src/modules/registry";
 import { moduleDescription, moduleName } from "../../src/dashboard/module-labels";
 
 /**
- * Die Beschriftungskataloge sind nach Modulkennung geschlüsselt, und ein
- * fehlender Eintrag fällt sonst nicht auf: `moduleName` gibt dann die
- * technische Kennung zurück und `moduleDescription` null — die Oberfläche
- * zeigt „raid" und „Keine Beschreibung", der Build bleibt grün.
+ * The label catalogs are keyed by module id, and a missing entry
+ * otherwise goes unnoticed: `moduleName` then returns the
+ * technical id and `moduleDescription` returns null — the UI
+ * shows "raid" and "No description", the build stays green.
  *
- * Diese Prüfung ersetzt eine Compilerprüfung bewusst. Sie über den Typ zu
- * erzwingen verlangte eine heterogene Literal-Registry und damit einen
- * bivarianten `handleEvent`; das lockerte den Modulvertrag genau dort, wo
- * Schema und Handler auseinanderlaufen können. Der Vertrag wiegt schwerer.
+ * This check deliberately replaces a compiler check. Enforcing it through
+ * the type would require a heterogeneous literal registry and thus a
+ * bivariant `handleEvent`; that would loosen the module contract exactly where
+ * schema and handler can diverge. The contract weighs heavier.
  */
-describe("Modulbeschriftungen", () => {
-  it.each(MODULES.map((module) => module.id))("führt für %s Namen in beiden Sprachen", (moduleId) => {
+describe("Module labels", () => {
+  it.each(MODULES.map((module) => module.id))("has names in both languages for %s", (moduleId) => {
     for (const sprache of ["de", "en"] as const) {
       const name = moduleName(moduleId, sprache);
       expect(name).not.toBe(moduleId);
@@ -23,7 +23,7 @@ describe("Modulbeschriftungen", () => {
     }
   });
 
-  it.each(MODULES.map((module) => module.id))("führt für %s eine Beschreibung in beiden Sprachen", (moduleId) => {
+  it.each(MODULES.map((module) => module.id))("has a description in both languages for %s", (moduleId) => {
     for (const sprache of ["de", "en"] as const) {
       const beschreibung = moduleDescription(moduleId, sprache);
       expect(beschreibung).not.toBeNull();
@@ -31,7 +31,7 @@ describe("Modulbeschriftungen", () => {
     }
   });
 
-  it("gibt für ein unbekanntes Modul die Kennung und keine Beschreibung zurück", () => {
+  it("returns the id and no description for an unknown module", () => {
     expect(moduleName("gibtesnicht", "de")).toBe("gibtesnicht");
     expect(moduleDescription("gibtesnicht", "de")).toBeNull();
   });

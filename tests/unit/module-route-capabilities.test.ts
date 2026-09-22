@@ -56,7 +56,7 @@ const environmentFor = (database: TestD1Database): Env => ({
   ...environmentKeys,
 } as unknown as Env);
 
-describe("Fähigkeiten für Modulrouten", () => {
+describe("Capabilities for module routes", () => {
   let database: TestD1Database;
 
   beforeEach(async () => {
@@ -69,7 +69,7 @@ describe("Fähigkeiten für Modulrouten", () => {
   afterEach(() => { database.close(); });
 
   it.each(["erstes-modul", "zweites-modul"])(
-    "reicht alle generischen Fähigkeiten an die Route von %s weiter",
+    "forwards all generic capabilities to %s's route",
     async (moduleId) => {
       const response = await moduleRouter.fetch(
         new Request(

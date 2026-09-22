@@ -42,9 +42,10 @@ const principalForPanel = (
 });
 
 /**
- * Der Worker reicht niemals den Client-Request an das Objekt durch. Diese
- * Grenze ist absichtlich hier sichtbar: Der Client kann den Header mit dem
- * Namen des internen Prinzipals setzen, aber er erreicht damit nie das DO.
+ * The worker never passes the client request through to the object. This
+ * boundary is deliberately visible here: the client can set a header with
+ * the same name as the internal principal, but it never reaches the DO
+ * that way.
  */
 const internalChannelRequest = (principal: RealtimePrincipal): Request => new Request(
   "https://channel-object.internal/ws",

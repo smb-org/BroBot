@@ -12,9 +12,9 @@ export interface WrittenModuleDiagnostic {
 }
 
 /**
- * Schreibt Modulbegründungen sowie hostseitige Aktions- und
- * Ausgangsdiagnosen und hält den Bestand je Kanal in derselben D1-Transaktion
- * auf die neuesten 500 Zeilen.
+ * Writes module justifications as well as host-side action and outcome
+ * diagnostics, and trims the per-channel count to the latest 500 rows
+ * within the same D1 transaction.
  */
 export const writeModuleDiagnostics = async (
   db: D1Database,
@@ -62,7 +62,7 @@ export const writeModuleDiagnostics = async (
   return written;
 };
 
-/** Löscht Ereignisse, deren Erzeugungszeitpunkt länger als 14 Tage zurückliegt. */
+/** Deletes events whose creation time is more than 14 days in the past. */
 export const purgeOldEventLogEntries = async (db: D1Database, now: string): Promise<void> => {
   const cutoff = new Date(
     Date.parse(now) - EVENT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000,

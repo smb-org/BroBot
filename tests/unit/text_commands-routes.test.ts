@@ -44,13 +44,13 @@ const requestFor = async (
   });
 };
 
-describe("Textbefehle-Panel", () => {
+describe("Text commands panel", () => {
   let database: TestD1Database;
 
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
-  it("lässt einen Verwalter Befehle anlegen, bearbeiten und löschen", async () => {
+  it("lets a manager create, edit, and delete commands", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -124,7 +124,7 @@ describe("Textbefehle-Panel", () => {
     ]));
   });
 
-  it("unterscheidet beim Ändern und Löschen fehlende Befehle", async () => {
+  it("distinguishes missing commands when editing and deleting", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -147,7 +147,7 @@ describe("Textbefehle-Panel", () => {
     await expect(remove.json()).resolves.toEqual({ error: "Der Befehl wurde nicht gefunden." });
   });
 
-  it("verweigert Nicht-Mitgliedern einen Befehl im fremden Kanal", async () => {
+  it("denies non-members a command in a foreign channel", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -165,7 +165,7 @@ describe("Textbefehle-Panel", () => {
       .resolves.toEqual({ count: 0 });
   });
 
-  it("erlaubt eine Listenzeile ohne Text und verlangt Text für die Art text", async () => {
+  it("allows a list line without text and requires text for the text kind", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -193,7 +193,7 @@ describe("Textbefehle-Panel", () => {
     });
   });
 
-  it("lässt einen Verwalter einen Befehl schalten und auditiert die Schaltung", async () => {
+  it("lets a manager toggle a command and audits the toggle", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -226,7 +226,7 @@ describe("Textbefehle-Panel", () => {
     });
   });
 
-  it("lässt einen Bediener einen Befehl schalten", async () => {
+  it("lets an operator toggle a command", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -252,7 +252,7 @@ describe("Textbefehle-Panel", () => {
     ).first()).resolves.toEqual({ enabled: 0 });
   });
 
-  it("verweigert einem Bediener Anlegen, Ändern und Löschen", async () => {
+  it("denies an operator create, edit, and delete", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -292,7 +292,7 @@ describe("Textbefehle-Panel", () => {
     ).all()).resolves.toMatchObject({ results: [{ command_name: "hallo", response_text: "Antwort" }] });
   });
 
-  it("verlangt für eine gemeinsame Schalter- und Textänderung die verwaltende Schwelle", async () => {
+  it("requires the managing threshold for a combined toggle-and-text change", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -319,7 +319,7 @@ describe("Textbefehle-Panel", () => {
     ).first()).resolves.toEqual({ response_text: "Antwort", enabled: 1 });
   });
 
-  it("verlangt für das Ändern der Mindeststufe die verwaltende Schwelle und auditiert es", async () => {
+  it("requires the managing threshold for changing the minimum tier and audits it", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");

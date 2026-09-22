@@ -183,7 +183,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   try {
     await maintainEventSubSubscriptions(context.env, now, fetch, channelId);
   } catch {
-    // Der Abgleich schreibt den Fehlerzustand selbst; die Moduländerung bleibt erfolgreich.
+    // The reconciliation writes the error state itself; the module change remains successful.
   }
   return context.json({
     module: await moduleStateFor(context.env.DB, channelId, module, enabled, settings),

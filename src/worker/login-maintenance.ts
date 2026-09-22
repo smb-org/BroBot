@@ -78,7 +78,7 @@ const rotateLoginTokensWithRetry = async (
 const isInvalidGrant = (error: unknown): boolean =>
   error instanceof TwitchApiError && error.code === "invalid_grant";
 
-/** Bestätigt einen Login-Widerruf, ohne den Widerrufszustand selbst zu schreiben. */
+/** Confirms a login revocation without writing the revocation state itself. */
 export const confirmLoginIdentityAuthorization = async (
   env: Env,
   userId: string,

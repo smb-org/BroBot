@@ -11,7 +11,7 @@ const encryptionKeys = JSON.stringify({
   retired: [],
 });
 
-describe("Twitch-Werbezeitplan", () => {
+describe("Twitch ad schedule", () => {
   let database: TestD1Database;
   let appTokenCiphertext: string;
 
@@ -36,7 +36,7 @@ describe("Twitch-Werbezeitplan", () => {
     TOKEN_ENCRYPTION_KEYS: encryptionKeys,
   } as unknown as Env);
 
-  it("liest Zahlen als Zahlen und verwendet den App-Token", async () => {
+  it("reads numbers as numbers and uses the app token", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       data: [{
         next_ad_at: "2026-09-21T12:00:00Z",
@@ -72,7 +72,7 @@ describe("Twitch-Werbezeitplan", () => {
     );
   });
 
-  it("parst numerische Zeichenketten ebenso defensiv wie Zahlen", async () => {
+  it("parses numeric strings as defensively as numbers", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       data: [{
         next_ad_at: "",
@@ -97,7 +97,7 @@ describe("Twitch-Werbezeitplan", () => {
     });
   });
 
-  it("liefert einen leeren Termin als erfolgreichen Normalfall", async () => {
+  it("returns an empty schedule as a successful normal case", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ data: [{}] }), { status: 200 }));
 
     await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, fetcher)).resolves.toMatchObject({
@@ -117,7 +117,7 @@ describe("Twitch-Werbezeitplan", () => {
   it.each([
     [429, "rate_limited"],
     [401, "unauthorized"],
-  ])("gibt HTTP %s als eigenen maschinenlesbaren Ausgang zurück", async (status, reason) => {
+  ])("returns HTTP %s as its own machine-readable outcome", async (status, reason) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "Twitch-Antwort" }),
       { status },
@@ -131,7 +131,7 @@ describe("Twitch-Werbezeitplan", () => {
     });
   });
 
-  it("verschiebt die nächste Werbung mit dem App-Token und liefert den neuen Zeitplan", async () => {
+  it("snoozes the next ad with the app token and returns the new schedule", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       data: [{
         next_ad_at: "2026-09-21T12:05:00Z",
@@ -168,7 +168,7 @@ describe("Twitch-Werbezeitplan", () => {
     );
   });
 
-  it("gibt eine Ratenbegrenzung als eigenen Snooze-Ausgang zurück", async () => {
+  it("returns a rate limit as its own snooze outcome", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "Twitch-Antwort" }),
       { status: 429 },
@@ -182,7 +182,7 @@ describe("Twitch-Werbezeitplan", () => {
     });
   });
 
-  it("erkennt fehlende channel:manage:ads-Zustimmung am Twitch-Ausgang", async () => {
+  it("detects missing channel:manage:ads consent from the Twitch response", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "Missing required scope: channel:manage:ads" }),
       { status: 401 },

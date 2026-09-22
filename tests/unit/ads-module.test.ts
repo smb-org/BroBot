@@ -14,13 +14,13 @@ const event = (payload: Record<string, unknown>, settings = adsModule.defaultSet
   chatStatus: null,
 });
 
-describe("Werbung-Modul", () => {
-  it("deklariert die beiden Werbe-Anlässe mit Version 1 und channel:read:ads", () => {
+describe("ads module", () => {
+  it("declares both ad events with version 1 and channel:read:ads", () => {
     expect(adsModule.eventSubTypes).toEqual(["stream.online", "channel.ad_break.begin"]);
     expect(adsModule.broadcasterScopes).toEqual(["channel:read:ads"]);
   });
 
-  it("unterscheidet automatische und manuelle Pausen und nennt die Dauer", () => {
+  it("distinguishes automatic and manual breaks and states the duration", () => {
     const automatisch = processAdBreak(event({
       duration_seconds: 30,
       started_at: "2026-09-20T10:00:00.000Z",
@@ -47,7 +47,7 @@ describe("Werbung-Modul", () => {
     });
   });
 
-  it("überspringt eine Pause mit Dauer null und begründet das", () => {
+  it("skips a break with zero duration and gives the reason", () => {
     expect(processAdBreak(event({
       duration_seconds: 0,
       started_at: "2026-09-20T10:00:00.000Z",
@@ -61,7 +61,7 @@ describe("Werbung-Modul", () => {
     });
   });
 
-  it("verwendet die Einstellung auch ohne Platzhalter und ergänzt dann die Dauer", () => {
+  it("uses the setting even without a placeholder and then appends the duration", () => {
     const result = processAdBreak(event({
       duration_seconds: 45,
       started_at: "2026-09-20T10:00:00.000Z",
@@ -77,7 +77,7 @@ describe("Werbung-Modul", () => {
     expect(result.actions).toEqual([{ kind: "chat", text: "Pause läuft (45 Sekunden)" }]);
   });
 
-  it("ersetzt den englischen Platzhalter und keinen deutschen Altname", () => {
+  it("replaces the English placeholder, not a German legacy name", () => {
     const result = processAdBreak(event({
       duration_seconds: 45,
       started_at: "2026-09-20T10:00:00.000Z",

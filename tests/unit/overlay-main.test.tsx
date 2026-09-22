@@ -14,7 +14,7 @@ const setFragment = (token: string): void => {
   window.history.replaceState(null, "", `/overlay#token=${token}`);
 };
 
-describe("Overlay-Statusansicht", () => {
+describe("Overlay status view", () => {
   beforeEach(() => {
     setFragment("erstes-token");
   });
@@ -27,9 +27,9 @@ describe("Overlay-Statusansicht", () => {
   });
 
   it.each([
-    ["Backendfehler", invalidResponse()],
-    ["Netzwerkfehler", new Error("Netzwerk unterbrochen")],
-  ])("bleibt bei einem %s vollständig leer", async (_description, failure) => {
+    ["backend error", invalidResponse()],
+    ["network error", new Error("Netzwerk unterbrochen")],
+  ])("stays completely empty on a %s", async (_description, failure) => {
     const fetcher = vi.fn();
     fetcher.mockImplementation(() => failure instanceof Error
       ? Promise.reject(failure)
@@ -42,7 +42,7 @@ describe("Overlay-Statusansicht", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("holt nach einem Startfehler ohne Neuladen erneut ab", async () => {
+  it("retries after a startup error without reloading", async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn()
       .mockRejectedValueOnce(new Error("Worker nicht erreichbar"))
@@ -65,7 +65,7 @@ describe("Overlay-Statusansicht", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("prüft einen geänderten Fragment-Token im selben Dokument erneut", async () => {
+  it("re-checks a changed fragment token within the same document", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(versionResponse("alt"))
       .mockResolvedValueOnce(versionResponse("neu"));
@@ -86,7 +86,7 @@ describe("Overlay-Statusansicht", () => {
     });
   });
 
-  it("macht einen Widerruf beim nächsten Poll sichtbar unsichtbar", async () => {
+  it("turns a revocation into invisible content on the next poll", async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn()
       .mockResolvedValueOnce(versionResponse("laufend"))
@@ -109,7 +109,7 @@ describe("Overlay-Statusansicht", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("vergrößert den Abstand nach wiederholten Fehlern maßvoll", async () => {
+  it("moderately increases the interval after repeated failures", async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn()
       .mockRejectedValue(new Error("Worker nicht erreichbar"));

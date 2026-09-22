@@ -170,8 +170,8 @@ const makeMaintenanceEnvironment = async (
 const requestedUrls = (fetcher: ReturnType<typeof vi.fn>): string[] =>
   fetcher.mock.calls.map((call: unknown[]) => String(call[0]));
 
-describe("Bot-Wartung", () => {
-  it("hinterlegt beim Wartungslauf die fehlenden Bot-Scopes", async () => {
+describe("bot maintenance", () => {
+  it("records the missing bot scopes during the maintenance run", async () => {
     const granted = [BOT_SCOPES[0], BOT_SCOPES[2]];
     const { environment: env, readMissingScopes } = await makeMaintenanceEnvironment(
       "2026-09-18T02:00:01.000Z",
@@ -187,16 +187,16 @@ describe("Bot-Wartung", () => {
     expect(readMissingScopes()).toEqual(missingBotScopes(granted));
   });
 
-  it("behandelt einen nicht parsebaren Datenbank-Ablaufwert als ablaufnah", () => {
+  it("treats an unparseable database expiry value as close to expiry", () => {
     expect(shouldRefreshBotToken("kein-datum", "2026-09-18T00:00:00.000Z")).toBe(true);
   });
 
-  it("erneuert nur Tokens, die in weniger als einer Stunde ablaufen", () => {
+  it("only refreshes tokens that expire in less than an hour", () => {
     expect(shouldRefreshBotToken("2026-09-18T00:59:59.000Z", "2026-09-18T00:00:00.000Z")).toBe(true);
     expect(shouldRefreshBotToken("2026-09-18T01:00:01.000Z", "2026-09-18T00:00:00.000Z")).toBe(false);
   });
 
-  it("tauscht ein Refresh-Token gegen beide neuen Token aus", async () => {
+  it("exchanges a refresh token for both new tokens", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }),
       { status: 200 },
@@ -211,7 +211,7 @@ describe("Bot-Wartung", () => {
     expect(fetcher).toHaveBeenCalledWith("https://id.twitch.tv/oauth2/token", expect.objectContaining({ method: "POST" }));
   });
 
-  it("übernimmt den Twitch-Fehlercode aus dem Refresh-Response", async () => {
+  it("adopts the Twitch error code from the refresh response", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ error: "invalid_client" }),
       { status: 400 },
@@ -223,7 +223,7 @@ describe("Bot-Wartung", () => {
     });
   });
 
-  it("validiert einen Access-Token über Twitch", async () => {
+  it("validates an access token via Twitch", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ client_id: "client-id", user_id: "bot-user", login: "brobot", expires_in: 3600, scopes: [] }),
       { status: 200 },
@@ -237,7 +237,7 @@ describe("Bot-Wartung", () => {
     });
   });
 
-  it("liest die Kanäle, in denen der Bot gemoddet ist", async () => {
+  it("reads the channels where the bot is a moderator", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ data: [{ broadcaster_id: "channel-1" }, { broadcaster_id: "channel-2" }] }),
       { status: 200 },
@@ -247,7 +247,7 @@ describe("Bot-Wartung", () => {
       .resolves.toEqual(["channel-1", "channel-2"]);
   });
 
-  it("liest alle Seiten der Moderator-Kanalabfrage", async () => {
+  it("reads all pages of the moderator channel query", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
@@ -266,7 +266,7 @@ describe("Bot-Wartung", () => {
     expect(fetcher.mock.calls[1]?.[0]).toContain("after=cursor-1");
   });
 
-  it("ruft bei einem weit entfernten Ablauf keinen Refresh-Endpunkt auf", async () => {
+  it("doesn't call the refresh endpoint when expiry is far away", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 7200 }), { status: 200 }))
@@ -277,7 +277,7 @@ describe("Bot-Wartung", () => {
     expect(requestedUrls(fetcher)).not.toContain("https://id.twitch.tv/oauth2/token");
   });
 
-  it("erneuert einen bald ablaufenden Bot und schreibt beide Ciphertexte", async () => {
+  it("refreshes a soon-expiring bot and writes both ciphertexts", async () => {
     const {
       environment: env,
       read,
@@ -297,7 +297,7 @@ describe("Bot-Wartung", () => {
     expect(read().updated_at).toBe("2026-09-18T00:00:00.000Z");
   });
 
-  it("wiederholt einen fehlgeschlagenen D1-Write nach erfolgreichem Twitch-Refresh", async () => {
+  it("retries a failed D1 write after a successful Twitch refresh", async () => {
     const { environment: env, getTokenWriteAttempts } = await makeMaintenanceEnvironment(
       "2026-09-18T00:59:59.000Z",
       "connected",
@@ -314,7 +314,7 @@ describe("Bot-Wartung", () => {
     expect(requestedUrls(fetcher)).toContain("https://api.twitch.tv/helix/moderation/channels?user_id=bot-user&first=100");
   });
 
-  it("behält einen bereits geschriebenen Token, wenn die D1-Antwort verloren geht", async () => {
+  it("keeps an already-written token when the D1 response is lost", async () => {
     const {
       environment: env,
       read,
@@ -340,7 +340,7 @@ describe("Bot-Wartung", () => {
     expect(readStatus().status).toBe("connected");
   });
 
-  it("behandelt zwei parallele Refresh-Läufe mit einem CAS-Gewinner", async () => {
+  it("handles two parallel refresh runs with one CAS winner", async () => {
     const { environment: env, readStatus, getSuccessfulTokenWrites } = await makeMaintenanceEnvironment(
       "2026-09-18T00:59:59.000Z",
     );
@@ -371,7 +371,7 @@ describe("Bot-Wartung", () => {
     expect(readStatus().reason).toBeNull();
   });
 
-  it("versucht bei einem abgelaufenen Access-Token einmal den gültigen Refresh", async () => {
+  it("tries the valid refresh once for an expired access token", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-17T23:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 }))
@@ -383,7 +383,7 @@ describe("Bot-Wartung", () => {
     expect(requestedUrls(fetcher)).toContain("https://id.twitch.tv/oauth2/token");
   });
 
-  it("refresh’t auch nach einem 401 bei noch weit entferntem Ablauf genau einmal", async () => {
+  it("also refreshes exactly once after a 401 when expiry is still far away", async () => {
     const { environment: env, read, readStatus } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 }))
@@ -397,7 +397,7 @@ describe("Bot-Wartung", () => {
     expect(readStatus().status).toBe("connected");
   });
 
-  it("setzt bei einem frischen 401 nur nach dem fehlgeschlagenen Refresh auf revoked", async () => {
+  it("sets revoked on a fresh 401 only after the refresh has failed", async () => {
     const { environment: env, readStatus } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 }))
@@ -410,7 +410,7 @@ describe("Bot-Wartung", () => {
     expect(readStatus().reason).toBe("authorization_revoked");
   });
 
-  it("lässt eine erfolgreiche Rotation trotz parallelem Status-Update bestehen", async () => {
+  it("lets a successful rotation stand despite a parallel status update", async () => {
     const { environment: env, read, readStatus } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z");
     let releaseValidation!: (response: Response) => void;
     let markValidationStarted!: () => void;
@@ -436,7 +436,7 @@ describe("Bot-Wartung", () => {
     expect(readStatus().status).toBe("connected");
   });
 
-  it("lässt den erfolgreichen Tokenstand stehen, wenn ein paralleler veralteter Lauf invalid_grant erhält", async () => {
+  it("leaves the successful token state standing when a parallel stale run gets invalid_grant", async () => {
     let markRotationCommitted!: () => void;
     const rotationCommitted = new Promise<void>((resolve) => { markRotationCommitted = resolve; });
     const { environment: env, read, readStatus, getInitialAccessTokenCiphertext } = await makeMaintenanceEnvironment(
@@ -470,7 +470,7 @@ describe("Bot-Wartung", () => {
     expect(readStatus().reason).toBeNull();
   });
 
-  it("setzt den Bot nach einem vor dem Speichern eintreffenden invalid_grant nicht dauerhaft auf revoked", async () => {
+  it("doesn't permanently set the bot to revoked on an invalid_grant that arrives before the save", async () => {
     let releaseTokenWrite!: () => void;
     let markTokenWriteStarted!: () => void;
     const tokenWriteStarted = new Promise<void>((resolve) => { markTokenWriteStarted = resolve; });
@@ -512,7 +512,7 @@ describe("Bot-Wartung", () => {
     expect(readStatus().reason).toBeNull();
   });
 
-  it("setzt revoked nicht durch einen bereits laufenden Erfolgsweg wieder auf connected", async () => {
+  it("doesn't let an already-running success path set revoked back to connected", async () => {
     const { environment: env, readStatus } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     let releaseModeration!: (response: Response) => void;
     let markModerationStarted!: () => void;
@@ -540,7 +540,7 @@ describe("Bot-Wartung", () => {
     expect(readStatus().status).toBe("revoked");
   });
 
-  it("markiert einen abgelehnten Refresh als widerrufen und versucht nicht endlos weiter", async () => {
+  it("marks a rejected refresh as revoked and doesn't keep retrying forever", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
@@ -552,7 +552,7 @@ describe("Bot-Wartung", () => {
     expect(requestedUrls(fetcher)).not.toContain("https://api.twitch.tv/helix/moderation/channels?user_id=bot-user");
   });
 
-  it("beendet auch einen mit 401 abgelehnten Refresh dauerhaft", async () => {
+  it("also permanently ends a refresh rejected with 401", async () => {
     const { environment: env, readStatus } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
@@ -568,7 +568,7 @@ describe("Bot-Wartung", () => {
     });
   });
 
-  it("behandelt invalid_client auch bei 400 nur vorübergehend", async () => {
+  it("treats invalid_client as only temporary, even with a 400", async () => {
     const { environment: env, readStatus } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
@@ -583,7 +583,7 @@ describe("Bot-Wartung", () => {
     });
   });
 
-  it("überspringt einen bereits widerrufenen Bot bis zur erneuten Autorisierung", async () => {
+  it("skips an already-revoked bot until it's reauthorized", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z", "revoked");
     const fetcher = vi.fn();
 
@@ -592,7 +592,7 @@ describe("Bot-Wartung", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("führt den stündlichen Handler über waitUntil aus", async () => {
+  it("runs the hourly handler via waitUntil", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     const waitUntil = vi.fn();
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {

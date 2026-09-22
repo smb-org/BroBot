@@ -10,13 +10,13 @@ const NOW = "2026-09-19T12:00:00.000Z";
 const ACTOR = { userId: "user-1", sessionId: "session-user-1" };
 const authorize = () => ({ sql: "AND 1 = 1", values: [] as const });
 
-describe("Textbefehle-D1-Adapter", () => {
+describe("Text commands D1 adapter", () => {
   let database: TestD1Database;
 
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
-  it("trennt gleichnamige Befehle nach Kanal", async () => {
+  it("separates same-named commands by channel", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -39,7 +39,7 @@ describe("Textbefehle-D1-Adapter", () => {
     })]);
   });
 
-  it("beansprucht einen Befehl nur einmal innerhalb seiner Abkühlzeit", async () => {
+  it("claims a command only once within its cooldown period", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -55,7 +55,7 @@ describe("Textbefehle-D1-Adapter", () => {
       .resolves.toMatchObject({ beansprucht: true });
   });
 
-  it("schreibt nur in die eigene Tabelle", async () => {
+  it("writes only to its own table", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -74,7 +74,7 @@ describe("Textbefehle-D1-Adapter", () => {
       .resolves.toEqual({ count: 0 });
   });
 
-  it("unterscheidet eine abgelehnte Löschung von einer fehlenden Zeile", async () => {
+  it("distinguishes a denied delete from a missing row", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -99,7 +99,7 @@ describe("Textbefehle-D1-Adapter", () => {
       .resolves.toEqual({ ok: false, reason: "nicht_gefunden" });
   });
 
-  it("sichert Inhaltsmutationen mit der verwaltenden SQL-Schwelle ab", async () => {
+  it("guards content mutations with the managing SQL gate", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -122,7 +122,7 @@ describe("Textbefehle-D1-Adapter", () => {
       .resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
   });
 
-  it("schaltet nur enabled und schreibt keine veralteten Inhaltswerte zurück", async () => {
+  it("toggles only enabled and doesn't write back stale content values", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -149,7 +149,7 @@ describe("Textbefehle-D1-Adapter", () => {
     ).first()).resolves.toEqual({ response_text: "Antwort", kind: "text", enabled: 0, cooldown_seconds: 5 });
   });
 
-  it("verwirft veraltete Update- und Lösch-Vorzustände, aber nicht Chatnutzung", async () => {
+  it("rejects stale update and delete preconditions, but not chat usage", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
@@ -234,7 +234,7 @@ describe("Textbefehle-D1-Adapter", () => {
     });
   });
 
-  it("erlaubt Listen ohne Antworttext, verlangt ihn aber für Textzeilen", async () => {
+  it("allows lists without response text but requires it for text lines", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");

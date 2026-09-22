@@ -401,9 +401,9 @@ const requestForRealtime = async (userId: string): Promise<Request> => {
   });
 };
 
-// Erschoepfungskarten: `Record<Union, true>` verlangt vom Compiler jedes Glied
-// genau einmal. Fehlt eines, ist es zuviel oder heisst es anders, bricht der
-// Typecheck -- lange bevor ein Client den geaenderten Wert auf der Leitung sieht.
+// Exhaustiveness maps: `Record<Union, true>` requires the compiler to list every member
+// exactly once. If one is missing, extra, or renamed, the
+// typecheck breaks -- long before a client sees the changed value on the wire.
 const alleRollen: Record<ChannelRole, true> = { broadcaster: true, manager: true, operator: true };
 const alleNachrichtentypen: Record<RealtimeMessageType, true> = { "system.hello": true, "event_log.new": true };
 const alleEmpfaengerarten: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
@@ -414,8 +414,8 @@ const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: t
 const allEventOrigins: Record<PanelEventOrigin, true> = { channel: true, module: true };
 const alleTonlagen: Record<EventTone, true> = { info: true, warning: true, error: true };
 
-describe("serialisierte Vertragsformen", () => {
-  it("friert Schlüssel, Werte und Durable-Object-Schlüssel ein", async () => {
+describe("serialized contract shapes", () => {
+  it("freezes keys, values, and Durable Object keys", async () => {
     const principalDatabase = new TestD1Database();
     const eventDatabase = new TestD1Database();
     try {
@@ -481,10 +481,10 @@ describe("serialisierte Vertragsformen", () => {
         ...durableObjectSource.matchAll(/const (?:SECURITY_DEADLINE_KEY|AD_PREWARNING_DEADLINE_KEY) = "([^"]+)"/g),
       ].map((match) => match[1]).sort();
 
-      // Der signierte OAuth-Zustand laeuft ueber Twitch und zurueck. Er stand
-      // lange ausserhalb dieses Satzes und trug deshalb unbemerkt einen
-      // deutschen Schluessel -- genau die Blindstelle, die dieser Test schliessen
-      // soll.
+      // The signed OAuth state travels out to Twitch and back. It sat
+      // outside this set for a long time and so silently carried a
+      // German key -- exactly the blind spot this test is meant to
+      // close.
       const oauthState: OAuthState = {
         transactionId: "transaktion-1",
         purpose: "login",
@@ -493,8 +493,8 @@ describe("serialisierte Vertragsformen", () => {
         fullConsentSecondAttempt: true,
       };
 
-      // Die Textbefehl-Form geht ueber die Route und ins Audit. Sie stand
-      // ausserhalb dieses Satzes und trug deshalb unbemerkt deutsche Schluessel.
+      // The text-command shape travels through the route and into the audit log. It sat
+      // outside this set and so silently carried German keys.
       const textCommand: TextCommand = {
         channelId: "kanal-a",
         name: "hallo",
@@ -508,8 +508,8 @@ describe("serialisierte Vertragsformen", () => {
         updatedAt: "2026-09-21T12:00:00.000Z",
       };
 
-      // Die Werbe-Zeitplan-Antwort geht ans Panel und stand ebenfalls
-      // ausserhalb dieses Satzes; sie trug deshalb unbemerkt deutsche Schluessel.
+      // The ad schedule response goes to the panel and likewise sat
+      // outside this set; it therefore silently carried German keys.
       const adsScheduleResponse: AdsScheduleResponse = {
         schedule: {
           nextAdAt: "2026-09-21T12:30:00.000Z",
@@ -646,12 +646,12 @@ describe("serialisierte Vertragsformen", () => {
       ]);
       expect(Object.fromEntries(MODULES.map((module) => [module.id, JSON.parse(JSON.stringify(module.defaultSettings))]))).toEqual(expectedModuleSettings);
       expect([...TEXT_COMMAND_MINIMUM_TIERS].sort()).toEqual(["broadcaster", "everyone", "moderator", "subscriber", "vip"]);
-      // Die geschlossenen Wertemengen sind reine TypeScript-Unions und haben zur
-      // Laufzeit keinen Wert, den man auslesen koennte. Ein Literal gegen dasselbe
-      // Literal zu pruefen waere eine Tautologie. Stattdessen zwingt ein
-      // `Record<Union, true>` den Compiler, jedes Glied genau einmal zu verlangen:
-      // ein neues, entferntes oder umbenanntes Glied bricht `pnpm run typecheck`,
-      // und die Zusicherung darunter friert die Schreibweise ein.
+      // The closed value sets are pure TypeScript unions and have no
+      // runtime value to read. Checking a literal against the same
+      // literal would be a tautology. Instead, a
+      // `Record<Union, true>` forces the compiler to require every member exactly once:
+      // a new, removed, or renamed member breaks `pnpm run typecheck`,
+      // and the assertion below freezes the spelling.
       expect(Object.keys(alleRollen).sort()).toEqual(["broadcaster", "manager", "operator"]);
       expect(Object.keys(alleNachrichtentypen).sort()).toEqual(["event_log.new", "system.hello"]);
       expect(Object.keys(alleEmpfaengerarten).sort()).toEqual(["overlay", "panel"]);

@@ -6,20 +6,20 @@ import { describe, expect, it } from "vitest";
 import { LATEST_SCHEMA_MIGRATION, LATEST_SCHEMA_TABLE } from "../../src/worker/config";
 
 /**
- * `/healthz` vergleicht den zuletzt angewandten Migrationsnamen mit einer
- * Konstante im Code. Laufen die beiden auseinander, meldet eine fehlerfreie
- * Installation 503 — ein Fehler, der niemandem auffällt, bevor er jemandem
- * den Start verdirbt.
+ * `/healthz` compares the most recently applied migration name against a
+ * constant in the code. If the two drift apart, an otherwise error-free
+ * install reports 503 — a failure nobody notices before it ruins
+ * someone's launch.
  */
-describe("Schema-Baseline", () => {
+describe("Schema baseline", () => {
   const directory = resolve(import.meta.dirname, "../../migrations");
   const files = readdirSync(directory).filter((name) => name.endsWith(".sql")).sort();
 
-  it("hält LATEST_SCHEMA_MIGRATION an der letzten Migrationsdatei", () => {
+  it("keeps LATEST_SCHEMA_MIGRATION pointed at the latest migration file", () => {
     expect(files.at(-1)).toBe(LATEST_SCHEMA_MIGRATION);
   });
 
-  it("legt die von /healthz geprüfte Tabelle wirklich an", () => {
+  it("actually creates the table /healthz checks", () => {
     const baseline = readFileSync(resolve(directory, LATEST_SCHEMA_MIGRATION), "utf8");
     expect(baseline).toContain(`CREATE TABLE ${LATEST_SCHEMA_TABLE} `);
   });

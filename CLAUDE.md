@@ -26,7 +26,11 @@ Key routing rules:
 
 ## Projektregeln
 
-- Sprache ist Deutsch; echte Umlaute verwenden.
+- Der Quelltext ist durchgehend englisch: Bezeichner, Kommentare, JSDoc, Testnamen.
+  Ausgenommen sind nur die deutschen Hälften der zweisprachigen Kataloge
+  (`src/dashboard/locale.ts`, `src/dashboard/labels.ts`, Modul-Sprachkataloge) — das sind
+  Übersetzungen für Nutzer, kein Codeartefakt.
+- Die Dokumentation unter `docs/` ist noch deutsch; die Umstellung steht aus.
 - Single-Package, kein Monorepo.
 - Module werden ausschließlich über Contract und Registry bekannt gemacht.
 - `channelId` ist überall Mandantenschlüssel; es gibt kein `BROADCASTER_ID`-Secret.

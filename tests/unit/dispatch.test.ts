@@ -18,8 +18,8 @@ const schluessel = JSON.stringify({
 });
 
 /**
- * Ein Modul-Doppel. `MODULES` ist leer, und die Tests dürfen nicht
- * voraussetzen, dass es je ein echtes Modul gibt.
+ * A module double. `MODULES` is empty, and the tests must not assume a real
+ * module ever exists.
  */
 const moduleDuplicate = (
   id: string,
@@ -49,7 +49,7 @@ const chatResponse = (body: unknown, status = 200) =>
   vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })));
 
-/** Liest den JSON-Körper eines Chat-Aufrufs, ohne blind zu casten. */
+/** Reads the JSON body of a chat call without blindly casting it. */
 const koerperVon = (fetcher: ReturnType<typeof chatResponse>, index = 0): Record<string, unknown> => {
   const body = fetcher.mock.calls[index]?.[1]?.body;
   return typeof body === "string" ? JSON.parse(body) as Record<string, unknown> : {};
@@ -86,7 +86,7 @@ const protokoll = async (database: TestD1Database) => {
   return result.results;
 };
 
-/** Trägt jedes Registry-Modul als aktiviert ein; die Verteilung liest aus der Datenbank. */
+/** Registers every registry module as enabled; dispatch reads from the database. */
 const activate = async (database: TestD1Database, channelId: string, moduleId: string): Promise<void> => {
   await database.prepare(
     "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{\"praefix\":\"!\"}')",
@@ -120,8 +120,8 @@ const verteile = async (
   );
 };
 
-describe("Modulauswahl", () => {
-  it("übergeht deaktivierte Module", () => {
+describe("module selection", () => {
+  it("skips disabled modules", () => {
     const { treffer } = selectModulesForEvent(
       [activation("modul-a", false)],
       CHAT_TYP,
@@ -130,7 +130,7 @@ describe("Modulauswahl", () => {
     expect(treffer).toEqual([]);
   });
 
-  it("übergeht Module, die für diesen Ereignistyp nicht zuständig sind", () => {
+  it("skips modules not responsible for this event type", () => {
     const { treffer } = selectModulesForEvent(
       [activation("modul-a")],
       CHAT_TYP,
@@ -139,15 +139,15 @@ describe("Modulauswahl", () => {
     expect(treffer).toEqual([]);
   });
 
-  it("meldet eine Aktivierung, die die Registry nicht kennt", () => {
+  it("reports an activation the registry doesn't know", () => {
     const { treffer, unbekannt } = selectModulesForEvent([activation("verschwunden")], CHAT_TYP, []);
     expect(treffer).toEqual([]);
     expect(unbekannt).toEqual(["verschwunden"]);
   });
 });
 
-describe("Verteilung und Ausführung", () => {
-  it("sendet die Chatnachricht eines Moduls und protokolliert den Erfolg", async () => {
+describe("dispatch and execution", () => {
+  it("sends a module's chat message and logs the success", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
@@ -172,11 +172,11 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("wertet eine verworfene Nachricht trotz HTTP 200 als Fehlschlag", async () => {
+  it("treats a dropped message as a failure despite HTTP 200", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
-      // Twitch antwortet bei AutoMod-Ablehnung mit 200 und is_sent: false.
+      // Twitch responds to an AutoMod rejection with 200 and is_sent: false.
       const fetcher = chatResponse({
         data: [{ is_sent: false, drop_reason: { code: "automod_held", message: "gehalten" } }],
       });
@@ -193,7 +193,7 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("hält die Reihenfolge der Aktionen ein", async () => {
+  it("preserves the order of actions", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
@@ -213,7 +213,7 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("lässt ein werfendes Modul die übrigen nicht mitreißen", async () => {
+  it("doesn't let a throwing module take the others down with it", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
@@ -234,7 +234,7 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("verliert eine Overlay-Aktion nicht stillschweigend", async () => {
+  it("doesn't silently drop an overlay action", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
@@ -252,15 +252,15 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("sendet ausschließlich in den Kanal des Ereignisses", async () => {
+  it("sends exclusively to the event's channel", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
       await insertChannel(database, "kanal-b");
       const fetcher = gesendet();
       await verteile(database, [moduleDuplicate("modul-a", () => ({
-        // Das Modul beschreibt nur Text; einen Zielkanal kann es gar nicht
-        // angeben. Der Host nimmt ihn aus dem geprüften Ereignis.
+        // The module only describes text; it can't specify a target channel at
+        // all. The host takes it from the verified event.
         actions: [{ kind: "chat", text: "hallo" }],
         diagnostics: [],
       }))], fetcher, "kanal-b");
@@ -271,7 +271,7 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("übergibt dem Modul den Akteur samt aufgelöster Kanalrolle", async () => {
+  it("passes the module the actor together with the resolved channel role", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
@@ -288,7 +288,7 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("reicht alle Chatstatus getrennt von der Panelrolle weiter und leert sie ohne Chatbezug", async () => {
+  it("forwards chat status separately from the panel role and clears it when there's no chat context", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
@@ -315,7 +315,7 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("übermittelt VIP und Abonnement gemeinsam aus den Chatbadges", async () => {
+  it("reports VIP and subscriber together from the chat badges", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
@@ -345,7 +345,7 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("protokolliert eine Aktivierung, die die Registry nicht kennt", async () => {
+  it("logs an activation the registry doesn't know", async () => {
     const database = new TestD1Database();
     try {
       await mitBot(database);
@@ -361,7 +361,7 @@ describe("Verteilung und Ausführung", () => {
     }
   });
 
-  it("veröffentlicht je Auslöser genau einen Feed-Hinweis", async () => {
+  it("publishes exactly one feed notice per trigger", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");

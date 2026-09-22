@@ -2,12 +2,12 @@ import { env, exports } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 
 /**
- * Die Worker-Testumgebung startet mit leerer Datenbank. Der Healthcheck prüft
- * seit #43 auch das Schema, deshalb müssen die Migrationen hier angewandt
- * werden — sonst prüft der Test nur, dass ein leeres D1 als kaputt gilt.
+ * The worker test environment starts with an empty database. Since #43, the
+ * healthcheck also checks the schema, so the migrations must be applied here
+ * — otherwise the test only checks that an empty D1 counts as broken.
  *
- * Die Dateien kommen über import.meta.glob, damit eine neue Migration
- * automatisch mitläuft und nicht vergessen werden kann.
+ * The files come in via import.meta.glob, so a new migration runs
+ * automatically and can't be forgotten.
  */
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
   query: "?raw",
@@ -18,9 +18,9 @@ const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
 const applyMigrations = async (): Promise<void> => {
   const database = (env as unknown as { DB: D1Database }).DB;
   for (const path of Object.keys(migrationSources).sort()) {
-    // Zeilenkommentare zuerst entfernen: Ein Semikolon in einem Kommentar
-    // würde die Zerlegung sonst mitten im Satz auftrennen, und D1 bekäme ein
-    // Fragment ohne Anweisung ("SQL code did not contain a statement").
+    // Strip line comments first: a semicolon inside a comment would otherwise
+    // split the statement mid-sentence, and D1 would get a fragment with no
+    // statement ("SQL code did not contain a statement").
     const statements = (migrationSources[path] ?? "")
       .split(/\r?\n/)
       .map((zeile) => zeile.replace(/^\s*--.*$/, ""))
@@ -37,18 +37,32 @@ const applyMigrations = async (): Promise<void> => {
   }
 };
 
-describe("Worker-Grundgerüst", () => {
-  it("meldet /healthz als kaputt, solange das Schema fehlt", async () => {
+describe("worker skeleton", () => {
+  it("reports /healthz as broken as long as the schema is missing", async () => {
     const response = await exports.default.fetch(new Request("http://localhost/healthz"));
     const body = await response.json<{ status: string; missingBindings: string[] }>();
 
-    // Genau der Fall, der bisher grün meldete: Deploy ohne angewandte Migration.
+    // Exactly the case that used to report green: a deploy without an applied migration.
     expect(response.status).toBe(503);
     expect(body.status).toBe("misconfigured");
     expect(body.missingBindings).toContain("DB_SCHEMA");
   });
 
-  describe("mit angewandtem Schema", () => {
+  /**
+   * The asset handler runs with `not_found_handling: single-page-application`,
+   * so without this route an unknown API path answers 200 with `index.html` and
+   * the caller reports "Unexpected token '<'". A renamed endpoint then looks
+   * like a parser bug rather than a missing route.
+   */
+  it("answers an unknown API path with 404 as JSON, not with the app shell", async () => {
+    const response = await exports.default.fetch(new Request("http://localhost/api/does-not-exist"));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toMatchObject({ error: expect.any(String) as unknown as string });
+  });
+
+  describe("with schema applied", () => {
     beforeAll(async () => {
       await (env as unknown as { DB: D1Database }).DB.prepare(
         `CREATE TABLE IF NOT EXISTS d1_migrations (
@@ -60,7 +74,7 @@ describe("Worker-Grundgerüst", () => {
       await applyMigrations();
     });
 
-    it("beantwortet /healthz mit dem konfigurierten Status", async () => {
+    it("responds to /healthz with the configured status", async () => {
       const response = await exports.default.fetch(new Request("http://localhost/healthz"));
       const body = await response.json<{ status: string; missingBindings: string[] }>();
 

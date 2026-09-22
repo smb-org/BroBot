@@ -33,13 +33,13 @@ const response = (body: unknown, status = 200): Response => new Response(JSON.st
   headers: { "Content-Type": "application/json" },
 });
 
-describe("Modulroute beim clientseitigen Wechsel", () => {
+describe("Module route during client-side navigation", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it("startet das Panel erst nach der neuen Aktivitätsprüfung", async () => {
+  it("starts the panel only after the new activity check", async () => {
     const activeState = { ...channel, activeModules: [{ moduleId: "aktiv", settings: "{}" }] };
     const inactiveState = { ...channel, activeModules: [] };
     let overviewAufrufe = 0;

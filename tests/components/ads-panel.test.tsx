@@ -11,13 +11,13 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   headers: { "Content-Type": "application/json" },
 });
 
-describe("Werbung-Panel-Ansicht", () => {
+describe("Ad panel view", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it("bindet die Feldgestaltung gemeinsam an die Panel-Hülle", () => {
+  it("shares field styling with the panel shell", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
 
     expect(styles).toMatch(/\.inspector-form label,\s*\.content-section label,\s*\.module-stack label/);
@@ -33,7 +33,7 @@ describe("Werbung-Panel-Ansicht", () => {
   it.each([
     ["de-DE", "Automatische Ansage", "Automatische Werbepause", "Manuelle Ansage", "Manuell gestartete Werbepause", "Aktionen", "Ansagen speichern"],
     ["en-US", "Automatic announcement", "Automatic ad break", "Manual announcement", "Manually started ad break", "Actions", "Save announcements"],
-  ])("rendert Felder und Abschnitte auf %s", async (browserLanguage, automaticHeading, automaticLabel, manualHeading, manualLabel, actionsHeading, saveLabel) => {
+  ])("renders fields and sections in %s", async (browserLanguage, automaticHeading, automaticLabel, manualHeading, manualLabel, actionsHeading, saveLabel) => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ settings: {
       automatic: "Automatisch {duration}",
       manual: "Manuell {duration}",
@@ -63,7 +63,7 @@ describe("Werbung-Panel-Ansicht", () => {
     }
   });
 
-  it("zeigt Snooze ohne Scope sichtbar, deaktiviert und mit Zähler sowie Aufladezeitpunkt", async () => {
+  it("shows snooze without scope visible, disabled, with counter and refresh time", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (path.endsWith("/zeitplan")) {
@@ -96,7 +96,7 @@ describe("Werbung-Panel-Ansicht", () => {
     expect(screen.getByText(/channel:manage:ads fehlt/)).toBeInTheDocument();
   });
 
-  it("zeigt einen leeren Zeitplan ruhig und listet die letzten Werbepausen", async () => {
+  it("shows an empty schedule calmly and lists recent ad breaks", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (path.endsWith("/zeitplan")) {
@@ -126,13 +126,13 @@ describe("Werbung-Panel-Ansicht", () => {
 
     expect(await screen.findByText("Derzeit ist keine Werbung geplant.")).toBeInTheDocument();
     expect(await screen.findByText(/90 Sekunden/)).toBeInTheDocument();
-    // Tests laufen in UTC (siehe package.json), damit derselbe Zeitpunkt überall
-    // gleich formatiert wird: 11:00Z bleibt 11:00 statt zur Zeitzone der Maschine
-    // zu wandern.
+    // Tests run in UTC (see package.json), so the same timestamp formats the
+    // same everywhere: 11:00Z stays 11:00 instead of drifting to the machine's
+    // timezone.
     expect(screen.getByText(/11:00/)).toBeInTheDocument();
   });
 
-  it("behandelt eine geleerte Vorlaufzeit als Feldfehler statt als null", async () => {
+  it("treats a cleared lead time as a field error, not null", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const path = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (path.endsWith("/zeitplan")) return Promise.resolve(jsonResponse({

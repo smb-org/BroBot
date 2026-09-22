@@ -30,8 +30,8 @@ export const eventSubMessageCutoff = (
 ): string => new Date(
   Date.parse(now) - replayWindowMs * EVENTSUB_REPLAY_RETENTION_FACTOR,
 ).toISOString();
-// Twitch-Nutzkörper sind klein; 64 KiB lässt viel Reserve für Metadaten und
-// verhindert trotzdem, dass der unauthentifizierte Eingang beliebig wächst.
+// Twitch payloads are small; 64 KiB leaves plenty of headroom for metadata
+// while still preventing the unauthenticated input from growing unbounded.
 export const EVENTSUB_MAX_BODY_BYTES = 64 * 1024;
 export const EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MS = 30 * 1000;
 
@@ -47,7 +47,7 @@ const decodeHex = (value: string): Uint8Array => {
   return bytes;
 };
 
-/** Vergleicht genau gleich lange Bytefolgen ohne Abbruch beim ersten Treffer. */
+/** Compares byte sequences of equal length without breaking off at the first difference. */
 export const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
   const length = Math.max(left.byteLength, right.byteLength);
   let difference = left.byteLength ^ right.byteLength;
@@ -58,9 +58,9 @@ export const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean 
 };
 
 /**
- * Prüft eine Twitch-Signatur mit jedem Schlüssel des Rings. Auch nach einem
- * Treffer werden die übrigen Schlüssel geprüft, damit die Laufzeit nicht vom
- * aktiven Schlüssel abhängt.
+ * Verifies a Twitch signature against every key in the ring. Even after a
+ * match, the remaining keys are still checked, so the runtime doesn't
+ * depend on which key is the active one.
  */
 export const verifyEventSubSignature = async (
   messageId: string,
@@ -87,7 +87,7 @@ export const verifyEventSubSignature = async (
   return validFormat && matched;
 };
 
-/** Liest RFC3339 einschließlich der von Twitch verwendeten Nanosekunden. */
+/** Parses RFC3339 including the nanosecond fractions Twitch uses. */
 export const parseEventSubTimestamp = (value: string): number | null => {
   const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
   if (match === null) return null;
@@ -176,9 +176,10 @@ const subscriptionRecord = (
 };
 
 /**
- * Liest Kanal und Abo-Typ aus der geprüften Benachrichtigung. Der Kanal kommt
- * ausschließlich aus der Bedingung des Abos und nie aus dem Ereignisrumpf —
- * sonst könnte ein fremder Kanal in unseren hineinschreiben.
+ * Reads the channel and subscription type from the verified notification.
+ * The channel comes exclusively from the subscription's condition and
+ * never from the event body — otherwise a foreign channel could write
+ * into ours.
  */
 const notificationTarget = (body: Record<string, unknown>): {
   channelId: string;
@@ -289,9 +290,9 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   const target = notificationTarget(body);
   if (target === null) return response("Ungültige EventSub-Benachrichtigung.", 400);
 
-  // Bewusst abgewartet statt im Hintergrund: Ein Chat-Aufruf ist kurz, und so
-  // ist der Ausgang in Tests sichtbar. Sollte die Verteilung später länger
-  // dauern, gehört sie hinter die Antwort.
+  // Deliberately awaited instead of run in the background: a chat call is
+  // short, and this keeps the outcome visible in tests. If dispatch later
+  // takes longer, it belongs after the response.
   await dispatchEventSubNotification(context.env, {
     channelId: target.channelId,
     subscriptionType: target.subscriptionType,

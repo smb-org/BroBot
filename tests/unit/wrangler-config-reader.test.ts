@@ -6,13 +6,13 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-// @ts-expect-error Das gemeinsame Konfigurationsmodul ist ein ausführbares ESM-Skript.
+// @ts-expect-error The shared configuration module is an executable ESM script.
 import { readWranglerConfig } from "../../scripts/read-wrangler-config.mjs";
 
 const readWranglerConfigTyped = readWranglerConfig as unknown as (configPath: string) => Promise<unknown>;
 
-describe("gemeinsamer Wrangler-Konfigurationsleser", () => {
-  it("akzeptiert nachgestellte Kommentare und überzählige Kommas wie Wrangler", async () => {
+describe("shared Wrangler config reader", () => {
+  it("accepts trailing comments and trailing commas like Wrangler", async () => {
     const directory = mkdtempSync(path.join(os.tmpdir(), "brobot-wrangler-config-"));
     const configPath = path.join(directory, "wrangler.jsonc");
     writeFileSync(configPath, `{

@@ -55,9 +55,9 @@ export class TestD1Database {
 
   public constructor() {
     this.sqlite.exec("PRAGMA foreign_keys = ON");
-    // Die Dateien werden gelesen statt aufgezaehlt: eine Namensliste im Test
-    // laeuft dem Verzeichnis irgendwann hinterher, und das faellt erst auf,
-    // wenn eine Migration stillschweigend nicht mitlaeuft.
+    // Files are read rather than enumerated: a name list in the test
+    // eventually falls behind the directory, and that only surfaces
+    // when a migration silently fails to run.
     const verzeichnis = resolve(import.meta.dirname, "../../migrations");
     for (const datei of readdirSync(verzeichnis).filter((name) => name.endsWith(".sql")).sort()) {
       this.sqlite.exec(readFileSync(resolve(verzeichnis, datei), "utf8"));

@@ -35,12 +35,12 @@ const requestForPath = async (userId: string, path: string): Promise<Request> =>
 const requestFor = async (userId: string, channelId: string, moduleId: string): Promise<Request> =>
   requestForPath(userId, `/auth/channels/${channelId}/broadcaster-scopes/${moduleId}`);
 
-describe("Broadcaster-Scope-Route", () => {
+describe("broadcaster scope route", () => {
   let database: TestD1Database;
 
   afterEach(() => { database.close(); });
 
-  it("fragt die Scopes eines ausgeschalteten Registry-Moduls an", async () => {
+  it("requests the scopes of a disabled registry module", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a");
@@ -60,7 +60,7 @@ describe("Broadcaster-Scope-Route", () => {
     ).first()).resolves.toEqual({ redirect_path: "/channels/kanal-a/modules/ads" });
   });
 
-  it("zieht keine Scopes aus fremden Kanälen in den Zustimmungsdialog", async () => {
+  it("doesn't pull scopes from other channels into the consent dialog", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
@@ -82,7 +82,7 @@ describe("Broadcaster-Scope-Route", () => {
   it.each([
     "/auth/channels/kanal-a/channel-bot",
     "/auth/channels/kanal-a/broadcaster-scopes/ads",
-  ])("weist ein Broadcaster-Mitglied ohne Kanalinhaber-Identität auf %s ab", async (path) => {
+  ])("rejects a broadcaster member without the channel-owner identity on %s", async (path) => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "zweites-konto");
@@ -99,7 +99,7 @@ describe("Broadcaster-Scope-Route", () => {
       .resolves.toEqual({ count: 0 });
   });
 
-  it("liefert für ein unbekanntes Registry-Modul 404 ohne Autorisierung", async () => {
+  it("returns 404 for an unknown registry module without authorization", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a");
@@ -116,7 +116,7 @@ describe("Broadcaster-Scope-Route", () => {
   it.each([
     "manager",
     "operator",
-  ] as const)("verweigert %s den Broadcaster-Zustimmungsweg auch für einen fremden Kanal", async (role) => {
+  ] as const)("denies %s the broadcaster consent path, even for a different channel", async (role) => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");

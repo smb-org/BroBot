@@ -81,7 +81,7 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
 const eventMetadata = (code: string) =>
   Object.prototype.hasOwnProperty.call(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
 
-/** Dieselbe Herkunftslogik wie die Ereignisroute: Betrieb ist Moduldiagnose. */
+/** Same origin logic as the event route: operational entries are module diagnostics. */
 export const realtimeHintMatchesFilters = (
   hint: RealtimeEventLogHint,
   filters: PanelEventFilters,
@@ -259,7 +259,7 @@ export const useRealtimeEventFeed = ({
       try {
         socket?.close(1008, "Fremder Kanal");
       } catch {
-        // Der Socket kann zwischen Empfang und close bereits geschlossen worden sein.
+        // The socket may already be closed between receipt and close.
       }
     };
 
@@ -348,7 +348,7 @@ export const useRealtimeEventFeed = ({
       try {
         socket?.close(1000, "Panel verlassen");
       } catch {
-        // Der Socket kann bereits geschlossen sein.
+        // The socket may already be closed.
       }
     };
   }, [channelId, clearPending, scheduleBatch, updatePendingCount]);

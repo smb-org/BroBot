@@ -108,25 +108,25 @@ const eventMessage: RealtimeEnvelope<"event_log.new"> = {
   payload: { entries: [] },
 };
 
-describe("ChannelObject-Realtime-Strecke", () => {
+describe("ChannelObject realtime path", () => {
   afterEach(() => {
     vi.useRealTimers();
     mocks.processAdPrewarning.mockClear();
   });
 
-  it("weist einen Aufbau ohne Prinzipal mit 403 ab", () => {
+  it("rejects a connection without a principal with 403", () => {
     const object = objectFor([]);
 
     expect(object.fetch(upgradeRequest()).status).toBe(403);
   });
 
-  it("weist einen Prinzipal für einen fremden Kanal mit 403 ab", () => {
+  it("rejects a principal for a foreign channel with 403", () => {
     const object = objectFor([]);
 
     expect(object.fetch(upgradeRequest(gueltigerPrinzipal({ channelId: "kanal-b" }))).status).toBe(403);
   });
 
-  it("weist eine Veröffentlichung für einen fremden Kanal ab", () => {
+  it("rejects a publish for a foreign channel", () => {
     const object = objectFor([]);
 
     expect(() => {
@@ -134,7 +134,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     }).toThrow(/fremden Kanal/);
   });
 
-  it("sendet an eine abgelaufene Verbindung nichts mehr", () => {
+  it("sends nothing more to an expired connection", () => {
     const abgelaufen = socketFor(gueltigerPrinzipal({ expiresAt: "2000-01-01T00:00:00.000Z" }));
     const gueltig = socketFor(gueltigerPrinzipal({ userId: "user-2", sessionId: "session-2" }));
     const object = objectFor([abgelaufen, gueltig]);
@@ -146,7 +146,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     expect(gueltig.send.mock.calls).toHaveLength(1);
   });
 
-  it("widerruft nur die Verbindung des betroffenen Nutzers", async () => {
+  it("revokes only the connection of the affected user", async () => {
     const betroffener = socketFor(gueltigerPrinzipal());
     const anderer = socketFor(gueltigerPrinzipal({ userId: "user-2", sessionId: "session-2" }));
     const object = objectFor([betroffener, anderer]);
@@ -157,7 +157,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     expect(anderer.close.mock.calls).toHaveLength(0);
   });
 
-  it("hält zwei Fristen getrennt, arbeitet die frühere ab und behält die spätere", async () => {
+  it("keeps two deadlines separate, processes the earlier one and keeps the later one", async () => {
     vi.useFakeTimers();
     const jetzt = Date.parse("2026-09-21T12:00:00.000Z");
     vi.setSystemTime(jetzt);
@@ -182,7 +182,7 @@ describe("ChannelObject-Realtime-Strecke", () => {
     expect(storage.deleteAlarm).toHaveBeenCalled();
   });
 
-  it("führt die Sicherheitsrunde auch mit offener Vorwarnungsfrist aus", async () => {
+  it("runs the security round even with an open pre-warning deadline", async () => {
     vi.useFakeTimers();
     const jetzt = Date.parse("2026-09-21T12:00:00.000Z");
     vi.setSystemTime(jetzt);

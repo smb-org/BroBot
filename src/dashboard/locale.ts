@@ -35,9 +35,9 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
 };
 
 /**
- * Die Sprache des Panels, abgeleitet aus dem Browser (Entscheidung 0007).
- * Dies ist die einzige Stelle, die sie bestimmt — eine spätere bewusste
- * Sprachwahl je Nutzer ersetzt nur diese Funktion.
+ * The panel's language, derived from the browser (decision 0007).
+ * This is the only place that determines it — a later, deliberate
+ * per-user language choice only replaces this function.
  */
 export const dashboardLanguage = (): DashboardLanguage => browserModuleLanguage();
 
@@ -546,10 +546,10 @@ export type EventCode =
   | "text_commands.ausgeloest"
   | "text_commands.deaktiviert"
   | "text_commands.berechtigung"
-  // Seit dem Wegfall der ändernden Chat-Befehle (#120) erzeugt niemand mehr
-  // diese beiden Kennungen. Sie bleiben, weil das Ereignisprotokoll seine
-  // Zeilen 14 Tage hält: Ohne Beschriftung wären bereits geschriebene
-  // Einträge im Panel nicht mehr lesbar.
+  // Since the removal of the mutating chat commands (#120), nobody generates
+  // these two codes anymore. They stay because the event log keeps its
+  // rows for 14 days: without a label, entries already written would
+  // become unreadable in the panel.
   | "text_commands.bereits_vorhanden"
   | "text_commands.nicht_berechtigt"
   | "text_commands.unbekannt"

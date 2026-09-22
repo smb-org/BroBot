@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { eventText as eventTextFor, eventToneEntries } from "../../src/dashboard/locale";
 import { eventSubName, moduleDescription, moduleName, moduleScopePurpose } from "../../src/dashboard/module-labels";
 
-describe("Werbung-Lokalisierung", () => {
+describe("ad locale", () => {
   it.each([
     ["de" as const, "Werbung", "Kündigt beginnende Werbepausen im Chat an.", "Werbepausen", "Werbepause automatisch gestartet: 30 Sekunden"],
     ["en" as const, "Ad breaks", "Announces beginning ad breaks in chat.", "Ad breaks", "Ad break automatically started: 30 seconds"],
-  ])("liefert alle sichtbaren Texte für %s", (language, name, description, eventName, eventText) => {
+  ])("delivers all visible texts for %s", (language, name, description, eventName, eventText) => {
     expect(moduleName("ads", language)).toBe(name);
     expect(moduleDescription("ads", language)).toBe(description);
     expect(eventSubName("channel.ad_break.begin", "", language)).toBe(eventName);
@@ -17,7 +17,7 @@ describe("Werbung-Lokalisierung", () => {
     );
   });
 
-  it("ordnet Ansage und Überspringen getrennten Tönen zu", () => {
+  it("assigns separate tones to announcement and skip", () => {
     expect(eventToneEntries["ads.ankuendigung"]).toMatchObject({ familie: "betrieb", tier: "gezeichnet", tone: "info", zahlSchluessel: "duration" });
     expect(eventToneEntries["ads.uebersprungen"]).toMatchObject({ familie: "betrieb", tier: "gezeichnet", tone: "warning", zahlSchluessel: null });
   });

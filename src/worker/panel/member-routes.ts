@@ -86,13 +86,13 @@ const memberResponse = (member: ChannelMemberRecord, user?: TwitchUser) => ({
 const canManageMembers = (role: ChannelRole): boolean => role !== "operator";
 
 /**
- * Nur ein Broadcaster darf die Rolle `broadcaster` vergeben oder entziehen.
- * Sonst könnte ein Verwalter ein Zweitkonto zum Broadcaster machen und danach
- * den ursprünglichen Broadcaster entfernen — der Schutz des letzten
- * Broadcasters greift dann nicht, weil zwischenzeitlich zwei existieren.
+ * Only a broadcaster may grant or revoke the `broadcaster` role. Otherwise
+ * a manager could turn a second account into a broadcaster and then remove
+ * the original broadcaster — the last-broadcaster protection wouldn't apply
+ * at that point, because two exist in the meantime.
  *
- * Diese Prüfung liefert nur die verständliche Fehlermeldung; verbindlich
- * durchgesetzt wird die Regel in der Mutation selbst.
+ * This check only produces the readable error message; the rule is
+ * authoritatively enforced in the mutation itself.
  */
 const mayAssignRole = (
   actorRole: ChannelRole,

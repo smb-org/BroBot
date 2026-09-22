@@ -12,13 +12,13 @@ vi.mock("../../src/modules/registry", () => ({
 
 import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
 
-describe("Modul-Panel-Lader", () => {
+describe("Module panel loader", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it("verweist aktive Module auf ihre eigene Unterseite", () => {
+  it("links active modules to their own subpage", () => {
     const onNavigate = vi.fn();
     render(<ModuleNavigation channelId="kanal-a" activeModules={[{ moduleId: "aktiv", settings: "{}" }]} onNavigate={onNavigate} />);
 
@@ -28,27 +28,27 @@ describe("Modul-Panel-Lader", () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "aktiv" });
   });
 
-  it("ruft den Lazy-Loader auf der Übersicht nicht auf", () => {
+  it("does not call the lazy loader on the overview", () => {
     render(<ModulePanelMount channelId="kanal-a" activeModules={[]} />);
 
     expect(screen.getByText("Keine Module aktiv.")).toBeInTheDocument();
     expect(activeLoader).not.toHaveBeenCalled();
   });
 
-  it("lädt das Panel erst auf der Modulunterseite lazy", async () => {
+  it("lazy-loads the panel only on the module subpage", async () => {
     render(<ModulePage channelId="kanal-a" moduleId="aktiv" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "aktiv", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
 
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     expect(activeLoader).toHaveBeenCalledTimes(1);
   });
 
-  it("zeigt für ein aktives Modul ohne Panel einen erklärten Zustand", () => {
+  it("shows an explained state for an active module without a panel", () => {
     render(<ModulePage channelId="kanal-a" moduleId="ohne-panel" ownRole="manager" modules={[{ id: "ohne-panel", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "ohne-panel", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
 
     expect(screen.getByText("Für dieses aktive Modul gibt es noch keine Panel-Ansicht.")).toBeInTheDocument();
   });
 
-  it("verwendet die Modulliste als Quelle und behauptet bei fehlender Übersicht nicht inaktiv", () => {
+  it("uses the module list as the source and does not claim inactive when the overview is missing", () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
@@ -64,7 +64,7 @@ describe("Modul-Panel-Lader", () => {
     expect(screen.getByText("Module werden geladen …")).toBeInTheDocument();
   });
 
-  it("navigiert beim Tippen auf eine Rastertaste, ohne beim Tippen zu schalten", () => {
+  it("navigates on tapping a grid tile without toggling on tap", () => {
     const fetcher = vi.fn<typeof fetch>();
     const onNavigate = vi.fn();
     vi.stubGlobal("fetch", fetcher);
@@ -77,7 +77,7 @@ describe("Modul-Panel-Lader", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("zeigt über der Modulüberschrift keinen Kicker", () => {
+  it("shows no kicker above the module heading", () => {
     render(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
@@ -85,7 +85,7 @@ describe("Modul-Panel-Lader", () => {
     expect(screen.queryByRole("complementary", { name: "Eigenschaften-Inspektor" })).not.toBeInTheDocument();
   });
 
-  it("zeigt dem Bediener den deaktivierten Detail-Schalter mit Grund an", () => {
+  it("shows the operator the disabled detail switch with a reason", () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
@@ -101,7 +101,7 @@ describe("Modul-Panel-Lader", () => {
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.")).toBeInTheDocument();
   });
 
-  it("zeigt das Modulsymbol im Detailkopf; die Brotkrume liegt in der Kopfleiste", () => {
+  it("shows the module icon in the detail header; the breadcrumb lives in the top bar", () => {
     render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"
@@ -116,7 +116,7 @@ describe("Modul-Panel-Lader", () => {
     expect(document.querySelector(".module-detail__icon .module-glyph")).toBeInTheDocument();
   });
 
-  it("zeigt unbekannte und deaktivierte Modul-IDs auf der Detailseite verständlich", () => {
+  it("shows unknown and disabled module IDs understandably on the detail page", () => {
     const { rerender } = render(<ModulePage
       channelId="kanal-a"
       moduleId="aktiv"

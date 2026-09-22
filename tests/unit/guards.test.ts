@@ -118,7 +118,7 @@ const makeRequest = async (
   return new Request(`https://brobot.example${path}`, init);
 };
 
-describe("kanalgebundener Routen-Guard", () => {
+describe("channel-scoped route guard", () => {
   let database: TestD1Database;
   let environment: GuardEnvironment;
 
@@ -137,7 +137,7 @@ describe("kanalgebundener Routen-Guard", () => {
     database.close();
   });
 
-  it("liefert die Datenbankrolle und ignoriert eine Rolle aus dem Request-Body", async () => {
+  it("returns the database role and ignores a role from the request body", async () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
 
     const response = await app.fetch(await makeRequest(environment), environment);
@@ -146,7 +146,7 @@ describe("kanalgebundener Routen-Guard", () => {
     await expect(response.json()).resolves.toEqual({ role: "operator" });
   });
 
-  it("lehnt fehlenden CSRF-Schutz vor dem Handler ab", async () => {
+  it("rejects missing CSRF protection before the handler", async () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
 
     const response = await app.fetch(await makeRequest(environment, undefined, false), environment);
@@ -154,7 +154,7 @@ describe("kanalgebundener Routen-Guard", () => {
     expect(response.status).toBe(403);
   });
 
-  it("lehnt einen falschen CSRF-Header trotz gültiger Session ab", async () => {
+  it("rejects an incorrect CSRF header despite a valid session", async () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     const request = await makeRequest(environment);
     const headers = new Headers(request.headers);
@@ -165,7 +165,7 @@ describe("kanalgebundener Routen-Guard", () => {
     expect(response.status).toBe(403);
   });
 
-  it("lässt einen Betreiber mit Sitzung durch und setzt nur Sitzung und Akteur", async () => {
+  it("lets an operator with a session through and sets only session and actor", async () => {
     await insertSession(database, "26876135");
     environment.BETREIBER_USER_IDS = '["26876135"]';
 
@@ -183,7 +183,7 @@ describe("kanalgebundener Routen-Guard", () => {
     });
   });
 
-  it("weist einen Nicht-Betreiber mit 403 und klarer Meldung ab", async () => {
+  it("rejects a non-operator with 403 and a clear message", async () => {
     environment.BETREIBER_USER_IDS = '["26876135"]';
 
     const response = await app.fetch(
@@ -195,7 +195,7 @@ describe("kanalgebundener Routen-Guard", () => {
     await expect(response.text()).resolves.toBe("Kein Betreiberzugang.");
   });
 
-  it("lässt einen Betreiber ohne Mitgliedszeile auf der Kanalroute nicht durch", async () => {
+  it("doesn't let an operator without a member row through on the channel route", async () => {
     await insertSession(database, "26876135");
     environment.BETREIBER_USER_IDS = '["26876135"]';
 
@@ -207,7 +207,7 @@ describe("kanalgebundener Routen-Guard", () => {
     expect(response.status).toBe(403);
   });
 
-  it("schützt eine ungewöhnliche HTTP-Methode ebenfalls mit CSRF", async () => {
+  it("also protects an unusual HTTP method with CSRF", async () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
 
     const response = await app.fetch(
@@ -218,7 +218,7 @@ describe("kanalgebundener Routen-Guard", () => {
     expect(response.status).toBe(403);
   });
 
-  it("lehnt ein Nichtmitglied, einen fremden Kanal und einen unbekannten Kanal ab", async () => {
+  it("rejects a non-member, a different channel, and an unknown channel", async () => {
     await insertMember(database, "kanal-b", "user-1", "operator");
 
     await expect(app.fetch(await makeRequest(environment), environment)).resolves.toHaveProperty("status", 403);

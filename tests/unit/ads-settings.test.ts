@@ -6,12 +6,12 @@ import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-describe("Werbung-Einstellungsdefaults", () => {
+describe("ad setting defaults", () => {
   let database: TestD1Database;
 
   afterEach(() => { database.close(); });
 
-  it("nimmt gespeichertes JSON ohne Vorwarnungsfelder mit Defaults an", async () => {
+  it("accepts stored JSON without prewarning fields, filling in defaults", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await database.prepare(

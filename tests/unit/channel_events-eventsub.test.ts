@@ -9,8 +9,8 @@ import {
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-describe("Kanalereignisse-EventSub-Ziele", () => {
-  it("erzeugt für jeden Typ die vollständige Twitch-Bedingung", () => {
+describe("channel events EventSub targets", () => {
+  it("generates the full Twitch condition for every type", () => {
     const raid = EVENTSUB_SUBSCRIPTION_DEFINITIONS.filter((definition) => definition.subscriptionType === "channel.raid");
     expect(raid.map((definition) => definition.variant)).toEqual(["incoming", "outgoing"]);
     expect(raid.map((definition) => definition.buildCondition("kanal-a", "bot-1"))).toEqual([
@@ -46,7 +46,7 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
     }
   });
 
-  it("leitet die zustimmende Identität aus der jeweiligen Bedingung ab", () => {
+  it("derives the consenting identity from the respective condition", () => {
     const moderation = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((definition) => definition.subscriptionType === "channel.moderate");
     expect(moderation?.consentingIdentityFromCondition({
       broadcaster_user_id: "200",
@@ -70,7 +70,7 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
     expect(raid?.consentingIdentityFromCondition({ to_broadcaster_user_id: "200" })).toBeNull();
   });
 
-  it("nimmt ausgeschaltete Kanalereignisse nicht in den Sollstand auf", async () => {
+  it("doesn't include disabled channel events in the target state", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -86,7 +86,7 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
     }
   });
 
-  it("nimmt bei aktiviertem Modul beide Raid-Ziele in den Sollstand auf", async () => {
+  it("includes both raid targets in the target state when the module is enabled", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -115,7 +115,7 @@ describe("Kanalereignisse-EventSub-Ziele", () => {
     }
   });
 
-  it("erzeugt für ein ausgeschaltetes Modul keine neuen Moderationsziele", async () => {
+  it("generates no new moderation targets for a disabled module", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");

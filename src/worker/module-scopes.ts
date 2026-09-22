@@ -4,9 +4,9 @@ import type { BotModule } from "../modules/contract";
 import { LOGIN_SCOPES } from "./auth/oauth";
 
 /**
- * Der Vollumfang stammt aus 0009 Abschnitt 7 und wird dort gepflegt. Die
- * Liste bleibt vollständig, auch solange einzelne Scopes noch keinem Modul
- * zugeordnet sind.
+ * The full scope set comes from 0009 section 7 and is maintained there. The
+ * list stays complete even while individual scopes aren't yet assigned to
+ * any module.
  */
 export const VOLLUMFANG_BROADCASTER_SCOPES = [
   "channel:read:ads",
@@ -39,7 +39,7 @@ interface IdentityScopeRow {
 
 const unique = (scopes: readonly string[]): string[] => [...new Set(scopes)];
 
-/** Ermittelt den abgeleiteten Vollumfang für markierte Kanäle. */
+/** Determines the derived full scope set for flagged channels. */
 export const listAllBroadcasterScopes = (): string[] => unique([
   ...LOGIN_SCOPES,
   ...MODULES.flatMap((module) => declaredScopes(module)),
@@ -92,7 +92,7 @@ export const moduleHasRequiredBroadcasterScopes = (
   return declaredScopes(module).every((scope) => granted.has(scope));
 };
 
-/** Ermittelt alle Zusatz-Scopes aus aktivierten Modulen eigener Broadcaster-Kanäle. */
+/** Determines all extra scopes from enabled modules of the user's own broadcaster channels. */
 export const listRequiredBroadcasterScopesForUser = async (
   db: D1Database,
   userId: string,
@@ -112,7 +112,7 @@ export const listRequiredBroadcasterScopesForUser = async (
   return unique(rows.results.flatMap((row) => declaredScopes(modules.get(row.module_id))));
 };
 
-/** Ergänzt die bereits benötigten Scopes um das angeforderte Registry-Modul. */
+/** Adds the requested registry module's scopes to the already-required ones. */
 export const listRequiredBroadcasterScopesForUserAndModule = async (
   db: D1Database,
   userId: string,
@@ -124,7 +124,7 @@ export const listRequiredBroadcasterScopesForUserAndModule = async (
 
 export const moduleScopeRequirement = (module: BotModule): string[] => declaredScopes(module);
 
-/** Scopes, die ein Modul für optionale Bedienhandlungen kennt. */
+/** Scopes a module knows about for optional operator actions. */
 export const moduleOptionalBroadcasterScopes = (module: BotModule): string[] =>
   module.id === "ads" ? [...ADS_OPTIONAL_BROADCASTER_SCOPES] : [];
 

@@ -6,15 +6,15 @@ import { getAppAccessToken } from "./app-token";
 const SHOUTOUT_URL = "https://api.twitch.tv/helix/chat/shoutouts";
 
 /**
- * Twitch erwartet auf den EventSub-Webhook eine Antwort in zehn Sekunden, und
- * dieser Aufruf wird dort abgewartet (`dispatch.ts`). Ohne Zeitlimit kostet ein
- * haengender Helix-Aufruf das Abo. Faellt weg, sobald der Helix-Wrapper kommt.
+ * Twitch expects a response to the EventSub webhook within ten seconds, and
+ * this call is awaited there (`dispatch.ts`). Without a timeout, a hanging
+ * Helix call costs the subscription. Goes away once the Helix wrapper lands.
  */
 const HELIX_REQUEST_TIMEOUT_MS = 5_000;
 
 export interface ShoutoutSendResult {
   sent: boolean;
-  /** Maschinenlesbarer Grund, wenn der Versuch nicht erfolgreich war. */
+  /** Machine-readable reason when the attempt was not successful. */
   reason: string | null;
   detail: Readonly<Record<string, string | number | boolean | null>>;
 }
@@ -63,8 +63,8 @@ export const sendShoutout = async (
   }
 
   const url = new URL(SHOUTOUT_URL);
-  // Absender ist der eigene Kanal, Empfaenger der Quellkanal des Raids.
-  // Vertauscht wuerde Twitch mit 401 antworten: Der Bot ist dort kein Moderator.
+  // Sender is the bot's own channel, recipient is the raid's source channel.
+  // Swapped, Twitch would respond with 401: the bot isn't a moderator there.
   url.searchParams.set("from_broadcaster_id", channelId);
   url.searchParams.set("to_broadcaster_id", targetChannelId);
   url.searchParams.set("moderator_id", identity.userId);

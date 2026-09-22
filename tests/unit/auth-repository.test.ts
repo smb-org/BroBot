@@ -79,12 +79,12 @@ const freshTimestamp = (): string => new Date().toISOString();
 const timestampWithInterval = (timestamp: string, abstandMs: number): string =>
   new Date(Date.parse(timestamp) + abstandMs).toISOString();
 
-// Test-Fixtures: säen den Rohzustand direkt per SQL, weil die Rotations- und
-// CAS-Tests genau die Zeilen prüfen, die eine echte Vorbedingung erzeugen —
-// nicht das, was die Repository-Funktionen selbst schreiben würden. Nur
-// Belanglosigkeiten (User-/Login-Namen, leere Scopes) stecken als Vorgabe im
-// Helfer; Status, Ciphertexte und Zeitstempel kommen an jeder Aufrufstelle
-// explizit mit, weil sie den jeweiligen Test ausmachen.
+// Test fixtures: seed the raw state directly via SQL, because the rotation
+// and CAS tests check exactly the rows that create a real precondition —
+// not what the repository functions themselves would write. Only
+// incidentals (user/login names, empty scopes) live as defaults in the
+// helper; status, ciphertexts, and timestamps are always passed explicitly
+// at the call site, because those are what each test is actually about.
 
 interface BotIdentitaetFixture {
   userId: string;
@@ -337,12 +337,12 @@ const readChannelMember = async (
 };
 
 /**
- * Gemeinsamer Ablauf aller actorGuard-Verweigerungstests: Datenbank anlegen,
- * Ausgangszustand säen, eine mutierende Repository-Funktion unter einem
- * Akteur aufrufen, die Ablehnung prüfen und den unveränderten Endzustand
- * nachweisen. Die eine Angriffsvariante, die den jeweiligen Test ausmacht —
- * Rolle, Kanal, Zeitstempel, Ziel-Endzustand — steckt vollständig in `aufbau`,
- * `mutation` und `pruefeEndzustand` an der jeweiligen Aufrufstelle.
+ * Common flow for all actorGuard rejection tests: create the database, seed
+ * the initial state, call a mutating repository function under an actor,
+ * verify the rejection, and prove the final state is unchanged. The one
+ * attack variant that makes up each test — role, channel, timestamp, target
+ * end state — lives entirely in `aufbau`, `mutation`, and `checkFinalState`
+ * at the respective call site.
  */
 const expectRejectedGuardMutation = async (
   aufbau: (database: TestD1Database, jetzt: string) => Promise<void>,
@@ -360,9 +360,9 @@ const expectRejectedGuardMutation = async (
   }
 };
 
-// Schmale Wrapper um die Rotationsaufrufe: benannte Felder statt langer
-// Positionsargumentlisten, damit an der Aufrufstelle erkennbar bleibt, welcher
-// Wert der erwartete (CAS-)Ist-Zustand und welcher der neue Soll-Zustand ist.
+// Thin wrappers around the rotation calls: named fields instead of long
+// positional argument lists, so the call site makes clear which value is the
+// expected (CAS) current state and which is the new target state.
 
 interface RotateBotTokensFields {
   expectedAccessTokenCiphertext: string;
@@ -412,8 +412,8 @@ const rotateLoginTokens = (
   felder.expectedUpdatedAt,
 );
 
-describe("Auth-D1-Repository", () => {
-  it("legt eine nachvollziehbare Session an und liest sie zurück", async () => {
+describe("auth D1 repository", () => {
+  it("creates a traceable session and reads it back", async () => {
     const database = new TestD1Database();
     const record = {
       sessionId: "session-1",
@@ -434,7 +434,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("verbraucht eine OAuth-Transaktion nur einmal anhand des gespeicherten Zustands", async () => {
+  it("consumes an OAuth transaction only once, based on the stored state", async () => {
     const database = new TestD1Database();
     try {
       const transaction = {
@@ -456,7 +456,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("verbraucht keine OAuth-Transaktion mit nicht parsebarem Ablaufwert", async () => {
+  it("doesn't consume an OAuth transaction with an unparseable expiry value", async () => {
     const database = new TestD1Database();
     try {
       await database.prepare(
@@ -479,7 +479,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("hinterlegt die Ursache eines fehlgeschlagenen OAuth-Rücklaufs", async () => {
+  it("records the cause of a failed OAuth callback", async () => {
     const database = new TestD1Database();
     try {
       await createOAuthTransaction(database as unknown as D1Database, {
@@ -499,7 +499,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("speichert und widerruft eine Session nachvollziehbar", async () => {
+  it("stores and revokes a session traceably", async () => {
     const database = new TestD1Database();
     try {
       const record = {
@@ -524,7 +524,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("legt eine OAuth-Transaktion an", async () => {
+  it("creates an OAuth transaction", async () => {
     const database = new TestD1Database();
     try {
       await createOAuthTransaction(database as unknown as D1Database, {
@@ -550,7 +550,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("liest die globale Bot-Identität aus der Ein-Zeilen-Tabelle", async () => {
+  it("reads the global bot identity from the single-row table", async () => {
     const { database } = fakeDatabase({
       id: 1,
       user_id: "bot-user",
@@ -576,7 +576,7 @@ describe("Auth-D1-Repository", () => {
     });
   });
 
-  it("speichert Login-Tokens getrennt von der Session und listet sie", async () => {
+  it("stores login tokens separately from the session and lists them", async () => {
     const database = new TestD1Database();
     const identity = {
       userId: "user-1",
@@ -610,7 +610,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("verwirft veraltete Token-Scopes nach einer zwischenzeitlichen Login-Rotation", async () => {
+  it("discards stale token scopes after an intervening login rotation", async () => {
     const database = new TestD1Database();
     try {
       await saeeLoginIdentitaet(database, { tokenScopesJson: "[\"aktuell\"]" });
@@ -637,7 +637,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("füllt nach einem parallelen Widerruf keine Token-Scopes wieder auf", async () => {
+  it("doesn't refill token scopes after a concurrent revocation", async () => {
     const database = new TestD1Database();
     try {
       await saeeLoginIdentitaet(database, { tokenScopesJson: "[\"aktuell\"]" });
@@ -666,7 +666,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("aktualisiert die Bot-Identität über id = 1", async () => {
+  it("updates the bot identity via id = 1", async () => {
     const database = new TestD1Database();
     try {
       await upsertBotIdentity(database as unknown as D1Database, {
@@ -691,7 +691,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("merkt den globalen Verbindungsstatus mit Ursache", async () => {
+  it("records the global connection status with a cause", async () => {
     const database = new TestD1Database();
     try {
       await setBotIdentityStatus(database as unknown as D1Database, "revoked", "invalid_grant", "2026-09-18T03:00:00.000Z");
@@ -706,7 +706,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("liest und speichert den Moderatorstatus je Kanal", async () => {
+  it("reads and stores moderator status per channel", async () => {
     const database = new TestD1Database();
     try {
       await database.prepare(
@@ -739,13 +739,13 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("liefert die freigegebenen Kanal-IDs für den Moderatorabgleich", async () => {
+  it("returns the approved channel IDs for the moderator sync", async () => {
     const { database } = fakeDatabase();
 
     await expect(listChannelIds(database)).resolves.toEqual(["channel-1"]);
   });
 
-  it("legt den globalen App-Token per CAS nur einmal an", async () => {
+  it("creates the global app token via CAS only once", async () => {
     const database = new TestD1Database();
     const db = database as unknown as D1Database;
 
@@ -774,7 +774,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("aktualisiert den App-Token nur mit dem erwarteten Ciphertext", async () => {
+  it("updates the app token only with the expected ciphertext", async () => {
     const database = new TestD1Database();
     const db = database as unknown as D1Database;
 
@@ -813,7 +813,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("räumt abgelaufene OAuth-Transaktionen auf", async () => {
+  it("cleans up expired OAuth transactions", async () => {
     const database = new TestD1Database();
     try {
       const insert = database.prepare(
@@ -838,7 +838,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("ersetzt den Bot-Access-Token nur einmal mit dem echten SQLite-CAS", async () => {
+  it("replaces the bot access token only once with the real SQLite CAS", async () => {
     const database = new TestD1Database();
     try {
       await saeeBotIdentitaet(database);
@@ -873,7 +873,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("ändert den Botstatus bei einer zweiten Rotation mit veraltetem Access-Ciphertext nicht", async () => {
+  it("doesn't change the bot status on a second rotation with a stale access ciphertext", async () => {
     const database = new TestD1Database();
     try {
       await saeeBotIdentitaet(database);
@@ -914,7 +914,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("widerruft keine aktive Session mit veraltetem Login-Access-Ciphertext", async () => {
+  it("doesn't revoke an active session with a stale login access ciphertext", async () => {
     const database = new TestD1Database();
     try {
       await saeeLoginIdentitaet(database, {
@@ -960,7 +960,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("speichert bei einer zweiten Login-Rotation keinen neuen Access-Ciphertext", async () => {
+  it("doesn't store a new access ciphertext on a second login rotation", async () => {
     const database = new TestD1Database();
     try {
       await saeeLoginIdentitaet(database);
@@ -999,7 +999,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("stellt keine Session mit veraltetem Login-Access-Ciphertext wieder her", async () => {
+  it("doesn't restore a session with a stale login access ciphertext", async () => {
     const database = new TestD1Database();
     try {
       await saeeLoginIdentitaet(database);
@@ -1047,7 +1047,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("stellt nach einem verspäteten invalid_grant den erfolgreich gespeicherten Botstand wieder her", async () => {
+  it("restores the successfully stored bot state after a delayed invalid_grant", async () => {
     const database = new TestD1Database();
     try {
       await saeeBotIdentitaet(database);
@@ -1078,7 +1078,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("stellt nach einem verspäteten invalid_grant den Loginstand und aktive Sessions wieder her", async () => {
+  it("restores the login state and active sessions after a delayed invalid_grant", async () => {
     const database = new TestD1Database();
     try {
       await saeeLoginIdentitaet(database, { expiresAt: "2026-09-18T01:00:00.000Z" });
@@ -1114,7 +1114,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("überschreibt einen frischeren Moderatorstatus nicht durch ein verspätetes Ergebnis", async () => {
+  it("doesn't overwrite a fresher moderator status with a delayed result", async () => {
     const database = new TestD1Database();
     try {
       await database.prepare(
@@ -1144,7 +1144,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("gibt eine Sperre nur mit ihrem Besitzer frei", async () => {
+  it("releases a lock only with its owner", async () => {
     const database = new TestD1Database();
     try {
       await database.prepare(
@@ -1176,7 +1176,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("führt Identität und Botstatus in einer atomaren Batch-Operation aus", async () => {
+  it("runs identity and bot status in one atomic batch operation", async () => {
     const database = new TestD1Database();
     try {
       await saeeBotIdentitaet(database, {
@@ -1232,7 +1232,7 @@ describe("Auth-D1-Repository", () => {
     }
   });
 
-  it("verweigert INSERT, wenn die Session einem anderen Nutzer als dem Actor gehört", () =>
+  it("denies INSERT when the session belongs to a different user than the actor", () =>
     expectRejectedGuardMutation(
       (database, jetzt) => seedGuardActor(database, {
         actor: { userId: "user-b", sessionId: "session-b" },
@@ -1253,7 +1253,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert INSERT mit einer widerrufenen Session", () =>
+  it("denies INSERT with a revoked session", () =>
     expectRejectedGuardMutation(
       (database, jetzt) => seedGuardActor(database, {
         actor: { userId: "user-1", sessionId: "session-1" },
@@ -1275,7 +1275,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert UPDATE mit einer widerrufenen Session", () =>
+  it("denies UPDATE with a revoked session", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1300,7 +1300,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert DELETE mit einer widerrufenen Session", () =>
+  it("denies DELETE with a revoked session", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1326,7 +1326,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert UPDATE mit einer abgelaufenen Session", () =>
+  it("denies UPDATE with an expired session", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1350,7 +1350,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert DELETE für eine widerrufene Twitch-Identität", () =>
+  it("denies DELETE for a revoked Twitch identity", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1376,7 +1376,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert INSERT in einem anderen Kanal als dem des Actors", () =>
+  it("denies INSERT in a channel other than the actor's", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1400,7 +1400,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert INSERT für eine Rollenvergabe durch einen Verwalter", () =>
+  it("denies INSERT for a role grant by a manager", () =>
     expectRejectedGuardMutation(
       (database, jetzt) => seedGuardActor(database, {
         actor: { userId: "user-1", sessionId: "session-1" },
@@ -1421,7 +1421,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert UPDATE auf Broadcaster-Rolle durch einen Verwalter", () =>
+  it("denies UPDATE to broadcaster role by a manager", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1445,7 +1445,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert SQL-UPDATE zum Herabstufen eines Broadcasters durch einen Verwalter bei mehreren Broadcastern", () =>
+  it("denies a SQL UPDATE demoting a broadcaster by a manager when there are multiple broadcasters", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1470,7 +1470,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert SQL-DELETE eines Broadcasters durch einen Verwalter bei mehreren Broadcastern", () =>
+  it("denies a SQL DELETE of a broadcaster by a manager when there are multiple broadcasters", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1496,7 +1496,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("verweigert DELETE durch ein Mitglied ohne Verwalterrolle", () =>
+  it("denies DELETE by a member without the manager role", () =>
     expectRejectedGuardMutation(
       async (database, jetzt) => {
         await seedGuardActor(database, {
@@ -1521,7 +1521,7 @@ describe("Auth-D1-Repository", () => {
       },
     ));
 
-  it("schreibt den Betreiber als Akteur in das Audit", async () => {
+  it("writes the operator as the actor into the audit log", async () => {
     const database = new TestD1Database();
     const jetzt = freshTimestamp();
     try {

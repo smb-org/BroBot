@@ -91,7 +91,7 @@ const leseAudit = async (database: TestD1Database): Promise<Record<string, unkno
     "SELECT actor_user_id, actor_kind, action, channel_id FROM audit_log ORDER BY created_at, audit_id",
   ).all<Record<string, unknown>>()).results;
 
-describe("Betreiberebene", () => {
+describe("Platform admin level", () => {
   let database: TestD1Database;
   let environment: Env;
 
@@ -106,7 +106,7 @@ describe("Betreiberebene", () => {
     vi.unstubAllGlobals();
   });
 
-  it("weist einen Nicht-Betreiber mit 403 ab", async () => {
+  it("rejects a non-platform-admin with 403", async () => {
     await insertLoginIdentityAndSession(database, "kein-betreiber");
 
     const response = await platformRouter.fetch(
@@ -118,7 +118,7 @@ describe("Betreiberebene", () => {
     await expect(response.text()).resolves.toBe("Kein Betreiberzugang.");
   });
 
-  it("liefert die kanalübergreifende Übersicht und sucht Nutzer über Helix", async () => {
+  it("returns the cross-channel overview and searches users via Helix", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a", "Alpha");
     await insertChannel(database, "kanal-b", "Beta");
@@ -170,7 +170,7 @@ describe("Betreiberebene", () => {
     });
   });
 
-  it("legt bei der Freigabe Kanal, Broadcaster-Zeile und Betreiber-Audit in einem Batch an", async () => {
+  it("creates the channel, broadcaster row, and platform-admin audit entry in one batch on approval", async () => {
     await setPlatform(database);
     await setBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(responseFromHelix([
@@ -204,7 +204,7 @@ describe("Betreiberebene", () => {
     ]);
   });
 
-  it("führt die drei erlaubten Mitgliedermutationen mit Betreiber-Audit aus", async () => {
+  it("performs the three allowed member mutations with platform-admin audit", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
@@ -238,7 +238,7 @@ describe("Betreiberebene", () => {
     await expect(leseAudit(database)).resolves.toHaveLength(3);
   });
 
-  it("setzt und löst die Vollzustimmung mit Audit im betroffenen Kanal", async () => {
+  it("sets and clears full consent with an audit entry in the affected channel", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
 
@@ -262,7 +262,7 @@ describe("Betreiberebene", () => {
     await expect(leseAudit(database)).resolves.toHaveLength(2);
   });
 
-  it("verweigert das Setzen, Ändern und Löschen jeder Broadcaster-Zeile", async () => {
+  it("denies setting, changing, and deleting any broadcaster row", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
@@ -294,7 +294,7 @@ describe("Betreiberebene", () => {
     await expect(leseAudit(database)).resolves.toEqual([]);
   });
 
-  it("sichert die Broadcaster-Sperre zusätzlich in den SQL-Mutationen", async () => {
+  it("also enforces the broadcaster lock in the SQL mutations", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
@@ -353,7 +353,7 @@ describe("Betreiberebene", () => {
     ).bind("kanal-a").first()).resolves.toEqual({ count: 2 });
   });
 
-  it("schreibt nach einer abgelehnten Mutation keine Audit-Zeile", async () => {
+  it("writes no audit row after a denied mutation", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
@@ -384,7 +384,7 @@ describe("Betreiberebene", () => {
     ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "operator" });
   });
 
-  it("löst Mitgliedernamen über die vorhandene Helix-Auflösung auf", async () => {
+  it("resolves member names via the existing Helix resolution", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
@@ -408,7 +408,7 @@ describe("Betreiberebene", () => {
     ]);
   });
 
-  it("listet ausschließlich Betreiber-Audit kanalübergreifend und seitenweise", async () => {
+  it("lists only platform-admin audit entries across channels, paginated", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
@@ -448,7 +448,7 @@ describe("Betreiberebene", () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
-  it("löst Betreiber-Audit-Akteure gesammelt auf und behält ungelöste IDs", async () => {
+  it("resolves platform-admin audit actors in bulk and keeps unresolved ids", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");

@@ -2,9 +2,9 @@ import type { ChannelRole } from "../contracts/values";
 import { dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 
 /**
- * Rollen werden im Datenmodell klein geschrieben. In der Oberflaeche steht der
- * Begriff, nicht der Enum-Wert — an beiden Stellen derselbe, damit Panel und
- * Mitgliederliste nicht auseinanderlaufen.
+ * Roles are lowercase in the data model. The UI shows the term,
+ * not the enum value — the same one in both places, so the panel and the
+ * member list don't drift apart.
  */
 export const roleLabel = (role: ChannelRole): string => {
   return dashboardCommonTexts().rollen[role];

@@ -71,7 +71,7 @@ const scheduleBody = (nextAdAt: string | null = "2026-09-21T12:05:00Z"): string 
   }],
 });
 
-describe("Werbung-Routen", () => {
+describe("ad routes", () => {
   let database: TestD1Database;
   let appTokenCiphertext: string;
   let schedule: ReturnType<typeof vi.fn>;
@@ -108,7 +108,7 @@ describe("Werbung-Routen", () => {
     return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void);
   };
 
-  it("lässt einen Bediener snoozen und schreibt den Ausgang ins Ereignisprotokoll", async () => {
+  it("lets an operator snooze and writes the outcome to the event log", async () => {
     const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody(), { status: 200 })));
 
@@ -125,7 +125,7 @@ describe("Werbung-Routen", () => {
     expect(schedule).toHaveBeenCalled();
   });
 
-  it("trennt Snooze-Bedienung von der verwaltenden Einstellungsschwelle", async () => {
+  it("separates snooze operation from the managing settings threshold", async () => {
     const environment = await setup("operator");
     const response = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/ads/settings", "PATCH"),
@@ -135,7 +135,7 @@ describe("Werbung-Routen", () => {
     expect(response.status).toBe(403);
   });
 
-  it("stellt beim erfolgreichen Zeitplanabruf den Vorwarnungswecker neu und schreibt kein Ereignis", async () => {
+  it("re-arms the prewarning alarm on a successful schedule fetch and writes no event", async () => {
     const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody("2026-09-21T12:00:00Z"), { status: 200 })));
 
@@ -149,7 +149,7 @@ describe("Werbung-Routen", () => {
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first()).resolves.toEqual({ count: 0 });
   });
 
-  it("protokolliert einen gescheiterten Zeitplanabruf", async () => {
+  it("logs a failed schedule fetch", async () => {
     const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "Twitch nicht erreichbar" }),
@@ -167,7 +167,7 @@ describe("Werbung-Routen", () => {
     ).first()).resolves.toEqual({ code: "ads.vorwarnung.zeitplan_fehler" });
   });
 
-  it("behandelt einen leeren erfolgreichen Zeitplan ohne Ereignis", async () => {
+  it("handles an empty successful schedule without an event", async () => {
     const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody(null), { status: 200 })));
 

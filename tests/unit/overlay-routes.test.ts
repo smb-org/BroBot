@@ -127,7 +127,7 @@ const databaseWithTouchBehavior = (
   },
 } as D1Database);
 
-describe("Overlay-Routen", () => {
+describe("Overlay routes", () => {
   let database: TestD1Database;
   let environment: TestEnvironment;
 
@@ -143,9 +143,9 @@ describe("Overlay-Routen", () => {
   });
 
   it.each([
-    ["Ausgabe", issuePath, "{}"],
-    ["Widerruf", revokePath("kanal-a", "token-1"), JSON.stringify({ reason: "Test" })],
-  ])("weist %s ohne Session ab", async (_name, path, body) => {
+    ["issue", issuePath, "{}"],
+    ["revoke", revokePath("kanal-a", "token-1"), JSON.stringify({ reason: "Test" })],
+  ])("rejects %s without a session", async (_name, path, body) => {
     const response = await authRouter.fetch(new Request(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -156,9 +156,9 @@ describe("Overlay-Routen", () => {
   });
 
   it.each([
-    ["Ausgabe", issuePath, "{}"],
-    ["Widerruf", revokePath("kanal-a", "token-1"), JSON.stringify({ reason: "Test" })],
-  ])("weist %s ohne CSRF ab", async (_name, path, body) => {
+    ["issue", issuePath, "{}"],
+    ["revoke", revokePath("kanal-a", "token-1"), JSON.stringify({ reason: "Test" })],
+  ])("rejects %s without CSRF", async (_name, path, body) => {
     const response = await authRouter.fetch(new Request(path, {
       method: "POST",
       headers: await sessionHeaders(environment, false),
@@ -168,7 +168,7 @@ describe("Overlay-Routen", () => {
     expect(response.status).toBe(403);
   });
 
-  it("weist die Ausgabe eines fremden Kanals trotz Mitgliedschaft in Kanal A ab", async () => {
+  it("rejects issuing for a foreign channel despite membership in channel A", async () => {
     await insertMember(database, "kanal-a");
     await insertChannel(database, "kanal-b");
 
@@ -184,7 +184,7 @@ describe("Overlay-Routen", () => {
     expect(response.status).toBe(403);
   });
 
-  it("weist einen Bediener bei Ausgabe und Widerruf eines Overlay-Tokens ab", async () => {
+  it("rejects an operator issuing and revoking an overlay token", async () => {
     await insertMember(database);
     const issue = await authRouter.fetch(new Request(issuePath, {
       method: "POST",
@@ -208,11 +208,11 @@ describe("Overlay-Routen", () => {
   });
 
   it.each([
-    ["fehlendem Authorization-Header", undefined],
-    ["leerem Bearer-Token", "Bearer "],
-    ["ungewöhnlich kodiertem Token", "Bearer abc%2Fdef"],
-    ["syntaktisch falschem Bearer-Token", "Bearer abc.def"],
-  ])("weist den Statusabruf mit %s ab", async (_description, authorization) => {
+    ["a missing Authorization header", undefined],
+    ["an empty bearer token", "Bearer "],
+    ["an unusually encoded token", "Bearer abc%2Fdef"],
+    ["a syntactically invalid bearer token", "Bearer abc.def"],
+  ])("rejects the status fetch with %s", async (_description, authorization) => {
     const headers = authorization === undefined ? {} : { Authorization: authorization };
     const response = await authRouter.fetch(new Request(statusPath, { headers }), environment);
 
@@ -220,9 +220,9 @@ describe("Overlay-Routen", () => {
   });
 
   it.each([
-    ["Ausgabe", issuePath, "{}"],
-    ["Widerruf", revokePath("kanal-a", "token-1"), JSON.stringify({ reason: "Test" })],
-  ])("weist %s ohne Kanalmitgliedschaft ab", async (_name, path, body) => {
+    ["issue", issuePath, "{}"],
+    ["revoke", revokePath("kanal-a", "token-1"), JSON.stringify({ reason: "Test" })],
+  ])("rejects %s without channel membership", async (_name, path, body) => {
     const response = await authRouter.fetch(new Request(path, {
       method: "POST",
       headers: await sessionHeaders(environment, true),
@@ -232,7 +232,7 @@ describe("Overlay-Routen", () => {
     expect(response.status).toBe(403);
   });
 
-  it("gibt eine Fragment-URL auf dem kanonischen Auslieferungspfad aus und liefert die Deployment-Version aus dem Status", async () => {
+  it("issues a fragment URL on the canonical delivery path and returns the deployment version from status", async () => {
     await insertMember(database);
     const response = await authRouter.fetch(new Request(issuePath, {
       method: "POST",
@@ -258,7 +258,7 @@ describe("Overlay-Routen", () => {
     expect(status.status).toBe(200);
   });
 
-  it("liefert die am Kanal gespeicherte Sprache im Overlay-Status", async () => {
+  it("returns the language stored on the channel in the overlay status", async () => {
     await insertMember(database);
     await database.prepare("UPDATE channels SET language = ? WHERE channel_id = ?")
       .bind("en", "kanal-a").run();
@@ -275,7 +275,7 @@ describe("Overlay-Routen", () => {
     await expect(response.json()).resolves.toMatchObject({ language: "en" });
   });
 
-  it("akzeptiert einen optionalen zukünftigen Ablauf und weist einen vergangenen ab", async () => {
+  it("accepts an optional future expiry and rejects a past one", async () => {
     await insertMember(database);
     const valid = await authRouter.fetch(new Request(issuePath, {
       method: "POST",
@@ -294,7 +294,7 @@ describe("Overlay-Routen", () => {
     expect(invalid.status).toBe(400);
   });
 
-  it("stellt bei Ablauf der Session während der Übertragung kein Token aus", async () => {
+  it("issues no token if the session expires during the transfer", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-09-21T00:00:00.000Z"));
@@ -355,7 +355,7 @@ describe("Overlay-Routen", () => {
     }
   });
 
-  it("weist einen abgelaufenen Token auf Routenebene ab", async () => {
+  it("rejects an expired token at the route level", async () => {
     await insertMember(database);
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
@@ -373,7 +373,7 @@ describe("Overlay-Routen", () => {
     expect(response.status).toBe(401);
   });
 
-  it("weist einen widerrufenen Token auf Routenebene ab", async () => {
+  it("rejects a revoked token at the route level", async () => {
     await insertMember(database);
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
@@ -395,7 +395,7 @@ describe("Overlay-Routen", () => {
     expect(response.status).toBe(401);
   });
 
-  it("weist einen Token nach dem Löschen seines Kanals auf Routenebene ab", async () => {
+  it("rejects a token at the route level after its channel is deleted", async () => {
     await insertMember(database);
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
@@ -412,9 +412,9 @@ describe("Overlay-Routen", () => {
   });
 
   it.each([
-    ["fehlgeschlagenen", "reject" as const],
-    ["konkurrierenden", "concurrent" as const],
-  ])("liefert den Status trotz %s last_used_at-Update weiter", async (_description, behavior) => {
+    ["failed", "reject" as const],
+    ["concurrent", "concurrent" as const],
+  ])("still returns status despite a %s last_used_at update", async (_description, behavior) => {
     await insertMember(database);
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
@@ -431,7 +431,7 @@ describe("Overlay-Routen", () => {
     await expect(response.json()).resolves.toEqual({ version: "version-2026-09-18", language: "de" });
   });
 
-  it("widerruft genau den Token des angegebenen Kanals", async () => {
+  it("revokes exactly the token of the specified channel", async () => {
     await insertMember(database);
     await insertChannel(database, "kanal-b");
     await insertMember(database, "kanal-b");

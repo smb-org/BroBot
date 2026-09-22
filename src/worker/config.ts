@@ -11,14 +11,14 @@ export const REQUIRED_SECRET_NAMES = [
   "BETREIBER_USER_IDS",
 ] as const;
 
-// Wrangler führt die angewandten Dateinamen in d1_migrations. Dadurch muss
-// nicht die komplette Tabelle-zu-Migration-Liste dupliziert werden; nur der
-// aktuelle Release-Sentinel ändert sich, wenn eine neue Migration hinzukommt.
+// Wrangler tracks the applied filenames in d1_migrations. This means the
+// full table-to-migration list never needs duplicating; only the current
+// release sentinel changes when a new migration is added.
 //
-// Die Konstante von Hand nachzuziehen ist die Stelle, an der es schiefgeht:
-// vergisst man sie, meldet /healthz eine frisch aufgesetzte Datenbank als
-// kaputt (503), obwohl alles stimmt. `tests/unit/schema-baseline.test.ts`
-// hält sie deshalb an der letzten Datei in `migrations/`.
+// Manually keeping the constant in sync is where this breaks: forget to
+// update it and /healthz reports a freshly set-up database as broken (503)
+// even though everything is fine. `tests/unit/schema-baseline.test.ts`
+// therefore pins it to the last file in `migrations/`.
 export const LATEST_SCHEMA_MIGRATION = "0000_baseline.sql";
 export const LATEST_SCHEMA_TABLE = "twitch_login_identity";
 
@@ -113,7 +113,7 @@ const getMissingSchema = async (env: Env): Promise<string[]> => {
       schema.latest_table_count > 0
     ) return [];
   } catch {
-    // Eine fehlende Migrationstabelle oder nicht erreichbares D1 ist ein Schemafehler.
+    // A missing migration table or unreachable D1 counts as a schema error.
   }
 
   return ["DB_SCHEMA"];

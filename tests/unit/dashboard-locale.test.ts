@@ -8,26 +8,26 @@ const setBrowserLanguage = (language: string): void => {
   Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
 };
 
-describe("Dashboard-Locale", () => {
+describe("dashboard locale", () => {
   afterEach(() => {
     setBrowserLanguage("de-DE");
   });
 
-  it("bestimmt die Panel-Sprache aus der Browsersprache", () => {
+  it("determines the panel language from the browser language", () => {
     setBrowserLanguage("en-US");
 
     expect(dashboardLanguage()).toBe("en");
     expect(roleLabel("manager")).toBe("Manager");
   });
 
-  it("verwendet Deutsch für deutsche Browser", () => {
+  it("uses German for German browsers", () => {
     setBrowserLanguage("de-AT");
 
     expect(dashboardLanguage()).toBe("de");
     expect(roleLabel("operator")).toBe("Bediener");
   });
 
-  it("löst Ereignistexte mit Detail auf und behält feste Texte bei", () => {
+  it("resolves event texts with detail and keeps fixed texts intact", () => {
     setBrowserLanguage("de-DE");
 
     expect(eventText("text_commands.ausgeloest", { name: "wiki" })).toBe("Befehl !wiki ausgeführt");
@@ -40,7 +40,7 @@ describe("Dashboard-Locale", () => {
     expect(eventText("host.chat.gesendet", { name: "wiki" })).toBe("Chat-Nachricht gesendet");
   });
 
-  it("liefert die englischen Detailtexte", () => {
+  it("returns the English detail texts", () => {
     setBrowserLanguage("en-US");
 
     expect(eventText("text_commands.ausgeloest", { name: "wiki" })).toBe("Command !wiki executed");
@@ -51,7 +51,7 @@ describe("Dashboard-Locale", () => {
     expect(eventText("text_commands.berechtigung", { name: "wiki", requiredTier: "moderator", currentTier: ["viewer"] })).toBe("Command !wiki not executed: minimum level moderators, present viewer");
   });
 
-  it("unterscheidet abgeschalteten Shoutout von der Schwelle", () => {
+  it("distinguishes a disabled shoutout from the threshold", () => {
     setBrowserLanguage("de-DE");
     expect(eventText("shoutout.unterdrueckt", { reason: "abgeschaltet" })).toBe("Shoutout abgeschaltet");
     expect(eventText("shoutout.unterdrueckt", { reason: "unter_schwelle", viewers: 2, threshold: 3 }))
@@ -63,7 +63,7 @@ describe("Dashboard-Locale", () => {
       .toBe("Shoutout below threshold (2 of 3 viewers)");
   });
 
-  it("rendert Moderationsdetails zweisprachig mit Bedeutungston", () => {
+  it("renders moderation details bilingually with a meaning-carrying tone", () => {
     setBrowserLanguage("de-DE");
     expect(eventText("channel_events.moderation.timeout", {
       person: "Alice", moderator: "Mod", duration: 300, reason: "Spam",
@@ -77,7 +77,7 @@ describe("Dashboard-Locale", () => {
     expect(eventText("channel_events.moderation.unbekannt", { action: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
   });
 
-  it("führt für jeden bekannten Ereigniscode Familie, Stufe, Wort und Zahl-Schlüssel", () => {
+  it("carries family, tier, word, and number key for every known event code", () => {
     const codes: EventCode[] = [
       "host.aktion.fehler", "host.chat.fehlgeschlagen", "host.chat.gesendet", "host.modul.fehler",
       "host.modul.unbekannt", "host.overlay.nicht_ausgefuehrt", "host.shoutout.fehlgeschlagen", "host.shoutout.gesendet", "channel_events.raid.incoming",
@@ -114,7 +114,7 @@ describe("Dashboard-Locale", () => {
     }
   });
 
-  it("benennt EventSub-Abos im Panel zweisprachig", () => {
+  it("names EventSub subscriptions bilingually in the panel", () => {
     setBrowserLanguage("de-DE");
     expect(eventSubName("channel.moderate")).toBe("Moderationsereignisse");
     expect(eventSubName("automod.message.hold")).toBe("AutoMod-Haltevorgänge");
@@ -128,7 +128,7 @@ describe("Dashboard-Locale", () => {
     expect(eventSubName("channel.suspicious_user.update")).toBe("Suspicious user classifications");
   });
 
-  it("rendert AutoMod- und Verdachtsereignisse zweisprachig mit ihrem Bedeutungston", () => {
+  it("renders AutoMod and suspicious-user events bilingually with their meaning-carrying tone", () => {
     setBrowserLanguage("de-DE");
     expect(eventText("channel_events.automod.halte", {
       person: "Alice", reason: "aggressive", text: "Nachricht",

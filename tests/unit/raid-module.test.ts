@@ -27,8 +27,8 @@ const eingehenderRaid = (viewers: number): Record<string, unknown> => ({
   viewers,
 });
 
-describe("Raid-Modul", () => {
-  it("setzt alte gespeicherte Schwellen still auf die neuen Defaults zurück", () => {
+describe("Raid module", () => {
+  it("silently resets old stored thresholds to the new defaults", () => {
     expect(raidSettingsSchema.parse({
       mindestZuschauer: 50,
       textLong: "voll",
@@ -42,12 +42,12 @@ describe("Raid-Modul", () => {
     });
   });
 
-  it("abonniert channel.raid ohne Broadcaster-Scope", () => {
+  it("subscribes to channel.raid without a broadcaster scope", () => {
     expect(raidModule.eventSubTypes).toEqual(["channel.raid"]);
     expect(raidModule.broadcasterScopes).toBeUndefined();
   });
 
-  it("erzeugt ab der Shoutout-Schwelle Shoutout und volle Chatzeile", () => {
+  it("produces a shoutout and the full chat line at the shoutout threshold", () => {
     const result = processRaid(event(eingehenderRaid(8), {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
@@ -62,7 +62,7 @@ describe("Raid-Modul", () => {
     ]);
   });
 
-  it("erzeugt ab der Shoutout-Schwelle ohne Schalter nur die volle Chatzeile", () => {
+  it("produces only the full chat line at the shoutout threshold when the switch is off", () => {
     const result = processRaid(event(eingehenderRaid(8), {
       shoutoutEnabled: false,
       shoutoutThreshold: 3,
@@ -80,7 +80,7 @@ describe("Raid-Modul", () => {
     }]);
   });
 
-  it("erzeugt unter der Shoutout-Schwelle nur die kurze Chatzeile", () => {
+  it("produces only the short chat line below the shoutout threshold", () => {
     const result = processRaid(event(eingehenderRaid(2), {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
@@ -98,7 +98,7 @@ describe("Raid-Modul", () => {
     }]);
   });
 
-  it("wendet Shoutout- und Text-Schwelle unabhängig an", () => {
+  it("applies the shoutout and text thresholds independently", () => {
     const result = processRaid(event(eingehenderRaid(10), {
       shoutoutEnabled: true,
       shoutoutThreshold: 50,
@@ -116,7 +116,7 @@ describe("Raid-Modul", () => {
     }]);
   });
 
-  it("meldet einen ausgehenden Raid und erzeugt keine Aktion", () => {
+  it("reports an outgoing raid and produces no action", () => {
     const result = processRaid(event({
       from_broadcaster_user_id: "kanal-a",
       to_broadcaster_user_id: "ziel-1",
@@ -130,7 +130,7 @@ describe("Raid-Modul", () => {
     }]);
   });
 
-  it("ersetzt beide Platzhalter und behandelt Schwelle null inklusiv", () => {
+  it("replaces both placeholders and treats a threshold of zero as inclusive", () => {
     const result = processRaid(event(eingehenderRaid(0), {
       shoutoutEnabled: true,
       shoutoutThreshold: 0,
@@ -145,7 +145,7 @@ describe("Raid-Modul", () => {
     ]);
   });
 
-  it("begründet einen Raid unter der Schwelle", () => {
+  it("gives a reason for a raid below the threshold", () => {
     const result = processRaid(event(eingehenderRaid(2), {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
@@ -160,7 +160,7 @@ describe("Raid-Modul", () => {
     }]);
   });
 
-  it("ersetzt deutsche Raid-Platzhalter nicht mehr", () => {
+  it("no longer replaces German raid placeholders", () => {
     const result = processRaid(event(eingehenderRaid(8), {
       shoutoutEnabled: false,
       shoutoutThreshold: 3,

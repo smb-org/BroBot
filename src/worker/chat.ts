@@ -7,16 +7,16 @@ import { kuerzeAuf200Zeichen } from "../modules/contract";
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
 
 /**
- * Twitch erwartet auf den EventSub-Webhook eine Antwort in zehn Sekunden, und
- * dieser Aufruf wird dort abgewartet (`dispatch.ts`). Ohne Zeitlimit kostet ein
- * haengender Helix-Aufruf das Abo. Faellt weg, sobald der Helix-Wrapper kommt.
+ * Twitch expects a response to the EventSub webhook within ten seconds, and
+ * this call is awaited there (`dispatch.ts`). Without a timeout, a hanging
+ * Helix call costs the subscription. Goes away once the Helix wrapper lands.
  */
 const HELIX_REQUEST_TIMEOUT_MS = 5_000;
 
 
 export interface ChatSendResult {
   sent: boolean;
-  /** Maschinenlesbarer Grund, wenn nicht gesendet wurde. */
+  /** Machine-readable reason when the message was not sent. */
   reason: string | null;
   detail: Readonly<Record<string, string | number | boolean | null>>;
 }
@@ -28,12 +28,12 @@ const readText = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
 /**
- * Sendet eine Chatnachricht im Namen des Bots.
+ * Sends a chat message on the bot's behalf.
  *
- * Twitch antwortet auch dann mit HTTP 200, wenn die Nachricht verworfen wurde
- * — etwa durch AutoMod. Der Ausgang steht dann in `data[0].is_sent` samt
- * `drop_reason`. Wer nur den Statuscode auswertet, protokolliert einen
- * Fehlschlag als Erfolg; genau das soll das Ereignisprotokoll verhindern.
+ * Twitch responds with HTTP 200 even when the message was dropped — for
+ * example by AutoMod. The actual outcome is then in `data[0].is_sent` along
+ * with `drop_reason`. Anyone who only checks the status code logs a failure
+ * as a success; that is exactly what the event log is meant to prevent.
  */
 export const sendChatMessage = async (
   environment: {
@@ -109,8 +109,8 @@ export const sendChatMessage = async (
     ? (asRecord(body).data as unknown[])[0]
     : null);
 
-  // Fehlt `is_sent`, ist der Ausgang unbekannt. Unbekannt gilt hier als nicht
-  // gesendet: Ein stiller Fehlschlag wäre schlimmer als eine falsche Warnung.
+  // If `is_sent` is missing, the outcome is unknown. Unknown counts as not
+  // sent here: a silent failure would be worse than a false warning.
   if (first.is_sent !== true) {
     const dropReason = asRecord(first.drop_reason);
     return {

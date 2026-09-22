@@ -56,7 +56,7 @@ interface LoadState<T> {
   status: "idle" | "loading" | "success" | "error";
   data: T | null;
   error: string | null;
-  /** Wann diese Antwort eintraf. Traegt das Datenalter in der Anzeige. */
+  /** When this response arrived. Drives the data-age display. */
   loadedAt?: number;
 }
 
@@ -133,14 +133,14 @@ type TokenView = {
 };
 
 /**
- * Ein Token, das turnusmäßig bald abläuft, ist kein Problem — der Cron erneuert
- * es beim nächsten Lauf. Ein Problem ist erst, wenn die Erneuerung ausbleibt.
+ * A token that's routinely about to expire is not a problem — the cron
+ * renews it on its next run. It's only a problem once the renewal fails to happen.
  *
- * Deshalb genügt die Restlaufzeit als Schwelle nicht: Bei vierstündigen Twitch-
- * Tokens und stündlichem Cron liegt jedes Token regelmäßig bis zu einer Stunde
- * im Erneuerungsfenster, ohne dass etwas kaputt wäre. Überfällig ist es erst,
- * wenn seit dem Zeitpunkt, ab dem der Cron hätte erneuern müssen, bereits ein
- * Wartungslauf stattgefunden hat und das Token trotzdem noch im Fenster steht.
+ * That's why remaining lifetime alone is not a sufficient threshold: with four-hour
+ * Twitch tokens and an hourly cron, every token regularly spends up to an hour
+ * inside the renewal window without anything being broken. It's only overdue
+ * once a maintenance run has already taken place since the point at which the
+ * cron should have renewed it, and the token is still inside the window anyway.
  */
 const renewalOverdue = (
   expiresAt: number,
@@ -283,8 +283,8 @@ const RouteLink = ({ route, current, children, onNavigate, className = "nav-link
 };
 
 /**
- * Der Zustandspunkt in der Navigation zeigt ein Problem, bevor man klickt.
- * Der Text daneben ist fuer Hilfsmittel: Farbe informiert nie allein.
+ * The status dot in the navigation shows a problem before you click.
+ * The text next to it is for assistive tech: color never informs alone.
  */
 const NavDot = ({ tone }: { tone: "healthy" | "warning" | "error" }): ReactElement | null =>
   tone === "healthy" ? null : (
@@ -655,9 +655,9 @@ const OverviewPage = ({ channels, onNavigate }: { channels: PanelChannelState[];
 };
 
 /**
- * Die einzige helle Aktion der Kanalseite. Sie steht in der Titelzeile und
- * nicht in der Moderatorzeile, weil diese bei gesundem Zustand gar nicht
- * erscheint — die Nachpruefung muss trotzdem jederzeit erreichbar sein.
+ * The channel page's only bright action. It sits in the title row and
+ * not in the moderator row, because that row doesn't appear at all in a
+ * healthy state — the recheck must still be reachable at all times.
  */
 const relativeZeit = (seit: number, jetzt: number): string => {
   const s = Math.max(0, Math.round((jetzt - seit) / 1000));
@@ -669,8 +669,8 @@ const relativeZeit = (seit: number, jetzt: number): string => {
 };
 
 /**
- * Beweist Leben, ohne einen Zustand zu behaupten. Steht bewusst neutral und
- * nie in Zustandsfarbe.
+ * Proves liveness without asserting a status. Deliberately neutral and
+ * never in status color.
  */
 const Datenalter = ({ seit }: { seit: number }): ReactElement => {
   const [jetzt, setJetzt] = useState(() => Date.now());
@@ -1169,10 +1169,10 @@ const EventFilterBar = ({
 }): ReactElement => {
   const texts = dashboardTexts();
   const [personDraft, setPersonDraft] = useState(filters.person ?? "");
-  // Der angewendete Filter ist die Quelle; der Entwurf zieht nach, wenn er sich
-  // von aussen aendert (Zuruecksetzen, Navigation, zweiter Tab). Das geschieht
-  // waehrend des Renders statt in einem Effect: ein Effect wuerde einen zweiten
-  // Durchlauf mit veraltetem Wert zeigen, und React verbietet das Muster.
+  // The applied filter is the source of truth; the draft follows along when it
+  // changes from outside (reset, navigation, second tab). This happens
+  // during render instead of in an effect: an effect would show a second
+  // pass with a stale value, and React forbids that pattern.
   const [zuletztAngewendet, setZuletztAngewendet] = useState(filters.person);
   if (zuletztAngewendet !== filters.person) {
     setZuletztAngewendet(filters.person);
@@ -1539,8 +1539,8 @@ export const DashboardApp = (): ReactElement => {
     const expectedOverviewPath = dashboardRoutePath(route);
 
     const load = async (): Promise<void> => {
-      // Die Modulseite zeigt denselben Kanalkopf wie die Uebersicht und
-      // braucht deshalb dieselben Daten.
+      // The module page shows the same channel header as the overview and
+      // therefore needs the same data.
       if (route.kind === "module" || route.section === "overview") {
         if (route.kind === "module") setModules(loadingState());
         try {
@@ -1786,7 +1786,7 @@ export const DashboardApp = (): ReactElement => {
           data: {
             members: [...current.data.members, ...nextPage.members],
             nextCursor: nextPage.nextCursor,
-            // Die Zahl gilt fuer den ganzen Kanal; die jeweils frischere Antwort zaehlt.
+            // The count applies to the whole channel; the most recent response wins.
             broadcasterCount: nextPage.broadcasterCount,
             viewerUserId: nextPage.viewerUserId,
           },
@@ -1815,11 +1815,11 @@ export const DashboardApp = (): ReactElement => {
       await logout();
       clearProtectedState();
     } catch (error) {
-      // 401 heisst: die Session ist tatsaechlich weg, der geschuetzte Zustand
-      // darf geraeumt werden. 403 heisst nur, dass das CSRF-Token nicht passte —
-      // der Worker hat dann nichts widerrufen. Wer hier raeumt, meldet eine
-      // Abmeldung, die gar nicht stattgefunden hat; nach einem Neuladen ist der
-      // Nutzer wieder angemeldet.
+      // 401 means: the session is actually gone, the protected state
+      // may be cleared. 403 only means the CSRF token didn't match —
+      // the worker hasn't revoked anything in that case. Clearing state here would report
+      // a sign-out that never happened; after a reload the
+      // user is signed in again.
       if (error instanceof PanelApiError && error.status === 401) {
         clearProtectedState();
         return;

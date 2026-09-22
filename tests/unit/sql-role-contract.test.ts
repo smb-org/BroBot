@@ -8,8 +8,8 @@ const { generateBaseline } = await import(baselineModulePath) as unknown as {
   generateBaseline: () => string;
 };
 
-describe("SQL-Vertrag für Kanalrollen", () => {
-  it("lässt genau die Werte des Kanalrollen-Tupels zu", () => {
+describe("SQL contract for channel roles", () => {
+  it("allows exactly the values of the channel-role tuple", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec(generateBaseline());

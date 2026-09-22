@@ -213,7 +213,7 @@ const databaseRacingAfterMemberRead = (database: TestD1Database, race: () => voi
 const databaseRacingBeforeMemberRead = (database: TestD1Database, race: () => void): D1Database =>
   databaseRacingAroundMemberRead(database, race, "before");
 
-describe("Mitgliederverwaltung", () => {
+describe("Member management", () => {
   let database: TestD1Database;
   let environment: Env;
 
@@ -228,7 +228,7 @@ describe("Mitgliederverwaltung", () => {
     vi.unstubAllGlobals();
   });
 
-  it("lässt einen Bediener die Liste lesen, aber keine Änderung ausführen", async () => {
+  it("lets an operator read the list but not perform any change", async () => {
     await setupChannel(database, "operator");
     await insertMember(database, "kanal-a", "user-2", "operator");
 
@@ -256,7 +256,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("liefert für auflösbare Mitglieder Login und Anzeigename aus Helix", async () => {
+  it("returns login and display name from Helix for resolvable members", async () => {
     await setupChannel(database);
     await insertMember(database, "kanal-a", "user-2", "operator");
     await insertBotIdentity(database);
@@ -291,7 +291,7 @@ describe("Mitgliederverwaltung", () => {
     ]);
   });
 
-  it("behält unauflösbare Mitglieder in der Liste und macht ihren Entzug weiter möglich", async () => {
+  it("keeps unresolvable members in the list and still allows revoking them", async () => {
     await setupChannel(database);
     await insertMember(database, "kanal-a", "user-2", "operator");
     await insertBotIdentity(database);
@@ -316,7 +316,7 @@ describe("Mitgliederverwaltung", () => {
     expect(removeResponse.status).toBe(204);
   });
 
-  it("liefert die Mitgliederliste auch bei einem Helix-Fehler mit nicht auflösbaren Namen", async () => {
+  it("returns the member list with unresolvable names even on a Helix error", async () => {
     await setupChannel(database);
     await insertMember(database, "kanal-a", "user-2", "operator");
     await insertBotIdentity(database);
@@ -335,7 +335,7 @@ describe("Mitgliederverwaltung", () => {
     ]);
   });
 
-  it("begrenzt Mitgliederseiten auf 100 und löst jede Seite mit höchstens einem Helix-Aufruf auf", async () => {
+  it("limits member pages to 100 and resolves each page with at most one Helix call", async () => {
     await setupChannel(database);
     for (let index = 0; index < 100; index += 1) {
       await insertMember(database, "kanal-a", `user-${String(index).padStart(3, "0")}`, "operator");
@@ -367,7 +367,7 @@ describe("Mitgliederverwaltung", () => {
     expect(requestUrl(vi.mocked(fetch).mock.calls[1]?.[0] as RequestInfo | URL).searchParams.getAll("id")).toHaveLength(1);
   });
 
-  it("weist eine unbegrenzte oder zu große Mitglieder-Seitengröße zurück", async () => {
+  it("rejects an unbounded or too-large member page size", async () => {
     await setupChannel(database);
 
     const response = await panelRouter.fetch(
@@ -378,7 +378,7 @@ describe("Mitgliederverwaltung", () => {
     expect(response.status).toBe(400);
   });
 
-  it("verhindert, dass ein Verwalter sich selbst zum Broadcaster macht", async () => {
+  it("prevents a manager from making themselves broadcaster", async () => {
     await setupChannel(database, "manager");
 
     const response = await panelRouter.fetch(
@@ -391,7 +391,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("verhindert Self-DELETE gegen Self-POST auch bei einer Löschung im Zwischenzustand", async () => {
+  it("prevents a self-DELETE racing a self-POST even with a deletion in between", async () => {
     await setupChannel(database, "manager");
     const racingDatabase = databaseRacingBeforeMemberRead(database, () => {
       deleteMemberImmediately(database, "kanal-a", "user-1");
@@ -411,7 +411,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("macht aus DELETE gegen PATCH desselben Mitglieds kein neues Mitglied", async () => {
+  it("doesn't turn a DELETE racing a PATCH of the same member into a new member", async () => {
     await setupChannel(database, "manager");
     await insertMember(database, "kanal-a", "user-2", "operator");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
@@ -431,7 +431,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("macht aus POST gegen ein gleichzeitiges Anlegen kein UPDATE", async () => {
+  it("doesn't turn a POST racing a concurrent create into an UPDATE", async () => {
     await setupChannel(database, "manager");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
       insertMemberImmediately(database, "kanal-a", "user-2", "operator");
@@ -450,7 +450,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("verwendet für POST, PATCH und DELETE ausschließlich die channelId aus der Route", async () => {
+  it("uses only the channelId from the route for POST, PATCH, and DELETE", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertSession(database, "user-1");
@@ -480,7 +480,7 @@ describe("Mitgliederverwaltung", () => {
     ).bind("kanal-b", "user-2").first()).resolves.toBeNull();
   });
 
-  it("schützt den letzten Broadcaster vor Entzug und Herabstufung", async () => {
+  it("protects the last broadcaster from removal and demotion", async () => {
     await setupChannel(database);
 
     const changeResponse = await panelRouter.fetch(
@@ -498,7 +498,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("verweigert Änderungen in einem fremden Kanal trotz gültiger Session", async () => {
+  it("denies changes in a foreign channel despite a valid session", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await insertSession(database, "user-1");
@@ -513,7 +513,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("erzeugt für jede erfolgreiche Mutation genau einen Audit-Eintrag", async () => {
+  it("creates exactly one audit entry for each successful mutation", async () => {
     await setupChannel(database);
 
     const addResponse = await panelRouter.fetch(
@@ -545,7 +545,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(3);
   });
 
-  it("meldet einen unbekannten Twitch-Namen klar und legt kein Mitglied an", async () => {
+  it("clearly reports an unknown Twitch name and creates no member", async () => {
     await setupChannel(database);
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }));
@@ -560,7 +560,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("sucht bekannte Twitch-Nutzer mit dem gespeicherten Bot-Token", async () => {
+  it("searches known Twitch users with the stored bot token", async () => {
     await setupChannel(database);
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
@@ -582,7 +582,7 @@ describe("Mitgliederverwaltung", () => {
     );
   });
 
-  it("speichert die bei der Suche gelieferte Bild-URL nicht in channel_members", async () => {
+  it("doesn't store the image URL returned by the search in channel_members", async () => {
     await setupChannel(database);
     await insertBotIdentity(database);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
@@ -621,7 +621,7 @@ describe("Mitgliederverwaltung", () => {
     ]);
   });
 
-  it("verbietet einem Bediener die Twitch-Nutzersuche ohne Helix-Aufruf", async () => {
+  it("forbids an operator from the Twitch user search without a Helix call", async () => {
     await setupChannel(database, "operator");
 
     const response = await panelRouter.fetch(
@@ -633,7 +633,7 @@ describe("Mitgliederverwaltung", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("liefert bei einer Helix-Zeitüberschreitung alle Namen als nicht auflösbar", async () => {
+  it("returns all names as unresolvable on a Helix timeout", async () => {
     await setupChannel(database);
     await insertBotIdentity(database);
     vi.mocked(fetch).mockImplementationOnce((_input, init) => new Promise<Response>((_resolve, reject) => {
@@ -652,10 +652,10 @@ describe("Mitgliederverwaltung", () => {
     ]);
   }, 10_000);
 
-  it("lässt einen Verwalter keinen Broadcaster anlegen", async () => {
-    // Sonst macht der Verwalter sein Zweitkonto zum Broadcaster und entfernt
-    // danach den ursprünglichen — der Schutz des letzten Broadcasters greift
-    // dann nicht, weil zwischenzeitlich zwei existieren.
+  it("doesn't let a manager create a broadcaster", async () => {
+    // Otherwise the manager makes their second account a broadcaster and then
+    // removes the original one — the last-broadcaster protection
+    // doesn't kick in then, because two exist in the meantime.
     await setupChannel(database, "manager");
 
     const response = await panelRouter.fetch(
@@ -670,7 +670,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("lässt einen Verwalter niemanden zum Broadcaster befördern", async () => {
+  it("doesn't let a manager promote anyone to broadcaster", async () => {
     await setupChannel(database, "manager");
     await insertMember(database, "kanal-a", "user-2", "operator");
 
@@ -686,8 +686,8 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("lässt einen Broadcaster einen weiteren Broadcaster anlegen", async () => {
-    // Gegenprobe: Die Regel darf den erlaubten Fall nicht mitsperren.
+  it("lets a broadcaster create another broadcaster", async () => {
+    // Control check: the rule must not also block the allowed case.
     await setupChannel(database, "broadcaster");
 
     const response = await panelRouter.fetch(
@@ -701,7 +701,7 @@ describe("Mitgliederverwaltung", () => {
     ).bind("kanal-a", "user-2").first()).resolves.toEqual({ role: "broadcaster" });
   });
 
-  it("lässt einen Broadcaster einen Broadcaster herabstufen und entfernen, solange einer verbleibt", async () => {
+  it("lets a broadcaster demote and remove a broadcaster as long as one remains", async () => {
     await setupChannel(database, "broadcaster");
     await insertMember(database, "kanal-a", "user-2", "broadcaster");
     await insertMember(database, "kanal-a", "user-3", "broadcaster");
@@ -725,7 +725,7 @@ describe("Mitgliederverwaltung", () => {
     ).bind("kanal-a", "user-3").first()).resolves.toBeNull();
   });
 
-  it("lässt einen Verwalter Verwalter und Bediener wie bisher verwalten", async () => {
+  it("lets a manager continue managing managers and operators as before", async () => {
     await setupChannel(database, "manager");
     await insertMember(database, "kanal-a", "user-2", "manager");
     await insertMember(database, "kanal-a", "user-3", "operator");
@@ -754,10 +754,10 @@ describe("Mitgliederverwaltung", () => {
     ).bind("kanal-a", "user-3").first()).resolves.toBeNull();
   });
 
-  it("legt kein Mitglied an, wenn die Session nach dem Guard widerrufen wird", async () => {
-    // Der Guard prüft die Session, danach wartet der Handler auf den Body.
-    // Ein Client kann ihn offen lassen, bis seine Session widerrufen ist.
-    // Die Mutation muss das bemerken, nicht nur der Guard.
+  it("creates no member when the session is revoked after the guard", async () => {
+    // The guard checks the session, then the handler waits for the body.
+    // A client can keep it open until its session has been revoked.
+    // The mutation must notice this, not just the guard.
     await setupChannel(database, "manager");
     const racingDatabase = databaseRacingBeforeMemberRead(database, () => {
       revokeSessionImmediately(database, "user-1");
@@ -776,7 +776,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("ändert keine Rolle, wenn die Session nach dem Guard widerrufen wird", async () => {
+  it("changes no role when the session is revoked after the guard", async () => {
     await setupChannel(database, "manager");
     await insertMember(database, "kanal-a", "user-2", "operator");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
@@ -796,7 +796,7 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("entfernt kein Mitglied, wenn die Session nach dem Guard widerrufen wird", async () => {
+  it("removes no member when the session is revoked after the guard", async () => {
     await setupChannel(database, "manager");
     await insertMember(database, "kanal-a", "user-2", "operator");
     const racingDatabase = databaseRacingAfterMemberRead(database, () => {
@@ -816,10 +816,10 @@ describe("Mitgliederverwaltung", () => {
     await expect(auditCount(database)).resolves.toBe(0);
   });
 
-  it("liefert Broadcaster-Zahl und eigene User-ID mit der Mitgliederliste", async () => {
-    // Beides braucht die Oberfläche, um den letzten Broadcaster und den eigenen
-    // Eintrag zu erkennen. Bei seitenweiser Liste darf sie es nicht selbst
-    // zählen: die Zahl gilt für den Kanal, nicht für die Seite.
+  it("returns the broadcaster count and own user id with the member list", async () => {
+    // The UI needs both to recognize the last broadcaster and its own
+    // entry. With a paginated list it must not count this itself:
+    // the count applies to the channel, not the page.
     await setupChannel(database, "broadcaster");
     await insertMember(database, "kanal-a", "user-2", "manager");
 
@@ -834,7 +834,7 @@ describe("Mitgliederverwaltung", () => {
     expect(body.viewerUserId).toBe("user-1");
   });
 
-  it("zählt Broadcaster über den ganzen Kanal, nicht über die abgerufene Seite", async () => {
+  it("counts broadcasters across the whole channel, not the fetched page", async () => {
     await setupChannel(database, "broadcaster");
     await insertMember(database, "kanal-a", "user-2", "broadcaster");
     await insertMember(database, "kanal-a", "user-3", "operator");
@@ -849,7 +849,7 @@ describe("Mitgliederverwaltung", () => {
     expect(body.broadcasterCount).toBe(2);
   });
 
-  it("weist eine schreibende Mitgliederroute ohne CSRF-Token ab", async () => {
+  it("rejects a write member route without a CSRF token", async () => {
     await setupChannel(database);
 
     const response = await panelRouter.fetch(

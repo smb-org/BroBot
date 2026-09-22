@@ -73,10 +73,10 @@ const parseEventFilters = (
   return { origin: herkunft, module: module, tone: ton, person };
 };
 
-// Teilt sich nur die Parse-/Fehlermechanik zwischen Audit- und Ereignisprotokoll.
-// Beide Protokolle haben absichtlich unterschiedliche Leseberechtigungen und
-// Aufbewahrungsfristen (siehe docs/decisions/0004-ereignisprotokoll.md) — das bleibt
-// pro Route stehen, dieser Helfer fasst sie inhaltlich nicht zusammen.
+// Only shares the parsing/error mechanics between the audit log and the
+// event log. Both logs deliberately have different read permissions and
+// retention periods (see docs/decisions/0004-ereignisprotokoll.md) — that
+// stays per route; this helper doesn't merge them in substance.
 const parseLogQuery = (
   context: Context<PanelEnvironment>,
   errorTexts: { limit: string; cursor: string },
@@ -194,7 +194,7 @@ panelRouter.post(
         try {
           await releaseBotChannelStatusCheck(context.env.DB, channelId, ownerId);
         } catch {
-          // Die Twitch-Ursache ist für den Nutzer wichtiger als ein fehlgeschlagenes Aufräumen.
+          // The Twitch-side cause matters more to the user than a failed cleanup.
         }
       }
       const message = error instanceof Error ? error.message : "Moderatorstatus konnte nicht gelesen werden.";

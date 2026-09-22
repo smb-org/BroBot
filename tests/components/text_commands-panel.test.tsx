@@ -8,13 +8,13 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   headers: { "Content-Type": "application/json" },
 });
 
-describe("Textbefehle-Panel-Ansicht", () => {
+describe("Text commands panel view", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it("listet Befehle und bietet Bearbeiten und Löschen an", async () => {
+  it("lists commands and offers edit and delete", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
@@ -57,7 +57,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
   });
 
-  it("hält den Anlege-Knopf bedeckt, bis Pflichtfelder gefüllt sind", async () => {
+  it("keeps the create button disabled until required fields are filled", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ befehle: [] })));
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
@@ -78,7 +78,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(add).toHaveClass("button--primary");
   });
 
-  it("sperrt das Anlegeformular während des Requests", async () => {
+  it("locks the create form while the request is in flight", async () => {
     let resolveCreate!: (response: Response) => void;
     const createFinished = new Promise<Response>((resolve) => { resolveCreate = resolve; });
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
@@ -114,7 +114,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(add).toBeDisabled();
   });
 
-  it("setzt beim Wechsel zu einem anderen Befehl die Entwurfswerte neu", async () => {
+  it("resets draft values when switching to another command", async () => {
     const commands = [
       {
         channelId: "kanal-a", name: "alpha", text: "Antwort A", kind: "text" as const, enabled: true,
@@ -141,7 +141,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it.each([
     ["de-DE", "Befehl !hallo löschen", "Befehl !hallo endgültig löschen", "Abbrechen"],
     ["en-US", "Delete !hallo", "Delete !hallo permanently", "Cancel"],
-  ])("bestätigt das Löschen erst an Ort und Stelle (%s)", async (browserLanguage, deleteLabel, confirmLabel, cancelLabel) => {
+  ])("confirms deletion in place first (%s)", async (browserLanguage, deleteLabel, confirmLabel, cancelLabel) => {
     let exists = true;
     let deleteRequestCount = 0;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
@@ -191,7 +191,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     await waitFor(() => expect(deleteRequestCount).toBe(1));
   });
 
-  it("behält ein geleertes Zahlenfeld leer und speichert es nicht als null", async () => {
+  it("keeps a cleared number field empty and does not save it as null", async () => {
     let created = false;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -221,7 +221,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect((cooldown as HTMLInputElement).value).toBe("");
   });
 
-  it("ordnet die drei Feldbreiten nach Inhaltsart zu", async () => {
+  it("assigns the three field widths by content type", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
@@ -263,7 +263,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
   it.each([
     ["de-DE", "Der Textbefehl konnte nicht gelöscht werden."],
     ["en-US", "The text command could not be deleted."],
-  ])("zeigt für einen Löschfehler den passenden Text (%s)", async (browserLanguage, expected) => {
+  ])("shows the matching text for a delete error (%s)", async (browserLanguage, expected) => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
@@ -298,7 +298,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(expected);
   });
 
-  it("folgt mit dem Panel der Browsersprache", async () => {
+  it("follows the browser language with the panel", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ befehle: [] })));
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
@@ -311,7 +311,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(screen.getByRole("combobox", { name: "Type" })).toBeInTheDocument();
   });
 
-  it("blendet das Antwortfeld für die Art liste aus und legt ohne Text an", async () => {
+  it("hides the response field for the type 'list' and creates without text", async () => {
     let createdBody: Record<string, unknown> | null = null;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -339,7 +339,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     await waitFor(() => expect(createdBody).toEqual({ name: "befehle", kind: "list", cooldownSeconds: 5 }));
   });
 
-  it("zeigt Bedienern den Schalter offen und Inhaltsaktionen sichtbar, aber gesperrt", async () => {
+  it("shows operators the switch open and content actions visible but locked", async () => {
     let enabled = false;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -395,7 +395,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(screen.getAllByText("Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.").length).toBeGreaterThan(0);
   });
 
-  it("zeigt die Mindeststufe als eigene Spalte und ändert sie über den Verwaltungsweg", async () => {
+  it("shows the minimum tier as its own column and changes it through the management path", async () => {
     let minimumTier = "everyone";
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
@@ -435,7 +435,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ minimumTier: "moderator" }))).toBe(true);
   });
 
-  it("ordnet Liste und Inspector als direkte Kinder des Befehlsbereichs an", async () => {
+  it("arranges list and inspector as direct children of the commands region", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
@@ -467,7 +467,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(bereich?.children[1]).toHaveClass("sub-inspector");
   });
 
-  it("schließt den Befehls-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+  it("closes the command inspector by button and Escape, returning focus to the row", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
@@ -516,7 +516,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(onCloseInspector).toHaveBeenCalledTimes(2);
   });
 
-  it("öffnet das Anlegen in der Inspektorspalte und wechselt ohne Doppelbelegung", async () => {
+  it("opens create in the inspector column and switches without double-occupying it", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {
@@ -569,7 +569,7 @@ describe("Textbefehle-Panel-Ansicht", () => {
     expect(plus).toHaveFocus();
   });
 
-  it("reicht den Schließen-Weg des Modul-Contracts an den Host weiter", async () => {
+  it("propagates the module contract's close path to the host", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/commands") && init?.method === undefined) {

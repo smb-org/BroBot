@@ -35,8 +35,8 @@ const fakeDatabase = () => {
   };
 };
 
-describe("Twitch-OAuth", () => {
-  it("ermittelt fehlende Bot-Scopes unabhängig von Reihenfolge und Zusatz-Scopes", () => {
+describe("Twitch OAuth", () => {
+  it("determines missing bot scopes regardless of order and extra scopes", () => {
     expect(missingBotScopes(["user:write:chat", "user:bot", "extra:scope"])).toEqual(
       BOT_SCOPES.filter((scope) => scope !== "user:bot" && scope !== "user:write:chat"),
     );
@@ -44,7 +44,7 @@ describe("Twitch-OAuth", () => {
     expect(missingBotScopes([...BOT_SCOPES, "extra:scope"])).toEqual([]);
   });
 
-  it("erzeugt für Login und Bot unterschiedliche, vollständige Scope-URLs", async () => {
+  it("generates different, complete scope URLs for login and bot", async () => {
     const { database } = fakeDatabase();
     const login = await startOAuthAuthorization(database, environment, "login", "2026-09-18T00:00:00.000Z");
     const bot = await startOAuthAuthorization(database, environment, "bot", "2026-09-18T00:00:00.000Z");
@@ -72,7 +72,7 @@ describe("Twitch-OAuth", () => {
     expect(loginUrl.searchParams.get("state")).not.toBe(botUrl.searchParams.get("state"));
   });
 
-  it("akzeptiert keinen manipulierten State", async () => {
+  it("does not accept a tampered state", async () => {
     const { database } = fakeDatabase();
     const started = await startOAuthAuthorization(database, environment, "login", "2026-09-18T00:00:00.000Z");
     const parsed = await verifyOAuthState(`${started.state}x`, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:00:00.000Z", started.stateNonce);
@@ -80,7 +80,7 @@ describe("Twitch-OAuth", () => {
     expect(parsed).toBeNull();
   });
 
-  it("liest einen signierten State ohne zusätzliche Verifier-Daten", async () => {
+  it("reads a signed state without additional verifier data", async () => {
     const { database } = fakeDatabase();
     const started = await startOAuthAuthorization(database, environment, "bot", "2026-09-18T00:00:00.000Z");
     const state = await verifyOAuthState(started.state, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:00:00.000Z", started.stateNonce);
@@ -89,7 +89,7 @@ describe("Twitch-OAuth", () => {
     expect(state?.transactionId).toBe(started.transactionId);
   });
 
-  it("behandelt einen abgelehnten Code-Tausch als OAuth-Fehler", async () => {
+  it("treats a rejected code exchange as an OAuth error", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ error: "access_denied", message: "Zugriff abgelehnt" }),
       { status: 400, headers: { "Content-Type": "application/json" } },
@@ -102,7 +102,7 @@ describe("Twitch-OAuth", () => {
     )).rejects.toThrow("Twitch-Code-Tausch wurde abgelehnt.");
   });
 
-  it("liest die Twitch-Identität ohne E-Mail-Scope", async () => {
+  it("reads the Twitch identity without email scope", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ data: [{ id: "user-1", login: "tester", display_name: "Tester" }] }),
       { status: 200, headers: { "Content-Type": "application/json" } },
@@ -120,7 +120,7 @@ describe("Twitch-OAuth", () => {
     });
   });
 
-  it("verifiziert ablaufende States nicht", async () => {
+  it("does not verify expiring states", async () => {
     const { database } = fakeDatabase();
     const started = await startOAuthAuthorization(database, environment, "login", "2026-09-18T00:00:00.000Z");
     const state = await verifyOAuthState(started.state, environment.SESSION_COOKIE_KEYS, "2026-09-18T00:11:00.000Z", started.stateNonce);

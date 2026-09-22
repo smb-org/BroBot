@@ -24,8 +24,9 @@ const healthyChannel = (channelId: string, displayName: string) => ({
   channelBotConsent: "granted",
   bot: { status: "connected", reason: null, updatedAt: relativeIso(0) },
   moderator,
-  // Ohne Chat-Abo empfaengt der Kanal keine Ereignisse; ein gesunder Kanal
-  // hat deshalb eines. Fehlt es, ist das eine Warnung, kein Normalzustand.
+  // Without a chat subscription the channel receives no events; a healthy
+  // channel therefore has one. If it's missing, that's a warning, not the
+  // normal state.
   chatSubscription: { status: "enabled", subscriptionId: "abo-1", reason: null, updatedAt: relativeIso(0) },
   tokens: {
     botExpiresAt: relativeIso(3 * 60 * 60 * 1000),
@@ -65,9 +66,9 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
 });
 
 /**
- * Stellt Kanal- und Mitgliederantworten und öffnet die Mitgliederseite. Die
- * drei Zugriffstests unterscheiden sich nur in den Mitgliedsdaten; alles
- * andere ist Gerüst.
+ * Provides channel and member responses and opens the members page. The
+ * three access tests differ only in their member data; everything else is
+ * scaffolding.
  */
 const showMembers = async (members: {
   members: unknown[];
@@ -140,7 +141,7 @@ class TestWebSocket {
   }
 }
 
-describe("Dashboard-Grundgerüst", () => {
+describe("Dashboard skeleton", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
@@ -154,7 +155,7 @@ describe("Dashboard-Grundgerüst", () => {
     vi.useRealTimers();
   });
 
-  it("erkennt die kanalgebundene Systemroute", () => {
+  it("recognizes the channel-bound system route", () => {
     expect(parseDashboardRoute("/channels/kanal-a/system")).toEqual({
       kind: "channel",
       channelId: "kanal-a",
@@ -162,7 +163,7 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
-  it("erkennt die kanalgebundene Mitgliederroute", () => {
+  it("recognizes the channel-bound members route", () => {
     expect(parseDashboardRoute("/channels/kanal-a/members")).toEqual({
       kind: "channel",
       channelId: "kanal-a",
@@ -170,7 +171,7 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
-  it("erkennt die kanalgebundene Ereignisroute", () => {
+  it("recognizes the channel-bound events route", () => {
     expect(parseDashboardRoute("/channels/kanal-a/events")).toEqual({
       kind: "channel",
       channelId: "kanal-a",
@@ -178,7 +179,7 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
-  it("erkennt die Unterseite eines kanalgebundenen Moduls", () => {
+  it("recognizes the subpage of a channel-bound module", () => {
     expect(parseDashboardRoute("/channels/kanal-a/modules/text_commands")).toEqual({
       kind: "module",
       channelId: "kanal-a",
@@ -186,7 +187,7 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
-  it("behält unbekannte Modul-IDs als Modulroute für die Detailseite", () => {
+  it("keeps unknown module IDs as a module route for the detail page", () => {
     expect(parseDashboardRoute("/channels/kanal-a/modules/unbekannt")).toEqual({
       kind: "module",
       channelId: "kanal-a",
@@ -194,16 +195,16 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
-  it("verwirft eine ungültig codierte Modulroute", () => {
+  it("discards an invalidly encoded module route", () => {
     expect(parseDashboardRoute("/channels/kanal-a/modules/%ZZ")).toEqual({ kind: "overview" });
   });
 
-  it("kodiert Kanal- und Modul-ID in der Modulroute", () => {
+  it("encodes channel and module ID in the module route", () => {
     expect(dashboardRoutePath({ kind: "module", channelId: "kanal/a", moduleId: "text befehle" }))
       .toBe("/channels/kanal%2Fa/modules/text%20befehle");
   });
 
-  it("zeigt Ereignisse mit Modul, Code, Detail und Akteur", async () => {
+  it("shows events with module, code, detail and actor", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -284,7 +285,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
   });
 
-  it("zeigt das Ereignis-Chip-Paar mit Familie, Stufe, Zahl und Zeit-Tooltip", async () => {
+  it("shows the event chip pair with family, tier, number and time tooltip", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -328,7 +329,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(firstCell.getAttribute("title")).toBe("2026-09-18T04:00:00.000Z");
   });
 
-  it("zeigt Abo-Stufen im Zahl-Chip als T1/T2/T3/Prime statt roh, unbekannte Werte ohne Chip", async () => {
+  it("shows subscription tiers in the number chip as T1/T2/T3/Prime instead of raw, unknown values without a chip", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -365,7 +366,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect([...unbekanntRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["Abo"]);
   });
 
-  it("erreicht Ereignisse über die Navigation und lädt die nächste Seite beim Scrollen", async () => {
+  it("reaches events via navigation and loads the next page on scroll", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const firstPage = {
       entries: [{
@@ -419,7 +420,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("button", { name: "Ältere Ereignisse laden" })).not.toBeInTheDocument();
   });
 
-  it("lädt neue Ereignisse am Anfang nach und mischt sie ein", async () => {
+  it("loads new events at the top and merges them in", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":7}', actorUserId: null, actorLogin: null, actorDisplayName: null };
@@ -449,7 +450,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(firstPage).toBe(2);
   });
 
-  it("hält die Liste weiter unten an und zeigt nur den Hinweis", async () => {
+  it("keeps the list further down and shows only the notice", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":8}', actorUserId: null, actorLogin: null, actorDisplayName: null };
@@ -485,7 +486,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getAllByRole("row")).toHaveLength(2);
   });
 
-  it("springt mit dem Hinweis an den Anfang und lädt dann nach", async () => {
+  it("jumps to the top via the notice and then loads more", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":9}', actorUserId: null, actorLogin: null, actorDisplayName: null };
@@ -523,7 +524,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(scrollTo).toHaveBeenCalledOnce();
   });
 
-  it("verarbeitet eine doppelte Nachricht nur einmal", async () => {
+  it("processes a duplicate message only once", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":10}', actorUserId: null, actorLogin: null, actorDisplayName: null };
@@ -555,7 +556,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(eventRequests).toBe(2);
   });
 
-  it("ignoriert unbekannte Nachrichtenarten", async () => {
+  it("ignores unknown message types", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
@@ -583,7 +584,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("button", { name: /neue Ereignisse/ })).not.toBeInTheDocument();
   });
 
-  it("schließt bei einem Hinweis aus einem fremden Kanal", async () => {
+  it("closes the connection on a message from a foreign channel", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -607,7 +608,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByText("Offline")).toBeInTheDocument();
   });
 
-  it("lädt Seite 1 nach einem Wiederaufbau neu", async () => {
+  it("reloads page 1 after a reconnect", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const alt = { eventId: "event-alt", createdAt: "2026-09-18T03:00:00.000Z", moduleId: "raid", code: "alt", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null };
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":11}', actorUserId: null, actorLogin: null, actorDisplayName: null };
@@ -641,7 +642,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(eventRequests).toBe(2);
   });
 
-  it("lädt am zugänglichen Feed-Ende nur einmal und zeigt das Ende ausdrücklich", async () => {
+  it("loads only once when the feed end is reached and shows the end explicitly", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let releaseSecondPage: ((response: Response) => void) | undefined;
     const firstPage = {
@@ -681,7 +682,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("Ende des Ereignisverlaufs erreicht.")).toBeInTheDocument();
   });
 
-  it("gruppiert denselben Auslöser, zeigt den stärksten Ton und den chronologischen Verlauf", async () => {
+  it("groups the same trigger, shows the strongest tone and the chronological history", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -772,7 +773,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText(/"grund": "rate_limited"/)).toBeInTheDocument();
   });
 
-  it("zeigt den Ereignis-Leerzustand als einzelnen Satz", async () => {
+  it("shows the events empty state as a single sentence", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -787,7 +788,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByText("Noch keine Ereignisse protokolliert.")).toBeInTheDocument();
   });
 
-  it("zeigt aktive Filter, kombiniert sie und meldet einen Treffer-Leerzustand", async () => {
+  it("shows active filters, combines them, and reports a no-results empty state", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const channelEntry = { eventId: "channel", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":21}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     const moduleEntry = { eventId: "module", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "text_commands", code: "text_commands.ausgeloest", detail: '{"name":"hilfe"}', actorUserId: "person-a", actorLogin: "alice", actorDisplayName: "Alice" };
@@ -850,7 +851,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("Keine Ereignisse passen zu den Filtern.")).not.toBeInTheDocument();
   });
 
-  it("entprellt fünf Eingaben im Personenfilter zu genau einer weiteren Ereignisanfrage", async () => {
+  it("debounces five inputs in the person filter into exactly one more events request", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const eventRequests: URL[] = [];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -873,10 +874,10 @@ describe("Dashboard-Grundgerüst", () => {
     }
     expect(eventRequests).toHaveLength(initialRequests);
 
-    // Kein `setTimeout` mit echter Wartezeit: der Test war damit von der Laufzeit
-    // der Maschine abhängig und fiel in drei Läufen einmal grundlos durch.
-    // `waitFor` pollt bis zur eigenen Frist und ist deshalb zuverlässig, egal
-    // wie schnell oder langsam die Entprellung tatsächlich abläuft.
+    // No `setTimeout` with a real wait: the test was then dependent on the
+    // machine's speed and failed once in three runs for no reason.
+    // `waitFor` polls until its own deadline and is therefore reliable, no
+    // matter how fast or slow the debounce actually runs.
     await waitFor(
       () => { expect(eventRequests).toHaveLength(initialRequests + 1); },
       { timeout: 2000 },
@@ -884,11 +885,11 @@ describe("Dashboard-Grundgerüst", () => {
     expect(eventRequests.at(-1)?.searchParams.get("actor")).toBe("alice");
   });
 
-  it("stellt den letzten Broadcaster nicht als entziehbar dar", async () => {
-    // Der Worker würde beides ablehnen. Ein Knopf, der garantiert scheitert,
-    // sieht aus wie eine Möglichkeit — man muss ihn drücken, um zu erfahren,
-    // dass es keine ist. Gesperrt mit Grund statt versteckt: ein verschwundener
-    // Knopf wirft die Frage auf, ob etwas kaputt ist.
+  it("does not present the last broadcaster as revocable", async () => {
+    // The worker would reject both. A button that's guaranteed to fail looks
+    // like an option — you have to press it to find out it isn't one.
+    // Disabled with a reason instead of hidden: a vanished button raises the
+    // question of whether something is broken.
     await showMembers({
       members: [broadcaster("100", "esembe", "esembe")],
       broadcasterCount: 1,
@@ -898,14 +899,14 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
     expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(2);
 
-    // Das Auswahlfeld bietet keinen Wert an, der abgelehnt würde.
+    // The select field offers no value that would be rejected.
     const rolle = screen.getByRole("combobox", { name: "Rolle für esembe" });
     expect(rolle).toBeDisabled();
     expect(within(rolle).getAllByRole("option").map((o) => o.textContent)).toEqual(["Broadcaster"]);
   });
 
-  it("lässt den Entzug zu, sobald ein zweiter Broadcaster bleibt", async () => {
-    // Gegenprobe: Die Sperre darf den erlaubten Fall nicht mitsperren.
+  it("allows revocation once a second broadcaster remains", async () => {
+    // Control check: the lock must not also lock the permitted case.
     await showMembers({
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
@@ -916,7 +917,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("Letzter Broadcaster")).not.toBeInTheDocument();
   });
 
-  it("warnt beim Entzug des eigenen Zugangs ausdrücklich vor der Aussperrung", async () => {
+  it("explicitly warns about lockout when revoking one's own access", async () => {
     const frage = vi.fn((meldung: string) => { void meldung; return false; });
     await showMembers({
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
@@ -929,12 +930,12 @@ describe("Dashboard-Grundgerüst", () => {
     expect(frage).toHaveBeenCalledOnce();
     expect(frage.mock.calls.at(0)?.[0] ?? "").toContain("selbst aus");
 
-    // Fremder Eintrag: dieselbe Aktion, andere Frage.
+    // Someone else's entry: same action, different question.
     fireEvent.click(screen.getByRole("button", { name: "Zugriff für Zweit entziehen" }));
     expect(frage.mock.calls.at(1)?.[0] ?? "").not.toContain("selbst aus");
   });
 
-  it("zeigt Mitgliedschaften und die Verwaltungsaktion nur für verwaltende Rollen", async () => {
+  it("shows memberships and the management action only for managing roles", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const members = {
       members: [
@@ -960,8 +961,8 @@ describe("Dashboard-Grundgerüst", () => {
     expect(avatarImage).toHaveAttribute("src", "https://cdn.example/streamerin.png");
     expect(document.querySelector(".member-avatar-placeholder")).toBeInTheDocument();
 
-    // Ein Bild, das nicht laedt, darf die Zeile nicht unbedienbar machen: der
-    // Platzhalter tritt an seine Stelle, der Profillink bleibt unveraendert da.
+    // An image that fails to load must not make the row unusable: the
+    // placeholder takes its place, the profile link stays unchanged.
     fireEvent.error(avatarImage as Element);
     expect(document.querySelector("img.member-avatar")).not.toBeInTheDocument();
     expect(document.querySelectorAll(".member-avatar-placeholder")).toHaveLength(2);
@@ -989,7 +990,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("button", { name: "Zugriff freigeben" })).toBeDisabled();
   });
 
-  it("behält die Semantik der Mitgliedertabelle für schmale Karten", async () => {
+  it("keeps the members table's semantics for narrow cards", async () => {
     await showMembers({
       members: [{ userId: "100", login: "streamer", displayName: "Streamerin", profileImageUrl: null, role: "manager", joinedAt: "2026-09-17T12:00:00.000Z" }],
       broadcasterCount: 1,
@@ -1008,7 +1009,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(Array.from(row?.querySelectorAll("td") ?? []).every((cell) => cell.getAttribute("role") === "cell")).toBe(true);
   });
 
-  it("zeigt dem Bediener Mitgliederaktionen deaktiviert mit Begründung", async () => {
+  it("shows the operator member actions disabled with a reason", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "operator" };
     const members = {
       members: [{ userId: "200", login: "moderation", displayName: "Moderation", role: "operator", joinedAt: "2026-09-18T12:00:00.000Z" }],
@@ -1040,7 +1041,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getAllByText(reason).length).toBeGreaterThan(0);
   });
 
-  it("verwirft Suchergebnis und Freigabebestätigung beim Kanalwechsel", async () => {
+  it("discards search result and access-grant confirmation on channel switch", async () => {
     const alpha = { ...healthyChannel("kanal-a", "Alpha"), role: "manager" };
     const beta = { ...healthyChannel("kanal-b", "Beta"), role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1071,7 +1072,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("button", { name: "Suchen" })).toBeDisabled();
   });
 
-  it("zeigt dem Bediener die Modulaktivierung deaktiviert mit Begründung", async () => {
+  it("shows the operator module activation disabled with a reason", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1092,7 +1093,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getAllByText(reason)).toHaveLength(2);
   });
 
-  it("zeigt Systemzustand, bevor das Audit-Log eintrifft", async () => {
+  it("shows system state before the audit log arrives", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let resolveAudit: ((response: Response) => void) | undefined;
     const auditResponse = new Promise<Response>((resolve) => { resolveAudit = resolve; });
@@ -1113,7 +1114,7 @@ describe("Dashboard-Grundgerüst", () => {
     await waitFor(() => expect(screen.queryByText("Audit-Log wird geladen …")).not.toBeInTheDocument());
   });
 
-  it("öffnet den ausgewählten Audit-Eintrag im Sub-Inspector", async () => {
+  it("opens the selected audit entry in the sub-inspector", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const auditEntry = {
       auditId: "audit-1",
@@ -1166,7 +1167,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(row).toHaveAttribute("aria-selected", "false");
   });
 
-  it("zeigt alle Abos lesbar und öffnet Meldung und Status im Sub-Inspector", async () => {
+  it("shows all subscriptions legibly and opens message and status in the sub-inspector", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
     const subscriptions = [
       { subscriptionType: "channel.chat.message", variant: "", version: "1", subscriptionId: "chat-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" },
@@ -1207,7 +1208,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("403")).toBeInTheDocument();
   });
 
-  it("zeigt Bot-Berechtigungen auf der Kanalseite, nennt fehlende Scopes und bietet keine Autorisierung an", async () => {
+  it("shows bot permissions on the channel page, names missing scopes, and offers no authorization", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       botPermissions: { missingScopes: ["user:bot", "user:read:chat"] },
@@ -1228,12 +1229,12 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("Der Betreiber muss die Anwendung neu autorisieren.")).toBeInTheDocument();
     expect(screen.getByText("user:bot")).toHaveClass("mono");
     expect(screen.getByText("user:read:chat")).toHaveClass("mono");
-    // Die Autorisierung gehört zum Betreiber-Account, nicht in die kanalbezogene Panel-Rolle.
+    // Authorization belongs to the platform account, not to the channel-scoped panel role.
     expect(screen.queryByRole("button", { name: /autoris/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /autoris/i })).not.toBeInTheDocument();
   });
 
-  it("zeigt markierten Kanal mit unvollständiger Vollzustimmung samt Zustandszeile, Scopes und Zustimmungslink", async () => {
+  it("shows a flagged channel with incomplete full consent, including status row, scopes, and consent link", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       role: "broadcaster",
@@ -1256,7 +1257,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(consentLink).toHaveAttribute("href", "/auth/login?channel=kanal-a");
   });
 
-  it("zeigt für einen unmarkierten Kanal keinen Vollzustimmungszustand", async () => {
+  it("shows no full-consent state for an unflagged channel", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: null };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1273,7 +1274,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("link", { name: "Vollzustimmung erteilen" })).not.toBeInTheDocument();
   });
 
-  it("zeigt für einen vollständig zugestimmten Kanal keinen Vollzustimmungszustand", async () => {
+  it("shows no full-consent state for a fully consented channel", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: { missingScopes: [] } };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1290,7 +1291,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("link", { name: "Vollzustimmung erteilen" })).not.toBeInTheDocument();
   });
 
-  it("zeigt Verwaltern die Vollzustimmung deaktiviert mit Begründung", async () => {
+  it("shows managers full consent disabled with a reason", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       role: "manager",
@@ -1312,7 +1313,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getAllByText("Nur der Broadcaster kann die Vollzustimmung erteilen.").length).toBeGreaterThan(0);
   });
 
-  it("zeigt vollständige Bot-Berechtigungen als gesunden Zustand mit Wort", async () => {
+  it("shows full bot permissions as a healthy state with a word", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1329,7 +1330,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(permissions).getByText("Gesund")).toBeInTheDocument();
   });
 
-  it("fragt beim Hinzufügen ausdrücklich nach dem tatsächlichen Zugriffsumfang", async () => {
+  it("explicitly asks for the actual access scope when adding", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let addRequestCount = 0;
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -1370,7 +1371,7 @@ describe("Dashboard-Grundgerüst", () => {
     await waitFor(() => expect(addRequestCount).toBe(1));
   });
 
-  it("bricht die Hinzufügen-Bestätigung ohne POST ab und lässt sie erneut öffnen", async () => {
+  it("cancels the add confirmation without a POST and allows reopening it", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let addRequestCount = 0;
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -1393,8 +1394,8 @@ describe("Dashboard-Grundgerüst", () => {
     fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
     const dialog = screen.getByRole("alertdialog");
     expect(dialog.querySelector(".member-avatar-placeholder")).toBeInTheDocument();
-    // Wer nur Tastatur oder Screenreader nutzt, muss die wichtigste
-    // Sicherheitsabfrage des Formulars auch tatsächlich mitbekommen.
+    // Anyone using only a keyboard or a screen reader must actually notice
+    // the form's most important safety prompt.
     expect(screen.getByRole("button", { name: "Zugriff endgültig freigeben" })).toHaveFocus();
 
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -1410,7 +1411,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
   });
 
-  it("verwirft einen verspäteten Mitglieder-Reload nach einer Mutation beim Kanalwechsel", async () => {
+  it("discards a late member reload after a mutation during a channel switch", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     let resolveAlphaReload: ((response: Response) => void) | undefined;
@@ -1459,7 +1460,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("Verspätetes Alpha-Mitglied")).not.toBeInTheDocument();
   });
 
-  it("behält den erfolgreichen Reload-Stand gegen eine verspätete Erstantwort", async () => {
+  it("keeps the successful reload state against a late initial response", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const neuerMember = { userId: "new-user", login: "new-user", displayName: "Neuer Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" };
     const delayedMember = { userId: "late-user", login: "late-user", displayName: "Verspäteter Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
@@ -1504,7 +1505,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("Verspäteter Stand")).not.toBeInTheDocument();
   });
 
-  it("sperrt die Pagination während eines laufenden Mitglieder-Reloads", async () => {
+  it("locks pagination while a member reload is in progress", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const ersterMember = { userId: "first-user", login: "first-user", displayName: "Erster Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
     const reloadMember = { userId: "reload-user", login: "reload-user", displayName: "Reload-Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" };
@@ -1554,7 +1555,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("button", { name: "Weitere Mitglieder laden" })).toBeEnabled();
   });
 
-  it("setzt den Pagination-Zustand nach einem Reload während der Pagination zurück", async () => {
+  it("resets pagination state after a reload during pagination", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const ersterMember = { userId: "first-user", login: "first-user", displayName: "Erster Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" };
     const reloadMember = { userId: "reload-user", login: "reload-user", displayName: "Reload-Stand", profileImageUrl: null, role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" };
@@ -1613,7 +1614,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("Verspätete Seite")).not.toBeInTheDocument();
   });
 
-  it("lädt die nächste Mitglieder-Seite mit dem gelieferten Cursor nach", async () => {
+  it("loads the next members page using the supplied cursor", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       void init;
@@ -1642,7 +1643,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(fetcher.mock.calls.at(-1)?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("zeigt bei leerer Modulregistry eine sinnvolle leere Modulfläche", async () => {
+  it("shows a sensible empty module area when the module registry is empty", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1659,7 +1660,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByText("Keine Module aktiv.")).toBeInTheDocument();
   });
 
-  it("verweist in der Kanalübersicht auf aktive Module statt ihre Formulare einzubetten", async () => {
+  it("links to active modules in the channel overview instead of embedding their forms", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1677,7 +1678,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
   });
 
-  it("erreicht ein aktives Modul über seine eigene Unterseite", async () => {
+  it("reaches an active module via its own subpage", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1695,7 +1696,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getAllByRole("link", { name: "Module" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
   });
 
-  it("zeigt im Kopf Anzeigename, Twitch-ID und den beschrifteten Modulschalter", async () => {
+  it("shows the display name, Twitch ID, and the labeled module switch in the header", async () => {
     const channel = { ...healthyChannel("26876135", "Esembe"), login: "esembe" };
     const secondChannel = healthyChannel("987654", "ZweiteRinne");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
@@ -1718,7 +1719,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(headerSwitch).toHaveTextContent("Textbefehle · Läuft");
   });
 
-  it("lädt die Kanalübersicht nach dem Einschalten neu und zeigt die Modulansicht", async () => {
+  it("reloads the channel overview after enabling and shows the module view", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
     let overviewAufrufe = 0;
     let modulesCalls = 0;
@@ -1755,7 +1756,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/overview")).toHaveLength(2);
   });
 
-  it("öffnet den Kanalumschalter per Enter und Pfeil ab, bewegt den Fokus und schließt ohne Auswahl per Escape", async () => {
+  it("opens the channel switcher with Enter and Arrow Down, moves focus, and closes without a selection via Escape", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1815,7 +1816,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("hält alle Optionen offen, ohne dass die Brotkrume die Liste beschneidet", async () => {
+  it("keeps all options open without the breadcrumb clipping the list", async () => {
     const channels = [
       healthyChannel("kanal-a", "Alpha"),
       healthyChannel("kanal-b", "Beta"),
@@ -1839,9 +1840,9 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(listbox).getByRole("option", { name: /Gamma/ })).toBeInTheDocument();
 
     const breadcrumb = screen.getByRole("navigation", { name: "Brotkrume" });
-    // jsdom injiziert die importierte CSS-Datei nicht und berechnet keine
-    // Layoutrechtecke; DOM-Struktur und die zugehoerige Regel halten deshalb
-    // fest, dass alle Optionen existieren und nichts abschneidet.
+    // jsdom does not inject the imported CSS file and computes no layout
+    // rects; the DOM structure and the matching rule therefore assert that
+    // all options exist and nothing clips.
     const styles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
     const breadcrumbRule = styles.match(/\.topbar__breadcrumb\s*\{[^}]*\}/)?.[0];
     expect(breadcrumb).toBeInTheDocument();
@@ -1849,7 +1850,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(breadcrumbRule).not.toMatch(/overflow\s*:\s*hidden/);
   });
 
-  it("markiert Bereichs- und Modulsegment als separat ausblendbare Teile der Brotkrume", async () => {
+  it("marks the area and module segments as separately hideable parts of the breadcrumb", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1864,8 +1865,8 @@ describe("Dashboard-Grundgerüst", () => {
 
     const breadcrumb = screen.getByRole("navigation", { name: "Brotkrume" });
     await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
-    // jsdom berechnet keine CSS-Layouts; die Regression wird deshalb über die
-    // eigene DOM-Klasse und die dazugehörige schmale CSS-Regel abgesichert.
+    // jsdom computes no CSS layouts; the regression is therefore guarded via
+    // the dedicated DOM class and its matching narrow CSS rule.
     expect(breadcrumb.querySelector(".topbar__breadcrumb-area")).toBeInTheDocument();
     expect(breadcrumb.querySelector(".topbar__breadcrumb-module")).toBeInTheDocument();
     const styles = readFileSync(resolve(process.cwd(), "src/dashboard/styles.css"), "utf8");
@@ -1873,7 +1874,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(styles).toMatch(/\.topbar__breadcrumb-module[\s\S]*?display:\s*none/);
   });
 
-  it("lässt das Kanalsegment bei genau einem Kanal ohne Bedienelement", async () => {
+  it("leaves the channel segment without a control when there is exactly one channel", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1892,7 +1893,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(segment).not.toHaveAttribute("aria-haspopup");
   });
 
-  it("zeigt die Brotkrume und die fünf Einträge der Schiene auf allen Bereichen und der Moduldetailseite", async () => {
+  it("shows the breadcrumb and the rail's five entries on all areas and the module detail page", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1936,7 +1937,7 @@ describe("Dashboard-Grundgerüst", () => {
     }
   });
 
-  it("führt die Marke als fokussierbaren Link auf die Kanalliste", async () => {
+  it("the brand acts as a focusable link to the channel list", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1955,7 +1956,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(window.location.pathname).toBe("/");
   });
 
-  it("mountet beim Wechsel zur Modulroute nicht den alten Übersichtsstand", async () => {
+  it("does not mount the old overview state when switching to the module route", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
     const inactiveModule = overview(channel);
@@ -1983,7 +1984,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("Das Modul „Textbefehle“ ist in diesem Kanal nicht aktiv.")).not.toBeInTheDocument();
   });
 
-  it("meldet ein deaktiviertes Modul auf seiner Unterseite verständlich", async () => {
+  it("reports a disabled module understandably on its subpage", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1999,7 +2000,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByText("Das Modul „Textbefehle“ ist ausgeschaltet.")).toBeInTheDocument();
   });
 
-  it("meldet ein unbekanntes Modul auf seiner Unterseite verständlich", async () => {
+  it("reports an unknown module understandably on its subpage", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -2014,7 +2015,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByText("Das Modul „unbekannt“ ist nicht bekannt.")).toBeInTheDocument();
   });
 
-  it("zeigt einen Kanal ohne Broadcaster-OAuth neutral und erreicht dessen Overview und System", async () => {
+  it("shows a channel without broadcaster OAuth neutrally and reaches its overview and system pages", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterConnection: "not_connected" };
     const fetcher = vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -2043,7 +2044,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
   });
 
-  it("zeigt einen fehlenden Moderatorstatus als roten Fehlerzustand", async () => {
+  it("shows a missing moderator status as a red error state", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
@@ -2064,7 +2065,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(moderatorCard).toHaveTextContent("Moderatorrolle fehlt");
   });
 
-  it("zeigt das betroffene Abo im letzten Fehler auf Deutsch und Englisch", async () => {
+  it("shows the affected subscription in the last error in German and English", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       lastError: {
@@ -2105,7 +2106,7 @@ describe("Dashboard-Grundgerüst", () => {
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
   });
 
-  it("zeigt fehlende Broadcaster-Zustimmung als Warnung und nur dem Broadcaster den Weg zur Nachforderung", async () => {
+  it("shows missing broadcaster consent as a warning and offers the reauthorization path only to the broadcaster", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       channelBotConsent: "missing",
@@ -2137,7 +2138,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("article", { name: "Chat-Zustimmung" })).toHaveAttribute("data-status", "warning");
   });
 
-  it("zeigt die letzte Moderatorprüfung und die Aktion nur für berechtigte Rollen", async () => {
+  it("shows the last moderator check and the action only for authorized roles", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       role: "manager",
@@ -2173,7 +2174,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByText("Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.")).toBeInTheDocument();
   });
 
-  it("zeigt während und nach der manuellen Prüfung eine Rückmeldung", async () => {
+  it("shows feedback during and after the manual check", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       role: "broadcaster",
@@ -2202,13 +2203,13 @@ describe("Dashboard-Grundgerüst", () => {
       nextAllowedAt: "2026-09-18T04:05:00.000Z",
     }));
 
-    // Gesunde Zustände bleiben sichtbar und tragen weiterhin eine grüne LED.
+    // Healthy states stay visible and keep a green LED.
     await waitFor(() => expect(screen.getAllByText(/Letzte Prüfung:/).length).toBeGreaterThanOrEqual(1));
     expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
     expect(screen.getAllByText(/Letzte Prüfung:/).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("reaktiviert die Moderatorprüfung nach Ablauf der Sperrzeit", async () => {
+  it("reactivates the moderator check after the lockout period expires", async () => {
     vi.useFakeTimers();
     try {
       const channel = {
@@ -2244,7 +2245,7 @@ describe("Dashboard-Grundgerüst", () => {
     }
   });
 
-  it("zeigt Twitch-Fehler an und behält den bisherigen Moderatorstand", async () => {
+  it("shows Twitch errors and keeps the previous moderator state", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       moderator: { isModerator: true, checkedAt: "2026-09-18T02:00:00.000Z", reason: null },
@@ -2268,7 +2269,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("article", { name: "Moderatorstatus" })).toHaveAttribute("data-status", "healthy");
   });
 
-  it("zeigt fehlende Token-Ablaufdaten nicht als gültig oder gesund", async () => {
+  it("does not show missing token expiry dates as valid or healthy", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       tokens: {
@@ -2296,7 +2297,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(tokenCard.querySelector('[data-status="healthy"]')).toBeNull();
   });
 
-  it("zeigt einen funktionierenden Kanal mit drei Stunden Restlaufzeit als gesund", async () => {
+  it("shows a working channel with three hours remaining as healthy", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -2313,22 +2314,22 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(channelTaste).getByText("Gesund", { selector: "span" })).toBeInTheDocument();
     expect(within(channelTaste).queryByText("Warnung")).not.toBeInTheDocument();
 
-    // Gesunde Zustände bleiben auf der Kanalseite sichtbar.
+    // Healthy states stay visible on the channel page.
     fireEvent.click(screen.getByRole("link", { name: /Alpha/ }));
     await screen.findByRole("heading", { name: "Alpha", level: 1 });
     expect(screen.getByRole("article", { name: "Token-Zustand" })).toHaveAttribute("data-status", "healthy");
     expect(screen.getByRole("article", { name: "Bot-Account" })).toHaveAttribute("data-status", "healthy");
   });
 
-  it("bleibt gesund, solange der Ablauf nur turnusmäßig näherrückt", async () => {
-    // Bei vierstündigen Twitch-Tokens und stündlichem Cron steht jedes Token
-    // regelmäßig bis zu einer Stunde im Erneuerungsfenster. Das ist der
-    // Normalfall und darf nicht warnen — sonst warnt die Anzeige alle vier
-    // Stunden knapp eine Stunde lang und verliert ihre Aussagekraft.
+  it("stays healthy as long as expiry is only approaching on its regular cycle", async () => {
+    // With four-hour Twitch tokens and an hourly cron, every token regularly
+    // sits in the renewal window for up to an hour. That's the normal case
+    // and must not warn — otherwise the display warns for nearly an hour
+    // every four hours and loses its meaning.
     const basis = healthyChannel("kanal-a", "Alpha");
     const channel = {
       ...basis,
-      // Der letzte Lauf liegt VOR dem Zeitpunkt, ab dem erneuert werden muss.
+      // The last run happened BEFORE the point at which renewal becomes due.
       bot: { ...basis.bot, updatedAt: relativeIso(-45 * 60 * 1000) },
       tokens: {
         ...basis.tokens,
@@ -2351,9 +2352,9 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(channelTaste).queryByText("Erneuerung überfällig")).not.toBeInTheDocument();
   });
 
-  it("warnt, wenn ein Wartungslauf das fällige Token nicht erneuert hat", async () => {
-    // Gleiche Restlaufzeit wie oben — aber der Cron ist seitdem gelaufen und
-    // hat nichts erneuert. Das ist der Fall, der tatsächlich kaputt ist.
+  it("warns when a maintenance run failed to renew the due token", async () => {
+    // Same remaining time as above — but the cron has run since then and
+    // renewed nothing. This is the case that's actually broken.
     const basis = healthyChannel("kanal-a", "Alpha");
     const channel = {
       ...basis,
@@ -2379,7 +2380,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(channelTaste).getByText("Erneuerung überfällig", { selector: "span" })).toBeInTheDocument();
   });
 
-  it("warnt bei einem seit mehr als einem Wartungsintervall veralteten Lauf", async () => {
+  it("warns on a run stale by more than one maintenance interval", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       bot: { status: "connected", reason: null, updatedAt: relativeIso(-(60 * 60 * 1000 + 1)) },
@@ -2399,7 +2400,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(within(channelTaste).getByText("Wartung überfällig", { selector: "span" })).toBeInTheDocument();
   });
 
-  it("verwirft beim Kanalwechsel den alten Datenstand vor der neuen Antwort", async () => {
+  it("discards the old data state before the new response on a channel switch", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     let resolveAlpha: ((response: Response) => void) | undefined;
@@ -2437,7 +2438,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("heading", { name: "Alpha", level: 1 })).not.toBeInTheDocument();
   });
 
-  it("verwirft beim Kanalwechsel eine verspätete, unterscheidbare Systemantwort", async () => {
+  it("discards a late, distinguishable system response on a channel switch", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     let resolveAlphaSystem: ((response: Response) => void) | undefined;
@@ -2472,7 +2473,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("alpha-system")).not.toBeInTheDocument();
   });
 
-  it("mischt eine verspätete Audit-Antwort nicht in den nächsten Kanal", async () => {
+  it("does not merge a late audit response into the next channel", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     let resolveAlphaAudit: ((response: Response) => void) | undefined;
@@ -2512,7 +2513,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByText("alpha-verspätet")).not.toBeInTheDocument();
   });
 
-  it("führt bei einer mit 401 abgewiesenen Abmeldung zur Anmeldung und entfernt geschützte Daten", async () => {
+  it("leads to sign-in and removes protected data when logout is rejected with 401", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
@@ -2531,10 +2532,10 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.queryByRole("heading", { name: "Alpha", level: 1 })).not.toBeInTheDocument();
   });
 
-  it("bleibt bei einer mit 403 abgewiesenen Abmeldung angemeldet und meldet den Fehler", async () => {
-    // 403 heisst, dass das CSRF-Token nicht passte — der Worker hat die Session
-    // nicht widerrufen. Wer hier zur Anmeldung fuehrt, meldet eine Abmeldung,
-    // die nicht stattgefunden hat: nach einem Neuladen ist der Nutzer wieder da.
+  it("stays signed in and reports the error when logout is rejected with 403", async () => {
+    // 403 means the CSRF token didn't match — the worker did not revoke the
+    // session. Redirecting to sign-in here would report a logout that never
+    // happened: after a reload the user is back.
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
@@ -2557,7 +2558,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("heading", { name: "Übersicht", level: 1 })).toBeInTheDocument();
   });
 
-  it("holt vor dem Logout den CSRF-Token und sendet ihn im Header", async () => {
+  it("fetches the CSRF token before logout and sends it in the header", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
@@ -2581,7 +2582,7 @@ describe("Dashboard-Grundgerüst", () => {
     });
   });
 
-  it("ordnet die Abonnementliste und ihren Inspector als direkte Bereichskinder an", async () => {
+  it("arranges the subscriptions list and its inspector as direct region children", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const subscriptions = [{
       subscriptionType: "channel.chat.message",
@@ -2614,7 +2615,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(bereich.children[1]).toHaveClass("sub-inspector");
   });
 
-  it("ordnet Audit-Liste und Inspector als direkte Bereichskinder an", async () => {
+  it("arranges the audit log list and inspector as direct region children", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       auditId: "audit-1",
@@ -2647,7 +2648,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(bereich.children[1]).toHaveClass("sub-inspector");
   });
 
-  it("behält die Audit-Auswahl beim erneuten Nachladen bestehen", async () => {
+  it("keeps the audit selection intact across a reload", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       auditId: "audit-1",
@@ -2690,7 +2691,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
   });
 
-  it("ordnet Ereignisliste und Vorgangs-Inspector als direkte Bereichskinder an", async () => {
+  it("arranges the events list and the incident inspector as direct region children", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       eventId: "event-1",
@@ -2724,7 +2725,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(bereich.children[1]).toHaveClass("sub-inspector");
   });
 
-  it("behält den Ereignis-Vorgang beim erneuten Nachladen bestehen", async () => {
+  it("keeps the event incident intact across a reload", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       eventId: "event-1",
@@ -2769,7 +2770,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(await screen.findByRole("region", { name: "Detail" })).toBeInTheDocument();
   });
 
-  it("zeigt die beiden Scope-Listen als gewöhnliche Bereiche ohne Inspector-Klasse", async () => {
+  it("shows both scope lists as ordinary regions without the inspector class", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
       botPermissions: { missingScopes: ["user:bot"] },
@@ -2791,7 +2792,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(broadcasterScopes).not.toHaveClass("sub-inspector");
   });
 
-  it("schließt den Abonnement-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+  it("closes the subscription inspector by button and Escape, returning focus to the row", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
     const subscription = {
@@ -2848,7 +2849,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(screen.getByRole("region", { name: "Abo-Details" })).toBeInTheDocument();
   });
 
-  it("schließt den Audit-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+  it("closes the audit inspector by button and Escape, returning focus to the row", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       auditId: "audit-1",
@@ -2894,7 +2895,7 @@ describe("Dashboard-Grundgerüst", () => {
     expect(row).toHaveFocus();
   });
 
-  it("schließt den Ereignis-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+  it("closes the event inspector by button and Escape, returning focus to the row", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       eventId: "event-1",

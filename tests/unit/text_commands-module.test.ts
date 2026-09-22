@@ -98,8 +98,8 @@ const eventCodes = async (database: TestD1Database): Promise<string[]> => {
   return result.results.map((entry) => entry.code);
 };
 
-describe("Textbefehle-Modul", () => {
-  it("behandelt entfallene Änderungsbefehle als unbekannt und ändert keine Moduldaten", async () => {
+describe("Text commands module", () => {
+  it("treats removed edit commands as unknown and doesn't change module data", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -120,7 +120,7 @@ describe("Textbefehle-Modul", () => {
     }
   });
 
-  it("antwortet nur im Kanal, in dem der Befehl angelegt wurde", async () => {
+  it("replies only in the channel where the command was created", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -143,7 +143,7 @@ describe("Textbefehle-Modul", () => {
     }
   });
 
-  it("antwortet bei einem unbekannten Befehl nicht im Chat", async () => {
+  it("doesn't reply in chat for an unknown command", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -161,7 +161,7 @@ describe("Textbefehle-Modul", () => {
     }
   });
 
-  it("schweigt beim zweiten Aufruf innerhalb der Abkühlzeit", async () => {
+  it("stays silent on the second call within the cooldown period", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -181,7 +181,7 @@ describe("Textbefehle-Modul", () => {
     }
   });
 
-  it("initialisiert den Listenbefehl beim Aktivieren des Moduls", async () => {
+  it("initializes the list command when the module is enabled", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -204,7 +204,7 @@ describe("Textbefehle-Modul", () => {
     }
   });
 
-  it("löst einen ausgeschalteten Befehl nicht aus und begründet das im Ereignisprotokoll", async () => {
+  it("doesn't trigger a disabled command and gives the reason in the event log", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -224,7 +224,7 @@ describe("Textbefehle-Modul", () => {
     }
   });
 
-  it("lässt Moderatoren einen Moderator-Befehl auslösen und schweigt bei Zuschauern mit Diagnose", async () => {
+  it("lets moderators trigger a moderator command and stays silent for viewers, with a diagnostic", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -250,7 +250,7 @@ describe("Textbefehle-Modul", () => {
     }
   });
 
-  it("wertet Moderatoren ohne Abo und Founder als Abonnenten", async () => {
+  it("treats moderators without a sub and founders as subscribers", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -269,7 +269,7 @@ describe("Textbefehle-Modul", () => {
     }
   });
 
-  it("listet nur eingeschaltete Befehle", async () => {
+  it("lists only enabled commands", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");

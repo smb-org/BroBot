@@ -55,8 +55,8 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
-describe("Betreiberebene", () => {
-  it("zeigt ohne Betreiberfreigabe weder Navigation noch Betreiberroute", async () => {
+describe("Platform level", () => {
+  it("shows neither navigation nor the platform route without platform access", async () => {
     setUpPlatform(false);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -68,7 +68,7 @@ describe("Betreiberebene", () => {
     expect(screen.queryByRole("heading", { name: "Betreiberebene", level: 1 })).not.toBeInTheDocument();
   });
 
-  it("bietet Broadcaster in keinem Rollenauswahlfeld an", async () => {
+  it("never offers Broadcaster in any role selector", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -82,7 +82,7 @@ describe("Betreiberebene", () => {
     expect(screen.queryAllByRole("option", { name: "Broadcaster" })).toHaveLength(0);
   });
 
-  it("fragt vor dem Entfernen eines Mitglieds nach und handelt noch nicht", async () => {
+  it("asks for confirmation before removing a member and does not act yet", async () => {
     const fetcher = setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -97,7 +97,7 @@ describe("Betreiberebene", () => {
     expect(fetcher.mock.calls.some(([input, init]) => requestUrl(input).pathname.endsWith("/members/456") && init?.method === "DELETE")).toBe(false);
   });
 
-  it("zeigt den Entfernen-Knopf der Broadcaster-Zeile deaktiviert mit Begründung", async () => {
+  it("shows the broadcaster row's remove button disabled with a reason", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -112,7 +112,7 @@ describe("Betreiberebene", () => {
     expect(remove).toHaveAccessibleDescription("Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
   });
 
-  it("setzt den Einladungslink aus dem Login des gewählten Kanals zusammen", async () => {
+  it("builds the invite link from the selected channel's login", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -124,7 +124,7 @@ describe("Betreiberebene", () => {
     expect(link).toHaveValue("http://localhost:3000/auth/login?channel=alpha_login");
   });
 
-  it("zeigt im Betreiber-Audit den Anzeigenamen und bei fehlender Auflösung die ID", async () => {
+  it("shows the display name in the platform audit log, falling back to the ID when it can't be resolved", async () => {
     setUpPlatform(true, {
       entries: [{
         auditId: "audit-1",
@@ -163,7 +163,7 @@ describe("Betreiberebene", () => {
     expect(within(audit).queryByText("Betreiber · 26876135")).not.toBeInTheDocument();
   });
 
-  it("zeigt den Einladungslink nur im Editor des gewählten Kanals", async () => {
+  it("shows the invite link only in the selected channel's editor", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -178,7 +178,7 @@ describe("Betreiberebene", () => {
     expect(within(overview).getByRole("region", { name: "Einladungslink" })).toContainElement(within(editor).getByRole("textbox", { name: "Einladungslink" }));
   });
 
-  it("ordnet Kanalübersicht und Kanal-Inspector als direkte Bereichskinder an", async () => {
+  it("arranges the channel overview and channel inspector as direct region children", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -192,7 +192,7 @@ describe("Betreiberebene", () => {
     expect(bereich.children[1]).toHaveClass("sub-inspector");
   });
 
-  it("schließt den Betreiber-Kanal-Inspector per Taste und Escape mit Fokus auf der Zeile", async () => {
+  it("closes the platform channel inspector by button and Escape, returning focus to the row", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -221,7 +221,7 @@ describe("Betreiberebene", () => {
     expect(row).toHaveFocus();
   });
 
-  it("öffnet die Kanalfreigabe in der Inspektorspalte und wechselt ohne Doppelbelegung", async () => {
+  it("opens channel access grant in the inspector column and switches without double-occupying it", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -256,7 +256,7 @@ describe("Betreiberebene", () => {
     expect(freigabe).not.toBeInTheDocument();
   });
 
-  it("gibt einen Kanal weiterhin über das geöffnete Formular frei", async () => {
+  it("still grants a channel access through the open form", async () => {
     const freigegeben = { ...channel };
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const url = requestUrl(input);

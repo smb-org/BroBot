@@ -6,7 +6,7 @@ import {
   type ActorContext,
 } from "./db/guards";
 
-/** Liefert dem Modul nur die bereits geprüfte SQL-Bedingung, nicht channel_members. */
+/** Gives the module only the already-verified SQL condition, not channel_members. */
 export const authorizeModuleMutation: AuthorizeModuleMutation = (channelId, actor, now) => {
   if (actor.sessionId !== undefined) {
     const context: ActorContext = { userId: actor.userId, sessionId: actor.sessionId };
@@ -22,7 +22,7 @@ export const authorizeModuleMutation: AuthorizeModuleMutation = (channelId, acto
   };
 };
 
-/** Dieselbe verwaltende Schwelle wie bei der Modulaktivierung. */
+/** Same management threshold as for module activation. */
 export const authorizeModuleManagementMutation: AuthorizeModuleMutation = (channelId, actor, now) => {
   if (actor.sessionId !== undefined) {
     const context: ActorContext = { userId: actor.userId, sessionId: actor.sessionId };

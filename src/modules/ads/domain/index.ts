@@ -65,14 +65,14 @@ const dateMs = (value: string | null): number | null => {
 };
 
 /**
- * Der Wecker feuert nie zu früh, aber regelmäßig ein paar Millisekunden zu
- * spät. Ohne Spielraum wäre die verbleibende Zeit deshalb *immer* knapp unter
- * der Vorlaufzeit und die Vorwarnung fiele im Betrieb jedes Mal aus, während
- * ein Test mit exakten Zeiten sie bestehen sieht.
+ * The alarm never fires early, but regularly fires a few milliseconds late.
+ * Without slack, the remaining time would therefore *always* be just under
+ * the lead time, and the prewarning would fail every time in production,
+ * while a test with exact timestamps would pass.
  */
 const MINDEST_VORLAUF_MS = 5_000;
 
-/** Zwei Termine innerhalb dieses Fensters sind derselbe Termin. */
+/** Two timestamps within this window count as the same schedule. */
 const TERMIN_TOLERANZ_MS = 2_000;
 
 const skip = (
@@ -105,9 +105,9 @@ export const decideAdPrewarning = (
     return skip("zu_spaet", { verbleibendSekunden: Math.max(0, Math.round(verbleibend / 1000)) });
   }
 
-  // Angesagt wird die tatsächlich verbleibende Zeit, nicht die eingestellte
-  // Vorlaufzeit: Weckt der Alarm später oder hat Twitch den Termin leicht
-  // verschoben, bliebe der Text sonst falsch.
+  // The announcement uses the actually remaining time, not the configured
+  // lead time: if the alarm fires later or Twitch shifted the schedule
+  // slightly, the text would otherwise be wrong.
   const sekunden = Math.round(verbleibend / 1000);
   return {
     kind: "announce",
