@@ -241,6 +241,8 @@ interface ModuleWorkspaceProperties {
   loading?: boolean;
   error?: string | null;
   onNavigate: (route: DashboardRoute) => void;
+  /** Reloads `modules` after a successful toggle. */
+  onChanged: () => Promise<void>;
 }
 
 const ModuleWorkspaceRow = ({
@@ -296,31 +298,14 @@ const ModuleWorkspaceRow = ({
   );
 };
 
-export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate }: ModuleWorkspaceProperties): ReactElement => {
+export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, error = null, onNavigate, onChanged }: ModuleWorkspaceProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = canManageModules(ownRole);
-  // The `modules` prop is owned by the caller and only refreshes on its own
-  // schedule; a toggle here has nowhere to report back to that would make it
-  // refetch. This tracks the in-flight/just-sent value per module so the row
-  // reflects the click immediately, and drops the override again once the
-  // caller's own data catches up to it (or reverts it, on failure).
+  // Holds the clicked value only while the request is in flight; afterwards
+  // the caller reloads `modules`, so the list, sidebar and overview agree.
   const [pendingEnabled, setPendingEnabled] = useState<Record<string, boolean>>({});
   const [busyModuleId, setBusyModuleId] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
-
-  // "Adjusting state when a prop changes" (react.dev/learn/you-might-not-need-an-effect):
-  // done here, during render, rather than in an effect -- once the caller's
-  // own data catches up to an override, it drops without an extra render.
-  const [reconciledAgainst, setReconciledAgainst] = useState(modules);
-  if (modules !== reconciledAgainst) {
-    setReconciledAgainst(modules);
-    setPendingEnabled((current) => {
-      const next = Object.fromEntries(
-        Object.entries(current).filter(([moduleId, optimistic]) => modules.find((state) => state.id === moduleId)?.enabled !== optimistic),
-      );
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
-  }
 
   const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
     setBusyModuleId(moduleId);
@@ -328,10 +313,11 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
     setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
     try {
       await setChannelModuleEnabled(channelId, moduleId, nextEnabled);
+      await onChanged();
     } catch (toggleFailure: unknown) {
-      setPendingEnabled((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== moduleId)));
       setToggleError(toggleFailure instanceof PanelApiError && toggleFailure.status === 401 ? texts.errors.sessionInvalid : texts.errors.changeFailed);
     } finally {
+      setPendingEnabled((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== moduleId)));
       setBusyModuleId(null);
     }
   };

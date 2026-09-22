@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
@@ -73,7 +73,7 @@ describe("Module panel loader", () => {
     const fetcher = vi.fn<typeof fetch>();
     const onNavigate = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} onChanged={vi.fn(() => Promise.resolve())} />);
 
     const taste = screen.getByRole("link", { name: /aktiv.*Läuft/i });
     fireEvent.click(taste);
@@ -82,8 +82,22 @@ describe("Module panel loader", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("toggles a module and reloads the caller's list afterwards", async () => {
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } })));
+    const onChanged = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={onChanged} />);
+
+    fireEvent.click(screen.getByRole("switch", { name: /aktiv/i }));
+
+    await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
+    const [url, init] = fetcher.mock.calls.find(([, requestInit]) => requestInit?.method === "PATCH") ?? [];
+    expect(url instanceof URL ? url.pathname : url).toBe("/api/channels/kanal-a/modules/aktiv");
+    expect(init?.body).toBe(JSON.stringify({ enabled: false }));
+  });
+
   it("shows no kicker above the module heading", () => {
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
 
     expect(screen.getByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("Tastenraster")).not.toBeInTheDocument();
