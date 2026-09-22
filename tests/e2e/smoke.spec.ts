@@ -109,6 +109,11 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
 
   const sidebar = page.getByRole("navigation", { name: "Hauptnavigation" });
   const burger = page.getByRole("button", { name: "Seitenleiste öffnen" });
+  const modulesLink = sidebar.getByRole("link", { name: "Module", exact: true });
+  await modulesLink.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL("/channels/kanal-e2e/modules");
+  await expect(modulesLink).toHaveAttribute("aria-current", "page");
 
   // Above the md breakpoint (768px): the sidebar sits inline, no burger needed.
   for (const width of [1280, 1920, 3440]) {

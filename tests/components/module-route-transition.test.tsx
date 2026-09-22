@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
@@ -60,7 +60,8 @@ describe("Module route during client-side navigation", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const link = await screen.findByRole("link", { name: /^aktiv.*Läuft$/ });
+    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
+    const link = await within(nav).findByRole("link", { name: /^aktiv.*Läuft$/ });
     expect(activeLoader).not.toHaveBeenCalled();
 
     link.click();

@@ -984,6 +984,20 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
   },
 };
 
+interface ModuleAuditTexts {
+  settingsChanged: (name: string) => string;
+}
+
+const moduleAuditTexts: LocaleCatalog<ModuleAuditTexts> = {
+  de: { settingsChanged: (name) => `Einstellungen geändert: ${name}` },
+  en: { settingsChanged: (name) => `Settings changed: ${name}` },
+};
+
+export const moduleSettingsChangedText = (
+  name: string,
+  language: DashboardLanguage = dashboardLanguage(),
+): string => moduleAuditTexts[language].settingsChanged(name);
+
 export const auditActionLabel = (
   action: string,
   language: DashboardLanguage = dashboardLanguage(),

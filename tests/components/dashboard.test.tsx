@@ -870,6 +870,9 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(row);
 
     const inspector = await screen.findByRole("region", { name: "Detail" });
+    const inspectorHeading = within(inspector).getByRole("heading", { name: "Vorgang" });
+    expect(inspectorHeading).toHaveAttribute("title", "trigger-1");
+    expect(inspectorHeading).not.toHaveTextContent("trigger-1");
     // Event text and chip come before the internal code, both inside and outside the inspector.
     const historyHeading = within(inspector).getByText(/gebannt von alice/).closest(".event-history__heading");
     if (historyHeading === null) throw new Error("Verlaufskopf fehlt");
@@ -887,7 +890,10 @@ describe("Dashboard skeleton", () => {
     if (disclosure === null) throw new Error("Technische Details fehlen");
     expect(disclosure.open).toBe(false);
     expect(within(inspector).getByText("Technische Details")).toBeInTheDocument();
+    expect(inspector.querySelector(".inspector-section__heading button[aria-label='ID kopieren']")).toBeNull();
+    expect(disclosure.contains(within(inspector).getByRole("button", { name: "ID kopieren" }))).toBe(true);
 
+    fireEvent.click(within(inspector).getByText("Technische Details"));
     fireEvent.click(within(inspector).getByRole("button", { name: "ID kopieren" }));
     expect(clipboard.writeText).toHaveBeenCalledWith("trigger-1");
     expect(await within(inspector).findByRole("button", { name: "Kopiert" })).toBeInTheDocument();
@@ -1804,7 +1810,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const link = await screen.findByRole("link", { name: /Textbefehle/ });
+    const link = await within(screen.getByRole("main")).findByRole("link", { name: /Textbefehle/ });
     expect(link).toHaveAttribute("href", "/channels/kanal-a/modules/text_commands");
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
   });
@@ -1824,7 +1830,7 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByRole("heading", { name: "Textbefehle", level: 1 })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Modulübersicht" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
+    expect(screen.getAllByRole("link", { name: "Module" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
   });
 
   it("shows the display name, Twitch ID, and the labeled module switch in the header", async () => {
@@ -2034,7 +2040,7 @@ describe("Dashboard skeleton", () => {
       { path: "/channels/kanal-a", heading: "Alpha", currentLink: "Kanal" },
       { path: "/channels/kanal-a/system", heading: "System", currentLink: "System" },
       { path: "/channels/kanal-a/members", heading: "Mitglieder", currentLink: "Mitglieder" },
-      { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Modulübersicht" },
+      { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Module" },
       { path: "/channels/kanal-a/events", heading: "Ereignisse", currentLink: "Ereignisse" },
       { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", currentLink: "Textbefehle Läuft" },
     ];
@@ -2048,14 +2054,11 @@ describe("Dashboard skeleton", () => {
       for (const label of ["Ereignisse", "Kanal", "System", "Mitglieder"]) {
         expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
       }
-      // The Modules group only auto-expands on a module route; elsewhere
-      // "Modulübersicht" is collapsed (not yet clicked open) rather than
-      // absent, so it needs `hidden: true` to be found either way.
-      expect(within(nav).getByRole("link", { name: "Modulübersicht", hidden: true })).toBeInTheDocument();
+      expect(within(nav).getByRole("link", { name: "Module" })).toBeInTheDocument();
       if (page.currentLink === null) {
-        expect(within(nav).queryByRole("link", { current: "page", hidden: true })).not.toBeInTheDocument();
+        expect(within(nav).queryByRole("link", { current: "page" })).not.toBeInTheDocument();
       } else {
-        expect(within(nav).getByRole("link", { current: "page", hidden: true })).toHaveAccessibleName(page.currentLink);
+        expect(within(nav).getByRole("link", { current: "page" })).toHaveAccessibleName(page.currentLink);
       }
     }
   });
@@ -2099,7 +2102,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const link = await screen.findByRole("link", { name: /Textbefehle/ });
+    const link = await within(screen.getByRole("main")).findByRole("link", { name: /Textbefehle/ });
     link.click();
 
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();

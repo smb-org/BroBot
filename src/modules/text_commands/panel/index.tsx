@@ -82,7 +82,7 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
   };
 
   return (
-    <SubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.columns.last} {relativeTime(initial.lastUsedAt, labels)}</span>} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={onClose}>
+    <SubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={initial.name} meta={<span className="command-inspector__meta">{labels.columns.last} {relativeTime(initial.lastUsedAt, labels)}</span>} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={onClose}>
       {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
       <label className="config-field config-field--medium">
         {labels.name}

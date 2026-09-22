@@ -1,5 +1,5 @@
 import { NavLink } from "@mantine/core";
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { type MouseEvent, type ReactNode } from "react";
 
 import { Led, type LedStatus } from "./Led";
 
@@ -21,12 +21,8 @@ export interface SidebarGroup {
 
 export interface SidebarModulesGroup {
   heading: string;
-  icon: ReactNode;
-  label: string;
-  /** Whether the current route is inside a module or the module list -- drives auto-expand, not the row's own active style (only a selected child gets that). */
-  active: boolean;
+  entry: SidebarEntry;
   entries: SidebarEntry[];
-  allEntry: SidebarEntry;
 }
 
 export interface SidebarProps {
@@ -63,17 +59,7 @@ const stopAndNavigate = (onNavigate: () => void, onEntryNavigate: () => void) =>
  * this needs to look pixel-exact rather than just work.
  */
 export function Sidebar({ groups, modules, platform, collapsed, onToggleCollapsed, onEntryNavigate, collapseLabel, expandLabel }: SidebarProps) {
-  // Auto-expands the group once the route enters it, without fighting a
-  // later manual collapse: adjusted during render (not in an effect) per
-  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes.
-  const [modulesOpened, setModulesOpened] = useState(modules.active);
-  const [wasActive, setWasActive] = useState(modules.active);
-  if (modules.active !== wasActive) {
-    setWasActive(modules.active);
-    if (modules.active) setModulesOpened(true);
-  }
-
-  const renderEntry = (entry: SidebarEntry): ReactNode => (
+  const renderEntry = (entry: SidebarEntry, moduleChild = false): ReactNode => (
     <NavLink
       key={entry.id}
       href={entry.href}
@@ -84,7 +70,7 @@ export function Sidebar({ groups, modules, platform, collapsed, onToggleCollapse
       rightSection={entry.led === undefined || collapsed ? undefined : <Led status={entry.led.status} word={entry.led.word} />}
       active={entry.active}
       aria-current={entry.active ? "page" : undefined}
-      className="sidebar-nav-link"
+      className={`sidebar-nav-link${moduleChild ? " sidebar-nav-link--module-child" : ""}`}
       onClick={stopAndNavigate(entry.onNavigate, onEntryNavigate)}
     />
   );
@@ -95,29 +81,19 @@ export function Sidebar({ groups, modules, platform, collapsed, onToggleCollapse
         {groups.map((group) => (
           <div className="sidebar__group" key={group.id}>
             {collapsed ? null : <div className="sidebar__heading">{group.heading}</div>}
-            {group.entries.map(renderEntry)}
+          {group.entries.map((entry) => renderEntry(entry))}
           </div>
         ))}
         <div className="sidebar__group">
           {collapsed ? null : <div className="sidebar__heading">{modules.heading}</div>}
-          <NavLink
-            label={collapsed ? undefined : modules.label}
-            title={collapsed ? modules.label : undefined}
-            aria-label={collapsed ? modules.label : undefined}
-            leftSection={modules.icon}
-            opened={modulesOpened}
-            onChange={setModulesOpened}
-            className="sidebar-nav-link sidebar-nav-link--parent"
-          >
-            {modules.entries.map(renderEntry)}
-            {renderEntry(modules.allEntry)}
-          </NavLink>
+          {renderEntry(modules.entry)}
+          {modules.entries.map((entry) => renderEntry(entry, true))}
         </div>
       </div>
       {platform === undefined ? null : (
         <div className="sidebar__group sidebar__group--platform">
           {collapsed ? null : <div className="sidebar__heading">{platform.heading}</div>}
-          {platform.entries.map(renderEntry)}
+          {platform.entries.map((entry) => renderEntry(entry))}
         </div>
       )}
       <button

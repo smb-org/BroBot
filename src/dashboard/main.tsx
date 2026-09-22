@@ -43,8 +43,8 @@ import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
-import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
-import { apiErrorText, auditActionLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
+import { platformTexts, channelPanelTexts, roleLabel, auditActionLabel } from "./labels";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { canManage } from "../contracts/values";
 import { eventSubName, moduleName, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
@@ -320,18 +320,15 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
   const allModulesRoute: DashboardRoute = { kind: "channel", channelId: navigationChannelId, section: "modules" };
   const modulesGroup: SidebarModulesGroup = {
     heading: texts.navigation.module,
-    icon: <NavigationIcon kind="modules" className="sidebar-nav-icon" />,
-    label: texts.navigation.module,
-    active: route.kind === "module" || (route.kind === "channel" && route.section === "modules"),
-    entries: activeModuleEntries,
-    allEntry: {
-      id: "all-modules",
-      label: texts.module.moduleOverview,
+    entry: {
+      id: "modules",
+      label: texts.navigation.module,
       icon: <NavigationIcon kind="modules" className="sidebar-nav-icon" />,
       href: dashboardRoutePath(allModulesRoute),
       active: route.kind === "channel" && route.section === "modules",
       onNavigate: () => { onNavigate(allModulesRoute); },
     },
+    entries: activeModuleEntries,
   };
 
   const platformGroup: SidebarGroup | undefined = platform ? {

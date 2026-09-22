@@ -315,7 +315,7 @@ export const EventsPage = ({
           <SubInspector
             ariaLabel={texts.events.detail}
             title={texts.events.operation}
-            identifier={<CopyableId id={selectedGroup.representative.triggerId || selectedGroup.representative.eventId} texts={texts} />}
+            identifier={selectedGroup.representative.triggerId || selectedGroup.representative.eventId}
             closeLabel={dashboardCommonTexts().close}
             onClose={closeGroup}
           >
@@ -335,6 +335,7 @@ export const EventsPage = ({
                 </div>
                 <details>
                   <summary>{texts.events.technicalDetails}</summary>
+                  <CopyableId id={entry.triggerId || entry.eventId} texts={texts} />
                   <pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre>
                 </details>
               </li>;

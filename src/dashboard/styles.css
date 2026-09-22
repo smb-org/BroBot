@@ -304,10 +304,12 @@ pre {
 .sidebar-nav-link { min-height: 44px; border-radius: var(--r-control); border-left: 2px solid transparent; color: var(--text-2); }
 .sidebar .sidebar-nav-link:hover { color: var(--text); background: var(--surface-hover); }
 .sidebar .sidebar-nav-link[data-active] { color: var(--brand-text); background: var(--tint-2); border-left-color: var(--brand); font-weight: 600; }
+.sidebar .sidebar-nav-link--module-child { margin-inline-start: var(--s4); }
 .sidebar-nav-icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .sidebar__collapse-toggle { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-top: 4px; border: 0; border-radius: var(--r-control); color: var(--text-3); background: transparent; cursor: pointer; }
 .sidebar__collapse-toggle:hover { color: var(--text); background: var(--surface-hover); }
 .sidebar[data-collapsed] .sidebar-nav-link { justify-content: center; }
+.sidebar[data-collapsed] .sidebar-nav-link--module-child { margin-inline-start: 0; }
 .sidebar[data-collapsed] .sidebar__collapse-toggle { margin-inline: auto; }
 
 /* Compatibility component for older module tests (ModuleNavigation); pages use the tile list instead. */
@@ -503,6 +505,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 /* ui/ListDetail: from 1024px a fixed 420px inspector column sits beside the list; below that the inspector floats from the right (480px, full width under 768px) instead of stacking under the list. Replaces the 1360px derivation for panels built on ListDetail. The inspector keeps its own padding, border, radius, surface, and named container; these rules only position it. */
 .list-detail { width: min(var(--page-width), 100%); min-width: 0; }
 .list-detail__list { min-width: 0; }
+.list-detail__inspector { min-width: 0; overflow-x: hidden; }
+.list-detail__inspector, .list-detail__inspector * { min-width: 0; overflow-wrap: anywhere; }
 .list-detail__backdrop { display: none; }
 
 @media (max-width: 1023px) {
@@ -517,7 +521,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 }
 
 @media (min-width: 1024px) {
-  .list-detail--open { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; align-items: start; }
+  .list-detail--open { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; align-items: start; }
+  .list-detail--open .list-detail__list { width: 100%; }
+  .list-detail--open .list-detail__list > * { width: 100%; max-width: none; }
+  .list-detail--open .list-detail__list :is(.content-section, .state-list, .inspector-section, .inspector-section__list, .properties-section) { width: 100%; max-width: none; }
   .list-detail--open .list-detail__inspector { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
 }
 .state-list { display: grid; gap: 8px; width: min(960px, 100%); }
@@ -561,7 +568,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .event-day { margin-top: var(--s6); }
 .event-day:first-child { margin-top: 0; }
 .event-day__heading { margin: 0 0 var(--s2); color: var(--text-3); font-size: 13px; font-weight: 600; }
-.event-inspector-id { display: inline-flex; align-items: center; gap: var(--s2); }
+.event-inspector-id { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s2); max-width: 100%; overflow-wrap: anywhere; }
 .subscriptions-table th:nth-child(1), .subscriptions-table td:nth-child(1) { width: 38%; }
 .subscriptions-table th:nth-child(2), .subscriptions-table td:nth-child(2) { width: 22%; }
 .subscriptions-table th:nth-child(3), .subscriptions-table td:nth-child(3) { width: 40%; overflow: hidden; text-overflow: ellipsis; }
@@ -581,6 +588,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .properties > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .properties dt { color: var(--text-3); font-size: 12px; }
 .properties dd { min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.list-detail__inspector .table { min-width: 0; }
+.list-detail__inspector .properties dd { white-space: normal; }
+.list-detail__inspector pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .properties-section { width: min(960px, 100%); }
 .sub-inspector { width: min(var(--dashboard-content-width), 100%); min-width: 0; margin-top: 0; padding: 18px 16px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-inspector); container: inspector / inline-size; }
 .inspector-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }

@@ -1,5 +1,6 @@
 import type { ChannelRole } from "../contracts/values";
-import { auditActionLabel, catalogString, dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { auditActionLabel as fixedAuditActionLabel, catalogString, dashboardCommonTexts, dashboardLanguage, moduleSettingsChangedText, type DashboardLanguage, type LocaleCatalog } from "./locale";
+import { moduleName } from "./module-labels";
 
 /**
  * Roles are lowercase in the data model. The UI shows the term,
@@ -246,6 +247,21 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
 };
 
 export const platformTexts = (language: DashboardLanguage = dashboardLanguage()): PlatformTexts => platformCatalog[language];
+
+export const auditActionLabel = (
+  action: string,
+  language: DashboardLanguage = dashboardLanguage(),
+): string => {
+  const fixedLabel = fixedAuditActionLabel(action, language);
+  if (fixedLabel !== action) return fixedLabel;
+
+  const suffix = ".settings_changed";
+  if (!action.endsWith(suffix)) return action;
+  const moduleId = action.slice(0, -suffix.length);
+  const name = moduleName(moduleId, language);
+  if (name === moduleId) return action;
+  return moduleSettingsChangedText(name, language);
+};
 
 export const platformActionLabel = (
   action: string,
