@@ -6,13 +6,13 @@ export type LedStatus = "green" | "amber" | "red" | "off";
 
 export interface LedProps {
   status: LedStatus;
-  /** "Grün steht nie ohne Wort daneben" -- there is no optional-word
-   *  escape hatch here on purpose. */
+  /** "Green never stands without a word next to it" -- there is no
+   *  optional-word escape hatch here on purpose. */
   word: string;
 }
 
 /**
- * "Die LED-mit-Wort-Regel": color alone never carries state. Mantine's
+ * "The LED-with-word rule": color alone never carries state. Mantine's
  * `Badge`/`Indicator` are deliberately not used -- see "LED" in
  * docs/input/DESIGN-neu.md. Reads its colors from `theme.other.state`
  * ("theme.other.zustand" in the document), as the document specifies.

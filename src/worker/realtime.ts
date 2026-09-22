@@ -67,10 +67,10 @@ realtimeRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     if (!hasExpectedOrigin(context.req.raw, context.env.PUBLIC_ORIGIN)) {
-      return context.text("WebSocket-Herkunft ist ungültig.", 403);
+      return context.json({ error: "websocket_origin_invalid" }, 403);
     }
     if (!protocolOffered(context.req.raw.headers.get("Sec-WebSocket-Protocol"))) {
-      return context.text("Realtime-Protokoll wird nicht unterstützt.", 426);
+      return context.json({ error: "realtime_protocol_unsupported" }, 426);
     }
 
     const channelId = context.req.param("channelId");

@@ -42,7 +42,7 @@ import { Led, ModuleCount, ModuleHeading, ModuleIcon, ModulePage, ModuleTile, Mo
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber } from "./locale";
+import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { canManage } from "../contracts/values";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "./router";
@@ -405,7 +405,7 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, headerModul
       )}
       <div className="dashboard-header__status">
         {connectionLed}
-        {loadedAt === undefined ? null : <Datenalter seit={loadedAt} />}
+        {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
       </div>
       {headerModule === undefined || headerModuleLabel === null ? null : (
         <div className="dashboard-header__switch">
@@ -457,8 +457,8 @@ const OverviewPage = ({ channels, onNavigate }: { channels: PanelChannelState[];
  * not in the moderator row, because that row doesn't appear at all in a
  * healthy state — the recheck must still be reachable at all times.
  */
-const relativeZeit = (seit: number, jetzt: number): string => {
-  const s = Math.max(0, Math.round((jetzt - seit) / 1000));
+const relativeTime = (since: number, now: number): string => {
+  const s = Math.max(0, Math.round((now - since) / 1000));
   const texts = dashboardTexts();
   if (s < 60) return texts.time.secondsAgo(s);
   const m = Math.round(s / 60);
@@ -470,35 +470,35 @@ const relativeZeit = (seit: number, jetzt: number): string => {
  * Proves liveness without asserting a status. Deliberately neutral and
  * never in status color.
  */
-const Datenalter = ({ seit }: { seit: number }): ReactElement => {
-  const [jetzt, setJetzt] = useState(() => Date.now());
+const DataAge = ({ since }: { since: number }): ReactElement => {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => { setJetzt(Date.now()); }, 1000);
+    const id = setInterval(() => { setNow(Date.now()); }, 1000);
     return () => { clearInterval(id); };
   }, []);
-  return <span className="datenalter">{dashboardTexts().time.updated(relativeZeit(seit, jetzt))}</span>;
+  return <span className="data-age">{dashboardTexts().time.updated(relativeTime(since, now))}</span>;
 };
 
-const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, dringend, onCheck }: {
+const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, urgent, onCheck }: {
   canCheck: boolean; checking: boolean; checkError: string | null;
-  nextAllowedAt: string | null; dringend: boolean; onCheck: () => void;
+  nextAllowedAt: string | null; urgent: boolean; onCheck: () => void;
 }): ReactElement => {
   const texts = dashboardTexts();
-  const [jetzt, setJetzt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const nextAllowedAtMs = nextAllowedAt === null ? null : Date.parse(nextAllowedAt);
   useEffect(() => {
     if (nextAllowedAtMs === null || !Number.isFinite(nextAllowedAtMs)) return;
-    const timeoutId = window.setTimeout(() => { setJetzt(Date.now()); }, Math.max(0, nextAllowedAtMs - Date.now()));
+    const timeoutId = window.setTimeout(() => { setNow(Date.now()); }, Math.max(0, nextAllowedAtMs - Date.now()));
     return () => { window.clearTimeout(timeoutId); };
   }, [nextAllowedAtMs]);
-  const cooldownActive = nextAllowedAtMs !== null && Number.isFinite(nextAllowedAtMs) && nextAllowedAtMs > jetzt;
+  const cooldownActive = nextAllowedAtMs !== null && Number.isFinite(nextAllowedAtMs) && nextAllowedAtMs > now;
   return (
     <div className="header-action">
-      <button className={dringend ? "button button--primary" : "button"} type="button" onClick={onCheck} disabled={!canCheck || checking || cooldownActive} aria-busy={checking}>
+      <button className={urgent ? "button button--primary" : "button"} type="button" onClick={onCheck} disabled={!canCheck || checking || cooldownActive} aria-busy={checking}>
         {checking ? texts.moderation.checkRunning : texts.moderation.checkModeratorStatus}
       </button>
       {nextAllowedAt === null ? null : <p className="muted moderator-check-time">{texts.moderation.nextCheckFrom(formatTimestamp(nextAllowedAt))}</p>}
-      {!canCheck ? <span className="sperrgrund">{texts.moderation.checkLocked}</span> : null}
+      {!canCheck ? <span className="lock-reason">{texts.moderation.checkLocked}</span> : null}
       {checkError === null ? null : <p className="form-error" role="alert">{checkError}</p>}
     </div>
   );
@@ -514,7 +514,7 @@ const ChannelBotConsentAction = ({ channelId, needed, canRequest }: {
   return (
     <div className="header-action">
       {canRequest ? <a className="button button--primary" href={`/auth/channels/${encodeURIComponent(channelId)}/channel-bot`}>{texts.moderation.requestBroadcasterConsent}</a> : <button className="button" type="button" disabled>{texts.moderation.requestBroadcasterConsent}</button>}
-      {!canRequest ? <span className="sperrgrund">{texts.moderation.broadcasterReauthorize}</span> : null}
+      {!canRequest ? <span className="lock-reason">{texts.moderation.broadcasterReauthorize}</span> : null}
     </div>
   );
 };
@@ -529,7 +529,7 @@ const BroadcasterConsentAction = ({ login, needed, canRequest }: {
   return (
     <div className="header-action">
       {canRequest ? <a className="button button--primary" href={`/auth/login?channel=${encodeURIComponent(login)}`}>{texts.requestFullConsent}</a> : <button className="button" type="button" disabled>{texts.requestFullConsent}</button>}
-      {!canRequest ? <span className="sperrgrund">{texts.fullConsentLocked}</span> : null}
+      {!canRequest ? <span className="lock-reason">{texts.fullConsentLocked}</span> : null}
     </div>
   );
 };
@@ -549,7 +549,7 @@ const botRow = (bot: PanelBotStatus | null): StatusEntry => {
   const texts = dashboardTexts();
   if (bot === null) return { key: "bot", tone: "neutral", node: <StateRow label={texts.statusCard.botAccount} tone="neutral" word={texts.status.notSetUp} detail={texts.bot.noSavedStatus} /> };
   const tone: StateTone = bot.status === "connected" ? "healthy" : "error";
-  return { key: "bot", tone, node: <StateRow label={texts.statusCard.botAccount} tone={tone} word={statusLabel(bot.status)} detail={bot.reason ?? texts.bot.lastUpdated(formatTimestamp(bot.updatedAt))} /> };
+  return { key: "bot", tone, node: <StateRow label={texts.statusCard.botAccount} tone={tone} word={statusLabel(bot.status)} detail={maintenanceReasonText(bot.reason) ?? texts.bot.lastUpdated(formatTimestamp(bot.updatedAt))} /> };
 };
 
 const broadcasterRow = (status: PanelChannelState["broadcasterConnection"]): StatusEntry => {
@@ -563,7 +563,7 @@ const chatRow = (status: PanelChannelState["chatSubscription"] | undefined, expe
   const current = status ?? null;
   const tone: StateTone = current === null ? expected ? "warning" : "neutral" : current.status === "enabled" ? "healthy" : current.status === "missing" ? "warning" : "error";
   const word = current === null ? expected ? texts.status.missing : texts.status.notChecked : current.status === "enabled" ? texts.status.active : current.status === "missing" ? texts.status.missing : current.status === "revoked" ? texts.status.revoked : texts.status.error;
-  return { key: "chat-subscription", tone, node: <StateRow label={texts.statusCard.chatSubscription} tone={tone} word={word} detail={current?.reason ?? (current === null && expected ? texts.status.chatSubscriptionMissing : undefined)} /> };
+  return { key: "chat-subscription", tone, node: <StateRow label={texts.statusCard.chatSubscription} tone={tone} word={word} detail={maintenanceReasonText(current?.reason) ?? (current === null && expected ? texts.status.chatSubscriptionMissing : undefined)} /> };
 };
 
 const botPermissionsRow = (permissions: PanelBotPermissions | null | undefined): StatusEntry | null => {
@@ -608,7 +608,7 @@ const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | nu
 const tokenRow = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): StatusEntry => {
   const texts = dashboardTexts();
   const token = tokenView(tokens, bot);
-  return { key: "token", tone: token.tone, node: <StateRow label={texts.statusCard.tokenStatus} tone={token.tone} word={token.label} detail={tokens.loginReason ?? undefined} /> };
+  return { key: "token", tone: token.tone, node: <StateRow label={texts.statusCard.tokenStatus} tone={token.tone} word={token.label} detail={maintenanceReasonText(tokens.loginReason) ?? undefined} /> };
 };
 
 const channelBotConsentRow = (status: PanelChannelState["channelBotConsent"]): StatusEntry => {
@@ -623,7 +623,7 @@ const moderatorRow = (moderator: PanelModeratorStatus | null): StatusEntry => {
   const word = moderator === null ? texts.status.notChecked : moderator.isModerator ? texts.status.moderator : texts.status.moderatorRoleMissing;
   const detail = moderator === null
     ? texts.moderation.noCheckForChannel
-    : moderator.reason ?? texts.moderation.lastCheck(formatTimestamp(moderator.checkedAt));
+    : maintenanceReasonText(moderator.reason) ?? texts.moderation.lastCheck(formatTimestamp(moderator.checkedAt));
   return { key: "moderator", tone, node: <StateRow label={texts.statusCard.moderatorStatus} tone={tone} word={word} detail={detail} /> };
 };
 
@@ -631,12 +631,13 @@ const lastErrorRow = (error: PanelLastError | null): StatusEntry => {
   const texts = dashboardTexts();
   const tone: StateTone = error === null ? "healthy" : "error";
   if (error === null) {
-    return { key: "fehler", tone, node: <StateRow label={texts.errors.last} tone={tone} word={texts.status.healthy} detail={texts.errors.noCause} /> };
+    return { key: "error", tone, node: <StateRow label={texts.errors.last} tone={tone} word={texts.status.healthy} detail={texts.errors.noCause} /> };
   }
   const aboName = error.source === "eventsub" && error.subscriptionType !== undefined
     ? eventSubName(error.subscriptionType, error.subscriptionVariant ?? "")
     : null;
-  const reason = aboName === null ? error.reason : `${aboName}: ${error.reason}`;
+  const reasonText = maintenanceReasonText(error.reason) ?? error.reason;
+  const reason = aboName === null ? reasonText : `${aboName}: ${reasonText}`;
   const detail = [
     reason,
     error.message === null || error.message === undefined ? null : truncateTo200Chars(error.message),
@@ -678,16 +679,16 @@ const subscriptionDisplayName = (subscription: PanelEventSubSubscription): strin
 
 const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubSubscription[] }): ReactElement => {
   const texts = dashboardTexts();
-  const leer = "—";
+  const emptyValue = "—";
   const { selectedKey, select, rowRef, close } = useInspectorSelection<string>();
   const selected = subscriptions.find((subscription) => subscriptionKey(subscription) === selectedKey) ?? null;
   return (
-    <section className={`content-section inspektor-bereich${selected === null ? "" : " inspektor-bereich--offen"}`} aria-label={texts.system.subscriptions}>
-      <div className="inspektor-bereich__liste">
-        <div className="section-heading"><h2>{texts.system.subscriptions}</h2><span className="muted zahl">{formatNumber(subscriptions.length)}</span></div>
+    <section className={`content-section inspector-section${selected === null ? "" : " inspector-section--open"}`} aria-label={texts.system.subscriptions}>
+      <div className="inspector-section__list">
+        <div className="section-heading"><h2>{texts.system.subscriptions}</h2><span className="muted number">{formatNumber(subscriptions.length)}</span></div>
         {subscriptions.length === 0 ? <p className="empty-state">{texts.system.noSubscriptions}</p> : (
-          <div className="tabelle-wrap">
-            <table className="tabelle abonnements-tabelle">
+          <div className="table-wrap">
+            <table className="table subscriptions-table">
               <thead><tr><th scope="col">{texts.system.subscription}</th><th scope="col">{texts.system.state}</th><th scope="col">{texts.system.reason}</th></tr></thead>
               <tbody>{subscriptions.map((subscription) => {
                 const key = subscriptionKey(subscription);
@@ -704,21 +705,21 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
                 >
                   <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
                   <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status)} /></td>
-                  <td>{subscription.reason ?? leer}</td>
+                  <td>{maintenanceReasonText(subscription.reason) ?? emptyValue}</td>
                 </tr>;
               })}</tbody>
             </table>
           </div>
         )}
       </div>
-      {selected === null ? null : <SubInspector ariaLabel={texts.system.subscriptionDetails} title={subscriptionDisplayName(selected)} identifier={selected.subscriptionId ?? leer} closeLabel={dashboardCommonTexts().close} onClose={close}>
+      {selected === null ? null : <SubInspector ariaLabel={texts.system.subscriptionDetails} title={subscriptionDisplayName(selected)} identifier={selected.subscriptionId ?? emptyValue} closeLabel={dashboardCommonTexts().close} onClose={close}>
         <dl className="properties">
           <div><dt>{texts.system.subscriptionRawType}</dt><dd className="mono">{selected.subscriptionType}</dd></div>
           <div><dt>{texts.system.subscriptionVersion}</dt><dd className="mono">{selected.version}</dd></div>
-          <div><dt>{texts.system.subscriptionId}</dt><dd className="mono">{selected.subscriptionId ?? leer}</dd></div>
+          <div><dt>{texts.system.subscriptionId}</dt><dd className="mono">{selected.subscriptionId ?? emptyValue}</dd></div>
           <div><dt>{texts.system.subscriptionUpdated}</dt><dd className="mono">{formatTimestamp(selected.updatedAt)}</dd></div>
-          <div><dt>{texts.system.twitchMessage}</dt><dd>{selected.message ?? leer}</dd></div>
-          <div><dt>{texts.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? leer : String(selected.statusCode)}</dd></div>
+          <div><dt>{texts.system.twitchMessage}</dt><dd>{selected.message ?? emptyValue}</dd></div>
+          <div><dt>{texts.system.httpStatus}</dt><dd className="mono">{selected.statusCode === null ? emptyValue : String(selected.statusCode)}</dd></div>
         </dl>
       </SubInspector>}
     </section>
@@ -751,12 +752,12 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
         kind="channel"
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
-        actions={<><ModeratorCheckAction canCheck={canManage(overview.role)} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} dringend={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
+        actions={<><ModeratorCheckAction canCheck={canManage(overview.role)} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} urgent={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
       />
-      <div className="zustand-liste">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+      <div className="state-list">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
       <BotPermissionsInspector permissions={overview.botPermissions} />
       <BroadcasterPermissionsInspector permissions={overview.broadcasterPermissions} />
-      <section className="content-section"><div className="section-heading"><h2>{dashboardTexts().overview.activeModules}</h2><span className="muted zahl">{formatNumber(overview.activeModules.length)}</span></div>{overview.activeModules.length === 0 ? <p className="empty-state">{dashboardTexts().module.noneActive}</p> : <div className="module-grid">{overview.activeModules.map(({ moduleId }) => <ModuleTile key={moduleId} channelId={overview.channelId} moduleId={moduleId} enabled onNavigate={onNavigate} />)}</div>}</section>
+      <section className="content-section"><div className="section-heading"><h2>{dashboardTexts().overview.activeModules}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>{overview.activeModules.length === 0 ? <p className="empty-state">{dashboardTexts().module.noneActive}</p> : <div className="module-grid">{overview.activeModules.map(({ moduleId }) => <ModuleTile key={moduleId} channelId={overview.channelId} moduleId={moduleId} enabled onNavigate={onNavigate} />)}</div>}</section>
     </>
   );
 };
@@ -779,7 +780,7 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
       {system === null && systemState.status === "loading" ? <p className="loading-line">{texts.system.loadState}</p> : null}
       {systemState.error !== null ? <ErrorPanel message={systemState.error} /> : null}
       {system === null ? null : <>
-        <div className="zustand-liste">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+        <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
         <BotPermissionsInspector permissions={system.botPermissions} />
         <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
         <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
@@ -789,13 +790,13 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
         onCloseInspector={closeAudit}
         list={
           <section className="content-section" aria-label={texts.system.auditLog}>
-            <div className="section-heading"><h2>{texts.system.auditLog}</h2>{auditState.data === null ? null : <span className="muted"><span className="zahl">{formatNumber(auditState.data.entries.length)}</span> {texts.system.entries}</span>}</div>
+            <div className="section-heading"><h2>{texts.system.auditLog}</h2>{auditState.data === null ? null : <span className="muted"><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.system.entries}</span>}</div>
             {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.system.loadAudit}</p> : null}
             {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
             {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="empty-state">{texts.system.noAuditEntries}</p> : null}
             {auditState.data !== null && auditState.data.entries.length > 0 ? <>
-              <div className={auditState.status === "loading" ? "veraltet" : undefined}>
-                <table className="tabelle audit-table">
+              <div className={auditState.status === "loading" ? "stale" : undefined}>
+                <table className="table audit-table">
                   <thead><tr><th scope="col">{texts.system.time}</th><th scope="col">{texts.system.action}</th><th scope="col">{texts.system.who}</th></tr></thead>
                   <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row" className="mono">{entry.action}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
                 </table>
@@ -817,21 +818,21 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
 
 const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactElement => {
   const texts = dashboardTexts();
-  const leer = "—";
-  const loginStatus = system.tokens.loginStatus === null ? leer : statusLabel(system.tokens.loginStatus);
+  const emptyValue = "—";
+  const loginStatus = system.tokens.loginStatus === null ? emptyValue : statusLabel(system.tokens.loginStatus);
   return (
     <section className="content-section properties-section" aria-label={texts.system.properties}>
       <div className="section-heading"><h2>{texts.system.properties}</h2></div>
       <dl className="properties">
-        <div><dt>{texts.system.botReason}</dt><dd>{system.bot?.reason ?? leer}</dd></div>
-        <div><dt>{texts.system.botUpdated}</dt><dd className="mono">{system.bot === null ? leer : formatTimestamp(system.bot.updatedAt)}</dd></div>
-        <div><dt>{texts.system.chatSubscriptionId}</dt><dd className="mono">{system.chatSubscription?.subscriptionId ?? leer}</dd></div>
-        <div><dt>{texts.system.chatSubscriptionReason}</dt><dd>{system.chatSubscription?.reason ?? leer}</dd></div>
-        <div><dt>{texts.system.chatSubscriptionUpdated}</dt><dd className="mono">{system.chatSubscription == null ? leer : formatTimestamp(system.chatSubscription.updatedAt)}</dd></div>
+        <div><dt>{texts.system.botReason}</dt><dd>{maintenanceReasonText(system.bot?.reason) ?? emptyValue}</dd></div>
+        <div><dt>{texts.system.botUpdated}</dt><dd className="mono">{system.bot === null ? emptyValue : formatTimestamp(system.bot.updatedAt)}</dd></div>
+        <div><dt>{texts.system.chatSubscriptionId}</dt><dd className="mono">{system.chatSubscription?.subscriptionId ?? emptyValue}</dd></div>
+        <div><dt>{texts.system.chatSubscriptionReason}</dt><dd>{maintenanceReasonText(system.chatSubscription?.reason) ?? emptyValue}</dd></div>
+        <div><dt>{texts.system.chatSubscriptionUpdated}</dt><dd className="mono">{system.chatSubscription == null ? emptyValue : formatTimestamp(system.chatSubscription.updatedAt)}</dd></div>
         <div><dt>{texts.system.loginStatus}</dt><dd>{loginStatus}</dd></div>
-        <div><dt>{texts.system.loginReason}</dt><dd>{system.tokens.loginReason ?? leer}</dd></div>
-        <div><dt>{texts.system.loginValidUntil}</dt><dd className="mono">{system.tokens.loginExpiresAt === null ? leer : formatTimestamp(system.tokens.loginExpiresAt)}</dd></div>
-        <div><dt>{texts.system.botValidUntil}</dt><dd className="mono">{system.tokens.botExpiresAt === null ? leer : formatTimestamp(system.tokens.botExpiresAt)}</dd></div>
+        <div><dt>{texts.system.loginReason}</dt><dd>{maintenanceReasonText(system.tokens.loginReason) ?? emptyValue}</dd></div>
+        <div><dt>{texts.system.loginValidUntil}</dt><dd className="mono">{system.tokens.loginExpiresAt === null ? emptyValue : formatTimestamp(system.tokens.loginExpiresAt)}</dd></div>
+        <div><dt>{texts.system.botValidUntil}</dt><dd className="mono">{system.tokens.botExpiresAt === null ? emptyValue : formatTimestamp(system.tokens.botExpiresAt)}</dd></div>
       </dl>
     </section>
   );

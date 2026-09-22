@@ -59,7 +59,7 @@ const log = async (
 };
 
 const snoozeOutcome = (result: SnoozeNextAdResult): AdDetail => ({
-  outcome: result.snoozed ? "erfolgreich" : "fehlgeschlagen",
+  outcome: result.snoozed ? "success" : "failed",
   reason: result.reason,
   ...result.detail,
 });

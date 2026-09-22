@@ -358,16 +358,16 @@ const expectedModuleSettings = {
     shoutoutEnabled: true,
     shoutoutThreshold: 3,
     textThreshold: 3,
-    textLong: "Willkommen {channel}! Danke für den Raid mit {viewers} Zuschauern — schaut gerne vorbei!",
-    textShort: "Danke für den Raid, {channel}, mit {viewers} Zuschauern!",
+    textLong: "Welcome {channel}! Thanks for the raid with {viewers} viewers — come say hi!",
+    textShort: "Thanks for the raid, {channel}, with {viewers} viewers!",
   },
   text_commands: {},
   ads: {
-    automatic: "Automatische Werbepause: {duration} Sekunden. Bin gleich zurück!",
-    manual: "Werbepause: {duration} Sekunden. Bin gleich zurück!",
+    automatic: "Automatic ad break: {duration} seconds. Be right back!",
+    manual: "Ad break: {duration} seconds. Be right back!",
     prewarning: true,
     leadSeconds: 60,
-    prewarningText: "Werbung in {seconds} Sekunden. Bin gleich zurück!",
+    prewarningText: "Ads in {seconds} seconds. Be right back!",
   },
 };
 

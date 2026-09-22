@@ -11,13 +11,13 @@ export interface ErrorPanelProps {
   title: string;
   /** Why. */
   reason: string;
-  /** The next possible action -- "immer drei Dinge: was nicht ging, warum,
-   *  und die nächste mögliche Aktion", so this is not optional. */
+  /** The next possible action -- "always three things: what didn't work,
+   *  why, and the next possible action", so this is not optional. */
   action: ErrorPanelAction;
 }
 
 /**
- * "Leer- und Fehlerkasten" in docs/input/DESIGN-neu.md: solid border,
+ * "Empty and error box" in docs/input/DESIGN-neu.md: solid border,
  * 45%-red on Fehler-Grund, title in red.
  */
 export function ErrorPanel({ title, reason, action }: ErrorPanelProps) {

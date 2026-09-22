@@ -18,8 +18,8 @@ export interface NumberFieldProps {
 }
 
 /**
- * "Zahlenfelder tragen ihre Einheit als Suffix im Feld ('5 s', '50
- * Zuschauer') und ihren Bereich im Hinweis." (docs/input/DESIGN-neu.md,
+ * "Number fields carry their unit as a suffix in the field ('5 s', '50
+ * viewers') and their range in the hint." (docs/input/DESIGN-neu.md,
  * "Inputs / Fields"). `unit` renders as a muted in-field suffix; the
  * min/max range belongs in `hint`, which the caller composes.
  */

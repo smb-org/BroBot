@@ -6,12 +6,12 @@ export interface SkeletonProps {
   /** How many rows to stand in for. @default 1 */
   rows?: number;
   /** Row height in px -- 34 for a table row, 58 for a status row, and so
-   *  on: "in der Höhe ... der Zeilen, die kommen." */
+   *  on: "in the height ... of the rows that come." */
   height: number;
 }
 
 /**
- * "Die Veraltet-Regel" in docs/input/DESIGN-neu.md: a skeleton only stands
+ * "The stale rule" in docs/input/DESIGN-neu.md: a skeleton only stands
  * in for the *first* load with no data yet -- reloads keep the stale
  * values at 55% opacity instead (that rule belongs to the caller, not this
  * component). No shimmer, ever: movement in the corner of the eye reads as

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 export interface ListDetailProps {
-  /** The list. Always rendered, always first -- "Zwei Kinder, Liste zuerst"
+  /** The list. Always rendered, always first -- "Two children, list first"
    *  in docs/input/DESIGN-neu.md. */
   list: ReactNode;
   /** The selected row's (or the open create form's) inspector content, or
@@ -32,7 +32,7 @@ export interface ListDetailProps {
  * The old, purely in-flow layout put the inspector below the list at
  * narrow widths; on the 1280px second monitor next to OBS -- narrower than
  * the old 1360px threshold this replaces -- that meant scrolling past the
- * whole list to ever see it. See "Warum die Grenze wichtig ist" in
+ * whole list to ever see it. See "Why the boundary matters" in
  * docs/input/umbau-plan.md.
  *
  * ponytail: the floating pair stays a normal DOM child of `.list-detail`

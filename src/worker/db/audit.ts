@@ -3,8 +3,8 @@ import type { AuditActorKind } from "../../contracts/values";
 const auditId = (): string => crypto.randomUUID();
 
 /**
- * Der zweite Teil wird mit der Fachmutation gebatcht. `changes()` verhindert,
- * dass ein abgelehnter oder ins Leere laufender Schreibversuch auditiert wird.
+ * The second part is batched with the domain mutation. `changes()` prevents
+ * a rejected or no-op write attempt from being audited.
  */
 export const prepareAudit = (
   db: D1Database,

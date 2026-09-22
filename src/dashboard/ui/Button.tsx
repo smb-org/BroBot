@@ -8,9 +8,10 @@ export type ButtonVariant = "primary" | "neutral" | "subtle" | "secondary";
 export interface ButtonProps {
   children: ReactNode;
   variant?: ButtonVariant;
-  /** "Gefahr (`danger`, nur in `ui/`): Rot ohne Rand; Hover Weiß auf Rot."
-   *  A deleting action carries this permanently; it overrides `variant`
-   *  because a danger button is never "quiet". */
+  /** "Danger (`danger`, only in `ui/`): red without a border; hover white on
+   *  red" in docs/input/DESIGN-neu.md. A deleting action carries this
+   *  permanently; it overrides `variant` because a danger button is never
+   *  "quiet". */
   danger?: boolean;
   disabled?: boolean;
   onClick?: () => void;
@@ -23,16 +24,17 @@ export interface ButtonProps {
 
 const subtleStyle: CSSProperties = { "--button-color": colors.text2 } as CSSProperties;
 
-// "Ein Button color="red" gibt es nicht" -- Mantine's `variant="filled"`
-// `color` prop auto-darkens on hover, not what "Hover Weiß auf Rot" asks
-// for. `--button-hover-color` is Mantine's own CSS variable (read by its
-// stylesheet's `:hover` rule), set here per-instance instead.
+// "There is no Button color="red"" in docs/input/DESIGN-neu.md -- Mantine's
+// `variant="filled"` `color` prop auto-darkens on hover, not what "hover
+// white on red" asks for. `--button-hover-color` is Mantine's own CSS
+// variable (read by its stylesheet's `:hover` rule), set here per-instance
+// instead.
 const dangerStyle: CSSProperties = {
   "--button-bg": colors.error,
   "--button-hover": colors.error,
   "--button-bd": "none",
   "--button-color": colors.text,
-  // Literal white, not a design token: "Weiß auf Rot" is the one place the
+  // Literal white, not a design token: "white on red" is the one place the
   // document names the color "white" rather than one of its own tokens.
   "--button-hover-color": "#ffffff",
 } as CSSProperties;
@@ -41,7 +43,7 @@ const dangerStyle: CSSProperties = {
  * "Buttons" in docs/input/DESIGN-neu.md: neutral is Mantine's `default`
  * variant (already themed to Taste/Taste-Hover in `theme.ts`), primary is
  * `filled` on the brand color (autoContrast + `luminanceThreshold` give it
- * dark text, see "Die Kontrastregel"), subtle is `subtle` recolored to
+ * dark text, see "the contrast rule"), subtle is `subtle` recolored to
  * Text-2, secondary reuses `default` for the "load more" convention, and
  * danger is hand-built because Mantine's `color` prop can't express its
  * hover rule.

@@ -8,7 +8,7 @@ export const adsSettingsSchema = z.object({
   manual: z.string().trim().min(1).max(200),
   prewarning: z.boolean().default(true),
   leadSeconds: z.number().int().min(30).max(300).default(60),
-  prewarningText: z.string().trim().min(1).max(200).default("Werbung in {seconds} Sekunden. Bin gleich zurück!"),
+  prewarningText: z.string().trim().min(1).max(200).default("Ads in {seconds} seconds. Be right back!"),
 });
 
 export type AdsSettings = z.output<typeof adsSettingsSchema>;

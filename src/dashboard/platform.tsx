@@ -84,13 +84,13 @@ const MembersTable = ({
   const texts = platformTexts();
   if (members.length === 0) return <p className="muted">{texts.noMembers}</p>;
   return (
-    <div className="tabelle-wrap">
-      <table className="tabelle">
+    <div className="table-wrap">
+      <table className="table">
         <thead>
           <tr>
             <th scope="col">{texts.login}</th>
             <th scope="col">{texts.role}</th>
-            <th scope="col" className="tabelle__aktion">{texts.remove}</th>
+            <th scope="col" className="table__action">{texts.remove}</th>
           </tr>
         </thead>
         <tbody>
@@ -114,7 +114,7 @@ const MembersTable = ({
                     </select>
                   )}
                 </td>
-                <td className="tabelle__aktion">
+                <td className="table__action">
                   {member.role === "broadcaster" ? (
                     <>
                       <button
@@ -508,8 +508,8 @@ const PlatformAudit = ({
       {auditState.error === null ? null : <p className="form-error" role="alert">{auditState.error}</p>}
       {auditState.data?.entries.length === 0 ? <p className="muted">{texts.auditEmpty}</p> : null}
       {auditState.data === null ? null : auditState.data.entries.length === 0 ? null : (
-        <div className="tabelle-wrap">
-          <table className="tabelle">
+        <div className="table-wrap">
+          <table className="table">
             <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.action}</th><th scope="col">{texts.actor}</th><th scope="col">{texts.timestamp}</th></tr></thead>
             <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId}><th scope="row">{channelNames.get(entry.channelId) ?? <span className="mono">{entry.channelId}</span>}</th><td>{platformActionLabel(entry.action)}</td><td className="mono">{actor(entry)}</td><td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td></tr>)}</tbody>
           </table>
@@ -611,10 +611,10 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
               {overview.error === null ? null : <p className="form-error" role="alert">{overview.error}</p>}
               {overview.data?.length === 0 ? <p className="muted">{texts.noChannels}</p> : null}
               {overview.data === null ? null : overview.data.length === 0 ? null : (
-                <div className="tabelle-wrap">
-                  <table className="tabelle tabelle--inhalt">
+                <div className="table-wrap">
+                  <table className="table table--content">
                     <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.identifier}</th><th scope="col">{texts.fullConsent}</th><th scope="col">{texts.broadcaster}</th><th scope="col">{texts.manager}</th><th scope="col">{texts.operator}</th><th scope="col">{texts.identity}</th></tr></thead>
-                    <tbody>{overview.data.map((channel) => <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}><th scope="row">{channel.login}</th><td className="mono">{channel.channelId}</td><td>{channel.fullConsent ? texts.yes : texts.no}</td><td className="zahl">{formatNumber(channel.memberCounts.broadcaster)}</td><td className="zahl">{formatNumber(channel.memberCounts.manager)}</td><td className="zahl">{formatNumber(channel.memberCounts.operator)}</td><td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel)}</span></span></td></tr>)}</tbody>
+                    <tbody>{overview.data.map((channel) => <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}><th scope="row">{channel.login}</th><td className="mono">{channel.channelId}</td><td>{channel.fullConsent ? texts.yes : texts.no}</td><td className="number">{formatNumber(channel.memberCounts.broadcaster)}</td><td className="number">{formatNumber(channel.memberCounts.manager)}</td><td className="number">{formatNumber(channel.memberCounts.operator)}</td><td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel)}</span></span></td></tr>)}</tbody>
                   </table>
                 </div>
               )}

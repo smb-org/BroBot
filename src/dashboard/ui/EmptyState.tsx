@@ -9,13 +9,13 @@ export interface EmptyStateAction {
 export interface EmptyStateProps {
   title: string;
   description: string;
-  /** "für Verwalter die primäre Handlung" -- omit for a Bediener, who gets
+  /** "The primary action for managers" -- omit for an operator, who gets
    *  the same explanation without a call to action. */
   action?: EmptyStateAction;
 }
 
 /**
- * "Leer- und Fehlerkasten" in docs/input/DESIGN-neu.md: dashed Linie-Stark
+ * "Empty and error box" in docs/input/DESIGN-neu.md: dashed Linie-Stark
  * border, radius md, Text-2 body.
  */
 export function EmptyState({ title, description, action }: EmptyStateProps) {

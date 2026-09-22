@@ -287,11 +287,11 @@ export const EventsPage = ({
             ) : null}
             {eventsState.data !== null ? <>
               {eventEntries.length === 0 ? null : <div ref={feedRef} className="event-feed">
-                <div className={eventsState.status === "loading" ? "veraltet" : undefined}>
+                <div className={eventsState.status === "loading" ? "stale" : undefined}>
                   {dayGroups.map((day) => (
                     <section key={day.key} className="event-day">
                       <h3 className="event-day__heading">{day.label}</h3>
-                      <table className="tabelle event-table">
+                      <table className="table event-table">
                         <thead><tr><th scope="col">{texts.events.event}</th><th scope="col">{texts.events.module}</th><th scope="col">{texts.events.who}</th><th scope="col">{texts.events.time}</th></tr></thead>
                         <tbody>{day.groups.map((group) => {
                           const entry = group.representative;

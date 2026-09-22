@@ -669,7 +669,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.prewarning.rescheduled": "Werbe-Vorwarnung unterdrückt: Termin wurde verschoben",
     "ads.prewarning.scope_missing": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
     "ads.prewarning.schedule_error": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "reason", "unbekannter Fehler")}`,
-    "ads.snooze": (detail) => detail.outcome === "erfolgreich" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "reason", "unbekannter Fehler")}`,
+    "ads.snooze": (detail) => detail.outcome === "success" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "reason", "unbekannter Fehler")}`,
     "text_commands.cooldown": (detail) => {
       const name = textCommandName(detail);
       return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
@@ -731,7 +731,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.prewarning.rescheduled": "Ad warning suppressed: schedule changed",
     "ads.prewarning.scope_missing": "Ad warning suppressed: channel:read:ads is missing",
     "ads.prewarning.schedule_error": (detail) => `Ad schedule could not be read: ${detailText(detail, "reason", "unknown error")}`,
-    "ads.snooze": (detail) => detail.outcome === "erfolgreich" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "reason", "unknown error")}`,
+    "ads.snooze": (detail) => detail.outcome === "success" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "reason", "unknown error")}`,
     "text_commands.cooldown": (detail) => {
       const name = textCommandName(detail);
       return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
@@ -977,6 +977,50 @@ export const apiErrorText = (
 ): string => {
   const catalog: Record<string, string> = apiErrorTexts[language];
   return (code !== null ? catalog[code] : undefined) ?? fallback;
+};
+
+/**
+ * DE/EN text for the known-closed subset of `reason` codes written to
+ * `bot_identity_status`/`twitch_login_identity`/`eventsub_subscriptions` by
+ * `bot-maintenance.ts`/`login-maintenance.ts`/`eventsub-subscriptions.ts`.
+ * Unlike `apiErrorTexts`, this isn't a closed union: Twitch's own error
+ * body can pass its own code straight through (`error.code ?? fallbackCode`
+ * in `bot-maintenance.ts`'s `maintenanceErrorDetails`), so an unrecognized
+ * code falls back to showing itself -- it's already an English identifier,
+ * never German prose, so that's safe.
+ */
+const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
+  de: {
+    timeout: "Zeitüberschreitung",
+    network_error: "Netzwerkfehler",
+    invalid_response: "Ungültige Antwort",
+    invalid_target: "Unbekanntes Ziel",
+    pagination_loop: "Wiederholte Seitenblätterung",
+    maintenance_failed: "Wartung fehlgeschlagen",
+    moderator_status_failed: "Moderatorstatus-Prüfung fehlgeschlagen",
+    channel_or_consent_missing: "Kanal oder Zustimmung fehlt",
+    token_ciphertext_unreadable: "Token nicht lesbar",
+  },
+  en: {
+    timeout: "Timeout",
+    network_error: "Network error",
+    invalid_response: "Invalid response",
+    invalid_target: "Unknown target",
+    pagination_loop: "Repeated pagination",
+    maintenance_failed: "Maintenance failed",
+    moderator_status_failed: "Moderator status check failed",
+    channel_or_consent_missing: "Channel or consent missing",
+    token_ciphertext_unreadable: "Token unreadable",
+  },
+};
+
+export const maintenanceReasonText = (
+  code: string | null | undefined,
+  language: DashboardLanguage = dashboardLanguage(),
+): string | null => {
+  if (code === null || code === undefined) return null;
+  const catalog: Record<string, string> = maintenanceReasonTexts[language];
+  return catalog[code] ?? code;
 };
 
 export const dashboardTexts = (): DashboardTexts => dashboardTextsCatalog[dashboardLanguage()];

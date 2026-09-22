@@ -1,5 +1,5 @@
 // The seam: everything a panel is allowed to import from `@mantine/*` comes
-// through here, in project vocabulary. See "Die Naht `src/dashboard/ui/`"
+// through here, in project vocabulary. See "The seam `src/dashboard/ui/`"
 // in docs/input/DESIGN-neu.md.
 
 export { UiProvider } from "./Provider";

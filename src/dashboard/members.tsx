@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } f
 
 import { CHANNEL_ROLES, canManage, type ChannelRole } from "../contracts/values";
 import type { PanelMember, PanelTwitchUser } from "../panel-contract";
-import { roleLabel } from "./labels";
-import { apiErrorText, dashboardCommonTexts, dashboardLanguage, type DashboardLanguage, type LocaleCatalog, formatDate } from "./locale";
+import { membersTexts, roleLabel } from "./labels";
+import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
 import { ListDetail, SubInspector, useInspectorSelection } from "./ui";
 import {
@@ -35,73 +35,6 @@ const manageableRoles = CHANNEL_ROLES;
 
 /** The join date is days to years in the past; the time of day adds nothing there. */
 const formatJoinDate = (value: string): string => formatDate(value);
-
-interface MembersTexts {
-  managementLocked: string;
-  grantAccessTitle: string;
-  twitchName: string;
-  search: string;
-  searching: string;
-  title: string;
-  count: (count: string) => string;
-  name: string;
-  role: string;
-  accessSince: string;
-  editMember: (name: string) => string;
-  remove: string;
-  lastBroadcaster: string;
-  unresolvable: string;
-  twitchId: (userId: string) => string;
-  roleFor: (name: string) => string;
-  removeAccessFor: (name: string) => string;
-  empty: string;
-  grantAccess: string;
-  newMemberRoleLabel: string;
-  confirmationTitle: (name: string) => string;
-  confirmationText: (role: string) => string;
-  grantPermanently: string;
-  membersWithAccess: string;
-  load: string;
-  loadMore: string;
-  loadingMore: string;
-  sessionInvalid: string;
-  changeFailed: string;
-  removeSelf: string;
-  removeOther: (name: string) => string;
-}
-
-const texts: LocaleCatalog<MembersTexts> = {
-  de: {
-    managementLocked: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", grantAccessTitle: "Zugriff vergeben",
-    twitchName: "Twitch-Name", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", count: (count) => `${count} Mitglieder`, name: "Name",
-    role: "Rolle", accessSince: "Zugriff seit", editMember: (name) => `Mitglied bearbeiten: ${name}`, remove: "Entziehen",
-    lastBroadcaster: "Letzter Broadcaster", unresolvable: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
-    roleFor: (name) => `Rolle für ${name}`, removeAccessFor: (name) => `Zugriff für ${name} entziehen`,
-    empty: "Für diesen Kanal ist noch niemand zusätzlich freigegeben.", grantAccess: "Zugriff freigeben",
-    newMemberRoleLabel: "Rolle für neue Mitgliedschaft", confirmationTitle: (name) => `Zugriff für ${name} freigeben?`,
-    confirmationText: (role) => `Diese Person hat keinerlei Beziehung zum Kanal, die Twitch belegen würde. Mit der Rolle „${role}“ erhält sie Zugriff auf die Mitgliederliste und auf die kanalbezogenen Panel-Funktionen, die diese Rolle erlaubt.`,
-    grantPermanently: "Zugriff endgültig freigeben", membersWithAccess: "Freigegebene Mitglieder",
-    load: "Mitglieder werden geladen …", loadMore: "Weitere Mitglieder laden", loadingMore: "Weitere Mitglieder werden geladen …",
-    sessionInvalid: "Deine Sitzung ist nicht mehr gültig.", changeFailed: "Die Mitgliederänderung ist fehlgeschlagen.",
-    removeSelf: "Deinen eigenen Zugang zu diesem Kanal wirklich entziehen? Du sperrst dich damit selbst aus und kommst nur über eine andere berechtigte Person zurück.",
-    removeOther: (name) => `Zugriff für ${name} wirklich entziehen? Die Person verliert den Zugang zu diesem Kanal und allen kanalbezogenen Panel-Daten und -Funktionen.`,
-  },
-  en: {
-    managementLocked: "Only broadcasters and managers may change members.", grantAccessTitle: "Grant access", twitchName: "Twitch name",
-    search: "Search", searching: "Searching …", title: "Members", count: (count) => `${count} members`, name: "Name", role: "Role", accessSince: "Access since",
-    editMember: (name) => `Edit member: ${name}`, remove: "Remove", lastBroadcaster: "Last broadcaster", unresolvable: "Unresolvable",
-    twitchId: (userId) => `Twitch ID ${userId}`, roleFor: (name) => `Role for ${name}`, removeAccessFor: (name) => `Remove access for ${name}`,
-    empty: "No one else has access to this channel yet.", grantAccess: "Grant access", newMemberRoleLabel: "Role for new membership",
-    confirmationTitle: (name) => `Grant access for ${name}?`, confirmationText: (role) => `This person has no Twitch relationship proving access to this channel. The ${role} role grants access to the member list and the channel features allowed by that role.`,
-    grantPermanently: "Grant access permanently", membersWithAccess: "Members with access",
-    load: "Loading members …", loadMore: "Load more members", loadingMore: "Loading more members …",
-    sessionInvalid: "Your session is no longer valid.", changeFailed: "The member change failed.",
-    removeSelf: "Remove your own access to this channel? This locks you out and you can return only through another authorized person.",
-    removeOther: (name) => `Remove access for ${name}? This person will lose access to this channel and all channel-specific panel data and features.`,
-  },
-};
-
-const membersTexts = (language: DashboardLanguage = dashboardLanguage()): MembersTexts => texts[language];
 
 const errorMessage = (error: unknown): string => {
   if (error instanceof PanelApiError && error.status === 401) return membersTexts().sessionInvalid;
@@ -179,8 +112,8 @@ const MemberList = ({
   const texts = membersTexts();
   if (members.length === 0) return <p className="muted">{texts.empty}</p>;
   return (
-    <div className="tabelle-wrap">
-      <table className="tabelle mitglieder-tabelle">
+    <div className="table-wrap">
+      <table className="table members-table">
         <thead className="sr-only"><tr role="row"><th scope="col" role="columnheader">{texts.name}</th><th scope="col" role="columnheader">{texts.role}</th><th scope="col" role="columnheader" aria-sort="descending">{texts.accessSince}</th></tr></thead>
         <tbody>
           {members.map((member) => {
@@ -214,7 +147,7 @@ const MemberList = ({
                   </div>
                 </th>
                 <td role="cell">{roleLabel(member.role)}</td>
-                <td className="zahl" role="cell">{formatJoinDate(member.joinedAt)}</td>
+                <td className="number" role="cell">{formatJoinDate(member.joinedAt)}</td>
               </tr>
             );
           })}
@@ -276,7 +209,7 @@ const MemberEditor = ({
         >
           {roleOptions(selectableRoles(member, ownUserId, broadcasterCount))}
         </select>
-        {managementLocked !== null ? <span className="sperrgrund">{managementLocked}</span> : locked === null ? null : <span className="sperrgrund">{texts.lastBroadcaster}</span>}
+        {managementLocked !== null ? <span className="lock-reason">{managementLocked}</span> : locked === null ? null : <span className="lock-reason">{texts.lastBroadcaster}</span>}
       </label>
       <div className="form-actions form-actions--destructive">
         <button
@@ -288,7 +221,7 @@ const MemberEditor = ({
           onClick={onRemove}
         >{texts.remove}</button>
       </div>
-      {locked === null ? null : <span className="sperrgrund">{texts.lastBroadcaster}</span>}
+      {locked === null ? null : <span className="lock-reason">{texts.lastBroadcaster}</span>}
     </SubInspector>
   );
 };
@@ -410,12 +343,12 @@ export const MembersPage = ({
       <ModuleHeading kind="members" title={texts.title} subtitle={<ModuleCount count={members.length} label={texts.count} />} />
       <section className="inspector-section inspector-form" aria-label={texts.grantAccessTitle}>
         <div className="section-heading"><h2>{texts.grantAccessTitle}</h2></div>
-        {!canManageMembers ? <p className="sperrgrund">{texts.managementLocked}</p> : null}
+        {!canManageMembers ? <p className="lock-reason">{texts.managementLocked}</p> : null}
         <form className="inspector-form" onSubmit={(event) => { void handleSearch(event); }}>
           <label htmlFor="member-search">{texts.twitchName}</label>
           <div className="form-row"><input id="member-search" value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="off" disabled={!canManageMembers} title={!canManageMembers ? texts.managementLocked : undefined} /><button className="button" type="submit" disabled={!canManageMembers || searching || login.trim().length === 0} title={!canManageMembers ? texts.managementLocked : undefined}>{searching ? texts.searching : texts.search}</button></div>
         </form>
-        {!canManageMembers && foundUser === null ? <div><button className="button" type="button" disabled title={texts.managementLocked}>{texts.grantAccess}</button><span className="sperrgrund">{texts.managementLocked}</span></div> : null}
+        {!canManageMembers && foundUser === null ? <div><button className="button" type="button" disabled title={texts.managementLocked}>{texts.grantAccess}</button><span className="lock-reason">{texts.managementLocked}</span></div> : null}
         {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
         {foundUser === null ? null : (
           <div className="inspector-result">
@@ -435,7 +368,7 @@ export const MembersPage = ({
             <label>{texts.role}<select aria-label={texts.newMemberRoleLabel} value={newRole} disabled={!canManageMembers} title={!canManageMembers ? texts.managementLocked : undefined} onChange={(event) => setNewRole(event.target.value as ChannelRole)}>{roleOptions()}</select></label>
             <div>
               <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texts.managementLocked : undefined}>{texts.grantAccess}</button>
-              {!canManageMembers ? <span className="sperrgrund">{texts.managementLocked}</span> : null}
+              {!canManageMembers ? <span className="lock-reason">{texts.managementLocked}</span> : null}
             </div>
           </div>
         )}
@@ -456,7 +389,7 @@ export const MembersPage = ({
               </div>
             </div>
             <p id="member-add-confirmation-description">{accessConfirmation(newRole)}</p>
-            {!canManageMembers ? <span className="sperrgrund">{texts.managementLocked}</span> : null}
+            {!canManageMembers ? <span className="lock-reason">{texts.managementLocked}</span> : null}
             <div className="form-actions">
               <button ref={confirmButtonRef} className="button button--primary" type="button" onClick={() => { void handleAdd(); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texts.managementLocked : undefined}>{texts.grantPermanently}</button>
               <button className="button button--quiet" type="button" onClick={cancelAdd} disabled={busyUserId === foundUser.userId}>{dashboardCommonTexts().cancel}</button>
@@ -469,7 +402,7 @@ export const MembersPage = ({
         {loading && members.length === 0 ? <p className="loading-line">{texts.load}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
-        {members.length === 0 && loading ? null : <div className={loading ? "veraltet" : undefined}>
+        {members.length === 0 && loading ? null : <div className={loading ? "stale" : undefined}>
           <ListDetail
             list={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMember} rowRef={rowRef} />}
             inspector={selectedMember === null ? null : (

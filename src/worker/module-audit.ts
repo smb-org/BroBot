@@ -5,8 +5,8 @@ import type { AuditActorKind } from "../contracts/values";
 export type { AuditActorKind } from "../contracts/values";
 
 /**
- * Der zweite Teil wird mit der Fachmutation gebatcht. `changes()` verhindert,
- * dass ein abgelehnter oder ins Leere laufender Schreibversuch auditiert wird.
+ * The second part is batched with the domain mutation. `changes()` prevents
+ * a rejected or no-op write attempt from being audited.
  */
 export const prepareModuleAudit = (
   db: D1Database,

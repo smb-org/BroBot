@@ -132,7 +132,7 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
       env.DB,
       identity.userId,
       "error",
-      "Token-Ciphertext konnte nicht gelesen werden.",
+      "token_ciphertext_unreadable",
       now,
       identity.accessTokenCiphertext,
       identity.refreshTokenCiphertext,

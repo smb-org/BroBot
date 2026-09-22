@@ -80,7 +80,7 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
 
   return (
     <SubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.columns.last} {relativeTime(initial.lastUsedAt, labels)}</span>} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={onClose}>
-      {!canManageContent ? <p className="sperrgrund">{labels.managementLocked}</p> : null}
+      {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
       <label className="config-field config-field--mittel">
         {labels.name}
         <input value={name} onChange={(event) => { setName(event.target.value); }} disabled={!canManageContent || busy} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
@@ -162,7 +162,7 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
   return (
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
-      <td className="tabelle__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
+      <td className="table__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
       <td>
         <select
           aria-label={labels.minimumTierFor(initial.name)}
@@ -322,7 +322,7 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
       {loading ? <p className="loading-line">{labels.load}</p> : null}
       {error === null ? null : <p className="form-error" role="alert">{error}</p>}
       {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-      {!loading && error === null && commands.length > 0 ? <div className="tabelle-wrap"><table className="tabelle"><thead><tr><th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.text}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setCreateOpen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
+      {!loading && error === null && commands.length > 0 ? <div className="table-wrap"><table className="table"><thead><tr><th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.text}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setCreateOpen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
     </section>
   );
 
@@ -332,7 +332,7 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
     <SubInspector ariaLabel={labels.add} title={labels.add} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={closeCreate}>
       <form className="config-section" aria-busy={creating} onSubmit={(event) => { event.preventDefault(); void create(); }}>
         <fieldset disabled={!canManageContent || creating}>
-        {!canManageContent ? <p className="sperrgrund">{labels.managementLocked}</p> : null}
+        {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
         <label className="config-field config-field--mittel">
           {labels.name}
           <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />

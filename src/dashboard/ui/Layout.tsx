@@ -3,7 +3,7 @@ import { Grid as MantineGrid, Group as MantineGroup, Stack as MantineStack } fro
 /**
  * Layout primitives re-exported as-is: `Stack`, `Group` and `Grid` are
  * already project vocabulary -- a panel builds its layout from these
- * instead of reaching for Mantine's grid directly ("Die Naht" in
+ * instead of reaching for Mantine's grid directly ("The seam" in
  * docs/input/DESIGN-neu.md).
  */
 export const Stack = MantineStack;

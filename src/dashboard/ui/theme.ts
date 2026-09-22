@@ -99,7 +99,7 @@ export const colors = {
   moderationFill: "rgba(92, 201, 196, 0.12)", // "--moderation-grund"
 } as const;
 
-// "Farbschema und Grundton": the warm palette poured into Mantine's ten-step
+// "Color scheme and base tone" in docs/input/DESIGN-neu.md: the warm palette poured into Mantine's ten-step
 // dark scale, 0 (lightest text) to 9 (deepest surface).
 const dark: MantineColorsTuple = [
   colors.text, // dark.0 -- text
@@ -131,14 +131,13 @@ const brand: MantineColorsTuple = [
 ];
 
 /**
- * "Die Kontrastregel": Mantine's `autoContrast` default `luminanceThreshold`
- * is 0.3. `{colors.marke}` (#538dcc) has a relative luminance of 0.25 --
- * below Mantine's default threshold, so `autoContrast` would treat it as
- * "dark enough" and put white text on it: 3.47:1, failing WCAG AA on every
- * primary button. At 0.2, `autoContrast` instead picks `{colors.marke-auf}`
- * (5.6:1). This is not a stray override -- raising it back to 0.3 breaks
- * every primary button's contrast. See "Das Theme" > "Die Kontrastregel" in
- * docs/input/DESIGN-neu.md.
+ * "The contrast rule" in docs/input/DESIGN-neu.md: Mantine's `autoContrast`
+ * default `luminanceThreshold` is 0.3. `{colors.marke}` (#538dcc) has a
+ * relative luminance of 0.25 -- below Mantine's default threshold, so
+ * `autoContrast` would treat it as "dark enough" and put white text on it:
+ * 3.47:1, failing WCAG AA on every primary button. At 0.2, `autoContrast`
+ * instead picks `{colors.marke-auf}` (5.6:1). This is not a stray override
+ * -- raising it back to 0.3 breaks every primary button's contrast.
  */
 export const luminanceThreshold = 0.2;
 
@@ -178,7 +177,7 @@ export const theme: MantineThemeOverride = createTheme({
   spacing: { xs: "4px", sm: "8px", md: "12px", lg: "16px", xl: "24px" },
   breakpoints: { xs: "420px", sm: "640px", md: "768px", lg: "1024px", xl: "1400px" },
   shadows: {
-    // "Die Schatten-nur-schwebend-Regel": exactly one shadow exists, and it
+    // "Shadows only for floating layers" rule in docs/input/DESIGN-neu.md: exactly one shadow exists, and it
     // belongs only to floating layers (Modal, Drawer, Popover, Menu, the
     // Select dropdown). Every other shadow level falls back to none, so a
     // component's larger default shadow is silenced by the theme itself.

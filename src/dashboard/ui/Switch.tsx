@@ -12,10 +12,10 @@ export interface SwitchProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
-  /** "trägt seinen Pending-Zustand selbst (`aria-busy`)" -- a switch is an
+  /** "Carries its own pending state (`aria-busy`)" -- a switch is an
    *  immediate action, never behind a SaveBar. */
   pending?: boolean;
-  /** "Für Bediener gesperrt, Sperrgrund als Navetikett darunter." Implies
+  /** "Locked for operators, lock reason as a caption below it." Implies
    *  `disabled`; rendered as the 11px caption under the control. */
   lockedReason?: string;
 }

@@ -30,7 +30,7 @@ const SIDEBAR_WIDTH_COLLAPSED = 80;
  * outside `ui/` touches them; panels only ever see `header`/`navbar`
  * content they compose from plain markup and other seam components.
  *
- * The collapsed state "übersteht die Sitzung im Browser" -- session
+ * The collapsed state "survives the session in the browser" -- session
  * storage, not local storage: it resets when the browser session ends.
  */
 export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebarLabel, children }: ShellProps) {

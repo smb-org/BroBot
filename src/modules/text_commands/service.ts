@@ -122,8 +122,8 @@ export const processTextCommandMessage = async (
       .filter((command) => command.enabled)
       .sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0
-      ? "Keine Textbefehle angelegt."
-      : `Befehle: ${commands.map((command) => `!${command.name}`).join(", ")}`;
+      ? "No text commands set up."
+      : `Commands: ${commands.map((command) => `!${command.name}`).join(", ")}`;
     return response(event, input, list);
   }
 

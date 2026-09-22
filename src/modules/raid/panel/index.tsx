@@ -78,7 +78,7 @@ const RaidForm = ({ channelId, labels, canManage, initial, onSaved }: RaidFormPr
 
   return (
     <section className="module-stack" aria-label={labels.title}>
-      {!canManage ? <p className="sperrgrund">{labels.managementLocked}</p> : null}
+      {!canManage ? <p className="lock-reason">{labels.managementLocked}</p> : null}
       <section className="config-section" aria-label={labels.thresholdSection}>
         <div className="section-heading"><h2>{labels.thresholdSection}</h2></div>
         <div style={{ display: "grid", gap: "6px", maxWidth: "var(--config-field-breit)" }}>

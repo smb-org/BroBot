@@ -466,7 +466,7 @@ const maintainBotIdentityInternal = async (
     await setBotIdentityStatusIfCurrent(
       env.DB,
       "error",
-      "Token-Ciphertext konnte nicht gelesen werden.",
+      "token_ciphertext_unreadable",
       now,
       identity.accessTokenCiphertext,
       identity.refreshTokenCiphertext,

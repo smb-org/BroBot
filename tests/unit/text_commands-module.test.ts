@@ -288,7 +288,7 @@ describe("Text commands module", () => {
 
       await dispatchEventSubNotification(environment(database), eventFor("!befehle"), fetcher, [textCommandModule]);
 
-      expect(body(fetcher, 0).message).toBe("Befehle: !aktiv, !befehle");
+      expect(body(fetcher, 0).message).toBe("Commands: !aktiv, !befehle");
     } finally {
       database.close();
     }

@@ -108,12 +108,12 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
       <section className="config-section" aria-label={labels.scheduleSection}>
         <div className="section-heading"><h2>{labels.scheduleSection}</h2></div>
         {schedule.schedule.nextAdAt === null ? <p className="empty-state">{labels.noAdBreak}</p> : (
-          <div className="tabelle-wrap">
-            <table className="tabelle" aria-label={labels.scheduleSection}>
+          <div className="table-wrap">
+            <table className="table" aria-label={labels.scheduleSection}>
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody><tr>
-                <td className="zahl">{formatTimestamp(schedule.schedule.nextAdAt, language)}</td>
-                <td className="zahl">{schedule.schedule.duration === null ? "—" : `${String(schedule.schedule.duration)} s`}</td>
+                <td className="number">{formatTimestamp(schedule.schedule.nextAdAt, language)}</td>
+                <td className="number">{schedule.schedule.duration === null ? "—" : `${String(schedule.schedule.duration)} s`}</td>
               </tr></tbody>
             </table>
           </div>
@@ -186,19 +186,19 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
             {snoozeLabel}
           </button>
         </div>
-        {snoozeReason === null ? null : <p className="sperrgrund">{snoozeReason}</p>}
+        {snoozeReason === null ? null : <p className="lock-reason">{snoozeReason}</p>}
       </section>
 
       <section className="config-section" aria-label={labels.recentSection}>
         <div className="section-heading"><h2>{labels.recentSection}</h2></div>
         {schedule.recentAdBreaks.length === 0 ? <p className="empty-state">{labels.noRecent}</p> : (
-          <div className="tabelle-wrap">
-            <table className="tabelle" aria-label={labels.recentSection}>
+          <div className="table-wrap">
+            <table className="table" aria-label={labels.recentSection}>
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody>{schedule.recentAdBreaks.map((adBreak) => (
                 <tr key={`${adBreak.timestamp}-${String(adBreak.durationSeconds)}`}>
-                  <td className="zahl">{labels.recentTime(formatTimestamp(adBreak.timestamp, language))}</td>
-                  <td className="zahl">{labels.recentDuration(String(adBreak.durationSeconds))}</td>
+                  <td className="number">{labels.recentTime(formatTimestamp(adBreak.timestamp, language))}</td>
+                  <td className="number">{labels.recentDuration(String(adBreak.durationSeconds))}</td>
                 </tr>
               ))}</tbody>
             </table>

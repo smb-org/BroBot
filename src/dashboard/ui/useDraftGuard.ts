@@ -16,7 +16,7 @@ export interface UseDraftGuardResult {
 }
 
 /**
- * "Ungespeicherte Änderungen (useDraftGuard)" (docs/input/DESIGN-neu.md):
+ * "Unsaved changes (useDraftGuard)" (docs/input/DESIGN-neu.md):
  * while the draft is dirty, switching the selection stays blocked behind a
  * three-way confirmation -- continue editing, discard and switch, save and
  * switch. A failed save keeps the switch blocked; the caller decides what

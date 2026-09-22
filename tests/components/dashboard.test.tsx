@@ -2620,10 +2620,10 @@ describe("Dashboard skeleton", () => {
     const row = (await screen.findByText("Chat-Nachrichten")).closest("tr");
     expect(row).not.toBeNull();
     fireEvent.click(row as HTMLElement);
-    const bereich = screen.getByRole("region", { name: "Abonnements" });
-    expect(bereich.children).toHaveLength(2);
-    expect(bereich.children[0]).toHaveClass("inspektor-bereich__liste");
-    expect(bereich.children[1]).toHaveClass("sub-inspector");
+    const section = screen.getByRole("region", { name: "Abonnements" });
+    expect(section.children).toHaveLength(2);
+    expect(section.children[0]).toHaveClass("inspector-section__list");
+    expect(section.children[1]).toHaveClass("sub-inspector");
   });
 
   it("shows the audit inspector only once an entry is selected, alongside the list", async () => {

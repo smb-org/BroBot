@@ -3,7 +3,7 @@ import { Modal, Text } from "@mantine/core";
 import { Button } from "./Button";
 
 /**
- * "Bestätigungs-Modal (`ConfirmDialog`)" in docs/input/DESIGN-neu.md: takes
+ * "Confirmation modal (`ConfirmDialog`)" in docs/input/DESIGN-neu.md: takes
  * a title, a description and two actions, never children -- the seam
  * enforces that this is only ever used for confirmations, never a form or
  * an editor. Cancel is `subtle` and starts focused; the action is `danger`
@@ -18,7 +18,7 @@ export interface ConfirmDialogProps {
   cancelLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
-  /** "Löschende Handlungen tragen sie dauerhaft" -- deleting actions render
+  /** "Deleting actions carry it permanently" -- deleting actions render
    *  the confirm button as `danger` instead of `filled`. */
   danger?: boolean;
 }
