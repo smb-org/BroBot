@@ -4,6 +4,11 @@ import { colors } from "./theme";
 
 export interface SwitchProps {
   label?: string;
+  /** Accessible name when the switch carries no visible `label` -- e.g. a
+   *  list row where the row itself already shows the subject's name and a
+   *  second visible label next to the switch would repeat it. Ignored once
+   *  `label` is set, same convention as `Select`'s `ariaLabel`. */
+  ariaLabel?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
@@ -21,12 +26,13 @@ export interface SwitchProps {
  * Track/thumb radii differ (md / sm), so both are pinned in the theme's
  * `Switch` override rather than here.
  */
-export function Switch({ label, checked, onChange, disabled, pending, lockedReason }: SwitchProps) {
+export function Switch({ label, ariaLabel, checked, onChange, disabled, pending, lockedReason }: SwitchProps) {
   const isDisabled = disabled ?? Boolean(lockedReason);
   return (
     <div>
       <MantineSwitch
         label={label}
+        aria-label={label ? undefined : ariaLabel}
         labelPosition="left"
         checked={checked}
         onChange={(event) => onChange(event.currentTarget.checked)}

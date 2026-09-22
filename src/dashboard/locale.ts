@@ -136,6 +136,7 @@ export interface DashboardTexts {
     warning: string;
     sessionInvalid: string;
     dataLoadFailed: string;
+    changeFailed: string;
     last: string;
     noCause: string;
   };
@@ -350,7 +351,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     errors: {
       title: "Fehler", warning: "Warnung", sessionInvalid: "Deine Sitzung ist nicht mehr gültig.",
-      dataLoadFailed: "Die Daten konnten nicht geladen werden.", last: "Letzter Fehler",
+      dataLoadFailed: "Die Daten konnten nicht geladen werden.", changeFailed: "Die Änderung ist fehlgeschlagen.", last: "Letzter Fehler",
       noCause: "Keine gespeicherte Ursache",
     },
     statusCard: {
@@ -475,6 +476,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     errors: {
       title: "Error", warning: "Warning", sessionInvalid: "Your session is no longer valid.", dataLoadFailed: "The data could not be loaded.",
+      changeFailed: "The change failed.",
       last: "Last error", noCause: "No saved cause",
     },
     statusCard: {

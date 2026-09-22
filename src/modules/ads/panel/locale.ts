@@ -1,6 +1,6 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
 
-interface AdsPanelTexts {
+export interface AdsPanelTexts {
   title: string;
   scheduleSection: string;
   noAdBreak: string;
@@ -27,6 +27,8 @@ interface AdsPanelTexts {
   manual: string;
   durationPlaceholderHint: string;
   save: string;
+  discard: string;
+  saving: string;
   saved: string;
   load: string;
   error: string;
@@ -61,6 +63,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     manual: "Manuell gestartete Werbepause",
     durationPlaceholderHint: "{duration} wird durch die Dauer in Sekunden ersetzt.",
     save: "Ansagen speichern",
+    discard: "Verwerfen",
+    saving: "Wird gespeichert …",
     saved: "Ansagen gespeichert.",
     load: "Werbeeinstellungen werden geladen …",
     error: "Die Werbeeinstellungen konnten nicht geladen oder gespeichert werden.",
@@ -93,6 +97,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     manual: "Manually started ad break",
     durationPlaceholderHint: "{duration} is replaced with the duration in seconds.",
     save: "Save announcements",
+    discard: "Discard",
+    saving: "Saving …",
     saved: "Announcements saved.",
     load: "Loading ad break settings …",
     error: "The ad break settings could not be loaded or saved.",

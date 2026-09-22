@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
+import { Field, NumberField, SaveBar, Switch, useDraft } from "../../../dashboard/ui";
 import type { AdsSettings, AdsScheduleResponse } from "../contracts";
 import { loadAdSettings, loadAdsSchedule, snoozeAds, saveAdSettings } from "./service";
-import { adsPanelTexts } from "./locale";
+import { adsPanelTexts, type AdsPanelTexts } from "./locale";
 
 interface AdsPanelProperties {
   channelId: string;
@@ -23,34 +24,31 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
   }).format(date);
 };
 
-export const AdsPanel = ({
-  channelId,
-  language,
-  canManage = true,
-}: AdsPanelProperties): ReactElement => {
-  const labels = adsPanelTexts(language);
-  const resolvedLanguage = language ?? (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("de") ? "de" : "en");
-  const [settings, setSettings] = useState<AdsPanelSettings | null>(null);
-  const [schedule, setSchedule] = useState<AdsScheduleResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+interface AdsFormProperties {
+  channelId: string;
+  labels: AdsPanelTexts;
+  canManage: boolean;
+  language: DashboardLanguage;
+  initial: AdsPanelSettings;
+  schedule: AdsScheduleResponse;
+  onScheduleChange: (schedule: AdsScheduleResponse) => void;
+  /** See `RaidForm`'s identical `onSaved`: feeds the just-saved value back
+   *  in as the next `initial` so `dirty` clears without a remount. */
+  onSaved: (settings: AdsPanelSettings) => void;
+}
+
+const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, onScheduleChange, onSaved }: AdsFormProperties): ReactElement => {
+  const { value: settings, setValue: setSettings, dirty, reset } = useDraft<AdsPanelSettings>(initial);
+  const [error, setError] = useState<string | undefined>(undefined);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [snoozeBusy, setSnoozeBusy] = useState(false);
   const [leadSecondsError, setLeadSecondsError] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    void Promise.all([loadAdSettings(channelId), loadAdsSchedule(channelId)]).then(([loadedSettings, loadedSchedule]) => {
-      if (!active) return;
-      setSettings(loadedSettings);
-      setSchedule(loadedSchedule);
-    }).catch(() => {
-      if (active) setError(labels.error);
-    });
-    return () => { active = false; };
-  }, [channelId, labels.error]);
-
-  if (settings === null || schedule === null) return <p className="loading-line">{error ?? labels.load}</p>;
+  const change = (next: Partial<AdsPanelSettings>): void => {
+    setSaved(false);
+    setSettings((current) => ({ ...current, ...next }));
+  };
 
   const save = async (): Promise<void> => {
     if (settings.leadSeconds === "") {
@@ -59,16 +57,24 @@ export const AdsPanel = ({
     }
     setLeadSecondsError(false);
     setBusy(true);
-    setError(null);
+    setError(undefined);
     setSaved(false);
+    const savedSettings = { ...settings, leadSeconds: settings.leadSeconds };
     try {
-      await saveAdSettings(channelId, { ...settings, leadSeconds: settings.leadSeconds });
+      await saveAdSettings(channelId, savedSettings);
+      onSaved(savedSettings);
       setSaved(true);
     } catch {
       setError(labels.error);
     } finally {
       setBusy(false);
     }
+  };
+
+  const discard = (): void => {
+    reset();
+    setSaved(false);
+    setLeadSecondsError(false);
   };
 
   const snoozeCount = schedule.schedule.snoozeCount;
@@ -80,9 +86,9 @@ export const AdsPanel = ({
       : snoozeCount <= 0 ? labels.snoozeNone : null;
   const snooze = async (): Promise<void> => {
     setSnoozeBusy(true);
-    setError(null);
+    setError(undefined);
     try {
-      setSchedule(await snoozeAds(channelId));
+      onScheduleChange(await snoozeAds(channelId));
     } catch {
       setError(labels.error);
     } finally {
@@ -92,8 +98,10 @@ export const AdsPanel = ({
 
   const snoozeLabel = labels.snoozeButton(
     snoozeCount === null ? "—" : String(snoozeCount),
-    formatTimestamp(schedule.schedule.snoozeRefreshAt, resolvedLanguage),
+    formatTimestamp(schedule.schedule.snoozeRefreshAt, language),
   );
+
+  const disabled = !canManage || busy;
 
   return (
     <section className="module-stack" aria-label={labels.title}>
@@ -104,7 +112,7 @@ export const AdsPanel = ({
             <table className="tabelle" aria-label={labels.scheduleSection}>
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody><tr>
-                <td className="zahl">{formatTimestamp(schedule.schedule.nextAdAt, resolvedLanguage)}</td>
+                <td className="zahl">{formatTimestamp(schedule.schedule.nextAdAt, language)}</td>
                 <td className="zahl">{schedule.schedule.duration === null ? "—" : `${String(schedule.schedule.duration)} s`}</td>
               </tr></tbody>
             </table>
@@ -118,8 +126,8 @@ export const AdsPanel = ({
           {labels.automatic}
           <textarea
             value={settings.automatic}
-            disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setSettings({ ...settings, automatic: event.target.value }); }}
+            disabled={disabled}
+            onChange={(event) => { change({ automatic: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.durationPlaceholderHint}</span>
         </label>
@@ -131,8 +139,8 @@ export const AdsPanel = ({
           {labels.manual}
           <textarea
             value={settings.manual}
-            disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setSettings({ ...settings, manual: event.target.value }); }}
+            disabled={disabled}
+            onChange={(event) => { change({ manual: event.target.value }); }}
           />
           <span className="config-field__hint">{labels.durationPlaceholderHint}</span>
         </label>
@@ -140,44 +148,35 @@ export const AdsPanel = ({
 
       <section className="config-section" aria-label={labels.warningSection}>
         <div className="section-heading"><h2>{labels.warningSection}</h2></div>
-        <label className="config-field config-field--breit">
+        <div style={{ display: "grid", gap: "6px", maxWidth: "var(--config-field-breit)" }}>
           <span>{labels.warningEnabled}</span>
-          <button
-            className="switch"
-            type="button"
-            role="switch"
-            aria-label={labels.warningEnabled}
-            aria-checked={settings.prewarning}
-            disabled={!canManage || busy}
-            onClick={() => { setSaved(false); setSettings({ ...settings, prewarning: !settings.prewarning }); }}
-          >
-            <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
-          </button>
-        </label>
-        <label className="config-field config-field--schmal">
-          {labels.leadSeconds}
-          <input
-            type="number"
-            min="30"
-            max="300"
-            step="1"
+          <Switch
+            ariaLabel={labels.warningEnabled}
+            checked={settings.prewarning}
+            disabled={disabled}
+            onChange={(checked) => { change({ prewarning: checked }); }}
+          />
+        </div>
+        <div className="config-field--schmal">
+          <NumberField
+            label={labels.leadSeconds}
             value={settings.leadSeconds}
-            aria-invalid={leadSecondsError}
-            disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setLeadSecondsError(false); setSettings({ ...settings, leadSeconds: event.target.value === "" ? "" : Number(event.target.value) }); }}
+            onChange={(value) => { setLeadSecondsError(false); change({ leadSeconds: value }); }}
+            min={30}
+            max={300}
+            disabled={disabled}
+            {...(leadSecondsError ? { error: labels.numberMissing } : {})}
           />
-          {leadSecondsError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
-        </label>
-        <label className="config-field config-field--breit">
-          {labels.prewarningText}
-          <input
-            type="search"
+        </div>
+        <div className="config-field--breit">
+          <Field
+            label={labels.prewarningText}
             value={settings.prewarningText}
-            disabled={!canManage || busy}
-            onChange={(event) => { setSaved(false); setSettings({ ...settings, prewarningText: event.target.value }); }}
+            onChange={(value) => { change({ prewarningText: value }); }}
+            disabled={disabled}
+            hint={labels.warningPlaceholderHint}
           />
-          <span className="config-field__hint">{labels.warningPlaceholderHint}</span>
-        </label>
+        </div>
       </section>
 
       <section className="config-section" aria-label={labels.snoozeSection}>
@@ -198,7 +197,7 @@ export const AdsPanel = ({
               <thead><tr><th scope="col">{labels.scheduledTime}</th><th scope="col">{labels.duration}</th></tr></thead>
               <tbody>{schedule.recentAdBreaks.map((adBreak) => (
                 <tr key={`${adBreak.timestamp}-${String(adBreak.durationSeconds)}`}>
-                  <td className="zahl">{labels.recentTime(formatTimestamp(adBreak.timestamp, resolvedLanguage))}</td>
+                  <td className="zahl">{labels.recentTime(formatTimestamp(adBreak.timestamp, language))}</td>
                   <td className="zahl">{labels.recentDuration(String(adBreak.durationSeconds))}</td>
                 </tr>
               ))}</tbody>
@@ -209,13 +208,60 @@ export const AdsPanel = ({
 
       <section className="config-section" aria-label={labels.actions}>
         <div className="section-heading"><h2>{labels.actions}</h2></div>
-        <div className="form-actions">
-          <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManage || busy}>{labels.save}</button>
-          {saved ? <span className="muted" role="status">{labels.saved}</span> : null}
-        </div>
+        <SaveBar
+          dirty={dirty}
+          pending={busy}
+          {...(error !== undefined ? { error } : {})}
+          saved={saved}
+          onSave={() => { void save(); }}
+          onDiscard={discard}
+          saveLabel={labels.save}
+          discardLabel={labels.discard}
+          savedLabel={labels.saved}
+          pendingLabel={labels.saving}
+        />
       </section>
-      {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     </section>
+  );
+};
+
+export const AdsPanel = ({
+  channelId,
+  language,
+  canManage = true,
+}: AdsPanelProperties): ReactElement => {
+  const labels = adsPanelTexts(language);
+  const resolvedLanguage = language ?? (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("de") ? "de" : "en");
+  const [settings, setSettings] = useState<AdsPanelSettings | null>(null);
+  const [schedule, setSchedule] = useState<AdsScheduleResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([loadAdSettings(channelId), loadAdsSchedule(channelId)]).then(([loadedSettings, loadedSchedule]) => {
+      if (!active) return;
+      setSettings(loadedSettings);
+      setSchedule(loadedSchedule);
+    }).catch(() => {
+      if (active) setError(labels.error);
+    });
+    return () => { active = false; };
+  }, [channelId, labels.error]);
+
+  if (settings === null || schedule === null) return <p className="loading-line">{error ?? labels.load}</p>;
+
+  return (
+    <AdsForm
+      key={channelId}
+      channelId={channelId}
+      labels={labels}
+      canManage={canManage}
+      language={resolvedLanguage}
+      initial={settings}
+      schedule={schedule}
+      onScheduleChange={setSchedule}
+      onSaved={setSettings}
+    />
   );
 };
 

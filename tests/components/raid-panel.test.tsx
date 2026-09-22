@@ -1,6 +1,9 @@
+import type { ReactElement } from "react";
+
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { UiProvider } from "../../src/dashboard/ui";
 import { AdsPanel } from "../../src/modules/ads/panel";
 import { loadAdSettings } from "../../src/modules/ads/panel/service";
 import { loadRaidSettings } from "../../src/modules/raid/panel/service";
@@ -11,6 +14,8 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   status,
   headers: { "Content-Type": "application/json" },
 });
+
+const renderPanel = (panel: ReactElement): ReturnType<typeof render> => render(<UiProvider>{panel}</UiProvider>);
 
 describe("Raid panel view", () => {
   afterEach(() => {
@@ -27,12 +32,12 @@ describe("Raid panel view", () => {
       textShort: "Klein {channel} {viewers}",
     } })));
 
-    render(<RaidPanel channelId="kanal-a" language="en" />);
+    renderPanel(<RaidPanel channelId="kanal-a" language="en" />);
 
     expect(await screen.findByRole("heading", { name: "Shoutout and messages", level: 2 })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Automatic Helix shoutout: enabled" })).toBeChecked();
-    expect(screen.getByLabelText("Shoutout threshold (viewers)")).toHaveValue(3);
-    expect(screen.getByLabelText("Text threshold (viewers)")).toHaveValue(3);
+    expect(screen.getByLabelText("Shoutout threshold (viewers)")).toHaveValue("3");
+    expect(screen.getByLabelText("Text threshold (viewers)")).toHaveValue("3");
     expect(screen.getByLabelText("Full raid message")).toHaveValue("Voll {channel} {viewers}");
     expect(screen.getByLabelText("Small raid message")).toHaveValue("Klein {channel} {viewers}");
   });
@@ -46,7 +51,7 @@ describe("Raid panel view", () => {
       textShort: "klein",
     } })));
 
-    render(<RaidPanel channelId="kanal-a" language="de" canManage={false} />);
+    renderPanel(<RaidPanel channelId="kanal-a" language="de" canManage={false} />);
 
     expect(await screen.findByText("Nur Broadcaster und Verwalter dürfen Raid-Einstellungen ändern.")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Helix-Shoutout automatisch senden: eingeschaltet" })).toBeDisabled();
@@ -54,7 +59,9 @@ describe("Raid panel view", () => {
     expect(screen.getByLabelText("Text-Schwelle (Zuschauer)")).toBeDisabled();
     expect(screen.getByLabelText("Voller Raid-Text")).toBeDisabled();
     expect(screen.getByLabelText("Kurzer Dankestext")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Raid-Einstellungen speichern" })).toBeDisabled();
+    // Every field is disabled, so no edit is possible and the save bar,
+    // which only appears once a field is dirty, never has anything to show.
+    expect(screen.queryByRole("button", { name: "Raid-Einstellungen speichern" })).not.toBeInTheDocument();
   });
 
   it("shows the disabled shoutout threshold as disabled but leaves the text threshold usable", async () => {
@@ -66,7 +73,7 @@ describe("Raid panel view", () => {
       textShort: "klein",
     } })));
 
-    render(<RaidPanel channelId="kanal-a" language="de" />);
+    renderPanel(<RaidPanel channelId="kanal-a" language="de" />);
 
     expect(await screen.findByRole("switch", { name: "Helix-Shoutout automatisch senden: ausgeschaltet" })).not.toBeChecked();
     expect(screen.getByLabelText("Shoutout-Schwelle (Zuschauer)")).toBeDisabled();
@@ -92,21 +99,24 @@ describe("Raid panel view", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<RaidPanel channelId="kanal-a" language="de" />);
+    renderPanel(<RaidPanel channelId="kanal-a" language="de" />);
     const raidText = await screen.findByLabelText("Voller Raid-Text");
+    fireEvent.change(raidText, { target: { value: "geändert" } });
     fireEvent.click(screen.getByRole("button", { name: "Raid-Einstellungen speichern" }));
     expect(await screen.findByRole("status")).toHaveTextContent("gespeichert");
     fireEvent.change(raidText, { target: { value: "neu" } });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("");
 
     cleanup();
-    render(<AdsPanel channelId="kanal-a" language="de" />);
-    const adText = (await screen.findAllByRole("textbox"))[0];
+    renderPanel(<AdsPanel channelId="kanal-a" language="de" />);
+    const adTextareas = await screen.findAllByRole("textbox");
+    const adText = adTextareas.find((element) => element.tagName === "TEXTAREA");
     if (adText === undefined) throw new Error("Werbungstextfeld fehlt");
+    fireEvent.change(adText, { target: { value: "geändert" } });
     fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
     expect(await screen.findByRole("status")).toHaveTextContent("gespeichert");
     fireEvent.change(adText, { target: { value: "neu" } });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("");
   });
 
   it("treats a cleared raid number field as a field error, not null", async () => {
@@ -119,13 +129,14 @@ describe("Raid panel view", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<RaidPanel channelId="kanal-a" language="de" />);
+    renderPanel(<RaidPanel channelId="kanal-a" language="de" />);
     const field = await screen.findByLabelText("Text-Schwelle (Zuschauer)");
     fireEvent.change(field, { target: { value: "" } });
     expect((field as HTMLInputElement).value).toBe("");
     fireEvent.click(screen.getByRole("button", { name: "Raid-Einstellungen speichern" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Zahl eingeben");
+    expect(await screen.findByText("× Zahl eingeben")).toBeInTheDocument();
+    expect(field).toHaveAttribute("aria-invalid", "true");
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
     expect((field as HTMLInputElement).value).toBe("");
   });

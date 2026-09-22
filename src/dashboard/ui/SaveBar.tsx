@@ -43,7 +43,7 @@ export function SaveBar({
 
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-      <span aria-live="polite" style={{ fontSize: "12px", color: error ? colors.errorText : colors.text3 }}>
+      <span role="status" aria-live="polite" style={{ fontSize: "12px", color: error ? colors.errorText : colors.text3 }}>
         {statusText}
       </span>
       {dirty ? (
