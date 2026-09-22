@@ -38,10 +38,10 @@ const key = (byte: number): string =>
 
 const PLATFORM_USER_ID = "4711";
 
-const sessionRowFor = (userId: string) => ({
+const sessionRowFor = (userId: string, login = userId) => ({
   session_id: `session-${userId}`,
   user_id: userId,
-  login: userId,
+  login,
   expires_at: "2099-09-19T00:00:00.000Z",
   created_at: "2026-09-18T00:00:00.000Z",
   updated_at: "2026-09-18T00:00:00.000Z",
@@ -190,6 +190,20 @@ describe("auth routes", () => {
     expect(cookie).toContain("__Host-brobot_oauth_state=");
     expect(cookie).toContain("HttpOnly; Secure; SameSite=Lax");
     expect(stateNonceFrom(response).length).toBeGreaterThan(0);
+    expect(new URL(response.headers.get("location") ?? "https://invalid").searchParams.get("force_verify")).toBeNull();
+  });
+
+  it("forces Twitch account selection for switch login and keeps the root return path", async () => {
+    const { environment, statement } = makeEnvironment();
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/login?switch=1&returnTo=%2F"),
+      environment,
+    );
+    const authorizeUrl = new URL(response.headers.get("location") ?? "https://invalid");
+
+    expect(response.status).toBe(302);
+    expect(authorizeUrl.searchParams.get("force_verify")).toBe("true");
+    expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("/"))).toBe(true);
   });
 
   it("gives a flagged channel the full scope via the invite link", async () => {
@@ -426,17 +440,17 @@ describe("auth routes", () => {
     expect(response.headers.get("location")).toBe("https://brobot.example/");
   });
 
-  it("creates only the global bot identity during operator authorization", async () => {
+  it("creates only the global bot identity during bot account authorization", async () => {
     const transaction = {
       transaction_id: "transaction-1",
       purpose: "bot",
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
     };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
+    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("bot-user", "brobot"));
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
+        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
       }),
       environment,
     );
@@ -466,10 +480,10 @@ describe("auth routes", () => {
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
     };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
+    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("bot-user", "BROBOT"));
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
+        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
       }),
       environment,
     );
@@ -484,7 +498,7 @@ describe("auth routes", () => {
     );
 
     expect(response.status).toBe(302);
-    // Operator authorization doesn't create a login session.
+    // Bot authorization doesn't create a login session.
     expect(response.headers.get("set-cookie") ?? "").not.toContain("__Host-brobot_session=");
     expect(statement.bind.mock.calls.some((args: unknown[]) => args.includes("bot-user") && args.includes("BROBOT"))).toBe(true);
   });
@@ -496,10 +510,10 @@ describe("auth routes", () => {
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
     };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
+    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("bot-user", "brobot"));
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
+        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
       }),
       environment,
     );
@@ -542,10 +556,10 @@ describe("auth routes", () => {
       expires_at: "2099-09-18T00:05:00.000Z",
       created_at: "2099-09-18T00:00:00.000Z",
     };
-    const { environment } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
+    const { environment } = makeEnvironment(transaction, sessionRowFor("bot-user", "brobot"));
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
+        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
       }),
       environment,
     );
@@ -586,10 +600,10 @@ describe("auth routes", () => {
         expires_at: "2099-09-18T00:05:00.000Z",
         created_at: "2099-09-18T00:00:00.000Z",
       };
-      const { environment, statement } = makeEnvironment(transaction, sessionRowFor(PLATFORM_USER_ID));
+      const { environment, statement } = makeEnvironment(transaction, sessionRowFor("bot-user", "brobot"));
       const login = await authRouter.fetch(
         new Request("https://brobot.example/auth/bot/login", {
-          headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
+          headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
         }),
         environment,
       );
@@ -1006,17 +1020,70 @@ describe("auth routes", () => {
   });
 
   it("renders a localized 403 page when a signed-in viewer cannot start bot authorization", async () => {
-    const { environment } = makeEnvironment(null, sessionRowFor("user-1"));
+    const { environment } = makeEnvironment(null, sessionRowFor(PLATFORM_USER_ID));
     const response = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("user-1"), "Accept-Language": "en-US,en;q=0.9" },
+        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID), "Accept-Language": "en-US,en;q=0.9" },
       }),
       environment,
     );
 
     expect(response.status).toBe(403);
     expect(response.headers.get("content-type")).toContain("text/plain");
-    await expect(response.text()).resolves.toContain("This page is only available to operators.");
+    await expect(response.text()).resolves.toContain("Only the bot account can connect itself.");
+  });
+
+  it("refuses bot authorization for another signed-in Twitch account", async () => {
+    const { environment } = makeEnvironment(null, sessionRowFor("user-1", "viewer"));
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/bot/login", {
+        headers: { Cookie: await sessionCookieHeaderFor("user-1") },
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.text()).resolves.toContain("Nur das Bot-Konto darf sich selbst verbinden.");
+  });
+
+  it("allows the bot account to start authorization with a case-insensitive login match", async () => {
+    const { environment } = makeEnvironment(null, sessionRowFor("bot-user", "BrObOt"));
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/bot/login", {
+        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
+      }),
+      environment,
+    );
+    const authorizeUrl = new URL(response.headers.get("location") ?? "https://invalid");
+
+    expect(response.status).toBe(302);
+    expect(authorizeUrl.hostname).toBe("id.twitch.tv");
+    expect(authorizeUrl.searchParams.get("scope")?.split(" ")).toContain("user:bot");
+  });
+
+  it("refuses the configured bot login when its signed-in user ID differs from the stored identity", async () => {
+    const existingBotIdentity = {
+      id: 1,
+      user_id: "stored-bot-user",
+      login: "brobot",
+      scopes_json: "[]",
+      access_token_ciphertext: "access",
+      refresh_token_ciphertext: "refresh",
+      expires_at: "2099-09-19T00:00:00.000Z",
+      created_at: "2026-09-18T00:00:00.000Z",
+      updated_at: "2026-09-18T00:00:00.000Z",
+    };
+    const { environment } = makeEnvironment(null, sessionRowFor("different-user", "brobot"), existingBotIdentity);
+    const response = await authRouter.fetch(
+      new Request("https://brobot.example/auth/bot/login", {
+        headers: { Cookie: await sessionCookieHeaderFor("different-user") },
+      }),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("location")).toBeNull();
+    await expect(response.text()).resolves.toContain("Nur das Bot-Konto darf sich selbst verbinden.");
   });
 
   it("doesn't let a manager start the channel:bot consent on behalf of the broadcaster", async () => {
@@ -1108,7 +1175,7 @@ describe("auth routes", () => {
     };
     const { environment, statement } = makeEnvironment(
       transaction,
-      sessionRowFor(PLATFORM_USER_ID),
+      sessionRowFor("echter-bot", "brobot"),
       {
         id: 1,
         user_id: "echter-bot",
@@ -1123,7 +1190,7 @@ describe("auth routes", () => {
     );
     const login = await authRouter.fetch(
       new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor(PLATFORM_USER_ID) },
+        headers: { Cookie: await sessionCookieHeaderFor("echter-bot") },
       }),
       environment,
     );

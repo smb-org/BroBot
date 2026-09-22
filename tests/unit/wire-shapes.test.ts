@@ -234,7 +234,7 @@ const panelForms = {
   activeModule: panelActiveModule,
   moduleState: panelModuleState,
   modulesResponse: { modules: [panelModuleState] } satisfies PanelModulesResponse,
-  channelsResponse: { channels: [panelChannelState], bot: panelBotStatus, platformAdmin: false } satisfies PanelChannelsResponse,
+  channelsResponse: { channels: [panelChannelState], bot: panelBotStatus, platformAdmin: false, viewerIsBot: false } satisfies PanelChannelsResponse,
   platformChannel: panelPlatformChannel,
   platformOverview: { channels: [panelPlatformChannel] } satisfies PanelPlatformOverviewResponse,
   platformMembers: {
@@ -580,7 +580,7 @@ describe("serialized contract shapes", () => {
         "$.panel.channelOverview.lastError: at,message,reason,source,status,subscriptionType,subscriptionVariant",
         "$.panel.channelOverview.moderator: checkedAt,isModerator,reason",
         "$.panel.channelOverview.tokens: botExpiresAt,loginExpiresAt,loginReason,loginStatus",
-        "$.panel.channelsResponse: bot,channels,platformAdmin",
+        "$.panel.channelsResponse: bot,channels,platformAdmin,viewerIsBot",
         "$.panel.channelsResponse.bot: reason,status,updatedAt",
         "$.panel.channelsResponse.channels[]: bot,botPermissions,broadcasterConnection,broadcasterPermissions,channelBotConsent,channelId,chatSubscription,displayName,lastError,login,moderator,role,tokens",
         "$.panel.channelsResponse.channels[].bot: reason,status,updatedAt",

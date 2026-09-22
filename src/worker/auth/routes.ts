@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import {
   requireBrowserChannelAuthorization,
-  requireBrowserPlatformAuthorization,
+  requireBrowserBotAuthorization,
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "./guards";
@@ -108,7 +108,7 @@ const isSafeLoginRedirectPath = (path: string | null | undefined): path is strin
   const safeBroadcasterScopePath = segments.length === 6 && segments[1] === "auth" && segments[2] === "channels" &&
     isEncodedPathSegment(segments[3] ?? "") && segments[4] === "broadcaster-scopes" &&
     isEncodedPathSegment(segments[5] ?? "");
-  return safeModulePath || safeBotLoginPath || safeChannelBotPath || safeBroadcasterScopePath;
+  return path === "/" || safeModulePath || safeBotLoginPath || safeChannelBotPath || safeBroadcasterScopePath;
 };
 
 const redirectAfterLogin = (origin: string, path: string | null | undefined): string =>
@@ -307,6 +307,9 @@ authRouter.get("/auth/login", async (context) => {
     scopes,
     false,
     isSafeLoginRedirectPath(returnTo) ? returnTo : null,
+    false,
+    null,
+    context.req.query("switch") === "1",
   );
   context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);
@@ -379,14 +382,11 @@ authRouter.get(
 );
 
 /**
- * Platform level only. Connecting the bot is an installation-wide act: there is
- * one bot account for every channel, and a broadcaster has no business starting
- * that flow. The callback already refuses a login that is not
- * `TWITCH_BOT_LOGIN`, and refuses a different user id once an identity exists,
- * so this guard is not what stops a takeover -- it stops the flow from being
- * reachable by the wrong person in the first place.
+ * Only the bot account itself can start the installation-wide bot consent.
+ * This prevents other signed-in Twitch accounts from ever reaching the consent
+ * screen for bot scopes.
  */
-authRouter.get("/auth/bot/login", requireBrowserPlatformAuthorization(), async (context) => {
+authRouter.get("/auth/bot/login", requireBrowserBotAuthorization(), async (context) => {
   const started = await startOAuthAuthorization(context.env.DB, context.env, "bot", nowIso());
   context.header("Set-Cookie", serializeOAuthStateCookie(started.stateNonce));
   return context.redirect(started.url, 302);

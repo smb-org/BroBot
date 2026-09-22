@@ -112,6 +112,9 @@ export interface PanelChannelsResponse {
    *  this viewer can see -- present even with zero released channels. */
   bot: PanelBotStatus | null;
   platformAdmin: boolean;
+  viewerIsBot: boolean;
+  /** Present only for platform admins and the bot account itself. */
+  botLogin?: string;
 }
 
 export interface PanelPlatformChannel {
