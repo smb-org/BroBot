@@ -95,7 +95,7 @@ const makeEnvironment = (
     OVERLAY_TOKEN_PEPPER: key(4),
     // The bot connection is platform level. The id must be numeric: the
     // parser rejects anything else, so a readable name would silently fail.
-    BETREIBER_USER_IDS: JSON.stringify([PLATFORM_USER_ID]),
+    PLATFORM_USER_IDS: JSON.stringify([PLATFORM_USER_ID]),
   } as unknown as Env & { SESSION_ENCRYPTION_KEYS: string };
   return { environment, statement };
 };

@@ -15,10 +15,11 @@ const deploymentBindings = [
   "SESSION_COOKIE_KEYS",
   "TOKEN_ENCRYPTION_KEYS",
   "OVERLAY_TOKEN_PEPPER",
-  "BETREIBER_USER_IDS",
+  "PLATFORM_USER_IDS",
 ];
 const compatibilitySecretAliases = {
   TOKEN_ENCRYPTION_KEYS: ["SESSION_ENCRYPTION_KEYS"],
+  PLATFORM_USER_IDS: ["BETREIBER_USER_IDS"],
 };
 const acceptedSecretNameSet = new Set([
   ...deploymentBindings,

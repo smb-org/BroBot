@@ -27,7 +27,7 @@ const ersetzteNamen = (): Set<string> => new Set(
  */
 describe("CI test configuration", () => {
   it("carries over the valid empty operator array unchanged", () => {
-    const value = /^BETREIBER_USER_IDS=(.*)$/m.exec(beispiel)?.[1];
+    const value = /^PLATFORM_USER_IDS=(.*)$/m.exec(beispiel)?.[1];
 
     expect(value).toBe("[]");
   });

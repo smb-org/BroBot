@@ -8,7 +8,7 @@ export const REQUIRED_SECRET_NAMES = [
   "SESSION_COOKIE_KEYS",
   "TOKEN_ENCRYPTION_KEYS",
   "OVERLAY_TOKEN_PEPPER",
-  "BETREIBER_USER_IDS",
+  "PLATFORM_USER_IDS",
 ] as const;
 
 // Wrangler tracks the applied filenames in d1_migrations. This means the
@@ -37,6 +37,12 @@ const secretValue = (env: Env, name: string): unknown => {
   if (name === "TOKEN_ENCRYPTION_KEYS" && (value === undefined || value === null || value === "")) {
     return Reflect.get(env, "SESSION_ENCRYPTION_KEYS");
   }
+  // The rename ships before the secret is set, so the old name keeps working.
+  // Without this the deploy would lock everyone out of the platform level --
+  // including the page where the secret is changed.
+  if (name === "PLATFORM_USER_IDS" && (value === undefined || value === null || value === "")) {
+    return Reflect.get(env, "BETREIBER_USER_IDS");
+  }
   return value;
 };
 
@@ -53,9 +59,9 @@ const parsePlatformUserIds = (value: unknown): string[] | null => {
 };
 
 export const getPlatformUserIds = (
-  env: { readonly BETREIBER_USER_IDS?: unknown },
+  env: { readonly PLATFORM_USER_IDS?: unknown; readonly BETREIBER_USER_IDS?: unknown },
 ): ReadonlySet<string> => {
-  const parsed = parsePlatformUserIds(env.BETREIBER_USER_IDS);
+  const parsed = parsePlatformUserIds(secretValue(env as unknown as Env, "PLATFORM_USER_IDS"));
   return parsed === null ? new Set<string>() : new Set(parsed);
 };
 
@@ -85,7 +91,7 @@ export const getMissingBindings = (env: Env): string[] => [
     if (typeof value !== "string" || value.length === 0 || PLACEHOLDER_PATTERN.test(value)) return true;
     if (name === "PUBLIC_ORIGIN") return !isAbsoluteOrigin(value);
     if (name === "OVERLAY_TOKEN_PEPPER") return !isBase64url32Byte(value);
-    if (name === "BETREIBER_USER_IDS") return parsePlatformUserIds(value) === null;
+    if (name === "PLATFORM_USER_IDS") return parsePlatformUserIds(value) === null;
     if (!KEY_RING_SECRET_NAMES.has(name)) return false;
     try {
       parseKeyRing(value);

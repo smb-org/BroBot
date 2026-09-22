@@ -46,7 +46,7 @@ const environment = (
   SESSION_COOKIE_KEYS: keyRing(1),
   SESSION_ENCRYPTION_KEYS: keyRing(2),
   OVERLAY_TOKEN_PEPPER: pepper,
-  BETREIBER_USER_IDS: "[]",
+  PLATFORM_USER_IDS: "[]",
   ...overrides,
 } as Env);
 
@@ -74,20 +74,46 @@ describe("Health check binding validation", () => {
   it("accepts an empty operator array and reads valid ids as a set", () => {
     const validPepper = Buffer.alloc(32, 4).toString("base64url");
     const env = environment(validPepper, {
-      BETREIBER_USER_IDS: '["26876135", "42"]',
+      PLATFORM_USER_IDS: '["26876135", "42"]',
     });
 
     expect(getMissingBindings(env)).toEqual([]);
     expect([...getPlatformUserIds(env)]).toEqual(["26876135", "42"]);
-    expect(getPlatformUserIds(environment(validPepper, { BETREIBER_USER_IDS: "[]" }))).toEqual(new Set());
+    expect(getPlatformUserIds(environment(validPepper, { PLATFORM_USER_IDS: "[]" }))).toEqual(new Set());
     expect(getPlatformUserIds({})).toEqual(new Set());
+  });
+
+  /**
+   * The rename ships before the secret is renamed in Cloudflare. Without the
+   * fallback the deploy would lock everyone out of the platform level, and the
+   * page where the secret is changed sits behind exactly that guard.
+   */
+  it("still reads the operator ids from the previous secret name", () => {
+    const validPepper = Buffer.alloc(32, 4).toString("base64url");
+    const withOldName = environment(validPepper, {
+      PLATFORM_USER_IDS: undefined,
+      BETREIBER_USER_IDS: '["26876135"]',
+    });
+
+    expect([...getPlatformUserIds(withOldName)]).toEqual(["26876135"]);
+    expect(getMissingBindings(withOldName)).toEqual([]);
+  });
+
+  it("prefers the current secret name when both are set", () => {
+    const validPepper = Buffer.alloc(32, 4).toString("base64url");
+    const withBoth = environment(validPepper, {
+      PLATFORM_USER_IDS: '["42"]',
+      BETREIBER_USER_IDS: '["26876135"]',
+    });
+
+    expect([...getPlatformUserIds(withBoth)]).toEqual(["42"]);
   });
 
   it("reports an invalid operator secret and returns an empty set for it", () => {
     const validPepper = Buffer.alloc(32, 4).toString("base64url");
-    const env = environment(validPepper, { BETREIBER_USER_IDS: '["nicht-numerisch"]' });
+    const env = environment(validPepper, { PLATFORM_USER_IDS: '["nicht-numerisch"]' });
 
-    expect(getMissingBindings(env)).toContain("BETREIBER_USER_IDS");
+    expect(getMissingBindings(env)).toContain("PLATFORM_USER_IDS");
     expect(getPlatformUserIds(env)).toEqual(new Set());
   });
 

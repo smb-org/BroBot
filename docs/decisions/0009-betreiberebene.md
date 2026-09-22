@@ -37,7 +37,7 @@ Tippfehler abfängt, die heute stillschweigend drei Stellen brechen.
 
 ## 2. Woran ein Betreiber erkannt wird
 
-Ein Secret `BETREIBER_USER_IDS` enthält ein JSON-Array von Twitch-User-IDs.
+Ein Secret `PLATFORM_USER_IDS` (früher `BETREIBER_USER_IDS`, wird als Rückfall weiterhin gelesen) enthält ein JSON-Array von Twitch-User-IDs.
 Wer sich regulär über Twitch anmeldet und dessen ID darin steht, ist Betreiber.
 Es gibt kein zweites Passwort und kein Bearer-Token.
 

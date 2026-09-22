@@ -20,7 +20,7 @@ const key = (byte: number): string =>
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
   SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
-  BETREIBER_USER_IDS: "[]",
+  PLATFORM_USER_IDS: "[]",
 };
 
 type GuardEnvironment = Env & { DB: D1Database };
@@ -167,7 +167,7 @@ describe("channel-scoped route guard", () => {
 
   it("lets an operator with a session through and sets only session and actor", async () => {
     await insertSession(database, "26876135");
-    environment.BETREIBER_USER_IDS = '["26876135"]';
+    environment.PLATFORM_USER_IDS = '["26876135"]';
 
     const response = await app.fetch(
       await makeRequest(environment, {}, true, "kanal-a", "GET", "26876135", "/api/platform/probe"),
@@ -184,7 +184,7 @@ describe("channel-scoped route guard", () => {
   });
 
   it("rejects a non-operator with 403 and a clear message", async () => {
-    environment.BETREIBER_USER_IDS = '["26876135"]';
+    environment.PLATFORM_USER_IDS = '["26876135"]';
 
     const response = await app.fetch(
       await makeRequest(environment, {}, true, "kanal-a", "GET", "user-1", "/api/platform/probe"),
@@ -197,7 +197,7 @@ describe("channel-scoped route guard", () => {
 
   it("doesn't let an operator without a member row through on the channel route", async () => {
     await insertSession(database, "26876135");
-    environment.BETREIBER_USER_IDS = '["26876135"]';
+    environment.PLATFORM_USER_IDS = '["26876135"]';
 
     const response = await app.fetch(
       await makeRequest(environment, {}, true, "kanal-a", "GET", "26876135"),
