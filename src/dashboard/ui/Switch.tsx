@@ -27,7 +27,10 @@ export interface SwitchProps {
  * `Switch` override rather than here.
  */
 export function Switch({ label, ariaLabel, checked, onChange, disabled, pending, lockedReason }: SwitchProps) {
-  const isDisabled = disabled ?? Boolean(lockedReason);
+  // `pending` must disable the control, not just show `aria-busy`: without
+  // this, a second click before the first request resolves fires another
+  // `onChange` with the opposite value -- two in-flight PATCHes racing.
+  const isDisabled = disabled ?? (Boolean(lockedReason) || Boolean(pending));
   return (
     <div>
       <MantineSwitch

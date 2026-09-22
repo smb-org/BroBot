@@ -882,6 +882,10 @@ export const DashboardApp = (): ReactElement => {
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [headerModuleBusy, setHeaderModuleBusy] = useState(false);
+  // Guards `reloadModules` against out-of-order responses: two reloads can
+  // be in flight together (a toggle's own reload racing a Stream Manager
+  // poll), and without this an older response can overwrite a newer one.
+  const modulesRequestGeneration = useRef(0);
   const requestLogin = useCallback((): void => { setAuthenticationRequired(true); }, []);
 
   const startMembersRequest = useCallback((): { controller: AbortController; generation: number } => {
@@ -1210,15 +1214,23 @@ export const DashboardApp = (): ReactElement => {
     }
   };
 
-  const reloadData = async <T,>(routePath: string, setState: LoadStateSetter<T>, fetchData: () => Promise<T>, preserveDataOnError: boolean, afterLoad?: () => void): Promise<void> => {
+  const reloadData = async <T,>(
+    routePath: string,
+    setState: LoadStateSetter<T>,
+    fetchData: () => Promise<T>,
+    preserveDataOnError: boolean,
+    afterLoad?: () => void,
+    /** Lets a superseded call discard its own response instead of overwriting a newer one. */
+    isCurrent: () => boolean = () => true,
+  ): Promise<void> => {
     setState((current) => loadingState(current));
     try {
       const response = await fetchData();
-      if (window.location.pathname !== routePath) return;
+      if (!isCurrent() || window.location.pathname !== routePath) return;
       setState(loadedState(response));
       afterLoad?.();
     } catch (error) {
-      if (window.location.pathname !== routePath) return;
+      if (!isCurrent() || window.location.pathname !== routePath) return;
       setState((current) => current.loadedAt === undefined
         ? { status: "error", data: null, error: errorMessage(error) }
         : { status: "error", data: preserveDataOnError ? current.data : null, error: errorMessage(error), loadedAt: current.loadedAt });
@@ -1230,7 +1242,16 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" && (route.kind !== "channel" || route.section !== "modules")) return;
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
-    await reloadData(routePath, setModules, () => fetchModules(channelId), false);
+    const generation = modulesRequestGeneration.current + 1;
+    modulesRequestGeneration.current = generation;
+    await reloadData(
+      routePath,
+      setModules,
+      () => fetchModules(channelId),
+      false,
+      undefined,
+      () => modulesRequestGeneration.current === generation,
+    );
   };
 
   const reloadOverview = async (): Promise<void> => {

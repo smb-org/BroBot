@@ -96,6 +96,26 @@ describe("Module panel loader", () => {
     expect(init?.body).toBe(JSON.stringify({ enabled: false }));
   });
 
+  it("sends exactly one PATCH for two rapid clicks on the same switch", async () => {
+    let resolvePatch: ((response: Response) => void) | undefined;
+    const patch = new Promise<Response>((resolve) => { resolvePatch = resolve; });
+    const fetcher = vi.fn<typeof fetch>((_input, init) =>
+      init?.method === "PATCH" ? patch : Promise.resolve(Response.json({ modules: [] })));
+    const onChanged = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={onChanged} />);
+
+    const toggle = screen.getByRole("switch", { name: /aktiv/i });
+    fireEvent.click(toggle);
+    // The switch disables itself while pending, so a second click through
+    // the DOM is a no-op; `fireEvent.click` still lets us assert that.
+    fireEvent.click(toggle);
+
+    resolvePatch?.(Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } }));
+    await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
+    expect(fetcher.mock.calls.filter(([, requestInit]) => requestInit?.method === "PATCH")).toHaveLength(1);
+  });
+
   it("shows no kicker above the module heading", () => {
     renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
 

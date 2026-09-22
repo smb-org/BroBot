@@ -1878,6 +1878,62 @@ describe("Dashboard skeleton", () => {
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/overview")).toHaveLength(2);
   });
 
+  it("doesn't let a late reload response overwrite a newer module toggle", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "manager" as const };
+    let modulesCalls = 0;
+    let resolveFirstReload: ((response: Response) => void) | undefined;
+    const firstReload = new Promise<Response>((resolve) => { resolveFirstReload = resolve; });
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
+        modulesCalls += 1;
+        // The first reload (after enabling text_commands) is held back; the
+        // second (after enabling raid) resolves immediately with both
+        // modules already on. The stale first response, reflecting only the
+        // first toggle, must lose once it does arrive.
+        if (modulesCalls === 2) return firstReload;
+        return jsonResponse({
+          modules: [
+            { id: "text_commands", enabled: modulesCalls > 1, settings: "{}" },
+            { id: "raid", enabled: modulesCalls > 2, settings: "{}" },
+          ],
+        });
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
+        return jsonResponse({ module: { id: "text_commands", enabled: true, settings: "{}" } });
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules/raid" && init?.method === "PATCH") {
+        return jsonResponse({ module: { id: "raid", enabled: true, settings: "{}" } });
+      }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/modules");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Textbefehle: Aus" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Raid-Shoutout: Aus" }));
+    await waitFor(() => { expect(modulesCalls).toBe(3); });
+    expect(await screen.findByRole("switch", { name: "Raid-Shoutout: Läuft" })).toBeChecked();
+
+    // The held-back first reload arrives last, describing an older state.
+    resolveFirstReload?.(jsonResponse({
+      modules: [
+        { id: "text_commands", enabled: true, settings: "{}" },
+        { id: "raid", enabled: false, settings: "{}" },
+      ],
+    }));
+
+    // Give the stale response a chance to apply before asserting it didn't.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.getByRole("switch", { name: "Raid-Shoutout: Läuft" })).toBeChecked();
+  });
+
   it("switches channels through the header select and moves the route", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");

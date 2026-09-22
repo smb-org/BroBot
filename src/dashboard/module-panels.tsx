@@ -274,6 +274,10 @@ export const ModuleWorkspace = ({ channelId, ownRole, modules, loading = false, 
   const [toggleError, setToggleError] = useState<string | null>(null);
 
   const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
+    // The seam `Switch` already disables itself while `pending`, but that
+    // guard lives in a prop the caller could ignore -- ignore an in-flight
+    // click here too, so two toggles for the same module never race.
+    if (busyModuleId === moduleId) return;
     setBusyModuleId(moduleId);
     setToggleError(null);
     setPendingEnabled((current) => ({ ...current, [moduleId]: nextEnabled }));
