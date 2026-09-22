@@ -168,6 +168,7 @@ export interface ModuleWorkspaceTexts {
   notActive: (name: string) => string;
   switchedOff: (name: string) => string;
   disabled: string;
+  mandatoryReason: string;
   noDescription: string;
 }
 
@@ -180,6 +181,7 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     notActive: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
     switchedOff: (name) => `Das Modul „${name}“ ist ausgeschaltet.`,
     disabled: "Deaktiviert",
+    mandatoryReason: "Kanalereignisse sind immer aktiv.",
     noDescription: "Keine Beschreibung für dieses Modul.",
   },
   en: {
@@ -190,6 +192,7 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     notActive: (name) => `The module “${name}” is not active in this channel.`,
     switchedOff: (name) => `The module “${name}” is switched off.`,
     disabled: "Disabled",
+    mandatoryReason: "Channel events are always active.",
     noDescription: "No description is available for this module.",
   },
 };

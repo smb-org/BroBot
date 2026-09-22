@@ -41,6 +41,7 @@ import { createClip, type CreateClipResult } from "../clip";
 import { sendShoutout } from "../shoutout";
 import { writeModuleAudit } from "../module-audit";
 import { writeModuleDiagnostics } from "../event-log";
+import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -211,6 +212,11 @@ panelRouter.post(
         null,
         nextAllowedAt,
       );
+      try {
+        await maintainEventSubSubscriptions(context.env, checkedAt, fetch, channelId);
+      } catch {
+        // The successful moderator check remains successful if maintenance fails.
+      }
       return context.json({
         moderator: { isModerator, checkedAt, reason: null },
         nextAllowedAt,

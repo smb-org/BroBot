@@ -74,8 +74,8 @@ describe("Platform level", () => {
 
     render(<DashboardApp />);
 
-    const zeile = await screen.findByRole("row", { name: /alpha_login/ });
-    fireEvent.click(zeile);
+    const channelRow = await screen.findByRole("row", { name: /alpha_login/ });
+    fireEvent.click(channelRow);
     const rolle = await screen.findByRole("combobox", { name: "Rolle: Helfer" });
 
     expect(within(rolle).queryByRole("option", { name: "Broadcaster" })).not.toBeInTheDocument();

@@ -99,7 +99,7 @@ const MembersTable = ({
               <tr>
                 <th scope="row">
                   <span>{memberName(member)}</span>
-                  <span className="login-hinweis">
+                  <span className="login-hint">
                     {member.login === null ? texts.twitchId(member.userId) : "@" + member.login + " · " + texts.twitchId(member.userId)}
                   </span>
                 </th>
@@ -331,7 +331,7 @@ const ChannelInspector = ({
       <section className="config-section" aria-label={texts.addMember}>
         <div className="section-heading"><h3>{texts.addMember}</h3></div>
         <form className="inspector-form" onSubmit={(event) => { void searchUser(event); }}>
-          <label className="config-field config-field--mittel" htmlFor={"betreiber-mitglied-suche-" + channel.channelId}>{texts.twitchLogin}
+          <label className="config-field config-field--medium" htmlFor={"betreiber-mitglied-suche-" + channel.channelId}>{texts.twitchLogin}
             <input id={"betreiber-mitglied-suche-" + channel.channelId} value={searchLogin} onChange={(event) => { setSearchLogin(event.target.value); }} autoComplete="off" />
           </label>
           <div className="form-actions">
@@ -345,7 +345,7 @@ const ChannelInspector = ({
               <strong>{userName(foundMember)}</strong>
               <span>@{foundMember.login} · {texts.twitchId(foundMember.userId)}</span>
             </div>
-            <label className="config-field config-field--mittel">{texts.role}
+            <label className="config-field config-field--medium">{texts.role}
               <select aria-label={texts.newRole} value={newRole} onChange={(event) => { setNewRole(event.target.value as "manager" | "operator"); }}>
                 {roleOptions()}
               </select>
@@ -420,7 +420,7 @@ const ChannelRelease = ({
   return (
     <SubInspector ariaLabel={texts.releaseChannel} title={texts.releaseChannel} closeLabel={dashboardCommonTexts().close} onClose={onClose}>
       <form className="inspector-form" onSubmit={(event) => { void searchUser(event); }}>
-        <label className="config-field config-field--mittel" htmlFor="betreiber-kanal-login">{texts.twitchLogin}
+        <label className="config-field config-field--medium" htmlFor="betreiber-kanal-login">{texts.twitchLogin}
           <input id="betreiber-kanal-login" value={login} onChange={(event) => { setLogin(event.target.value); }} autoComplete="off" />
         </label>
         <div className="form-actions">
@@ -434,7 +434,7 @@ const ChannelRelease = ({
             <strong>{texts.userFound}: {found.displayName}</strong>
             <span>@{found.login} · {texts.twitchId(found.userId)}</span>
           </div>
-          <label className="config-field config-field--mittel">
+          <label className="config-field config-field--medium">
             <span>{texts.setFullConsent}</span>
             <input type="checkbox" checked={fullConsent} onChange={(event) => { setFullConsent(event.target.checked); }} />
           </label>
@@ -472,7 +472,7 @@ const InvitationLink = ({ channel: channel }: { channel: PanelPlatformChannelOve
     <section className="config-section" aria-label={texts.invitationLink}>
       <div className="section-heading"><h2>{texts.invitationLink}</h2></div>
       <p className="muted">{texts.invitationLinkHint}</p>
-      <label className="config-field config-field--breit" htmlFor="betreiber-einladungslink">{texts.invitationLink}
+      <label className="config-field config-field--wide" htmlFor="betreiber-einladungslink">{texts.invitationLink}
         <input id="betreiber-einladungslink" readOnly value={link} />
       </label>
       <div className="form-actions">

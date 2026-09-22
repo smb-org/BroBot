@@ -14,8 +14,8 @@ export interface LedProps {
 /**
  * "The LED-with-word rule": color alone never carries state. Mantine's
  * `Badge`/`Indicator` are deliberately not used -- see "LED" in
- * docs/input/DESIGN-neu.md. Reads its colors from `theme.other.state`
- * ("theme.other.zustand" in the document), as the document specifies.
+ * the dashboard design document. Reads its colors from `theme.other.state`
+ * as specified there.
  */
 export function Led({ status, word }: LedProps) {
   const theme = useMantineTheme();

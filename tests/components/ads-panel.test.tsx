@@ -30,9 +30,9 @@ describe("Ad panel view", () => {
     expect(styles).toMatch(/:is\(\.inspector-form, \.content-section, \.module-stack\) input/);
     expect(styles).toMatch(/:is\(\.inspector-form, \.content-section, \.module-stack\) textarea/);
     expect(styles).toMatch(/:is\(\.inspector-form, \.content-section, \.module-stack\) select/);
-    expect(styles).toMatch(/--config-field-schmal:\s*9rem/);
-    expect(styles).toMatch(/--config-field-mittel:\s*20rem/);
-    expect(styles).toMatch(/--config-field-breit:\s*40rem/);
+    expect(styles).toMatch(/--config-field-narrow:\s*9rem/);
+    expect(styles).toMatch(/--config-field-medium:\s*20rem/);
+    expect(styles).toMatch(/--config-field-wide:\s*40rem/);
   });
 
   it.each([
@@ -58,8 +58,8 @@ describe("Ad panel view", () => {
     const textareas = (await screen.findAllByRole("textbox")).filter((element) => element.tagName === "TEXTAREA");
     expect(textareas).toHaveLength(2);
     expect(textareas.map((textarea) => textarea.closest("label")?.className)).toEqual([
-      "config-field config-field--breit",
-      "config-field config-field--breit",
+      "config-field config-field--wide",
+      "config-field config-field--wide",
     ]);
     expect(textareas[0]?.closest("label")).toHaveTextContent(automaticLabel);
     expect(textareas[1]?.closest("label")).toHaveTextContent(manualLabel);

@@ -41,12 +41,14 @@ const moduleState = (
   id: string,
   enabled: boolean,
   settings: string,
+  mandatory: boolean,
   requiredBroadcasterScopes: readonly string[] = [],
   missingBroadcasterScopes: readonly string[] = [],
 ): PanelModuleState => ({
   id,
-  enabled,
+  enabled: mandatory || enabled,
   settings,
+  mandatory,
   ...(requiredBroadcasterScopes.length === 0 ? {} : {
     requiredBroadcasterScopes: [...requiredBroadcasterScopes],
     missingBroadcasterScopes: [...missingBroadcasterScopes],
@@ -61,7 +63,7 @@ const moduleStateFor = async (
   settings: string,
 ): Promise<PanelModuleState> => {
   const scopes = await moduleBroadcasterScopeState(db, channelId, module);
-  return moduleState(module.id, enabled, settings, scopes.required, scopes.missing);
+  return moduleState(module.id, enabled, settings, module.mandatory === true, scopes.required, scopes.missing);
 };
 
 export const moduleRouter = new Hono<ModuleRouteEnvironment>();
@@ -142,6 +144,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const body = await readJsonBody(context.req.raw);
   const enabled = body?.enabled;
   if (typeof enabled !== "boolean") return context.json({ error: "module_enabled_field_invalid" }, 400);
+  if (module.mandatory === true && !enabled) return context.json({ error: "module_mandatory" }, 400);
 
   const channelId = context.req.param("channelId");
   const defaultSettingsJson = JSON.stringify(module.defaultSettings);

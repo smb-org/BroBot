@@ -79,6 +79,7 @@ export interface PanelChannelState {
   broadcasterPermissions: PanelBroadcasterPermissions | null;
   moderator: PanelModeratorStatus | null;
   chatSubscription: PanelChatSubscription | null;
+  chatSubscriptionNeeded?: boolean;
   tokens: PanelTokenStatus;
   lastError: PanelLastError | null;
 }
@@ -96,6 +97,7 @@ export interface PanelModuleState {
   id: string;
   enabled: boolean;
   settings: string;
+  mandatory?: boolean;
   /** Consent declared by the module, shown before a redirect. */
   requiredBroadcasterScopes?: string[];
   /** Declared scopes the broadcaster identity does not currently prove. */
@@ -202,6 +204,7 @@ export interface PanelSystemResponse {
   botPermissions: PanelBotPermissions | null;
   broadcasterPermissions: PanelBroadcasterPermissions | null;
   chatSubscription: PanelChatSubscription | null;
+  chatSubscriptionNeeded?: boolean;
   subscriptions?: PanelEventSubSubscription[];
   tokens: PanelTokenStatus;
 }

@@ -51,6 +51,9 @@ export const EVENTSUB_SUBSCRIPTION_TYPES = [
 ] as const;
 export type EventSubSubscriptionType = (typeof EVENTSUB_SUBSCRIPTION_TYPES)[number];
 
+export const EVENTSUB_NEUTRAL_REASON_CODES = ["moderator_required", "pending_adoption"] as const;
+export type EventSubNeutralReasonCode = (typeof EVENTSUB_NEUTRAL_REASON_CODES)[number];
+
 export const isEventSubSubscriptionType = (value: string): value is EventSubSubscriptionType =>
   (EVENTSUB_SUBSCRIPTION_TYPES as readonly string[]).includes(value);
 
@@ -212,6 +215,7 @@ export const API_ERROR_CODES = [
   "module_settings_invalid",
   "module_settings_changed_concurrently",
   "module_enabled_field_invalid",
+  "module_mandatory",
   "module_changed_concurrently",
   "command_management_denied",
   "command_data_invalid",

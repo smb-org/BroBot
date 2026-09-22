@@ -7,7 +7,7 @@ import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelMember, PanelModuleState } from "../panel-contract";
 import { createClip, fetchMembers, sendManualShoutout, setChannelModuleEnabled } from "./api";
 import { dashboardTexts } from "./locale";
-import { moduleDescription, moduleName } from "./module-labels";
+import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
 import type { DashboardRoute } from "./router";
 import { Spotlight, type SpotlightItem } from "./ui";
 
@@ -46,10 +46,13 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
 
   const moduleItems = useMemo<SpotlightItem[]>(() => MODULES.map((module) => {
     const description = moduleDescription(module.id);
+    const accessibleDescription = module.mandatory === true
+      ? `${description === null ? "" : `${description} `}${moduleWorkspaceTexts().mandatoryReason}`
+      : description;
     return {
       id: `module:${module.id}`,
       label: moduleName(module.id),
-      ...(description === null ? {} : { description }),
+      ...(accessibleDescription === null || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
       group: texts.spotlight.groupModules,
       onTrigger: () => { onNavigate({ kind: "module", channelId, moduleId: module.id }); },
     };

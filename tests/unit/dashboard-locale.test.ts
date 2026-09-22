@@ -68,10 +68,10 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.moderation.timeout", {
       person: "Alice", moderator: "Mod", duration: 300, reason: "Spam",
     })).toBe("Alice für 300 Sekunden getimeoutet von Mod: Spam");
-    expect(eventToneEntries["channel_events.moderation.timeout"]).toMatchObject({ family: "moderation", tier: "voll", numberKey: "duration" });
-    expect(eventToneEntries["channel_events.moderation.untimeout"]).toMatchObject({ family: "moderation", tier: "gezeichnet" });
-    expect(eventToneEntries["channel_events.moderation.unban"]).toMatchObject({ family: "moderation", tier: "gezeichnet" });
-    expect(eventToneEntries["channel_events.moderation.unknown"]).toMatchObject({ family: "moderation", tier: "voll" });
+    expect(eventToneEntries["channel_events.moderation.timeout"]).toMatchObject({ family: "moderation", tier: "full", numberKey: "duration" });
+    expect(eventToneEntries["channel_events.moderation.untimeout"]).toMatchObject({ family: "moderation", tier: "outlined" });
+    expect(eventToneEntries["channel_events.moderation.unban"]).toMatchObject({ family: "moderation", tier: "outlined" });
+    expect(eventToneEntries["channel_events.moderation.unknown"]).toMatchObject({ family: "moderation", tier: "full" });
 
     setBrowserLanguage("en-US");
     expect(eventText("channel_events.moderation.unknown", { action: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
@@ -97,16 +97,16 @@ describe("dashboard locale", () => {
 
     expect(Object.keys(eventToneEntries).sort()).toEqual([...codes].sort());
     expect(eventToneEntries["channel_events.chat.community_gift"]).toEqual({
-      family: "gemeinschaft", tier: "voll", word: { de: "Gift", en: "Gift" }, numberKey: "count",
+      family: "community", tier: "full", word: { de: "Gift", en: "Gift" }, numberKey: "count",
     });
     expect(eventToneEntries["channel_events.raid.incoming"]).toEqual({
-      family: "raid", tier: "voll", word: { de: "Raid", en: "Raid" }, numberKey: "viewers",
+      family: "raid", tier: "full", word: { de: "Raid", en: "Raid" }, numberKey: "viewers",
     });
     expect(eventToneEntries["channel_events.moderation.untimeout"]).toEqual({
-      family: "moderation", tier: "gezeichnet", word: { de: "Entsperrt", en: "Untimeout" }, numberKey: null,
+      family: "moderation", tier: "outlined", word: { de: "Entsperrt", en: "Untimeout" }, numberKey: null,
     });
     expect(eventToneEntries["host.chat.sent"]).toEqual({
-      family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info",
+      family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info",
     });
     for (const code of codes) {
       expect(eventToneEntries[code].word.de.length).toBeLessThanOrEqual(12);
@@ -142,10 +142,10 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.suspicious.cleared", {
       person: "Alice", einstufung: "none", moderator: "Mod",
     })).toBe("Einstufung von Alice aufgehoben von Mod");
-    expect(eventToneEntries["channel_events.automod.held"]).toMatchObject({ family: "moderation", tier: "voll" });
-    expect(eventToneEntries["channel_events.suspicious.message"]).toMatchObject({ family: "moderation", tier: "voll" });
-    expect(eventToneEntries["channel_events.suspicious.classified"]).toMatchObject({ family: "moderation", tier: "voll" });
-    expect(eventToneEntries["channel_events.suspicious.cleared"]).toMatchObject({ family: "moderation", tier: "gezeichnet" });
+    expect(eventToneEntries["channel_events.automod.held"]).toMatchObject({ family: "moderation", tier: "full" });
+    expect(eventToneEntries["channel_events.suspicious.message"]).toMatchObject({ family: "moderation", tier: "full" });
+    expect(eventToneEntries["channel_events.suspicious.classified"]).toMatchObject({ family: "moderation", tier: "full" });
+    expect(eventToneEntries["channel_events.suspicious.cleared"]).toMatchObject({ family: "moderation", tier: "outlined" });
 
     setBrowserLanguage("en-US");
     expect(eventText("channel_events.automod.held", {

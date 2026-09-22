@@ -55,6 +55,18 @@ describe("Channel Spotlight", () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "raid" });
   });
 
+  it("explains that mandatory channel events remain active from Spotlight", async () => {
+    stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "kanalereignisse" } });
+
+    expect(await screen.findByText("Kanalereignisse")).toBeInTheDocument();
+    expect(screen.getByText(/Kanalereignisse sind immer aktiv\./)).toBeInTheDocument();
+  });
+
   it("closes on Escape", async () => {
     stubFetch();
     renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);

@@ -8,7 +8,7 @@ import { PanelApiError, setChannelModuleEnabled } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
-import { Switch } from "./ui";
+import { ListRow, Switch } from "./ui";
 
 const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
 
@@ -235,33 +235,28 @@ const ModuleWorkspaceRow = ({
   const labels = workspaceTexts();
   const texts = dashboardTexts();
   const details = moduleDetails(moduleId);
-  const effectiveEnabled = rawEnabled && missingScopes.length === 0;
+  const mandatory = moduleId === "channel_events";
+  const effectiveEnabled = (rawEnabled || mandatory) && missingScopes.length === 0;
   const state = missingScopes.length > 0 ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
+  const lockedReason = mandatory ? labels.mandatoryReason : manageable ? undefined : texts.module.managementLocked;
 
   return (
-    <StateRow
-      label={details.name}
-      tone={missingScopes.length > 0 ? "warning" : effectiveEnabled ? "healthy" : "neutral"}
-      word={state}
-      icon={<ModuleIcon moduleId={moduleId} className="scope-zeile__icon" />}
-      detail={details.description}
-      action={
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <Switch
-            checked={rawEnabled}
-            ariaLabel={`${details.name}: ${statusWord(rawEnabled)}`}
-            pending={busy}
-            onChange={onToggle}
-            {...(manageable ? {} : { lockedReason: texts.module.managementLocked })}
-          />
-          <a
-            className="module-list-link"
-            href={dashboardRoutePath(route)}
-            onClick={(event) => { event.preventDefault(); onNavigate(route); }}
-          >{`${details.name} · ${statusWord(effectiveEnabled)}`}</a>
-        </div>
-      }
+    <ListRow
+      href={dashboardRoutePath(route)}
+      onNavigate={() => { onNavigate(route); }}
+      icon={<ModuleIcon moduleId={moduleId} className="scope-row__icon" />}
+      title={details.name}
+      description={details.description}
+      status={<Led status={missingScopes.length > 0 ? "amber" : effectiveEnabled ? "green" : "off"} label={state} />}
+      action={<Switch
+        checked={rawEnabled || mandatory}
+        ariaLabel={details.name}
+        pending={busy}
+        disabled={mandatory || !manageable}
+        onChange={onToggle}
+        {...(lockedReason === undefined ? {} : { lockedReason })}
+      />}
     />
   );
 };
@@ -320,7 +315,8 @@ export const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onCh
       <div className="state-list">
         {MODULES.map((module) => {
           const state = modules.find((candidate) => candidate.id === module.id);
-          const rawEnabled = pendingEnabled[module.id] ?? state?.enabled === true;
+          const mandatory = state?.mandatory === true || module.id === "channel_events";
+          const rawEnabled = mandatory || (pendingEnabled[module.id] ?? state?.enabled === true);
           return (
             <ModuleWorkspaceRow
               key={module.id}
@@ -393,15 +389,16 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const registered = MODULES.find((candidate) => candidate.id === moduleId);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
-  const enabled = moduleState?.enabled === true;
+  const mandatory = moduleState?.mandatory === true || moduleId === "channel_events";
+  const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
-  const disabledReason = manageable ? null : texts.module.managementLocked;
-  const switchDisabled = registered === undefined || moduleState === undefined;
+  const disabledReason = mandatory ? labels.mandatoryReason : manageable ? null : texts.module.managementLocked;
+  const switchDisabled = mandatory || registered === undefined || moduleState === undefined;
   const missingScopes = moduleState?.missingBroadcasterScopes ?? [];
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
   const missingScopeSet = new Set(missingScopes);
   const effectiveEnabled = enabled && missingScopes.length === 0;
-  const viewLoading = loading || moduleState === undefined || (enabled && activeModule === undefined);
+  const viewLoading = loading || moduleState === undefined || (registered?.panel !== undefined && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
 
   const stateMessage = registered === undefined
@@ -443,7 +440,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
                 tone={missing ? "warning" : "healthy"}
                 word={missing ? texts.module.scopeMissing : texts.module.scopeGranted}
                 detail={<span className="mono">{scope}</span>}
-                icon={<NavigationIcon kind="permission" className="scope-zeile__icon" />}
+                icon={<NavigationIcon kind="permission" className="scope-row__icon" />}
               />;
             })}
           </div>

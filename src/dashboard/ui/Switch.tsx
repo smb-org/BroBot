@@ -21,8 +21,8 @@ export interface SwitchProps {
 }
 
 /**
- * "Schalter": hit area 44x44, track 36x20 on Text-4, thumb 14px, on =
- * green track (docs/input/DESIGN-neu.md, "Bauteilvorgaben" and "Schalter").
+ * Hit area 44x44, track 36x20 on Text-4, thumb 14px, on = green track
+ * (dashboard design document, "Component defaults" and "Switch").
  * Track/thumb radii differ (md / sm), so both are pinned in the theme's
  * `Switch` override rather than here.
  */
@@ -44,9 +44,7 @@ export function Switch({ label, ariaLabel, checked, onChange, disabled, pending,
         color={colors.green}
         styles={{ track: { backgroundColor: checked ? undefined : colors.text4 } }}
       />
-      {lockedReason ? (
-        <div style={{ fontSize: "11px", lineHeight: 1.1, color: colors.text3, marginTop: "4px" }}>{lockedReason}</div>
-      ) : null}
+      {lockedReason ? <div className="switch-locked-reason">{lockedReason}</div> : null}
     </div>
   );
 }

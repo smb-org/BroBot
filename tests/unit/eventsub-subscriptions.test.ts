@@ -12,7 +12,7 @@ import { TestD1Database } from "./test-d1";
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     { id: "chat", eventSubTypes: ["channel.chat.message"] },
-    { id: "channel_events", eventSubTypes: ["channel.shoutout.create"] },
+    { id: "channel_events", mandatory: true, eventSubTypes: ["channel.shoutout.create"] },
     { id: "moderation", eventSubTypes: ["channel.moderate"] },
     { id: "aus", eventSubTypes: ["channel.follow"] },
   ],
@@ -40,6 +40,13 @@ const insertAppToken = async (database: TestD1Database): Promise<void> => {
       (id, access_token_ciphertext, expires_at, created_at, updated_at)
      VALUES (1, ?, ?, ?, ?)`,
   ).bind(ciphertext, "2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+};
+
+const confirmBotModerator = async (database: TestD1Database, channelId: string): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+     VALUES (?, 1, '2026-09-19T00:00:00.000Z', NULL)`,
+  ).bind(channelId).run();
 };
 
 describe("EventSub reconciliation", () => {
@@ -72,10 +79,37 @@ describe("EventSub reconciliation", () => {
 
     await expect(listDesiredEventSubTargets(asD1(database))).resolves.toEqual([
       { channelId: "kanal-a", subscriptionType: "channel.chat.message", variant: "", version: "1" },
+      { channelId: "kanal-a", subscriptionType: "channel.shoutout.create", variant: "", version: "1", deferredReason: "moderator_required" },
     ]);
     await expect(listDesiredEventSubTargets(asD1(database), "kanal-a")).resolves.toEqual([
       { channelId: "kanal-a", subscriptionType: "channel.chat.message", variant: "", version: "1" },
+      { channelId: "kanal-a", subscriptionType: "channel.shoutout.create", variant: "", version: "1", deferredReason: "moderator_required" },
     ]);
+  });
+
+  it("defers moderator subscriptions until status is confirmed", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'moderation', 1, '{}')`,
+    ).run();
+
+    const deferred = await listDesiredEventSubTargets(asD1(database), "kanal-a");
+    expect(deferred).toContainEqual({
+      channelId: "kanal-a",
+      subscriptionType: "channel.moderate",
+      variant: "",
+      version: "2",
+      deferredReason: "moderator_required",
+    });
+    await confirmBotModerator(database, "kanal-a");
+    expect(await listDesiredEventSubTargets(asD1(database), "kanal-a")).toContainEqual({
+      channelId: "kanal-a",
+      subscriptionType: "channel.moderate",
+      variant: "",
+      version: "2",
+    });
   });
 
   it("reads the Twitch subscription list through pagination and stops on a cursor loop", async () => {
@@ -153,6 +187,134 @@ describe("EventSub reconciliation", () => {
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-1" });
   });
 
+  it("adopts an owned subscription after create returns the already-exists conflict", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'chat', 1, '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+    const remote = {
+      id: "e6c8e776-adopted",
+      type: "channel.chat.message",
+      version: "1",
+      status: "enabled",
+      condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Conflict", message: "subscription already exists; id=e6c8e776-adopted" }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [remote], pagination: {} }), { status: 200 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher, "kanal-a");
+
+    expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET"))
+      .toEqual(["GET", "POST", "GET"]);
+    await expect(database.prepare(
+      "SELECT status, reason, subscription_id, secret_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({
+      status: "enabled",
+      reason: null,
+      subscription_id: "e6c8e776-adopted",
+      secret_id: "eventsub-v1",
+    });
+  });
+
+  it("keeps a not-yet-listed 409 subscription neutral until a later adoption pass", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'chat', 1, '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Conflict", message: "subscription already exists; id=e6c8e776-adopted" }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher, "kanal-a");
+
+    await expect(database.prepare(
+      "SELECT status, reason, subscription_id, secret_id, error_message, error_status FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({
+      status: "missing",
+      reason: "pending_adoption",
+      subscription_id: null,
+      secret_id: null,
+      error_message: null,
+      error_status: null,
+    });
+  });
+
+  it("serializes overlapping maintenance for a channel and runs one coalesced pass afterwards", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'chat', 1, '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+    let releaseInitialList!: (response: Response) => void;
+    const initialList = new Promise<Response>((resolve) => { releaseInitialList = resolve; });
+    let requestCount = 0;
+    let activeCalls = 0;
+    let maximumConcurrentCalls = 0;
+    const remote = {
+      id: "subscription-after-create",
+      type: "channel.chat.message",
+      version: "1",
+      status: "enabled",
+      condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    };
+    const fetcher = vi.fn<typeof fetch>(async (_input, init) => {
+      requestCount += 1;
+      activeCalls += 1;
+      maximumConcurrentCalls = Math.max(maximumConcurrentCalls, activeCalls);
+      try {
+        if (requestCount === 1) return await initialList;
+        if (init?.method === "POST") return Response.json({ data: [remote] }, { status: 202 });
+        return Response.json({ data: [remote], pagination: {} });
+      } finally {
+        activeCalls -= 1;
+      }
+    });
+
+    const firstRun = maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher, "kanal-a");
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:01:00.000Z", fetcher, "kanal-a");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    releaseInitialList(Response.json({ data: [], pagination: {} }));
+    await firstRun;
+
+    expect(requestCount).toBe(3);
+    expect(maximumConcurrentCalls).toBe(1);
+    await expect(database.prepare(
+      "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-after-create" });
+  });
+
   it("creates channel.moderate with version 2 and moderator_user_id", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
@@ -160,6 +322,7 @@ describe("EventSub reconciliation", () => {
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('kanal-a', 'moderation', 1, '{}')`,
     ).run();
+    await confirmBotModerator(database, "kanal-a");
     await database.prepare(
       `INSERT INTO bot_identity
         (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
@@ -178,7 +341,15 @@ describe("EventSub reconciliation", () => {
           condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
           transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
         }],
-      }), { status: 202 }));
+      }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{
+        id: "shoutout-subscription",
+        type: "channel.shoutout.create",
+        version: "1",
+        status: "enabled",
+        condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
+        transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+      }] }), { status: 202 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
 
@@ -203,6 +374,7 @@ describe("EventSub reconciliation", () => {
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('kanal-a', 'moderation', 1, '{}')`,
     ).run();
+    await confirmBotModerator(database, "kanal-a");
     await database.prepare(
       `INSERT INTO bot_identity
         (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
@@ -218,15 +390,23 @@ describe("EventSub reconciliation", () => {
       condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
       transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
     });
+    const shoutout = {
+      id: "shoutout-subscription",
+      type: "channel.shoutout.create",
+      version: "1",
+      status: "enabled",
+      condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    };
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("2", "v2")], pagination: {} }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("2", "v2"), shoutout], pagination: {} }), { status: 200 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect((fetcher.mock.calls[0]?.[1] as RequestInit).method).toBeUndefined();
 
     const v1Fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("1", "v1")], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("1", "v1"), shoutout], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("2", "v2-replaced")], pagination: {} }), { status: 202 }));
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T02:00:00.000Z", v1Fetcher);
@@ -244,6 +424,7 @@ describe("EventSub reconciliation", () => {
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('kanal-a', 'moderation', 1, '{}')`,
     ).run();
+    await confirmBotModerator(database, "kanal-a");
     await database.prepare(
       `INSERT INTO bot_identity
         (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
@@ -262,7 +443,15 @@ describe("EventSub reconciliation", () => {
         client_secret: "client-secret-geheim",
         signature: "signature-geheim",
         chat_message: "Chatnachricht-geheim",
-      }), { status: 403 }));
+      }), { status: 403 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{
+        id: "shoutout-subscription",
+        type: "channel.shoutout.create",
+        version: "1",
+        status: "enabled",
+        condition: { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-user" },
+        transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+      }] }), { status: 202 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
 
@@ -296,6 +485,7 @@ describe("EventSub reconciliation", () => {
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('kanal-a', 'channel_events', 1, '{}')`,
     ).run();
+    await confirmBotModerator(database, "kanal-a");
     await database.prepare(
       `INSERT INTO bot_identity
         (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
@@ -352,11 +542,13 @@ describe("EventSub reconciliation", () => {
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
 
     await expect(database.prepare(
-      "SELECT channel_id, status, reason FROM eventsub_subscriptions ORDER BY channel_id",
+      "SELECT channel_id, status, reason FROM eventsub_subscriptions ORDER BY channel_id, subscription_type",
     ).all()).resolves.toEqual({
       results: [
         { channel_id: "kanal-a", status: "error", reason: "rate_limited" },
+        { channel_id: "kanal-a", status: "missing", reason: "moderator_required" },
         { channel_id: "kanal-b", status: "enabled", reason: null },
+        { channel_id: "kanal-b", status: "missing", reason: "moderator_required" },
       ],
       success: true,
       meta: { changes: 0, size: 0 },
@@ -404,10 +596,11 @@ describe("EventSub reconciliation", () => {
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     await expect(database.prepare(
-      "SELECT channel_id, status, subscription_id, reason FROM eventsub_subscriptions ORDER BY channel_id",
+      "SELECT channel_id, status, subscription_id, reason FROM eventsub_subscriptions ORDER BY channel_id, subscription_type",
     ).all()).resolves.toEqual({
       results: [
         { channel_id: "kanal-a", status: "enabled", subscription_id: "subscription-a", reason: null },
+        { channel_id: "kanal-a", status: "missing", subscription_id: null, reason: "moderator_required" },
         { channel_id: "kanal-b", status: "enabled", subscription_id: "subscription-b", reason: null },
       ],
       success: true,

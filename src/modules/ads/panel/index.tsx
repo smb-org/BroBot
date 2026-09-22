@@ -124,7 +124,7 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
 
       <section className="config-section" aria-label={labels.automaticSection}>
         <div className="section-heading"><h2>{labels.automaticSection}</h2></div>
-        <label className="config-field config-field--breit">
+        <label className="config-field config-field--wide">
           {labels.automatic}
           <textarea
             value={settings.automatic}
@@ -137,7 +137,7 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
 
       <section className="config-section" aria-label={labels.manualSection}>
         <div className="section-heading"><h2>{labels.manualSection}</h2></div>
-        <label className="config-field config-field--breit">
+        <label className="config-field config-field--wide">
           {labels.manual}
           <textarea
             value={settings.manual}
@@ -150,7 +150,7 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
 
       <section className="config-section" aria-label={labels.warningSection}>
         <div className="section-heading"><h2>{labels.warningSection}</h2></div>
-        <div style={{ display: "grid", gap: "6px", maxWidth: "var(--config-field-breit)" }}>
+        <div style={{ display: "grid", gap: "6px", maxWidth: "var(--config-field-wide)" }}>
           <span>{labels.warningEnabled}</span>
           <Switch
             ariaLabel={labels.warningEnabled}
@@ -159,7 +159,7 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
             onChange={(checked) => { change({ prewarning: checked }); }}
           />
         </div>
-        <div className="config-field--schmal">
+        <div className="config-field--narrow">
           <NumberField
             label={labels.leadSeconds}
             value={settings.leadSeconds}
@@ -170,7 +170,7 @@ const AdsForm = ({ channelId, labels, canManage, language, initial, schedule, on
             {...(leadSecondsError ? { error: labels.numberMissing } : {})}
           />
         </div>
-        <div className="config-field--breit">
+        <div className="config-field--wide">
           <Field
             label={labels.prewarningText}
             value={settings.prewarningText}

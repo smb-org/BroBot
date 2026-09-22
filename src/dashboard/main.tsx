@@ -46,7 +46,7 @@ import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
 import { apiErrorText, auditActionLabel, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { canManage } from "../contracts/values";
-import { eventSubName, moduleName, statusWord } from "./module-labels";
+import { eventSubName, moduleName, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
 import { BlockingState, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, Switch as UiSwitch, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
@@ -84,10 +84,13 @@ const statusLabel = (status: PanelBotStatus["status"]): string => {
   return texts.status.error;
 };
 
-const subscriptionTone = (status: PanelEventSubSubscription["status"]): StateTone =>
-  status === "enabled" ? "healthy" : status === "missing" || status === "pending" ? "warning" : "error";
+const subscriptionTone = (status: PanelEventSubSubscription["status"], reason: string | null): StateTone =>
+  reason === "pending_adoption" || reason === "moderator_required" ? "neutral"
+    : status === "enabled" ? "healthy" : status === "missing" || status === "pending" ? "warning" : "error";
 
-const subscriptionStatusLabel = (status: PanelEventSubSubscription["status"]): string => {
+const subscriptionStatusLabel = (status: PanelEventSubSubscription["status"], reason: string | null): string => {
+  const reasonText = maintenanceReasonText(reason);
+  if ((reason === "pending_adoption" || reason === "moderator_required") && reasonText !== null) return reasonText;
   const texts = dashboardTexts();
   if (status === "enabled") return texts.status.active;
   if (status === "missing") return texts.status.missing;
@@ -158,7 +161,8 @@ const broadcasterConsentMissing = (permissions: PanelBroadcasterPermissions | nu
 
 const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "error" => {
   if (channel.moderator?.isModerator === false) return "error";
-  if (channel.chatSubscription?.status === "error" || channel.chatSubscription?.status === "revoked") return "error";
+  if (channel.chatSubscriptionNeeded === true &&
+      (channel.chatSubscription?.status === "error" || channel.chatSubscription?.status === "revoked")) return "error";
   if (channel.lastError?.source === "eventsub") return "error";
   if (channel.bot?.status === "error" || channel.bot?.status === "revoked") return "error";
   if (channel.botPermissions?.missingScopes.length) return "warning";
@@ -167,8 +171,9 @@ const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "err
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (tokenStatus.tone === "error") return "error";
   if (channelBotConsentMissing(channel)) return "warning";
-  if (channel.chatSubscription == null) return "warning";
-  if (channel.chatSubscription.status === "missing") return "warning";
+  if (channel.chatSubscriptionNeeded === true && channel.chatSubscription == null) return "warning";
+  if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "missing" &&
+      channel.chatSubscription.reason !== "pending_adoption" && channel.chatSubscription.reason !== "moderator_required") return "warning";
   if (tokenStatus.tone !== "healthy") return "warning";
   if (channel.bot?.status !== "connected" || channel.moderator?.isModerator !== true ||
       channel.tokens.loginStatus !== "connected" || channel.tokens.botExpiresAt === null ||
@@ -179,8 +184,8 @@ const channelStatus = (channel: PanelChannelState): "healthy" | "warning" | "err
 const statusText = (channel: PanelChannelState): string => {
   const texts = dashboardTexts();
   if (channel.moderator?.isModerator === false) return texts.status.moderatorRoleMissing;
-  if (channel.chatSubscription?.status === "error") return texts.status.chatSubscriptionError;
-  if (channel.chatSubscription?.status === "revoked") return texts.status.chatSubscriptionRevoked;
+  if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "error") return texts.status.chatSubscriptionError;
+  if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "revoked") return texts.status.chatSubscriptionRevoked;
   if (channel.lastError?.source === "eventsub") return texts.errors.last;
   if (channel.bot?.status === "error") return texts.status.botError;
   if (channel.bot?.status === "revoked") return texts.status.botTokenRevoked;
@@ -188,8 +193,9 @@ const statusText = (channel: PanelChannelState): string => {
   if (broadcasterConsentMissing(channel.broadcasterPermissions)) return channelPanelTexts().fullConsentMissing;
   const tokenStatus = tokenView(channel.tokens, channel.bot);
   if (channelBotConsentMissing(channel) && tokenStatus.tone === "healthy") return texts.status.broadcasterConsentMissing;
-  if (channel.chatSubscription == null && !channelBotConsentMissing(channel)) return texts.status.chatSubscriptionMissing;
-  if (channel.chatSubscription?.status === "missing") return texts.status.chatSubscriptionMissing;
+  if (channel.chatSubscriptionNeeded === true && channel.chatSubscription == null) return texts.status.chatSubscriptionMissing;
+  if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "missing" &&
+      channel.chatSubscription.reason !== "pending_adoption" && channel.chatSubscription.reason !== "moderator_required") return texts.status.chatSubscriptionMissing;
   if (tokenStatus.tone !== "healthy") return tokenStatus.label;
   if (channelStatus(channel) === "healthy") return texts.status.healthy;
   return texts.status.stateIncomplete;
@@ -360,7 +366,7 @@ interface DashboardHeaderProperties {
   channels: PanelChannelState[];
   activeChannel: PanelChannelState | undefined;
   loadedAt: number | undefined;
-  headerModule: { id: string; enabled: boolean } | undefined;
+  headerModule: { id: string; enabled: boolean; mandatory?: boolean } | undefined;
   headerModuleBusy: boolean;
   onToggleHeaderModule: () => void;
   onNavigate: (route: DashboardRoute) => void;
@@ -391,6 +397,9 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, headerModul
   const connectionLed = connectionLabel === null ? null : <span className="led" data-status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : "red"}><span className="led__dot" aria-hidden="true" /><span>{connectionLabel}</span></span>;
   const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
   const managementLocked = activeChannel !== undefined && !canManage(activeChannel.role);
+  const mandatoryModule = headerModule?.mandatory === true || headerModule?.id === "channel_events";
+  const switchLockReason = mandatoryModule ? moduleWorkspaceTexts().mandatoryReason
+    : managementLocked ? texts.module.managementLocked : undefined;
   return (
     <div className="dashboard-header">
       <a className="brand-mark dashboard-header__brand" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
@@ -416,7 +425,7 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, headerModul
             checked={headerModule.enabled}
             onChange={onToggleHeaderModule}
             pending={headerModuleBusy}
-            {...(managementLocked ? { lockedReason: texts.module.managementLocked } : {})}
+            {...(switchLockReason === undefined ? {} : { lockedReason: switchLockReason })}
           />
         </div>
       )}
@@ -560,12 +569,22 @@ const broadcasterRow = (status: PanelChannelState["broadcasterConnection"]): Sta
   return { key: "broadcaster", tone, node: <StateRow label={texts.statusCard.broadcasterOauth} tone={tone} word={broadcasterConnectionLabel(status)} detail={status === "connected" ? texts.bot.optionalModules : texts.bot.normalOperation} /> };
 };
 
-const chatRow = (status: PanelChannelState["chatSubscription"] | undefined, expected = false): StatusEntry => {
+const chatRow = (status: PanelChannelState["chatSubscription"] | undefined, needed = false): StatusEntry => {
   const texts = dashboardTexts();
   const current = status ?? null;
-  const tone: StateTone = current === null ? expected ? "warning" : "neutral" : current.status === "enabled" ? "healthy" : current.status === "missing" ? "warning" : "error";
-  const word = current === null ? expected ? texts.status.missing : texts.status.notChecked : current.status === "enabled" ? texts.status.active : current.status === "missing" ? texts.status.missing : current.status === "revoked" ? texts.status.revoked : texts.status.error;
-  return { key: "chat-subscription", tone, node: <StateRow label={texts.statusCard.chatSubscription} tone={tone} word={word} detail={maintenanceReasonText(current?.reason) ?? (current === null && expected ? texts.status.chatSubscriptionMissing : undefined)} /> };
+  if (!needed) {
+    return { key: "chat-subscription", tone: "neutral", node: <StateRow label={texts.statusCard.chatSubscription} tone="neutral" word={texts.status.chatSubscriptionNotNeeded} /> };
+  }
+  const reasonText = maintenanceReasonText(current?.reason);
+  const neutralReason = current?.reason === "pending_adoption" || current?.reason === "moderator_required";
+  const tone: StateTone = current === null || current.status === "missing"
+    ? neutralReason ? "neutral" : "warning"
+    : current.status === "enabled" ? "healthy" : "error";
+  const word = neutralReason ? reasonText ?? texts.status.notChecked
+    : current === null || current.status === "missing" ? texts.status.missing
+      : current.status === "enabled" ? texts.status.active
+        : current.status === "revoked" ? texts.status.revoked : texts.status.error;
+  return { key: "chat-subscription", tone, node: <StateRow label={texts.statusCard.chatSubscription} tone={tone} word={word} detail={neutralReason ? undefined : reasonText ?? (current === null ? texts.status.chatSubscriptionMissing : undefined)} /> };
 };
 
 const botPermissionsRow = (permissions: PanelBotPermissions | null | undefined): StatusEntry | null => {
@@ -656,7 +675,7 @@ const BotPermissionsInspector = ({ permissions }: { permissions: PanelBotPermiss
     <section className="content-section" aria-label={texts.system.missingBotPermissions}>
       <div className="section-heading"><h2>{texts.system.missingBotPermissions}</h2><span className="mono muted">{formatNumber(permissions.missingScopes.length)}</span></div>
       <h4>{texts.system.missingScopes}</h4>
-      <ul className="scope-liste">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
+      <ul className="scope-list">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
     </section>
   );
 };
@@ -668,7 +687,7 @@ const BroadcasterPermissionsInspector = ({ permissions }: { permissions: PanelBr
     <section className="content-section" aria-label={texts.missingBroadcasterPermissions}>
       <div className="section-heading"><h2>{texts.missingBroadcasterPermissions}</h2><span className="mono muted">{formatNumber(permissions.missingScopes.length)}</span></div>
       <h4>{texts.missingScopes}</h4>
-      <ul className="scope-liste">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
+      <ul className="scope-list">{permissions.missingScopes.map((scope) => <li className="mono" key={scope}>{scope}</li>)}</ul>
     </section>
   );
 };
@@ -696,7 +715,7 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
                 const key = subscriptionKey(subscription);
                 const name = subscriptionDisplayName(subscription);
                 const unknown = name === subscription.subscriptionType;
-                const tone = subscriptionTone(subscription.status);
+                const tone = subscriptionTone(subscription.status, subscription.reason);
                 return <tr
                   key={key}
                   ref={rowRef(key)}
@@ -706,7 +725,7 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
                   onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(key); } }}
                 >
                   <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
-                  <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status)} /></td>
+                  <td><Led status={channelToneToLedStatus(tone)} label={subscriptionStatusLabel(subscription.status, subscription.reason)} /></td>
                   <td>{maintenanceReasonText(subscription.reason) ?? emptyValue}</td>
                 </tr>;
               })}</tbody>
@@ -742,7 +761,7 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
   const entries = sortBySeverity([
     broadcasterRow(overview.broadcasterConnection),
     channelBotConsentRow(overview.channelBotConsent),
-    chatRow(overview.chatSubscription, overview.channelBotConsent === "granted"),
+    chatRow(overview.chatSubscription, overview.chatSubscriptionNeeded === true),
     moderatorRow(overview.moderator),
     botRow(overview.bot),
     botPermissionsRow(overview.botPermissions),
@@ -790,7 +809,7 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
       {system === null && systemState.status === "loading" ? <p className="loading-line">{texts.system.loadState}</p> : null}
       {systemState.error !== null ? <ErrorPanel message={systemState.error} /> : null}
       {system === null ? null : <>
-        <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+        <div className="state-list">{[broadcasterRow(system.broadcasterConnection), chatRow(system.chatSubscription, system.chatSubscriptionNeeded === true), botRow(system.bot), botPermissionsRow(system.botPermissions), broadcasterPermissionsRow(system.broadcasterPermissions), tokenRow(system.tokens, system.bot)].filter((entry): entry is StatusEntry => entry !== null).map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
         <BotPermissionsInspector permissions={system.botPermissions} />
         <BroadcasterPermissionsInspector permissions={system.broadcasterPermissions} />
         <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
@@ -1292,7 +1311,8 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" || modules.data === null) return;
     const targetModuleId = route.moduleId;
     const state = modules.data.modules.find((module) => module.id === targetModuleId);
-    if (state === undefined || (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusy) return;
+    if (state === undefined || state.mandatory === true || targetModuleId === "channel_events" ||
+        (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusy) return;
     setHeaderModuleBusy(true);
     try {
       await setChannelModuleEnabled(route.channelId, targetModuleId, !state.enabled);

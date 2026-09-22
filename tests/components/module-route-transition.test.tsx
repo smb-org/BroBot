@@ -60,7 +60,7 @@ describe("Module route during client-side navigation", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const link = await screen.findByRole("link", { name: /^aktiv · Läuft$/ });
+    const link = await screen.findByRole("link", { name: /^aktiv.*Läuft$/ });
     expect(activeLoader).not.toHaveBeenCalled();
 
     link.click();

@@ -153,7 +153,7 @@ describe("ChannelObject realtime path", () => {
 
     await object.revokeUser("user-1");
 
-    expect(affected.close.mock.calls).toEqual([[4003, "Kanalzugriff widerrufen"]]);
+    expect(affected.close.mock.calls).toEqual([[4003, "Channel access revoked"]]);
     expect(other.close.mock.calls).toHaveLength(0);
   });
 
@@ -206,7 +206,7 @@ describe("ChannelObject realtime path", () => {
 
     expect(prepare).toHaveBeenCalled();
     const close = Reflect.get(socket, "close") as ReturnType<typeof vi.fn>;
-    expect(close).toHaveBeenCalledWith(4003, "Berechtigung widerrufen");
+    expect(close).toHaveBeenCalledWith(4003, "Authorization revoked");
     expect([...storage.values.values()]).toEqual([jetzt + 60_000]);
   });
 });

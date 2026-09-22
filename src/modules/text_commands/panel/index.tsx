@@ -3,8 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { dashboardCommonTexts, type DashboardLanguage } from "../../../dashboard/locale";
 import { ListDetail, SubInspector, useInspectorSelection } from "../../../dashboard/ui";
 import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand, type TextCommandMinimumTier } from "../contracts";
+import { validCommandName } from "../domain";
 import { deleteTextCommand, loadTextCommands, createTextCommand, toggleTextCommand, setTextCommandMinimumTier, saveTextCommand } from "./service";
 import { textCommandsTexts } from "./locale";
+
+const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
 interface TextCommandRowProperties {
   channelId: string;
@@ -81,22 +84,22 @@ const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageC
   return (
     <SubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={<span className="command-inspector__meta">{labels.columns.last} {relativeTime(initial.lastUsedAt, labels)}</span>} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={onClose}>
       {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
-      <label className="config-field config-field--mittel">
+      <label className="config-field config-field--medium">
         {labels.name}
         <input value={name} onChange={(event) => { setName(event.target.value); }} disabled={!canManageContent || busy} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
       </label>
-      <label className="config-field config-field--schmal">
+      <label className="config-field config-field--narrow">
         {labels.kind}
         <select aria-label={labels.kind} value={kind} onChange={(event) => { setKind(event.target.value as "text" | "list"); }} disabled={!canManageContent || busy}>
           <option value="text">{labels.kindText}</option>
           <option value="list">{labels.kindList}</option>
         </select>
       </label>
-      {kind === "text" ? <label className="config-field config-field--breit">
+      {kind === "text" ? <label className="config-field config-field--wide">
         {labels.text}
         <textarea value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent || busy} />
       </label> : null}
-      <label className="config-field config-field--schmal">
+      <label className="config-field config-field--narrow">
         {labels.cooldown}
         <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSeconds(event.target.value === "" ? "" : Number(event.target.value)); }} disabled={!canManageContent || busy} />
         {cooldownError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
@@ -263,8 +266,12 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
     if (selected !== null) { closeInspector(); return; }
     if (createOpen) closeCreate();
   }, [selected, closeInspector, createOpen]);
-  const nameValid = /^[a-z0-9][a-z0-9_-]{0,31}$/.test(name.trim());
-  const canCreate = nameValid && (kind === "list" || text.trim().length > 0);
+  const normalizedName = normalizeCommandName(name);
+  const nameEmpty = normalizedName.length === 0;
+  const nameValid = validCommandName(normalizedName);
+  const responseMissing = kind === "text" && text.trim().length === 0;
+  const canCreate = nameValid && !responseMissing;
+  const createHint = nameEmpty ? labels.nameMissing : !nameValid ? labels.nameInvalid : responseMissing ? labels.responseMissing : null;
 
   const create = async (): Promise<void> => {
     if (!canManageContent || !canCreate || creating) return;
@@ -276,7 +283,7 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
     setError(null);
     setCreating(true);
     try {
-      await createTextCommand(channelId, { name: name.trim(), kind, ...(kind === "text" ? { text } : {}), cooldownSeconds });
+      await createTextCommand(channelId, { name: normalizedName, kind, ...(kind === "text" ? { text } : {}), cooldownSeconds });
       setName("");
       setText("");
       setKind("text");
@@ -339,28 +346,28 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
       <form className="config-section" aria-busy={creating} onSubmit={(event) => { event.preventDefault(); void create(); }}>
         <fieldset disabled={!canManageContent || creating}>
         {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
-        <label className="config-field config-field--mittel">
+        <label className="config-field config-field--medium">
           {labels.name}
-          <input aria-label={labels.name} value={name} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />
+          <input aria-label={labels.name} value={normalizedName} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />
           <span className="muted">{labels.nameHint}</span>
         </label>
-        <label className="config-field config-field--schmal">
+        <label className="config-field config-field--narrow">
           {labels.kind}
           <select aria-label={labels.kind} value={kind} onChange={(event) => { setKind(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
             <option value="text">{labels.kindText}</option>
             <option value="list">{labels.kindList}</option>
           </select>
         </label>
-        {kind === "text" ? <label className="config-field config-field--breit">
+        {kind === "text" ? <label className="config-field config-field--wide">
           {labels.text}
           <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent} />
         </label> : null}
-        <label className="config-field config-field--schmal">
+        <label className="config-field config-field--narrow">
           {labels.cooldown}
           <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSeconds(event.target.value === "" ? "" : Number(event.target.value)); }} />
           {cooldownError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
         </label>
-        <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.add}</button>{canCreate ? null : <span className="form-hint">{nameValid ? (kind === "text" ? labels.responseMissing : labels.nameMissing) : (kind === "text" ? labels.nameAndResponseMissing : labels.nameMissing)}</span>}</div>
+        <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.add}</button>{createHint === null ? null : <span className="form-hint">{createHint}</span>}</div>
         </fieldset>
       </form>
     </SubInspector>

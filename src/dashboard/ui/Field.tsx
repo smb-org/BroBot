@@ -21,7 +21,7 @@ export interface FieldProps {
  * A single-line text field. Project vocabulary only: `label`, `hint`,
  * `error` -- never Mantine's `description`/`error` render-prop shape.
  * "Inputs / Fields" in docs/input/DESIGN-neu.md: error carries a leading
- * `×` and the border stays "Linie-Stark" (wired in the theme's `Input`
+ * `×` and the border stays strong (wired in the theme's `Input`
  * override, not here).
  */
 export function Field({ label, hint, error, value, onChange, placeholder, disabled = false, required = false, name, id, onKeyDown }: FieldProps) {

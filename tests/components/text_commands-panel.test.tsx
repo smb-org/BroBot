@@ -60,8 +60,18 @@ describe("Text commands panel view", () => {
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
   });
 
-  it("keeps the create button disabled until required fields are filled", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ commands: [] })));
+  it("normalizes !Test before creating and distinguishes empty, invalid, and missing response hints", async () => {
+    let createdBody: Record<string, unknown> | null = null;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/commands") && init?.method === "POST") {
+        createdBody = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : null;
+        return Promise.resolve(jsonResponse({ command: {} }));
+      }
+      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ commands: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      return Promise.resolve(jsonResponse({}));
+    });
     vi.stubGlobal("fetch", fetcher);
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 
@@ -72,13 +82,36 @@ describe("Text commands panel view", () => {
     const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
     expect(add).toBeDisabled();
     expect(add).not.toHaveClass("button--primary");
-    expect(screen.getByText(/Name und Antworttext ausfüllen/i)).toBeInTheDocument();
+    expect(screen.getByText("Namen ausfüllen")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "hallo" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "!Test" } });
+    expect(screen.getByLabelText("Name")).toHaveValue("test");
+    expect(screen.getByText("Antworttext ausfüllen")).toBeInTheDocument();
     expect(add).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Antworttext"), { target: { value: "Hallo" } });
     expect(add).toBeEnabled();
     expect(add).toHaveClass("button--primary");
+    fireEvent.click(add);
+    await waitFor(() => { expect(createdBody).toEqual({ name: "test", kind: "text", text: "Hallo", cooldownSeconds: 5 }); });
+  });
+
+  it.each([
+    ["de-DE", "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich; maximal 32 Zeichen."],
+    ["en-US", "Use lowercase letters, numbers, hyphen, or underscore; maximum 32 characters."],
+  ])("shows the invalid-name hint for !te st in %s", async (browserLanguage, expectedHint) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ commands: [] }));
+    vi.stubGlobal("fetch", fetcher);
+    Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
+
+    render(<TextCommandsPanel channelId="kanal-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: browserLanguage === "de-DE" ? "Befehl anlegen" : "Add command" }));
+    const createPanel = await screen.findByRole("region", { name: browserLanguage === "de-DE" ? "Befehl anlegen" : "Add command" });
+    const add = within(createPanel).getByRole("button", { name: browserLanguage === "de-DE" ? "Befehl anlegen" : "Add command" });
+    fireEvent.change(screen.getByLabelText(browserLanguage === "de-DE" ? "Name" : "Name"), { target: { value: "!te st" } });
+
+    expect(screen.getByLabelText("Name")).toHaveValue("te st");
+    expect(screen.getByText(expectedHint)).toBeInTheDocument();
+    expect(add).toBeDisabled();
   });
 
   it("locks the create form while the request is in flight", async () => {
@@ -250,16 +283,16 @@ describe("Text commands panel view", () => {
     expect(await screen.findByRole("heading", { name: "Befehle" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Befehl anlegen" }));
     await screen.findByRole("region", { name: "Befehl anlegen" });
-    expect(screen.getByLabelText("Name").closest("label")).toHaveClass("config-field--mittel");
-    expect(screen.getByLabelText("Antworttext").closest("label")).toHaveClass("config-field--breit");
-    expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual(["config-field config-field--schmal"]);
+    expect(screen.getByLabelText("Name").closest("label")).toHaveClass("config-field--medium");
+    expect(screen.getByLabelText("Antworttext").closest("label")).toHaveClass("config-field--wide");
+    expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual(["config-field config-field--narrow"]);
 
     fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
     const editorTextarea = await screen.findByDisplayValue("Hallo");
     const editorField = editorTextarea.closest("label");
-    expect(editorField).toHaveClass("config-field--breit");
+    expect(editorField).toHaveClass("config-field--wide");
     expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual([
-      "config-field config-field--schmal",
+      "config-field config-field--narrow",
     ]);
   });
 

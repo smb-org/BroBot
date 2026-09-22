@@ -26,7 +26,7 @@ export interface SelectProps {
 }
 
 /**
- * "Popover, Menu, Combobox: surface Taste, border Linie-Stark, radius sm,
+ * "Popover, Menu, Combobox: surface, strong border, radius sm,
  * shadow xs" (docs/input/DESIGN-neu.md, "Component defaults"). The dropdown
  * override lives here rather than in the global theme because `Select` is
  * the only place in this seam step that opens a Combobox.

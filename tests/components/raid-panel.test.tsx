@@ -47,7 +47,7 @@ describe("Raid panel view", () => {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
       textThreshold: 3,
-      textLong: "voll",
+      textLong: "full",
       textShort: "klein",
     } })));
 
@@ -69,7 +69,7 @@ describe("Raid panel view", () => {
       shoutoutEnabled: false,
       shoutoutThreshold: 50,
       textThreshold: 5,
-      textLong: "voll",
+      textLong: "full",
       textShort: "klein",
     } })));
 
@@ -84,7 +84,7 @@ describe("Raid panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/raid/settings")) return Promise.resolve(jsonResponse({ settings: {
-        shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "voll", textShort: "klein",
+        shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "full", textShort: "klein",
       } }));
       if (url.pathname.endsWith("/ads/schedule")) return Promise.resolve(jsonResponse({
         schedule: { nextAdAt: null, duration: null, lastAdAt: null, prerollFreeTime: null, snoozeCount: null, snoozeRefreshAt: null },
@@ -123,7 +123,7 @@ describe("Raid panel view", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
       if (url.pathname.endsWith("/raid/settings") && init?.method === undefined) return Promise.resolve(jsonResponse({ settings: {
-        shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "voll", textShort: "klein",
+        shoutoutEnabled: true, shoutoutThreshold: 3, textThreshold: 3, textLong: "full", textShort: "klein",
       } }));
       return Promise.resolve(jsonResponse({}));
     });

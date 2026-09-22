@@ -31,13 +31,13 @@ describe("Raid module", () => {
   it("silently resets old stored thresholds to the new defaults", () => {
     expect(raidSettingsSchema.parse({
       mindestZuschauer: 50,
-      textLong: "voll",
+      textLong: "full",
       textShort: "klein",
     })).toEqual({
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
       textThreshold: 3,
-      textLong: "voll",
+      textLong: "full",
       textShort: "klein",
     });
   });
@@ -150,7 +150,7 @@ describe("Raid module", () => {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
       textThreshold: 3,
-      textLong: "voll",
+      textLong: "full",
       textShort: "klein",
     }));
 

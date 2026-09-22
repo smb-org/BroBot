@@ -34,13 +34,13 @@ unformatiert und fällt auf das Browser-Standardaussehen zurück.
 Eine Konfigurationsfläche teilt ihren Inhalt in `.config-section`-Abschnitte.
 Jeder Abschnitt beginnt mit einer Überschrift in `.section-heading`, die von
 einer Haarlinie getrennt wird; Container-Karten gehören nicht zu dieser Welt.
-Die Feldhülle trägt genau eine Inhaltsstufe: `config-field--schmal` für
-Zahlen und kurze Werte, `config-field--mittel` für Namen und Bezeichner oder
-`config-field--breit` für Fließtext.
+Die Feldhülle trägt genau eine Inhaltsstufe: `config-field--narrow` für
+Zahlen und kurze Werte, `config-field--medium` für Namen und Bezeichner oder
+`config-field--wide` für Fließtext.
 
 Eine Tabelle mit wählbaren Zeilen und der Inspektor ihrer gewählten Zeile
-liegen zusammen in einem `.config-section.inspektor-bereich` mit genau zwei
-direkten Kindern: zuerst `.inspektor-bereich__liste` (Überschrift, Tabelle,
+liegen zusammen in einem `.config-section.inspector-section` mit genau zwei
+direkten Kindern: zuerst `.inspector-section__list` (Überschrift, Tabelle,
 Nachladen-Knopf, Fehler- und Leerzeile), dann der `.sub-inspector` — oder,
 solange dessen Anlegen-Formular über den Plus-Knopf an der Überschrift
 geöffnet ist, das Formular auf derselben Fläche. Ohne Auswahl und ohne
@@ -55,7 +55,7 @@ den Fokus an die Zeile zurück, das Formular schließt sich. Die Auswahl bleibt
 beim Nachladen bestehen, solange die Zeile noch existiert. Zerstörende
 Handlungen verwenden `button--danger`, stehen vom primären Knopf abgesetzt und
 fragen mit `.inspector-confirmation` an Ort und Stelle nach. Eine Ansicht ohne
-`.inspektor-bereich` bleibt einspaltig; sie bricht nicht, sie nutzt nur die
+`.inspector-section` bleibt einspaltig; sie bricht nicht, sie nutzt nur die
 Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
 `.sub-inspector` nicht.
 

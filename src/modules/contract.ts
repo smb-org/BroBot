@@ -248,6 +248,8 @@ export interface ModuleEvent<Settings = unknown> {
 
 export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
+  /** The module is always enabled for every released channel and cannot be disabled. */
+  mandatory?: boolean;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
   /** Broadcaster consent the host verifies before the EventSub subscription. */

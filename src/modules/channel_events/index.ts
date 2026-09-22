@@ -21,6 +21,7 @@ const eventSubTypes = [
 
 export const channelEventsModule: BotModule<typeof settingsSchema> = {
   id: "channel_events",
+  mandatory: true,
   settingsSchema,
   defaultSettings: {},
   eventSubTypes,

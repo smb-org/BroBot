@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from "react";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
@@ -9,6 +9,7 @@ vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     { id: "aktiv", settingsSchema: {}, defaultSettings: {}, panel: activeLoader },
     { id: "ohne-panel", settingsSchema: {}, defaultSettings: {} },
+    { id: "channel_events", mandatory: true, settingsSchema: {}, defaultSettings: {} },
   ],
 }));
 
@@ -69,17 +70,68 @@ describe("Module panel loader", () => {
     expect(screen.getByText("Module werden geladen …")).toBeInTheDocument();
   });
 
-  it("navigates on tapping a grid tile without toggling on tap", () => {
-    const fetcher = vi.fn<typeof fetch>();
+  it("navigates from the module row click and Enter, while the switch toggles without navigation", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path === "/api/csrf"
+        ? Response.json({ token: "csrf-token" })
+        : Response.json({ module: { id: "aktiv", enabled: false, settings: "{}" } }));
+    });
     const onNavigate = vi.fn();
+    const onChanged = vi.fn(() => Promise.resolve());
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} onChanged={vi.fn(() => Promise.resolve())} />);
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={onNavigate} onChanged={onChanged} />);
 
-    const taste = screen.getByRole("link", { name: /aktiv.*Läuft/i });
-    fireEvent.click(taste);
+    const link = screen.getByRole("link", { name: /aktiv.*Läuft/i });
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    link.focus();
+    fireEvent.keyDown(link, { key: "Enter" });
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+    const row = link.closest(".list-row");
+    if (!(row instanceof HTMLElement)) throw new Error("Module row is missing");
+    expect(within(row).getAllByText("aktiv", { exact: true })).toHaveLength(1);
+    expect(within(row).getAllByText("Läuft", { exact: true })).toHaveLength(1);
 
-    expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "aktiv" });
-    expect(fetcher).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("switch", { name: "aktiv" }));
+    await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.some(([, requestInit]) => requestInit?.method === "PATCH")).toBe(true);
+  });
+
+  it("keeps mandatory channel events on, disabled, and explains the lock", () => {
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
+
+    const toggle = screen.getByRole("switch", { name: "Kanalereignisse" });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText("Kanalereignisse sind immer aktiv.")).toBeInTheDocument();
+  });
+
+  it("keeps the mandatory module detail switch locked when no persisted module row exists", () => {
+    renderWithMantine(<ModulePage
+      channelId="kanal-a"
+      moduleId="channel_events"
+      ownRole="manager"
+      modules={[{ id: "channel_events", enabled: true, mandatory: true, settings: "{}" }]}
+      activeModules={[]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    const toggle = screen.getByRole("switch", { name: "Kanalereignisse: Läuft" });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText("Kanalereignisse sind immer aktiv.")).toBeInTheDocument();
+    expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
+  });
+
+  it("shows the module name and state once in the row", () => {
+    renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
+    const row = screen.getByRole("link", { name: /aktiv.*Läuft/i }).closest(".list-row");
+    if (!(row instanceof HTMLElement)) throw new Error("Module row is missing");
+    expect(within(row).getAllByText("aktiv", { exact: true })).toHaveLength(1);
+    expect(within(row).getAllByText("Läuft", { exact: true })).toHaveLength(1);
   });
 
   it("toggles a module and reloads the caller's list afterwards", async () => {

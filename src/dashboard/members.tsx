@@ -136,13 +136,13 @@ const MemberList = ({
                       <span>{memberLabel(member)}</span>
                       {member.displayName !== null && member.login !== null ? (
                         <a
-                          className="login-hinweis profile-link"
+                          className="login-hint profile-link"
                           href={`https://twitch.tv/${member.login}`}
                           target="_blank"
                           rel="noreferrer noopener"
                         >twitch.tv/{member.login}</a>
                       ) : null}
-                      {member.displayName === null && member.login === null ? <span className="login-hinweis">{texts.twitchId(member.userId)}</span> : null}
+                      {member.displayName === null && member.login === null ? <span className="login-hint">{texts.twitchId(member.userId)}</span> : null}
                     </div>
                   </div>
                 </th>
@@ -189,16 +189,16 @@ const MemberEditor = ({
           <span>{name}</span>
           {member.displayName !== null && member.login !== null ? (
             <a
-              className="login-hinweis profile-link"
+              className="login-hint profile-link"
               href={`https://twitch.tv/${member.login}`}
               target="_blank"
               rel="noreferrer noopener"
             >twitch.tv/{member.login}</a>
           ) : null}
-          {member.displayName === null && member.login === null ? <span className="login-hinweis">{texts.twitchId(member.userId)}</span> : null}
+          {member.displayName === null && member.login === null ? <span className="login-hint">{texts.twitchId(member.userId)}</span> : null}
         </div>
       </div>
-      <label className="config-field config-field--mittel">
+      <label className="config-field config-field--medium">
         {texts.role}
         <select
           aria-label={texts.roleFor(name)}
@@ -358,7 +358,7 @@ export const MembersPage = ({
                 <strong>{foundUser.displayName}</strong>
                 <span>@{foundUser.login} · Twitch-ID {foundUser.userId}</span>
                 <a
-                  className="login-hinweis profile-link"
+                  className="login-hint profile-link"
                   href={`https://twitch.tv/${foundUser.login}`}
                   target="_blank"
                   rel="noreferrer noopener"

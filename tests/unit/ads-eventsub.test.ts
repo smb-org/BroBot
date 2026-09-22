@@ -38,6 +38,8 @@ describe("Werbung-EventSub", () => {
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'ads', 1, '{}')",
     ).run();
 
-    await expect(listDesiredEventSubTargets(database as unknown as D1Database)).resolves.toEqual([]);
+    const targets = await listDesiredEventSubTargets(database as unknown as D1Database);
+    expect(targets.filter((target) => ["stream.online", "channel.ad_break.begin"].includes(target.subscriptionType))).toEqual([]);
+    expect(targets.some((target) => target.subscriptionType === "channel.chat.notification")).toBe(true);
   });
 });

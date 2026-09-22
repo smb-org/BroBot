@@ -81,7 +81,7 @@ const RaidForm = ({ channelId, labels, canManage, initial, onSaved }: RaidFormPr
       {!canManage ? <p className="lock-reason">{labels.managementLocked}</p> : null}
       <section className="config-section" aria-label={labels.thresholdSection}>
         <div className="section-heading"><h2>{labels.thresholdSection}</h2></div>
-        <div style={{ display: "grid", gap: "6px", maxWidth: "var(--config-field-breit)" }}>
+        <div style={{ display: "grid", gap: "6px", maxWidth: "var(--config-field-wide)" }}>
           <span>{labels.shoutoutEnabled}</span>
           <Switch
             ariaLabel={labels.toggleLabel(settings.shoutoutEnabled)}
@@ -90,7 +90,7 @@ const RaidForm = ({ channelId, labels, canManage, initial, onSaved }: RaidFormPr
             onChange={(checked) => { change({ shoutoutEnabled: checked }); }}
           />
         </div>
-        <div className="config-field--schmal">
+        <div className="config-field--narrow">
           <NumberField
             label={labels.shoutoutThreshold}
             value={settings.shoutoutThreshold}
@@ -101,7 +101,7 @@ const RaidForm = ({ channelId, labels, canManage, initial, onSaved }: RaidFormPr
             {...(numberErrors.shoutoutThreshold ? { error: labels.numberMissing } : {})}
           />
         </div>
-        <div className="config-field--schmal">
+        <div className="config-field--narrow">
           <NumberField
             label={labels.textThreshold}
             value={settings.textThreshold}
@@ -112,7 +112,7 @@ const RaidForm = ({ channelId, labels, canManage, initial, onSaved }: RaidFormPr
             {...(numberErrors.textThreshold ? { error: labels.numberMissing } : {})}
           />
         </div>
-        <label className="config-field config-field--breit">
+        <label className="config-field config-field--wide">
           {labels.fullText}
           <textarea
             aria-label={labels.fullText}
@@ -122,7 +122,7 @@ const RaidForm = ({ channelId, labels, canManage, initial, onSaved }: RaidFormPr
           />
           <span className="config-field__hint">{labels.placeholderFull}</span>
         </label>
-        <label className="config-field config-field--breit">
+        <label className="config-field config-field--wide">
           {labels.shortText}
           <textarea
             aria-label={labels.shortText}

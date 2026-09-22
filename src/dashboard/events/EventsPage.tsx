@@ -33,12 +33,12 @@ const actorCell = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTex
 const EventChipPair = ({ code, detail, texts: texts }: { code: string; detail: ReturnType<typeof eventDetail>; texts: ReturnType<typeof dashboardTexts> }): ReactElement => {
   const metadata = eventMetadata(code);
   if (metadata === null) {
-    return <span className="event-chip-pair"><span className="event-chip" data-stufe="gezeichnet">{texts.events.unknown}</span></span>;
+    return <span className="event-chip-pair"><span className="event-chip" data-tier="outlined">{texts.events.unknown}</span></span>;
   }
   const number = eventChipNumber(detail, metadata.numberKey);
   return <span className="event-chip-pair">
     {number === null ? null : <span className="event-chip event-chip--number">{number}</span>}
-    <span className="event-chip" data-familie={metadata.family} data-stufe={metadata.tier} data-ton={metadata.tone}>{metadata.word[dashboardLanguage()]}</span>
+    <span className="event-chip" data-family={metadata.family} data-tier={metadata.tier} data-tone={metadata.tone}>{metadata.word[dashboardLanguage()]}</span>
   </span>;
 };
 

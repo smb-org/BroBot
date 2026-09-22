@@ -150,6 +150,7 @@ describe("Dashboard skeleton", () => {
     TestWebSocket.reset();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
   });
 
   it("recognizes the channel-bound system route", () => {
@@ -272,9 +273,9 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("user-2")).toHaveClass("mono");
     const sentRow = screen.getByText("Chat-Nachricht gesendet").closest("tr");
     const failedRow = screen.getByText("Aktion fehlgeschlagen").closest("tr");
-    expect(sentRow?.querySelector(".event-chip[data-ton='info']")).toHaveTextContent("Info");
+    expect(sentRow?.querySelector(".event-chip[data-tone='info']")).toHaveTextContent("Info");
     expect(within(sentRow as HTMLElement).getByText("Info")).toBeInTheDocument();
-    expect(failedRow?.querySelector(".event-chip[data-ton='error']")).toHaveTextContent("Fehler");
+    expect(failedRow?.querySelector(".event-chip[data-tone='error']")).toHaveTextContent("Fehler");
     expect(within(failedRow as HTMLElement).getByText("Fehler")).toBeInTheDocument();
     const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
     const unknownEventRow = screen.getByText("plugin.anderes").closest("tr");
@@ -345,12 +346,12 @@ describe("Dashboard skeleton", () => {
     }
 
     expect([...giftRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["5x", "Gift"]);
-    expect(giftRow.querySelector(".event-chip[data-familie='gemeinschaft'][data-stufe='voll']")).toHaveTextContent("Gift");
+    expect(giftRow.querySelector(".event-chip[data-family='community'][data-tier='full']")).toHaveTextContent("Gift");
     expect([...raidRow.querySelectorAll(".event-chip")].map((chip) => chip.textContent)).toEqual(["21", "Raid"]);
-    expect(raidRow.querySelector(".event-chip[data-familie='raid'][data-stufe='voll']")).toHaveTextContent("Raid");
-    expect(untimeoutRow.querySelector(".event-chip[data-familie='moderation'][data-stufe='gezeichnet']")).toHaveTextContent("Entsperrt");
-    expect(sentRow.querySelector(".event-chip[data-ton='info'][data-stufe='gezeichnet']")).toHaveTextContent("Info");
-    expect(sentRow.querySelector(".event-chip[data-stufe='voll']")).toBeNull();
+    expect(raidRow.querySelector(".event-chip[data-family='raid'][data-tier='full']")).toHaveTextContent("Raid");
+    expect(untimeoutRow.querySelector(".event-chip[data-family='moderation'][data-tier='outlined']")).toHaveTextContent("Entsperrt");
+    expect(sentRow.querySelector(".event-chip[data-tone='info'][data-tier='outlined']")).toHaveTextContent("Info");
+    expect(sentRow.querySelector(".event-chip[data-tier='full']")).toBeNull();
     expect(unknownRow.querySelector(".event-chip")).toHaveTextContent("Unbekannt");
     expect(unknownRow.querySelector(".event-label > .mono")).toHaveTextContent("plugin.anderes");
     const timeCell = giftRow.querySelector("td:last-child");
@@ -1786,7 +1787,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByRole("switch", { name: "Textbefehle: Aus" })).not.toBeChecked();
+    expect(await screen.findByRole("switch", { name: "Textbefehle" })).not.toBeChecked();
     expect(screen.queryByText("Keine Module aktiv.")).not.toBeInTheDocument();
   });
 
@@ -1803,7 +1804,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const link = await screen.findByRole("link", { name: /Textbefehle ·/ });
+    const link = await screen.findByRole("link", { name: /Textbefehle/ });
     expect(link).toHaveAttribute("href", "/channels/kanal-a/modules/text_commands");
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
   });
@@ -1927,10 +1928,10 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    fireEvent.click(await screen.findByRole("switch", { name: "Textbefehle: Aus" }));
-    fireEvent.click(await screen.findByRole("switch", { name: "Raid-Shoutout: Aus" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Textbefehle" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Raid-Shoutout" }));
     await waitFor(() => { expect(modulesCalls).toBe(3); });
-    expect(await screen.findByRole("switch", { name: "Raid-Shoutout: Läuft" })).toBeChecked();
+    expect(await screen.findByRole("switch", { name: "Raid-Shoutout" })).toBeChecked();
 
     // The held-back first reload arrives last, describing an older state.
     resolveFirstReload?.(jsonResponse({
@@ -1943,7 +1944,7 @@ describe("Dashboard skeleton", () => {
     // Give the stale response a chance to apply before asserting it didn't.
     await Promise.resolve();
     await Promise.resolve();
-    expect(screen.getByRole("switch", { name: "Raid-Shoutout: Läuft" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Raid-Shoutout" })).toBeChecked();
   });
 
   it("is the Stream Manager after sign-in: module toggle, immediate actions, and the warnings feed together, no page change", async () => {
@@ -1974,9 +1975,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     // Module toggle, without navigating away from the overview.
-    const moduleSwitch = await screen.findByRole("switch", { name: "Textbefehle: Aus" });
+    const moduleSwitch = await screen.findByRole("switch", { name: "Textbefehle" });
     fireEvent.click(moduleSwitch);
-    await waitFor(() => { expect(screen.getByRole("switch", { name: "Textbefehle: Läuft" })).toBeChecked(); });
+    await waitFor(() => { expect(screen.getByRole("switch", { name: "Textbefehle" })).toBeChecked(); });
     expect(window.location.pathname).toBe("/channels/kanal-a");
 
     // Immediate actions section is present and reachable.
@@ -2098,7 +2099,7 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
-    const link = await screen.findByRole("link", { name: /Textbefehle ·/ });
+    const link = await screen.findByRole("link", { name: /Textbefehle/ });
     link.click();
 
     expect(screen.queryByRole("heading", { name: "Befehl anlegen" })).not.toBeInTheDocument();
@@ -2166,6 +2167,71 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(screen.getByRole("link", { name: "System" }));
     await screen.findByRole("heading", { name: "System", level: 1 });
     expect(await screen.findByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
+  });
+
+  it("locks the mandatory module switch in the module page header too", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "channel_events", enabled: true, mandatory: true, settings: "{}" }] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/channel_events");
+
+    render(<DashboardApp />);
+
+    const headerSwitch = await screen.findByRole("switch", { name: "Kanalereignisse · Läuft" });
+    expect(headerSwitch).toBeChecked();
+    expect(headerSwitch).toBeDisabled();
+    expect(screen.getAllByText("Kanalereignisse sind immer aktiv.").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
+  });
+
+  it("shows chat as not needed when no active module reads it, even if no subscription row exists", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), chatSubscription: null, chatSubscriptionNeeded: false };
+    const overviewState = { ...channel, activeModules: [] };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overviewState);
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const chatRow = await screen.findByRole("article", { name: "Chat-Abo" });
+    expect(chatRow).toHaveAttribute("data-status", "neutral");
+    expect(chatRow).toHaveTextContent("Nicht benötigt — kein aktives Modul liest den Chat");
+  });
+
+  it.each([
+    ["de-DE", "pending_adoption", "Wird übernommen"],
+    ["de-DE", "moderator_required", "Wartet auf Moderatorstatus des Bots"],
+    ["en-US", "pending_adoption", "Being adopted"],
+    ["en-US", "moderator_required", "Waiting for the bot's moderator status"],
+  ])("shows %s EventSub reason %s as neutral, not as an error", async (browserLanguage, reason, expected) => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), chatSubscription: { status: "missing", subscriptionId: null, reason, updatedAt: relativeIso(0) }, chatSubscriptionNeeded: true };
+    const overviewState = { ...channel, activeModules: [] };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overviewState);
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      return jsonResponse({}, 404);
+    }));
+    Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const chatRow = await screen.findByRole("article", { name: browserLanguage === "de-DE" ? "Chat-Abo" : "Chat subscription" });
+    expect(chatRow).toHaveAttribute("data-status", "neutral");
+    expect(chatRow).toHaveTextContent(expected);
+    expect(await screen.findByRole("article", { name: browserLanguage === "de-DE" ? "Letzter Fehler" : "Last error" })).toHaveAttribute("data-status", "healthy");
   });
 
   it("shows a missing moderator status as a red error state", async () => {

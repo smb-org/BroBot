@@ -6,11 +6,11 @@ import { colors } from "./theme";
 export type ChipTone = "community" | "raid" | "moderation" | "green" | "amber" | "red" | "neutral";
 
 export interface ChipProps {
-  /** "Herkunft" family, or a `Zustand` color for the "Betrieb" family, or
-   *  `neutral` for the number chip and the "Unbekannt" fallback. */
+  /** Event family, status color for operational events, or `neutral` for
+   *  number chips and unknown events. */
   tone: ChipTone;
-  /** "Voll" (filled) is the action; "gezeichnet" (outlined, the default) is
-   *  its reverse. Ignored for `neutral`. */
+  /** Apply the family fill when true; otherwise keep the chip outlined.
+   *  Ignored for `neutral`. */
   filled?: boolean;
   /** The number chip: Plex Mono with tabular numerals, no tone coloring. */
   mono?: boolean;
@@ -18,9 +18,8 @@ export interface ChipProps {
 }
 
 /**
- * "Ereignis-Chip-Paar" in docs/input/DESIGN-neu.md: 20px tall, 1px border,
- * radius sm. Family and Zustand colors come from `theme.other`, as the
- * document specifies for this component.
+ * Event chips are 20px tall with a 1px border and small radius. Family and
+ * status colors come from `theme.other`, as specified in the design document.
  */
 export function Chip({ tone, filled, mono, children }: ChipProps) {
   const theme = useMantineTheme();

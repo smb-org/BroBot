@@ -1,4 +1,4 @@
-import type { ApiErrorCode, AuditAction, ChannelRole, EventCode, EventTone } from "../contracts/values";
+import { EVENTSUB_NEUTRAL_REASON_CODES, type ApiErrorCode, type AuditAction, type ChannelRole, type EventCode, type EventSubNeutralReasonCode, type EventTone } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -76,6 +76,7 @@ export interface DashboardTexts {
     botTokenRevoked: string;
     broadcasterConsentMissing: string;
     chatSubscriptionMissing: string;
+    chatSubscriptionNotNeeded: string;
     healthy: string;
     stateIncomplete: string;
     notConnected: string;
@@ -362,7 +363,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       maintenanceOverdue: "Wartung überfällig", renewalOverdue: "Erneuerung überfällig", valid: "Gültig",
       moderatorRoleMissing: "Moderatorrolle fehlt", chatSubscriptionError: "Chat-Abo-Fehler", chatSubscriptionRevoked: "Chat-Abo widerrufen",
       botError: "Bot-Fehler", botTokenRevoked: "Bot-Token widerrufen", broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt",
-      chatSubscriptionMissing: "Chat-Abo fehlt", healthy: "Gesund", stateIncomplete: "Zustand unvollständig",
+      chatSubscriptionMissing: "Chat-Abo fehlt", chatSubscriptionNotNeeded: "Nicht benötigt — kein aktives Modul liest den Chat.", healthy: "Gesund", stateIncomplete: "Zustand unvollständig",
       notConnected: "Nicht verbunden", notSetUp: "Nicht eingerichtet", moderator: "Moderator", missing: "Fehlt",
       active: "Aktiv", pending: "Ausstehend", notRequired: "Nicht erforderlich", present: "Vorhanden",
       botPermissionsMissing: (count) => `${count} fehlen`,
@@ -527,7 +528,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       renewalOverdue: "Renewal overdue", valid: "Valid", moderatorRoleMissing: "Moderator role missing",
       chatSubscriptionError: "Chat subscription error", chatSubscriptionRevoked: "Chat subscription revoked", botError: "Bot error",
       botTokenRevoked: "Bot token revoked", broadcasterConsentMissing: "Broadcaster consent missing",
-      chatSubscriptionMissing: "Chat subscription missing", healthy: "Healthy", stateIncomplete: "Incomplete status",
+      chatSubscriptionMissing: "Chat subscription missing", chatSubscriptionNotNeeded: "Not needed — no active module reads chat.", healthy: "Healthy", stateIncomplete: "Incomplete status",
       notConnected: "Not connected", notSetUp: "Not set up", moderator: "Moderator", missing: "Missing", active: "Active",
       pending: "Pending", notRequired: "Not required", present: "Present",
       botPermissionsMissing: (count) => `${count} missing`,
@@ -862,8 +863,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   },
 };
 
-export type EventFamily = "gemeinschaft" | "raid" | "moderation" | "betrieb";
-export type EventTier = "voll" | "gezeichnet";
+export type EventFamily = "community" | "raid" | "moderation" | "operations";
+export type EventTier = "full" | "outlined";
 export type EventNumberKey = "viewers" | "count" | "duration" | "remainingSeconds" | "tier" | null;
 export interface EventToneEntry {
   family: EventFamily;
@@ -874,59 +875,59 @@ export interface EventToneEntry {
 }
 
 export const eventToneEntries: Record<EventCode, EventToneEntry> = {
-  "host.action.failed": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
-  "host.chat.failed": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
-  "host.chat.sent": { family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
-  "host.module.error": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
-  "host.module.unknown": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "host.overlay.not_executed": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
-  "host.shoutout.failed": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
-  "host.shoutout.sent": { family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
-  "channel_events.raid.incoming": { family: "raid", tier: "voll", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
-  "channel_events.raid.outgoing": { family: "raid", tier: "gezeichnet", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
-  "channel_events.shoutout.sent": { family: "raid", tier: "gezeichnet", word: { de: "Shoutout", en: "Shoutout" }, numberKey: null },
-  "channel_events.shoutout.received": { family: "raid", tier: "voll", word: { de: "Shoutout", en: "Shoutout" }, numberKey: "viewers" },
-  "channel_events.chat.sub": { family: "gemeinschaft", tier: "voll", word: { de: "Abo", en: "Sub" }, numberKey: "tier" },
-  "channel_events.chat.resub": { family: "gemeinschaft", tier: "voll", word: { de: "Resub", en: "Resub" }, numberKey: "tier" },
-  "channel_events.chat.gift_sub": { family: "gemeinschaft", tier: "voll", word: { de: "Gift-Sub", en: "Gift Sub" }, numberKey: "tier" },
-  "channel_events.chat.community_gift": { family: "gemeinschaft", tier: "voll", word: { de: "Gift", en: "Gift" }, numberKey: "count" },
-  "channel_events.chat.announcement": { family: "gemeinschaft", tier: "gezeichnet", word: { de: "Ankündigung", en: "Announcement" }, numberKey: null },
-  "channel_events.chat.unknown": { family: "gemeinschaft", tier: "voll", word: { de: "Unbekannt", en: "Unknown" }, numberKey: null },
-  "channel_events.moderation.ban": { family: "moderation", tier: "voll", word: { de: "Bann", en: "Ban" }, numberKey: null },
-  "channel_events.moderation.timeout": { family: "moderation", tier: "voll", word: { de: "Auszeit", en: "Timeout" }, numberKey: "duration" },
-  "channel_events.moderation.untimeout": { family: "moderation", tier: "gezeichnet", word: { de: "Entsperrt", en: "Untimeout" }, numberKey: null },
-  "channel_events.moderation.unban": { family: "moderation", tier: "gezeichnet", word: { de: "Entbannt", en: "Unbanned" }, numberKey: null },
-  "channel_events.moderation.delete": { family: "moderation", tier: "voll", word: { de: "Gelöscht", en: "Deleted" }, numberKey: null },
-  "channel_events.moderation.warn": { family: "moderation", tier: "voll", word: { de: "Verwarnung", en: "Warning" }, numberKey: null },
-  "channel_events.moderation.unknown": { family: "moderation", tier: "voll", word: { de: "Unbekannt", en: "Unknown" }, numberKey: null },
-  "channel_events.automod.held": { family: "moderation", tier: "voll", word: { de: "AutoMod", en: "AutoMod" }, numberKey: null },
-  "channel_events.suspicious.message": { family: "moderation", tier: "voll", word: { de: "Verdacht", en: "Suspicious" }, numberKey: null },
-  "channel_events.suspicious.classified": { family: "moderation", tier: "voll", word: { de: "Einstufung", en: "Classified" }, numberKey: null },
-  "channel_events.suspicious.cleared": { family: "moderation", tier: "gezeichnet", word: { de: "Entwarnt", en: "Cleared" }, numberKey: null },
-  "raid.outgoing": { family: "raid", tier: "gezeichnet", word: { de: "Raid", en: "Raid" }, numberKey: "viewers", tone: "warning" },
-  "raid.shoutout": { family: "raid", tier: "voll", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
-  "raid.invalid": { family: "raid", tier: "gezeichnet", word: { de: "Raid", en: "Raid" }, numberKey: null, tone: "warning" },
-  "shoutout.suppressed": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "ads.announcement": { family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: "duration", tone: "info" },
-  "ads.skipped": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "ads.prewarning.announced": { family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
-  "ads.prewarning.no_schedule": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "ads.prewarning.too_late": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "ads.prewarning.break_started": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "ads.prewarning.rescheduled": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "ads.prewarning.scope_missing": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "ads.prewarning.schedule_error": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
-  "ads.snooze": { family: "betrieb", tier: "gezeichnet", word: { de: "Snooze", en: "Snooze" }, numberKey: null, tone: "info" },
-  "ads.commercial.failed": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
-  "host.clip.failed": { family: "betrieb", tier: "gezeichnet", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
-  "text_commands.cooldown": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: "remainingSeconds", tone: "warning" },
-  "text_commands.triggered": { family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
-  "text_commands.disabled": { family: "betrieb", tier: "gezeichnet", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
-  "text_commands.permission_denied": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "text_commands.already_exists": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "text_commands.not_authorized": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "text_commands.unknown": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
-  "text_commands.invalid": { family: "betrieb", tier: "gezeichnet", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "host.action.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.chat.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.chat.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "host.module.error": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.module.unknown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "host.overlay.not_executed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.shoutout.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.shoutout.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "channel_events.raid.incoming": { family: "raid", tier: "full", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
+  "channel_events.raid.outgoing": { family: "raid", tier: "outlined", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
+  "channel_events.shoutout.sent": { family: "raid", tier: "outlined", word: { de: "Shoutout", en: "Shoutout" }, numberKey: null },
+  "channel_events.shoutout.received": { family: "raid", tier: "full", word: { de: "Shoutout", en: "Shoutout" }, numberKey: "viewers" },
+  "channel_events.chat.sub": { family: "community", tier: "full", word: { de: "Abo", en: "Sub" }, numberKey: "tier" },
+  "channel_events.chat.resub": { family: "community", tier: "full", word: { de: "Resub", en: "Resub" }, numberKey: "tier" },
+  "channel_events.chat.gift_sub": { family: "community", tier: "full", word: { de: "Gift-Sub", en: "Gift Sub" }, numberKey: "tier" },
+  "channel_events.chat.community_gift": { family: "community", tier: "full", word: { de: "Gift", en: "Gift" }, numberKey: "count" },
+  "channel_events.chat.announcement": { family: "community", tier: "outlined", word: { de: "Ankündigung", en: "Announcement" }, numberKey: null },
+  "channel_events.chat.unknown": { family: "community", tier: "full", word: { de: "Unbekannt", en: "Unknown" }, numberKey: null },
+  "channel_events.moderation.ban": { family: "moderation", tier: "full", word: { de: "Bann", en: "Ban" }, numberKey: null },
+  "channel_events.moderation.timeout": { family: "moderation", tier: "full", word: { de: "Auszeit", en: "Timeout" }, numberKey: "duration" },
+  "channel_events.moderation.untimeout": { family: "moderation", tier: "outlined", word: { de: "Entsperrt", en: "Untimeout" }, numberKey: null },
+  "channel_events.moderation.unban": { family: "moderation", tier: "outlined", word: { de: "Entbannt", en: "Unbanned" }, numberKey: null },
+  "channel_events.moderation.delete": { family: "moderation", tier: "full", word: { de: "Gelöscht", en: "Deleted" }, numberKey: null },
+  "channel_events.moderation.warn": { family: "moderation", tier: "full", word: { de: "Verwarnung", en: "Warning" }, numberKey: null },
+  "channel_events.moderation.unknown": { family: "moderation", tier: "full", word: { de: "Unbekannt", en: "Unknown" }, numberKey: null },
+  "channel_events.automod.held": { family: "moderation", tier: "full", word: { de: "AutoMod", en: "AutoMod" }, numberKey: null },
+  "channel_events.suspicious.message": { family: "moderation", tier: "full", word: { de: "Verdacht", en: "Suspicious" }, numberKey: null },
+  "channel_events.suspicious.classified": { family: "moderation", tier: "full", word: { de: "Einstufung", en: "Classified" }, numberKey: null },
+  "channel_events.suspicious.cleared": { family: "moderation", tier: "outlined", word: { de: "Entwarnt", en: "Cleared" }, numberKey: null },
+  "raid.outgoing": { family: "raid", tier: "outlined", word: { de: "Raid", en: "Raid" }, numberKey: "viewers", tone: "warning" },
+  "raid.shoutout": { family: "raid", tier: "full", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
+  "raid.invalid": { family: "raid", tier: "outlined", word: { de: "Raid", en: "Raid" }, numberKey: null, tone: "warning" },
+  "shoutout.suppressed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "ads.announcement": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: "duration", tone: "info" },
+  "ads.skipped": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "ads.prewarning.announced": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "ads.prewarning.no_schedule": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "ads.prewarning.too_late": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "ads.prewarning.break_started": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "ads.prewarning.rescheduled": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "ads.prewarning.scope_missing": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "ads.prewarning.schedule_error": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "ads.snooze": { family: "operations", tier: "outlined", word: { de: "Snooze", en: "Snooze" }, numberKey: null, tone: "info" },
+  "ads.commercial.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.clip.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "text_commands.cooldown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: "remainingSeconds", tone: "warning" },
+  "text_commands.triggered": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "text_commands.disabled": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "text_commands.permission_denied": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "text_commands.already_exists": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "text_commands.not_authorized": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "text_commands.unknown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "text_commands.invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
 };
 
 export function eventText(code: string, language?: DashboardLanguage): string;
@@ -1041,6 +1042,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     module_settings_invalid: "Moduleinstellungen sind ungültig.",
     module_settings_changed_concurrently: "Moduleinstellungen wurden inzwischen geändert.",
     module_enabled_field_invalid: "Feld enabled ist ungültig.",
+    module_mandatory: "Kanalereignisse sind immer aktiv.",
     module_changed_concurrently: "Modul wurde inzwischen geändert.",
     command_management_denied: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, ändern oder löschen.",
     command_data_invalid: "Befehlsdaten sind ungültig.",
@@ -1109,6 +1111,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     module_settings_invalid: "The module settings are invalid.",
     module_settings_changed_concurrently: "The module settings have since changed.",
     module_enabled_field_invalid: "The enabled field is invalid.",
+    module_mandatory: "Channel events are always active.",
     module_changed_concurrently: "The module has since changed.",
     command_management_denied: "Only broadcasters and managers may create, change, or remove commands.",
     command_data_invalid: "Command data is invalid.",
@@ -1183,11 +1186,28 @@ const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
   },
 };
 
+const eventSubNeutralReasonTexts: LocaleCatalog<Record<EventSubNeutralReasonCode, string>> = {
+  de: {
+    moderator_required: "Wartet auf Moderatorstatus des Bots",
+    pending_adoption: "Wird übernommen",
+  },
+  en: {
+    moderator_required: "Waiting for the bot's moderator status",
+    pending_adoption: "Being adopted",
+  },
+};
+
+const isEventSubNeutralReasonCode = (code: string): code is EventSubNeutralReasonCode =>
+  (EVENTSUB_NEUTRAL_REASON_CODES as readonly string[]).includes(code);
+
 export const maintenanceReasonText = (
   code: string | null | undefined,
   language: DashboardLanguage = dashboardLanguage(),
 ): string | null => {
   if (code === null || code === undefined) return null;
+  if (isEventSubNeutralReasonCode(code)) {
+    return catalogString(eventSubNeutralReasonTexts[language], code) ?? code;
+  }
   const catalog: Record<string, string> = maintenanceReasonTexts[language];
   return catalogString(catalog, code) ?? code;
 };

@@ -36,7 +36,7 @@ interface TextCommandsTexts {
   hoursAgo: (count: number) => string;
   responseMissing: string;
   nameMissing: string;
-  nameAndResponseMissing: string;
+  nameInvalid: string;
   columns: {
     name: string;
     kind: string;
@@ -84,7 +84,7 @@ const texts: LocaleCatalog<TextCommandsTexts> = {
     hoursAgo: (count) => `vor ${String(count)} h`,
     responseMissing: "Antworttext ausfüllen",
     nameMissing: "Namen ausfüllen",
-    nameAndResponseMissing: "Name und Antworttext ausfüllen",
+    nameInvalid: "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich; maximal 32 Zeichen.",
     columns: { name: "!Name", kind: "Art", text: "Antwort", cooldown: "Abkühl.", last: "Zuletzt", minimumTier: "Mindeststufe", active: "Schalter" },
   },
   en: {
@@ -122,7 +122,7 @@ const texts: LocaleCatalog<TextCommandsTexts> = {
     hoursAgo: (count) => `${String(count)} h ago`,
     responseMissing: "Fill in a response",
     nameMissing: "Fill in a name",
-    nameAndResponseMissing: "Fill in a name and response",
+    nameInvalid: "Use lowercase letters, numbers, hyphen, or underscore; maximum 32 characters.",
     columns: { name: "!Name", kind: "Type", text: "Response", cooldown: "Cooldown", last: "Last", minimumTier: "Minimum level", active: "Switch" },
   },
 };
