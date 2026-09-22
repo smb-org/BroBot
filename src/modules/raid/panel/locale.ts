@@ -13,6 +13,8 @@ export interface RaidPanelTexts {
   placeholderShort: string;
   actions: string;
   save: string;
+  discard: string;
+  saving: string;
   saved: string;
   load: string;
   error: string;
@@ -34,6 +36,8 @@ const catalog: Record<DashboardLanguage, RaidPanelTexts> = {
     placeholderShort: "{channel} und {viewers} werden beim Eingang ersetzt.",
     actions: "Aktionen",
     save: "Raid-Einstellungen speichern",
+    discard: "Verwerfen",
+    saving: "Wird gespeichert …",
     saved: "Raid-Einstellungen gespeichert.",
     load: "Raid-Einstellungen werden geladen …",
     error: "Die Raid-Einstellungen konnten nicht geladen oder gespeichert werden.",
@@ -53,6 +57,8 @@ const catalog: Record<DashboardLanguage, RaidPanelTexts> = {
     placeholderShort: "{channel} and {viewers} are replaced when the raid arrives.",
     actions: "Actions",
     save: "Save raid settings",
+    discard: "Discard",
+    saving: "Saving …",
     saved: "Raid settings saved.",
     load: "Loading raid settings …",
     error: "The raid settings could not be loaded or saved.",

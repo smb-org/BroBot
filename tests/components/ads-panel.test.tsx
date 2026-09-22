@@ -1,15 +1,20 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import type { ReactElement } from "react";
+
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { UiProvider } from "../../src/dashboard/ui";
 import { AdsPanel } from "../../src/modules/ads/panel";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
   headers: { "Content-Type": "application/json" },
 });
+
+const renderPanel = (panel: ReactElement): ReturnType<typeof render> => render(<UiProvider>{panel}</UiProvider>);
 
 describe("Ad panel view", () => {
   afterEach(() => {
@@ -40,14 +45,17 @@ describe("Ad panel view", () => {
     } })));
     Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
 
-    render(<AdsPanel channelId="kanal-a" />);
+    renderPanel(<AdsPanel channelId="kanal-a" />);
 
     expect(await screen.findByRole("heading", { name: automaticHeading, level: 2 })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: manualHeading, level: 2 })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: actionsHeading, level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: saveLabel })).toBeInTheDocument();
+    // The save bar only appears once a field is dirty -- not before.
+    expect(screen.queryByRole("button", { name: saveLabel })).not.toBeInTheDocument();
 
-    const textareas = await screen.findAllByRole("textbox");
+    // `textbox` also matches the prewarning-text `Field`'s single-line
+    // input; textareas are the multi-line subset of that role.
+    const textareas = (await screen.findAllByRole("textbox")).filter((element) => element.tagName === "TEXTAREA");
     expect(textareas).toHaveLength(2);
     expect(textareas.map((textarea) => textarea.closest("label")?.className)).toEqual([
       "config-field config-field--breit",
@@ -89,7 +97,7 @@ describe("Ad panel view", () => {
       } }));
     }));
 
-    render(<AdsPanel channelId="kanal-a" language="de" />);
+    renderPanel(<AdsPanel channelId="kanal-a" language="de" />);
 
     const button = await screen.findByRole("button", { name: /Snooze.*0.*Aufladung/ });
     expect(button).toBeDisabled();
@@ -122,7 +130,7 @@ describe("Ad panel view", () => {
       } }));
     }));
 
-    render(<AdsPanel channelId="kanal-a" language="de" />);
+    renderPanel(<AdsPanel channelId="kanal-a" language="de" />);
 
     expect(await screen.findByText("Derzeit ist keine Werbung geplant.")).toBeInTheDocument();
     expect(await screen.findByText(/90 Sekunden/)).toBeInTheDocument();
@@ -146,13 +154,14 @@ describe("Ad panel view", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    render(<AdsPanel channelId="kanal-a" language="de" />);
+    renderPanel(<AdsPanel channelId="kanal-a" language="de" />);
     const field = await screen.findByLabelText("Vorlaufzeit (Sekunden)");
     fireEvent.change(field, { target: { value: "" } });
     expect((field as HTMLInputElement).value).toBe("");
     fireEvent.click(screen.getByRole("button", { name: "Ansagen speichern" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Zahl eingeben");
+    expect(await screen.findByText("× Zahl eingeben")).toBeInTheDocument();
+    expect(field).toHaveAttribute("aria-invalid", "true");
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
     expect((field as HTMLInputElement).value).toBe("");
   });
