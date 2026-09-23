@@ -46,9 +46,9 @@ Vor dem Push muss `pnpm run check` lokal grün durchlaufen. CI prüft zusätzlic
 - Force-Push und Löschen von `main` sind gesperrt
 - Der Schutz gilt **auch für Administratoren**
 
-Freigaben sind bewusst **nicht** erforderlich: Einen eigenen Pull Request kann man bei GitHub nicht selbst freigeben, und bei der derzeitigen Besetzung würde das jede Arbeit blockieren. Die verbindliche Hürde ist die grüne CI.
+Freigaben sind bewusst **nicht** erforderlich: Einen eigenen Pull Request kann man bei GitHub nicht selbst freigeben, und bei der derzeitigen Besetzung würde das jede Arbeit blockieren. Die verbindliche Hürde sind die grüne CI, gelesene SonarCloud-Befunde und das unabhängige Review vor dem Merge (siehe [AI-WORKFLOW.md](./AI-WORKFLOW.md)).
 
-**SonarCloud ist absichtlich keine Pflichtprüfung.** Es läuft mit und ist sichtbar, scheitert in diesem Projekt aber regelmäßig an der Duplikationsschwelle — Ursache sind fast immer Tests, die ihren Aufbau bewusst wiederholen. Zusammengefasste Tests sind an dieser Stelle schlechtere Tests. Sicherheitsbefunde von SonarCloud werden ernst genommen und behoben; die Duplikationsschwelle allein blockiert nichts.
+**SonarCloud ist keine Pflichtprüfung, wird aber vor jedem Merge gelesen.** Fehler-, Sicherheits- und Zuverlässigkeitsbefunde werden behoben, bevor gemergt wird. Testduplikate meldet nicht Sonar — dessen Duplikationsprüfung läuft nur über `sonar.sources` (Produktionscode) —, sondern der nicht blockierende `jscpd`-Schritt in der CI (`pnpm run dup:tests`). Funde daraus werden als Aufräumaufgabe erfasst, blockieren den Merge aber nicht.
 
 Muss der Schutz im Notfall umgangen werden, geschieht das über die Repository-Einstellungen unter Branches — als bewusste Entscheidung, nicht nebenbei.
 
