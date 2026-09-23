@@ -1,5 +1,6 @@
 import type {
   AuditActorKind,
+  AuditArea,
   ChannelControlDuration,
   ChannelStreamState,
   ChannelRole,
@@ -255,11 +256,19 @@ export interface PanelAuditEntry {
   action: string;
   before: string;
   after: string;
+  /** The action's target member, when one is stored in `before`/`after` -- resolved server-side alongside the actor (#181). */
+  subjectLogin?: string | null;
+  subjectDisplayName?: string | null;
 }
 
 export interface PanelAuditResponse {
   entries: PanelAuditEntry[];
   nextCursor: string | null;
+}
+
+export interface PanelAuditFilters {
+  person: string | null;
+  area: AuditArea | null;
 }
 
 export interface PanelEventEntry {

@@ -1,4 +1,4 @@
-import { COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, SHOUTOUT_FAILURE_REASONS, type ApiErrorCode, type AuditAction, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ShoutoutFailureReason } from "../contracts/values";
+import { COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, SHOUTOUT_FAILURE_REASONS, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ShoutoutFailureReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -249,6 +249,18 @@ export interface DashboardTexts {
     after: string;
     olderEntries: string;
     loadingOlderEntries: string;
+    yes: string;
+    no: string;
+    newValue: string;
+    removedValue: string;
+    filter: string;
+    person: string;
+    area: string;
+    allAreas: string;
+    areaLabels: Record<AuditArea, string>;
+    activeFilters: string;
+    resetFilters: string;
+    noMatches: string;
   };
   events: {
     title: string;
@@ -526,6 +538,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       title: "Audit-Log", entries: "Einträge", time: "Zeit", action: "Aktion", who: "Wer",
       load: "Audit-Log wird geladen …", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
       before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
+      yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
+      filter: "Filter", person: "Person", area: "Bereich", allAreas: "Alle Bereiche",
+      areaLabels: { module: "Module", command: "Textbefehle", member: "Mitglieder", channel: "Kanal", overlay: "Overlay" },
+      activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen", noMatches: "Keine Einträge passen zu den Filtern.",
     },
     events: {
       title: "Ereignisse", count: (count) => `${count} Einträge`, log: "Ereignisprotokoll", time: "Zeit", event: "Ereignis",
@@ -733,6 +749,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       title: "Audit log", entries: "entries", time: "Time", action: "Action", who: "Who",
       load: "Loading audit log …", empty: "No audit entries saved yet.", changeData: "Change data",
       before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
+      yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
+      filter: "Filters", person: "Person", area: "Area", allAreas: "All areas",
+      areaLabels: { module: "Modules", command: "Text commands", member: "Members", channel: "Channel", overlay: "Overlay" },
+      activeFilters: "Active filters:", resetFilters: "Reset filters", noMatches: "No entries match the filters.",
     },
     events: {
       title: "Events", count: (count) => `${count} entries`, log: "Event log", time: "Time", event: "Event", module: "Module",
@@ -1334,6 +1354,36 @@ export const auditActionLabel = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string => catalogString(auditActionTexts[language], action) ?? action;
 
+const memberAsWords: LocaleCatalog<string> = { de: "als", en: "as" };
+
+/** The connector between a member's login and their role in an audit row's subject, e.g. "sensitron als Bediener" (#181). */
+export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()): string => memberAsWords[language];
+
+/**
+ * Fallback labels for the handful of common audit diff field keys that
+ * aren't a module's own settings (member role, channel consent, overlay
+ * token lifecycle, ...). Anything not listed here falls back to its raw
+ * key, per #181's explicit allowance -- this stays a short, curated list,
+ * not an attempt at completeness.
+ */
+const auditFieldLabels: LocaleCatalog<Record<string, string>> = {
+  de: {
+    role: "Rolle", enabled: "Aktiv", fullConsent: "Vollzustimmung", revocationReason: "Widerrufsgrund",
+    expiresAt: "Gültig bis", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
+    clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename",
+  },
+  en: {
+    role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
+    expiresAt: "Valid until", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
+    clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name",
+  },
+};
+
+export const auditFieldLabel = (
+  key: string,
+  language: DashboardLanguage = dashboardLanguage(),
+): string => catalogString(auditFieldLabels[language], key) ?? key;
+
 /**
  * DE/EN text for every `ApiErrorCode` the worker (or the dashboard's own
  * request guard) can send back as `{ "error": "<code>" }`. `Record<ApiErrorCode,
@@ -1378,6 +1428,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     last_broadcaster_cannot_be_removed: "Der letzte Broadcaster kann nicht entfernt werden.",
     event_origin_invalid: "Ereignis-Herkunft ist ungültig.",
     event_tone_invalid: "Ereignis-Ton ist ungültig.",
+    audit_area_invalid: "Audit-Bereich ist ungültig.",
     moderator_status_check_denied: "Nur Broadcaster und Verwalter dürfen den Moderatorstatus prüfen.",
     moderator_status_check_rate_limited: "Der Moderatorstatus wurde für diesen Kanal kürzlich geprüft.",
     moderator_status_check_failed: "Moderatorstatus konnte nicht gelesen werden.",
@@ -1452,6 +1503,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     last_broadcaster_cannot_be_removed: "The last broadcaster cannot be removed.",
     event_origin_invalid: "Event origin is invalid.",
     event_tone_invalid: "Event tone is invalid.",
+    audit_area_invalid: "Audit area is invalid.",
     moderator_status_check_denied: "Only broadcasters and managers may check the moderator status.",
     moderator_status_check_rate_limited: "The moderator status for this channel was checked recently.",
     moderator_status_check_failed: "The moderator status could not be read.",

@@ -1421,11 +1421,19 @@ describe("Dashboard skeleton", () => {
     expect(row).toHaveAttribute("aria-selected", "false");
     fireEvent.keyDown(row as HTMLElement, { key: "Enter" });
     expect(row).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "Vorher" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Nachher" })).toBeInTheDocument();
-    expect(screen.getByText('{"enabled":false}')).toBeInTheDocument();
     const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
-    expect(await within(inspector).findByText("user-1")).toBeInTheDocument();
+    // #181 item 2: the inspector shows the display name like the table, the
+    // raw id only as a tooltip -- not "user-1" as visible text.
+    expect(await within(inspector).findByText("Alice")).toBeInTheDocument();
+    expect(within(inspector).getByText("Alice")).toHaveAttribute("title", "user-1");
+    // #181 item 3: a diff of the one changed field, not raw JSON blocks.
+    expect(within(inspector).getByText("Aktiv")).toBeInTheDocument();
+    expect(within(inspector).getByText("Nein")).toBeInTheDocument();
+    expect(within(inspector).getByText("Ja")).toBeInTheDocument();
+    expect(within(inspector).queryByText('{"enabled":false}')).not.toBeInTheDocument();
+    fireEvent.click(within(inspector).getByText("Technische Details"));
+    const rawBlocks = inspector.querySelectorAll("pre");
+    expect(Array.from(rawBlocks).map((pre) => pre.textContent.trim())).toEqual(['{\n  "enabled": false\n}', '{\n  "enabled": true\n}']);
     const secondRow = screen.getByText("Modul deaktiviert").closest("tr");
     expect(secondRow).not.toBeNull();
     fireEvent.keyDown(secondRow as HTMLElement, { key: " " });

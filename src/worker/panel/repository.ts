@@ -1,6 +1,7 @@
 import type {
   PanelActiveModule,
   PanelAuditEntry,
+  PanelAuditFilters,
   PanelAuditResponse,
   PanelBotStatus,
   PanelBotPermissions,
@@ -18,11 +19,13 @@ import type {
 } from "../../panel-contract";
 import type {
   AuditActorKind,
+  AuditArea,
   ChannelStreamState,
   ChannelRole,
   EventSubSubscriptionType,
   IdentityStatus,
 } from "../../contracts/values";
+import { AUDIT_AREA_PREFIXES } from "../../dashboard/audit/areas";
 import { eventToneEntries } from "../../dashboard/locale";
 import {
   channelBotConsentCondition,
@@ -427,27 +430,58 @@ export const getSystemOverviewForUser = async (
   };
 };
 
+const escapeLikePrefix = (prefix: string): string => prefix.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+
+/**
+ * "module" has no prefix of its own in `AUDIT_AREA_PREFIXES` -- it's every
+ * action none of the other areas' prefixes match, so its predicate is the
+ * conjunction of the others' negations. Kept in sync with
+ * `dashboard/audit/areas.ts`'s `auditAreaForAction` by construction: both
+ * read the same table.
+ */
+const auditAreaSqlClause = (area: AuditArea): { sql: string; values: string[] } => {
+  const match = AUDIT_AREA_PREFIXES.find((entry) => entry.area === area);
+  if (match !== undefined) return { sql: "action LIKE ? ESCAPE '\\'", values: [`${escapeLikePrefix(match.prefix)}%`] };
+  return {
+    sql: AUDIT_AREA_PREFIXES.map(() => "action NOT LIKE ? ESCAPE '\\'").join(" AND "),
+    values: AUDIT_AREA_PREFIXES.map((entry) => `${escapeLikePrefix(entry.prefix)}%`),
+  };
+};
+
 export const getAuditLogForChannel = async (
   db: D1Database,
   channelId: string,
   limit: number,
   cursor: LogCursor | null,
+  filters: PanelAuditFilters = { person: null, area: null },
 ): Promise<PanelAuditResponse> => {
+  const where = ["channel_id = ?"];
+  const filterValues: string[] = [channelId];
+  if (filters.person !== null) {
+    where.push("actor_user_id = ?");
+    filterValues.push(filters.person);
+  }
+  if (filters.area !== null) {
+    const area = auditAreaSqlClause(filters.area);
+    where.push(area.sql);
+    filterValues.push(...area.values);
+  }
+  const whereClause = where.join("\n          AND ");
   const query = cursor === null
     ? `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
-        WHERE channel_id = ?
+        WHERE ${whereClause}
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`
     : `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
-        WHERE channel_id = ?
+        WHERE ${whereClause}
           AND (created_at < ? OR (created_at = ? AND audit_id < ?))
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`;
   const values = cursor === null
-    ? [channelId, limit + 1]
-    : [channelId, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
+    ? [...filterValues, limit + 1]
+    : [...filterValues, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
   const result = await db.prepare(query).bind(...values).all<AuditLogRow>();
   const hasNextPage = result.results.length > limit;
   const rows = result.results.slice(0, limit);

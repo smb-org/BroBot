@@ -36,7 +36,8 @@ import {
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
 import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
-import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
+import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
+import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
 import { createClip, type CreateClipResult } from "../clip";
 import { fetchTwitchUserByLogin, sendShoutout, type ShoutoutSendResult } from "../shoutout";
 import { writeModuleAudit } from "../module-audit";
@@ -85,6 +86,18 @@ const parseEventFilters = (
     tone: validTone,
     ...(validTones.length > 1 ? { tones: validTones } : {}),
     person,
+  };
+};
+
+const parseAuditFilters = (
+  context: Context<PanelEnvironment>,
+): PanelAuditFilters | Response => {
+  const area = context.req.query("area");
+  if (area !== undefined && !isAuditArea(area)) return context.json({ error: "audit_area_invalid" }, 400);
+  const actor = context.req.query("actor");
+  return {
+    person: actor === undefined || actor.length === 0 ? null : actor,
+    area: area === undefined ? null : area,
   };
 };
 
@@ -390,17 +403,29 @@ panelRouter.get(
     const channelId = context.req.param("channelId");
     const parsed = parseLogQuery(context);
     if (parsed instanceof Response) return parsed;
-    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor);
-    const actorIds = audit.entries.map((entry) => entry.actorUserId);
-    const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
+    const filters = parseAuditFilters(context);
+    if (filters instanceof Response) return filters;
+    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, filters);
+    // The subject enrichment (#181 item 2/4) reuses the actor lookup's single
+    // batched Twitch call -- a member action's target is just another user id
+    // living in `before`/`after`, resolved the same way as the actor.
+    const subjectIds = audit.entries.flatMap((entry) => {
+      const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
+      return subjectId === null ? [] : [subjectId];
+    });
+    const userIds = [...new Set([...audit.entries.map((entry) => entry.actorUserId), ...subjectIds])];
+    const users = await fetchTwitchUsersById(fetch, context.env, userIds);
     return context.json({
       ...audit,
       entries: audit.entries.map((entry) => {
-        const actor = actors.get(entry.actorUserId);
+        const actor = users.get(entry.actorUserId);
+        const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
+        const subject = subjectId === null ? undefined : users.get(subjectId);
         return {
           ...entry,
           actorLogin: actor?.login ?? null,
           actorDisplayName: actor?.displayName ?? null,
+          ...(subjectId === null ? {} : { subjectLogin: subject?.login ?? null, subjectDisplayName: subject?.displayName ?? null }),
         };
       }),
     });
