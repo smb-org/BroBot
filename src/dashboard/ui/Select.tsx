@@ -84,10 +84,10 @@ export function Select({
       id={id}
       title={title}
       allowDeselect={false}
-      comboboxProps={{ shadow: "xs" }}
+      comboboxProps={{ shadow: "xs", width: "max-content" }}
       renderOption={renderOption}
       styles={{
-        dropdown: { backgroundColor: colors.surface, borderColor: colors.hairlineStrong },
+        dropdown: { backgroundColor: colors.surface, borderColor: colors.hairlineStrong, maxWidth: "min(90vw, 320px)" },
         option: { fontSize: "13px" },
       }}
     />

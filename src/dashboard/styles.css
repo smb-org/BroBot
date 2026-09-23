@@ -488,10 +488,12 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .command-panel .table thead th { height: 30px; }
 /* Shared phase 2 components ───────────────────────────── */
 .command-panel .table thead th:nth-child(1) { width: 116px; }
-.command-panel .table thead th:nth-child(2) { width: auto; }
-.command-panel .table thead th:nth-child(3) { width: 150px; }
-.command-panel .table thead th:nth-child(4) { width: 84px; }
-.command-panel .table tbody th:nth-child(1) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.command-panel .table thead th:nth-child(2) { width: 130px; }
+.command-panel .table thead th:nth-child(3) { width: auto; }
+.command-panel .table thead th:nth-child(4) { width: 172px; }
+.command-panel .table thead th:nth-child(5) { width: 76px; }
+.command-panel .table tbody th:nth-child(1),
+.command-panel .table tbody td:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .command-panel .table .minimum-tier-select { width: 100%; min-width: 0; }
 .command-panel .table .minimum-tier-select input { width: 100%; min-width: 0; }
 .command-inspector__meta { display: none; margin-left: auto; font-size: 11.5px; }
@@ -501,6 +503,13 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .command-panel .table tbody tr[aria-selected="true"] { background: var(--tint-1); }
 .command-panel .table tbody tr[aria-selected="true"] > *:first-child { box-shadow: inset 2px 0 0 var(--brand); }
 .command-panel .table tbody th { color: var(--brand-text); font-weight: 600; }
+/* Below the width the inspector-open state relies on, keep the columns at
+   their sized-to-content widths and scroll instead of squeezing them --
+   squeezed fixed-width columns overlap their headers (#174). */
+@media (max-width: 900px) {
+  .command-panel .table-wrap { overflow-x: auto; }
+  .command-panel .table { min-width: 580px; }
+}
 .table__answer { min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
 .command-create { display: grid; gap: 14px; max-width: var(--config-field-wide); }
 .form-actions--create { align-items: center; }
