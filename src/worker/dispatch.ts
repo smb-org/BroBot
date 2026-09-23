@@ -13,7 +13,8 @@ import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-lo
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
-import { readChannelStreamState, writeEventSubStreamState, writeHelixStreamStateIfUnknown } from "./db/stream-state";
+import { writeEventSubStreamState } from "./db/stream-state";
+import { lookupAndStoreStreamStateIfMissing } from "./stream-state-lookup";
 import { clearStreamEndChannelControls, readDispatchChannelState } from "./db/channel-controls";
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
@@ -38,46 +39,12 @@ const textValue = (value: unknown): string | null =>
 
 const arrayValue = (value: unknown): value is readonly unknown[] => Array.isArray(value);
 
-const streamStateFromHelix = async (
-  environment: DispatchEnvironment,
-  channelId: string,
-  fetcher: typeof fetch,
-): Promise<Exclude<ModuleStreamState, "unknown"> | null> => {
-  try {
-    const accessToken = await getAppAccessToken(
-      environment as unknown as Env,
-      new Date().toISOString(),
-      fetcher,
-    );
-    const result = await helixRequest<{ data?: unknown }>({
-      url: "https://api.twitch.tv/helix/streams",
-      query: { user_id: channelId, type: "live" },
-      accessToken,
-      clientId: environment.TWITCH_CLIENT_ID,
-      fetcher,
-    });
-    if (!result.ok || !recordValue(result.data) || !arrayValue(result.data.data)) return null;
-    if (result.data.data.length === 0) return "offline";
-    const firstStream = result.data.data[0];
-    return recordValue(firstStream) && typeof firstStream.id === "string" ? "online" : null;
-  } catch {
-    return null;
-  }
-};
-
 const streamStateForEvent = async (
   environment: DispatchEnvironment,
   channelId: string,
   fetcher: typeof fetch,
-): Promise<ModuleStreamState> => {
-  const stored = await readChannelStreamState(environment.DB, channelId);
-  if (stored !== null) return stored;
-  const fromHelix = await streamStateFromHelix(environment, channelId, fetcher);
-  if (fromHelix === null) return "unknown";
-  const storedByHelix = await writeHelixStreamStateIfUnknown(environment.DB, channelId, fromHelix, new Date().toISOString());
-  if (storedByHelix) return fromHelix;
-  return await readChannelStreamState(environment.DB, channelId) ?? fromHelix;
-};
+): Promise<ModuleStreamState> =>
+  (await lookupAndStoreStreamStateIfMissing(environment as unknown as Env, channelId, new Date().toISOString(), fetcher)) ?? "unknown";
 
 const firstDataRecord = (result: unknown): Readonly<Record<string, unknown>> | null => {
   if (!recordValue(result) || !arrayValue(result.data)) return null;

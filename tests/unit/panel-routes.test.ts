@@ -6,8 +6,11 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 import { panelRouter } from "../../src/worker/panel/routes";
 import * as eventsubMaintenance from "../../src/worker/eventsub-subscriptions";
-import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
+import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
+
+const requestedUrl = (input?: RequestInfo | URL): string =>
+  typeof input === "string" ? input : input instanceof URL ? input.href : input?.url ?? "";
 
 const key = (byte: number): string =>
   btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
@@ -116,6 +119,10 @@ describe("Panel read endpoints", () => {
   beforeEach(() => {
     database = new TestD1Database();
     environment = makeEnvironment(database);
+    // Default: no network in tests that don't stub `fetch` themselves. The
+    // overview route's Helix stream-state backfill (#178) would otherwise
+    // reach the real network whenever a test channel has no stored state.
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network disabled in tests")));
   });
 
   afterEach(() => {
@@ -239,6 +246,56 @@ describe("Panel read endpoints", () => {
       streamState: "offline",
       activeModules: [],
     });
+  });
+
+  it("looks up and stores the stream state via Helix when the overview has no row yet (#178)", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+    );
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "live-1" }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      { ...environment, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ channelId: "kanal-a", streamState: "online" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+    await expect(database.prepare(
+      "SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ state: "online", source: "helix" });
+  });
+
+  it("does not call Helix from the overview route when a stream state row already exists", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
+       VALUES ('kanal-a', 'offline', '2026-09-23T08:00:00.000Z', 'eventsub')`,
+    ).run();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("returns the stored scope state and all EventSub subscriptions in the system contract", async () => {
