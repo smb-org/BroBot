@@ -7,7 +7,7 @@ export interface StoredStreamStateRecord {
   state: StoredStreamState;
   source: StreamStateSource;
   changedAt: string;
-  /** The real stream start, independent of `changedAt` (see migration 0008). Null when unknown or offline. */
+  /** The real stream start, independent of `changedAt` (see migration 0006). Null when unknown or offline. */
   startedAt: string | null;
 }
 
