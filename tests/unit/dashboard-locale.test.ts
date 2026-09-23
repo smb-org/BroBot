@@ -211,10 +211,24 @@ describe("dashboard locale", () => {
     // Twitch's own message reads better than the bare code.
     expect(eventCauseText("host.chat.failed", { reason: "http_403", message: "You are banned from chatting in this channel" }))
       .toBe("You are banned from chatting in this channel");
-    // No message at all: falls back to the raw code, same as before.
-    expect(eventCauseText("host.chat.failed", { reason: "http_403" })).toBe("http_403");
+    // No message at all: an http_<status> pattern gets a generic localized
+    // fallback, never the raw code.
+    expect(eventCauseText("host.chat.failed", { reason: "http_403" })).toBe("Twitch antwortete mit Fehler 403");
     // An empty message doesn't count as "nonempty".
-    expect(eventCauseText("host.chat.failed", { reason: "http_403", message: "" })).toBe("http_403");
+    expect(eventCauseText("host.chat.failed", { reason: "http_403", message: "" })).toBe("Twitch antwortete mit Fehler 403");
+
+    setBrowserLanguage("en-US");
+    expect(eventCauseText("host.chat.failed", { reason: "http_500" })).toBe("Twitch responded with error 500");
+  });
+
+  it("falls back to a localized generic cause for a reason that isn't http_<status> either", () => {
+    setBrowserLanguage("de-DE");
+    // An arbitrary Twitch chat moderation code, uncatalogued and without a
+    // message -- the raw value never reaches the popover, even here.
+    expect(eventCauseText("host.chat.failed", { reason: "banned_word" })).toBe("Unbekannte Ursache");
+
+    setBrowserLanguage("en-US");
+    expect(eventCauseText("host.chat.failed", { reason: "banned_word" })).toBe("Unknown cause");
   });
 
   it("never returns a raw snake_case reason for any value a current producer can emit", () => {

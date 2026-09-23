@@ -5,14 +5,17 @@ import { describe, expect, it } from "vitest";
 /**
  * The project rule (CLAUDE.md): source is English throughout -- identifiers,
  * comments, JSDoc, test names -- except the German half of the bilingual
- * catalogues. This scans every `.ts`, `.tsx`, and `.css` file under `src/` for the two
- * things a stray German fragment shows up as: an umlaut/ß, or one of a
- * short list of common German words as a whole word. CSS is scanned too, so
- * selectors, custom properties, and comments follow the same source rule. It is deliberately a
- * raw-text scan, not an AST walk restricted to string-literal nodes: the
- * rule covers comments and identifiers too, not just string content, so
- * scanning the whole file is the correct scope here (unlike
- * `role-sql-guard.test.ts`, which specifically needs to ignore comments).
+ * catalogues. This scans every `.ts`, `.tsx`, and `.css` file under `src/`
+ * for three things a stray German fragment shows up as: an umlaut/ß, one of
+ * a short list of common German words as a whole word, or a known German
+ * fragment inside a quoted snake_case machine-code value (`germanSnakeCase
+ * LiteralsIn`'s comment explains why that third check exists separately).
+ * CSS is scanned too, so selectors, custom properties, and comments follow
+ * the same source rule. It is deliberately a raw-text scan, not an AST walk
+ * restricted to string-literal nodes: the rule covers comments and
+ * identifiers too, not just string content, so scanning the whole file is
+ * the correct scope here (unlike `role-sql-guard.test.ts`, which
+ * specifically needs to ignore comments).
  *
  * Allowlist entries are exact file paths with a one-line reason each --
  * no per-line ignores. Each is a dedicated bilingual catalogue (same shape
@@ -54,39 +57,34 @@ const umlautPattern = /[äöüÄÖÜß]/u;
  * `ziel_ungueltig` (issue #191 -- these strings shipped as real
  * `EventCode`/reason values before anyone noticed the guard couldn't see
  * them). This second, narrower check looks specifically at quoted
- * snake_case string literals, segment by segment, for two things: a known
- * German fragment, or a segment that reads as a `ue`/`oe`/`ae`
- * transliteration of an umlaut. The transliteration check needs an
- * allowlist (`UE_OE_AE_ALLOWLIST`) -- plenty of ordinary English words
- * ("request", "queue", "issue", "true", ...) contain those letter pairs
- * too, and without it every one of them would be a false positive.
+ * snake_case string literals (single, double, or backtick-quoted -- a
+ * template literal with `${...}` interpolation doesn't match the
+ * plain-snake_case character class, so only a literal value trips this),
+ * segment by segment, against a short explicit list of known German
+ * fragments. An earlier version also flagged any segment containing a
+ * `ue`/`oe`/`ae` letter pair as a possible umlaut transliteration, guarded
+ * by an allowlist of common English exceptions -- dropped because the
+ * allowlist could never keep up (e.g. "queued_message" false-positived);
+ * an explicit fragment list is worth more than a heuristic that needs its
+ * own exception list to stay usable.
  */
 const GERMAN_SNAKE_FRAGMENTS = new Set([
   "ungueltig", "schwelle", "dauer", "abgeschaltet", "ziel", "quelle", "zuschauer",
 ]);
-const UE_OE_AE_ALLOWLIST = new Set([
-  "request", "true", "false", "value", "values", "queue", "issue", "issues",
-  "continue", "unique", "due", "blue", "glue", "argue", "argued", "statue",
-  "virtue", "rescue", "avenue", "revenue", "fuel", "cue", "hue", "sue",
-  "does", "goes", "toe", "toes", "shoe", "shoes", "subdue", "overdue",
-  "residue", "coexist", "aerial", "aesthetic", "aeon", "algae",
-]);
-const transliteratedUmlautPattern = /ue|oe|ae/;
 
 /** True when `segment` (one `_`-delimited piece of a lowercase snake_case
  *  token, already stripped of quotes) reads as a German-language machine
  *  code -- see the block comment above. */
-const looksGermanSnakeCase = (segment: string): boolean =>
-  GERMAN_SNAKE_FRAGMENTS.has(segment) ||
-  (transliteratedUmlautPattern.test(segment) && !UE_OE_AE_ALLOWLIST.has(segment));
+const looksGermanSnakeCase = (segment: string): boolean => GERMAN_SNAKE_FRAGMENTS.has(segment);
 
-/** Every quoted, lowercase, underscore-joined string literal in `line`
- *  (`"foo_bar"`, not a bare `"foo"` -- see `looksGermanSnakeCase`'s comment)
- *  where at least one segment looks German. */
+/** Every quoted (`"..."`, `'...'`, or `` `...` ``), lowercase,
+ *  underscore-joined string literal in `line` (`"foo_bar"`, not a bare
+ *  `"foo"` -- see `looksGermanSnakeCase`'s comment) where at least one
+ *  segment looks German. */
 const germanSnakeCaseLiteralsIn = (line: string): string[] => {
   const hits: string[] = [];
-  for (const match of line.matchAll(/"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"/g)) {
-    const value = match[1];
+  for (const match of line.matchAll(/(["'`])([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\1/g)) {
+    const value = match[2];
     if (value !== undefined && value.split("_").some(looksGermanSnakeCase)) hits.push(value);
   }
   return hits;
@@ -151,11 +149,23 @@ describe("German guard", () => {
     // `wordPattern` above already catches "abgeschaltet" as a whole word.
     expect(germanSnakeCaseLiteralsIn('reason: "abgeschaltet"')).toEqual([]);
 
-    // Ordinary English snake_case machine values, including ones containing
-    // "ue"/"oe"/"ae", must not trip it.
+    // The same fragment, single- and backtick-quoted -- source doesn't only
+    // use double quotes.
+    expect(germanSnakeCaseLiteralsIn("reason: 'ziel_ungueltig'")).toEqual(["ziel_ungueltig"]);
+    expect(germanSnakeCaseLiteralsIn("reason: `ziel_ungueltig`")).toEqual(["ziel_ungueltig"]);
+    // Mismatched quote characters around the same text don't count as one
+    // literal -- `"ziel_ungueltig'` isn't valid source either way.
+    expect(germanSnakeCaseLiteralsIn("reason: \"ziel_ungueltig'")).toEqual([]);
+    // A template literal with real interpolation isn't a plain snake_case
+    // value, so it doesn't match at all (nothing to flag or not flag).
+    expect(germanSnakeCaseLiteralsIn("reason: `ziel_${suffix}`")).toEqual([]);
+
+    // Ordinary English snake_case machine values must not trip it --
+    // including ones a dropped `ue`/`oe`/`ae` heuristic used to flag.
     expect(germanSnakeCaseLiteralsIn('code: "request_failed"')).toEqual([]);
     expect(germanSnakeCaseLiteralsIn('code: "panel_request_not_allowed"')).toEqual([]);
     expect(germanSnakeCaseLiteralsIn('code: "channel_owner_only_consent_request"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn("status: 'queued_message'")).toEqual([]);
     expect(germanSnakeCaseLiteralsIn('reason: "rate_limited"')).toEqual([]);
     expect(germanSnakeCaseLiteralsIn('reason: "not_live"')).toEqual([]);
     expect(germanSnakeCaseLiteralsIn('reason: "duration_zero"')).toEqual([]);

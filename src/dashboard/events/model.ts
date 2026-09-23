@@ -34,12 +34,15 @@ export const eventToneFromValue = (value: string): EventTone | null =>
  * diagnostic reason/cause into the rendered row text, in every branch --
  * an icon repeating it would be clutter, not help. Listed explicitly
  * (derived by reading each formatter, not by comparing rendered strings at
- * runtime): a wording mismatch would otherwise slip through unnoticed, e.g.
- * `host.announcement.failed`'s own hand-rolled phrase for `not_moderator`
- * ("bot is not a moderator") doesn't literally contain the shoutout
- * catalog's phrasing for the same reason ("the bot is not a moderator in
- * this channel"), so a substring check keeps the icon exactly where it
- * shouldn't be.
+ * runtime): a wording mismatch would otherwise slip through unnoticed. That
+ * used to be a real risk for `host.announcement.failed`, which hand-rolled
+ * its own phrase for `not_moderator` ("bot is not a moderator") instead of
+ * the shoutout catalog's wording for the same reason ("the bot is not a
+ * moderator in this channel") -- a substring check would have kept the icon
+ * exactly where it shouldn't be. It and `ads.prewarning.schedule_error` now
+ * call `eventCauseText` directly for their row text instead of hand-rolling
+ * or embedding the raw reason, which also closed the gap where an
+ * uncatalogued reason (e.g. an `http_<status>`) showed up raw in the row.
  *
  * `raid.invalid`, `shoutout.suppressed`, and `ads.skipped` only got here
  * once their formatters switched from embedding the raw reason value (or
@@ -189,9 +192,17 @@ export const eventChipNumber = (detail: EventDetail, key: EventNumberKey): strin
   return formatNumber(value);
 };
 
+/** Pretty-prints the diagnostic detail for the inspector's technical
+ *  details, through the same legacy-value normalization (`eventDetail`)
+ *  every other reader goes through -- otherwise a row persisted before
+ *  issue #191's rename would show its old German reason here even though
+ *  the row text and cause popover both show the new English one. Malformed
+ *  JSON still falls back to the raw string (`JSON.parse` throwing is what
+ *  distinguishes that from a legitimately empty `{}`). */
 export const formatEventDetail = (detail: string): string => {
   try {
-    return JSON.stringify(JSON.parse(detail), null, 2);
+    JSON.parse(detail);
+    return JSON.stringify(eventDetail(detail), null, 2);
   } catch {
     return detail;
   }

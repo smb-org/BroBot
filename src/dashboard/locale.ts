@@ -1077,7 +1077,11 @@ const genericFailureTexts: LocaleCatalog<Record<string, string>> = {
  * for each producer ("Twitch rejected the shoutout" vs. "... the request";
  * "permission to send shoutouts" vs. "... to create clips"), so the cause
  * popover has to pick the same catalog the row's own text used, never guess
- * from the value alone across catalogs. `ads.skipped`, `raid.invalid`, and
+ * from the value alone across catalogs. `host.announcement.failed` reuses
+ * the shoutout catalog outright -- `sendChatAnnouncement` (`worker/
+ * announcement.ts`) emits exactly the same `not_moderator`/
+ * `bot_identity_missing`/`app_token_unavailable` (plus the generic Helix
+ * reasons) as `sendShoutout` does. `ads.skipped`, `raid.invalid`, and
  * `shoutout.suppressed` are listed here too even though `events/model.ts`'s
  * `CODES_WITH_CAUSE_IN_TEXT` currently suppresses their icon outright (their
  * row text is exhaustive over every reason their producer emits) -- belt
@@ -1086,6 +1090,7 @@ const genericFailureTexts: LocaleCatalog<Record<string, string>> = {
  */
 const REASON_CATALOG_BY_CODE: Partial<Record<EventCode, LocaleCatalog<Record<string, string>>>> = {
   "host.shoutout.failed": shoutoutFailureTexts,
+  "host.announcement.failed": shoutoutFailureTexts,
   "ads.commercial.failed": commercialFailureTexts,
   "host.clip.failed": clipFailureTexts,
   "host.chat.failed": chatFailureTexts,
@@ -1094,18 +1099,39 @@ const REASON_CATALOG_BY_CODE: Partial<Record<EventCode, LocaleCatalog<Record<str
   "shoutout.suppressed": shoutoutSuppressedReasonTexts,
 };
 
+const HTTP_STATUS_REASON_PATTERN = /^http_(\d{3})$/;
+
+/** `helixRequest`'s (`worker/twitch/helix.ts`) generic fallback for any
+ *  status it has no more specific reason for -- shared across every Helix
+ *  caller (chat, shoutout, clip, ...), so this lives beside `eventCauseText`
+ *  itself rather than in any one producer's catalog. */
+const httpStatusCauseText = (status: string, language: DashboardLanguage): string =>
+  language === "de" ? `Twitch antwortete mit Fehler ${status}` : `Twitch responded with error ${status}`;
+
+/** The last resort when nothing else -- catalog, `http_<status>` pattern,
+ *  or a `detail.message` -- identifies the cause at all (e.g. an arbitrary
+ *  Twitch chat moderation code with no message attached). Still better than
+ *  showing the raw machine value, which stays reserved for the inspector's
+ *  technical details. */
+const unknownCauseText: LocaleCatalog<string> = {
+  de: "Unbekannte Ursache",
+  en: "Unknown cause",
+};
+
 /**
  * The localized cause behind a warning/error event, read from the
  * `reason`/`cause`/`message` diagnostic keys. Looks up the code's own
  * failure catalog first (`REASON_CATALOG_BY_CODE`), falls back to the small
  * shared `genericFailureTexts` only when the code has none. When neither
- * covers the value, prefers a nonempty `detail.message` over the bare code
- * -- Twitch's own message (e.g. a chat drop reason's `message`, or a Helix
- * error body's `message`) reads better than `http_403` or an arbitrary
- * moderation code we don't have a translation for. Falls back to the raw
- * value only when there's no message either. Reused by the events list's
- * hover icon so the cause is readable without opening the inspector, even
- * for codes whose own row text stays generic (`host.chat.failed`,
+ * covers the value: a nonempty `detail.message` wins next -- Twitch's own
+ * message (e.g. a chat drop reason's `message`, or a Helix error body's
+ * `message`) reads better than a bare code; then an `http_<status>` pattern
+ * gets a generic "Twitch responded with error <status>"; anything else
+ * uncatalogued falls back to `unknownCauseText`. The raw machine value never
+ * reaches this function's return value -- it stays visible only in the
+ * inspector's technical details (`formatEventDetail`). Reused by the events
+ * list's hover icon so the cause is readable without opening the inspector,
+ * even for codes whose own row text stays generic (`host.chat.failed`,
  * `host.action.failed`, ...). Returns null when the detail carries none of
  * those keys, so the row gets no icon at all.
  */
@@ -1121,7 +1147,10 @@ export const eventCauseText = (
     ?? catalogString(genericFailureTexts[language], raw);
   if (localized !== undefined) return localized;
   const message = detail.message;
-  return typeof message === "string" && message.length > 0 ? message : raw;
+  if (typeof message === "string" && message.length > 0) return message;
+  const httpStatus = HTTP_STATUS_REASON_PATTERN.exec(raw)?.[1];
+  if (httpStatus !== undefined) return httpStatusCauseText(httpStatus, language);
+  return unknownCauseText[language];
 };
 
 export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
@@ -1132,13 +1161,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.chat.sent": "Chat-Nachricht gesendet",
     "host.announcement.sent": (detail) => `Chat-Ankündigung gesendet: ${detailText(detail, "text", "ohne Text")}`,
     "host.announcement.failed": (detail) => {
-      const reason = detail.reason === "not_moderator"
-        ? "Bot ist kein Moderator"
-        : detail.reason === "app_token_unavailable"
-          ? "App-Token nicht verfügbar"
-          : detail.reason === "bot_identity_missing"
-            ? "Bot-Identität fehlt"
-            : `Helix: ${detailText(detail, "reason", "unbekannter Grund")}`;
+      const reason = eventCauseText("host.announcement.failed", detail, "de") ?? "unbekannter Grund";
       return detail.outcome === "sent_as_message"
         ? `Ankündigung nicht möglich (${reason}) — als Nachricht gesendet`
         : `Ankündigung nicht möglich (${reason}) — nicht gesendet`;
@@ -1193,7 +1216,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.prewarning.break_started": "Werbe-Vorwarnung unterdrückt: Werbepause hat begonnen",
     "ads.prewarning.rescheduled": "Werbe-Vorwarnung unterdrückt: Termin wurde verschoben",
     "ads.prewarning.scope_missing": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
-    "ads.prewarning.schedule_error": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "reason", "unbekannter Fehler")}`,
+    "ads.prewarning.schedule_error": (detail) => `Werbezeitplan nicht gelesen: ${eventCauseText("ads.prewarning.schedule_error", detail, "de") ?? "unbekannter Fehler"}`,
     "ads.snooze": (detail) => detail.outcome === "success" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "reason", "unbekannter Fehler")}`,
     "ads.commercial.failed": (detail) => `Werbeeinblendung nicht gestartet: ${commercialFailureReasonText(detail.reason, "de")}`,
     "text_commands.cooldown": (detail) => {
@@ -1230,13 +1253,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.chat.sent": "Chat message sent",
     "host.announcement.sent": (detail) => `Chat announcement sent: ${detailText(detail, "text", "no text")}`,
     "host.announcement.failed": (detail) => {
-      const reason = detail.reason === "not_moderator"
-        ? "bot is not a moderator"
-        : detail.reason === "app_token_unavailable"
-          ? "app token unavailable"
-          : detail.reason === "bot_identity_missing"
-            ? "bot identity missing"
-            : `Helix: ${detailText(detail, "reason", "unknown reason")}`;
+      const reason = eventCauseText("host.announcement.failed", detail, "en") ?? "unknown reason";
       return detail.outcome === "sent_as_message"
         ? `Announcement unavailable (${reason}); sent as a chat message`
         : `Announcement unavailable (${reason}); not sent`;
@@ -1291,7 +1308,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.prewarning.break_started": "Ad warning suppressed: ad break has started",
     "ads.prewarning.rescheduled": "Ad warning suppressed: schedule changed",
     "ads.prewarning.scope_missing": "Ad warning suppressed: channel:read:ads is missing",
-    "ads.prewarning.schedule_error": (detail) => `Ad schedule could not be read: ${detailText(detail, "reason", "unknown error")}`,
+    "ads.prewarning.schedule_error": (detail) => `Ad schedule could not be read: ${eventCauseText("ads.prewarning.schedule_error", detail, "en") ?? "unknown error"}`,
     "ads.snooze": (detail) => detail.outcome === "success" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "reason", "unknown error")}`,
     "ads.commercial.failed": (detail) => `Commercial not started: ${commercialFailureReasonText(detail.reason, "en")}`,
     "text_commands.cooldown": (detail) => {

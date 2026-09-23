@@ -209,6 +209,24 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.queryByText(/ziel_ungueltig/)).not.toBeInTheDocument();
   });
 
+  it("normalizes a legacy reason in the inspector's technical details too, not just the row", () => {
+    renderPage([entry({ eventId: "legacy", moduleId: "raid", code: "raid.invalid", detail: "{\"reason\":\"ziel_ungueltig\"}" })]);
+
+    fireEvent.click(screen.getByText("Raid verworfen: Ziel ungültig").closest("tr") as HTMLElement);
+    const technicalDetails = document.querySelector(".event-detail-json");
+    expect(technicalDetails).not.toBeNull();
+    expect(technicalDetails?.textContent).toContain("target_invalid");
+    expect(technicalDetails?.textContent).not.toContain("ziel_ungueltig");
+  });
+
+  it("still falls back to the raw stored string in technical details for malformed detail JSON", () => {
+    renderPage([entry({ eventId: "malformed", moduleId: "host", code: "host.action.failed", detail: "not json" })]);
+
+    fireEvent.click(screen.getByText("Aktion fehlgeschlagen").closest("tr") as HTMLElement);
+    const technicalDetails = document.querySelector(".event-detail-json");
+    expect(technicalDetails?.textContent).toBe("not json");
+  });
+
   it("hides the icon when the row's own event text already spells the cause out", () => {
     renderPage([
       // "ads.commercial.failed" already renders "... Twitch hat den Start
@@ -223,17 +241,24 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.getByText(/Werbeeinblendung nicht gestartet: Twitch hat den Start abgelehnt/)).toBeInTheDocument();
   });
 
-  it("hides the icon for a code whose row wording differs from the reason catalog's (host.announcement.failed)", () => {
-    // Row text: "... (Bot ist kein Moderator) ..." -- not a substring of the
-    // shoutout catalog's "Der Bot ist kein Moderator in diesem Kanal", so a
-    // plain string-containment check would have kept the icon here.
+  it("hides the icon for host.announcement.failed and uses the shared shoutout catalog wording in the row", () => {
     renderPage([entry({
       eventId: "announcement-failed", moduleId: "host", code: "host.announcement.failed",
       detail: "{\"reason\":\"not_moderator\",\"outcome\":\"not_sent\"}",
     })]);
 
     expect(screen.queryByRole("button", { name: causeButtonName })).not.toBeInTheDocument();
-    expect(screen.getByText(/Bot ist kein Moderator/)).toBeInTheDocument();
+    expect(screen.getByText("Ankündigung nicht möglich (Der Bot ist kein Moderator in diesem Kanal) — nicht gesendet")).toBeInTheDocument();
+  });
+
+  it("localizes an uncatalogued http_<status> reason in the row instead of leaking it raw (host.announcement.failed)", () => {
+    renderPage([entry({
+      eventId: "announcement-http", moduleId: "host", code: "host.announcement.failed",
+      detail: "{\"reason\":\"http_500\",\"outcome\":\"not_sent\"}",
+    })]);
+
+    expect(screen.getByText("Ankündigung nicht möglich (Twitch antwortete mit Fehler 500) — nicht gesendet")).toBeInTheDocument();
+    expect(screen.queryByText(/http_500/)).not.toBeInTheDocument();
   });
 
   it("uses the clip catalog's wording, not the shoutout one, for host.clip.failed", async () => {
