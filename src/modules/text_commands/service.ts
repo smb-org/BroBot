@@ -3,7 +3,7 @@ import { truncateTo200Chars } from "../contract";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import {
   commandFromMessage,
-  commandTextWithPlaceholders,
+  renderCommandText,
   chatStatusMeetsTier,
   cooldownRemaining,
 } from "./domain";
@@ -128,9 +128,8 @@ export const processTextCommandMessage = async (
     return response(event, input, list);
   }
 
-  return response(event, input, commandTextWithPlaceholders(
+  return response(event, input, renderCommandText(
     claim.command.text,
-    userFor(event),
-    channelFor(event),
+    { user: userFor(event), channel: channelFor(event) },
   ));
 };

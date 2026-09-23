@@ -6,9 +6,15 @@ import { truncateTo200Chars } from "../modules/contract";
 import { helixRequest } from "./twitch/helix";
 
 const CHAT_MESSAGES_URL = "https://api.twitch.tv/helix/chat/messages";
+const CHAT_MESSAGE_MAXIMUM_LENGTH = 500;
+
+export const truncateChatText = (text: string): { text: string; truncated: boolean } => text.length <= CHAT_MESSAGE_MAXIMUM_LENGTH
+  ? { text, truncated: false }
+  : { text: `${text.slice(0, CHAT_MESSAGE_MAXIMUM_LENGTH - 1)}…`, truncated: true };
 
 export interface ChatSendResult {
   sent: boolean;
+  truncated: boolean;
   /** Machine-readable reason when the message was not sent. */
   reason: string | null;
   detail: Readonly<Record<string, string | number | boolean | null>>;
@@ -41,10 +47,11 @@ export const sendChatMessage = async (
   replyToMessageId: string | undefined,
   fetcher: typeof fetch = fetch,
 ): Promise<ChatSendResult> => {
-  const textDetail = { text: truncateTo200Chars(text) };
+  const preparedText = truncateChatText(text);
+  const textDetail = { text: truncateTo200Chars(preparedText.text) };
   const identity = await getBotIdentity(environment.DB);
   if (identity === null) {
-    return { sent: false, reason: "bot_identity_missing", detail: textDetail };
+    return { sent: false, truncated: preparedText.truncated, reason: "bot_identity_missing", detail: textDetail };
   }
   let accessToken: string;
   try {
@@ -54,13 +61,13 @@ export const sendChatMessage = async (
       fetcher,
     );
   } catch {
-    return { sent: false, reason: "app_token_unavailable", detail: textDetail };
+    return { sent: false, truncated: preparedText.truncated, reason: "app_token_unavailable", detail: textDetail };
   }
 
   const payload: Record<string, string | boolean> = {
     broadcaster_id: channelId,
     sender_id: identity.userId,
-    message: text,
+    message: preparedText.text,
     for_source_only: false,
   };
   if (replyToMessageId !== undefined) payload.reply_parent_message_id = replyToMessageId;
@@ -75,7 +82,7 @@ export const sendChatMessage = async (
   });
 
   if (!result.ok) {
-    return { sent: false, reason: result.reason, detail: { ...textDetail, status: result.status, message: result.message } };
+    return { sent: false, truncated: preparedText.truncated, reason: result.reason, detail: { ...textDetail, status: result.status, message: result.message } };
   }
 
   const body = isRecord(result.data) ? result.data : {};
@@ -87,10 +94,11 @@ export const sendChatMessage = async (
     const dropReason = isRecord(first.drop_reason) ? first.drop_reason : {};
     return {
       sent: false,
+      truncated: preparedText.truncated,
       reason: readText(dropReason.code) ?? "not_sent",
       detail: { ...textDetail, message: readText(dropReason.message) },
     };
   }
 
-  return { sent: true, reason: null, detail: { messageId: readText(first.message_id), ...textDetail } };
+  return { sent: true, truncated: preparedText.truncated, reason: null, detail: { messageId: readText(first.message_id), ...textDetail } };
 };

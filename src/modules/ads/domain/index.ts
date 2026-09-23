@@ -1,5 +1,19 @@
-import type { AdBreaksEvent } from "../contracts";
-import type { AdsSettings } from "../contracts";
+import type { ADS_TEMPLATE_FIELDS, AdBreaksEvent, AdsSettings } from "../contracts";
+import { renderTemplate, templateVariableNames } from "../contract";
+import type { TemplateValues } from "../contract";
+
+export const renderAdBreakText = (template: string, duration: number): string => {
+  const normalized = template.trim();
+  const values: TemplateValues<typeof ADS_TEMPLATE_FIELDS.automatic> = { duration };
+  return templateVariableNames(normalized).includes("duration")
+    ? renderTemplate(normalized, values)
+    : `${renderTemplate(normalized, {})} (${String(duration)} Sekunden)`;
+};
+
+export const renderPrewarningText = (
+  template: string,
+  values: TemplateValues<typeof ADS_TEMPLATE_FIELDS.prewarningText>,
+): string => renderTemplate(template, values);
 
 const finiteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -111,7 +125,7 @@ export const decideAdPrewarning = (
   const seconds = Math.round(remainingMs / 1000);
   return {
     kind: "announce",
-    text: input.settings.prewarningText.replaceAll("{seconds}", String(seconds)),
+    text: renderPrewarningText(input.settings.prewarningText, { seconds }),
     seconds,
     scheduledAt: input.schedule.nextAdAt ?? new Date(nextAdAtMs).toISOString(),
   };

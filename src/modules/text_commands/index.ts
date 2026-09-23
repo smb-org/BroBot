@@ -7,7 +7,11 @@ export type {
   TextCommandClaim,
   TextCommandActor,
 } from "./contracts";
-export { TEXT_COMMAND_MINIMUM_TIERS } from "./contracts";
+export {
+  TEXT_COMMAND_MINIMUM_TIERS,
+  TEXT_COMMAND_TEMPLATE_FIELDS,
+  TEXT_COMMAND_VARIABLES,
+} from "./contracts";
 export type { TextCommandRepository } from "./repository";
 
 import { z } from "zod";

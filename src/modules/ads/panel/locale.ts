@@ -1,4 +1,7 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
+import type { ADS_VARIABLES } from "../contracts";
+
+type AdsVariableName = keyof typeof ADS_VARIABLES;
 
 export interface AdsPanelTexts {
   title: string;
@@ -10,6 +13,7 @@ export interface AdsPanelTexts {
   warningEnabled: string;
   leadSeconds: string;
   prewarningText: string;
+  variables: Record<AdsVariableName, string>;
   warningPlaceholderHint: string;
   snoozeSection: string;
   snoozeButton: (count: string, refresh: string) => string;
@@ -48,6 +52,10 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     warningEnabled: "Vorwarnung vor der Werbung",
     leadSeconds: "Vorlaufzeit (Sekunden)",
     prewarningText: "Vorwarnungstext",
+    variables: {
+      duration: "Dauer der Werbepause in Sekunden",
+      seconds: "Verbleibende Sekunden bis zur Werbepause",
+    },
     warningPlaceholderHint: "{seconds} bleibt als englischer Platzhalter und wird durch die verbleibenden Sekunden ersetzt.",
     snoozeSection: "Snooze",
     snoozeButton: (count, refresh) => `Snooze · ${count} verfügbar · Aufladung ${refresh}`,
@@ -84,6 +92,10 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     warningEnabled: "Warn before the ad break",
     leadSeconds: "Lead time (seconds)",
     prewarningText: "Warning text",
+    variables: {
+      duration: "Ad break duration in seconds",
+      seconds: "Seconds remaining until the ad break",
+    },
     warningPlaceholderHint: "{seconds} stays as the English placeholder and is replaced with the remaining seconds.",
     snoozeSection: "Snooze",
     snoozeButton: (count, refresh) => `Snooze · ${count} available · refresh ${refresh}`,

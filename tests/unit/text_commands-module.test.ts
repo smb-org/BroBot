@@ -56,7 +56,12 @@ const activate = async (database: TestD1Database, channelId: string): Promise<vo
   ).bind(channelId, textCommandModule.id).run();
 };
 
-const createCommand = async (database: TestD1Database, name = "hallo", minimumTier: TextCommandMinimumTier = "everyone"): Promise<void> => {
+const createCommand = async (
+  database: TestD1Database,
+  name = "hallo",
+  minimumTier: TextCommandMinimumTier = "everyone",
+  text = "Hallo {user}",
+): Promise<void> => {
   const repository = createTextCommandRepository(
     database as unknown as D1Database,
     () => ({ sql: "AND 1 = 1", values: [] as const }),
@@ -64,7 +69,7 @@ const createCommand = async (database: TestD1Database, name = "hallo", minimumTi
   await repository.create({
     channelId: "kanal-a",
     name,
-    text: "Hallo {user}",
+    text,
     kind: "text",
     minimumTier: minimumTier,
     cooldownSeconds: 5,
@@ -138,6 +143,39 @@ describe("Text commands module", () => {
       expect(fetcher).toHaveBeenCalledTimes(1);
       expect(body(fetcher, 0).message).toBe("Hallo alice");
       await expect(eventCodes(database)).resolves.toContain("text_commands.unknown");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("truncates an expanded chat response to 500 characters and records a diagnostic", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createCommand(database, "lang", "everyone", `${"x".repeat(500)}{legacy}`);
+      const fetcher = fetcherForChat();
+
+      await dispatchEventSubNotification(
+        environment(database),
+        eventFor("!lang"),
+        fetcher,
+        [textCommandModule],
+      );
+
+      expect((body(fetcher, 0).message as string).length).toBe(500);
+      expect(body(fetcher, 0).message).toBe(`${"x".repeat(499)}…`);
+      const rows = await database.prepare(
+        "SELECT code, detail_json FROM event_log ORDER BY rowid",
+      ).all<{ code: string; detail_json: string }>();
+      expect(rows.results.map((row) => row.code)).toEqual([
+        "text_commands.triggered",
+        "template_truncated",
+        "host.chat.sent",
+      ]);
+      expect(JSON.parse(rows.results[1]?.detail_json ?? "{}")).toEqual({ current: 508 });
     } finally {
       database.close();
     }

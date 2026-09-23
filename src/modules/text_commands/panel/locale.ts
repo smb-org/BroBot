@@ -1,5 +1,7 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
-import type { TextCommandMinimumTier } from "../contracts";
+import type { TEXT_COMMAND_VARIABLES, TextCommandMinimumTier } from "../contracts";
+
+type TextCommandVariableName = (typeof TEXT_COMMAND_VARIABLES)[number]["name"];
 
 interface TextCommandsTexts {
   title: string;
@@ -10,6 +12,7 @@ interface TextCommandsTexts {
   kindText: string;
   kindList: string;
   text: string;
+  variables: Record<TextCommandVariableName, string>;
   cooldown: string;
   minimumTier: string;
   minimumTierFor: (name: string) => string;
@@ -58,6 +61,10 @@ const texts: LocaleCatalog<TextCommandsTexts> = {
     kindText: "Antworttext",
     kindList: "Befehlsliste",
     text: "Antworttext",
+    variables: {
+      user: "Name des Zuschauers, der den Befehl auslöst",
+      channel: "Name des Kanals",
+    },
     cooldown: "Abkühlzeit (Sekunden)",
     minimumTier: "Mindeststufe",
     minimumTierFor: (name) => `Mindeststufe für Befehl !${name}`,
@@ -96,6 +103,10 @@ const texts: LocaleCatalog<TextCommandsTexts> = {
     kindText: "Response text",
     kindList: "Command list",
     text: "Response text",
+    variables: {
+      user: "Name of the viewer who triggered the command",
+      channel: "Channel name",
+    },
     cooldown: "Cooldown (seconds)",
     minimumTier: "Minimum level",
     minimumTierFor: (name) => `Minimum level for !${name}`,

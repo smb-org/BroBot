@@ -193,6 +193,41 @@ describe("Text commands panel", () => {
     });
   });
 
+  it("accepts unknown template variables with warnings and rejects templates above 500 characters", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+
+    const created = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "vorlage",
+        text: `${"x".repeat(480)} {user} {zzz}`,
+        cooldownSeconds: 5,
+      }),
+      environment,
+    );
+
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      warnings: [
+        { field: "text", code: "unknown_template_variables", unknownVariables: ["zzz"] },
+        { field: "text", code: "template_worst_case_too_long", worstCaseLength: 512 },
+      ],
+    });
+    await expect(database.prepare(
+      "SELECT response_text FROM text_commands WHERE command_name = 'vorlage'",
+    ).first()).resolves.toEqual({ response_text: `${"x".repeat(480)} {user} {zzz}` });
+
+    const oversized = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/vorlage", "PATCH", {
+        text: "x".repeat(501),
+      }),
+      environment,
+    );
+    expect(oversized.status).toBe(400);
+  });
+
   it("lets a manager toggle a command and audits the toggle", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

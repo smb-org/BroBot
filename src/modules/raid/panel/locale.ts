@@ -1,4 +1,7 @@
 import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
+import type { RAID_VARIABLES } from "../contracts";
+
+type RaidVariableName = keyof typeof RAID_VARIABLES;
 
 export interface RaidPanelTexts {
   title: string;
@@ -9,6 +12,7 @@ export interface RaidPanelTexts {
   toggleLabel: (active: boolean) => string;
   fullText: string;
   shortText: string;
+  variables: Record<RaidVariableName, string>;
   placeholderFull: string;
   placeholderShort: string;
   actions: string;
@@ -32,6 +36,10 @@ const catalog: Record<DashboardLanguage, RaidPanelTexts> = {
     toggleLabel: (active) => `Helix-Shoutout automatisch senden: ${active ? "eingeschaltet" : "ausgeschaltet"}`,
     fullText: "Voller Raid-Text",
     shortText: "Kurzer Dankestext",
+    variables: {
+      channel: "Name des Kanals, von dem der Raid kommt",
+      viewers: "Anzahl der Personen, die mit dem Raid kommen",
+    },
     placeholderFull: "{channel} und {viewers} werden beim Eingang ersetzt.",
     placeholderShort: "{channel} und {viewers} werden beim Eingang ersetzt.",
     actions: "Aktionen",
@@ -53,6 +61,10 @@ const catalog: Record<DashboardLanguage, RaidPanelTexts> = {
     toggleLabel: (active) => `Automatic Helix shoutout: ${active ? "enabled" : "disabled"}`,
     fullText: "Full raid message",
     shortText: "Small raid message",
+    variables: {
+      channel: "Name of the channel sending the raid",
+      viewers: "Number of people joining with the raid",
+    },
     placeholderFull: "{channel} and {viewers} are replaced when the raid arrives.",
     placeholderShort: "{channel} and {viewers} are replaced when the raid arrives.",
     actions: "Actions",

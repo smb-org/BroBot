@@ -2,8 +2,23 @@ import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole } from "../contracts/values";
+import type { TemplateFields } from "../template";
+export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
 export { truncateTo200Chars } from "../text";
+export {
+  closestTemplateVariable,
+  renderTemplate,
+  templateFieldsWarnings,
+  templateVariableNames,
+  templateWarnings,
+  tokenizeTemplate,
+  unknownTemplateVariables,
+  worstCaseTemplateLength,
+  TEMPLATE_TOKEN_CANDIDATE_PATTERN,
+  TEMPLATE_VARIABLE_PATTERN,
+} from "../template";
+export type { TemplateFields, TemplateVariable, TemplateValues, TemplateWarning } from "../template";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
 export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";
@@ -252,6 +267,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   mandatory?: boolean;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
+  /** Template fields and variables used by both panel validation and worker rendering. */
+  templateFields?: TemplateFields<z.output<SettingsSchema>>;
   /** Broadcaster consent the host verifies before the EventSub subscription. */
   broadcasterScopes?: readonly string[];
   eventSubTypes?: readonly string[];

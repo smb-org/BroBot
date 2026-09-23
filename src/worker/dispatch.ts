@@ -123,6 +123,9 @@ const runActions = async (
           action.replyToMessageId,
           fetcher,
         );
+        if (result.truncated) {
+          diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
+        }
         diagnostics.push(result.sent
           ? { code: "host.chat.sent" satisfies EventCode, detail: result.detail }
           : { code: "host.chat.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } });

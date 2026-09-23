@@ -5,6 +5,13 @@ import type {
   EventTone,
   IdentityStatus,
 } from "./contracts/values";
+import type { TemplateWarning } from "./template";
+
+export type PanelTemplateWarning = TemplateWarning;
+
+export interface PanelTemplateWarningResponse {
+  warnings: readonly PanelTemplateWarning[];
+}
 
 export type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
 export type PanelChannelBotConsentStatus = "granted" | "missing";

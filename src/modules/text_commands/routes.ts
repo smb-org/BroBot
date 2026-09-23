@@ -3,19 +3,20 @@ import { z } from "zod";
 
 import type { ModuleRouteEnvironment } from "./contract";
 import { createTextCommandRepository } from "./adapters/d1";
-import { TEXT_COMMAND_MINIMUM_TIERS } from "./contracts";
+import { TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS } from "./contracts";
 import { validCommandName } from "./domain";
+import { templateFieldsWarnings } from "./contract";
 
 const bodySchema = z.object({
   name: z.string(),
   kind: z.enum(["text", "list"]).default("text"),
   minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).default("everyone"),
-  text: z.string().optional(),
+  text: z.string().max(500).optional(),
   cooldownSeconds: z.number().int().min(0).max(86400),
 });
 const editBodySchema = z.object({
   name: z.string().optional(),
-  text: z.string().optional(),
+  text: z.string().max(500).optional(),
   kind: z.enum(["text", "list"]).optional(),
   cooldownSeconds: z.number().int().min(0).max(86400).optional(),
   minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).optional(),
@@ -68,8 +69,11 @@ textCommandRoutes.post("/commands", async (context) => {
     context.get("prepareModuleAudit"),
   );
   const channelId = param(context, "channelId");
+  const warnings = body.kind === "list"
+    ? []
+    : templateFieldsWarnings({ text: body.text ?? "" }, TEXT_COMMAND_TEMPLATE_FIELDS);
   const created = await repository.create({ channelId, ...body, text: body.text ?? "", now: nowIso() }, context.get("actor"));
-  if (created.ok) return context.json({ command: { ...body, channelId, lastUsedAt: null } }, 201);
+  if (created.ok) return context.json({ command: { ...body, channelId, lastUsedAt: null }, warnings }, 201);
   return created.reason === "existiert"
     ? context.json({ error: "command_already_exists" }, 409)
     : context.json({ error: "command_creation_denied" }, 403);
@@ -98,6 +102,9 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   }
   const cooldownSeconds = body.cooldownSeconds ?? before.cooldownSeconds;
   const minimumTier = body.minimumTier ?? before.minimumTier;
+  const warnings = kind === "list"
+    ? []
+    : templateFieldsWarnings({ text }, TEXT_COMMAND_TEMPLATE_FIELDS);
   const authorizeMutation = contentChanged
     ? context.get("authorizeManagementMutation")
     : context.get("authorizeMutation");
@@ -117,7 +124,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     onlyToggle: !contentChanged,
     now: nowIso(),
   }, context.get("actor"));
-  if (changed.ok) return context.json({ command: { ...before, ...body, channelId, name: newName, text, kind, cooldownSeconds, minimumTier: minimumTier, enabled: body.enabled ?? before.enabled } });
+  if (changed.ok) return context.json({ command: { ...before, ...body, channelId, name: newName, text, kind, cooldownSeconds, minimumTier: minimumTier, enabled: body.enabled ?? before.enabled }, warnings });
   if (changed.reason === "nicht_gefunden") return context.json({ error: "command_not_found" }, 404);
   if (changed.reason === "nicht_berechtigt") return context.json({ error: "command_update_denied" }, 403);
   if (changed.reason === "konflikt") return context.json({ error: "command_changed_concurrently" }, 409);

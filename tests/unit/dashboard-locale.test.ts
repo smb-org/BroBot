@@ -38,6 +38,7 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.disabled", { name: "wiki" })).toBe("Textbefehl !wiki ausgeschaltet");
     expect(eventText("text_commands.permission_denied", { name: "wiki", requiredTier: "moderator", currentTier: ["viewer"] })).toBe("Befehl !wiki nicht ausgelöst: Mindeststufe Moderatoren, vorhanden Zuschauer");
     expect(eventText("host.chat.sent", { name: "wiki" })).toBe("Chat-Nachricht gesendet");
+    expect(eventText("template_truncated", { current: 508 })).toBe("Chatnachricht auf 500 Zeichen gekürzt (ursprünglich 508)");
   });
 
   it("returns the English detail texts", () => {
@@ -49,6 +50,7 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.unknown", { name: "wiki" })).toBe("Unknown text command !wiki");
     expect(eventText("text_commands.disabled", { name: "wiki" })).toBe("Text command !wiki disabled");
     expect(eventText("text_commands.permission_denied", { name: "wiki", requiredTier: "moderator", currentTier: ["viewer"] })).toBe("Command !wiki not executed: minimum level moderators, present viewer");
+    expect(eventText("template_truncated", { current: 508 })).toBe("Chat message shortened to 500 characters (originally 508)");
   });
 
   it("distinguishes a disabled shoutout from the threshold", () => {
@@ -79,7 +81,7 @@ describe("dashboard locale", () => {
 
   it("carries family, tier, word, and number key for every known event code", () => {
     const codes: EventCode[] = [
-      "host.action.failed", "host.chat.failed", "host.chat.sent", "host.module.error",
+      "host.action.failed", "host.chat.failed", "host.chat.sent", "template_truncated", "host.module.error",
       "host.module.unknown", "host.overlay.not_executed", "host.shoutout.failed", "host.shoutout.sent", "host.clip.failed", "channel_events.raid.incoming",
       "channel_events.raid.outgoing", "channel_events.shoutout.sent", "channel_events.shoutout.received",
       "channel_events.chat.sub", "channel_events.chat.resub", "channel_events.chat.gift_sub",

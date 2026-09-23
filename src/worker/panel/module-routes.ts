@@ -21,6 +21,7 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
+import { templateFieldsWarnings } from "../../template";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -120,6 +121,12 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   if (stored === null) return context.json({ error: "module_not_configured" }, 404);
   const settings = module.settingsSchema.safeParse(await readJsonBody(context.req.raw));
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 400);
+  const warnings = module.templateFields === undefined
+    ? []
+    : templateFieldsWarnings(
+      settings.data as Readonly<Record<string, unknown>>,
+      module.templateFields,
+    );
   const changed = await updateChannelModuleWithAudit(
     context.env.DB,
     actorOf(context),
@@ -131,7 +138,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     nowIso(),
   );
   if (!changed) return context.json({ error: "module_settings_changed_concurrently" }, 409);
-  return context.json({ settings: settings.data });
+  return context.json({ settings: settings.data, warnings });
 });
 
 moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context) => {

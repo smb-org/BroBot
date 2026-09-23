@@ -1,6 +1,7 @@
 import type { AdsSettings, AdsScheduleResponse } from "../contracts";
 import { DEFAULT_PREWARNING_TEXT } from "../contracts/chat-defaults";
 import { PanelApiError } from "../../../contracts/panel-error";
+import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
 
 const emptySettings: AdsSettings = {
   automatic: "",
@@ -62,14 +63,15 @@ export const loadAdsSchedule = async (channelId: string): Promise<AdsScheduleRes
 export const saveAdSettings = async (
   channelId: string,
   settings: AdsSettings,
-): Promise<void> => {
+): Promise<readonly PanelTemplateWarning[]> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
-  await json(await fetch(pathFor(channelId), {
+  const saved = await json<PanelTemplateWarningResponse>(await fetch(pathFor(channelId), {
     method: "PATCH",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.token },
     body: JSON.stringify(settings),
   }));
+  return saved.warnings;
 };
 
 export const snoozeAds = async (channelId: string): Promise<AdsScheduleResponse> => {

@@ -1,5 +1,6 @@
 import type { RaidSettings } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
+import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
 
 const pathFor = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/raid/settings`;
@@ -21,12 +22,16 @@ export const loadRaidSettings = async (channelId: string): Promise<RaidSettings>
   return (await json<{ settings: RaidSettings }>(response)).settings;
 };
 
-export const saveRaidSettings = async (channelId: string, settings: RaidSettings): Promise<void> => {
+export const saveRaidSettings = async (
+  channelId: string,
+  settings: RaidSettings,
+): Promise<readonly PanelTemplateWarning[]> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
-  await json(await fetch(pathFor(channelId), {
+  const saved = await json<PanelTemplateWarningResponse>(await fetch(pathFor(channelId), {
     method: "PATCH",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.token },
     body: JSON.stringify(settings),
   }));
+  return saved.warnings;
 };

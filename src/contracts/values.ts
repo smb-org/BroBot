@@ -72,6 +72,7 @@ export const EVENT_CODES = [
   "host.action.failed",
   "host.chat.failed",
   "host.chat.sent",
+  "template_truncated",
   "host.module.error",
   "host.module.unknown",
   "host.overlay.not_executed",

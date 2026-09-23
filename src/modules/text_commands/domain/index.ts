@@ -1,5 +1,7 @@
 import type { ModuleChatStatus } from "../contract";
-import type { TextCommandMinimumTier } from "../contracts";
+import type { TEXT_COMMAND_VARIABLES, TextCommandMinimumTier } from "../contracts";
+import { renderTemplate } from "../contract";
+import type { TemplateValues } from "../contract";
 
 export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
@@ -26,8 +28,10 @@ export const commandFromMessage = (message: string): TextCommandInput | null => 
   };
 };
 
-export const commandTextWithPlaceholders = (text: string, user: string, channel: string): string =>
-  text.replaceAll("{user}", user).replaceAll("{channel}", channel);
+export const renderCommandText = (
+  text: string,
+  values: TemplateValues<typeof TEXT_COMMAND_VARIABLES>,
+): string => renderTemplate(text, values);
 
 export const cooldownRemaining = (lastUsedAt: string | null, now: string, cooldownSeconds: number): number => {
   if (lastUsedAt === null) return 0;
