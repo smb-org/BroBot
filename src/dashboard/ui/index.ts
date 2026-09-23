@@ -72,6 +72,9 @@ export type { ChipGroupOption, ChipGroupProps } from "./ChipGroup";
 export { ConfirmDialog } from "./ConfirmDialog";
 export type { ConfirmDialogProps } from "./ConfirmDialog";
 
+export { Popover } from "./Popover";
+export type { PopoverProps } from "./Popover";
+
 export { ControlDurationDialog } from "./ControlDurationDialog";
 export type { ControlDurationDialogProps } from "./ControlDurationDialog";
 

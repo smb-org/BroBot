@@ -50,9 +50,10 @@ const capture = async (page: Page, testInfo: TestInfo, name: string): Promise<vo
   }
 };
 
-test("editor stage 2 pages fit at 1280px and 390px and produce review screenshots", async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
-
+/** `events` is a param (not baked into the route) so #190/#191's cause-icon
+ *  test can serve one event with a diagnostic reason while every other test
+ *  here keeps the empty feed its screenshots already expect. */
+const installMocks = async (page: Page, events: readonly unknown[] = []): Promise<void> => {
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -99,7 +100,7 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
       return;
     }
     if (pathname === `/api/channels/${channel.channelId}/events`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: events, nextCursor: null }) });
       return;
     }
     if (pathname === `/api/channels/${channel.channelId}/members`) {
@@ -139,6 +140,12 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
     }
     await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
   });
+};
+
+test("editor stage 2 pages fit at 1280px and 390px and produce review screenshots", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+
+  await installMocks(page);
 
   await page.goto(`/channels/${channel.channelId}`);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -177,4 +184,42 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
   await page.keyboard.press("Meta+K");
   await expect(page.getByRole("dialog")).toBeVisible();
   await capture(page, testInfo, "14-spotlight");
+});
+
+// #190/#191: the event row's cause icon, exercised in a real browser --
+// jsdom's component tests can't prove real visibility (Mantine's popover
+// never resolves its exit transition without a genuine `transitionend`).
+test("events page cause icon: hover shows it, Escape hides it, tap opens it", async ({ page }) => {
+  await installMocks(page, [{
+    eventId: "evt-cause-1",
+    createdAt: "2026-09-20T09:00:00.000Z",
+    moduleId: "host",
+    triggerId: "trigger-cause-1",
+    code: "host.chat.failed",
+    detail: JSON.stringify({ reason: "rate_limited" }),
+    actorUserId: null,
+    actorLogin: null,
+    actorDisplayName: null,
+  }]);
+
+  await page.goto(`/channels/${channel.channelId}/events`);
+  const trigger = page.getByRole("button", { name: /^Ursache anzeigen:/ });
+  await expect(trigger).toBeVisible();
+
+  await trigger.hover();
+  await expect(page.getByText("Twitch-Abklingzeit aktiv")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Twitch-Abklingzeit aktiv")).toBeHidden();
+
+  // Move off the trigger first so the click below starts from a clean,
+  // un-hovered state. This popover treats a click the same way it treats a
+  // tap (see `ui/Popover.tsx`) -- there's no separate touch code path to
+  // exercise, so a click stands in for it here.
+  await page.mouse.move(0, 0);
+  await trigger.click();
+  await expect(page.getByText("Twitch-Abklingzeit aktiv")).toBeVisible();
+
+  // The click on the icon must not have opened the inspector.
+  await expect(page.getByText("Vorgang")).toHaveCount(0);
 });

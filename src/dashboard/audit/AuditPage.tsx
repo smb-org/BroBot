@@ -213,8 +213,8 @@ export const AuditPage = ({ auditState, filters, onFiltersChange, onNextPage, lo
             <details>
               <summary>{texts.events.technicalDetails}</summary>
               <div className="inspector-columns">
-                <div><h4>{texts.audit.before}</h4><pre>{formatEventDetail(selectedAudit.before)}</pre></div>
-                <div><h4>{texts.audit.after}</h4><pre>{formatEventDetail(selectedAudit.after)}</pre></div>
+                <div><h4>{texts.audit.before}</h4><pre>{formatEventDetail(selectedAudit.before, selectedAudit.action)}</pre></div>
+                <div><h4>{texts.audit.after}</h4><pre>{formatEventDetail(selectedAudit.after, selectedAudit.action)}</pre></div>
               </div>
             </details>
           </SubInspector>

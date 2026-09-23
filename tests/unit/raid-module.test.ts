@@ -76,7 +76,7 @@ describe("Raid module", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.suppressed",
-      detail: { reason: "abgeschaltet", viewers: 8, threshold: 3 },
+      detail: { reason: "disabled", viewers: 8, threshold: 3 },
     }]);
   });
 
@@ -94,7 +94,7 @@ describe("Raid module", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.suppressed",
-      detail: { reason: "unter_schwelle", viewers: 2, threshold: 3 },
+      detail: { reason: "below_threshold", viewers: 2, threshold: 3 },
     }]);
   });
 
@@ -112,7 +112,7 @@ describe("Raid module", () => {
     ]);
     expect(result.diagnostics).toEqual([{
       code: "shoutout.suppressed",
-      detail: { reason: "unter_schwelle", viewers: 10, threshold: 50 },
+      detail: { reason: "below_threshold", viewers: 10, threshold: 50 },
     }]);
   });
 
@@ -156,7 +156,7 @@ describe("Raid module", () => {
 
     expect(result.diagnostics).toEqual([{
       code: "shoutout.suppressed",
-      detail: { reason: "unter_schwelle", viewers: 2, threshold: 3 },
+      detail: { reason: "below_threshold", viewers: 2, threshold: 3 },
     }]);
   });
 

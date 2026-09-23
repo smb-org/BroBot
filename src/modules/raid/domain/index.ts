@@ -1,3 +1,4 @@
+import type { RaidInvalidReason } from "../../../contracts/values";
 import type { RAID_TEMPLATE_FIELDS } from "../contracts";
 import { renderTemplate } from "../contract";
 import type { TemplateValues } from "../contract";
@@ -23,7 +24,7 @@ export type RaidDecision =
   }
   | {
     kind: "invalid";
-    reason: "ziel_ungueltig" | "quelle_ungueltig" | "zuschauer_ungueltig";
+    reason: RaidInvalidReason;
   };
 
 export const renderRaidText = (
@@ -45,9 +46,9 @@ export const decideRaid = (
     (subscriptionVariant !== "incoming" && fromId === channelId);
 
   if (outgoing) return { kind: "outgoing", targetChannelId: toId, viewers };
-  if (toId !== channelId) return { kind: "invalid", reason: "ziel_ungueltig" };
-  if (fromId === null) return { kind: "invalid", reason: "quelle_ungueltig" };
-  if (viewers === null) return { kind: "invalid", reason: "zuschauer_ungueltig" };
+  if (toId !== channelId) return { kind: "invalid", reason: "target_invalid" };
+  if (fromId === null) return { kind: "invalid", reason: "source_invalid" };
+  if (viewers === null) return { kind: "invalid", reason: "viewers_invalid" };
 
   return {
     kind: "incoming",

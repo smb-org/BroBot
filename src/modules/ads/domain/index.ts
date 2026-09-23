@@ -1,3 +1,4 @@
+import type { AdsSkippedReason } from "../../../contracts/values";
 import type { ADS_TEMPLATE_FIELDS, AdBreaksEvent, AdsSettings } from "../contracts";
 import { renderTemplate, templateVariableNames } from "../contract";
 import type { TemplateValues } from "../contract";
@@ -22,7 +23,7 @@ const nonEmptyString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
 export type AdBreaksDecision =
-  | { kind: "skip"; reason: "dauer_null" | "dauer_ungueltig" | "start_ungueltig"; durationSeconds: number | null; automatic: boolean }
+  | { kind: "skip"; reason: AdsSkippedReason; durationSeconds: number | null; automatic: boolean }
   | { kind: "announce"; event: AdBreaksEvent };
 
 export const decideAdBreak = (
@@ -31,14 +32,14 @@ export const decideAdBreak = (
   const duration = finiteNumber(payload.duration_seconds) ? payload.duration_seconds : null;
   const automatic = payload.is_automatic === true;
   if (duration === null || duration < 0) {
-    return { kind: "skip", reason: "dauer_ungueltig", durationSeconds: duration, automatic };
+    return { kind: "skip", reason: "duration_invalid", durationSeconds: duration, automatic };
   }
-  if (duration === 0) return { kind: "skip", reason: "dauer_null", durationSeconds: 0, automatic };
+  if (duration === 0) return { kind: "skip", reason: "duration_zero", durationSeconds: 0, automatic };
 
   const startedAt = nonEmptyString(payload.started_at);
   const start = startedAt === null ? Number.NaN : Date.parse(startedAt);
   if (startedAt === null || !Number.isFinite(start)) {
-    return { kind: "skip", reason: "start_ungueltig", durationSeconds: duration, automatic };
+    return { kind: "skip", reason: "start_invalid", durationSeconds: duration, automatic };
   }
 
   const triggerLogin = nonEmptyString(payload.requester_user_login) ??
