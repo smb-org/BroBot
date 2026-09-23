@@ -457,7 +457,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     </>}
   </dl>;
 
-  const deleteButton = command === null ? undefined : <Button icon="remove" danger="subtle" onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>;
+  const deleteButton = command === null ? undefined : <Button icon="remove" iconOnly ariaLabel={labels.delete} title={labels.delete} danger="subtle" onClick={() => { setConfirmingDelete(true); }} />;
   return <>
     <EditorShell
       ariaLabel={isCreate ? labels.add : labels.details(command.name)}

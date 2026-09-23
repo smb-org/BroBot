@@ -24,6 +24,7 @@ interface ButtonBaseProps {
   type?: "button" | "submit";
   /** Initial focus inside a `ConfirmDialog`: Mantine honors the focus target. */
   autoFocus?: boolean;
+  title?: string;
   size?: ButtonSize;
   ref?: Ref<HTMLButtonElement>;
   className?: string;
@@ -85,6 +86,7 @@ export function Button(props: ButtonProps) {
     onClick,
     type = "button",
     autoFocus = false,
+    title,
     size = "md",
     ref,
     className,
@@ -124,6 +126,7 @@ export function Button(props: ButtonProps) {
       type={type}
       aria-label={iconOnly ? props.ariaLabel : undefined}
       aria-describedby={describedBy}
+      title={title}
       data-autofocus={autoFocus ? true : undefined}
       className={buttonClassName}
       leftSection={leadingIcon}
