@@ -8,7 +8,7 @@ import {
 import { purgeOldTextCommandUserCooldowns } from "./db/text-command-user-cooldowns";
 import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
 import { eventSubMessageCutoff } from "./eventsub";
-import { maintainMissingStreamStates } from "./stream-state-lookup";
+import { maintainStreamStates } from "./stream-state-lookup";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   _controller,
@@ -26,7 +26,7 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
     maintainBotIdentity(env, now),
     maintainAppAccessToken(env, now),
     maintainEventSubSubscriptions(env, now),
-    maintainMissingStreamStates(env, now),
+    maintainStreamStates(env, now),
   ];
   // The count trim is a full-table scan (see EVENT_LOG_LIMIT's comment) --
   // cheap once a day, not something every hourly tick should pay for.

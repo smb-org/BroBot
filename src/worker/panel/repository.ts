@@ -1,6 +1,7 @@
 import type {
   PanelActiveModule,
   PanelAuditEntry,
+  PanelAuditFilters,
   PanelAuditResponse,
   PanelBotStatus,
   PanelBotPermissions,
@@ -18,11 +19,13 @@ import type {
 } from "../../panel-contract";
 import type {
   AuditActorKind,
+  AuditArea,
   ChannelStreamState,
   ChannelRole,
   EventSubSubscriptionType,
   IdentityStatus,
 } from "../../contracts/values";
+import { AUDIT_AREA_PREFIXES } from "../../dashboard/audit/areas";
 import { eventToneEntries } from "../../dashboard/locale";
 import {
   channelBotConsentCondition,
@@ -72,7 +75,7 @@ interface ChannelStateRow {
   eventsub_error_status: number | null;
   eventsub_error_updated_at: string | null;
   stream_state: ChannelStreamState | null;
-  stream_changed_at: string | null;
+  stream_started_at: string | null;
   muted: ChannelControlFields["muted"];
   muted_until: string | null;
   mute_until_stream_end: ChannelControlFields["mute_until_stream_end"];
@@ -159,11 +162,11 @@ export const channelStateQuery = `
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
              LIMIT 1) AS stream_state,
-           (SELECT stream_state.changed_at
+           (SELECT stream_state.started_at
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
                AND stream_state.state = 'online'
-             LIMIT 1) AS stream_changed_at,
+             LIMIT 1) AS stream_started_at,
            channel_controls.muted AS muted,
            channel_controls.muted_until AS muted_until,
            channel_controls.mute_until_stream_end AS mute_until_stream_end,
@@ -347,7 +350,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   chatSubscription: mapEventSub(row),
   chatSubscriptionNeeded: row.chat_subscription_needed === 1,
   streamState: row.stream_state,
-  streamStartedAt: row.stream_changed_at,
+  streamStartedAt: row.stream_started_at,
   controls: mapChannelControls(row, new Date().toISOString()),
   tokens: mapTokens(row),
   lastError: mapLastError(row),
@@ -427,27 +430,91 @@ export const getSystemOverviewForUser = async (
   };
 };
 
+/** All audit action prefixes end in `.`, so `/` is their exclusive upper bound. */
+const actionPrefixUpperBound = (prefix: string): string => {
+  const lastCharacter = prefix.at(-1);
+  if (lastCharacter === undefined) return prefix;
+  return `${prefix.slice(0, -1)}${String.fromCharCode(lastCharacter.charCodeAt(0) + 1)}`;
+};
+
+/**
+ * "module" has no prefix of its own in `AUDIT_AREA_PREFIXES` -- it's every
+ * action none of the other areas' prefixes match, so its predicate is the
+ * conjunction of the others' negations. Kept in sync with
+ * `dashboard/audit/areas.ts`'s `auditAreaForAction` by construction: both
+ * read the same table.
+ */
+export const auditAreaSqlClause = (area: AuditArea): { sql: string; values: string[] } => {
+  const match = AUDIT_AREA_PREFIXES.find((entry) => entry.area === area);
+  if (match !== undefined) {
+    return {
+      sql: "action >= ? AND action < ?",
+      values: [match.prefix, actionPrefixUpperBound(match.prefix)],
+    };
+  }
+  const prefixes = [...AUDIT_AREA_PREFIXES].sort((left, right) =>
+    left.prefix < right.prefix ? -1 : left.prefix > right.prefix ? 1 : 0,
+  );
+  const ranges: { lower: string | null; upper: string | null }[] = [
+    { lower: null, upper: prefixes[0]?.prefix ?? null },
+    ...prefixes.slice(0, -1).map((entry, index) => ({
+      lower: actionPrefixUpperBound(entry.prefix),
+      upper: prefixes[index + 1]?.prefix ?? null,
+    })),
+    { lower: actionPrefixUpperBound(prefixes.at(-1)?.prefix ?? ""), upper: null },
+  ];
+  return {
+    sql: `(${ranges.map(({ lower, upper }) => {
+      if (lower === null && upper === null) return "1 = 1";
+      if (lower === null) return "action < ?";
+      if (upper === null) return "action >= ?";
+      return "(action >= ? AND action < ?)";
+    }).join(" OR ")})`,
+    values: ranges.flatMap(({ lower, upper }) => lower === null
+      ? upper === null ? [] : [upper]
+      : upper === null ? [lower] : [lower, upper]),
+  };
+};
+
+const NO_AUDIT_FILTERS: PanelAuditFilters = Object.freeze({ person: null, area: null });
+
+// The channel + actor and channel + action indexes keep both optional filters
+// selective before the descending timestamp scan as each channel's audit log
+// grows.
 export const getAuditLogForChannel = async (
   db: D1Database,
   channelId: string,
   limit: number,
   cursor: LogCursor | null,
+  filters: PanelAuditFilters = NO_AUDIT_FILTERS,
 ): Promise<PanelAuditResponse> => {
+  const where = ["channel_id = ?"];
+  const filterValues: string[] = [channelId];
+  if (filters.person !== null) {
+    where.push("actor_user_id = ?");
+    filterValues.push(filters.person);
+  }
+  if (filters.area !== null) {
+    const area = auditAreaSqlClause(filters.area);
+    where.push(area.sql);
+    filterValues.push(...area.values);
+  }
+  const whereClause = where.join("\n          AND ");
   const query = cursor === null
     ? `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
-        WHERE channel_id = ?
+        WHERE ${whereClause}
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`
     : `SELECT audit_id, actor_user_id, actor_kind, created_at, channel_id, module_id, action, before_json, after_json
          FROM audit_log
-        WHERE channel_id = ?
+        WHERE ${whereClause}
           AND (created_at < ? OR (created_at = ? AND audit_id < ?))
         ORDER BY created_at DESC, audit_id DESC
         LIMIT ?`;
   const values = cursor === null
-    ? [channelId, limit + 1]
-    : [channelId, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
+    ? [...filterValues, limit + 1]
+    : [...filterValues, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
   const result = await db.prepare(query).bind(...values).all<AuditLogRow>();
   const hasNextPage = result.results.length > limit;
   const rows = result.results.slice(0, limit);

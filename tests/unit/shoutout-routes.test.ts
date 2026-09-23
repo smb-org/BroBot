@@ -44,6 +44,9 @@ describe("manual shoutout", () => {
   beforeEach(async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'raid', 1, '{}')",
+    ).run();
     await insertAppAccessToken(
       database,
       await encryptJson({ token: "app-token" }, parseKeyRing(environmentKeys.TOKEN_ENCRYPTION_KEYS)),
@@ -88,6 +91,19 @@ describe("manual shoutout", () => {
     await expect(database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ code: "host.shoutout.sent" });
+  });
+
+  it("rejects a shoutout after the raid module is disabled", async () => {
+    const environment = await asMember("operator");
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'kanal-a' AND module_id = 'raid'").run();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { login: "streamerin" }), environment);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "module_disabled" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("reports an unknown login without calling shoutout", async () => {

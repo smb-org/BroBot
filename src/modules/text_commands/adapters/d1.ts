@@ -9,7 +9,7 @@ import type {
   TextCommandResponseType,
   TextCommandStreamCondition,
 } from "../contracts";
-import { truncateTo200Chars, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
+import { textFingerprintIfTruncated, truncateTo200Chars, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
 import type {
   TextCommandAliasConflict,
   TextCommandMutationResult,
@@ -20,21 +20,32 @@ import { cooldownRemaining } from "../domain";
 const MODULE_ID = "text_commands";
 const extraTemplateKeys = ["offlineText", "notFollowingText", "unavailableText", "usageText"] as const;
 
-const auditValues = (command: TextCommand) => ({
+/**
+ * Preview plus, only past the truncation cutoff, a `${key}Hash` fingerprint
+ * of the full value (#181 review): otherwise an edit that only touches text
+ * after character 200 truncates to the same preview on both sides and the
+ * audit diff would show no change at all.
+ */
+const previewField = async (key: string, text: string): Promise<Record<string, string>> => {
+  const hash = await textFingerprintIfTruncated(text);
+  return hash === undefined ? { [key]: truncateTo200Chars(text) } : { [key]: truncateTo200Chars(text), [`${key}Hash`]: hash };
+};
+
+const auditValues = async (command: TextCommand) => ({
   name: command.name,
   kind: command.kind,
   enabled: command.enabled,
   minimumTier: command.minimumTier,
-  text: truncateTo200Chars(command.text),
+  ...await previewField("text", command.text),
   cooldownSeconds: command.cooldownSeconds,
   aliases: [...command.aliases],
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
   responseType: command.responseType,
-  ...(command.offlineText === undefined ? {} : { offlineText: truncateTo200Chars(command.offlineText) }),
-  ...(command.notFollowingText === undefined ? {} : { notFollowingText: truncateTo200Chars(command.notFollowingText) }),
-  ...(command.unavailableText === undefined ? {} : { unavailableText: truncateTo200Chars(command.unavailableText) }),
-  ...(command.usageText === undefined ? {} : { usageText: truncateTo200Chars(command.usageText) }),
+  ...(command.offlineText === undefined ? {} : await previewField("offlineText", command.offlineText)),
+  ...(command.notFollowingText === undefined ? {} : await previewField("notFollowingText", command.notFollowingText)),
+  ...(command.unavailableText === undefined ? {} : await previewField("unavailableText", command.unavailableText)),
+  ...(command.usageText === undefined ? {} : await previewField("usageText", command.usageText)),
 });
 
 const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
@@ -308,7 +319,7 @@ export const createTextCommandRepository = (
       moduleId: MODULE_ID,
       action: "text_commands.command.created" satisfies AuditAction,
       before: null,
-      after: auditValues(after),
+      after: await auditValues(after),
     }, input.now, aliasWrites);
     if (changes > 0) return succeeded();
     if (await this.find(input.channelId, input.name) !== null) return failed("already_exists");
@@ -444,8 +455,8 @@ export const createTextCommandRepository = (
       channelId: input.channelId,
       moduleId: MODULE_ID,
       action: "text_commands.command.updated" satisfies AuditAction,
-      before: auditValues(before),
-      after: auditValues(after),
+      before: await auditValues(before),
+      after: await auditValues(after),
     }, input.now, sideEffects);
     if (changes > 0) return succeeded();
 
@@ -498,7 +509,7 @@ export const createTextCommandRepository = (
       channelId,
       moduleId: MODULE_ID,
       action: "text_commands.command.removed" satisfies AuditAction,
-      before: auditValues(before),
+      before: await auditValues(before),
       after: null,
     }, now, [cleanupCooldowns]);
     if (changes > 0) return succeeded();

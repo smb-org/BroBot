@@ -567,6 +567,40 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("stores the event's real stream start on stream.online and clears it again on stream.offline (#178)", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const environmentValue = environment(database);
+
+      await dispatchEventSubNotification(environmentValue, {
+        channelId: "kanal-a",
+        subscriptionType: "stream.online",
+        triggerId: "online-1",
+        payload: { started_at: "2026-09-19T11:55:00.000Z" },
+        receivedAt: "2026-09-19T12:00:00.000Z",
+      }, sent(), []);
+
+      await expect(database.prepare(
+        "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", started_at: "2026-09-19T11:55:00.000Z" });
+
+      await dispatchEventSubNotification(environmentValue, {
+        channelId: "kanal-a",
+        subscriptionType: "stream.offline",
+        triggerId: "offline-1",
+        payload: {},
+        receivedAt: "2026-09-19T12:05:00.000Z",
+      }, sent(), []);
+
+      await expect(database.prepare(
+        "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "offline", started_at: null });
+    } finally {
+      database.close();
+    }
+  });
+
   it("memoizes one lazy Helix stream lookup for every module in a dispatch", async () => {
     const database = new TestD1Database();
     try {
@@ -593,7 +627,7 @@ describe("dispatch and execution", () => {
       let streamStateReads = 0;
       const wrappedDb = {
         prepare(sql: string) {
-          if (/SELECT state\s+FROM channel_stream_state/u.test(sql)) streamStateReads += 1;
+          if (/SELECT[\s\S]*FROM channel_stream_state/u.test(sql)) streamStateReads += 1;
           return database.prepare(sql);
         },
         batch: database.batch.bind(database),

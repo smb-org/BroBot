@@ -229,3 +229,29 @@ export const clearStreamEndChannelControls = async (
         AND (mute_until_stream_end = 1 OR pause_until_stream_end = 1)`,
   ).bind(changedAt, channelId).run();
 };
+
+/**
+ * Prepares the Helix offline cleanup for the same batch as its state write.
+ * A newer stream transition or control update leaves the control untouched.
+ */
+export const prepareHelixOfflineStreamEndControlsCleanup = (
+  db: D1Database,
+  channelId: string,
+  changedAt: string,
+): D1PreparedStatement => db.prepare(
+  `UPDATE channel_controls
+      SET muted = CASE WHEN mute_until_stream_end = 1 THEN 0 ELSE muted END,
+          muted_until = CASE WHEN mute_until_stream_end = 1 THEN NULL ELSE muted_until END,
+          mute_until_stream_end = 0,
+          paused = CASE WHEN pause_until_stream_end = 1 THEN 0 ELSE paused END,
+          paused_until = CASE WHEN pause_until_stream_end = 1 THEN NULL ELSE paused_until END,
+          pause_until_stream_end = 0,
+          updated_at = ?
+    WHERE channel_id = ?
+      AND (mute_until_stream_end = 1 OR pause_until_stream_end = 1)
+      AND julianday(updated_at) < julianday(?)
+      AND EXISTS (
+        SELECT 1 FROM channel_stream_state
+         WHERE channel_id = ? AND state = 'offline' AND changed_at = ?
+      )`,
+).bind(changedAt, channelId, changedAt, channelId, changedAt);

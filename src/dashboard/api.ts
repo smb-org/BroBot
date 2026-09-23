@@ -1,4 +1,5 @@
 import type {
+  PanelAuditFilters,
   PanelAuditResponse,
   PanelPlatformMembersResponse,
   PanelPlatformAuditResponse,
@@ -184,9 +185,12 @@ export const fetchAuditLog = (
   channelId: string,
   cursor: string | null = null,
   signal?: AbortSignal,
+  filters?: PanelAuditFilters,
 ): Promise<PanelAuditResponse> => {
   const params = new URLSearchParams();
   if (cursor !== null) params.set("cursor", cursor);
+  if (filters?.person !== null && filters?.person !== undefined) params.set("actor", filters.person);
+  if (filters?.area !== null && filters?.area !== undefined) params.set("area", filters.area);
   const query = params.toString();
   return requestJson<PanelAuditResponse>(
     `${channelPath(channelId, "audit-log")}${query.length > 0 ? `?${query}` : ""}`,

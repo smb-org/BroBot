@@ -1421,16 +1421,58 @@ describe("Dashboard skeleton", () => {
     expect(row).toHaveAttribute("aria-selected", "false");
     fireEvent.keyDown(row as HTMLElement, { key: "Enter" });
     expect(row).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "Vorher" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Nachher" })).toBeInTheDocument();
-    expect(screen.getByText('{"enabled":false}')).toBeInTheDocument();
     const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
-    expect(await within(inspector).findByText("user-1")).toBeInTheDocument();
+    // #181 item 2: the inspector shows the display name like the table, the
+    // raw id only as a tooltip -- not "user-1" as visible text.
+    expect(await within(inspector).findByText("Alice")).toBeInTheDocument();
+    expect(within(inspector).getByText("Alice")).toHaveAttribute("title", "user-1");
+    // #181 item 3: a diff of the one changed field, not raw JSON blocks.
+    expect(within(inspector).getByText("Aktiv")).toBeInTheDocument();
+    expect(within(inspector).getByText("Nein")).toBeInTheDocument();
+    expect(within(inspector).getByText("Ja")).toBeInTheDocument();
+    expect(within(inspector).queryByText('{"enabled":false}')).not.toBeInTheDocument();
+    fireEvent.click(within(inspector).getByText("Technische Details"));
+    const rawBlocks = inspector.querySelectorAll("pre");
+    expect(Array.from(rawBlocks).map((pre) => pre.textContent.trim())).toEqual(['{\n  "enabled": false\n}', '{\n  "enabled": true\n}']);
     const secondRow = screen.getByText("Modul deaktiviert").closest("tr");
     expect(secondRow).not.toBeNull();
     fireEvent.keyDown(secondRow as HTMLElement, { key: " " });
     expect(secondRow).toHaveAttribute("aria-selected", "true");
     expect(row).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("labels a module.enabled entry's settings diff with the module's own field catalogue, not the raw key", async () => {
+    // #187 review: `module.enabled` carries settings too (first enable, or a
+    // re-enable resetting to defaults) -- its diff needs the module's own
+    // field labels just like `*.settings_changed`, not raw keys like "leadSeconds".
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const auditEntry = {
+      auditId: "audit-1",
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      moduleId: "ads",
+      action: "module.enabled",
+      before: "null",
+      after: JSON.stringify({ channelId: "kanal-a", moduleId: "ads", enabled: true, settings: JSON.stringify({ prewarning: true, leadSeconds: 60 }) }),
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/audit-log")) return jsonResponse({ entries: [auditEntry], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
+
+    render(<DashboardApp />);
+
+    const row = await screen.findByText("Modul aktiviert: Werbung");
+    fireEvent.click(row);
+    const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
+    expect(await within(inspector).findByText("Vorlaufzeit")).toBeInTheDocument();
+    expect(within(inspector).queryByText("leadSeconds")).not.toBeInTheDocument();
   });
 
   it("shows all subscriptions legibly and opens message and status in the sub-inspector", async () => {
@@ -2336,6 +2378,43 @@ describe("Dashboard skeleton", () => {
 
     // Warnings/errors feed needs no interaction to show.
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+  });
+
+  it("uses the overview stream state for Spotlight actions", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), streamState: "offline" as const };
+    const freshOverview = { ...overview(channel), streamState: "online" as const, streamStartedAt: "2026-09-23T11:30:00.000Z" };
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(freshOverview));
+      if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ modules: [{ id: "clips", enabled: true, settings: "{}" }] }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules/text_commands/commands") return Promise.resolve(jsonResponse({ commands: [] }));
+      if (url.pathname === "/api/channels/kanal-a/members") return Promise.resolve(jsonResponse({ members: [], broadcasterCount: 0, viewerUserId: "user-1", nextCursor: null }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/clips" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ clipId: null, editUrl: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    const { container } = render(<DashboardApp />);
+
+    await waitFor(() => {
+      expect(container.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+    });
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "clip" } });
+    fireEvent.click(await within(screen.getByRole("dialog")).findByText("Clip erstellen"));
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) =>
+        requestUrl(input).pathname === "/api/channels/kanal-a/clips" && init?.method === "POST")).toBe(true);
+    });
   });
 
   it("switches channels through the header select and moves the route", async () => {

@@ -8,7 +8,7 @@ const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const migration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
 describe("configuration revisions and alias index migration", () => {
-  it("applies 0000 through 0006 to seeded data and preserves keys, indexes, and foreign keys", () => {
+  it("applies 0000 through 0008 to seeded data and preserves keys, indexes, and foreign keys", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
@@ -28,6 +28,8 @@ describe("configuration revisions and alias index migration", () => {
         "0003_text_command_kinds.sql",
         "0004_channel_controls.sql",
         "0005_clips_default_on.sql",
+        "0006_stream_started_at.sql",
+        "0007_audit_log_filter_indexes.sql",
       ]) database.exec(migration(name));
 
       database.exec(`

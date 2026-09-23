@@ -14,7 +14,7 @@ import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
 import { writeEventSubStreamState } from "./db/stream-state";
-import { lookupAndStoreStreamStateIfMissing } from "./stream-state-lookup";
+import { lookupAndRefreshStreamState } from "./stream-state-lookup";
 import { clearStreamEndChannelControls, readDispatchChannelState } from "./db/channel-controls";
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
@@ -44,7 +44,7 @@ const streamStateForEvent = async (
   channelId: string,
   fetcher: typeof fetch,
 ): Promise<ModuleStreamState> =>
-  (await lookupAndStoreStreamStateIfMissing(environment as unknown as Env, channelId, new Date().toISOString(), fetcher)) ?? "unknown";
+  (await lookupAndRefreshStreamState(environment as unknown as Env, channelId, new Date().toISOString(), fetcher)).state ?? "unknown";
 
 const firstDataRecord = (result: unknown): Readonly<Record<string, unknown>> | null => {
   if (!recordValue(result) || !arrayValue(result.data)) return null;
@@ -348,11 +348,15 @@ export const dispatchEventSubNotification = async (
 ): Promise<void> => {
   let streamStateUpdated = false;
   if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
+    // The `started_at` Twitch sends on `stream.online` is the actual stream
+    // start, distinct from `event.receivedAt` (used only for write ordering).
+    const startedAt = event.subscriptionType === "stream.online" ? textValue(event.payload.started_at) : null;
     streamStateUpdated = await writeEventSubStreamState(
       environment.DB,
       event.channelId,
       event.subscriptionType === "stream.online" ? "online" : "offline",
       event.eventSubTimestamp ?? event.receivedAt,
+      startedAt,
     );
   }
   const dispatchState = await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt);

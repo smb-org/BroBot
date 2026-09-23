@@ -2,7 +2,7 @@ import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState
 import { createRoot } from "react-dom/client";
 
 import type {
-  PanelAuditEntry,
+  PanelAuditFilters,
   PanelAuditResponse,
   PanelBotPermissions,
   PanelBotStatus,
@@ -45,15 +45,17 @@ import { ImmediateActions, WarningsAndErrorsFeed } from "./stream-manager";
 import { ChannelSpotlight } from "./spotlight";
 import { MembersPage } from "./members";
 import { PlatformPage } from "./platform";
-import { platformTexts, channelPanelTexts, roleLabel, auditActionLabel } from "./labels";
+import { platformTexts, channelPanelTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { CHANNEL_CONTROL_DURATIONS, canManage, type ChannelControlDuration } from "../contracts/values";
 import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, Button, ControlDurationDialog, Icon, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { BlockingState, Button, ControlDurationDialog, Icon, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
+import { AuditPage } from "./audit/AuditPage";
+import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
 
@@ -973,49 +975,6 @@ const SystemPage = ({ system, systemState }: SystemPageProperties): ReactElement
   );
 };
 
-interface AuditPageProperties {
-  auditState: LoadState<PanelAuditResponse>;
-  onNextPage: () => void;
-  loadingNextPage: boolean;
-}
-
-const AuditPage = ({ auditState, onNextPage, loadingNextPage }: AuditPageProperties): ReactElement => {
-  const texts = dashboardTexts();
-  const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>();
-  const selectedAudit = auditState.data?.entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
-  return (
-    <>
-      <ModuleHeading kind="system" title={texts.audit.title} subtitle={texts.system.readOnly} />
-      <ListDetail
-        onCloseInspector={closeAudit}
-        list={
-          <section className="content-section" aria-label={texts.audit.title}>
-            <div className="section-heading"><h2>{texts.audit.title}</h2>{auditState.data === null ? null : <span className="muted"><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.audit.entries}</span>}</div>
-            {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.audit.load}</p> : null}
-            {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
-            {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="empty-state">{texts.audit.empty}</p> : null}
-            {auditState.data !== null && auditState.data.entries.length > 0 ? <>
-              <div className={auditState.status === "loading" ? "stale" : undefined}>
-                <table className="table audit-table">
-                  <thead><tr><th scope="col">{texts.audit.time}</th><th scope="col">{texts.audit.action}</th><th scope="col">{texts.audit.who}</th></tr></thead>
-                  <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row">{auditActionLabel(entry.action)}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
-                </table>
-              </div>
-              {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
-            </> : null}
-          </section>
-        }
-        inspector={selectedAudit === null ? null : (
-          <SubInspector ariaLabel={texts.audit.changeData} title={selectedAudit.action} identifier={selectedAudit.auditId} closeLabel={dashboardCommonTexts().close} onClose={closeAudit}>
-            <dl className="properties"><div><dt>{texts.audit.who}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
-            <div className="inspector-columns"><div><h4>{texts.audit.before}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texts.audit.after}</h4><pre>{selectedAudit.after}</pre></div></div>
-          </SubInspector>
-        )}
-      />
-    </>
-  );
-};
-
 const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactElement => {
   const texts = dashboardTexts();
   const emptyValue = "—";
@@ -1037,9 +996,6 @@ const SystemProperties = ({ system }: { system: PanelSystemResponse }): ReactEle
     </section>
   );
 };
-
-const auditActorLabel = (entry: PanelAuditEntry): string =>
-  entry.actorDisplayName ?? (entry.actorLogin == null ? entry.actorUserId : `@${entry.actorLogin}`);
 
 const mergeEventEntries = (
   current: readonly PanelEventEntry[],
@@ -1349,7 +1305,7 @@ export const DashboardApp = (): ReactElement => {
         setAudit(loadingState());
         setAuditChannelId(route.channelId);
         try {
-          const response = await fetchAuditLog(route.channelId, null, controller.signal);
+          const response = await fetchAuditLog(route.channelId, null, controller.signal, route.auditFilters ?? emptyAuditFilter);
           if (!cancelled && !controller.signal.aborted) {
             setAudit(loadedState(response));
             setAuditChannelId(route.channelId);
@@ -1666,7 +1622,7 @@ export const DashboardApp = (): ReactElement => {
     auditPageController.current = controller;
     setLoadingNextAuditPage(true);
     try {
-      const nextPage = await fetchAuditLog(channelId, cursor, controller.signal);
+      const nextPage = await fetchAuditLog(channelId, cursor, controller.signal, route.auditFilters ?? emptyAuditFilter);
       if (window.location.pathname !== routePath) return;
       setAudit((current) => {
         if (current.data === null || current.data.nextCursor !== cursor) return current;
@@ -1732,6 +1688,18 @@ export const DashboardApp = (): ReactElement => {
     navigate(nextRoute);
   };
   const eventFilters = route.kind === "channel" && route.section === "events" ? route.filters ?? emptyEventFilter : emptyEventFilter;
+
+  const updateAuditFilters = (filters: PanelAuditFilters): void => {
+    if (route.kind !== "channel" || route.section !== "audit") return;
+    const nextRoute: DashboardRoute = {
+      kind: "channel",
+      channelId: route.channelId,
+      section: "audit",
+      ...(auditFilterIsActive(filters) ? { auditFilters: filters } : {}),
+    };
+    navigate(nextRoute);
+  };
+  const auditFilters = route.kind === "channel" && route.section === "audit" ? route.auditFilters ?? emptyAuditFilter : emptyAuditFilter;
 
   if (authenticationRequired) {
     const texts = dashboardTexts();
@@ -1800,9 +1768,9 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && system.status !== "idle" ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && audit.status !== "idle" ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && audit.status !== "idle" ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} filters={auditFilters} onFiltersChange={updateAuditFilters} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
-        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} streamState={selectedChannel.streamState} modules={modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} /> : null}
+        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} streamState={overviewForHeader === null ? selectedChannel.streamState : overviewForHeader.streamState} modules={modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} /> : null}
         </div>
       </Shell>
     </UiProvider>
