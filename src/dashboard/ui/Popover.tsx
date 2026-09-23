@@ -28,7 +28,7 @@ export function Popover({ triggerLabel, icon, children }: PopoverProps): ReactEl
       <MantinePopover.Target>
         <button
           type="button"
-          className="button button--quiet ui-button--icon-only ui-button--icon-only-compact"
+          className="ui-popover-trigger"
           aria-label={triggerLabel}
           aria-describedby={opened ? contentId : undefined}
           onMouseEnter={() => { setOpened(true); }}

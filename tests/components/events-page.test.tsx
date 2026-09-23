@@ -11,7 +11,10 @@ const entry = (overrides: Partial<PanelEventEntry>): PanelEventEntry => ({
   eventId: "event-1",
   createdAt: "2026-09-22T10:00:00.000Z",
   moduleId: "host",
-  triggerId: "trigger-1",
+  // Distinct per entry by default -- entries sharing a `triggerId` collapse
+  // into one group (`eventGroups`), and only the group's representative
+  // renders as a row. Callers that want to exercise grouping override this.
+  triggerId: `trigger-${overrides.eventId ?? "event-1"}`,
   code: "host.chat.failed",
   detail: "{}",
   actorUserId: null,
@@ -83,6 +86,20 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.queryByText("Vorgang")).not.toBeInTheDocument();
     const row = trigger.closest("tr");
     expect(row).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("hides the icon when the row's own event text already spells the cause out", () => {
+    renderPage([
+      // "ads.commercial.failed" already renders "... Twitch hat den Start
+      // abgelehnt" inline -- the popover would just repeat it.
+      entry({ eventId: "spelled-out", moduleId: "ads", code: "ads.commercial.failed", detail: "{\"reason\":\"twitch_error\"}" }),
+      // "host.clip.failed" stays generic ("Clip fehlgeschlagen") regardless
+      // of the reason, so the icon still earns its place.
+      entry({ eventId: "still-hidden", moduleId: "host", code: "host.clip.failed", detail: "{\"reason\":\"twitch_error\"}" }),
+    ]);
+
+    expect(screen.getAllByRole("button", { name: "Ursache anzeigen" })).toHaveLength(1);
+    expect(screen.getByText(/Werbeeinblendung nicht gestartet: Twitch hat den Start abgelehnt/)).toBeInTheDocument();
   });
 
   it("still opens the inspector when the row itself is clicked", () => {

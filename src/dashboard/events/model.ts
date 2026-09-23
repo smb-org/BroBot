@@ -1,6 +1,6 @@
 import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
-import { eventCauseText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
+import { eventCauseText, eventText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
 import { moduleName } from "../module-labels";
 
 export const emptyEventFilter: PanelEventFilters = {
@@ -29,12 +29,18 @@ export const eventToneFromValue = (value: string): EventTone | null =>
   EVENT_TONES.includes(value as EventTone) ? value as EventTone : null;
 
 /** The row's failure cause for the hover/focus icon -- null on any tone
- *  other than warning/error, or when the diagnostic detail carries none of
- *  the usual reason/cause/message keys (the row then gets no icon). */
+ *  other than warning/error, when the diagnostic detail carries none of the
+ *  usual reason/cause/message keys, or when the row's own event text already
+ *  spells the cause out (e.g. `ads.commercial.failed`'s text already ends in
+ *  "Twitch hat den Start abgelehnt" -- an icon repeating it is clutter, not
+ *  help). The row then gets no icon either way. */
 export const eventCause = (entry: PanelEventEntry): string | null => {
   const tone = eventTone(entry.code);
   if (tone !== "warning" && tone !== "error") return null;
-  return eventCauseText(entry.code, eventDetail(entry.detail));
+  const detail = eventDetail(entry.detail);
+  const cause = eventCauseText(entry.code, detail);
+  if (cause === null) return null;
+  return eventText(entry.code, detail).includes(cause) ? null : cause;
 };
 
 export interface EventGroup {
