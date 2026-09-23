@@ -66,6 +66,7 @@ export type ModuleAction =
   | { kind: "chat"; text: string; replyToMessageId?: string }
   | { kind: "announcement"; text: string }
   | { kind: "shoutout"; targetChannelId: string }
+  | { kind: "shoutout"; targetLogin: string }
   | { kind: "overlay"; type: string; payload: Readonly<Record<string, unknown>> };
 
 /**
@@ -141,9 +142,23 @@ export interface ModuleExecutionContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
   streamState: () => Promise<ModuleStreamState>;
+  /** Lazily loads the current channel's public Helix fields and live start time. */
+  channelInfo: () => Promise<ModuleChannelInfo | null>;
+  /** Lazily loads whether the caller follows the current channel. */
+  followedAt: (userId: string) => Promise<ModuleFollowedAt>;
+  /** Lazily reads the channel's configured chat-template language. */
+  channelLanguage: () => Promise<ModuleLanguage>;
 }
 
+export type ModuleFollowedAt = (string & {}) | null | "unavailable";
+
 export type ModuleStreamState = "online" | "offline" | "unknown";
+
+export interface ModuleChannelInfo {
+  title: string;
+  gameName: string;
+  startedAt: string | null;
+}
 
 /** Infrastructure for one-time initial data when a module is enabled. */
 export interface ModuleEnableContext {

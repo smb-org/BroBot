@@ -17,7 +17,9 @@ export interface TextCommandsTexts {
   deleteError: string;
   name: string;
   aliases: string;
-  variables: { user: string; channel: string };
+  variables: { user: string; channel: string; uptime: string; followage: string; game: string; title: string; target: string };
+  templateFieldLabels: { offlineText: string; notFollowingText: string; unavailableText: string; usageText: string };
+  shoutoutCooldownHint: string;
   kind: string;
   kindLabels: Record<TextCommandKind, string>;
   kindHints: Record<TextCommandKind, string>;
@@ -103,7 +105,7 @@ export interface TextCommandsTexts {
   textAreaMessages: TextAreaMessages;
   tagInputMessages: TagInputMessages;
   warningLabel: (warning: PanelTemplateWarning) => string;
-  columns: { name: string; response: string; minimumTier: string; active: string };
+  columns: { name: string; kind: string; response: string; minimumTier: string; active: string };
 }
 
 const templateMessages: LocaleCatalog<TextAreaMessages> = {
@@ -132,8 +134,18 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     title: "Textbefehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
     load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
-    name: "Name", aliases: "Aliase", variables: { user: "Name des Zuschauers, der den Befehl auslöst", channel: "Name des Kanals" }, kind: "Art", kindLabels: { text: "Antworttext", list: "Befehlsliste" },
-    kindHints: { text: "Antwortet mit dem Text unten.", list: "Zählt alle eingeschalteten Befehle auf (ohne Aliase)." },
+    name: "Name", aliases: "Aliase", variables: {
+      user: "Name des Zuschauers, der den Befehl auslöst", channel: "Name des Kanals", uptime: "Dauer des laufenden Streams",
+      followage: "Dauer, seit der Zuschauer dem Kanal folgt", game: "Aktuelle Twitch-Kategorie", title: "Aktueller Streamtitel", target: "Twitch-Login des Shoutout-Ziels",
+    },
+    templateFieldLabels: { offlineText: "Offline-Antwort", notFollowingText: "Antwort ohne Follow", unavailableText: "Antwort bei fehlenden Daten", usageText: "Nutzungshinweis" },
+    shoutoutCooldownHint: "Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.",
+    kind: "Art", kindLabels: { text: "Antworttext", list: "Befehlsliste", uptime: "Stream-Laufzeit", followage: "Followage", game: "Spiel und Titel", shoutout: "Shoutout" },
+    kindHints: {
+      text: "Antwortet mit dem Text unten.", list: "Zählt alle eingeschalteten Befehle auf (ohne Aliase).",
+      uptime: "Zeigt die aktuelle Laufzeit des Streams.", followage: "Zeigt, seit wann die auslösende Person folgt.",
+      game: "Zeigt die aktuelle Kategorie und den Streamtitel.", shoutout: "!so <name> empfiehlt einen Twitch-Kanal im Chat.",
+    },
     response: "Antwort", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.",
     minimumTier: "Wer darf auslösen", minimumTierLocked: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern.",
     tierLabels: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
@@ -186,14 +198,24 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unbekannte Variable${warning.unknownVariables.length === 1 ? "" : "n"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
       : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
-    columns: { name: "!Name", response: "Antwort", minimumTier: "Mindeststufe", active: "Aktiv" },
+    columns: { name: "!Name", kind: "Art", response: "Antwort", minimumTier: "Mindeststufe", active: "Aktiv" },
   },
   en: {
     title: "Text commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
     load: "Loading text commands …", loadError: "The text commands could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
-    name: "Name", aliases: "Aliases", variables: { user: "Name of the viewer who triggered the command", channel: "Channel name" }, kind: "Type", kindLabels: { text: "Response text", list: "Command list" },
-    kindHints: { text: "Replies with the text below.", list: "Lists all enabled commands (without aliases)." },
+    name: "Name", aliases: "Aliases", variables: {
+      user: "Name of the viewer who triggered the command", channel: "Channel name", uptime: "Current stream duration",
+      followage: "How long the viewer has followed the channel", game: "Current Twitch category", title: "Current stream title", target: "Shoutout target's Twitch login",
+    },
+    templateFieldLabels: { offlineText: "Offline response", notFollowingText: "Not following response", unavailableText: "Unavailable response", usageText: "Usage response" },
+    shoutoutCooldownHint: "Twitch enforces shoutout cooldowns: 2 minutes per channel and 60 minutes per target.",
+    kind: "Type", kindLabels: { text: "Response text", list: "Command list", uptime: "Stream uptime", followage: "Followage", game: "Game and title", shoutout: "Shoutout" },
+    kindHints: {
+      text: "Replies with the text below.", list: "Lists all enabled commands (without aliases).",
+      uptime: "Shows how long the current stream has been live.", followage: "Shows how long the caller has followed.",
+      game: "Shows the current category and stream title.", shoutout: "!so <name> recommends a Twitch channel in chat.",
+    },
     response: "Response", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.",
     minimumTier: "Who can use it", minimumTierLocked: "Only broadcasters and managers may change minimum levels.",
     tierLabels: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
@@ -246,7 +268,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unknown variable${warning.unknownVariables.length === 1 ? "" : "s"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
       : `Template can be ${String(warning.worstCaseLength)} characters long.`,
-    columns: { name: "!Name", response: "Response", minimumTier: "Minimum level", active: "Active" },
+    columns: { name: "!Name", kind: "Type", response: "Response", minimumTier: "Minimum level", active: "Active" },
   },
 };
 

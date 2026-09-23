@@ -18,6 +18,7 @@ describe("text command options migration", () => {
         VALUES ('channel-a', 'existing', 'Existing response', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
       `);
       database.exec(readFileSync(resolve(migrationsDirectory, "0002_text_command_options.sql"), "utf8"));
+      database.exec(readFileSync(resolve(migrationsDirectory, "0003_text_command_kinds.sql"), "utf8"));
 
       expect(database.prepare(
         `SELECT aliases_json, user_cooldown_seconds, stream_condition, response_type
@@ -46,6 +47,7 @@ describe("text command options migration", () => {
         VALUES ('channel-a', 'channel-a', 'Channel A', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
       `);
       database.exec(readFileSync(resolve(migrationsDirectory, "0002_text_command_options.sql"), "utf8"));
+      database.exec(readFileSync(resolve(migrationsDirectory, "0003_text_command_kinds.sql"), "utf8"));
       const insert = database.prepare(
         `INSERT INTO text_commands
           (channel_id, command_name, response_text, aliases_json, user_cooldown_seconds, stream_condition, response_type, created_at, updated_at)
@@ -59,6 +61,16 @@ describe("text command options migration", () => {
         ["too-long-cooldown", "[]", 86401, "any", "say"],
       ] as const;
       for (const values of invalid) expect(() => insert.run(...values)).toThrow();
+      expect(() => database.prepare(
+        `INSERT INTO text_commands (channel_id, command_name, response_text, kind, created_at, updated_at)
+         VALUES ('channel-a', 'invalid-kind', 'Response', 'other', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z')`,
+      ).run()).toThrow();
+      database.prepare(
+        `INSERT INTO text_commands (channel_id, command_name, response_text, kind, template_fields_json, created_at, updated_at)
+         VALUES ('channel-a', 'uptime', 'Live', 'uptime', '{"offlineText":"Offline"}', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z')`,
+      ).run();
+      expect(database.prepare("SELECT kind, template_fields_json FROM text_commands WHERE command_name = 'uptime'").get())
+        .toEqual({ kind: "uptime", template_fields_json: '{"offlineText":"Offline"}' });
     } finally {
       database.close();
     }

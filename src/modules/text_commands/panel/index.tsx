@@ -6,10 +6,10 @@ import {
   SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_VARIABLES, type TextCommand, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
-import { commandListReply } from "../contracts/chat-defaults";
-import { renderCommandText, statusForTier, validCommandName } from "../domain";
-import { worstCaseTemplateLength, type PanelTemplateWarning } from "../contract";
+import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, type TextCommand, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
+import { commandListReply, TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES, textCommandDefaultsFor } from "../contracts/chat-defaults";
+import { statusForTier, validCommandName } from "../domain";
+import { renderTemplate, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
 import { createTextCommand, deleteTextCommand, loadTextCommands, saveTextCommand, setTextCommandMinimumTier, toggleTextCommand } from "./service";
 import { textCommandsTexts } from "./locale";
 
@@ -18,6 +18,10 @@ const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u
 interface CommandDraft {
   name: string;
   text: string;
+  offlineText: string;
+  notFollowingText: string;
+  unavailableText: string;
+  usageText: string;
   kind: TextCommandKind;
   minimumTier: TextCommandMinimumTier;
   cooldownSeconds: number | "";
@@ -30,6 +34,10 @@ interface CommandDraft {
 const draftFromCommand = (command: TextCommand): CommandDraft => ({
   name: command.name,
   text: command.text,
+  offlineText: command.offlineText ?? TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.offlineText,
+  notFollowingText: command.notFollowingText ?? TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.notFollowingText,
+  unavailableText: command.unavailableText ?? TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.unavailableText,
+  usageText: command.usageText ?? TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.usageText,
   kind: command.kind,
   minimumTier: command.minimumTier,
   cooldownSeconds: command.cooldownSeconds,
@@ -42,6 +50,7 @@ const draftFromCommand = (command: TextCommand): CommandDraft => ({
 const newCommandDraft = (): CommandDraft => ({
   name: "",
   text: "",
+  ...TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES,
   kind: "text",
   minimumTier: "everyone",
   cooldownSeconds: 5,
@@ -50,6 +59,11 @@ const newCommandDraft = (): CommandDraft => ({
   streamCondition: "any",
   responseType: "say",
 });
+
+type CommandTemplateField = "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText";
+
+const templateFieldsForKind = (kind: TextCommandKind): Readonly<Record<string, readonly TemplateVariable[]>> =>
+  TEXT_COMMAND_TEMPLATE_FIELDS[kind];
 
 const tierDescription = (tier: TextCommandMinimumTier, labels: ReturnType<typeof textCommandsTexts>): string => {
   const included = statusForTier[tier].map((status) => labels.tierSubjects[status]);
@@ -97,7 +111,8 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
   return (
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
-      <td className="table__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
+      <td>{labels.kindLabels[initial.kind]}</td>
+      <td className="table__answer" title={initial.kind === "list" ? undefined : initial.text}>{initial.kind === "list" ? "—" : initial.text}</td>
       <td>
         <div className="minimum-tier-select" onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
           <Select
@@ -139,7 +154,7 @@ interface TextCommandEditorProperties {
 }
 
 const TextCommandEditor = ({ channelId, language, initial, command, commands, canManageContent, botIsModerator, onClose, onCreateSuccess, onGuardChange, onRefresh, onDeleted }: TextCommandEditorProperties): ReactElement => {
-  const labels = textCommandsTexts(language);
+  const labels = useMemo(() => textCommandsTexts(language), [language]);
   const resolvedLanguage = language ?? dashboardLanguage();
   const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial);
   const [active, setActive] = useState(command?.enabled ?? true);
@@ -153,13 +168,15 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
   const [deleting, setDeleting] = useState(false);
   const [attemptedSave, setAttemptedSave] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
-  const [templateIssues, setTemplateIssues] = useState<{ unknown: readonly string[]; worstCaseExceeded: boolean }>({ unknown: [], worstCaseExceeded: false });
-  const labelsForVariables = useMemo(() => TEXT_COMMAND_VARIABLES.map((variable) => ({
+  const isCreate = command === null;
+  const templateFields = templateFieldsForKind(draft.kind);
+  const variableDescriptions: Readonly<Record<string, string>> = labels.variables;
+  const templateVariables = (field: CommandTemplateField) => (templateFields[field] ?? []).map((variable) => ({
     name: variable.name,
     sample: variable.sample,
-    description: variable.name === "user" ? labels.variables.user : labels.variables.channel,
-  })), [labels.variables]);
-  const isCreate = command === null;
+    description: variableDescriptions[variable.name] ?? variable.name,
+  }));
+  const templateValue = (field: CommandTemplateField): string => draft[field];
   const normalizedName = normalizeCommandName(draft.name);
   const nameInvalid = normalizedName.length === 0 || !validCommandName(normalizedName);
   const sameNameAlias = draft.aliases.includes(normalizedName);
@@ -167,12 +184,22 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
   const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : undefined;
   const cooldownInvalid = draft.cooldownSeconds === "" || !Number.isInteger(draft.cooldownSeconds) || draft.cooldownSeconds < 0 || draft.cooldownSeconds > 86400;
   const userCooldownInvalid = draft.userCooldownSeconds === "" || !Number.isInteger(draft.userCooldownSeconds) || draft.userCooldownSeconds < 0 || draft.userCooldownSeconds > 86400;
-  const responseInvalid = draft.kind === "text" && (draft.text.trim().length === 0 || draft.text.length > 500);
+  const templateFieldNames = Object.keys(templateFields) as CommandTemplateField[];
+  const responseInvalid = templateFieldNames.some((field) => {
+    const value = templateValue(field);
+    return value.trim().length === 0 || value.length > 500;
+  });
   const valid = !nameInvalid && !sameNameAlias && !cooldownInvalid && !userCooldownInvalid && !responseInvalid && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES;
-  const localWarnings = templateIssues.unknown.length === 0 && !templateIssues.worstCaseExceeded ? [] : [
-    ...(templateIssues.unknown.length === 0 ? [] : [labels.warningLabel({ field: "text", code: "unknown_template_variables", unknownVariables: templateIssues.unknown })]),
-    ...(templateIssues.worstCaseExceeded ? [labels.warningLabel({ field: "text", code: "template_worst_case_too_long", worstCaseLength: worstCaseTemplateLength(draft.text, TEXT_COMMAND_VARIABLES) })] : []),
-  ];
+  const localWarnings = templateFieldNames.flatMap((field) => {
+    const variables = templateFields[field] ?? [];
+    const value = templateValue(field);
+    const unknown = unknownTemplateVariables(value, variables);
+    const worstCaseLength = worstCaseTemplateLength(value, variables);
+    return [
+      ...(unknown.length === 0 ? [] : [labels.warningLabel({ field, code: "unknown_template_variables", unknownVariables: unknown })]),
+      ...(worstCaseLength > 500 ? [labels.warningLabel({ field, code: "template_worst_case_too_long", worstCaseLength })] : []),
+    ];
+  });
   const warnings = [...serverWarnings.map(labels.warningLabel), ...localWarnings];
   const tierOptions = TEXT_COMMAND_MINIMUM_TIERS.map((tier) => ({
     value: tier,
@@ -187,7 +214,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     : undefined;
   const settingsIssue = nameError !== undefined || responseInvalid
     ? "error" as const
-    : announcementWarning !== undefined || templateIssues.unknown.length > 0 || templateIssues.worstCaseExceeded || serverWarnings.some((warning) => warning.field === "text")
+    : announcementWarning !== undefined || localWarnings.length > 0 || serverWarnings.length > 0
       ? "warning" as const
       : undefined;
   const listPreview = commandListReply(commands.filter((item) => item.enabled && item.name !== command?.name).map((item) => item.name));
@@ -199,6 +226,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
       name: normalizedName,
       text: draft.kind === "list" ? "" : draft.text,
       kind: draft.kind,
+      ...(draft.kind === "uptime" ? { offlineText: draft.offlineText } : {}),
+      ...(draft.kind === "followage" ? { notFollowingText: draft.notFollowingText, unavailableText: draft.unavailableText } : {}),
+      ...(draft.kind === "shoutout" ? { usageText: draft.usageText } : {}),
       minimumTier: draft.minimumTier,
       cooldownSeconds: draft.cooldownSeconds as number,
       aliases: draft.aliases,
@@ -258,6 +288,25 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     if (key === "name" || key === "aliases") setFieldError(null);
   };
 
+  const changeKind = (kind: TextCommandKind): void => {
+    setValue((current) => {
+      const defaults = kind === "uptime" || kind === "followage" || kind === "game" || kind === "shoutout"
+        ? textCommandDefaultsFor(kind)
+        : null;
+      return {
+        ...current,
+        kind,
+        text: kind === "list" ? "" : defaults?.text ?? (current.kind === "text" ? current.text : ""),
+        offlineText: current.offlineText || defaults?.offlineText || TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.offlineText,
+        notFollowingText: current.notFollowingText || defaults?.notFollowingText || TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.notFollowingText,
+        unavailableText: current.unavailableText || defaults?.unavailableText || TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.unavailableText,
+        usageText: current.usageText || defaults?.usageText || TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.usageText,
+        ...(isCreate && kind === "shoutout" ? { minimumTier: "moderator" as const } : {}),
+      };
+    });
+    setSaved(false); setError(undefined); setConcurrentConflict(false);
+  };
+
   const handleSave = async (): Promise<void> => {
     if (!valid) { setAttemptedSave(true); return; }
     const result = await saveDraft();
@@ -270,7 +319,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     if (latest === undefined) { onClose(); return; }
     accept(draftFromCommand(latest));
     setActive(latest.enabled);
-    setConcurrentConflict(false); setFieldError(null); setError(undefined); setServerWarnings([]); setTemplateIssues({ unknown: [], worstCaseExceeded: false });
+    setConcurrentConflict(false); setFieldError(null); setError(undefined); setServerWarnings([]);
   };
 
   const toggleActive = async (next: boolean): Promise<void> => {
@@ -291,6 +340,28 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     try { await deleteTextCommand(channelId, command.name); setConfirmingDelete(false); await onDeleted(); }
     catch { setError(labels.deleteError); }
     finally { setDeleting(false); }
+  };
+
+  const templateEditor = (field: CommandTemplateField, label: string): ReactElement => {
+    const value = templateValue(field);
+    return <TextArea
+      key={field}
+      id={`command-${field}`}
+      name={field}
+      label={field === "text" ? labels.response : label}
+      hint={labels.responseHint}
+      value={value}
+      onChange={(next) => { setDraftField(field, next); }}
+      maxLength={500}
+      variables={templateVariables(field)}
+      preview={(template, values) => renderTemplate(template, values)}
+      previewLabel={labels.previewLabel}
+      previewSpeaker={labels.previewSpeaker}
+      required
+      disabled={!canManageContent || pending}
+      messages={labels.textAreaMessages}
+      {...(attemptedSave && value.trim().length === 0 ? { error: labels.responseMissing } : {})}
+    />;
   };
 
   const sections = [
@@ -336,27 +407,21 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
           value={draft.kind}
           options={kindOptions}
           disabled={!canManageContent || pending}
-          onChange={(value) => { if (value !== null) setDraftField("kind", value as TextCommandKind); }}
+          onChange={(value) => { if (value !== null) changeKind(value as TextCommandKind); }}
         />
-        {draft.kind === "text" ? <TextArea
-          id="command-response"
-          name="text"
-          label={labels.response}
-          hint={labels.responseHint}
-          value={draft.text}
-          onChange={(value) => { setDraftField("text", value); }}
-          maxLength={500}
-          variables={labelsForVariables}
-          preview={(template, values) => renderCommandText(template, values)}
-          previewLabel={labels.previewLabel}
-          previewSpeaker={labels.previewSpeaker}
-          required
-          disabled={!canManageContent || pending}
-          messages={labels.textAreaMessages}
-          onIssuesChange={setTemplateIssues}
-          {...(attemptedSave && draft.text.trim().length === 0 ? { error: labels.responseMissing } : {})}
-        /> : <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />}
-        <SegmentedControl
+        {draft.kind === "list"
+          ? <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />
+          : templateEditor("text", labels.response)}
+        {draft.kind === "uptime" ? templateEditor("offlineText", labels.templateFieldLabels.offlineText) : null}
+        {draft.kind === "followage" ? <>
+          {templateEditor("notFollowingText", labels.templateFieldLabels.notFollowingText)}
+          {templateEditor("unavailableText", labels.templateFieldLabels.unavailableText)}
+        </> : null}
+        {draft.kind === "shoutout" ? <>
+          {templateEditor("usageText", labels.templateFieldLabels.usageText)}
+          <p className="muted command-shoutout-hint">{labels.shoutoutCooldownHint}</p>
+        </> : null}
+        {draft.kind === "shoutout" ? null : <SegmentedControl
           label={labels.responseType}
           hint={labels.responseTypeHints[draft.responseType]}
           value={draft.responseType}
@@ -364,7 +429,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
           {...(announcementWarning === undefined ? {} : { warning: announcementWarning })}
           disabled={!canManageContent || pending}
           onChange={(value) => { setDraftField("responseType", value as TextCommandResponseType); }}
-        />
+        />}
       </>,
     },
     {
@@ -436,14 +501,22 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     cooldown: draft.cooldownSeconds === "" ? "—" : `${String(draft.cooldownSeconds)} s`,
     userCooldown: draft.userCooldownSeconds === 0 ? labels.cooldownOff : draft.userCooldownSeconds === "" ? "—" : `${String(draft.userCooldownSeconds)} s`,
   }), [draft, labels]);
+  const templateView = (field: CommandTemplateField): ReactElement =>
+    <TemplateText value={templateValue(field)} variables={templateVariables(field)} />;
 
   const propertyList = <dl className="properties command-properties">
     <div><dt>{labels.name}</dt><dd className="mono">!{draft.name}</dd></div>
     <div><dt>{labels.active}</dt><dd><Switch ariaLabel={labels.active} hint={labels.activeImmediately} checked={active} pending={activePending} onChange={(next) => { void toggleActive(next); }} layout="inline" /></dd></div>
     <div><dt>{labels.aliases}</dt><dd className="mono">{props.aliases.length === 0 ? labels.noAliases : props.aliases.map((alias) => `!${alias}`).join(", ")}</dd></div>
     <div><dt>{labels.kind}</dt><dd>{props.kind}</dd></div>
-    <div><dt>{labels.response}</dt><dd>{draft.kind === "text" ? <TemplateText value={props.text} variables={labelsForVariables} /> : <TemplateText value={listPreview} variables={[]} />}</dd></div>
-    <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>
+    <div><dt>{labels.response}</dt><dd>{draft.kind === "list" ? <TemplateText value={listPreview} variables={[]} /> : templateView("text")}</dd></div>
+    {draft.kind === "uptime" ? <div><dt>{labels.templateFieldLabels.offlineText}</dt><dd>{templateView("offlineText")}</dd></div> : null}
+    {draft.kind === "followage" ? <>
+      <div><dt>{labels.templateFieldLabels.notFollowingText}</dt><dd>{templateView("notFollowingText")}</dd></div>
+      <div><dt>{labels.templateFieldLabels.unavailableText}</dt><dd>{templateView("unavailableText")}</dd></div>
+    </> : null}
+    {draft.kind === "shoutout" ? <div><dt>{labels.templateFieldLabels.usageText}</dt><dd>{templateView("usageText")}</dd></div> : null}
+    {draft.kind === "shoutout" ? null : <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>}
     <div><dt>{labels.minimumTier}</dt><dd>{props.minimumTier} · {props.minimumDescription}</dd></div>
     <div><dt>{labels.streamCondition}</dt><dd>{props.stream}</dd></div>
     <div><dt>{labels.cooldown}</dt><dd className="mono">{props.cooldown}</dd></div>
@@ -474,7 +547,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
       warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${labels.saved} ${items.join(" ")}` : items.join(" ")}
       {...(concurrentConflict ? { conflict: { message: labels.conflictMessage, reloadLabel: labels.reload, onReload: () => { void reloadServer(); } } } : {})}
       onSave={() => { void handleSave(); }}
-      onDiscard={() => { reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setError(undefined); setServerWarnings([]); setTemplateIssues({ unknown: [], worstCaseExceeded: false }); }}
+      onDiscard={() => { reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setError(undefined); setServerWarnings([]); }}
       saveLabel={isCreate ? labels.create : labels.save}
       discardLabel={labels.discard}
       savedLabel={labels.saved}
@@ -619,7 +692,7 @@ export const TextCommandsPanel = ({
     {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
     {!loading && error === null && commands.length > 0 ? <div className="table-wrap"><table className="table"><thead><tr>
-      <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
+      <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.kind}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
     </tr></thead><tbody>{commands.map((command) => <TextCommandRow
       key={command.name}
       initial={command}

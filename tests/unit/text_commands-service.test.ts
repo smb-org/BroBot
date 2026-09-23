@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleResult } from "../../src/modules/contract";
+import { formatFollowage, formatUptime } from "../../src/modules/text_commands/domain";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
 import type { TextCommand, TextCommandRepository } from "../../src/modules/text_commands";
 
@@ -69,6 +70,87 @@ describe("Text commands service", () => {
       code: "text_commands.triggered",
       detail: { name: "hallo", response: "Hallo alice in kanal-a-login" },
     }]);
+  });
+
+  it("renders uptime and its offline template through the same declared command path", async () => {
+    const online = await processTextCommandMessage(
+      eventFor("!uptime"),
+      repositoryFor([{ ...command("uptime", "{user}|{channel}|{uptime}"), kind: "uptime" }]),
+      {
+        channelInfo: () => Promise.resolve({ title: "Title", gameName: "Game", startedAt: "2026-09-19T10:00:00.000Z" }),
+        channelLanguage: () => Promise.resolve("de"),
+      },
+    );
+    const offline = await processTextCommandMessage(
+      eventFor("!uptime"),
+      repositoryFor([{ ...command("uptime", "Live"), kind: "uptime", offlineText: "{channel} ist offline" }]),
+      { channelInfo: () => Promise.resolve({ title: "Title", gameName: "Game", startedAt: null }) },
+    );
+
+    expect(online.actions[0]).toMatchObject({ kind: "chat", text: "alice|kanal-a-login|2 Std. 0 Min." });
+    expect(offline.actions[0]).toMatchObject({ kind: "chat", text: "kanal-a-login ist offline" });
+    expect(formatUptime("2026-09-19T10:00:00.000Z", NOW, "en")).toBe("2 h 0 min");
+  });
+
+  it("renders followage, not-following, and unavailable templates with diagnostics", async () => {
+    const following = await processTextCommandMessage(
+      eventFor("!followage"),
+      repositoryFor([{ ...command("followage", "{user}|{channel}|{followage}"), kind: "followage" }]),
+      { followedAt: () => Promise.resolve("2025-09-19T12:00:00.000Z"), channelLanguage: () => Promise.resolve("de") },
+    );
+    const notFollowing = await processTextCommandMessage(
+      eventFor("!followage"),
+      repositoryFor([{ ...command("followage", "Default"), kind: "followage", notFollowingText: "{user} folgt {channel} noch nicht" }]),
+      { followedAt: () => Promise.resolve(null) },
+    );
+    const unavailable = await processTextCommandMessage(
+      eventFor("!followage"),
+      repositoryFor([{ ...command("followage", "Default"), kind: "followage", unavailableText: "Followage fehlt" }]),
+      { followedAt: () => Promise.resolve("unavailable") },
+    );
+
+    expect(following.actions[0]).toMatchObject({ kind: "chat", text: "alice|kanal-a-login|1 Jahr" });
+    expect(notFollowing.actions[0]).toMatchObject({ kind: "chat", text: "alice folgt kanal-a-login noch nicht" });
+    expect(unavailable.actions[0]).toMatchObject({ kind: "chat", text: "Followage fehlt" });
+    expect(unavailable.diagnostics[0]?.code).toBe("text_commands.lookup_unavailable");
+    expect(formatFollowage("2025-06-19T12:00:00.000Z", NOW, "de")).toBe("1 Jahr, 3 Monate");
+    expect(formatFollowage("2025-06-19T12:00:00.000Z", NOW, "en")).toBe("1 year, 3 months");
+  });
+
+  it("renders current game and title, and diagnoses a Helix lookup failure", async () => {
+    const commandEntry = { ...command("game", "{channel}|{game}|{title}"), kind: "game" as const };
+    const result = await processTextCommandMessage(
+      eventFor("!game"),
+      repositoryFor([commandEntry]),
+      { channelInfo: () => Promise.resolve({ title: "A stream title", gameName: "Minecraft", startedAt: null }) },
+    );
+    const failed = await processTextCommandMessage(
+      eventFor("!game"),
+      repositoryFor([commandEntry]),
+      { channelInfo: () => Promise.resolve(null) },
+    );
+
+    expect(result.actions[0]).toMatchObject({ kind: "chat", text: "kanal-a-login|Minecraft|A stream title" });
+    expect(failed.actions).toEqual([]);
+    expect(failed.diagnostics[0]).toMatchObject({ code: "text_commands.lookup_unavailable", detail: { kind: "game" } });
+  });
+
+  it("runs a shoutout before its template reply and uses the usage template without a target", async () => {
+    const shoutout = await processTextCommandMessage(
+      eventFor("!so Streamerin"),
+      repositoryFor([{ ...command("so", "Hey {user}, folgt {target}!"), kind: "shoutout" }]),
+    );
+    const usage = await processTextCommandMessage(
+      eventFor("!so"),
+      repositoryFor([{ ...command("so", "unused"), kind: "shoutout", usageText: "Nutzung: !so <name>" }]),
+    );
+
+    expect(shoutout.actions).toEqual([
+      { kind: "shoutout", targetLogin: "streamerin" },
+      { kind: "chat", text: "Hey alice, folgt streamerin!" },
+    ]);
+    expect(usage.actions).toEqual([{ kind: "chat", text: "Nutzung: !so <name>" }]);
+    expect(usage.diagnostics).toContainEqual({ code: "text_commands.argument_missing", detail: { name: "so" } });
   });
 
   it("logs the command, arguments, and resolved response", async () => {
@@ -221,14 +303,20 @@ describe("Text commands service", () => {
     const findByAlias = vi.spyOn(repository, "findByAlias");
     const claim = vi.spyOn(repository, "claim");
     const streamState = vi.fn(() => Promise.resolve("online" as const));
+    const channelInfo = vi.fn(() => Promise.resolve(null));
+    const followedAt = vi.fn(() => Promise.resolve("unavailable" as const));
+    const channelLanguage = vi.fn(() => Promise.resolve("de" as const));
 
-    await processTextCommandMessage(eventFor("!hallo"), repository, { streamState });
+    await processTextCommandMessage(eventFor("!hallo"), repository, { streamState, channelInfo, followedAt, channelLanguage });
 
     expect(find).toHaveBeenCalledTimes(1);
     expect(findByAlias).not.toHaveBeenCalled();
     expect(claim).toHaveBeenCalledTimes(1);
     expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0);
     expect(streamState).not.toHaveBeenCalled();
+    expect(channelInfo).not.toHaveBeenCalled();
+    expect(followedAt).not.toHaveBeenCalled();
+    expect(channelLanguage).not.toHaveBeenCalled();
   });
 
   it("checks tier before stream state and rejects an incompatible stream without claiming", async () => {

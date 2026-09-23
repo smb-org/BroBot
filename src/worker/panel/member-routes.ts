@@ -25,6 +25,7 @@ import {
 import { CHANNEL_ROLES, canManage, type AuditAction, type ChannelRole } from "../../contracts/values";
 import { revokeRealtimeUser } from "../realtime";
 import { helixRequest } from "../twitch/helix";
+import { fetchTwitchUserByLogin, type TwitchUser } from "../shoutout";
 
 interface MemberRouteEnvironment {
   Bindings: Env;
@@ -33,13 +34,6 @@ interface MemberRouteEnvironment {
 
 interface JsonRecord {
   [key: string]: unknown;
-}
-
-export interface TwitchUser {
-  userId: string;
-  login: string;
-  displayName: string;
-  profileImageUrl: string | null;
 }
 
 const roles = CHANNEL_ROLES;
@@ -124,35 +118,6 @@ const readProfileImageUrl = (user: JsonRecord): string | null =>
   typeof user.profile_image_url === "string" && user.profile_image_url.length > 0
     ? user.profile_image_url
     : null;
-
-export const fetchTwitchUserByLogin = async (
-  fetcher: typeof fetch,
-  environment: Env,
-  login: string,
-): Promise<TwitchUser | null> => {
-  const accessToken = await readStoredBotAccessToken(environment);
-  if (accessToken === null) throw new Error("Bot token for Twitch user search is missing.");
-
-  const result = await helixRequest<JsonRecord>({
-    url: "https://api.twitch.tv/helix/users",
-    query: { login },
-    accessToken,
-    clientId: environment.TWITCH_CLIENT_ID,
-    fetcher,
-  });
-  if (!result.ok) throw new Error("Twitch user search failed.");
-  if (!Array.isArray(result.data.data)) return null;
-
-  const first = (result.data.data as unknown[])[0];
-  if (!isJsonRecord(first) || typeof first.id !== "string" || typeof first.login !== "string" ||
-      typeof first.display_name !== "string") return null;
-  return {
-    userId: first.id,
-    login: first.login,
-    displayName: first.display_name,
-    profileImageUrl: readProfileImageUrl(first),
-  };
-};
 
 export const fetchTwitchUsersById = async (
   fetcher: typeof fetch,

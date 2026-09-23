@@ -140,7 +140,7 @@ Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben. Panel-Ansichten erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
 
 Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Jede Zeile hat
-eine Art (`text` oder `list`), einen Schalter und eine Mindeststufe
+eine Art (`text`, `list`, `uptime`, `followage`, `game` oder `shoutout`), einen Schalter und eine Mindeststufe
 (`everyone`, `subscriber`, `vip`, `moderator` oder `broadcaster`). Die Art `list`
 zählt beim Auslösen alle eingeschalteten Zeilen auf. Die angelegten Befehle
 werden kanalbezogen als `!<name>` ausgelöst. `{user}` und `{channel}` werden
@@ -150,6 +150,8 @@ und das Modul meldet `text_commands.abgekuehlt`. Ein unbekannter, ausgeschaltete
 oder für den Chatstatus zu niedriger `!`-Befehl erzeugt keine Chataktion,
 sondern jeweils die Diagnose `text_commands.unbekannt`,
 `text_commands.deaktiviert` bzw. `text_commands.berechtigung`.
+
+A chat command whose complete configuration is its name, minimum tier, cooldown, template, and exactly one host action is a text-command kind; a feature with its own state or events belongs in its own module.
 
 ## Aktionen und Begründungen melden
 

@@ -1,8 +1,62 @@
-import {
-  getBotIdentity,
-} from "./db/bot-identity";
+import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
+import { getBotIdentity } from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
+
+export interface TwitchUser {
+  userId: string;
+  login: string;
+  displayName: string;
+  profileImageUrl: string | null;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readStoredBotAccessToken = async (environment: Env): Promise<string | null> => {
+  const identity = await getBotIdentity(environment.DB);
+  if (identity === null) return null;
+  const value = await decryptJson<{ token?: unknown }>(
+    identity.accessTokenCiphertext,
+    parseKeyRing(getTokenEncryptionKeys(environment)),
+  );
+  return value !== null && typeof value.token === "string" && value.token.length > 0
+    ? value.token
+    : null;
+};
+
+export const fetchTwitchUserByLogin = async (
+  fetcher: typeof fetch,
+  environment: Env,
+  login: string,
+  credentialSource: "bot" | "app" = "bot",
+): Promise<TwitchUser | null> => {
+  const accessToken = credentialSource === "app"
+    ? await getAppAccessToken(environment, new Date().toISOString(), fetcher)
+    : await readStoredBotAccessToken(environment);
+  if (accessToken === null) throw new Error("A Twitch access token for user search is missing.");
+  const result = await helixRequest<Record<string, unknown>>({
+    url: "https://api.twitch.tv/helix/users",
+    query: { login },
+    accessToken,
+    clientId: environment.TWITCH_CLIENT_ID,
+    fetcher,
+  });
+  if (!result.ok) throw new Error("Twitch user search failed.");
+  const userData: unknown = result.data.data;
+  if (!Array.isArray(userData)) return null;
+  const first: unknown = userData[0];
+  if (!isRecord(first) || typeof first.id !== "string" || typeof first.login !== "string" ||
+      typeof first.display_name !== "string") return null;
+  return {
+    userId: first.id,
+    login: first.login,
+    displayName: first.display_name,
+    profileImageUrl: typeof first.profile_image_url === "string" && first.profile_image_url.length > 0
+      ? first.profile_image_url
+      : null,
+  };
+};
 
 const SHOUTOUT_URL = "https://api.twitch.tv/helix/chat/shoutouts";
 

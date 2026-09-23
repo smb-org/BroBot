@@ -286,6 +286,7 @@ const moduleActions: readonly ModuleAction[] = [
   { kind: "chat", text: "Hallo", replyToMessageId: "message-1" },
   { kind: "announcement", text: "Hinweis" },
   { kind: "shoutout", targetChannelId: "kanal-b" },
+  { kind: "shoutout", targetLogin: "streamerin" },
   { kind: "overlay", type: "warning", payload: { text: "Hallo" } },
 ];
 
@@ -417,7 +418,7 @@ const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, ov
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
 const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, chat: true, shoutout: true, overlay: true };
 const allLanguages: Record<ModuleLanguage, true> = { de: true, en: true };
-const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true };
+const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true, uptime: true, followage: true, game: true, shoutout: true };
 const allTextCommandResponseTypes: Record<TextCommandResponseType, true> = { say: true, reply: true, announcement: true };
 const allTextCommandStreamConditions: Record<TextCommandStreamCondition, true> = { any: true, online: true, offline: true };
 const allEventOrigins: Record<PanelEventOrigin, true> = { channel: true, module: true };
@@ -560,6 +561,7 @@ describe("serialized contract shapes", () => {
         "$.modules.action[]: kind,replyToMessageId,text",
         "$.modules.action[]: kind,text",
         "$.modules.action[]: kind,targetChannelId",
+        "$.modules.action[]: kind,targetLogin",
         "$.modules.action[]: kind,payload,type",
         "$.modules.action[].payload: text",
         "$.modules.actor: login,role,userId",
@@ -577,6 +579,7 @@ describe("serialized contract shapes", () => {
         "$.modules.result.actions[]: kind,replyToMessageId,text",
         "$.modules.result.actions[]: kind,text",
         "$.modules.result.actions[]: kind,targetChannelId",
+        "$.modules.result.actions[]: kind,targetLogin",
         "$.modules.result.actions[]: kind,payload,type",
         "$.modules.result.actions[].payload: text",
         "$.modules.result.diagnostics[]: code,detail",
@@ -676,7 +679,7 @@ describe("serialized contract shapes", () => {
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
       expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "chat", "overlay", "shoutout"]);
       expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);
-      expect(Object.keys(allTextCommandKinds).sort()).toEqual(["list", "text"]);
+      expect(Object.keys(allTextCommandKinds).sort()).toEqual(["followage", "game", "list", "shoutout", "text", "uptime"]);
       expect(Object.keys(allTextCommandResponseTypes).sort()).toEqual([...TEXT_COMMAND_RESPONSE_TYPES].sort());
       expect(Object.keys(allTextCommandStreamConditions).sort()).toEqual([...TEXT_COMMAND_STREAM_CONDITIONS].sort());
       expect(Object.keys(allEventOrigins).sort()).toEqual(["channel", "module"]);

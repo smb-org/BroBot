@@ -1,8 +1,17 @@
 import type { EventCode } from "../../contracts/values";
 import { truncateTo200Chars } from "../contract";
-import type { ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult, ModuleStreamState } from "../contract";
+import type { ModuleAction, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult, ModuleStreamState } from "../contract";
 import {
   commandFromMessage,
+  formatFollowage,
+  formatUptime,
+  renderFollowageText,
+  renderGameText,
+  renderNotFollowingText,
+  renderOfflineText,
+  renderShoutoutText,
+  renderUnavailableText,
+  renderUptimeText,
   renderCommandText,
   chatStatusMeetsTier,
   cooldownRemaining,
@@ -10,7 +19,7 @@ import {
 import type { TextCommandInput } from "./domain";
 import type { TextCommand } from "./contracts";
 import type { TextCommandRepository } from "./repository";
-import { NO_COMMANDS_REPLY, commandListReply } from "./contracts/chat-defaults";
+import { NO_COMMANDS_REPLY, TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES, commandListReply } from "./contracts/chat-defaults";
 
 const CHAT_MESSAGE_MAXIMUM_LENGTH = 500;
 
@@ -69,14 +78,19 @@ const response = (
   text: string,
   alias: string | null,
   streamState: ModuleStreamState | undefined,
+  options: {
+    prefixActions?: readonly ModuleAction[];
+    forceChat?: boolean;
+    diagnostics?: readonly ModuleDiagnostic[];
+  } = {},
 ): ModuleResult => {
   const replyToMessageId = textValue(event.payload.message_id);
-  const action = command.responseType === "announcement"
+  const action = !options.forceChat && command.responseType === "announcement"
     ? { kind: "announcement" as const, text }
     : {
       kind: "chat" as const,
       text,
-      ...(command.responseType === "reply" && replyToMessageId !== null
+      ...(!options.forceChat && command.responseType === "reply" && replyToMessageId !== null
         ? { replyToMessageId }
         : {}),
     };
@@ -85,10 +99,11 @@ const response = (
     ...(prepared.originalLength === null
       ? []
       : [{ code: "template_truncated" satisfies EventCode, detail: { current: prepared.originalLength } }]),
+    ...(options.diagnostics ?? []),
     diagnosticTriggered(input, command, prepared.text, alias, streamState),
   ];
   return {
-    actions: [{ ...action, text: prepared.text }],
+    actions: [...(options.prefixActions ?? []), { ...action, text: prepared.text }],
     diagnostics,
   };
 };
@@ -101,7 +116,7 @@ const rejection = (code: EventCode, detail: NonNullable<ModuleDiagnostic["detail
 export const processTextCommandMessage = async (
   event: ModuleEvent,
   repository: TextCommandRepository,
-  context: Pick<ModuleExecutionContext, "streamState"> = { streamState: () => Promise.resolve("unknown") },
+  context: Partial<Pick<ModuleExecutionContext, "streamState" | "channelInfo" | "followedAt" | "channelLanguage">> = {},
 ): Promise<ModuleResult> => {
   const text = messageText(event);
   if (text === null) return { actions: [], diagnostics: [] };
@@ -134,7 +149,7 @@ export const processTextCommandMessage = async (
 
   let streamState: ModuleStreamState | undefined;
   if (command.streamCondition !== "any") {
-    streamState = await context.streamState();
+    streamState = await (context.streamState ?? (() => Promise.resolve("unknown")))();
     if (streamState !== "unknown" && streamState !== command.streamCondition) {
       return rejection("text_commands.stream_state", {
         name: command.name,
@@ -175,8 +190,100 @@ export const processTextCommandMessage = async (
     return response(event, input, claim.command, list, alias, streamState);
   }
 
-  return response(event, input, claim.command, renderCommandText(
-    claim.command.text,
-    { user: userFor(event), channel: channelFor(event) },
-  ), alias, streamState);
+  const claimed = claim.command;
+  const user = userFor(event);
+  const channel = channelFor(event);
+  if (claimed.kind === "text") {
+    return response(event, input, claimed, renderCommandText(claimed.text, { user, channel }), alias, streamState);
+  }
+
+  const lookupUnavailable = (kind: "uptime" | "followage" | "game"): ModuleDiagnostic => ({
+    code: "text_commands.lookup_unavailable" satisfies EventCode,
+    detail: { name: claimed.name, kind },
+  });
+
+  if (claimed.kind === "uptime") {
+    const info = await (context.channelInfo ?? (() => Promise.resolve(null)))();
+    if (info === null) return { actions: [], diagnostics: [lookupUnavailable("uptime")] };
+    if (info.startedAt === null) {
+      return response(
+        event,
+        input,
+        claimed,
+        renderOfflineText(claimed.offlineText ?? TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.offlineText, { channel }),
+        alias,
+        streamState,
+      );
+    }
+    const language = await (context.channelLanguage ?? (() => Promise.resolve("de" as const)))();
+    return response(event, input, claimed, renderUptimeText(claimed.text, {
+      user,
+      channel,
+      uptime: formatUptime(info.startedAt, event.receivedAt, language),
+    }), alias, streamState);
+  }
+
+  if (claimed.kind === "followage") {
+    const userId = userIdFor(event);
+    const followedAt = userId === null
+      ? "unavailable"
+      : await (context.followedAt ?? (() => Promise.resolve("unavailable" as const)))(userId);
+    if (followedAt === "unavailable") {
+      return response(
+        event,
+        input,
+        claimed,
+        renderUnavailableText(claimed.unavailableText ?? TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.unavailableText),
+        alias,
+        streamState,
+        { diagnostics: [lookupUnavailable("followage")] },
+      );
+    }
+    if (followedAt === null) {
+      return response(
+        event,
+        input,
+        claimed,
+        renderNotFollowingText(claimed.notFollowingText ?? TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.notFollowingText, { user, channel }),
+        alias,
+        streamState,
+      );
+    }
+    const language = await (context.channelLanguage ?? (() => Promise.resolve("de" as const)))();
+    return response(event, input, claimed, renderFollowageText(claimed.text, {
+      user,
+      channel,
+      followage: formatFollowage(followedAt, event.receivedAt, language),
+    }), alias, streamState);
+  }
+
+  if (claimed.kind === "game") {
+    const info = await (context.channelInfo ?? (() => Promise.resolve(null)))();
+    if (info === null) return { actions: [], diagnostics: [lookupUnavailable("game")] };
+    return response(event, input, claimed, renderGameText(claimed.text, {
+      channel,
+      game: info.gameName,
+      title: info.title,
+    }), alias, streamState);
+  }
+
+  const args = input.arguments?.trim() ?? "";
+  if (!/^[a-zA-Z0-9_]{1,25}$/u.test(args)) {
+    return response(
+      event,
+      input,
+      claimed,
+      renderUnavailableText(claimed.usageText ?? TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.usageText),
+      alias,
+      streamState,
+      {
+        forceChat: true,
+        diagnostics: [{ code: "text_commands.argument_missing" satisfies EventCode, detail: { name: claimed.name } }],
+      },
+    );
+  }
+  return response(event, input, claimed, renderShoutoutText(claimed.text, { user, target: args.toLowerCase() }), alias, streamState, {
+    forceChat: true,
+    prefixActions: [{ kind: "shoutout", targetLogin: args.toLowerCase() }],
+  });
 };

@@ -33,12 +33,12 @@ import {
   listChannelsForUser,
   type LogCursor,
 } from "./repository";
-import { fetchTwitchUserByLogin, fetchTwitchUsersById, memberRouter } from "./member-routes";
+import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
 import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
 import { createClip, type CreateClipResult } from "../clip";
-import { sendShoutout } from "../shoutout";
+import { fetchTwitchUserByLogin, sendShoutout } from "../shoutout";
 import { writeModuleAudit } from "../module-audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";

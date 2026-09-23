@@ -113,7 +113,45 @@ describe("Text command editor", () => {
     await waitFor(() => {
       expect(screen.getByRole("listbox")).toHaveTextContent("AntworttextAntwortet mit dem Text unten.");
       expect(screen.getByRole("listbox")).toHaveTextContent("BefehlslisteZählt alle eingeschalteten Befehle auf (ohne Aliase).");
+      expect(screen.getByRole("listbox")).toHaveTextContent("Stream-LaufzeitZeigt die aktuelle Laufzeit des Streams.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("FollowageZeigt, seit wann die auslösende Person folgt.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("Spiel und TitelZeigt die aktuelle Kategorie und den Streamtitel.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("Shoutout!so <name> empfiehlt einen Twitch-Kanal im Chat.");
     });
+  });
+
+  it("shows each kind's template fields and variable chips in its editor", async () => {
+    const createWithKind = async (label: RegExp): Promise<void> => {
+      cleanup();
+      renderPanel(panelFetch({ commands: () => [] }));
+      fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+      fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+      fireEvent.click(await screen.findByRole("option", { name: label }));
+    };
+
+    await createWithKind(/Stream-Laufzeit/u);
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Offline-Antwort" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "{uptime}" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "{channel}" })).toHaveLength(2);
+
+    await createWithKind(/Followage/u);
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Antwort ohne Follow" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Antwort bei fehlenden Daten" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "{followage}" })).toBeInTheDocument();
+
+    await createWithKind(/Spiel und Titel/u);
+    expect(screen.getByRole("button", { name: "{game}" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "{title}" })).toBeInTheDocument();
+
+    await createWithKind(/Shoutout/u);
+    expect(screen.getByRole("textbox", { name: "Nutzungshinweis" })).toBeInTheDocument();
+    expect(screen.getByText("Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
+    const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
+    const selectedTier = within(tierGroup).getByRole("radio", { checked: true });
+    expect(selectedTier).toHaveAccessibleName("Moderatoren. Moderatoren und Broadcaster.");
   });
 
   it("puts the Art select's hint below the field, not between the label and the control", async () => {
