@@ -17,7 +17,7 @@ Key routing rules:
 - Full review pipeline → invoke /autoplan
 - Bugs/errors → invoke /investigate
 - QA/testing site behavior → invoke /qa or /qa-only
-- Code review/diff check → invoke /review
+- Code review/diff check on work in progress (writes fixes) → invoke /review — not the merge-gate review; that is a separate, read-only Codex run (`codex exec -m gpt-6-sol -c model_reasoning_effort="xhigh" -s read-only "Review the full diff origin/main..HEAD of this branch …" < /dev/null` in its own worktree), see `docs/AI-WORKFLOW.md`, Abschnitt „Vor dem Merge“
 - Visual polish → invoke /design-review
 - Ship/deploy/PR → invoke /ship or /land-and-deploy
 - Save progress → invoke /context-save
@@ -37,6 +37,7 @@ Key routing rules:
 - Der Bot ist mehrkanalfähig; ein Kanal wird ausschließlich über eine Zeile in `channels` freigegeben, nicht über Konfiguration. Zugriff berechtigt nur über `channel_members`, nicht über die Twitch-Rolle.
 - Overlay-Imports sind durch ESLint begrenzt und bleiben lazy.
 - Vor jedem Push: `pnpm run check`.
+- Vor jedem Merge: unabhängiges Codex-Review (`gpt-6-sol`) über den kompletten PR-Diff, CI grün und SonarCloud-Befunde (Fehler, Sicherheit, Zuverlässigkeit) behoben. Details: `docs/AI-WORKFLOW.md`, Abschnitt „Vor dem Merge“.
 - Keine Secrets im Repository.
 - Keine Attribution-Trailer und keine `claude.ai/code`- oder `session_`-URLs in Commits, PRs oder Dateien.
 - Commit-Format samt Icon-Legende: `docs/CONTRIBUTING.md`.

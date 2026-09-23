@@ -307,7 +307,7 @@ describe("Dashboard skeleton", () => {
     const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
     const unknownEvent = screen.getByText("plugin.anderes", { selector: ".event-table__text" });
     const unknownRow = unknownEvent.closest("tr");
-    expect(eventRow?.querySelector("td:nth-child(2)")).toHaveTextContent("Raid-Shoutout");
+    expect(eventRow?.querySelector("td:nth-child(2)")).toHaveTextContent("Shoutout");
     expect(eventRow?.querySelector("td:nth-child(3)")).toHaveTextContent("Automatisch");
     expect(unknownEvent).toHaveClass("mono");
     expect(unknownRow?.querySelector("td:nth-child(2)")).toHaveClass("mono");
@@ -1965,7 +1965,7 @@ describe("Dashboard skeleton", () => {
     expect(fetcher.mock.calls.at(-1)?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("lists every registered module as a switchable row on the overview, even with none active", async () => {
+  it("lists every registered module and presents clips as active by default", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -1973,7 +1973,7 @@ describe("Dashboard skeleton", () => {
       if (path.endsWith("/overview")) return jsonResponse(overview(channel));
       if (path.endsWith("/system")) return jsonResponse(system);
       if (path.endsWith("/audit-log")) return jsonResponse(audit);
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "clips", enabled: true, settings: "{}" }] });
       return jsonResponse({}, 404);
     }));
     window.history.replaceState({}, "", "/channels/kanal-a");
@@ -1981,6 +1981,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("switch", { name: "Textbefehle" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Clips" })).toBeChecked();
     expect(screen.queryByText("Keine Module aktiv.")).not.toBeInTheDocument();
   });
 
@@ -2314,9 +2315,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     fireEvent.click(await screen.findByRole("switch", { name: "Textbefehle" }));
-    fireEvent.click(await screen.findByRole("switch", { name: "Raid-Shoutout" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Shoutout" }));
     await waitFor(() => { expect(modulesCalls).toBe(3); });
-    expect(await screen.findByRole("switch", { name: "Raid-Shoutout" })).toBeChecked();
+    expect(await screen.findByRole("switch", { name: "Shoutout" })).toBeChecked();
 
     // The held-back first reload arrives last, describing an older state.
     resolveFirstReload?.(jsonResponse({
@@ -2329,7 +2330,7 @@ describe("Dashboard skeleton", () => {
     // Give the stale response a chance to apply before asserting it didn't.
     await Promise.resolve();
     await Promise.resolve();
-    expect(screen.getByRole("switch", { name: "Raid-Shoutout" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Shoutout" })).toBeChecked();
   });
 
   it("is the Stream Manager after sign-in: module toggle, immediate actions, and the warnings feed together, no page change", async () => {
@@ -2350,6 +2351,8 @@ describe("Dashboard skeleton", () => {
         return jsonResponse({ modules: [
           { id: "text_commands", enabled: modulesCalls > 1, settings: "{}" },
           { id: "ads", enabled: true, settings: "{}" },
+          { id: "raid", enabled: true, settings: "{}" },
+          { id: "clips", enabled: true, settings: "{}" },
         ] });
       }
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
@@ -2369,12 +2372,49 @@ describe("Dashboard skeleton", () => {
     expect(window.location.pathname).toBe("/channels/kanal-a");
 
     // Immediate actions section is present and reachable.
-    expect(screen.getByRole("button", { name: "Clip erstellen" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Shoutout senden" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Clip erstellen" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Shoutout senden" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /Werbung jetzt/ })).toBeInTheDocument();
 
     // Warnings/errors feed needs no interaction to show.
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+  });
+
+  it("uses the overview stream state for Spotlight actions", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), streamState: "offline" as const };
+    const freshOverview = { ...overview(channel), streamState: "online" as const, streamStartedAt: "2026-09-23T11:30:00.000Z" };
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(freshOverview));
+      if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ modules: [{ id: "clips", enabled: true, settings: "{}" }] }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules/text_commands/commands") return Promise.resolve(jsonResponse({ commands: [] }));
+      if (url.pathname === "/api/channels/kanal-a/members") return Promise.resolve(jsonResponse({ members: [], broadcasterCount: 0, viewerUserId: "user-1", nextCursor: null }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/clips" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ clipId: null, editUrl: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    const { container } = render(<DashboardApp />);
+
+    await waitFor(() => {
+      expect(container.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+    });
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "clip" } });
+    fireEvent.click(await within(screen.getByRole("dialog")).findByText("Clip erstellen"));
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) =>
+        requestUrl(input).pathname === "/api/channels/kanal-a/clips" && init?.method === "POST")).toBe(true);
+    });
   });
 
   it("switches channels through the header select and moves the route", async () => {

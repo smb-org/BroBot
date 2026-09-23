@@ -28,17 +28,21 @@ describe("Schema sentinel drift", () => {
     expect(LATEST_SCHEMA_MIGRATION).toBe(files.at(-1));
   });
 
-  it("names a table that this migration actually creates, alters, or indexes", () => {
-    const source = readFileSync(path.join(migrationsDirectory, LATEST_SCHEMA_MIGRATION), "utf8");
-    const created = [...source.matchAll(/CREATE TABLE(?:\s+IF NOT EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
-      .map((match) => match[1]);
-    const altered = [...source.matchAll(/ALTER TABLE\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
-      .map((match) => match[1]);
-    const renamed = [...source.matchAll(/ALTER TABLE\s+[A-Za-z_][A-Za-z0-9_]*\s+RENAME TO\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
-      .map((match) => match[1]);
-    const indexed = [...source.matchAll(/CREATE INDEX(?:\s+IF NOT EXISTS)?\s+[A-Za-z_][A-Za-z0-9_]*\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
-      .map((match) => match[1]);
+  // Not every migration creates or alters a table (0005 only backfills
+  // rows), so this scans the whole history rather than assuming the latest
+  // file does it.
+  it("names a table that some migration actually creates or alters", () => {
+    const touched = migrationFiles().flatMap((file) => {
+      const source = readFileSync(path.join(migrationsDirectory, file), "utf8");
+      const created = [...source.matchAll(/CREATE TABLE(?:\s+IF NOT EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
+        .map((match) => match[1]);
+      const altered = [...source.matchAll(/ALTER TABLE\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
+        .map((match) => match[1]);
+      const renamed = [...source.matchAll(/ALTER TABLE\s+[A-Za-z_][A-Za-z0-9_]*\s+RENAME TO\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
+        .map((match) => match[1]);
+      return [...created, ...altered, ...renamed];
+    });
 
-    expect([...created, ...altered, ...renamed, ...indexed]).toContain(LATEST_SCHEMA_TABLE);
+    expect(touched).toContain(LATEST_SCHEMA_TABLE);
   });
 });

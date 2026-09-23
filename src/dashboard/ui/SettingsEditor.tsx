@@ -131,7 +131,7 @@ export function SettingsEditor<Settings extends object>({
           step={field.step}
           increaseLabel={copy.increaseLabel ?? copy.label}
           decreaseLabel={copy.decreaseLabel ?? copy.label}
-          value={typeof fieldValue === "number" ? fieldValue : fieldValue === "" ? "" : ""}
+          value={typeof fieldValue === "number" ? fieldValue : ""}
           disabled={disabled}
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
         />

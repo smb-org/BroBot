@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
-import type { AuditWriteAction, ChannelRole } from "../contracts/values";
+import type { AuditWriteAction, ChannelRole, ChannelStreamState, ImmediateActionRequirement } from "../contracts/values";
 import type { TemplateFields } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
@@ -191,7 +191,16 @@ export interface ModulePanelProperties {
 /** Props for one lazily loaded card in the channel's immediate-action row. */
 export interface ModuleImmediateActionProperties {
   channelId: string;
-  streamState?: "online" | "offline" | null;
+  streamState?: ChannelStreamState | null;
+  /** Localized by the host from the action's declared requirements and current stream state. */
+  availabilityReason: string | null;
+}
+
+export interface ModuleImmediateActionDefinition {
+  /** Conditions are evaluated by the host; the module remains enabled implicitly. */
+  requires: readonly ImmediateActionRequirement[];
+  /** Kept lazy so disabled modules add no immediate-action bytes to the panel bundle. */
+  load: () => Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>;
 }
 
 export type ModuleLanguage = "de" | "en";
@@ -293,6 +302,14 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;
+  /**
+   * The declaration the release path uses to write an enabled
+   * `channel_modules` row for new channels. A channel released before the
+   * module existed gets that row from a backfill migration instead. Every
+   * reader treats a missing row as disabled — this flag never substitutes
+   * for the row at read time.
+   */
+  defaultEnabled?: boolean;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
   /** Template fields and variables used by both panel validation and worker rendering. */
@@ -337,5 +354,5 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Lazily loaded editor declaration for this module's settings. */
   settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
   /** Lazily loaded immediate-action card, shown only while this module is enabled. */
-  immediateActions?: () => Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>;
+  immediateActions?: ModuleImmediateActionDefinition;
 };

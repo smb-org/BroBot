@@ -18,3 +18,4 @@ export type {
   TemplateValues,
   TemplateWarning,
 } from "../contract";
+export type { ModuleImmediateActionProperties } from "../contract";

@@ -64,8 +64,14 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
     expect(() => { expectEveryFieldHasHelperText(container); }).toThrow();
   });
 
-  it("gives every Stream Manager immediate-action field a helper text", () => {
-    const { container } = renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+  it("gives every enabled Stream Manager immediate-action field a helper text", async () => {
+    const { container } = renderWithMantine(<ImmediateActions
+      channelId="kanal-a"
+      streamState="online"
+      modules={[{ id: "ads", enabled: true }, { id: "raid", enabled: true }]}
+    />);
+    await screen.findByRole("radiogroup", { name: "Werbedauer" });
+    await screen.findByRole("textbox", { name: "Twitch-Name" });
     expectEveryFieldHasHelperText(container);
   });
 
