@@ -247,4 +247,27 @@ export default defineConfig(
       "@typescript-eslint/no-confusing-void-expression": "off",
     },
   },
+  {
+    // Raw-field guard (editor-konzept 15.5): a raw <input>/<select>/<textarea>
+    // belongs only behind the seam (Field, NumberField, TextArea, TagInput,
+    // SegmentedControl, ChoiceCards, Switch).
+    //
+    // TODO(#169): the module panels (text_commands, raid, ads) are mid-migration
+    // to the seam and still contain raw elements at the time this rule was
+    // added. Once that migration lands, add "src/modules/*/panel/**/*.tsx" to
+    // `files` below (the rule's intended final scope per 15.5) and drop this
+    // comment -- for now they are exempt so the rule can go straight to
+    // "error" everywhere it already holds instead of sitting at "warn".
+    files: ["src/dashboard/**/*.tsx"],
+    ignores: ["src/dashboard/ui/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXOpeningElement[name.name=/^(input|select|textarea)$/]",
+          message: "Raw form fields only in src/dashboard/ui/ -- use Field, NumberField, TextArea, TagInput, SegmentedControl, ChoiceCards, or Switch (editor-konzept 15).",
+        },
+      ],
+    },
+  },
 );
