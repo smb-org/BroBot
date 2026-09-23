@@ -610,8 +610,8 @@ export const initializeListCommand = async (
   const authorization = authorizeMutation(channelId, actor, now);
   const mutation = db.prepare(
     `INSERT INTO text_commands
-      (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at)
-     SELECT ?, 'befehle', '', 'list', 1, 'everyone', 5, NULL, ?, ?
+      (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds, last_used_at, created_at, updated_at, revision)
+     SELECT ?, 'befehle', '', 'list', 1, 'everyone', 5, NULL, ?, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM text_commands
          WHERE channel_id = ? AND command_name = 'befehle'
@@ -622,6 +622,7 @@ export const initializeListCommand = async (
     channelId,
     now,
     now,
+    initialTextCommandRevision(now),
     channelId,
     ...authorization.values,
   );

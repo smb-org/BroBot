@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
+import { createTextCommandRepository, initializeListCommand } from "../../src/modules/text_commands/adapters/d1";
 import { purgeOldTextCommandUserCooldowns } from "../../src/worker/db/text-command-user-cooldowns";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
@@ -66,6 +66,32 @@ describe("Text commands D1 adapter", () => {
       ok: false,
       reason: "conflict",
       current: { text: "Replacement", revision: replacement.revision },
+    });
+  });
+
+  it("rejects a stale save after the built-in list command is deleted and the module is re-enabled", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await initializeListCommand(database as unknown as D1Database, "kanal-a", ACTOR, NOW, authorize);
+    const loaded = await repository.find("kanal-a", "befehle");
+    if (loaded === null) throw new Error("Built-in command was not found.");
+    expect(loaded.revision).toBe(Date.parse(NOW));
+
+    await expect(repository.delete("kanal-a", "befehle", loaded.revision, ACTOR, NOW)).resolves.toEqual({ ok: true });
+    const reenabledAt = "2026-09-19T12:00:01.000Z";
+    await initializeListCommand(database as unknown as D1Database, "kanal-a", ACTOR, reenabledAt, authorize);
+    const recreated = await repository.find("kanal-a", "befehle");
+    if (recreated === null) throw new Error("Recreated built-in command was not found.");
+    expect(recreated.revision).toBeGreaterThan(loaded.revision);
+
+    await expect(repository.change({
+      channelId: "kanal-a", name: "befehle", newName: "befehle", text: "", kind: "list",
+      enabled: true, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
+      expectedRevision: loaded.revision, now: "2026-09-19T12:00:02.000Z",
+    }, ACTOR)).resolves.toMatchObject({
+      ok: false,
+      reason: "conflict",
+      current: { revision: recreated.revision },
     });
   });
 
