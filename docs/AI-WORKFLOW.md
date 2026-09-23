@@ -28,7 +28,7 @@ abgebrochen und die Aufgabe an Sonnet übergeben.
 Kein Pull Request wird gemergt, bevor beides erfüllt ist:
 
 1. **Unabhängiges Review über den kompletten Diff** — Codex `gpt-6-sol`, `xhigh`, im Sandbox-Modus `read-only` in einem eigenen Worktree auf dem Stand des PRs. Jeder Befund wird am Code geprüft und entweder behoben oder mit Begründung verworfen. Grüne Tests und Stichproben ersetzen das Review nicht.
-2. **Alle Checks grün**, ausdrücklich auch SonarCloud. Die Branch-Protection von `main` verlangt `quality` und `SonarCloud Code Analysis`; ein roter oder noch laufender Check blockiert den Merge.
+2. **CI grün und SonarCloud gelesen.** Die Branch-Protection von `main` verlangt `quality`. SonarCloud blockiert technisch nicht; seine Fehler-, Sicherheits- und Zuverlässigkeitsbefunde werden trotzdem vor dem Merge behoben. Eine rote Duplikationsschwelle allein hält den Merge nicht auf und wird als Aufräumaufgabe erfasst.
 
 Das unabhängige Review ersetzt nicht die Verantwortung des Hauptmodells: Es bewertet jeden Befund selbst, entscheidet über Architekturfragen und verwirft Befunde nur mit Begründung.
 
