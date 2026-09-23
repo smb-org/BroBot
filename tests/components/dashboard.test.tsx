@@ -2130,7 +2130,14 @@ describe("Dashboard skeleton", () => {
       if (page.currentLink === null) {
         expect(within(nav).queryByRole("link", { current: "page" })).not.toBeInTheDocument();
       } else {
-        expect(within(nav).getByRole("link", { current: "page" })).toHaveAccessibleName(page.currentLink);
+        const currentLink = within(nav).getByRole("link", { current: "page" });
+        expect(currentLink).toHaveAccessibleName(page.currentLink);
+        if (page.currentLink === "Textbefehle · Läuft") {
+          const led = currentLink.querySelector(".led--dot-only");
+          expect(led?.querySelector(".led__dot")).toBeInTheDocument();
+          expect(led).toHaveAttribute("title", "Läuft");
+          expect(led).toHaveAttribute("aria-hidden", "true");
+        }
       }
     }
   });

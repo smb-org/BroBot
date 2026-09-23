@@ -44,7 +44,7 @@ export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebar
     <AppShell
       className="dashboard-shell"
       mode="static"
-      header={{ height: { base: 112, md: 56 } }}
+      header={{ height: { base: 128, md: 56 } }}
       navbar={{
         width: collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED,
         breakpoint: "md",
@@ -56,6 +56,7 @@ export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebar
       <AppShell.Header className="dashboard-shell__header">
         <div className="dashboard-shell__header-inner">
           <Burger
+            className="dashboard-shell__burger"
             opened={mobileOpened}
             onClick={toggleMobile}
             hiddenFrom="md"

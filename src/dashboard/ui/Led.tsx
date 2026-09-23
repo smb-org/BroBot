@@ -17,7 +17,7 @@ export interface LedProps {
  */
 export function Led({ status, word, dotOnly = false }: LedProps) {
   return (
-    <span className={`led${dotOnly ? " led--dot-only" : ""}`} data-status={status} aria-hidden={dotOnly ? true : undefined}>
+    <span className={`led${dotOnly ? " led--dot-only" : ""}`} data-status={status} aria-hidden={dotOnly ? true : undefined} title={dotOnly ? word : undefined}>
       <span className="led__dot" aria-hidden="true" />
       {dotOnly ? null : <span>{word}</span>}
     </span>

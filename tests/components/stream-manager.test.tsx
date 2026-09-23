@@ -175,6 +175,32 @@ describe("Stream Manager warnings and errors feed", () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: "channel", channelId: "kanal-a", section: "events" });
   });
 
+  it("shows day labels for older entries and sorts the feed newest first", async () => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 20);
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 9, 30);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels/kanal-a/events") {
+        return Promise.resolve(jsonResponse({
+          entries: [
+            { eventId: "older", createdAt: yesterday.toISOString(), moduleId: "raid", triggerId: "t1", code: "raid.invalid", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null },
+            { eventId: "newer", createdAt: today.toISOString(), moduleId: "ads", triggerId: "t2", code: "ads.commercial.failed", detail: "{\"reason\":\"rate_limited\"}", actorUserId: null, actorLogin: null, actorDisplayName: null },
+          ],
+          nextCursor: null,
+        }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    const { container } = renderWithMantine(<WarningsAndErrorsFeed channelId="kanal-a" />);
+
+    await screen.findByText("Raid verworfen: ungültige Daten");
+    const times = Array.from(container.querySelectorAll(".stream-manager-feed__time"), (time) => time.textContent);
+    expect(times).toEqual(["10:20", "Gestern 09:30"]);
+    expect(container.querySelector(".stream-manager-feed")?.firstElementChild).toHaveTextContent("Werbeeinblendung nicht gestartet: rate_limited");
+  });
+
   it("shows an empty state when there is nothing to warn about", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;

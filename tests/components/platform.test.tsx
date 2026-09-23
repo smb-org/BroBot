@@ -93,7 +93,9 @@ describe("Platform level", () => {
     if (table === null) throw new Error("Kanalübersicht-Tabelle fehlt");
     expect(table).toHaveClass("platform-channel-table");
     const membersHeader = within(table).getByRole("columnheader", { name: "Mitglieder" });
+    const consentHeader = within(table).getByRole("columnheader", { name: "Zustimmung" });
     const counts = within(channelRow).getByText("1 · 1 · 0");
+    expect(consentHeader).toHaveAttribute("title", "Vollzustimmung");
     expect(membersHeader).toHaveAttribute("title", expect.stringContaining("·"));
     expect(counts).toHaveAttribute("title", membersHeader.getAttribute("title"));
   });

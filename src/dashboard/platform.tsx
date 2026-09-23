@@ -611,7 +611,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
               {overview.data === null ? null : overview.data.length === 0 ? null : (
                 <div className="table-wrap">
                   <table className="table table--content platform-channel-table">
-                    <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.identifier}</th><th scope="col">{texts.fullConsent}</th><th scope="col" title={`${texts.broadcaster} · ${texts.manager} · ${texts.operator}`}>{texts.members}</th><th scope="col">{texts.identity}</th></tr></thead>
+                    <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.identifier}</th><th scope="col" title={texts.fullConsent}>{texts.fullConsentColumn}</th><th scope="col" title={`${texts.broadcaster} · ${texts.manager} · ${texts.operator}`}>{texts.members}</th><th scope="col">{texts.identity}</th></tr></thead>
                     <tbody>{overview.data.map((channel) => {
                       const roleCountsTitle = `${texts.broadcaster} · ${texts.manager} · ${texts.operator}`;
                       return <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}>

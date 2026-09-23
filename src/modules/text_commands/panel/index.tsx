@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import { dashboardCommonTexts, type DashboardLanguage } from "../../../dashboard/locale";
-import { ListDetail, SubInspector, useInspectorSelection } from "../../../dashboard/ui";
+import { ListDetail, Select as UiSelect, SubInspector, useInspectorSelection } from "../../../dashboard/ui";
 import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand, type TextCommandMinimumTier } from "../contracts";
 import { validCommandName } from "../domain";
 import { deleteTextCommand, loadTextCommands, createTextCommand, toggleTextCommand, setTextCommandMinimumTier, saveTextCommand } from "./service";
@@ -167,17 +167,21 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
       <th scope="row" className="mono">!{initial.name}</th>
       <td className="table__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
       <td>
-        <select
-          aria-label={labels.minimumTierFor(initial.name)}
-          value={minimumTier}
-          disabled={!canManageContent || minimumBusy}
-          aria-busy={minimumBusy}
-          title={minimumDisabledReason}
+        <div
+          className="minimum-tier-select"
           onClick={(event) => { event.stopPropagation(); }}
-          onChange={(event) => { void onMinimumChange(event.target.value as TextCommandMinimumTier); }}
+          onKeyDown={(event) => { event.stopPropagation(); }}
         >
-          {TEXT_COMMAND_MINIMUM_TIERS.map((tier) => <option key={tier} value={tier}>{labels.tiers[tier]}</option>)}
-        </select>
+          <UiSelect
+            ariaLabel={labels.minimumTierFor(initial.name)}
+            value={minimumTier}
+            disabled={!canManageContent || minimumBusy}
+            busy={minimumBusy}
+            {...(minimumDisabledReason === undefined ? {} : { title: minimumDisabledReason })}
+            options={TEXT_COMMAND_MINIMUM_TIERS.map((tier) => ({ value: tier, label: labels.tiers[tier] }))}
+            onChange={(value) => { if (value !== null) void onMinimumChange(value as TextCommandMinimumTier); }}
+          />
+        </div>
       </td>
       <td>
         <button

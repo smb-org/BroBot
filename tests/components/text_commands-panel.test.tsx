@@ -1,7 +1,12 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+
+import { cleanup, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { UiProvider } from "../../src/dashboard/ui";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
+
+const render = (element: ReactElement): ReturnType<typeof renderComponent> => renderComponent(<UiProvider>{element}</UiProvider>);
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
@@ -464,10 +469,12 @@ describe("Text commands panel view", () => {
     const row = await screen.findByRole("row", { name: /!hallo/ });
     expect(screen.getByRole("columnheader", { name: "Mindeststufe" })).toBeInTheDocument();
     const select = within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" });
-    expect(select).toHaveValue("everyone");
-    fireEvent.change(select, { target: { value: "moderator" } });
+    expect(select.tagName).toBe("INPUT");
+    expect(select).toHaveValue("Alle");
+    fireEvent.click(select);
+    fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
 
-    await screen.findByRole("option", { name: "Moderatoren", selected: true });
+    await waitFor(() => expect(within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" })).toHaveValue("Moderatoren"));
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ minimumTier: "moderator" }))).toBe(true);
   });
 

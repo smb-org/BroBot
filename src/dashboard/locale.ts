@@ -312,6 +312,7 @@ export interface DashboardTexts {
     openClip: string;
     feedTitle: string;
     feedEmpty: string;
+    yesterday: string;
   };
   /** ⌘K/Ctrl+K (#164): jumps to an entity, explicitly not a navigation
    *  replacement -- "raid" opens the module, "!clip" opens that text
@@ -488,6 +489,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       openClip: "Clip öffnen",
       feedTitle: "Warnungen und Fehler",
       feedEmpty: "Keine Warnungen oder Fehler.",
+      yesterday: "Gestern",
     },
     spotlight: {
       placeholder: "Suchen oder Aktion ausführen …",
@@ -647,6 +649,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       openClip: "Open clip",
       feedTitle: "Warnings and errors",
       feedEmpty: "No warnings or errors.",
+      yesterday: "Yesterday",
     },
     spotlight: {
       placeholder: "Search or run an action …",
@@ -1255,6 +1258,19 @@ export const formatTimestamp = (value: string): string =>
 
 export const formatClockTime = (value: string): string =>
   formatDashboardDate(value, { hour: "2-digit", minute: "2-digit" });
+
+const localDayKey = (date: Date): string =>
+  `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+export const formatStreamManagerFeedTime = (value: string, now = new Date()): string => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const time = formatClockTime(value);
+  if (localDayKey(date) === localDayKey(now)) return time;
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (localDayKey(date) === localDayKey(yesterday)) return `${dashboardTexts().streamManager.yesterday} ${time}`;
+  return `${formatDate(value)} ${time}`;
+};
 
 export const formatNumber = (value: number): string =>
   new Intl.NumberFormat(dashboardLanguage()).format(value);

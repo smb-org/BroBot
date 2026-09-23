@@ -20,9 +20,11 @@ export interface SelectProps {
   options: SelectOption[];
   placeholder?: string;
   disabled?: boolean;
+  busy?: boolean;
   required?: boolean;
   name?: string;
   id?: string;
+  title?: string;
 }
 
 /**
@@ -41,9 +43,11 @@ export function Select({
   options,
   placeholder,
   disabled = false,
+  busy = false,
   required = false,
   name,
   id,
+  title,
 }: SelectProps) {
   return (
     <MantineSelect
@@ -56,9 +60,11 @@ export function Select({
       data={options}
       placeholder={placeholder}
       disabled={disabled}
+      aria-busy={busy}
       required={required}
       name={name}
       id={id}
+      title={title}
       allowDeselect={false}
       comboboxProps={{ shadow: "xs" }}
       styles={{

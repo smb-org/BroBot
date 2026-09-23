@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from "react";
 
 import type { PanelEventEntry } from "../panel-contract";
 import { createClip, fetchEvents, PanelApiError, sendManualShoutout, startCommercial } from "./api";
-import { apiErrorText, dashboardLanguage, dashboardTexts, eventText, formatClockTime } from "./locale";
+import { apiErrorText, dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime } from "./locale";
 import { eventDetail, eventMetadata } from "./events/model";
 import { Button, Field, Select } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
@@ -170,7 +170,9 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
     fetchEvents(channelId, null, controller.signal)
       .then((response) => {
         if (controller.signal.aborted) return;
-        setEntries(response.entries.filter((entry) => eventMetadata(entry.code)?.tone !== "info"));
+        setEntries(response.entries
+          .filter((entry) => eventMetadata(entry.code)?.tone !== "info")
+          .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)));
       })
       .catch(() => { if (!controller.signal.aborted) setEntries([]); });
     return () => { controller.abort(); };
@@ -197,7 +199,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
                 >
                   <span className="event-chip" data-tone={tone}>{metadata?.word[dashboardLanguage()] ?? texts.events.unknown}</span>
                   <span className="stream-manager-feed__text">{label}</span>
-                  <time className="stream-manager-feed__time mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
+                  <time className="stream-manager-feed__time mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatStreamManagerFeedTime(entry.createdAt)}</time>
                 </a>
               </li>
             );

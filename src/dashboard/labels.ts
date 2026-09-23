@@ -55,6 +55,7 @@ export interface PlatformTexts {
   login: string;
   identifier: string;
   fullConsent: string;
+  fullConsentColumn: string;
   broadcaster: string;
   manager: string;
   operator: string;
@@ -118,6 +119,7 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     login: "Login",
     identifier: "Kennung",
     fullConsent: "Vollzustimmung",
+    fullConsentColumn: "Zustimmung",
     broadcaster: "Broadcaster",
     manager: "Verwalter",
     operator: "Bediener",
@@ -185,6 +187,7 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     login: "Login",
     identifier: "Identifier",
     fullConsent: "Full consent",
+    fullConsentColumn: "Consent",
     broadcaster: "Broadcaster",
     manager: "Manager",
     operator: "Operator",
