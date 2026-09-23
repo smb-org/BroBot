@@ -8,6 +8,8 @@ Arbeitsteilung zwischen KI-Agenten in diesem Projekt, damit alle Mitarbeitenden 
 |---|---|
 | Implementierung, alle Themen | Codex `gpt-6-luna`, Reasoning-Effort `xhigh` (Codex-CLI ≥ 0.155) |
 | Implementierung, wenn Codex nicht verfügbar ist | Sonnet |
+| Kleine Korrekturen mit klarer Ursache (CSS, eine Beschriftung, eine Bedingung; ein, zwei Dateien) | Sonnet — ein Codex-Lauf kostet hier mehr als die Arbeit |
+| Review vor jedem Merge | Codex `gpt-6-sol`, Reasoning-Effort `xhigh`, nur lesend |
 | Leichte Fleißarbeit: Test-Boilerplate, mechanische Edits, Formatierung, Doku-Anpassungen | Haiku oder Sonnet |
 | Review, anspruchsvolle Konzepte, Architekturentscheidungen | Hauptmodell, nicht delegieren |
 
@@ -20,6 +22,15 @@ zu `killall -9` auf `node`, `pnpm`, `zsh` und `sh`.
 
 Mit `gpt-6-luna` ist Codex wieder der Implementierer. Zeigt ein Lauf dasselbe Muster, wird er
 abgebrochen und die Aufgabe an Sonnet übergeben.
+
+## Vor dem Merge
+
+Kein Pull Request wird gemergt, bevor beides erfüllt ist:
+
+1. **Unabhängiges Review über den kompletten Diff** — Codex `gpt-6-sol`, `xhigh`, im Sandbox-Modus `read-only` in einem eigenen Worktree auf dem Stand des PRs. Jeder Befund wird am Code geprüft und entweder behoben oder mit Begründung verworfen. Grüne Tests und Stichproben ersetzen das Review nicht.
+2. **Alle Checks grün**, ausdrücklich auch SonarCloud. Die Branch-Protection von `main` verlangt `quality` und `SonarCloud Code Analysis`; ein roter oder noch laufender Check blockiert den Merge.
+
+Hintergrund: Mehrere PRs wurden im September 2026 nur auf Basis von Tests und Stichproben gemergt; ein Massen-`UPDATE` ohne `WHERE` in einer Migration fiel erst SonarCloud auf, und der Hinweis wurde beim Merge übersehen.
 
 ## Parallelität
 

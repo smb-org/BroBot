@@ -37,6 +37,7 @@ Key routing rules:
 - Der Bot ist mehrkanalfähig; ein Kanal wird ausschließlich über eine Zeile in `channels` freigegeben, nicht über Konfiguration. Zugriff berechtigt nur über `channel_members`, nicht über die Twitch-Rolle.
 - Overlay-Imports sind durch ESLint begrenzt und bleiben lazy.
 - Vor jedem Push: `pnpm run check`.
+- Vor jedem Merge: unabhängiges Codex-Review (`gpt-6-sol`) über den kompletten PR-Diff und alle Checks grün, auch SonarCloud. Details: `docs/AI-WORKFLOW.md`, Abschnitt „Vor dem Merge“.
 - Keine Secrets im Repository.
 - Keine Attribution-Trailer und keine `claude.ai/code`- oder `session_`-URLs in Commits, PRs oder Dateien.
 - Commit-Format samt Icon-Legende: `docs/CONTRIBUTING.md`.
