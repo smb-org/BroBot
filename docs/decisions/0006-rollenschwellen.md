@@ -80,7 +80,29 @@ Ein Kanal ohne `broadcaster` wäre nicht mehr verwaltbar. Deshalb lässt sich di
 letzte Zeile mit dieser Rolle weder entziehen noch löschen; die Bedingung steht
 als `soleBroadcasterPredicate` in derselben Anweisung wie die Änderung.
 
-## 7. Offen
+## 7. Darstellung einer Handlung ohne Recht (Nachtrag, 23. September 2026)
+
+Was eine Rolle nicht darf, bleibt sichtbar und nennt seinen Grund. Dafür gibt
+es zwei Formen, je nachdem, ob ein einzelnes Bedienelement oder ein ganzes
+Formular betroffen ist:
+
+- **Einzelnes Bedienelement** (Schalter, Knopf, Auswahl in einer Tabellenzeile
+  oder Zustandszeile): Es steht an seinem Platz, ist deaktiviert und trägt den
+  Grund an der Wirkung — als Zeile darunter oder als zugängliche Beschreibung.
+- **Ganzes Formular** (Editor eines Befehls, Einstellungen eines Moduls): Es
+  wird als lesende Eigenschaftenliste gezeigt, mit genau einer Grundzeile über
+  der Liste. Das gilt als „sichtbar mit Grund" im Sinne dieser Entscheidung:
+  Jeder Wert ist sichtbar, der Grund steht einmal an der Stelle, an der die
+  Bearbeitung beginnen würde. Deaktivierte Formularfelder werden nicht
+  gezeigt.
+
+Handlungen, die die Rolle innerhalb eines solchen Formulars ausführen darf
+(etwa das Ein- und Ausschalten eines einzelnen Befehls nach Abschnitt 2),
+stehen in der lesenden Liste als bedienbares Element. Die Schwelle selbst
+ändert sich durch die Darstellung nicht; der Server prüft sie unabhängig
+davon nach Abschnitt 4.
+
+## 8. Offen
 
 Ob es unterhalb von `operator` noch eine reine Leserolle braucht, und ob
 einzelne Module eigene Schwellen setzen dürfen, ist nicht entschieden. Beides

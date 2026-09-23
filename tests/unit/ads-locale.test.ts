@@ -18,7 +18,7 @@ describe("ad locale", () => {
   });
 
   it("assigns separate tones to announcement and skip", () => {
-    expect(eventToneEntries["ads.announcement"]).toMatchObject({ family: "betrieb", tier: "gezeichnet", tone: "info", numberKey: "duration" });
-    expect(eventToneEntries["ads.skipped"]).toMatchObject({ family: "betrieb", tier: "gezeichnet", tone: "warning", numberKey: null });
+    expect(eventToneEntries["ads.announcement"]).toMatchObject({ family: "operations", tier: "outlined", tone: "info", numberKey: "duration" });
+    expect(eventToneEntries["ads.skipped"]).toMatchObject({ family: "operations", tier: "outlined", tone: "warning", numberKey: null });
   });
 });

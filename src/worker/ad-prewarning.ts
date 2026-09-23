@@ -268,6 +268,9 @@ export const processAdPrewarning = async (
   }];
   if (decision.kind === "announce") {
     const sent = await sendChatMessage(environment, channelId, decision.text, undefined, fetcher);
+    if (sent.truncated) {
+      diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: decision.text.length } });
+    }
     diagnostics.push(sent.sent
       ? { code: "host.chat.sent" satisfies EventCode, detail: sent.detail }
       : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });

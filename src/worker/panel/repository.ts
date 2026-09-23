@@ -42,6 +42,7 @@ interface ChannelStateRow {
   broadcaster_scopes_json: string | null;
   broadcaster_status: string | null;
   channel_bot_consent: number;
+  chat_subscription_needed: number;
   bot_status: PanelBotStatus["status"] | null;
   bot_reason: string | null;
   bot_updated_at: string | null;
@@ -105,7 +106,7 @@ const eventCodesForOrigin = (origin: PanelEventFilters["origin"]): string[] => {
   if (origin === null) return [];
   const operational = origin === "module";
   return Object.entries(eventToneEntries)
-    .filter(([, metadata]) => (metadata.family === "betrieb") === operational)
+    .filter(([, metadata]) => (metadata.family === "operations") === operational)
     .map(([code]) => code);
 };
 
@@ -132,6 +133,12 @@ export const channelStateQuery = `
            broadcaster_identity.scopes_json AS broadcaster_scopes_json,
            broadcaster_identity.status AS broadcaster_status,
            CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent,
+           CASE WHEN EXISTS (
+             SELECT 1 FROM channel_modules AS chat_module
+              WHERE chat_module.channel_id = channel.channel_id
+                AND chat_module.module_id = 'text_commands'
+                AND chat_module.enabled = 1
+           ) THEN 1 ELSE 0 END AS chat_subscription_needed,
            bot_status.status AS bot_status, bot_status.reason AS bot_reason,
            bot_status.updated_at AS bot_updated_at,
            bot_identity.missing_scopes_json AS bot_missing_scopes_json,
@@ -313,6 +320,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   broadcasterPermissions: mapBroadcasterPermissions(row),
   moderator: mapModerator(row),
   chatSubscription: mapEventSub(row),
+  chatSubscriptionNeeded: row.chat_subscription_needed === 1,
   tokens: mapTokens(row),
   lastError: mapLastError(row),
 });
@@ -375,6 +383,7 @@ export const getSystemOverviewForUser = async (
     botPermissions: mapBotPermissions(row),
     broadcasterPermissions: mapBroadcasterPermissions(row),
     chatSubscription: mapEventSub(row),
+    chatSubscriptionNeeded: row.chat_subscription_needed === 1,
     subscriptions: subscriptions.map((subscription): PanelEventSubSubscription => ({
       subscriptionType: subscription.subscriptionType,
       variant: subscription.variant,

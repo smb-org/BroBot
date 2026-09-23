@@ -109,6 +109,11 @@ test("the sidebar stays reachable across every viewport width -- inline above 76
 
   const sidebar = page.getByRole("navigation", { name: "Hauptnavigation" });
   const burger = page.getByRole("button", { name: "Seitenleiste öffnen" });
+  const modulesLink = sidebar.getByRole("link", { name: "Module", exact: true });
+  await modulesLink.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL("/channels/kanal-e2e/modules");
+  await expect(modulesLink).toHaveAttribute("aria-current", "page");
 
   // Above the md breakpoint (768px): the sidebar sits inline, no burger needed.
   for (const width of [1280, 1920, 3440]) {
@@ -191,6 +196,10 @@ test("ListDetail shows the two-column form at 1280px, the second monitor next to
           enabled: true,
           minimumTier: "everyone",
           cooldownSeconds: 5,
+          aliases: [],
+          userCooldownSeconds: 0,
+          streamCondition: "any",
+          responseType: "say",
           lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",

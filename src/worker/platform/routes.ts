@@ -27,6 +27,7 @@ import {
   listPlatformAudit,
   listPlatformChannels,
 } from "./repository";
+import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { CHANNEL_ROLES, PLATFORM_ASSIGNABLE_ROLES, type ChannelRole } from "../../contracts/values";
 
 interface PlatformEnvironment {
@@ -151,6 +152,11 @@ platformRouter.post("/api/platform/channels", async (context) => {
       nowIso(),
     );
     if (!released) return context.json({ error: "channel_already_released" }, 409);
+    try {
+      await maintainEventSubSubscriptions(context.env, nowIso(), fetch, user.userId);
+    } catch {
+      // A maintenance failure does not undo the completed channel release.
+    }
   } catch {
     return context.json({ error: "channel_release_failed" }, 409);
   }

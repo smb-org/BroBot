@@ -17,6 +17,14 @@ const mantineBoundaryPattern = {
   group: ["@mantine/*"],
   message: "Mantine nur in src/dashboard/ui/. Panels importieren aus der Naht.",
 };
+const tablerBoundaryPattern = {
+  group: ["@tabler/icons-react"],
+  message: "Import Tabler icons only from src/dashboard/ui/Icon.tsx.",
+};
+const tablerBoundaryPath = {
+  name: "@tabler/icons-react",
+  message: "Tabler icons may only be imported from src/dashboard/ui/Icon.tsx.",
+};
 
 const moduleIsolationPatterns = [
   {
@@ -28,6 +36,7 @@ const moduleIsolationPatterns = [
     message: "Module dürfen kein anderes Modul importieren.",
   },
   mantineBoundaryPattern,
+  tablerBoundaryPattern,
 ];
 
 const overlayBoundaryPatterns = [
@@ -44,11 +53,12 @@ const overlayBoundaryPatterns = [
     message: "Overlay-Ansichten dürfen Zod nicht importieren.",
   },
   mantineBoundaryPattern,
+  tablerBoundaryPattern,
 ];
 
 const overlayRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
-  ...overlayBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern),
+  ...overlayBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern),
 ];
 
 const panelBoundaryPatterns = [
@@ -65,15 +75,17 @@ const panelBoundaryPatterns = [
     message: "Panel-Ansichten dürfen keine Overlay-Ansichten importieren.",
   },
   mantineBoundaryPattern,
+  tablerBoundaryPattern,
 ];
 
 const panelRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
-  ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern),
+  ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern),
 ];
 
 export default defineConfig(
   globalIgnores([
+    ".claude/**",
     ".wrangler/**",
     "dist/**",
     "coverage/**",
@@ -93,6 +105,13 @@ export default defineConfig(
   })),
   reactHooks.configs.flat.recommended,
   reactRefresh.configs.vite,
+  {
+    files: ["**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"],
+    ignores: ["src/dashboard/ui/Icon.tsx"],
+    rules: {
+      "no-restricted-imports": ["error", { paths: [tablerBoundaryPath] }],
+    },
+  },
   {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
@@ -145,6 +164,7 @@ export default defineConfig(
     // und für auszulösende Anwendungsfälle den Service verwenden. Repository-
     // und Adapterzugriff bleiben trotzdem hinter dem Service verborgen.
     files: ["src/dashboard/**/*.{ts,tsx}"],
+    ignores: ["src/dashboard/ui/Icon.tsx"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -161,14 +181,18 @@ export default defineConfig(
     // Davor haette der Dashboard-Block hier Mantine verboten -- also genau
     // an der einen Stelle, an der es erlaubt sein muss.
     files: ["src/dashboard/ui/**/*.{ts,tsx}"],
+    ignores: ["src/dashboard/ui/Icon.tsx"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
-          patterns: [{
-            group: ["**/modules/**", "**/worker/**"],
-            message: "ui/ ist Darstellung: keine Module, kein Worker.",
-          }],
+            patterns: [
+              {
+                group: ["**/modules/**", "**/worker/**"],
+                message: "ui/ ist Darstellung: keine Module, kein Worker.",
+              },
+              tablerBoundaryPattern,
+            ],
         },
       ],
     },
@@ -192,6 +216,7 @@ export default defineConfig(
           paths: [
             { name: "react", message: "Der Worker darf React nicht importieren." },
             { name: "react-dom", message: "Der Worker darf react-dom nicht importieren." },
+            tablerBoundaryPath,
           ],
           patterns: [
             {
@@ -221,6 +246,22 @@ export default defineConfig(
     files: ["**/*.tsx"],
     rules: {
       "@typescript-eslint/no-confusing-void-expression": "off",
+    },
+  },
+  {
+    // Raw-field guard (editor-konzept 15.5): a raw <input>/<select>/<textarea>
+    // belongs only behind the seam (Field, NumberField, TextArea, TagInput,
+    // SegmentedControl, ChoiceCards, Switch).
+    files: ["src/dashboard/**/*.tsx", "src/modules/*/panel/**/*.tsx"],
+    ignores: ["src/dashboard/ui/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXOpeningElement[name.name=/^(input|select|textarea)$/]",
+          message: "Raw form fields only in src/dashboard/ui/ -- use Field, NumberField, TextArea, TagInput, SegmentedControl, ChoiceCards, or Switch (editor-konzept 15).",
+        },
+      ],
     },
   },
 );

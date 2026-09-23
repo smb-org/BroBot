@@ -1,3 +1,7 @@
+import type { RAID_TEMPLATE_FIELDS } from "../contracts";
+import { renderTemplate } from "../contract";
+import type { TemplateValues } from "../contract";
+
 const textValue = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
@@ -21,6 +25,11 @@ export type RaidDecision =
     kind: "invalid";
     reason: "ziel_ungueltig" | "quelle_ungueltig" | "zuschauer_ungueltig";
   };
+
+export const renderRaidText = (
+  template: string,
+  values: TemplateValues<typeof RAID_TEMPLATE_FIELDS.textLong>,
+): string => renderTemplate(template.trim(), values);
 
 /** Distinguishes the two EventSub raid directions using the same pattern as channel events. */
 export const decideRaid = (

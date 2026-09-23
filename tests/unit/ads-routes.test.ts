@@ -138,6 +138,39 @@ describe("ad routes", () => {
     expect(response.status).toBe(403);
   });
 
+  it("returns non-blocking template warnings and enforces the 500-character setting limit", async () => {
+    const environment = await setup("manager");
+    const settings = {
+      automatic: "Hello {viewer}",
+      manual: "x".repeat(500),
+      prewarning: true,
+      leadSeconds: 60,
+      prewarningText: "Ad in {seconds}",
+    };
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/settings", "PATCH", settings),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      warnings: [
+        { field: "automatic", code: "unknown_template_variables", unknownVariables: ["viewer"] },
+        { field: "manual", code: "template_worst_case_too_long", worstCaseLength: 515 },
+      ],
+    });
+
+    const oversized = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/settings", "PATCH", {
+        ...settings,
+        automatic: "x".repeat(501),
+      }),
+      environment,
+    );
+    expect(oversized.status).toBe(400);
+  });
+
   it("re-arms the prewarning alarm on a successful schedule fetch and writes no event", async () => {
     const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(scheduleBody("2026-09-21T12:00:00Z"), { status: 200 })));

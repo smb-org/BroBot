@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ListDetail } from "../../src/dashboard/ui";
+import { ListDetail, SubInspector } from "../../src/dashboard/ui";
 
 const list = <section role="region" aria-label="Liste">Liste</section>;
 const inspector = <section role="region" aria-label="Details">Details</section>;
@@ -18,6 +18,16 @@ describe("ListDetail", () => {
     expect(screen.queryByRole("region", { name: "Details" })).not.toBeInTheDocument();
     expect(container.querySelector(".list-detail")).not.toHaveClass("list-detail--open");
     expect(container.querySelector(".list-detail__backdrop")).not.toBeInTheDocument();
+  });
+
+  it("shows an identifier only as the inspector title tooltip", () => {
+    render(<SubInspector ariaLabel="Details" title="Operation" identifier="internal-id" closeLabel="Close" onClose={() => {}}>Content</SubInspector>);
+
+    const details = screen.getByRole("region", { name: "Details" });
+    const title = screen.getByRole("heading", { name: "Operation" });
+    expect(title).toHaveAttribute("title", "internal-id");
+    expect(details).not.toHaveTextContent("internal-id");
+    expect(within(details).queryByRole("button", { name: /copy/i })).not.toBeInTheDocument();
   });
 
   it("renders the list and the inspector together once there is a selection", () => {

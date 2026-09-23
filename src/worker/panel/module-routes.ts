@@ -21,6 +21,7 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
+import { templateFieldsWarnings } from "../../template";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -41,12 +42,14 @@ const moduleState = (
   id: string,
   enabled: boolean,
   settings: string,
+  mandatory: boolean,
   requiredBroadcasterScopes: readonly string[] = [],
   missingBroadcasterScopes: readonly string[] = [],
 ): PanelModuleState => ({
   id,
-  enabled,
+  enabled: mandatory || enabled,
   settings,
+  mandatory,
   ...(requiredBroadcasterScopes.length === 0 ? {} : {
     requiredBroadcasterScopes: [...requiredBroadcasterScopes],
     missingBroadcasterScopes: [...missingBroadcasterScopes],
@@ -61,7 +64,7 @@ const moduleStateFor = async (
   settings: string,
 ): Promise<PanelModuleState> => {
   const scopes = await moduleBroadcasterScopeState(db, channelId, module);
-  return moduleState(module.id, enabled, settings, scopes.required, scopes.missing);
+  return moduleState(module.id, enabled, settings, module.mandatory === true, scopes.required, scopes.missing);
 };
 
 export const moduleRouter = new Hono<ModuleRouteEnvironment>();
@@ -118,6 +121,12 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   if (stored === null) return context.json({ error: "module_not_configured" }, 404);
   const settings = module.settingsSchema.safeParse(await readJsonBody(context.req.raw));
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 400);
+  const warnings = module.templateFields === undefined
+    ? []
+    : templateFieldsWarnings(
+      settings.data as Readonly<Record<string, unknown>>,
+      module.templateFields,
+    );
   const changed = await updateChannelModuleWithAudit(
     context.env.DB,
     actorOf(context),
@@ -129,7 +138,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     nowIso(),
   );
   if (!changed) return context.json({ error: "module_settings_changed_concurrently" }, 409);
-  return context.json({ settings: settings.data });
+  return context.json({ settings: settings.data, warnings });
 });
 
 moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context) => {
@@ -142,6 +151,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const body = await readJsonBody(context.req.raw);
   const enabled = body?.enabled;
   if (typeof enabled !== "boolean") return context.json({ error: "module_enabled_field_invalid" }, 400);
+  if (module.mandatory === true && !enabled) return context.json({ error: "module_mandatory" }, 400);
 
   const channelId = context.req.param("channelId");
   const defaultSettingsJson = JSON.stringify(module.defaultSettings);

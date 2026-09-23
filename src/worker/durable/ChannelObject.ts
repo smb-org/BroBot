@@ -215,21 +215,21 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async revokeSession(sessionId: string): Promise<void> {
     for (const webSocket of this.ctx.getWebSockets(`session:${sessionId}`)) {
-      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Sitzung widerrufen");
+      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Session revoked");
     }
     await this.stopSecurityAlarmIfIdle();
   }
 
   public async revokeUser(userId: string): Promise<void> {
     for (const webSocket of this.ctx.getWebSockets(`user:${userId}`)) {
-      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Kanalzugriff widerrufen");
+      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Channel access revoked");
     }
     await this.stopSecurityAlarmIfIdle();
   }
 
   public async revokeToken(tokenId: string): Promise<void> {
     for (const webSocket of this.ctx.getWebSockets(`token:${tokenId}`)) {
-      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Overlay-Token widerrufen");
+      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Overlay token revoked");
     }
     await this.stopSecurityAlarmIfIdle();
   }
@@ -318,7 +318,7 @@ export class ChannelObject extends DurableObject<Env> {
     }
 
     for (const webSocket of expired) {
-      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Berechtigung widerrufen");
+      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Authorization revoked");
     }
 
     if (securityDue) {

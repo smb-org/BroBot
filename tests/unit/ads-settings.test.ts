@@ -20,7 +20,7 @@ describe("ad setting defaults", () => {
     ).run();
 
     let geleseneEinstellungen: unknown;
-    const probe: BotModule = {
+    const probe: BotModule<typeof adsModule.settingsSchema> = {
       ...adsModule,
       handleEvent: (event: ModuleEvent) => {
         geleseneEinstellungen = event.settings;

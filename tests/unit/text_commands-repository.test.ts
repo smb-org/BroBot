@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
+import { purgeOldTextCommandUserCooldowns } from "../../src/worker/db/text-command-user-cooldowns";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
@@ -55,6 +56,136 @@ describe("Text commands D1 adapter", () => {
       .resolves.toMatchObject({ claimed: true });
   });
 
+  it("claims per-user cooldowns atomically without consuming the global cooldown", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await repository.create({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 0,
+      userCooldownSeconds: 60, now: NOW,
+    }, ACTOR);
+
+    await expect(repository.claim("kanal-a", "hallo", NOW, "user-a", 60)).resolves.toMatchObject({ claimed: true });
+    await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:30.000Z", "user-a", 60))
+      .resolves.toMatchObject({ claimed: false, reason: "user_cooldown", remainingSeconds: 30 });
+    await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:30.000Z", "user-b", 60))
+      .resolves.toMatchObject({ claimed: true });
+    await expect(database.prepare(
+      "SELECT last_used_at FROM text_commands WHERE command_name = 'hallo'",
+    ).first()).resolves.toEqual({ last_used_at: "2026-09-19T12:00:30.000Z" });
+    await expect(database.prepare(
+      "SELECT user_id, last_used_at FROM text_command_user_cooldowns ORDER BY user_id",
+    ).all()).resolves.toMatchObject({ results: [
+      { user_id: "user-a", last_used_at: NOW },
+      { user_id: "user-b", last_used_at: "2026-09-19T12:00:30.000Z" },
+    ] });
+  });
+
+  it("does not write a per-user row while the global cooldown is active", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await repository.create({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 60,
+      userCooldownSeconds: 60, now: NOW,
+    }, ACTOR);
+
+    await repository.claim("kanal-a", "hallo", NOW, "user-a", 60);
+    await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:30.000Z", "user-b", 60))
+      .resolves.toMatchObject({ claimed: false, reason: "cooldown", remainingSeconds: 30 });
+    await expect(database.prepare(
+      "SELECT user_id FROM text_command_user_cooldowns ORDER BY user_id",
+    ).all()).resolves.toMatchObject({ results: [{ user_id: "user-a" }] });
+  });
+
+  it("keeps the global claim unchanged when the same user is blocked", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await repository.create({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 0,
+      userCooldownSeconds: 60, now: NOW,
+    }, ACTOR);
+    await repository.claim("kanal-a", "hallo", NOW, "user-a", 60);
+
+    await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:30.000Z", "user-a", 60))
+      .resolves.toMatchObject({ claimed: false, reason: "user_cooldown" });
+    await expect(database.prepare(
+      "SELECT last_used_at FROM text_commands WHERE command_name = 'hallo'",
+    ).first()).resolves.toEqual({ last_used_at: NOW });
+  });
+
+  it("uses one claim statement without a per-user cooldown and skips it for a missing actor", async () => {
+    await insertChannel(database, "kanal-a");
+    const statements: string[] = [];
+    const batchSizes: number[] = [];
+    const countedDb = {
+      prepare(sql: string) {
+        statements.push(sql);
+        return database.prepare(sql);
+      },
+      batch(values: TestPreparedStatement[]) {
+        batchSizes.push(values.length);
+        return database.batch(values);
+      },
+    } as unknown as D1Database;
+    const repository = createTextCommandRepository(countedDb, authorize);
+    await repository.create({
+      channelId: "kanal-a", name: "plain", text: "Antwort", kind: "text", cooldownSeconds: 0, now: NOW,
+    }, ACTOR);
+    statements.length = 0;
+    await expect(repository.claim("kanal-a", "plain", NOW, "user-a", 0)).resolves.toMatchObject({ claimed: true });
+    expect(statements.filter((sql) => sql.startsWith("UPDATE text_commands"))).toHaveLength(1);
+    expect(batchSizes).toEqual([]);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_command_user_cooldowns").first())
+      .resolves.toEqual({ count: 0 });
+
+    await repository.create({
+      channelId: "kanal-a", name: "optional", text: "Antwort", kind: "text", cooldownSeconds: 0,
+      userCooldownSeconds: 60, now: NOW,
+    }, ACTOR);
+    statements.length = 0;
+    await expect(repository.claim("kanal-a", "optional", NOW, null, 60)).resolves.toMatchObject({ claimed: true });
+    expect(statements.filter((sql) => sql.startsWith("UPDATE text_commands"))).toHaveLength(1);
+    expect(batchSizes).toEqual([]);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_command_user_cooldowns").first())
+      .resolves.toEqual({ count: 0 });
+
+    await repository.create({
+      channelId: "kanal-a", name: "limited", text: "Antwort", kind: "text", cooldownSeconds: 0,
+      userCooldownSeconds: 60, now: NOW,
+    }, ACTOR);
+    statements.length = 0;
+    await expect(repository.claim("kanal-a", "limited", NOW, "user-a", 60)).resolves.toMatchObject({ claimed: true });
+    expect(statements.filter((sql) => sql.startsWith("UPDATE text_commands"))).toHaveLength(1);
+    expect(batchSizes).toEqual([2]);
+    await expect(database.prepare(
+      "SELECT user_id, last_used_at FROM text_command_user_cooldowns WHERE command_name = 'limited'",
+    ).all()).resolves.toMatchObject({ results: [{ user_id: "user-a", last_used_at: NOW }] });
+  });
+
+  it("uses the current per-user cooldown value and prunes only rows older than 24 hours", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await repository.create({
+      channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 0,
+      userCooldownSeconds: 60, now: NOW,
+    }, ACTOR);
+    await repository.claim("kanal-a", "hallo", NOW, "user-a", 60);
+    await database.prepare("UPDATE text_commands SET user_cooldown_seconds = 20 WHERE command_name = 'hallo'").run();
+    await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:30.000Z", "user-a", 20))
+      .resolves.toMatchObject({ claimed: true });
+
+    await database.prepare(
+      `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
+       VALUES ('kanal-a', 'hallo', 'old', '2026-09-18T11:59:59.000Z'),
+              ('kanal-a', 'hallo', 'recent', '2026-09-18T12:00:01.000Z')`,
+    ).run();
+    await purgeOldTextCommandUserCooldowns(database as unknown as D1Database, "2026-09-18T12:00:00.000Z");
+    await expect(database.prepare(
+      "SELECT user_id FROM text_command_user_cooldowns ORDER BY user_id",
+    ).all()).resolves.toMatchObject({ results: [
+      { user_id: "recent" }, { user_id: "user-a" },
+    ] });
+  });
+
   it("writes only to its own table", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -67,7 +198,10 @@ describe("Text commands D1 adapter", () => {
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'text_%' ORDER BY name",
     ).all<{ name: string }>();
 
-    expect(tables.results).toEqual([{ name: "text_commands" }]);
+    expect(tables.results).toEqual([
+      { name: "text_command_user_cooldowns" },
+      { name: "text_commands" },
+    ]);
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first<{ count: number }>())
       .resolves.toEqual({ count: 0 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first<{ count: number }>())
@@ -88,15 +222,16 @@ describe("Text commands D1 adapter", () => {
 
     await expect(verweigert.create({
       channelId: "kanal-a", name: "neu", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
-    }, foreignActor)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
+    }, foreignActor)).resolves.toEqual({ ok: false, reason: "not_authorized" });
     await expect(verweigert.change({
-      channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10, now: NOW,
-    }, foreignActor)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
+      channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10,
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say", now: NOW,
+    }, foreignActor)).resolves.toEqual({ ok: false, reason: "not_authorized" });
 
     await expect(verweigert.delete("kanal-a", "hallo", foreignActor, NOW))
-      .resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
+      .resolves.toEqual({ ok: false, reason: "not_authorized" });
     await expect(verweigert.delete("kanal-a", "fehlt", ACTOR, NOW))
-      .resolves.toEqual({ ok: false, reason: "nicht_gefunden" });
+      .resolves.toEqual({ ok: false, reason: "not_found" });
   });
 
   it("guards content mutations with the managing SQL gate", async () => {
@@ -107,7 +242,7 @@ describe("Text commands D1 adapter", () => {
 
     await expect(repository.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
-    }, ACTOR)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
+    }, ACTOR)).resolves.toEqual({ ok: false, reason: "not_authorized" });
 
     await database.prepare("UPDATE channel_members SET role = 'manager' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     await expect(repository.create({
@@ -116,10 +251,11 @@ describe("Text commands D1 adapter", () => {
 
     await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
     await expect(repository.change({
-      channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10, now: NOW,
-    }, ACTOR)).resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
+      channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10,
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say", now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: false, reason: "not_authorized" });
     await expect(repository.delete("kanal-a", "hallo", ACTOR, NOW))
-      .resolves.toEqual({ ok: false, reason: "nicht_berechtigt" });
+      .resolves.toEqual({ ok: false, reason: "not_authorized" });
   });
 
   it("toggles only enabled and doesn't write back stale content values", async () => {
@@ -140,6 +276,10 @@ describe("Text commands D1 adapter", () => {
       kind: "text",
       enabled: false,
       cooldownSeconds: 999,
+      aliases: [],
+      userCooldownSeconds: 0,
+      streamCondition: "any",
+      responseType: "say",
       now: "2026-09-19T12:01:00.000Z",
       onlyToggle: true,
     }, ACTOR)).resolves.toEqual({ ok: true });
@@ -174,8 +314,9 @@ describe("Text commands D1 adapter", () => {
     );
     await expect(updateRepository.change({
       channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Antwort", kind: "text",
-      enabled: false, cooldownSeconds: 5, now: "2026-09-19T12:01:00.000Z", onlyToggle: true,
-    }, ACTOR)).resolves.toEqual({ ok: false, reason: "konflikt" });
+      enabled: false, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
+      now: "2026-09-19T12:01:00.000Z", onlyToggle: true,
+    }, ACTOR)).resolves.toEqual({ ok: false, reason: "conflict" });
     await expect(database.prepare("SELECT response_text, minimum_level, enabled FROM text_commands WHERE command_name = 'hallo'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "moderator", enabled: 1 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
@@ -198,7 +339,7 @@ describe("Text commands D1 adapter", () => {
       (entry, changedAt) => prepareModuleAudit(deleteDb, ACTOR.userId, changedAt, entry),
     );
     await expect(deleteRepository.delete("kanal-a", "loeschen", ACTOR, "2026-09-19T12:01:00.000Z"))
-      .resolves.toEqual({ ok: false, reason: "konflikt" });
+      .resolves.toEqual({ ok: false, reason: "conflict" });
     await expect(database.prepare("SELECT response_text, minimum_level FROM text_commands WHERE command_name = 'loeschen'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "vip" });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
@@ -222,16 +363,76 @@ describe("Text commands D1 adapter", () => {
     );
     await expect(chatRepository.change({
       channelId: "kanal-a", name: "chat", newName: "chat", text: "Antwort", kind: "text",
-      enabled: false, cooldownSeconds: 5, now: "2026-09-19T12:01:00.000Z", onlyToggle: true,
+      enabled: false, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
+      now: "2026-09-19T12:01:00.000Z", onlyToggle: true,
     }, ACTOR)).resolves.toEqual({ ok: true });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 1 });
     const audit = await database.prepare("SELECT before_json, after_json FROM audit_log").first<{ before_json: string; after_json: string }>();
     expect(JSON.parse(audit?.before_json ?? "null") as unknown).toEqual({
       name: "chat", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5,
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
     });
     expect(JSON.parse(audit?.after_json ?? "null") as unknown).toEqual({
       name: "chat", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5,
+      aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
     });
+  });
+
+  it("checks alias uniqueness and stream state inside their CAS updates", async () => {
+    await insertChannel(database, "kanal-a");
+    const baseRepository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await baseRepository.create({
+      channelId: "kanal-a", name: "first", text: "Antwort", kind: "text", cooldownSeconds: 0,
+      aliases: ["friendly"], now: NOW,
+    }, ACTOR);
+    const competingDb = {
+      prepare: database.prepare.bind(database),
+      batch: async (statements: TestPreparedStatement[]) => {
+        await database.prepare(
+          `INSERT INTO text_commands
+            (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
+             aliases_json, user_cooldown_seconds, stream_condition, response_type, created_at, updated_at)
+           VALUES ('kanal-a', 'competitor', 'Other', 'text', 1, 'everyone', 0,
+                   '["raced"]', 0, 'any', 'say', ?, ?)`,
+        ).bind(NOW, NOW).run();
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const repository = createTextCommandRepository(
+      competingDb,
+      authorize,
+      (entry, changedAt) => prepareModuleAudit(competingDb, ACTOR.userId, changedAt, entry),
+    );
+
+    await expect(repository.change({
+      channelId: "kanal-a", name: "first", newName: "first", text: "Antwort", kind: "text", enabled: true,
+      cooldownSeconds: 0, aliases: ["raced"], userCooldownSeconds: 0, streamCondition: "any", responseType: "say", now: NOW,
+    }, ACTOR)).resolves.toEqual({
+      ok: false, reason: "alias_conflict", conflict: { field: "aliases", trigger: "raced", command: "competitor" },
+    });
+    await expect(database.prepare("SELECT aliases_json FROM text_commands WHERE command_name = 'first'").first())
+      .resolves.toEqual({ aliases_json: '["friendly"]' });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first())
+      .resolves.toEqual({ count: 0 });
+
+    const streamDb = {
+      prepare: database.prepare.bind(database),
+      batch: async (statements: TestPreparedStatement[]) => {
+        await database.prepare("UPDATE text_commands SET stream_condition = 'offline' WHERE command_name = 'first'").run();
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const streamRepository = createTextCommandRepository(
+      streamDb,
+      authorize,
+      (entry, changedAt) => prepareModuleAudit(streamDb, ACTOR.userId, changedAt, entry),
+    );
+    await expect(streamRepository.change({
+      channelId: "kanal-a", name: "first", newName: "first", text: "Andere Antwort", kind: "text", enabled: true,
+      cooldownSeconds: 0, aliases: ["friendly"], userCooldownSeconds: 0, streamCondition: "any", responseType: "say", now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: false, reason: "conflict" });
+    await expect(database.prepare("SELECT stream_condition FROM text_commands WHERE command_name = 'first'").first())
+      .resolves.toEqual({ stream_condition: "offline" });
   });
 
   it("allows lists without response text but requires it for text lines", async () => {

@@ -1,5 +1,6 @@
-import type { TextCommand, TextCommandMinimumTier } from "../contracts";
+import type { TextCommand, TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
+import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
 
 const pathFor = (channelId: string, name?: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/text_commands/commands${name === undefined ? "" : `/${encodeURIComponent(name)}`}`;
@@ -24,9 +25,9 @@ export const loadTextCommands = async (channelId: string): Promise<TextCommand[]
 const mutation = async (
   channelId: string,
   method: "POST" | "PATCH" | "DELETE",
-  body?: Record<string, string | number | boolean>,
+  body?: unknown,
   name?: string,
-): Promise<void> => {
+): Promise<readonly PanelTemplateWarning[]> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
   const response = await fetch(pathFor(channelId, name), {
@@ -37,35 +38,56 @@ const mutation = async (
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  await json<unknown>(response);
+  if (method === "DELETE") {
+    await json<unknown>(response);
+    return [];
+  }
+  return (await json<PanelTemplateWarningResponse>(response)).warnings;
 };
 
 export const createTextCommand = async (
   channelId: string,
-  command: { name: string; kind: "text" | "list"; text?: string; cooldownSeconds: number },
-): Promise<void> => mutation(channelId, "POST", command);
+  command: Pick<TextCommand, "name" | "kind" | "text" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "responseType">,
+): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "POST", command);
 
 export const saveTextCommand = async (
   channelId: string,
-  command: { oldName: string; name: string; kind: "text" | "list"; text?: string; cooldownSeconds: number },
-): Promise<void> => mutation(channelId, "PATCH", {
+  command: {
+    oldName: string;
+    name: string;
+    kind: TextCommandKind;
+    text: string;
+    minimumTier: TextCommandMinimumTier;
+    cooldownSeconds: number;
+    aliases: readonly string[];
+    userCooldownSeconds: number;
+    streamCondition: TextCommandStreamCondition;
+    responseType: TextCommandResponseType;
+  },
+): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", {
   name: command.name,
   kind: command.kind,
-  ...(command.text === undefined ? {} : { text: command.text }),
+  text: command.text,
+  minimumTier: command.minimumTier,
   cooldownSeconds: command.cooldownSeconds,
+  aliases: command.aliases,
+  userCooldownSeconds: command.userCooldownSeconds,
+  streamCondition: command.streamCondition,
+  responseType: command.responseType,
 }, command.oldName);
 
 export const toggleTextCommand = async (
   channelId: string,
   name: string,
   enabled: boolean,
-): Promise<void> => mutation(channelId, "PATCH", { enabled }, name);
+): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { enabled }, name);
 
 export const setTextCommandMinimumTier = async (
   channelId: string,
   name: string,
   minimumTier: TextCommandMinimumTier,
-): Promise<void> => mutation(channelId, "PATCH", { minimumTier: minimumTier }, name);
+): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { minimumTier: minimumTier }, name);
 
-export const deleteTextCommand = async (channelId: string, name: string): Promise<void> =>
-  mutation(channelId, "DELETE", undefined, name);
+export const deleteTextCommand = async (channelId: string, name: string): Promise<void> => {
+  await mutation(channelId, "DELETE", undefined, name);
+};

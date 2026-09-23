@@ -32,10 +32,15 @@ import type {
   PanelTokenStatus,
   PanelTwitchUser,
   PanelEventOrigin,
+  PanelCommandAliasConflict,
 } from "../../src/panel-contract";
 import { MODULES } from "../../src/modules/registry";
-import { TEXT_COMMAND_MINIMUM_TIERS } from "../../src/modules/text_commands/contracts";
-import type { TextCommandKind } from "../../src/modules/text_commands/contracts";
+import {
+  TEXT_COMMAND_MINIMUM_TIERS,
+  TEXT_COMMAND_RESPONSE_TYPES,
+  TEXT_COMMAND_STREAM_CONDITIONS,
+} from "../../src/modules/text_commands/contracts";
+import type { TextCommandKind, TextCommandResponseType, TextCommandStreamCondition } from "../../src/modules/text_commands/contracts";
 import { adsModule } from "../../src/modules/ads";
 import type {
   ModuleActor,
@@ -279,13 +284,14 @@ const panelForms = {
 
 const moduleActions: readonly ModuleAction[] = [
   { kind: "chat", text: "Hallo", replyToMessageId: "message-1" },
+  { kind: "announcement", text: "Hinweis" },
   { kind: "shoutout", targetChannelId: "kanal-b" },
   { kind: "overlay", type: "warning", payload: { text: "Hallo" } },
 ];
 
 const moduleDiagnostic: ModuleDiagnostic = {
   code: "raid.shoutout",
-  detail: { reason: "raid_erkannt", viewers: 5, allowed: true, missing: null },
+  detail: { reason: "raid_detected", viewers: 5, allowed: true, missing: null, alias: "hi", streamState: "online" },
 };
 
 const moduleActor: ModuleActor = { userId: "user-1", login: "person", role: "manager" };
@@ -409,9 +415,11 @@ const allRoles: Record<ChannelRole, true> = { broadcaster: true, manager: true, 
 const allMessageTypes: Record<RealtimeMessageType, true> = { "system.hello": true, "event_log.new": true };
 const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
-const allActionKinds: Record<ModuleAction["kind"], true> = { chat: true, shoutout: true, overlay: true };
+const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, chat: true, shoutout: true, overlay: true };
 const allLanguages: Record<ModuleLanguage, true> = { de: true, en: true };
 const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true };
+const allTextCommandResponseTypes: Record<TextCommandResponseType, true> = { say: true, reply: true, announcement: true };
+const allTextCommandStreamConditions: Record<TextCommandStreamCondition, true> = { any: true, online: true, offline: true };
 const allEventOrigins: Record<PanelEventOrigin, true> = { channel: true, module: true };
 const alleTonlagen: Record<EventTone, true> = { info: true, warning: true, error: true };
 
@@ -504,6 +512,10 @@ describe("serialized contract shapes", () => {
         enabled: true,
         minimumTier: "everyone",
         cooldownSeconds: 5,
+        aliases: ["hi"],
+        userCooldownSeconds: 30,
+        streamCondition: "online",
+        responseType: "announcement",
         lastUsedAt: null,
         createdAt: "2026-09-21T12:00:00.000Z",
         updatedAt: "2026-09-21T12:00:00.000Z",
@@ -526,6 +538,7 @@ describe("serialized contract shapes", () => {
 
       const wireShapes = {
         adsScheduleResponse,
+        commandAliasConflict: { field: "aliases", trigger: "hi", command: "hallo" } satisfies PanelCommandAliasConflict,
         oauthState,
         textCommand,
         realtime: {
@@ -538,12 +551,14 @@ describe("serialized contract shapes", () => {
       };
 
       expect(shapeKeys(wireShapes)).toEqual([
-        "$: adsScheduleResponse,modules,oauthState,panel,realtime,textCommand",
+        "$: adsScheduleResponse,commandAliasConflict,modules,oauthState,panel,realtime,textCommand",
         "$.adsScheduleResponse: recentAdBreaks,schedule,snoozeScopeAvailable",
         "$.adsScheduleResponse.recentAdBreaks[]: durationSeconds,timestamp",
         "$.adsScheduleResponse.schedule: duration,lastAdAt,nextAdAt,prerollFreeTime,snoozeCount,snoozeRefreshAt",
+        "$.commandAliasConflict: command,field,trigger",
         "$.modules: action,actor,auditEntry,diagnostic,event,mutationActor,mutationAuthorization,result",
         "$.modules.action[]: kind,replyToMessageId,text",
+        "$.modules.action[]: kind,text",
         "$.modules.action[]: kind,targetChannelId",
         "$.modules.action[]: kind,payload,type",
         "$.modules.action[].payload: text",
@@ -551,7 +566,7 @@ describe("serialized contract shapes", () => {
         "$.modules.auditEntry: action,after,before,channelId,moduleId",
         "$.modules.auditEntry.after: count,enabled,name",
         "$.modules.diagnostic: code,detail",
-        "$.modules.diagnostic.detail: allowed,missing,reason,viewers",
+        "$.modules.diagnostic.detail: alias,allowed,missing,reason,streamState,viewers",
         "$.modules.event: actor,channelId,chatStatus,payload,receivedAt,settings,subscriptionType,subscriptionVariant,triggerId",
         "$.modules.event.actor: login,role,userId",
         "$.modules.event.payload: message_id",
@@ -560,11 +575,12 @@ describe("serialized contract shapes", () => {
         "$.modules.mutationAuthorization: sql,values",
         "$.modules.result: actions,diagnostics",
         "$.modules.result.actions[]: kind,replyToMessageId,text",
+        "$.modules.result.actions[]: kind,text",
         "$.modules.result.actions[]: kind,targetChannelId",
         "$.modules.result.actions[]: kind,payload,type",
         "$.modules.result.actions[].payload: text",
         "$.modules.result.diagnostics[]: code,detail",
-        "$.modules.result.diagnostics[].detail: allowed,missing,reason,viewers",
+        "$.modules.result.diagnostics[].detail: alias,allowed,missing,reason,streamState,viewers",
         "$.oauthState: expiresAt,fullConsentSecondAttempt,purpose,reconcileEventSub,transactionId",
         "$.panel: activeModule,auditEntry,auditResponse,channelOverview,channelState,channelsResponse,eventEntry,eventFilters,eventsResponse,member,membersResponse,moduleState,modulesResponse,platformAuditEntry,platformAuditResponse,platformChannel,platformMembers,platformOverview,system,twitchUser",
         "$.panel.activeModule: moduleId,settings",
@@ -637,7 +653,7 @@ describe("serialized contract shapes", () => {
         "$.realtime.panelPrincipal: channelId,expiresAt,kind,role,sessionId,userId,v",
         "$.realtime.systemHello: channelId,createdAt,id,payload,type,version",
         "$.realtime.systemHello.payload: ",
-        "$.textCommand: channelId,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,text,updatedAt",
+        "$.textCommand: aliases,channelId,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,streamCondition,text,updatedAt,userCooldownSeconds",
       ]);
       expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
       expect(MODULES.map((module) => module.id).sort()).toEqual([
@@ -658,9 +674,11 @@ describe("serialized contract shapes", () => {
       expect(Object.keys(allMessageTypes).sort()).toEqual(["event_log.new", "system.hello"]);
       expect(Object.keys(allRecipientKinds).sort()).toEqual(["overlay", "panel"]);
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
-      expect(Object.keys(allActionKinds).sort()).toEqual(["chat", "overlay", "shoutout"]);
+      expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "chat", "overlay", "shoutout"]);
       expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);
       expect(Object.keys(allTextCommandKinds).sort()).toEqual(["list", "text"]);
+      expect(Object.keys(allTextCommandResponseTypes).sort()).toEqual([...TEXT_COMMAND_RESPONSE_TYPES].sort());
+      expect(Object.keys(allTextCommandStreamConditions).sort()).toEqual([...TEXT_COMMAND_STREAM_CONDITIONS].sort());
       expect(Object.keys(allEventOrigins).sort()).toEqual(["channel", "module"]);
       expect(Object.keys(alleTonlagen).sort()).toEqual(["error", "info", "warning"]);
     } finally {

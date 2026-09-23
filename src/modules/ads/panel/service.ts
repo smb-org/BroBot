@@ -1,14 +1,5 @@
-import type { AdsSettings, AdsScheduleResponse } from "../contracts";
-import { DEFAULT_PREWARNING_TEXT } from "../contracts/chat-defaults";
+import type { AdsScheduleResponse } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
-
-const emptySettings: AdsSettings = {
-  automatic: "",
-  manual: "",
-  prewarning: true,
-  leadSeconds: 60,
-  prewarningText: DEFAULT_PREWARNING_TEXT,
-};
 
 const emptySchedule: AdsScheduleResponse = {
   schedule: {
@@ -23,9 +14,6 @@ const emptySchedule: AdsScheduleResponse = {
   snoozeScopeAvailable: false,
 };
 
-const pathFor = (channelId: string): string =>
-  `/api/channels/${encodeURIComponent(channelId)}/modules/ads/settings`;
-
 const json = async <T>(response: Response): Promise<T> => {
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) throw new PanelApiError(
@@ -36,12 +24,6 @@ const json = async <T>(response: Response): Promise<T> => {
     body,
   );
   return body as T;
-};
-
-export const loadAdSettings = async (channelId: string): Promise<AdsSettings> => {
-  const response = await fetch(pathFor(channelId));
-  const loaded = (await json<{ settings: Partial<AdsSettings> }>(response)).settings;
-  return { ...emptySettings, ...loaded };
 };
 
 const schedulePathFor = (channelId: string): string =>
@@ -57,19 +39,6 @@ export const loadAdsSchedule = async (channelId: string): Promise<AdsScheduleRes
     schedule: { ...emptySchedule.schedule, ...(loaded.schedule ?? {}) },
     recentAdBreaks: loaded.recentAdBreaks ?? [],
   };
-};
-
-export const saveAdSettings = async (
-  channelId: string,
-  settings: AdsSettings,
-): Promise<void> => {
-  const csrfResponse = await fetch("/api/csrf");
-  const csrf = await json<{ token: string }>(csrfResponse);
-  await json(await fetch(pathFor(channelId), {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.token },
-    body: JSON.stringify(settings),
-  }));
 };
 
 export const snoozeAds = async (channelId: string): Promise<AdsScheduleResponse> => {

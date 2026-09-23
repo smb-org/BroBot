@@ -17,6 +17,30 @@ export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } fr
 export { Field } from "./Field";
 export type { FieldProps } from "./Field";
 
+export { FieldPair } from "./FieldPair";
+export type { FieldPairProps } from "./FieldPair";
+
+export { SegmentedControl } from "./SegmentedControl";
+export type { SegmentedControlOption, SegmentedControlProps } from "./SegmentedControl";
+
+export { ChoiceCards } from "./ChoiceCards";
+export type { ChoiceCardOption, ChoiceCardsProps } from "./ChoiceCards";
+
+export { TagInput } from "./TagInput";
+export type { TagInputMessages, TagInputProps } from "./TagInput";
+
+export { TextArea } from "./TextArea";
+export type { TemplateVariableOption, TextAreaMessages, TextAreaProps } from "./TextArea";
+
+export { TemplateText } from "./TemplateText";
+export type { TemplateTextProps } from "./TemplateText";
+
+export { EditorShell } from "./EditorShell";
+export type { EditorSection, EditorShellProps } from "./EditorShell";
+
+export { SettingsEditor } from "./SettingsEditor";
+export type { SettingsEditorCatalog, SettingsEditorDefinition, SettingsEditorProps, SettingsEditorSpec, SettingsEditorTexts, SettingsFieldSpec, SettingsFieldText } from "./SettingsEditor";
+
 export { NumberField } from "./NumberField";
 export type { NumberFieldProps } from "./NumberField";
 
@@ -27,7 +51,11 @@ export { Switch } from "./Switch";
 export type { SwitchProps } from "./Switch";
 
 export { Button } from "./Button";
-export type { ButtonProps, ButtonVariant } from "./Button";
+export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button";
+export { FormDensity } from "./FormDensity";
+
+export { Icon } from "./Icon";
+export type { IconName } from "./Icon";
 
 export { Led } from "./Led";
 export type { LedProps, LedStatus } from "./Led";
@@ -68,6 +96,9 @@ export type { UseDraftGuardResult } from "./useDraftGuard";
 
 export { ListDetail } from "./ListDetail";
 export type { ListDetailProps } from "./ListDetail";
+
+export { ListRow } from "./ListRow";
+export type { ListRowProps } from "./ListRow";
 
 export { Spotlight } from "./Spotlight";
 export type { SpotlightItem, SpotlightProps } from "./Spotlight";

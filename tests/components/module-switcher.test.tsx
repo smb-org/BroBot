@@ -67,8 +67,12 @@ describe("Module navigation in the sidebar", () => {
     renderModulePage();
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    expect(within(nav).getByRole("link", { name: "Textbefehle Läuft" }).querySelector("svg")).toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "Werbung Läuft" })).toBeInTheDocument();
+    const textCommandsLink = within(nav).getByRole("link", { name: "Textbefehle · Läuft" });
+    expect(textCommandsLink.querySelector("svg")).toBeInTheDocument();
+    expect(textCommandsLink).toHaveAttribute("title", "Textbefehle · Läuft");
+    expect(textCommandsLink.querySelector(".led--dot-only")).toBeInTheDocument();
+    expect(within(textCommandsLink).queryByText("Läuft", { exact: true })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Werbung · Läuft" })).toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: /Kanalereignisse/ })).not.toBeInTheDocument();
   });
 
@@ -76,29 +80,46 @@ describe("Module navigation in the sidebar", () => {
     renderModulePage(moduleStates, [channel, secondChannel]);
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    fireEvent.click(within(nav).getByRole("link", { name: "Werbung Läuft" }));
+    fireEvent.click(within(nav).getByRole("link", { name: "Werbung · Läuft" }));
 
     expect(await screen.findByRole("heading", { name: "Werbung", level: 1 })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/ads");
   });
 
-  it("the All-modules entry leads to the module overview", async () => {
+  it("the Module node leads to and is active on the module overview", async () => {
     renderModulePage();
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    const moduleLink = within(nav).getByRole("link", { name: "Modulübersicht" });
+    const moduleLink = within(nav).getByRole("link", { name: "Module" });
     expect(moduleLink).toHaveAttribute("href", "/channels/kanal-a/modules");
+    expect(moduleLink).not.toHaveAttribute("aria-current", "page");
     fireEvent.click(moduleLink);
 
     expect(await screen.findByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/channels/kanal-a/modules");
+    expect(within(nav).getByRole("link", { name: "Module" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("still lists the single active module and the All-modules entry when only one module is active", async () => {
+  it("keeps the module overview node and the single active module visible", async () => {
     renderModulePage([moduleStates[0] as typeof moduleStates[number]]);
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    expect(within(nav).getByRole("link", { name: "Textbefehle Läuft" })).toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "Modulübersicht" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Textbefehle · Läuft" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Module" })).toBeInTheDocument();
+    expect(within(nav).getAllByRole("link", { name: "Module" })).toHaveLength(1);
+  });
+
+  it("keeps the overview route on the collapsed Module icon", async () => {
+    window.sessionStorage.removeItem("brobot-dashboard-sidebar-collapsed");
+    renderModulePage();
+
+    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Seitenleiste einklappen" }));
+    const moduleLink = within(nav).getByRole("link", { name: "Module" });
+    expect(moduleLink).toHaveAttribute("href", "/channels/kanal-a/modules");
+    expect(moduleLink).toHaveAttribute("title", "Module");
+    fireEvent.click(moduleLink);
+
+    expect(await screen.findByRole("heading", { name: "Module", level: 1 })).toBeInTheDocument();
   });
 });

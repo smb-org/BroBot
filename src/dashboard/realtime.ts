@@ -91,7 +91,7 @@ export const realtimeHintMatchesFilters = (
   const metadata = eventMetadata(hint.code);
   if (filters.origin !== null) {
     if (metadata === null) return false;
-    const isModuleDiagnostic = metadata.family === "betrieb";
+    const isModuleDiagnostic = metadata.family === "operations";
     if (filters.origin === "module" !== isModuleDiagnostic) return false;
   }
   if (filters.tone !== null && (metadata === null || metadata.tone !== filters.tone)) return false;
@@ -112,7 +112,7 @@ const reconnectDelay = (attempt: number): number => Math.min(
 
 const socketNeedsRenewal = (event: CloseEvent): boolean =>
   event.code === SOCKET_EXPIRED_CODE || event.code === SOCKET_REVOKED_CODE ||
-  /abgelaufen|widerrufen|expired|revoked/i.test(event.reason);
+  /expired|revoked/i.test(event.reason);
 
 const realtimeUrl = (channelId: string): string => {
   const url = new URL(`/ws/channels/${encodeURIComponent(channelId)}`, window.location.href);

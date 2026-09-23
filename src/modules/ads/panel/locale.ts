@@ -1,4 +1,5 @@
-import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
+import type { DashboardLanguage, LocaleCatalog } from "../../../dashboard/locale";
+import type { SettingsEditorCatalog } from "../../../dashboard/ui";
 
 export interface AdsPanelTexts {
   title: string;
@@ -6,11 +7,6 @@ export interface AdsPanelTexts {
   noAdBreak: string;
   scheduledTime: string;
   duration: string;
-  warningSection: string;
-  warningEnabled: string;
-  leadSeconds: string;
-  prewarningText: string;
-  warningPlaceholderHint: string;
   snoozeSection: string;
   snoozeButton: (count: string, refresh: string) => string;
   snoozeScopeMissing: string;
@@ -22,34 +18,18 @@ export interface AdsPanelTexts {
   noRecent: string;
   recentDuration: (duration: string) => string;
   recentTime: (timestamp: string) => string;
-  automaticSection: string;
-  manualSection: string;
-  actions: string;
-  automatic: string;
-  manual: string;
-  durationPlaceholderHint: string;
-  save: string;
-  discard: string;
-  saving: string;
-  saved: string;
-  load: string;
-  error: string;
-  numberMissing: string;
+  loading: string;
+  loadError: string;
 }
 
-const texts: LocaleCatalog<AdsPanelTexts> = {
+const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
   de: {
     title: "Ansagen",
     scheduleSection: "Nächste Werbung",
     noAdBreak: "Derzeit ist keine Werbung geplant.",
     scheduledTime: "Zeitpunkt",
     duration: "Dauer",
-    warningSection: "Vorwarnung",
-    warningEnabled: "Vorwarnung vor der Werbung",
-    leadSeconds: "Vorlaufzeit (Sekunden)",
-    prewarningText: "Vorwarnungstext",
-    warningPlaceholderHint: "{seconds} bleibt als englischer Platzhalter und wird durch die verbleibenden Sekunden ersetzt.",
-    snoozeSection: "Snooze",
+    snoozeSection: "Werbung verschieben",
     snoozeButton: (count, refresh) => `Snooze · ${count} verfügbar · Aufladung ${refresh}`,
     snoozeScopeMissing: "Snooze ist deaktiviert: channel:manage:ads fehlt.",
     snoozeNone: "Snooze ist deaktiviert: keine Verschiebung mehr verfügbar.",
@@ -60,19 +40,8 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     noRecent: "Noch keine Werbepausen im Ereignisprotokoll.",
     recentDuration: (duration) => `${duration} Sekunden`,
     recentTime: (timestamp) => timestamp,
-    automaticSection: "Automatische Ansage",
-    manualSection: "Manuelle Ansage",
-    actions: "Aktionen",
-    automatic: "Automatische Werbepause",
-    manual: "Manuell gestartete Werbepause",
-    durationPlaceholderHint: "{duration} wird durch die Dauer in Sekunden ersetzt.",
-    save: "Ansagen speichern",
-    discard: "Verwerfen",
-    saving: "Wird gespeichert …",
-    saved: "Ansagen gespeichert.",
-    load: "Werbeeinstellungen werden geladen …",
-    error: "Die Werbeeinstellungen konnten nicht geladen oder gespeichert werden.",
-    numberMissing: "Zahl eingeben",
+    loading: "Werbeplan wird geladen …",
+    loadError: "Der Werbeplan konnte nicht geladen werden.",
   },
   en: {
     title: "Announcements",
@@ -80,12 +49,7 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     noAdBreak: "No ad break is currently scheduled.",
     scheduledTime: "Time",
     duration: "Duration",
-    warningSection: "Warning",
-    warningEnabled: "Warn before the ad break",
-    leadSeconds: "Lead time (seconds)",
-    prewarningText: "Warning text",
-    warningPlaceholderHint: "{seconds} stays as the English placeholder and is replaced with the remaining seconds.",
-    snoozeSection: "Snooze",
+    snoozeSection: "Postpone an ad break",
     snoozeButton: (count, refresh) => `Snooze · ${count} available · refresh ${refresh}`,
     snoozeScopeMissing: "Snooze is disabled: channel:manage:ads is missing.",
     snoozeNone: "Snooze is disabled: no postponements remain.",
@@ -96,22 +60,101 @@ const texts: LocaleCatalog<AdsPanelTexts> = {
     noRecent: "No ad breaks are in the event log yet.",
     recentDuration: (duration) => `${duration} seconds`,
     recentTime: (timestamp) => timestamp,
-    automaticSection: "Automatic announcement",
-    manualSection: "Manual announcement",
-    actions: "Actions",
-    automatic: "Automatic ad break",
-    manual: "Manually started ad break",
-    durationPlaceholderHint: "{duration} is replaced with the duration in seconds.",
-    save: "Save announcements",
-    discard: "Discard",
-    saving: "Saving …",
-    saved: "Announcements saved.",
-    load: "Loading ad break settings …",
-    error: "The ad break settings could not be loaded or saved.",
-    numberMissing: "Enter a number",
+    loading: "Loading the ad schedule …",
+    loadError: "The ad schedule could not be loaded.",
   },
 };
 
-export const adsPanelTexts = (
-  language: DashboardLanguage = dashboardLanguage(),
-): AdsPanelTexts => texts[language];
+export const adsPanelTexts = (language: DashboardLanguage): AdsPanelTexts => panelCatalog[language];
+
+const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]> = {
+  de: {
+    countLabel: (count, maxLength) => `${String(count)} von ${String(maxLength)} Zeichen`,
+    previewCountLabel: (count) => `${String(count)} Zeichen`,
+    unknownVariable: (name, suggestion, available) => suggestion === null
+      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Verfügbar: ${available.map((item) => `{${item}}`).join(", ")}`
+      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}?`,
+    insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+    worstCaseLength: (length, maxLength) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maxLength)} ab.`,
+  },
+  en: {
+    countLabel: (count, maxLength) => `${String(count)} of ${String(maxLength)} characters`,
+    previewCountLabel: (count) => `${String(count)} characters`,
+    unknownVariable: (name, suggestion, available) => suggestion === null
+      ? `Unknown variable {${name}} — it will be sent literally. Available: ${available.map((item) => `{${item}}`).join(", ")}`
+      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}?`,
+    insertSuggestionLabel: (name) => `Insert {${name}}`,
+    worstCaseLength: (length, maxLength) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maxLength)}.`,
+  },
+};
+
+const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
+  de: {
+    title: "Ansagen-Einstellungen", ariaLabel: "Ansagen-Einstellungen",
+    readOnlyReason: "Nur Broadcaster und Verwalter dürfen Ansagen-Einstellungen ändern.",
+    saveLabel: "Ansagen speichern", discardLabel: "Verwerfen", savedLabel: "Ansagen gespeichert.", pendingLabel: "Wird gespeichert …",
+    invalidMessage: "Bitte korrigiere die markierten Felder.", numberMissing: "Zahl eingeben",
+    issueLabels: { error: "Fehler", warning: "Hinweis" },
+    loadError: "Die Ansagen-Einstellungen konnten nicht geladen werden.", saveError: "Die Ansagen-Einstellungen konnten nicht gespeichert werden.",
+    conflictMessage: "Ansagen-Einstellungen wurden inzwischen geändert.", reloadLabel: "Serverstand laden", enabledLabel: "An", disabledLabel: "Aus",
+    templateMessages: templateMessages.de,
+    warningLabel: (warning) => warning.code === "unknown_template_variables"
+      ? `Unbekannte Variable${warning.unknownVariables.length === 1 ? "" : "n"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
+      : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
+    sections: { announcements: "Ansagen", prewarning: "Vorwarnung" },
+    fields: {
+      automatic: {
+        label: "Automatische Werbepause", hint: "Geht raus, wenn eine geplante Werbung beginnt. Ohne {duration} ergänzt die Vorschau (N Sekunden).",
+        requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot",
+        variables: [{ name: "duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
+      },
+      manual: {
+        label: "Manuell gestartete Werbepause", hint: "Geht raus, wenn jemand die Werbung von Hand startet. Ohne {duration} ergänzt die Vorschau (N Sekunden).",
+        requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot",
+        variables: [{ name: "duration", description: "Dauer der Werbepause in Sekunden", sample: "90" }],
+      },
+      prewarning: { label: "Vorwarnung vor der Werbung", hint: "Kündigt die nächste Werbung vorher im Chat an.", description: "Kündigt die nächste Werbung vorher im Chat an." },
+      leadSeconds: { label: "Vorlaufzeit", hint: "So lange vor der Werbung. 30 bis 300.", unit: "s", disabledReason: "Vorwarnung ist ausgeschaltet.", increaseLabel: "Vorlaufzeit erhöhen", decreaseLabel: "Vorlaufzeit verringern" },
+      prewarningText: {
+        label: "Vorwarnungstext", hint: "Was der Bot vor der Werbung schreibt.", requiredError: "Text eingeben",
+        previewLabel: "Vorschau", previewSpeaker: "Bot",
+        variables: [{ name: "seconds", description: "Verbleibende Sekunden bis zur Werbung", sample: "60" }],
+      },
+    },
+  },
+  en: {
+    title: "Announcement settings", ariaLabel: "Announcement settings",
+    readOnlyReason: "Only broadcasters and managers may change announcement settings.",
+    saveLabel: "Save announcements", discardLabel: "Discard", savedLabel: "Announcements saved.", pendingLabel: "Saving …",
+    invalidMessage: "Please correct the marked fields.", numberMissing: "Enter a number",
+    issueLabels: { error: "Error", warning: "Warning" },
+    loadError: "Announcement settings could not be loaded.", saveError: "Announcement settings could not be saved.",
+    conflictMessage: "Announcement settings have changed since they were loaded.", reloadLabel: "Load server version", enabledLabel: "On", disabledLabel: "Off",
+    templateMessages: templateMessages.en,
+    warningLabel: (warning) => warning.code === "unknown_template_variables"
+      ? `Unknown variable${warning.unknownVariables.length === 1 ? "" : "s"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
+      : `Template can be ${String(warning.worstCaseLength)} characters long.`,
+    sections: { announcements: "Announcements", prewarning: "Prewarning" },
+    fields: {
+      automatic: {
+        label: "Automatic ad break", hint: "Sent when a scheduled ad break starts. If {duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",
+        previewLabel: "Preview", previewSpeaker: "Bot",
+        variables: [{ name: "duration", description: "Ad break duration in seconds", sample: "90" }],
+      },
+      manual: {
+        label: "Manually started ad break", hint: "Sent when someone starts an ad break by hand. If {duration} is missing, the preview adds (N seconds).", requiredError: "Enter text",
+        previewLabel: "Preview", previewSpeaker: "Bot",
+        variables: [{ name: "duration", description: "Ad break duration in seconds", sample: "90" }],
+      },
+      prewarning: { label: "Warn before an ad break", hint: "Announces the next ad break in chat beforehand.", description: "Announces the next ad break in chat beforehand." },
+      leadSeconds: { label: "Lead time", hint: "How long before the ad break. 30 to 300.", unit: "s", disabledReason: "Prewarning is turned off.", increaseLabel: "Increase lead time", decreaseLabel: "Decrease lead time" },
+      prewarningText: {
+        label: "Prewarning text", hint: "What the bot says before the ad break.", requiredError: "Enter text",
+        previewLabel: "Preview", previewSpeaker: "Bot",
+        variables: [{ name: "seconds", description: "Seconds remaining until the ad break", sample: "60" }],
+      },
+    },
+  },
+};
+
+export const adsSettingsEditorCatalog = (language: DashboardLanguage): SettingsEditorCatalog => editorCatalog[language];

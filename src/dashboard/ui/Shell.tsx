@@ -1,8 +1,6 @@
-import { AppShell, Burger, Group } from "@mantine/core";
+import { AppShell, Burger } from "@mantine/core";
 import { useDisclosure, useSessionStorage } from "@mantine/hooks";
 import type { ReactNode } from "react";
-
-import { colors } from "./theme";
 
 export interface ShellNavContext {
   collapsed: boolean;
@@ -25,8 +23,9 @@ const SIDEBAR_WIDTH_COLLAPSED = 80;
 
 /**
  * "Layout" (docs/input/DESIGN-neu.md): the fixed-measure shell -- a 56px
- * header and a 240/80px navbar that becomes a drawer below the `md`
- * breakpoint. Mantine's `AppShell` and `Burger` live here so no page
+ * desktop header and a 240/80px navbar that becomes a drawer below the `md`
+ * breakpoint. The static shell grid lets the rail paint beside the full
+ * document; its navigation contents remain sticky. Mantine's AppShell and Burger live here so no page
  * outside `ui/` touches them; panels only ever see `header`/`navbar`
  * content they compose from plain markup and other seam components.
  *
@@ -43,7 +42,9 @@ export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebar
 
   return (
     <AppShell
-      header={{ height: { base: 96, md: 56 } }}
+      className="dashboard-shell"
+      mode="static"
+      header={{ height: { base: 128, md: 56 } }}
       navbar={{
         width: collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED,
         breakpoint: "md",
@@ -52,25 +53,26 @@ export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebar
       padding={0}
       withBorder={false}
     >
-      <AppShell.Header style={{ backgroundColor: colors.rail, borderBottom: `1px solid ${colors.hairline}` }}>
-        <Group h="100%" gap="sm" wrap="nowrap" px="md">
+      <AppShell.Header className="dashboard-shell__header">
+        <div className="dashboard-shell__header-inner">
           <Burger
+            className="dashboard-shell__burger"
             opened={mobileOpened}
             onClick={toggleMobile}
             hiddenFrom="md"
             size="sm"
             aria-label={mobileOpened ? closeSidebarLabel : openSidebarLabel}
           />
-          <div style={{ flex: 1, minWidth: 0, height: "100%" }}>{header}</div>
-        </Group>
+          <div className="dashboard-shell__header-content">{header}</div>
+        </div>
       </AppShell.Header>
       <AppShell.Navbar
+        className="dashboard-shell__navbar"
         aria-label={navLabel}
-        style={{ backgroundColor: colors.rail, borderRight: `1px solid ${colors.hairline}` }}
       >
         {navbar({ collapsed, onToggleCollapsed, closeMobileNav: closeMobile })}
       </AppShell.Navbar>
-      <AppShell.Main style={{ backgroundColor: colors.ground }}>{children}</AppShell.Main>
+      <AppShell.Main className="dashboard-shell__main">{children}</AppShell.Main>
     </AppShell>
   );
 }

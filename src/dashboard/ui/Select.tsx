@@ -20,13 +20,15 @@ export interface SelectProps {
   options: SelectOption[];
   placeholder?: string;
   disabled?: boolean;
+  busy?: boolean;
   required?: boolean;
   name?: string;
   id?: string;
+  title?: string;
 }
 
 /**
- * "Popover, Menu, Combobox: surface Taste, border Linie-Stark, radius sm,
+ * "Popover, Menu, Combobox: surface, strong border, radius sm,
  * shadow xs" (docs/input/DESIGN-neu.md, "Component defaults"). The dropdown
  * override lives here rather than in the global theme because `Select` is
  * the only place in this seam step that opens a Combobox.
@@ -41,14 +43,16 @@ export function Select({
   options,
   placeholder,
   disabled = false,
+  busy = false,
   required = false,
   name,
   id,
+  title,
 }: SelectProps) {
   return (
     <MantineSelect
       label={label}
-      aria-label={label ? undefined : ariaLabel}
+      aria-label={ariaLabel}
       description={hint}
       error={error ? `× ${error}` : undefined}
       value={value}
@@ -56,9 +60,11 @@ export function Select({
       data={options}
       placeholder={placeholder}
       disabled={disabled}
+      aria-busy={busy}
       required={required}
       name={name}
       id={id}
+      title={title}
       allowDeselect={false}
       comboboxProps={{ shadow: "xs" }}
       styles={{

@@ -1,6 +1,12 @@
 import "@mantine/spotlight/styles.css";
 
 import { Spotlight as MantineSpotlight, type SpotlightActionData, type SpotlightFilterFunction } from "@mantine/spotlight";
+import type { ReactNode } from "react";
+
+import { Icon, type IconName } from "./Icon";
+
+type SpotlightActionGroupData = { group: string; actions: SpotlightActionData[] };
+type SpotlightActions = SpotlightActionData | SpotlightActionGroupData;
 
 export interface SpotlightItem {
   id: string;
@@ -11,6 +17,7 @@ export interface SpotlightItem {
   group?: string;
   /** Terms matched in addition to the label/description (e.g. an English + German alias). */
   keywords?: string[];
+  icon?: IconName | Exclude<ReactNode, string>;
   disabled?: boolean;
   disabledReason?: string;
   onTrigger: () => void;
@@ -42,11 +49,35 @@ export interface SpotlightProps {
  * ("ads" keyword matches query "ads off") or the query can extend toward a
  * longer keyword as the user keeps typing.
  */
+const flatActions = (actions: SpotlightActions[]): SpotlightActionData[] => actions.flatMap((action) =>
+  "actions" in action ? action.actions.map((item) => ({ ...item, group: action.group })) : [action],
+);
+
+const groupedActions = (actions: SpotlightActionData[]): SpotlightActions[] => {
+  const result: SpotlightActions[] = [];
+  const groups = new Map<string, SpotlightActionData[]>();
+  for (const action of actions) {
+    if (action.group === undefined) {
+      result.push(action);
+      continue;
+    }
+    const group = groups.get(action.group);
+    if (group === undefined) {
+      const members: SpotlightActionData[] = [];
+      groups.set(action.group, members);
+      result.push({ group: action.group, actions: members });
+      members.push(action);
+    } else {
+      group.push(action);
+    }
+  }
+  return result;
+};
+
 const filterItems: SpotlightFilterFunction = (query, actions) => {
   const q = query.trim().toLowerCase();
-  if (q.length === 0) return actions;
-  return actions.filter((action) => {
-    if ("actions" in action) return true;
+  const filtered = flatActions(actions).filter((action) => {
+    if (q.length === 0) return true;
     const label = (action.label ?? "").toLowerCase();
     const description = (action.description ?? "").toLowerCase();
     if (label.includes(q) || description.includes(q)) return true;
@@ -58,6 +89,7 @@ const filterItems: SpotlightFilterFunction = (query, actions) => {
       return normalized.length > 0 && (q.startsWith(normalized) || normalized.startsWith(q));
     });
   });
+  return groupedActions(filtered);
 };
 
 /**
@@ -69,11 +101,15 @@ const filterItems: SpotlightFilterFunction = (query, actions) => {
  * package's own types.
  */
 export function Spotlight({ items, emptyMessage, placeholder, forceOpened, query, onQueryChange, onOpen }: SpotlightProps) {
-  const actions: SpotlightActionData[] = items.map((item) => {
+  const actionItems: SpotlightActionData[] = items.map((item) => {
     const description = item.disabled ? item.disabledReason ?? item.description : item.description;
+    const leftSection = typeof item.icon === "string"
+      ? <Icon name={item.icon as IconName} size={20} />
+      : item.icon;
     return {
       id: item.id,
       label: item.label,
+      ...(leftSection === undefined ? {} : { leftSection }),
       ...(item.group === undefined ? {} : { group: item.group }),
       ...(item.keywords === undefined ? {} : { keywords: item.keywords }),
       ...(item.disabled === undefined ? {} : { disabled: item.disabled }),
@@ -81,13 +117,14 @@ export function Spotlight({ items, emptyMessage, placeholder, forceOpened, query
       ...(item.disabled === true ? {} : { onClick: item.onTrigger }),
     };
   });
+  const actions = groupedActions(actionItems);
 
   return (
     <MantineSpotlight
       actions={actions}
       filter={filterItems}
       nothingFound={emptyMessage}
-      searchProps={{ placeholder }}
+      searchProps={{ placeholder, leftSection: <Icon name="search" size={20} /> }}
       {...(forceOpened === undefined ? {} : { forceOpened })}
       {...(query === undefined ? {} : { query })}
       {...(onQueryChange === undefined ? {} : { onQueryChange })}

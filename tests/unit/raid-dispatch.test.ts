@@ -46,7 +46,10 @@ describe("Raid dispatch", () => {
       );
       await database.prepare(
         "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, ?)",
-      ).bind("kanal-a", raidModule.id, JSON.stringify(raidModule.defaultSettings)).run();
+      ).bind("kanal-a", raidModule.id, JSON.stringify({
+        ...raidModule.defaultSettings,
+        textLong: "Willkommen {legacy_token} {channel}",
+      })).run();
 
       const fetcher = vi.fn<typeof fetch>()
         .mockResolvedValueOnce(new Response(JSON.stringify({ message: "gesperrt" }), { status: 429 }))
@@ -79,7 +82,7 @@ describe("Raid dispatch", () => {
         "host.chat.sent",
       ]);
       expect(jsonRecord(rows.results[1]?.detail_json ?? "{}")).toMatchObject({ cause: "rate_limited", status: 429 });
-      expect(jsonRecord(rows.results[2]?.detail_json ?? "{}").text).toEqual(expect.stringContaining("quelle"));
+      expect(jsonRecord(rows.results[2]?.detail_json ?? "{}").text).toBe("Willkommen {legacy_token} quelle");
     } finally {
       database.close();
     }

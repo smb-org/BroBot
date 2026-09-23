@@ -33,6 +33,7 @@ describe("channel events EventSub targets", () => {
         ["channel.suspicious_user.message", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.suspicious_user.update", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["stream.online", { broadcaster_user_id: "kanal-a" }],
+        ["stream.offline", { broadcaster_user_id: "kanal-a" }],
         ["channel.ad_break.begin", { broadcaster_user_id: "kanal-a" }],
       ]);
 
@@ -70,7 +71,7 @@ describe("channel events EventSub targets", () => {
     expect(raid?.consentingIdentityFromCondition({ to_broadcaster_user_id: "200" })).toBeNull();
   });
 
-  it("doesn't include disabled channel events in the target state", async () => {
+  it("includes mandatory channel events even when the stored row is disabled", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -80,7 +81,9 @@ describe("channel events EventSub targets", () => {
          VALUES ('kanal-a', 'channel_events', 0, '{}')`,
       ).run();
 
-      await expect(listDesiredEventSubTargets(database as unknown as D1Database, "kanal-a")).resolves.toEqual([]);
+      const targets = await listDesiredEventSubTargets(database as unknown as D1Database, "kanal-a");
+      expect(targets.some((target) => target.subscriptionType === "channel.chat.notification")).toBe(true);
+      expect(targets.filter((target) => target.subscriptionType === "channel.raid")).toHaveLength(2);
     } finally {
       database.close();
     }
@@ -102,20 +105,22 @@ describe("channel events EventSub targets", () => {
         { channelId: "kanal-a", subscriptionType: "channel.raid", variant: "outgoing", version: "1" },
       ]);
       expect(targets.filter((target) => target.subscriptionType !== "channel.raid")).toEqual([
-        { channelId: "kanal-a", subscriptionType: "channel.shoutout.create", variant: "", version: "1" },
-        { channelId: "kanal-a", subscriptionType: "channel.shoutout.receive", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.shoutout.create", variant: "", version: "1", deferredReason: "moderator_required" },
+        { channelId: "kanal-a", subscriptionType: "channel.shoutout.receive", variant: "", version: "1", deferredReason: "moderator_required" },
         { channelId: "kanal-a", subscriptionType: "channel.chat.notification", variant: "", version: "1" },
-        { channelId: "kanal-a", subscriptionType: "channel.moderate", variant: "", version: "2" },
-        { channelId: "kanal-a", subscriptionType: "automod.message.hold", variant: "", version: "1" },
-        { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.message", variant: "", version: "1" },
-        { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.update", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "channel.moderate", variant: "", version: "2", deferredReason: "moderator_required" },
+        { channelId: "kanal-a", subscriptionType: "automod.message.hold", variant: "", version: "1", deferredReason: "moderator_required" },
+        { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.message", variant: "", version: "1", deferredReason: "moderator_required" },
+        { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.update", variant: "", version: "1", deferredReason: "moderator_required" },
+        { channelId: "kanal-a", subscriptionType: "stream.online", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "stream.offline", variant: "", version: "1" },
       ]);
     } finally {
       database.close();
     }
   });
 
-  it("generates no new moderation targets for a disabled module", async () => {
+  it("defers mandatory moderation targets until the bot is a moderator", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -130,7 +135,11 @@ describe("channel events EventSub targets", () => {
         "automod.message.hold",
         "channel.suspicious_user.message",
         "channel.suspicious_user.update",
-      ].includes(target.subscriptionType))).toEqual([]);
+      ].includes(target.subscriptionType))).toEqual([
+        { channelId: "kanal-a", subscriptionType: "automod.message.hold", variant: "", version: "1", deferredReason: "moderator_required" },
+        { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.message", variant: "", version: "1", deferredReason: "moderator_required" },
+        { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.update", variant: "", version: "1", deferredReason: "moderator_required" },
+      ]);
     } finally {
       database.close();
     }

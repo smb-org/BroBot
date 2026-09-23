@@ -5,6 +5,19 @@ import type {
   EventTone,
   IdentityStatus,
 } from "./contracts/values";
+import type { TemplateWarning } from "./template";
+
+export type PanelTemplateWarning = TemplateWarning;
+
+export interface PanelTemplateWarningResponse {
+  warnings: readonly PanelTemplateWarning[];
+}
+
+export interface PanelCommandAliasConflict {
+  field: "name" | "aliases";
+  trigger: string;
+  command: string;
+}
 
 export type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
 export type PanelChannelBotConsentStatus = "granted" | "missing";
@@ -79,6 +92,7 @@ export interface PanelChannelState {
   broadcasterPermissions: PanelBroadcasterPermissions | null;
   moderator: PanelModeratorStatus | null;
   chatSubscription: PanelChatSubscription | null;
+  chatSubscriptionNeeded?: boolean;
   tokens: PanelTokenStatus;
   lastError: PanelLastError | null;
 }
@@ -96,6 +110,7 @@ export interface PanelModuleState {
   id: string;
   enabled: boolean;
   settings: string;
+  mandatory?: boolean;
   /** Consent declared by the module, shown before a redirect. */
   requiredBroadcasterScopes?: string[];
   /** Declared scopes the broadcaster identity does not currently prove. */
@@ -202,6 +217,7 @@ export interface PanelSystemResponse {
   botPermissions: PanelBotPermissions | null;
   broadcasterPermissions: PanelBroadcasterPermissions | null;
   chatSubscription: PanelChatSubscription | null;
+  chatSubscriptionNeeded?: boolean;
   subscriptions?: PanelEventSubSubscription[];
   tokens: PanelTokenStatus;
 }

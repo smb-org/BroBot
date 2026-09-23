@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModuleState } from "../../panel-contract";
-import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, formatTimestamp } from "../locale";
+import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
 import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
+import { Icon } from "../ui/Icon";
 import { ChipGroup, EmptyState, ErrorPanel, Field, ListDetail, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import type { LoadState } from "../load-state";
 import {
@@ -33,12 +34,12 @@ const actorCell = (entry: PanelEventEntry, texts: ReturnType<typeof dashboardTex
 const EventChipPair = ({ code, detail, texts: texts }: { code: string; detail: ReturnType<typeof eventDetail>; texts: ReturnType<typeof dashboardTexts> }): ReactElement => {
   const metadata = eventMetadata(code);
   if (metadata === null) {
-    return <span className="event-chip-pair"><span className="event-chip" data-stufe="gezeichnet">{texts.events.unknown}</span></span>;
+    return <span className="event-chip-pair"><span className="event-chip" data-tier="outlined">{texts.events.unknown}</span></span>;
   }
   const number = eventChipNumber(detail, metadata.numberKey);
   return <span className="event-chip-pair">
     {number === null ? null : <span className="event-chip event-chip--number">{number}</span>}
-    <span className="event-chip" data-familie={metadata.family} data-stufe={metadata.tier} data-ton={metadata.tone}>{metadata.word[dashboardLanguage()]}</span>
+    <span className="event-chip" data-family={metadata.family} data-tier={metadata.tier} data-tone={metadata.tone}>{metadata.word[dashboardLanguage()]}</span>
   </span>;
 };
 
@@ -96,6 +97,7 @@ const EventFilterBar = ({
   return <div className="event-filter" aria-label={texts.events.filter}>
     <div className="event-filter__controls">
       <ChipGroup
+        className="event-filter__chips"
         ariaLabel={texts.events.origin}
         value={filters.origin}
         onChange={(value) => { onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}
@@ -106,6 +108,7 @@ const EventFilterBar = ({
         ]}
       />
       <ChipGroup
+        className="event-filter__chips"
         ariaLabel={texts.events.tone}
         value={filters.tone}
         onChange={(value) => { onChange({ ...filters, tone: eventToneFromValue(value ?? "") }); }}
@@ -124,6 +127,7 @@ const EventFilterBar = ({
       />
       <Field
         label={texts.events.person}
+        icon="search"
         value={personDraft}
         onChange={setPersonDraft}
         onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
@@ -258,7 +262,7 @@ export const EventsPage = ({
           <section className="content-section" aria-label={texts.events.log}>
             <div className="section-heading"><h2>{texts.events.log}</h2><RealtimeFeedStatus status={realtime.status} /></div>
             <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
-            {realtime.pendingCount === 0 ? null : <button className="button realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite">{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
+            {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
             {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texts.events.load}</p> : null}
             {/* Connection lost: nothing could ever be loaded -- distinct from a background refresh failing once data already exists. */}
             {eventsState.status === "error" && eventsState.data === null ? (
@@ -296,10 +300,24 @@ export const EventsPage = ({
                           const entry = group.representative;
                           const eventLabel = eventText(entry.code, eventDetail(entry.detail));
                           return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}>
-                            <td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td>
-                            <td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td>
-                            <td>{actorCell(entry, texts)}</td>
-                            <td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td>
+                            <td>
+                              <span className="event-label event-table__primary">
+                                <EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} />
+                                <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`}>{eventLabel}</span>
+                              </span>
+                              <span className="event-table__mobile-meta muted">
+                                <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{actorCell(entry, texts)}</span>
+                                <span aria-hidden="true">·</span>
+                                <time className="mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
+                              </span>
+                            </td>
+                            <td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</td>
+                            <td title={actorLabel(entry, texts)}>{actorCell(entry, texts)}</td>
+                            <td className="mono" title={entry.createdAt}>
+                              <time dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
+                            </td>
                           </tr>;
                         })}</tbody>
                       </table>
@@ -315,7 +333,7 @@ export const EventsPage = ({
           <SubInspector
             ariaLabel={texts.events.detail}
             title={texts.events.operation}
-            identifier={<CopyableId id={selectedGroup.representative.triggerId || selectedGroup.representative.eventId} texts={texts} />}
+            identifier={selectedGroup.representative.triggerId || selectedGroup.representative.eventId}
             closeLabel={dashboardCommonTexts().close}
             onClose={closeGroup}
           >
@@ -335,6 +353,7 @@ export const EventsPage = ({
                 </div>
                 <details>
                   <summary>{texts.events.technicalDetails}</summary>
+                  <CopyableId id={entry.triggerId || entry.eventId} texts={texts} />
                   <pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre>
                 </details>
               </li>;

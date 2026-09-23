@@ -1,5 +1,5 @@
 import { createTheme } from "@mantine/core";
-import type { MantineColorsTuple, MantineThemeOverride } from "@mantine/core";
+import type { MantineColorsTuple, MantineTheme, MantineThemeOverride } from "@mantine/core";
 
 export interface StateToken {
   readonly color: string;
@@ -12,12 +12,9 @@ export interface FamilyToken {
   readonly background: string;
 }
 
-// `theme.other` is typed `Record<string, any>` by Mantine; this augmentation
-// gives `Led` and `Chip` a typed read of the two groups they own, instead of
-// every `theme.other.state.*` access silently widening to `any` under
-// strictTypeChecked. The design document names this property `theme.other.
-// zustand`/`familie` (German); kept in English here per the project's
-// identifier rule, with the German names quoted below for traceability.
+// Mantine types `theme.other` as `Record<string, any>`. This augmentation
+// gives `Led` and `Chip` typed access to their token groups under strict
+// type checking.
 declare module "@mantine/core" {
   interface MantineThemeOther {
     rail: string;
@@ -29,14 +26,14 @@ declare module "@mantine/core" {
     s8: string;
     s10: string;
     s12: string;
-    /** "theme.other.zustand" in docs/input/DESIGN-neu.md. */
+    /** Status-color tokens. */
     state: {
       green: StateToken;
       amber: StateToken;
       red: StateToken;
       off: StateToken;
     };
-    /** "theme.other.familie" in docs/input/DESIGN-neu.md. */
+    /** Event-family color tokens. */
     family: {
       community: FamilyToken;
       raid: FamilyToken;
@@ -46,57 +43,51 @@ declare module "@mantine/core" {
 }
 
 /**
- * Color tokens transcribed from `docs/input/DESIGN-neu.md` ("Colors") and
- * `DESIGN.md`, whose `colors.*` placeholders these values resolve. This is
- * the single source `ui/` reads from; nothing here duplicates a literal hex
- * value anywhere else in `ui/`. Keys are English (project rule); each one's
- * German source name from `src/dashboard/styles.css` is quoted in its
- * comment so the mapping back to that file and to the design document stays
- * traceable.
+ * Color tokens transcribed from the dashboard design document ("Colors") and
+ * `DESIGN.md`. This is the single source read by `ui/`; no other file in
+ * `ui/` duplicates these hex values.
  *
- * The `depth` value ("Tiefe") has no hex value anywhere in either document
- * -- the design doc calls it "*neu*" and only describes it verbally ("the
- * darkest surface, only the background behind Modal/Drawer, at 60%
- * opacity, darker than the well"). One step below `well` on the same warm
- * near-black scale: deep enough to separate a floating layer, warm enough not
- * to read as a hole next to a running stream. Decided 2026-09-22.
+ * The `depth` value has no specified hex value in either document. It is
+ * described as the darkest surface behind a modal or drawer, darker than the
+ * well at 60% opacity. This value is one step below `well` on the same warm
+ * near-black scale. Decided 2026-09-22.
  */
 export const colors = {
-  ground: "#141312", // "--grund"
+  ground: "#141312", // "--background"
   rail: "#181716", // "--rail"
-  surface: "#1e1c1a", // "--taste"
-  surfaceHover: "#262321", // "--taste-hover"
-  inspector: "#1a1917", // "--inspektor"
-  well: "#100f0e", // "--rinne"
-  depth: "#0a0908", // "--tiefe" (decided 2026-09-22, see above)
-  hairline: "#312e2b", // "--linie"
-  hairlineStrong: "#403c38", // "--linie-stark"
-  hairlineLight: "#68615a", // "--linie-hell"
+  surface: "#1e1c1a", // "--surface"
+  surfaceHover: "#262321", // "--surface-hover"
+  inspector: "#1a1917", // "--surface-inspector"
+  well: "#100f0e", // "--surface-well"
+  depth: "#0a0908", // "--surface-depth" (decided 2026-09-22, see above)
+  hairline: "#312e2b", // "--line"
+  hairlineStrong: "#403c38", // "--line-strong"
+  hairlineLight: "#68615a", // "--line-light"
   text: "#f2efeb", // "--text"
   text2: "#b3aca4", // "--text-2"
   text3: "#8b857e", // "--text-3"
   text4: "#615c56", // "--text-4"
-  brand: "#538dcc", // "--marke"
-  brandHover: "#659cd7", // "--marke-hover"
-  brandPress: "#4c80bc", // "--marke-press"
-  brandText: "#9bc3ed", // "--marke-text"
-  brandHairline: "#60758c", // "--marke-linie"
-  onBrand: "#0a0c10", // "--marke-auf"
+  brand: "#538dcc", // "--brand"
+  brandHover: "#659cd7", // "--brand-hover"
+  brandPress: "#4c80bc", // "--brand-press"
+  brandText: "#9bc3ed", // "--brand-text"
+  brandHairline: "#60758c", // "--brand-line"
+  onBrand: "#0a0c10", // "--on-brand"
   tint1: "#172638", // "--tint-1"
   tint2: "#14202e", // "--tint-2"
-  green: "#3ddc84", // "--gruen"
-  greenFill: "rgba(61, 220, 132, 0.12)", // "--gruen-grund"
+  green: "#3ddc84", // "--green"
+  greenFill: "rgba(61, 220, 132, 0.12)", // Green status surface
   amber: "#d9a441", // "--warn"
-  amberFill: "rgba(217, 164, 65, 0.09)", // "--warn-grund"
-  error: "#e2564d", // "--fehler"
-  errorText: "#e8655d", // "--fehler-text"
-  errorFill: "rgba(226, 86, 77, 0.09)", // "--fehler-grund"
-  community: "#c4a3f5", // "--gemeinschaft"
-  communityFill: "rgba(196, 163, 245, 0.12)", // "--gemeinschaft-grund"
+  amberFill: "rgba(217, 164, 65, 0.09)", // "--warning-surface"
+  error: "#e2564d", // "--error"
+  errorText: "#e8655d", // "--error-text"
+  errorFill: "rgba(226, 86, 77, 0.09)", // "--error-surface"
+  community: "#c4a3f5", // "--community"
+  communityFill: "rgba(196, 163, 245, 0.12)", // "--community-surface"
   raid: "#f4a2d3", // "--raid"
-  raidFill: "rgba(244, 162, 211, 0.12)", // "--raid-grund"
+  raidFill: "rgba(244, 162, 211, 0.12)", // "--raid-surface"
   moderation: "#5cc9c4", // "--moderation"
-  moderationFill: "rgba(92, 201, 196, 0.12)", // "--moderation-grund"
+  moderationFill: "rgba(92, 201, 196, 0.12)", // "--moderation-surface"
 } as const;
 
 // "Color scheme and base tone" in docs/input/DESIGN-neu.md: the warm palette poured into Mantine's ten-step
@@ -114,7 +105,7 @@ const dark: MantineColorsTuple = [
   colors.depth, // dark.9 -- backdrop behind floating layers
 ];
 
-// "Marke": built light-to-dark so Mantine's convention (shade 6 filled,
+// Brand colors are built light-to-dark so Mantine's convention (shade 6 filled,
 // shade 7 pressed) lands on today's values. Shades 0/1/3/5/8/9 are unused
 // interpolation steps the document does not name.
 const brand: MantineColorsTuple = [
@@ -132,11 +123,11 @@ const brand: MantineColorsTuple = [
 
 /**
  * "The contrast rule" in docs/input/DESIGN-neu.md: Mantine's `autoContrast`
- * default `luminanceThreshold` is 0.3. `{colors.marke}` (#538dcc) has a
+ * default `luminanceThreshold` is 0.3. `{colors.brand}` (#538dcc) has a
  * relative luminance of 0.25 -- below Mantine's default threshold, so
  * `autoContrast` would treat it as "dark enough" and put white text on it:
  * 3.47:1, failing WCAG AA on every primary button. At 0.2, `autoContrast`
- * instead picks `{colors.marke-auf}` (5.6:1). This is not a stray override
+ * instead picks `{colors.onBrand}` (5.6:1). This is not a stray override
  * -- raising it back to 0.3 breaks every primary button's contrast.
  */
 export const luminanceThreshold = 0.2;
@@ -149,7 +140,7 @@ export const theme: MantineThemeOverride = createTheme({
   luminanceThreshold,
   // `autoContrast`'s dark branch reaches for `theme.black`, not a
   // per-color token; without this override it renders pure `#000` instead
-  // of `{colors.marke-auf}` on the primary button. Not pure black: the doc
+  // of `{colors.onBrand}` on the primary button. Not pure black: the doc
   // is explicit that the button text is a dark shade of the palette, and
   // gives its own contrast ratio (5.6:1) against it.
   black: colors.onBrand,
@@ -157,11 +148,11 @@ export const theme: MantineThemeOverride = createTheme({
   fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif",
   fontFamilyMonospace: '"IBM Plex Mono", ui-monospace, monospace',
   fontSizes: {
-    xs: "11px", // Navetikett
-    sm: "12px", // Feldname, LED-Wort, Zahl
-    md: "13px", // Body, Abschnitt, Knopftext -- Mantine's default for every component
-    lg: "15px", // Bereichstitel
-    xl: "22px", // Seitentitel
+    xs: "11px", // Navigation label
+    sm: "12px", // Field name, LED word, number
+    md: "13px", // Body, section, and button text
+    lg: "15px", // Section title
+    xl: "22px", // Page title
   },
   lineHeights: { md: "1.5" },
   headings: {
@@ -197,9 +188,8 @@ export const theme: MantineThemeOverride = createTheme({
     s8: "32px",
     s10: "40px",
     s12: "48px",
-    // Zustand and Herkunft are one shade and one field each -- deliberately
-    // not modeled as ten-step Mantine colors. Only `Led` and `Chip` read
-    // these.
+    // State and event-family tokens each use one color per state or family,
+    // rather than ten-step Mantine scales. Only `Led` and `Chip` read these.
     state: {
       green: { color: colors.green, background: colors.greenFill },
       amber: { color: colors.amber, background: colors.amberFill },
@@ -228,18 +218,28 @@ export const theme: MantineThemeOverride = createTheme({
     // Textarea (Mantine keys every one of them under `["Input", <own
     // name>]`), so this one override moves every field's surface into the
     // well without repeating it per field type.
-    Input: {
-      defaultProps: { size: "md" },
-      vars: () => ({
-        wrapper: {
-          "--input-bg": colors.well,
-          "--input-bd": colors.hairlineStrong,
-          "--input-height-md": "44px",
-          "--input-height-compact-md": "34px",
-        },
-      }),
+  Input: {
+    defaultProps: { size: "md" },
+    vars: (_theme: MantineTheme, props: { size?: string }) => ({
+      wrapper: {
+        "--input-bg": colors.well,
+        "--input-bd": colors.hairlineStrong,
+        "--input-height-md": "44px",
+        "--input-height-compact-md": "34px",
+        "--input-fz": typeof props.size === "string" && props.size.startsWith("compact-") ? "13px" : "14px",
+        "--input-padding": "12px",
+        "--input-padding-y-md": "10px",
+      },
+    }),
+  },
+  InputWrapper: {
+    styles: {
+      label: { fontSize: "13px", fontWeight: 500 },
+      description: { fontSize: "12px" },
+      error: { fontSize: "12px" },
     },
-    Switch: {
+  },
+  Switch: {
       defaultProps: { size: "md", radius: "md" },
       styles: {
         thumb: { borderRadius: "var(--mantine-radius-sm)" },

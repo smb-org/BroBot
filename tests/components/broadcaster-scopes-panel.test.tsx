@@ -89,7 +89,7 @@ describe("Broadcaster scope notice in the module panel", () => {
     expect(screen.getByText("channel:manage:ads")).toBeInTheDocument();
     expect(screen.getByText(missing)).toBeInTheDocument();
     expect(screen.getByText(granted)).toBeInTheDocument();
-    expect(document.querySelectorAll(".scope-zeile__icon")).toHaveLength(2);
+    expect(document.querySelectorAll(".scope-row__icon")).toHaveLength(2);
     expect(document.querySelector(".module-state__icon")).toBeInTheDocument();
   });
 

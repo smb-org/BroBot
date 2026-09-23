@@ -47,9 +47,13 @@ export const EVENTSUB_SUBSCRIPTION_TYPES = [
   "channel.shoutout.receive",
   "channel.suspicious_user.message",
   "channel.suspicious_user.update",
+  "stream.offline",
   "stream.online",
 ] as const;
 export type EventSubSubscriptionType = (typeof EVENTSUB_SUBSCRIPTION_TYPES)[number];
+
+export const EVENTSUB_NEUTRAL_REASON_CODES = ["moderator_required", "pending_adoption"] as const;
+export type EventSubNeutralReasonCode = (typeof EVENTSUB_NEUTRAL_REASON_CODES)[number];
 
 export const isEventSubSubscriptionType = (value: string): value is EventSubSubscriptionType =>
   (EVENTSUB_SUBSCRIPTION_TYPES as readonly string[]).includes(value);
@@ -69,6 +73,9 @@ export const EVENT_CODES = [
   "host.action.failed",
   "host.chat.failed",
   "host.chat.sent",
+  "host.announcement.failed",
+  "host.announcement.sent",
+  "template_truncated",
   "host.module.error",
   "host.module.unknown",
   "host.overlay.not_executed",
@@ -95,6 +102,8 @@ export const EVENT_CODES = [
   "channel_events.suspicious.message",
   "channel_events.suspicious.classified",
   "channel_events.suspicious.cleared",
+  "channel_events.stream.offline",
+  "channel_events.stream.online",
   "raid.outgoing",
   "raid.shoutout",
   "raid.invalid",
@@ -112,6 +121,8 @@ export const EVENT_CODES = [
   "ads.commercial.failed",
   "host.clip.failed",
   "text_commands.cooldown",
+  "text_commands.user_cooldown",
+  "text_commands.stream_state",
   "text_commands.triggered",
   "text_commands.disabled",
   "text_commands.permission_denied",
@@ -212,10 +223,12 @@ export const API_ERROR_CODES = [
   "module_settings_invalid",
   "module_settings_changed_concurrently",
   "module_enabled_field_invalid",
+  "module_mandatory",
   "module_changed_concurrently",
   "command_management_denied",
   "command_data_invalid",
   "command_already_exists",
+  "command_alias_conflict",
   "command_creation_denied",
   "command_not_found",
   "command_update_denied",

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   commandFromMessage,
-  commandTextWithPlaceholders,
+  renderCommandText,
   cooldownRemaining,
   chatStatusMeetsTier,
   validCommandName,
@@ -11,6 +11,8 @@ import {
 describe("Text commands domain", () => {
   it("recognizes a generic !-word with no special case", () => {
     expect(commandFromMessage("!befehle")).toEqual({ kind: "command", name: "befehle" });
+    expect(commandFromMessage("!Hallo")).toEqual({ kind: "command", name: "hallo" });
+    expect(commandFromMessage("!HÉ")).toEqual({ kind: "unknown" });
   });
 
   it("allows only simple lowercase command names", () => {
@@ -20,12 +22,12 @@ describe("Text commands domain", () => {
   });
 
   it("replaces the designated placeholders without introducing further variables", () => {
-    expect(commandTextWithPlaceholders("Hallo {user} in {channel} — {unknown}", "Alice", "Kanal A"))
+    expect(renderCommandText("Hallo {user} in {channel} — {unknown}", { user: "Alice", channel: "Kanal A" }))
       .toBe("Hallo Alice in Kanal A — {unknown}");
   });
 
   it("does not replace old German placeholder names", () => {
-    expect(commandTextWithPlaceholders("Hallo {nutzer} in {kanal}", "Alice", "Kanal A"))
+    expect(renderCommandText("Hallo {nutzer} in {kanal}", { user: "Alice", channel: "Kanal A" }))
       .toBe("Hallo {nutzer} in {kanal}");
   });
 

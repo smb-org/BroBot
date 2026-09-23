@@ -24,8 +24,10 @@ import { helixPages, helixRequest } from "./twitch/helix";
 import type { HelixResult } from "../modules/contract";
 import type {
   EventSubAuthorizationIdentity,
+  EventSubNeutralReasonCode,
   EventSubSubscriptionType,
 } from "../contracts/values";
+import { listChannelIds } from "./db/channels";
 
 export type { EventSubSubscriptionType } from "../contracts/values";
 
@@ -38,6 +40,7 @@ interface EventSubSubscriptionDefinitionBase<SubscriptionType extends string> {
   consentingIdentityFromCondition: (
     condition: Readonly<Record<string, unknown>>,
   ) => EventSubAuthorizationIdentity | null;
+  requiresModerator?: boolean;
 }
 
 const conditionField = (field: string): ((condition: Readonly<Record<string, unknown>>) => string | null) =>
@@ -76,6 +79,7 @@ const moderatorSubscriptionDefinition = <SubscriptionType extends string>(
   subscriptionType,
   variant: "",
   version,
+  requiresModerator: true,
   buildCondition: (channelId, botUserId) => channelAndBotCondition("broadcaster_user_id", "moderator_user_id", botUserId, channelId),
   channelIdFromCondition: conditionField("broadcaster_user_id"),
   consentingIdentityFromCondition: identityFromConditionField("moderator_user_id", "bot"),
@@ -141,6 +145,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS = [
   moderatorSubscriptionDefinition("channel.suspicious_user.message", "1"),
   moderatorSubscriptionDefinition("channel.suspicious_user.update", "1"),
   broadcasterSubscriptionDefinition("stream.online", "1", false),
+  broadcasterSubscriptionDefinition("stream.offline", "1", false),
   broadcasterSubscriptionDefinition("channel.ad_break.begin", "1"),
 ] as const satisfies readonly EventSubSubscriptionDefinitionBase<EventSubSubscriptionType>[];
 
@@ -157,6 +162,7 @@ export interface EventSubTarget {
   /** Empty for EventSub types with exactly one target; raid distinguishes the two directions. */
   variant: string;
   version: string;
+  deferredReason?: EventSubNeutralReasonCode;
 }
 
 export const eventSubTargetKey = (target: { channelId: string; subscriptionType: string; variant: string; version: string }): string =>
@@ -184,10 +190,11 @@ const conditionContains = (
 
 interface EventSubTargetRow {
   channel_id: string;
-  module_id: string;
+  module_id: string | null;
   channel_bot_consent: number;
   broadcaster_scopes_json: string | null;
   broadcaster_status: string | null;
+  bot_is_moderator: number | null;
 }
 
 const parseScopes = (serialized: string | null): string[] => {
@@ -244,11 +251,14 @@ export const listDesiredEventSubTargets = async (
        , CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent
        , broadcaster_identity.scopes_json AS broadcaster_scopes_json
        , broadcaster_identity.status AS broadcaster_status
+       , bot_status.is_moderator AS bot_is_moderator
        FROM channels AS channel
-       JOIN channel_modules ON channel_modules.channel_id = channel.channel_id
+       LEFT JOIN channel_modules ON channel_modules.channel_id = channel.channel_id
         AND channel_modules.enabled = 1
        LEFT JOIN twitch_login_identity AS broadcaster_identity
          ON broadcaster_identity.user_id = channel.channel_id
+       LEFT JOIN bot_channel_status AS bot_status
+         ON bot_status.channel_id = channel.channel_id
       WHERE 1 = 1
         ${channelId === undefined ? "" : "AND channel.channel_id = ?"}
       ORDER BY channel.channel_id, channel_modules.module_id`;
@@ -256,25 +266,41 @@ export const listDesiredEventSubTargets = async (
     ? await db.prepare(query).all<EventSubTargetRow>()
     : await db.prepare(query).bind(channelId).all<EventSubTargetRow>();
   const modules = new Map(MODULES.map((module) => [module.id, module]));
-  const targets = new Map<string, EventSubTarget>();
+  const channels = new Map<string, { row: EventSubTargetRow; moduleIds: Set<string> }>();
   for (const row of result.results) {
-    const module = modules.get(row.module_id);
-    if (module === undefined) continue;
-    const requiredScopes = moduleScopeRequirement(module);
-    const grantedScopes = row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : [];
-    if (requiredScopes.length === 0
-      ? row.channel_bot_consent !== 1
-      : !moduleHasRequiredBroadcasterScopes(module, grantedScopes)) continue;
-    for (const subscriptionType of module.eventSubTypes ?? []) {
-      for (const definition of EVENTSUB_SUBSCRIPTION_DEFINITIONS) {
-        if (definition.subscriptionType !== subscriptionType) continue;
-        const target: EventSubTarget = {
-          channelId: row.channel_id,
-          subscriptionType: definition.subscriptionType,
-          variant: definition.variant,
-          version: definition.version,
-        };
-        targets.set(eventSubTargetKey(target), target);
+    const channel = channels.get(row.channel_id) ?? { row, moduleIds: new Set<string>() };
+    if (row.module_id !== null) channel.moduleIds.add(row.module_id);
+    channels.set(row.channel_id, channel);
+  }
+  const targets = new Map<string, EventSubTarget>();
+  for (const [id, channel] of channels) {
+    const row = channel.row;
+    const enabledModuleIds = new Set(channel.moduleIds);
+    for (const module of MODULES) {
+      if (module.mandatory === true) enabledModuleIds.add(module.id);
+    }
+    for (const moduleId of enabledModuleIds) {
+      const module = modules.get(moduleId);
+      if (module === undefined) continue;
+      const requiredScopes = moduleScopeRequirement(module);
+      const grantedScopes = row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : [];
+      if (requiredScopes.length === 0
+        ? row.channel_bot_consent !== 1
+        : !moduleHasRequiredBroadcasterScopes(module, grantedScopes)) continue;
+      for (const subscriptionType of module.eventSubTypes ?? []) {
+        for (const definition of EVENTSUB_SUBSCRIPTION_DEFINITIONS) {
+          if (definition.subscriptionType !== subscriptionType) continue;
+          const baseTarget: EventSubTarget = {
+            channelId: id,
+            subscriptionType: definition.subscriptionType,
+            variant: definition.variant,
+            version: definition.version,
+          };
+          const target = "requiresModerator" in definition && definition.requiresModerator && row.bot_is_moderator !== 1
+            ? { ...baseTarget, deferredReason: "moderator_required" as const }
+            : baseTarget;
+          targets.set(eventSubTargetKey(target), target);
+        }
       }
     }
   }
@@ -416,6 +442,30 @@ const createSubscription = async (
   return subscription;
 };
 
+const isAlreadyExistsConflict = (error: unknown): error is TwitchApiError =>
+  error instanceof TwitchApiError && error.status === 409 &&
+  /subscription already exists/i.test(error.message);
+
+const adoptRemoteSubscription = async (
+  env: Env,
+  target: EventSubTarget,
+  botUserId: string,
+  now: string,
+  appAccessToken: string,
+  activeSecretId: string,
+  fetcher: typeof fetch,
+): Promise<boolean> => {
+  const remote = await fetchEventSubSubscriptions(fetcher, env.TWITCH_CLIENT_ID, appAccessToken);
+  const adopted = remote.find((subscription) => subscription.status === "enabled" &&
+    isOwnedByTarget(subscription, target, botUserId, callbackUrl(env.PUBLIC_ORIGIN)));
+  if (adopted === undefined) {
+    await mark(env.DB, target, "missing", "pending_adoption", null, now);
+    return false;
+  }
+  await mark(env.DB, target, "enabled", null, adopted.id, now, activeSecretId);
+  return true;
+};
+
 const deleteSubscription = async (
   fetcher: typeof fetch,
   clientId: string,
@@ -443,8 +493,12 @@ export const reconcileEventSubSubscriptions = async (
   fetcher: typeof fetch = fetch,
   channelId?: string,
 ): Promise<void> => {
-  const targets = await listDesiredEventSubTargets(env.DB, channelId);
+  const allTargets = await listDesiredEventSubTargets(env.DB, channelId);
+  const deferredTargets = allTargets.filter((target) => target.deferredReason !== undefined);
+  const targets = allTargets.filter((target) => target.deferredReason === undefined);
   const targetByKey = new Map(targets.map((target) => [eventSubTargetKey(target), target]));
+  const deferredByKey = new Map(deferredTargets.map((target) => [eventSubTargetKey(target), target]));
+  const allDesiredKeys = new Set(allTargets.map(eventSubTargetKey));
   const currentStates = new Map((await listEventSubSubscriptions(env.DB, channelId)).map((state) => [
     eventSubTargetKey(state),
     state,
@@ -455,11 +509,14 @@ export const reconcileEventSubSubscriptions = async (
     await mark(env.DB, target, "error", details.code, subscriptionId, now, null, details.message, details.status);
   };
 
+  await Promise.all(deferredTargets.map((target) =>
+    mark(env.DB, target, "missing", target.deferredReason ?? "moderator_required", null, now)));
+
   let remote: EventSubRemoteSubscription[];
   try {
     remote = await fetchEventSubSubscriptions(fetcher, env.TWITCH_CLIENT_ID, appAccessToken);
   } catch (error: unknown) {
-    const desiredKeys = new Set(targetByKey.keys());
+    const desiredKeys = allDesiredKeys;
     if (targets.length === 0 && currentStates.size === 0) {
       logMaintenanceError({ channelId: channelId ?? "global", subscriptionType: "eventsub", variant: "list" }, error);
     }
@@ -509,9 +566,8 @@ export const reconcileEventSubSubscriptions = async (
       variant: definition.variant,
       version: subscription.version,
     };
-    const targetKey = target === undefined
-      ? eventSubTargetKey(remoteTarget)
-      : eventSubTargetKey(target);
+    const targetKey = eventSubTargetKey(target ?? remoteTarget);
+    if (deferredByKey.has(targetKey)) continue;
     const desired = targetByKey.get(targetKey);
     const valid = desired !== undefined && subscription.status === "enabled" &&
       isOwnedByTarget(subscription, desired, botUserId, expectedCallback) && !kept.has(targetKey);
@@ -575,11 +631,19 @@ export const reconcileEventSubSubscriptions = async (
       const subscription = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
       await mark(env.DB, target, "enabled", null, subscription.id, now, activeSecretId);
     } catch (error: unknown) {
-      await markError(target, error);
+      if (isAlreadyExistsConflict(error)) {
+        try {
+          await adoptRemoteSubscription(env, target, botUserId, now, appAccessToken, activeSecretId, fetcher);
+        } catch (adoptionError: unknown) {
+          await markError(target, adoptionError);
+        }
+      } else {
+        await markError(target, error);
+      }
     }
   }
 
-  const desiredKeys = new Set(targetByKey.keys());
+  const desiredKeys = allDesiredKeys;
   const staleStates = [...currentStates.values()].filter((state) => {
     const key = eventSubTargetKey(state);
     return !desiredKeys.has(key) && !failedStaleCleanup.has(key);
@@ -596,23 +660,27 @@ export const reconcileEventSubSubscriptions = async (
   })));
 };
 
-/** Runs exactly one reconciliation pass; errors are stored as state. */
-export const maintainEventSubSubscriptions = async (
+/** Runs one channel pass; callers hold that channel's D1 lease. */
+const maintainEventSubSubscriptionsPass = async (
   env: Env,
   now: string,
   fetcher: typeof fetch = fetch,
-  channelId?: string,
+  channelId: string,
 ): Promise<void> => {
   let targets: EventSubTarget[];
   try {
     targets = await listDesiredEventSubTargets(env.DB, channelId);
   } catch (error: unknown) {
-    logMaintenanceError({ channelId: channelId ?? "global", subscriptionType: "eventsub", variant: "targets" }, error);
+    logMaintenanceError({ channelId, subscriptionType: "eventsub", variant: "targets" }, error);
     return;
   }
+  const deferredTargets = targets.filter((target) => target.deferredReason !== undefined);
+  const actionableTargets = targets.filter((target) => target.deferredReason === undefined);
+  await Promise.all(deferredTargets.map((target) =>
+    mark(env.DB, target, "missing", target.deferredReason ?? "moderator_required", null, now)));
   const botIdentity = await getBotIdentity(env.DB);
   if (botIdentity === null) {
-    await Promise.all(targets.map((target) => {
+    await Promise.all(actionableTargets.map((target) => {
       logTargetError(target, new Error(), "bot_identity_missing");
       return mark(env.DB, target, "error", "bot_identity_missing", null, now);
     }));
@@ -620,7 +688,7 @@ export const maintainEventSubSubscriptions = async (
   }
   const botStatus = await getBotIdentityStatus(env.DB);
   if (botStatus?.status === "revoked") {
-    await Promise.all(targets.map((target) => {
+    await Promise.all(actionableTargets.map((target) => {
       logTargetError(target, new Error(), "bot_identity_revoked");
       return mark(env.DB, target, "error", "bot_identity_revoked", null, now);
     }));
@@ -630,10 +698,10 @@ export const maintainEventSubSubscriptions = async (
   try {
     appAccessToken = await getAppAccessToken(env, now, fetcher);
   } catch (error: unknown) {
-    if (targets.length === 0) {
-      logMaintenanceError({ channelId: channelId ?? "global", subscriptionType: "app-token", variant: "eventsub" }, error);
+    if (actionableTargets.length === 0) {
+      logMaintenanceError({ channelId, subscriptionType: "app-token", variant: "eventsub" }, error);
     }
-    await Promise.all(targets.map((target) => {
+    await Promise.all(actionableTargets.map((target) => {
       const details = maintenanceErrorDetails(error, reasonFor(error));
       logTargetError(target, error, details.code);
       return mark(env.DB, target, "error", details.code, null, now, null, details.message, details.status);
@@ -644,12 +712,88 @@ export const maintainEventSubSubscriptions = async (
     await reconcileEventSubSubscriptions(env, now, appAccessToken, botIdentity.userId, fetcher, channelId);
   } catch (error: unknown) {
     const details = maintenanceErrorDetails(error, reasonFor(error));
-    if (targets.length === 0) {
-      logMaintenanceError({ channelId: channelId ?? "global", subscriptionType: "eventsub", variant: "reconcile" }, error, details.code);
+    if (actionableTargets.length === 0) {
+      logMaintenanceError({ channelId, subscriptionType: "eventsub", variant: "reconcile" }, error, details.code);
     }
-    await Promise.all(targets.map((target) => {
+    await Promise.all(actionableTargets.map((target) => {
       logTargetError(target, error, details.code);
       return mark(env.DB, target, "error", details.code, null, now, null, details.message, details.status);
     }));
   }
+};
+
+const EVENTSUB_MAINTENANCE_LEASE_MS = 10 * 60 * 1000;
+
+interface EventSubMaintenanceLeaseRow {
+  owner_id: string;
+  rerun_needed: number;
+}
+
+const maintainChannelWithLease = async (
+  env: Env,
+  now: string,
+  fetcher: typeof fetch,
+  channelId: string,
+): Promise<void> => {
+  const ownerId = crypto.randomUUID();
+  const wallClock = new Date().toISOString();
+  const leaseUntil = new Date(Date.now() + EVENTSUB_MAINTENANCE_LEASE_MS).toISOString();
+  await env.DB.prepare(
+    `INSERT INTO eventsub_maintenance_locks (channel_id, owner_id, lease_until, rerun_needed)
+     VALUES (?, ?, ?, 0)
+     ON CONFLICT(channel_id) DO UPDATE SET
+       owner_id = CASE WHEN eventsub_maintenance_locks.lease_until <= ? THEN excluded.owner_id ELSE eventsub_maintenance_locks.owner_id END,
+       lease_until = CASE WHEN eventsub_maintenance_locks.lease_until <= ? THEN excluded.lease_until ELSE eventsub_maintenance_locks.lease_until END,
+       rerun_needed = CASE WHEN eventsub_maintenance_locks.lease_until <= ? THEN 0 ELSE 1 END`,
+  ).bind(channelId, ownerId, leaseUntil, wallClock, wallClock, wallClock).run();
+
+  const lease = await env.DB.prepare(
+    "SELECT owner_id, rerun_needed FROM eventsub_maintenance_locks WHERE channel_id = ?",
+  ).bind(channelId).first<EventSubMaintenanceLeaseRow>();
+  if (lease?.owner_id !== ownerId) return;
+
+  for (;;) {
+    await maintainEventSubSubscriptionsPass(env, now, fetcher, channelId);
+    const released = await env.DB.prepare(
+      `DELETE FROM eventsub_maintenance_locks
+        WHERE channel_id = ? AND owner_id = ? AND rerun_needed = 0`,
+    ).bind(channelId, ownerId).run();
+    if (released.meta.changes > 0) return;
+
+    const current = await env.DB.prepare(
+      "SELECT owner_id, rerun_needed FROM eventsub_maintenance_locks WHERE channel_id = ?",
+    ).bind(channelId).first<EventSubMaintenanceLeaseRow>();
+    if (current?.owner_id !== ownerId || current.rerun_needed !== 1) return;
+
+    await env.DB.prepare(
+      `UPDATE eventsub_maintenance_locks
+          SET rerun_needed = 0,
+              lease_until = ?
+        WHERE channel_id = ? AND owner_id = ? AND rerun_needed = 1`,
+    ).bind(new Date(Date.now() + EVENTSUB_MAINTENANCE_LEASE_MS).toISOString(), channelId, ownerId).run();
+  }
+};
+
+/**
+ * Serializes reconciliation per channel. Active contenders set one durable
+ * rerun bit, which the lease owner consumes after its current pass.
+ */
+export const maintainEventSubSubscriptions = async (
+  env: Env,
+  now: string,
+  fetcher: typeof fetch = fetch,
+  channelId?: string,
+): Promise<void> => {
+  let channelIds: string[];
+  if (channelId !== undefined) {
+    channelIds = [channelId];
+  } else {
+    try {
+      channelIds = await listChannelIds(env.DB);
+    } catch (error: unknown) {
+      logMaintenanceError({ channelId: "global", subscriptionType: "eventsub", variant: "channels" }, error);
+      return;
+    }
+  }
+  for (const id of channelIds) await maintainChannelWithLease(env, now, fetcher, id);
 };

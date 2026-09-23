@@ -42,7 +42,14 @@ const testModule: BotModule<typeof testModuleSchema> = {
   },
 };
 
-vi.mock("../../src/modules/registry", () => ({ MODULES: [testModule] }));
+const mandatoryTestModule: BotModule<typeof testModuleSchema> = {
+  id: "channel_events",
+  mandatory: true,
+  settingsSchema: testModuleSchema,
+  defaultSettings: { betrag: 42 },
+};
+
+vi.mock("../../src/modules/registry", () => ({ MODULES: [testModule, mandatoryTestModule] }));
 
 const { createCsrfToken } = await import("../../src/worker/auth/csrf");
 const { createSessionCookie } = await import("../../src/worker/auth/session");
@@ -174,10 +181,13 @@ describe("Module management in the panel", () => {
       await requestFor("user-1", "/api/channels/kanal-a/modules"),
       environment,
     );
-    const body = await response.json<{ modules: Array<{ id: string; enabled: boolean; settings: string }> }>();
+    const body = await response.json<{ modules: Array<{ id: string; enabled: boolean; settings: string; mandatory: boolean }> }>();
 
     expect(response.status).toBe(200);
-    expect(body.modules).toEqual([{ id: "test-modul", enabled: false, settings: '{"betrag":42}' }]);
+    expect(body.modules).toEqual([
+      { id: "test-modul", enabled: false, settings: '{"betrag":42}', mandatory: false },
+      { id: "channel_events", enabled: true, settings: '{"betrag":42}', mandatory: true },
+    ]);
   });
 
   it("enables a module for a broadcaster and writes exactly one audit entry", async () => {
@@ -189,18 +199,38 @@ describe("Module management in the panel", () => {
       await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
       environment,
     );
-    const body = await response.json<{ module: { id: string; enabled: boolean; settings: string } }>();
+    const body = await response.json<{ module: { id: string; enabled: boolean; settings: string; mandatory: boolean } }>();
 
     expect(response.status).toBe(200);
-    expect(body.module).toEqual({ id: "test-modul", enabled: true, settings: '{"betrag":42}' });
+    expect(body.module).toEqual({ id: "test-modul", enabled: true, settings: '{"betrag":42}', mandatory: false });
     await expect(auditCount(database)).resolves.toBe(1);
 
     const listResponse = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules"),
       environment,
     );
-    const list = await listResponse.json<{ modules: Array<{ id: string; enabled: boolean }> }>();
-    expect(list.modules).toEqual([{ id: "test-modul", enabled: true, settings: '{"betrag":42}' }]);
+    const list = await listResponse.json<{ modules: Array<{ id: string; enabled: boolean; settings: string; mandatory: boolean }> }>();
+    expect(list.modules).toEqual([
+      { id: "test-modul", enabled: true, settings: '{"betrag":42}', mandatory: false },
+      { id: "channel_events", enabled: true, settings: '{"betrag":42}', mandatory: true },
+    ]);
+  });
+
+  it("rejects disabling mandatory channel events with the closed API error", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/channel_events", "PATCH", { enabled: false }),
+      environment,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "module_mandatory" });
+    await expect(auditCount(database)).resolves.toBe(0);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM channel_modules WHERE module_id = 'channel_events'").first())
+      .resolves.toEqual({ count: 0 });
   });
 
   it("binds the activation and the dependent list command atomically", async () => {
@@ -407,10 +437,10 @@ describe("Module management in the panel", () => {
       await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: false }),
       environment,
     );
-    const body = await response.json<{ module: { id: string; enabled: boolean; settings: string } }>();
+    const body = await response.json<{ module: { id: string; enabled: boolean; settings: string; mandatory: boolean } }>();
 
     expect(response.status).toBe(200);
-    expect(body.module).toEqual({ id: "test-modul", enabled: false, settings: '{"betrag":42}' });
+    expect(body.module).toEqual({ id: "test-modul", enabled: false, settings: '{"betrag":42}', mandatory: false });
     await expect(auditCount(database)).resolves.toBe(2);
   });
 });

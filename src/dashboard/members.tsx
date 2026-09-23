@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, type ReactElement, type SyntheticEvent } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { CHANNEL_ROLES, canManage, type ChannelRole } from "../contracts/values";
-import type { PanelMember, PanelTwitchUser } from "../panel-contract";
-import { membersTexts, roleLabel } from "./labels";
+import type { PanelMember } from "../panel-contract";
+import { membersTexts, roleDescription, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
-import { ListDetail, SubInspector, useInspectorSelection } from "./ui";
+import { MemberAvatar } from "./member-avatar";
+import { MemberGrantEditor } from "./member-grant-editor";
+import { Button, ChoiceCards, ConfirmDialog, EditorShell, ListDetail, useDraftGuard, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -79,25 +81,6 @@ const selectableRoles = (
 const memberLabel = (member: PanelMember): string =>
   member.displayName ?? (member.login === null ? membersTexts().unresolvable : `@${member.login}`);
 
-const roleOptions = (roles: readonly ChannelRole[] = manageableRoles): ReactElement[] =>
-  roles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>);
-
-const accessConfirmation = (role: ChannelRole): string =>
-  membersTexts().confirmationText(roleLabel(role));
-
-/**
- * `src` may also be missing, not just `null`: during a deploy, a new panel
- * bundle can talk to an older worker that doesn't supply the field yet.
- * A missing image must not take down the page.
- */
-const MemberAvatar = ({ src }: { src: string | null | undefined }): ReactElement => {
-  const [failedSource, setFailedSource] = useState<string | null>(null);
-  if (src === null || src === undefined || src.length === 0 || failedSource === src) {
-    return <span className="member-avatar-placeholder" aria-hidden="true" />;
-  }
-  return <img className="member-avatar" src={src} alt="" aria-hidden="true" onError={() => setFailedSource(src)} />;
-};
-
 const MemberList = ({
   members,
   selectedUserId,
@@ -131,18 +114,18 @@ const MemberList = ({
               >
                 <th scope="row" role="rowheader">
                   <div className="avatar-row">
-                    <MemberAvatar src={member.profileImageUrl} />
+                    <MemberAvatar src={member.profileImageUrl} name={member.displayName ?? member.login ?? member.userId} />
                     <div>
                       <span>{memberLabel(member)}</span>
                       {member.displayName !== null && member.login !== null ? (
                         <a
-                          className="login-hinweis profile-link"
+                          className="login-hint profile-link"
                           href={`https://twitch.tv/${member.login}`}
                           target="_blank"
                           rel="noreferrer noopener"
                         >twitch.tv/{member.login}</a>
                       ) : null}
-                      {member.displayName === null && member.login === null ? <span className="login-hinweis">{texts.twitchId(member.userId)}</span> : null}
+                      {member.displayName === null && member.login === null ? <span className="login-hint">{texts.twitchId(member.userId)}</span> : null}
                     </div>
                   </div>
                 </th>
@@ -157,13 +140,24 @@ const MemberList = ({
   );
 };
 
-const MemberEditor = ({
+/**
+ * The member editor (15b): a role `ChoiceCards` as the only draft field,
+ * "Zugang entziehen" left in the save bar behind its own `ConfirmDialog`.
+ * `role`/`dirty`/`onRoleChange` are controlled by `MembersPage` so its
+ * `useDraftGuard` (row switch, grant editor, close) can see the same draft.
+ */
+const MemberInspector = ({
   member,
   canManageMembers,
   broadcasterCount,
   ownUserId,
-  busy,
+  role,
+  dirty,
   onRoleChange,
+  pending,
+  error,
+  onSave,
+  onDiscard,
   onRemove,
   onClose,
 }: {
@@ -171,58 +165,98 @@ const MemberEditor = ({
   canManageMembers: boolean;
   broadcasterCount: number;
   ownUserId: string;
-  busy: boolean;
+  role: ChannelRole;
+  dirty: boolean;
   onRoleChange: (role: ChannelRole) => void;
+  pending: boolean;
+  error?: string;
+  onSave: () => void;
+  onDiscard: () => void;
   onRemove: () => void;
   onClose: () => void;
 }): ReactElement => {
   const texts = membersTexts();
+  const common = dashboardCommonTexts();
   const name = memberLabel(member);
-  const managementLocked = canManageMembers ? null : texts.managementLocked;
+  const roles = selectableRoles(member, ownUserId, broadcasterCount);
   const locked = removalLocked(member, broadcasterCount);
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+
+  const propertiesList = (
+    <dl className="properties">
+      <div><dt>{texts.name}</dt><dd>{name}</dd></div>
+      <div><dt>{texts.role}</dt><dd>{roleLabel(member.role)}</dd></div>
+      <div><dt>{texts.accessSince}</dt><dd>{formatJoinDate(member.joinedAt)}</dd></div>
+    </dl>
+  );
+
+  if (!canManageMembers) {
+    return (
+      <EditorShell
+        ariaLabel={texts.editMember(name)}
+        title={name}
+        identifier={formatJoinDate(member.joinedAt)}
+        sections={[]}
+        readOnly={{ reason: texts.managementLocked, content: propertiesList }}
+        dirty={false}
+        onSave={() => {}}
+        onDiscard={() => {}}
+        saveLabel={common.save}
+        discardLabel={common.discard}
+        savedLabel={common.saved}
+        pendingLabel={common.saving}
+        issueLabels={{ error: common.error, warning: common.warning }}
+        onClose={onClose}
+        closeLabel={common.close}
+      />
+    );
+  }
 
   return (
-    <SubInspector ariaLabel={texts.editMember(name)} title={name} identifier={formatJoinDate(member.joinedAt)} closeLabel={dashboardCommonTexts().close} onClose={onClose}>
-      <div className="avatar-row">
-        <MemberAvatar src={member.profileImageUrl} />
-        <div>
-          <span>{name}</span>
-          {member.displayName !== null && member.login !== null ? (
-            <a
-              className="login-hinweis profile-link"
-              href={`https://twitch.tv/${member.login}`}
-              target="_blank"
-              rel="noreferrer noopener"
-            >twitch.tv/{member.login}</a>
-          ) : null}
-          {member.displayName === null && member.login === null ? <span className="login-hinweis">{texts.twitchId(member.userId)}</span> : null}
-        </div>
-      </div>
-      <label className="config-field config-field--mittel">
-        {texts.role}
-        <select
-          aria-label={texts.roleFor(name)}
-          value={member.role}
-          disabled={!canManageMembers || busy || isLastBroadcaster(member, broadcasterCount)}
-          title={managementLocked ?? locked ?? undefined}
-          onChange={(event) => { onRoleChange(event.target.value as ChannelRole); }}
-        >
-          {roleOptions(selectableRoles(member, ownUserId, broadcasterCount))}
-        </select>
-        {managementLocked !== null ? <span className="lock-reason">{managementLocked}</span> : locked === null ? null : <span className="lock-reason">{texts.lastBroadcaster}</span>}
-      </label>
-      <div className="form-actions form-actions--destructive">
-        <button
-          className="button button--quiet"
-          type="button"
-          aria-label={texts.removeAccessFor(name)}
-          disabled={!canManageMembers || busy || locked !== null}
-          title={managementLocked ?? locked ?? undefined}
-          onClick={onRemove}
-        >{texts.remove}</button>
-      </div>
-      {locked === null ? null : <span className="lock-reason">{texts.lastBroadcaster}</span>}
-    </SubInspector>
+    <>
+      <EditorShell
+        ariaLabel={texts.editMember(name)}
+        title={name}
+        identifier={formatJoinDate(member.joinedAt)}
+        sections={[{
+          id: "role",
+          label: texts.role,
+          content: (
+            <ChoiceCards
+              label={texts.roleFor(name)}
+              hint={locked ?? texts.roleHint}
+              value={role}
+              onChange={(next) => { onRoleChange(next as ChannelRole); }}
+              options={roles.map((candidate) => ({ value: candidate, label: roleLabel(candidate), description: roleDescription(candidate) }))}
+              disabled={locked !== null}
+            />
+          ),
+        }]}
+        dirty={dirty}
+        pending={pending}
+        {...(error === undefined ? {} : { error })}
+        onSave={onSave}
+        onDiscard={onDiscard}
+        saveLabel={common.save}
+        discardLabel={common.discard}
+        savedLabel={common.saved}
+        pendingLabel={common.saving}
+        issueLabels={{ error: common.error, warning: common.warning }}
+        onClose={onClose}
+        closeLabel={common.close}
+        footer={<span title={locked ?? undefined}><Button danger icon="memberRemove" disabled={locked !== null} onClick={() => { setRemoveConfirmOpen(true); }}>{texts.remove}</Button></span>}
+      />
+      <ConfirmDialog
+        opened={removeConfirmOpen}
+        title={texts.removeConfirmTitle(name)}
+        description={member.userId === ownUserId ? texts.removeSelf : texts.removeOther(name)}
+        confirmLabel={texts.remove}
+        cancelLabel={common.cancel}
+        danger
+        onCancel={() => { setRemoveConfirmOpen(false); }}
+        onConfirm={() => { setRemoveConfirmOpen(false); onRemove(); }}
+      />
+    </>
   );
 };
 
@@ -241,92 +275,71 @@ export const MembersPage = ({
   onAuthenticationRequired,
 }: MembersPageProperties): ReactElement => {
   const texts = membersTexts();
-  const [login, setLogin] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [foundUser, setFoundUser] = useState<PanelTwitchUser | null>(null);
-  const [newRole, setNewRole] = useState<ChannelRole>("operator");
+  const canManageMembers = canManage(ownRole);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [confirmingAdd, setConfirmingAdd] = useState(false);
-  const canManageMembers = canManage(ownRole);
-  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [grantOpen, setGrantOpen] = useState(false);
+  const grantButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [roleDraft, setRoleDraft] = useState<{ userId: string; role: ChannelRole } | null>(null);
   const { selectedKey: selectedUserId, select: selectMember, rowRef, close: closeSelection } = useInspectorSelection<string>();
-
-  /**
-   * `role="alertdialog"` requires focus to actually move into it —
-   * otherwise neither keyboard nor screen reader use notices the form's
-   * most important safety prompt.
-   */
-  useEffect(() => {
-    if (confirmingAdd) confirmButtonRef.current?.focus();
-  }, [confirmingAdd]);
 
   useEffect(() => {
     if (selectedUserId !== null && !members.some((member) => member.userId === selectedUserId)) closeSelection();
   }, [members, selectedUserId, closeSelection]);
 
-  const cancelAdd = (): void => setConfirmingAdd(false);
+  const selectedMember = members.find((member) => member.userId === selectedUserId) ?? null;
+  const draftRole = selectedMember !== null && roleDraft?.userId === selectedMember.userId ? roleDraft.role : selectedMember?.role ?? "operator";
+  const roleDirty = selectedMember !== null && roleDraft !== null && roleDraft.userId === selectedMember.userId && roleDraft.role !== selectedMember.role;
 
-  const handleSearch = async (event: SyntheticEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    if (!canManageMembers) return;
-    setSearching(true);
-    setSearchError(null);
-    setFoundUser(null);
-    setConfirmingAdd(false);
-    try {
-      setFoundUser((await searchTwitchUser(channelId, login)).user);
-    } catch (error: unknown) {
-      setSearchError(errorMessage(error));
-      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const handleAdd = async (): Promise<void> => {
-    if (!canManageMembers || foundUser === null) return;
-    setBusyUserId(foundUser.userId);
+  const saveRoleDraft = async (): Promise<string | null> => {
+    if (selectedMember === null || roleDraft === null || !roleDirty) return null;
+    setBusyUserId(roleDraft.userId);
     setActionError(null);
     try {
-      await addChannelMember(channelId, foundUser.userId, newRole);
-      setConfirmingAdd(false);
-      setFoundUser(null);
-      setLogin("");
+      await updateChannelMemberRole(channelId, roleDraft.userId, roleDraft.role);
+      setRoleDraft(null);
       await onReload();
+      return null;
     } catch (error: unknown) {
-      setActionError(errorMessage(error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
+      return errorMessage(error);
     } finally {
       setBusyUserId(null);
     }
   };
 
-  const handleRoleChange = async (userId: string, role: ChannelRole): Promise<void> => {
-    setBusyUserId(userId);
-    setActionError(null);
-    try {
-      await updateChannelMemberRole(channelId, userId, role);
-      await onReload();
-    } catch (error: unknown) {
-      setActionError(errorMessage(error));
-      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-    } finally {
-      setBusyUserId(null);
-    }
+  const draftGuard = useDraftGuard(roleDirty, saveRoleDraft, () => { setRoleDraft(null); });
+
+  const openGrant = (): void => {
+    draftGuard.guardSwitch(() => {
+      closeSelection();
+      setGrantOpen(true);
+      grantButtonRef.current?.focus();
+    });
+  };
+
+  const closeGrant = (): void => {
+    setGrantOpen(false);
+    grantButtonRef.current?.focus();
+  };
+
+  const selectMemberGuarded = (userId: string): void => {
+    draftGuard.guardSwitch(() => { setGrantOpen(false); selectMember(userId); });
+  };
+
+  const closeFloating = (): void => {
+    draftGuard.guardSwitch(() => {
+      if (selectedUserId !== null) closeSelection();
+      if (grantOpen) setGrantOpen(false);
+    });
   };
 
   const handleRemove = async (member: PanelMember): Promise<void> => {
-    const isSelf = member.userId === ownUserId;
-    const confirmationMessage = isSelf
-      ? texts.removeSelf
-      : texts.removeOther(memberLabel(member));
-    if (!window.confirm(confirmationMessage)) return;
     setBusyUserId(member.userId);
     setActionError(null);
     try {
       await removeChannelMember(channelId, member.userId);
+      closeSelection();
       await onReload();
     } catch (error: unknown) {
       setActionError(errorMessage(error));
@@ -336,93 +349,82 @@ export const MembersPage = ({
     }
   };
 
-  const selectedMember = members.find((member) => member.userId === selectedUserId) ?? null;
-
   return (
     <>
       <ModuleHeading kind="members" title={texts.title} subtitle={<ModuleCount count={members.length} label={texts.count} />} />
-      <section className="inspector-section inspector-form" aria-label={texts.grantAccessTitle}>
-        <div className="section-heading"><h2>{texts.grantAccessTitle}</h2></div>
-        {!canManageMembers ? <p className="lock-reason">{texts.managementLocked}</p> : null}
-        <form className="inspector-form" onSubmit={(event) => { void handleSearch(event); }}>
-          <label htmlFor="member-search">{texts.twitchName}</label>
-          <div className="form-row"><input id="member-search" value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="off" disabled={!canManageMembers} title={!canManageMembers ? texts.managementLocked : undefined} /><button className="button" type="submit" disabled={!canManageMembers || searching || login.trim().length === 0} title={!canManageMembers ? texts.managementLocked : undefined}>{searching ? texts.searching : texts.search}</button></div>
-        </form>
-        {!canManageMembers && foundUser === null ? <div><button className="button" type="button" disabled title={texts.managementLocked}>{texts.grantAccess}</button><span className="lock-reason">{texts.managementLocked}</span></div> : null}
-        {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
-        {foundUser === null ? null : (
-          <div className="inspector-result">
-            <div className="avatar-row">
-              <MemberAvatar src={foundUser.profileImageUrl} />
-              <div>
-                <strong>{foundUser.displayName}</strong>
-                <span>@{foundUser.login} · Twitch-ID {foundUser.userId}</span>
-                <a
-                  className="login-hinweis profile-link"
-                  href={`https://twitch.tv/${foundUser.login}`}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >twitch.tv/{foundUser.login}</a>
-              </div>
-            </div>
-            <label>{texts.role}<select aria-label={texts.newMemberRoleLabel} value={newRole} disabled={!canManageMembers} title={!canManageMembers ? texts.managementLocked : undefined} onChange={(event) => setNewRole(event.target.value as ChannelRole)}>{roleOptions()}</select></label>
-            <div>
-              <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texts.managementLocked : undefined}>{texts.grantAccess}</button>
-              {!canManageMembers ? <span className="lock-reason">{texts.managementLocked}</span> : null}
-            </div>
-          </div>
-        )}
-        {confirmingAdd && foundUser !== null ? (
-          <div
-            className="inspector-confirmation"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="member-add-confirmation-title"
-            aria-describedby="member-add-confirmation-description"
-            onKeyDown={(event) => { if (event.key === "Escape") cancelAdd(); }}
-          >
-            <div className="avatar-row">
-              <MemberAvatar src={foundUser.profileImageUrl} />
-              <div>
-                <h3 id="member-add-confirmation-title">{texts.confirmationTitle(foundUser.displayName)}</h3>
-                <span>@{foundUser.login}</span>
-              </div>
-            </div>
-            <p id="member-add-confirmation-description">{accessConfirmation(newRole)}</p>
-            {!canManageMembers ? <span className="lock-reason">{texts.managementLocked}</span> : null}
-            <div className="form-actions">
-              <button ref={confirmButtonRef} className="button button--primary" type="button" onClick={() => { void handleAdd(); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texts.managementLocked : undefined}>{texts.grantPermanently}</button>
-              <button className="button button--quiet" type="button" onClick={cancelAdd} disabled={busyUserId === foundUser.userId}>{dashboardCommonTexts().cancel}</button>
-            </div>
-          </div>
-        ) : null}
-      </section>
       <section className="content-section" aria-label={texts.membersWithAccess}>
-        <div className="section-heading"><h2>{texts.membersWithAccess}</h2></div>
-        {loading && members.length === 0 ? <p className="loading-line">{texts.load}</p> : null}
+        <div className="section-heading">
+          <h2>{texts.membersWithAccess}</h2>
+          <span title={canManageMembers ? undefined : texts.managementLocked}>
+            <Button ref={grantButtonRef} variant="subtle" iconOnly icon="add" ariaLabel={texts.grantAccessTitle} disabled={!canManageMembers} onClick={openGrant} />
+          </span>
+        </div>
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
-        {members.length === 0 && loading ? null : <div className={loading ? "stale" : undefined}>
+        <div className={loading ? "stale" : undefined}>
           <ListDetail
-            list={<MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMember} rowRef={rowRef} />}
-            inspector={selectedMember === null ? null : (
-              <MemberEditor
+            list={loading && members.length === 0 ? <p className="loading-line">{texts.load}</p> : <MemberList members={members} selectedUserId={selectedUserId} onSelect={selectMemberGuarded} rowRef={rowRef} />}
+            inspector={selectedMember !== null ? (
+              <MemberInspector
                 key={selectedMember.userId}
                 member={selectedMember}
                 canManageMembers={canManageMembers}
                 broadcasterCount={broadcasterCount}
                 ownUserId={ownUserId}
-                busy={busyUserId === selectedMember.userId}
-                onRoleChange={(role) => { void handleRoleChange(selectedMember.userId, role); }}
+                role={draftRole}
+                dirty={roleDirty}
+                onRoleChange={(role) => { setRoleDraft({ userId: selectedMember.userId, role }); }}
+                pending={busyUserId === selectedMember.userId}
+                {...(actionError === null ? {} : { error: actionError })}
+                onSave={() => { void saveRoleDraft(); }}
+                onDiscard={() => { setRoleDraft(null); }}
                 onRemove={() => { void handleRemove(selectedMember); }}
-                onClose={closeSelection}
+                onClose={closeFloating}
               />
-            )}
-            onCloseInspector={closeSelection}
+            ) : grantOpen ? (
+              <MemberGrantEditor
+                roles={manageableRoles}
+                defaultRole="operator"
+                texts={{
+                  ariaLabel: texts.grantAccessTitle,
+                  title: texts.grantAccessTitle,
+                  searchLabel: texts.twitchName,
+                  searchHint: texts.twitchNameHint,
+                  searchButton: texts.search,
+                  searchingButton: texts.searching,
+                  roleLabel: texts.role,
+                  roleHint: texts.roleHint,
+                  saveLabel: texts.grantAccess,
+                  confirmTitle: texts.confirmationTitle,
+                  confirmDescription: (_name, role) => texts.confirmationText(role),
+                  confirmButton: texts.grantPermanently,
+                  closeLabel: dashboardCommonTexts().close,
+                }}
+                onSearch={(login) => searchTwitchUser(channelId, login).then((response) => response.user)}
+                onGrant={(userId, role) => addChannelMember(channelId, userId, role).then(() => undefined)}
+                errorText={errorMessage}
+                onGranted={() => { void onReload(); }}
+                onAuthenticationRequired={onAuthenticationRequired}
+                onClose={closeGrant}
+              />
+            ) : null}
+            onCloseInspector={closeFloating}
           />
-        </div>}
+        </div>
         {nextCursor == null ? null : <button className="button button--secondary" type="button" onClick={() => { void onLoadNextPage(); }} disabled={loading || loadingNextPage}>{loadingNextPage ? texts.loadingMore : texts.loadMore}</button>}
       </section>
+      <ConfirmDialog
+        opened={draftGuard.confirmOpen}
+        title={texts.unsavedRoleTitle}
+        description={texts.unsavedRoleDescription}
+        cancelLabel={texts.continueEditing}
+        alternative={{ label: texts.saveAndSwitch, onClick: () => { void draftGuard.saveAndSwitch(); } }}
+        confirmLabel={texts.discardAndSwitch}
+        danger
+        {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
+        onCancel={draftGuard.continueEditing}
+        onConfirm={draftGuard.discardAndSwitch}
+      />
     </>
   );
 };

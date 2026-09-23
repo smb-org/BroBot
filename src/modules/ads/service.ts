@@ -1,7 +1,7 @@
 import type { EventCode } from "../../contracts/values";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import type { AdsSettings } from "./contracts";
-import { decideAdBreak } from "./domain";
+import { decideAdBreak, renderAdBreakText } from "./domain";
 
 const diagnoseDetail = (
   event: ReturnType<typeof decideAdBreak>,
@@ -25,13 +25,6 @@ const diagnoseDetail = (
 const diagnosticCode = (event: ReturnType<typeof decideAdBreak>): EventCode =>
   event.kind === "announce" ? "ads.announcement" : "ads.skipped";
 
-const textWithDuration = (template: string, durationSeconds: number): string => {
-  const text = template.trim();
-  return text.includes("{duration}")
-    ? text.replaceAll("{duration}", String(durationSeconds))
-    : `${text} (${String(durationSeconds)} Sekunden)`;
-};
-
 export const processAdBreak = (
   event: ModuleEvent<AdsSettings>,
 ): ModuleResult => {
@@ -45,7 +38,7 @@ export const processAdBreak = (
 
   const template = decision.event.automatic ? event.settings.automatic : event.settings.manual;
   return {
-    actions: [{ kind: "chat", text: textWithDuration(template, decision.event.durationSeconds) }],
+    actions: [{ kind: "chat", text: renderAdBreakText(template, decision.event.durationSeconds) }],
     diagnostics: [{ code: diagnosticCode(decision), detail: diagnoseDetail(decision) }],
   };
 };

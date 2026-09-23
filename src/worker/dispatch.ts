@@ -1,5 +1,5 @@
 import type { EventCode } from "../contracts/values";
-import type { BotModule, ModuleAction, ModuleActor, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleResult } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleActor, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleResult, ModuleStreamState } from "../modules/contract";
 import type { RealtimeEnvelope } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
 import {
@@ -9,10 +9,14 @@ import {
   listChannelModulesForChannel,
 } from "./db/channel-modules";
 import { sendChatMessage } from "./chat";
+import { sendChatAnnouncement } from "./announcement";
 import { sendShoutout } from "./shoutout";
 import { publishRealtimeMessage } from "./realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
+import { getAppAccessToken } from "./app-token";
+import { helixRequest } from "./twitch/helix";
+import { readChannelStreamState, writeEventSubStreamState, writeHelixStreamStateIfUnknown } from "./db/stream-state";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -31,6 +35,49 @@ const errorMessage = (error: unknown): string =>
 
 const textValue = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
+
+const arrayValue = (value: unknown): value is readonly unknown[] => Array.isArray(value);
+
+const streamStateFromHelix = async (
+  environment: DispatchEnvironment,
+  channelId: string,
+  fetcher: typeof fetch,
+): Promise<Exclude<ModuleStreamState, "unknown"> | null> => {
+  try {
+    const accessToken = await getAppAccessToken(
+      environment as unknown as Env,
+      new Date().toISOString(),
+      fetcher,
+    );
+    const result = await helixRequest<{ data?: unknown }>({
+      url: "https://api.twitch.tv/helix/streams",
+      query: { user_id: channelId, type: "live" },
+      accessToken,
+      clientId: environment.TWITCH_CLIENT_ID,
+      fetcher,
+    });
+    if (!result.ok || !recordValue(result.data) || !arrayValue(result.data.data)) return null;
+    if (result.data.data.length === 0) return "offline";
+    const firstStream = result.data.data[0];
+    return recordValue(firstStream) && typeof firstStream.id === "string" ? "online" : null;
+  } catch {
+    return null;
+  }
+};
+
+const streamStateForEvent = async (
+  environment: DispatchEnvironment,
+  channelId: string,
+  fetcher: typeof fetch,
+): Promise<ModuleStreamState> => {
+  const stored = await readChannelStreamState(environment.DB, channelId);
+  if (stored !== null) return stored;
+  const fromHelix = await streamStateFromHelix(environment, channelId, fetcher);
+  if (fromHelix === null) return "unknown";
+  const storedByHelix = await writeHelixStreamStateIfUnknown(environment.DB, channelId, fromHelix, new Date().toISOString());
+  if (storedByHelix) return fromHelix;
+  return await readChannelStreamState(environment.DB, channelId) ?? fromHelix;
+};
 
 const recordValue = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -123,9 +170,51 @@ const runActions = async (
           action.replyToMessageId,
           fetcher,
         );
+        if (result.truncated) {
+          diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
+        }
         diagnostics.push(result.sent
           ? { code: "host.chat.sent" satisfies EventCode, detail: result.detail }
           : { code: "host.chat.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } });
+        continue;
+      }
+      if (action.kind === "announcement") {
+        const result = await sendChatAnnouncement(environment, channelId, action.text, fetcher);
+        if (result.truncated) {
+          diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
+        }
+        if (result.sent) {
+          diagnostics.push({ code: "host.announcement.sent" satisfies EventCode, detail: result.detail });
+          continue;
+        }
+
+        try {
+          const fallback = await sendChatMessage(environment, channelId, action.text, undefined, fetcher);
+          if (fallback.truncated && !result.truncated) {
+            diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
+          }
+          diagnostics.push({
+            code: "host.announcement.failed" satisfies EventCode,
+            detail: {
+              reason: result.reason ?? "unknown_error",
+              outcome: fallback.sent ? "sent_as_message" : "not_sent",
+              ...(typeof result.detail.status === "number" ? { status: result.detail.status } : {}),
+            },
+          });
+          diagnostics.push(fallback.sent
+            ? { code: "host.chat.sent" satisfies EventCode, detail: fallback.detail }
+            : { code: "host.chat.failed" satisfies EventCode, detail: { reason: fallback.reason, ...fallback.detail } });
+        } catch (error: unknown) {
+          diagnostics.push({
+            code: "host.announcement.failed" satisfies EventCode,
+            detail: {
+              reason: result.reason ?? "unknown_error",
+              outcome: "not_sent",
+              ...(typeof result.detail.status === "number" ? { status: result.detail.status } : {}),
+            },
+          });
+          diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
+        }
         continue;
       }
       if (action.kind === "shoutout") {
@@ -170,10 +259,23 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
+  if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
+    await writeEventSubStreamState(
+      environment.DB,
+      event.channelId,
+      event.subscriptionType === "stream.online" ? "online" : "offline",
+      event.receivedAt,
+    );
+  }
   const activations = await listChannelModulesForChannel(environment.DB, event.channelId);
   const { matches, unknownModules } = selectModulesForEvent(activations, event.subscriptionType, registry);
   const actor = await actorForEvent(environment.DB, event.channelId, event.payload);
   const newEntries: WrittenModuleDiagnostic[] = [];
+  let streamStatePromise: Promise<ModuleStreamState> | undefined;
+  const streamState = (): Promise<ModuleStreamState> => {
+    streamStatePromise ??= streamStateForEvent(environment, event.channelId, fetcher);
+    return streamStatePromise;
+  };
 
   for (const moduleId of unknownModules) {
     newEntries.push(...await writeModuleDiagnostics(
@@ -204,12 +306,13 @@ export const dispatchEventSubNotification = async (
         actor,
         chatStatus: chatStatusFor(event.subscriptionType, event.payload),
       };
-      result = module.handleEvent === undefined
-        ? null
-        : await module.handleEvent(moduleEvent, {
-          DB: environment.DB,
-          authorizeMutation: authorizeModuleMutation,
-        });
+        result = module.handleEvent === undefined
+          ? null
+          : await module.handleEvent(moduleEvent, {
+            DB: environment.DB,
+            authorizeMutation: authorizeModuleMutation,
+            streamState,
+          });
     } catch (error: unknown) {
       // A module that throws doesn't take down the worker or the other
       // modules with it. The error becomes visible, not swallowed.

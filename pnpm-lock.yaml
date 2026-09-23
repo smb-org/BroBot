@@ -118,6 +118,9 @@ importers:
       '@mantine/spotlight':
         specifier: 9.6.2
         version: 9.6.2(@mantine/core@9.6.2(@mantine/hooks@9.6.2(react@19.2.8))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@mantine/hooks@9.6.2(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@tabler/icons-react':
+        specifier: ^3.47.0
+        version: 3.47.0(react@19.2.8)
       hono:
         specifier: ^4.13.1
         version: 4.13.1
@@ -979,6 +982,14 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@tabler/icons-react@3.47.0':
+    resolution: {integrity: sha512-lQkDkYwqTzRNt+MYNinu+fkcIZLKjYBcI37RWkcY72doOgE/vMVFvrFrGZ2cVo2ueB3zH1dWMIhnGgi8Y5mFJA==}
+    peerDependencies:
+      react: '>= 16'
+
+  '@tabler/icons@3.47.0':
+    resolution: {integrity: sha512-aCbSemVrGvSA3w0sJi8mka6QrnQCN8wCD1jKNXXIR/h6Q4ffov/yFPyzjTULDM8ETtK4DABUZhWdYlygqy3npA==}
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -2790,6 +2801,13 @@ snapshots:
   '@speed-highlight/core@1.2.24': {}
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@tabler/icons-react@3.47.0(react@19.2.8)':
+    dependencies:
+      '@tabler/icons': 3.47.0
+      react: 19.2.8
+
+  '@tabler/icons@3.47.0': {}
 
   '@testing-library/dom@10.4.1':
     dependencies:

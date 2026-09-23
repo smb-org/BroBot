@@ -2,8 +2,24 @@ import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole } from "../contracts/values";
+import type { TemplateFields } from "../template";
+import type { SettingsEditorDefinition } from "../dashboard/ui";
+export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
 export { truncateTo200Chars } from "../text";
+export {
+  closestTemplateVariable,
+  renderTemplate,
+  templateFieldsWarnings,
+  templateVariableNames,
+  templateWarnings,
+  tokenizeTemplate,
+  unknownTemplateVariables,
+  worstCaseTemplateLength,
+  TEMPLATE_TOKEN_CANDIDATE_PATTERN,
+  TEMPLATE_VARIABLE_PATTERN,
+} from "../template";
+export type { TemplateFields, TemplateVariable, TemplateValues, TemplateWarning } from "../template";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
 export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";
@@ -31,10 +47,10 @@ export type ModuleDiagnosticDetailKey =
   | "action" | "allowed" | "arguments" | "cause" | "count" | "current"
   | "currentTier" | "missing"
   | "duration" | "endsAt" | "gifter" | "kind" | "lastAdBreakAt" | "message"
-  | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person"
+  | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person" | "alias"
   | "reason" | "recipient" | "remainingSeconds" | "requiredTier" | "response"
   | "scheduledAt" | "scheduledFor" | "scope" | "seconds" | "source"
-  | "sourceChannelId" | "startedAt" | "status" | "target" | "targetChannelId"
+  | "sourceChannelId" | "startedAt" | "status" | "streamState" | "target" | "targetChannelId"
   | "text" | "threshold" | "tier" | "triggerLogin" | "type" | "viewers";
 
 export interface ModuleDiagnostic {
@@ -48,6 +64,7 @@ export interface ModuleDiagnostic {
 /** A semantically well-named module action for the host to execute. */
 export type ModuleAction =
   | { kind: "chat"; text: string; replyToMessageId?: string }
+  | { kind: "announcement"; text: string }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "overlay"; type: string; payload: Readonly<Record<string, unknown>> };
 
@@ -83,7 +100,7 @@ export interface ModuleMutationAuthorization {
   values: readonly (string | number | null)[];
 }
 
-export type ModuleAuditValue = string | number | boolean | null;
+export type ModuleAuditValue = string | number | boolean | null | readonly string[];
 
 /** Business values a module has explicitly cleared for the audit. */
 export type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
@@ -123,7 +140,10 @@ export type AuthorizeModuleMutation = (
 export interface ModuleExecutionContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
+  streamState: () => Promise<ModuleStreamState>;
 }
+
+export type ModuleStreamState = "online" | "offline" | "unknown";
 
 /** Infrastructure for one-time initial data when a module is enabled. */
 export interface ModuleEnableContext {
@@ -142,6 +162,8 @@ export interface ModulePanelProperties {
   language?: ModuleLanguage;
   /** May the view execute management controls? */
   canManage?: boolean;
+  /** Last known status of the bot's moderator role in this channel. */
+  botIsModerator?: boolean | null;
   /** Called by the host when an inspector is closed. */
   onCloseInspector?: () => void;
   /** Deep-link target set by the host (Spotlight, #164) -- a module reads
@@ -248,8 +270,12 @@ export interface ModuleEvent<Settings = unknown> {
 
 export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
+  /** The module is always enabled for every released channel and cannot be disabled. */
+  mandatory?: boolean;
   settingsSchema: SettingsSchema;
   defaultSettings: z.output<SettingsSchema>;
+  /** Template fields and variables used by both panel validation and worker rendering. */
+  templateFields?: TemplateFields<z.output<SettingsSchema>>;
   /** Broadcaster consent the host verifies before the EventSub subscription. */
   broadcasterScopes?: readonly string[];
   eventSubTypes?: readonly string[];
@@ -287,4 +313,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
    * direct import.
    */
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
+  /** Lazily loaded editor declaration for this module's settings. */
+  settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
 };

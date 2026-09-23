@@ -1,4 +1,3 @@
-import type { EventSubSubscriptionType } from "../contracts/values";
 import { catalogString, dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "./locale";
 /**
  * Both catalogs are keyed by module id. Completeness is enforced by
@@ -44,6 +43,8 @@ interface EventSubscriptionNames {
   suspiciousMessages: string;
   suspiciousClassifications: string;
   adBreaks: string;
+  streamStarted: string;
+  streamEnded: string;
 }
 
 const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
@@ -60,6 +61,8 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     suspiciousMessages: "Nachrichten auffälliger Nutzer",
     suspiciousClassifications: "Einstufungen auffälliger Nutzer",
     adBreaks: "Werbepausen",
+    streamStarted: "Streamstarts",
+    streamEnded: "Streamenden",
   },
   en: {
     chatMessages: "Chat messages",
@@ -74,11 +77,13 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     suspiciousMessages: "Suspicious user messages",
     suspiciousClassifications: "Suspicious user classifications",
     adBreaks: "Ad breaks",
+    streamStarted: "Stream starts",
+    streamEnded: "Stream ends",
   },
 };
 
 export const eventSubName = (
-  subscriptionType: EventSubSubscriptionType,
+  subscriptionType: string,
   variant = "",
   language: DashboardLanguage = dashboardLanguage(),
 ): string => {
@@ -97,6 +102,8 @@ export const eventSubName = (
   if (subscriptionType === "channel.suspicious_user.message") return texts.suspiciousMessages;
   if (subscriptionType === "channel.suspicious_user.update") return texts.suspiciousClassifications;
   if (subscriptionType === "channel.ad_break.begin") return texts.adBreaks;
+  if (subscriptionType === "stream.online") return texts.streamStarted;
+  if (subscriptionType === "stream.offline") return texts.streamEnded;
   return subscriptionType;
 };
 
@@ -168,6 +175,8 @@ export interface ModuleWorkspaceTexts {
   notActive: (name: string) => string;
   switchedOff: (name: string) => string;
   disabled: string;
+  mandatoryReason: string;
+  alwaysActiveStatus: string;
   noDescription: string;
 }
 
@@ -180,6 +189,8 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     notActive: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
     switchedOff: (name) => `Das Modul „${name}“ ist ausgeschaltet.`,
     disabled: "Deaktiviert",
+    mandatoryReason: "Kanalereignisse sind immer aktiv.",
+    alwaysActiveStatus: "Läuft · immer aktiv",
     noDescription: "Keine Beschreibung für dieses Modul.",
   },
   en: {
@@ -190,6 +201,8 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     notActive: (name) => `The module “${name}” is not active in this channel.`,
     switchedOff: (name) => `The module “${name}” is switched off.`,
     disabled: "Disabled",
+    mandatoryReason: "Channel events are always active.",
+    alwaysActiveStatus: "Running · always active",
     noDescription: "No description is available for this module.",
   },
 };

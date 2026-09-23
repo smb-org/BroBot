@@ -1,39 +1,63 @@
 import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 
-type RestrictedImportPattern = { regex?: string };
-type RestrictedImportsRule = [number, { patterns?: RestrictedImportPattern[] }];
+type RestrictedImportPattern = { regex?: string; group?: string[] };
+type RestrictedImportPath = string | { name?: string };
+type RestrictedImportsRule = [number, { paths?: RestrictedImportPath[]; patterns?: RestrictedImportPattern[] }];
 type CalculatedConfig = { rules?: Record<string, unknown> };
+
+interface ImportRestrictions {
+  paths: string[];
+  patterns: RegExp[];
+}
 
 const eslint = new ESLint({ cwd: process.cwd() });
 
-const restrictedPatternsFor = async (filePath: string): Promise<RegExp[]> => {
+const restrictionsFor = async (filePath: string): Promise<ImportRestrictions> => {
   const config = await eslint.calculateConfigForFile(filePath) as unknown as CalculatedConfig;
   const rule = config.rules?.["no-restricted-imports"] as RestrictedImportsRule | undefined;
-  if (rule === undefined) throw new Error(`Keine no-restricted-imports-Regel für ${filePath}`);
-  return (rule[1].patterns ?? [])
-    .flatMap((pattern) => pattern.regex === undefined ? [] : [new RegExp(pattern.regex)]);
+  return {
+    paths: (rule?.[1].paths ?? []).map((path) => typeof path === "string" ? path : path.name ?? ""),
+    patterns: (rule?.[1].patterns ?? []).flatMap((pattern) => [
+      ...(pattern.regex === undefined ? [] : [new RegExp(pattern.regex)]),
+      ...(pattern.group ?? []).map((group) => new RegExp(`^${group.replaceAll("*", ".*")}$`)),
+    ]),
+  };
 };
 
-const rejects = (patterns: RegExp[], importPath: string): boolean =>
-  patterns.some((pattern) => pattern.test(importPath));
+const rejects = (restrictions: ImportRestrictions, importPath: string): boolean =>
+  restrictions.paths.includes(importPath) || restrictions.patterns.some((pattern) => pattern.test(importPath));
 
 describe("effective ESLint module boundaries", () => {
   it("keeps the overlay boundaries effective, including service.js and worker code", async () => {
-    const patterns = await restrictedPatternsFor("src/modules/example/overlay/view.tsx");
+    const restrictions = await restrictionsFor("src/modules/example/overlay/view.tsx");
 
-    expect(rejects(patterns, "../service.js")).toBe(true);
-    expect(rejects(patterns, "../../worker/config")).toBe(true);
-    expect(rejects(patterns, "zod")).toBe(true);
+    expect(rejects(restrictions, "../service.js")).toBe(true);
+    expect(rejects(restrictions, "../../worker/config")).toBe(true);
+    expect(rejects(restrictions, "zod")).toBe(true);
   });
 
   it("keeps the panel boundaries and module isolation effective", async () => {
-    const patterns = await restrictedPatternsFor("src/modules/example/panel/view.tsx");
+    const restrictions = await restrictionsFor("src/modules/example/panel/view.tsx");
 
-    expect(rejects(patterns, "../worker/config")).toBe(true);
-    expect(rejects(patterns, "../repository.js")).toBe(true);
-    expect(rejects(patterns, "../overlay/view")).toBe(true);
-    expect(rejects(patterns, "../../other-module/contract")).toBe(true);
-    expect(rejects(patterns, "../service.js")).toBe(false);
+    expect(rejects(restrictions, "../worker/config")).toBe(true);
+    expect(rejects(restrictions, "../repository.js")).toBe(true);
+    expect(rejects(restrictions, "../overlay/view")).toBe(true);
+    expect(rejects(restrictions, "../../other-module/contract")).toBe(true);
+    expect(rejects(restrictions, "../service.js")).toBe(false);
+  });
+
+  it("keeps Tabler imports inside ui/Icon.tsx and out of panels and the overlay", async () => {
+    const panelRestrictions = await restrictionsFor("src/modules/example/panel/view.tsx");
+    const overlayRestrictions = await restrictionsFor("src/overlay/main.tsx");
+    const workerRestrictions = await restrictionsFor("src/worker/index.ts");
+    const testRestrictions = await restrictionsFor("tests/example.test.ts");
+    const iconRestrictions = await restrictionsFor("src/dashboard/ui/Icon.tsx");
+
+    expect(rejects(panelRestrictions, "@tabler/icons-react")).toBe(true);
+    expect(rejects(overlayRestrictions, "@tabler/icons-react")).toBe(true);
+    expect(rejects(workerRestrictions, "@tabler/icons-react")).toBe(true);
+    expect(rejects(testRestrictions, "@tabler/icons-react")).toBe(true);
+    expect(rejects(iconRestrictions, "@tabler/icons-react")).toBe(false);
   });
 });

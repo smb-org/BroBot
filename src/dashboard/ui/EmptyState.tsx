@@ -15,7 +15,7 @@ export interface EmptyStateProps {
 }
 
 /**
- * "Empty and error box" in docs/input/DESIGN-neu.md: dashed Linie-Stark
+ * "Empty and error box" in the dashboard design document: dashed strong line
  * border, radius md, Text-2 body.
  */
 export function EmptyState({ title, description, action }: EmptyStateProps) {

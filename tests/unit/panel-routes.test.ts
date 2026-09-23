@@ -5,6 +5,7 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 import { panelRouter } from "../../src/worker/panel/routes";
+import * as eventsubMaintenance from "../../src/worker/eventsub-subscriptions";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -684,7 +685,7 @@ describe("manual moderator status check", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("updates only the requested channel on success and starts no maintenance run", async () => {
+  it("updates only the requested channel and triggers maintenance after moderator status is confirmed", async () => {
     await insertMember(database, "kanal-a", "user-1", "manager");
     await insertBotChannelStatus(database, "kanal-a", false, "2026-09-18T03:00:00.000Z", "moderator_entfernt");
     await insertBotChannelStatus(database, "kanal-b", false, "2026-09-18T03:00:00.000Z", "moderator_entfernt");
@@ -693,6 +694,7 @@ describe("manual moderator status check", () => {
       { status: 200 },
     ));
     vi.stubGlobal("fetch", fetcher);
+    const maintenance = vi.spyOn(eventsubMaintenance, "maintainEventSubSubscriptions");
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/moderator-status", "POST"),
@@ -710,12 +712,14 @@ describe("manual moderator status check", () => {
     expect(body.moderator).toEqual({ isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null });
     expect(channelA).toEqual({ is_moderator: 1, checked_at: "2026-09-18T04:00:00.000Z", reason: null });
     expect(channelB).toEqual({ is_moderator: 0, checked_at: "2026-09-18T03:00:00.000Z", reason: "moderator_entfernt" });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       "https://api.twitch.tv/helix/moderation/channels?user_id=bot-user&first=100&broadcaster_id=kanal-a",
     );
-    expect(fetcher.mock.calls.some((call) => String(call[0]).includes("oauth2/token"))).toBe(false);
+    expect(fetcher.mock.calls.some((call) => String(call[0]).includes("oauth2/token"))).toBe(true);
     expect(fetcher.mock.calls.some((call) => String(call[0]).includes("channel-b"))).toBe(false);
+    expect(maintenance).toHaveBeenCalledWith(environment, "2026-09-18T04:00:00.000Z", fetch, "kanal-a");
+    maintenance.mockRestore();
   });
 
   it("rejects a check within the cooldown and states the earliest allowed time", async () => {
@@ -739,7 +743,7 @@ describe("manual moderator status check", () => {
     expect(response.status).toBe(429);
     expect(body.error).toBe("moderator_status_check_rate_limited");
     expect(body.nextAllowedAt).toBe("2026-09-18T04:05:00.000Z");
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("atomically blocks a concurrent trigger for the same channel", async () => {
@@ -763,7 +767,7 @@ describe("manual moderator status check", () => {
 
     expect(firstResponse.status).toBe(200);
     expect(secondResponse.status).toBe(429);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("also honors a fresh check from the maintenance run", async () => {

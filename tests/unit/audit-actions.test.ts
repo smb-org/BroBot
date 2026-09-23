@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { AUDIT_ACTIONS } from "../../src/contracts/values";
-import { platformTexts } from "../../src/dashboard/labels";
-import { auditActionLabel } from "../../src/dashboard/locale";
+import { auditActionLabel, platformTexts } from "../../src/dashboard/labels";
+import { MODULES } from "../../src/modules/registry";
 
 /**
  * `AUDIT_ACTIONS` is `audit_log.action`'s closed vocabulary -- see the type's
@@ -37,6 +37,23 @@ describe("audit actions", () => {
       expect(auditActionLabel(action, "de"), action).not.toBe(action);
       expect(auditActionLabel(action, "en"), action).not.toBe(action);
     }
+  });
+
+  it("labels every fixed and module settings audit action in both languages", () => {
+    const actions = [
+      ...AUDIT_ACTIONS,
+      ...MODULES.map((module) => `${module.id}.settings_changed`),
+    ];
+    for (const action of actions) {
+      expect(auditActionLabel(action, "de"), action).not.toBe(action);
+      expect(auditActionLabel(action, "en"), action).not.toBe(action);
+    }
+  });
+
+  it("composes module settings labels from the bilingual module catalogue", () => {
+    expect(auditActionLabel("raid.settings_changed", "de")).toBe("Einstellungen geändert: Raid-Shoutout");
+    expect(auditActionLabel("raid.settings_changed", "en")).toBe("Settings changed: Raid shoutout");
+    expect(auditActionLabel("__proto__.settings_changed", "de")).toBe("__proto__.settings_changed");
   });
 
   it("uses the audit writer action type as the writer call-site guard", () => {

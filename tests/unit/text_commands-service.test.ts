@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleResult } from "../../src/modules/contract";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
@@ -14,6 +14,10 @@ const command = (name: string, text: string, lastUsedAt: string | null = null): 
   enabled: true,
   minimumTier: "everyone",
   cooldownSeconds: 5,
+  aliases: [],
+  userCooldownSeconds: 0,
+  streamCondition: "any",
+  responseType: "reply",
   lastUsedAt,
   createdAt: NOW,
   updatedAt: NOW,
@@ -22,6 +26,7 @@ const command = (name: string, text: string, lastUsedAt: string | null = null): 
 const repositoryFor = (commands: TextCommand[]): TextCommandRepository => ({
   list: () => Promise.resolve(commands),
   find: (_channelId: string, name: string) => Promise.resolve(commands.find((entry) => entry.name === name) ?? null),
+  findByAlias: (_channelId: string, alias: string) => Promise.resolve(commands.find((entry) => entry.aliases.includes(alias)) ?? null),
   create: () => Promise.resolve({ ok: true }),
   change: () => Promise.resolve({ ok: true }),
   delete: () => Promise.resolve({ ok: true }),
@@ -172,6 +177,112 @@ describe("Text commands service", () => {
 
     expect(result.actions).toEqual([]);
     expect(result.diagnostics[0]?.code).toBe("text_commands.cooldown");
+  });
+
+  it("resolves aliases after names and claims the canonical command name", async () => {
+    const entry = { ...command("hallo", "Antwort"), aliases: ["hi"] };
+    const repository = repositoryFor([entry]);
+    const findByAlias = vi.spyOn(repository, "findByAlias");
+    const claim = vi.spyOn(repository, "claim");
+
+    const result = await processTextCommandMessage(eventFor("!HI"), repository);
+
+    expect(findByAlias).toHaveBeenCalledWith("kanal-a", "hi");
+    expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0);
+    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", replyToMessageId: "twitch-message-1" }]);
+    expect(result.diagnostics).toEqual([{
+      code: "text_commands.triggered",
+      detail: { name: "hallo", alias: "hi", response: "Antwort" },
+    }]);
+  });
+
+  it("shares the cooldown claim between the command name and its alias", async () => {
+    const entry = { ...command("hallo", "Antwort"), aliases: ["hi"] };
+    const repository = repositoryFor([entry]);
+    const claim = vi.spyOn(repository, "claim")
+      .mockResolvedValueOnce({ command: entry, claimed: true })
+      .mockResolvedValueOnce({
+        command: { ...entry, lastUsedAt: NOW }, claimed: false, reason: "cooldown", remainingSeconds: 5,
+      });
+
+    const byName = await processTextCommandMessage(eventFor("!hallo"), repository);
+    const byAlias = await processTextCommandMessage(eventFor("!hi"), repository);
+
+    expect(byName.actions).toHaveLength(1);
+    expect(byAlias.actions).toEqual([]);
+    expect(byAlias.diagnostics[0]?.code).toBe("text_commands.cooldown");
+    expect(claim.mock.calls.map((call) => call[1])).toEqual(["hallo", "hallo"]);
+  });
+
+  it("skips alias and stream lookups when their command features are unused", async () => {
+    const entry = command("hallo", "Antwort");
+    const repository = repositoryFor([entry]);
+    const find = vi.spyOn(repository, "find");
+    const findByAlias = vi.spyOn(repository, "findByAlias");
+    const claim = vi.spyOn(repository, "claim");
+    const streamState = vi.fn(() => Promise.resolve("online" as const));
+
+    await processTextCommandMessage(eventFor("!hallo"), repository, { streamState });
+
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(findByAlias).not.toHaveBeenCalled();
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0);
+    expect(streamState).not.toHaveBeenCalled();
+  });
+
+  it("checks tier before stream state and rejects an incompatible stream without claiming", async () => {
+    const entry = { ...command("hallo", "Antwort"), minimumTier: "moderator" as const, streamCondition: "online" as const };
+    const repository = repositoryFor([entry]);
+    const claim = vi.spyOn(repository, "claim");
+    const streamState = vi.fn(() => Promise.resolve("offline" as const));
+
+    const deniedByTier = await processTextCommandMessage(eventFor("!hallo"), repository, { streamState });
+    expect(deniedByTier.diagnostics[0]?.code).toBe("text_commands.permission_denied");
+    expect(streamState).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+
+    const streamDenied = await processTextCommandMessage(
+      { ...eventFor("!hallo"), chatStatus: ["moderator"] },
+      repository,
+      { streamState },
+    );
+    expect(streamDenied.actions).toEqual([]);
+    expect(streamDenied.diagnostics).toEqual([{
+      code: "text_commands.stream_state",
+      detail: { name: "hallo", allowed: "online", streamState: "offline" },
+    }]);
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("allows a command when stream state is unknown and records that state", async () => {
+    const entry = { ...command("hallo", "Antwort"), streamCondition: "online" as const };
+    const result = await processTextCommandMessage(
+      eventFor("!hallo"),
+      repositoryFor([entry]),
+      { streamState: () => Promise.resolve("unknown") },
+    );
+
+    expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", replyToMessageId: "twitch-message-1" }]);
+    expect(result.diagnostics[0]?.detail).toMatchObject({ name: "hallo", streamState: "unknown" });
+  });
+
+  it.each([
+    ["text", "say", { kind: "chat", text: "Antwort" }],
+    ["text", "reply", { kind: "chat", text: "Antwort", replyToMessageId: "twitch-message-1" }],
+    ["text", "announcement", { kind: "announcement", text: "Antwort" }],
+    ["list", "say", { kind: "chat", text: "Befehle: !befehle" }],
+    ["list", "reply", { kind: "chat", text: "Befehle: !befehle", replyToMessageId: "twitch-message-1" }],
+    ["list", "announcement", { kind: "announcement", text: "Befehle: !befehle" }],
+  ] as const)("maps %s commands with response type %s to the matching action", async (kind, responseType, expected) => {
+    const entry = { ...command("befehle", kind === "list" ? "" : "Antwort"), kind, responseType, aliases: ["hi"] };
+    const result = await processTextCommandMessage(eventFor("!befehle"), repositoryFor([entry]));
+
+    expect(result.actions).toEqual([expected]);
+    const action = result.actions[0];
+    if (kind === "list" && (action?.kind === "chat" || action?.kind === "announcement")) {
+      expect(action.text).not.toContain("hi");
+    }
   });
 
 });

@@ -7,7 +7,7 @@ import { Button } from "./Button";
  * a title, a description and two actions, never children -- the seam
  * enforces that this is only ever used for confirmations, never a form or
  * an editor. Cancel is `subtle` and starts focused; the action is `danger`
- * or `filled`. Modal chrome (radius, shadow, surface, 420px width, the
+ * or `filled`. Modal chrome (radius, shadow, surface, 720px width, the
  * 60%-opacity backdrop) comes from the theme's `Modal` override.
  */
 export interface ConfirmDialogProps {
@@ -18,9 +18,14 @@ export interface ConfirmDialogProps {
   cancelLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
+  alternative?: { label: string; onClick: () => void };
   /** "Deleting actions carry it permanently" -- deleting actions render
    *  the confirm button as `danger` instead of `filled`. */
   danger?: boolean;
+  pending?: boolean;
+  /** A failed confirmed action (e.g. `useDraftGuard`'s `saveAndSwitch`) --
+   *  keeps the dialog open and shows why. */
+  error?: string;
 }
 
 export function ConfirmDialog({
@@ -31,18 +36,23 @@ export function ConfirmDialog({
   cancelLabel,
   onConfirm,
   onCancel,
+  alternative,
   danger = false,
+  pending = false,
+  error,
 }: ConfirmDialogProps) {
   return (
-    <Modal opened={opened} onClose={onCancel} title={title} size={420} centered closeOnEscape trapFocus returnFocus>
+    <Modal opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={720} centered closeOnEscape={!pending} trapFocus returnFocus>
       <Text size="sm" c="dimmed">
         {description}
       </Text>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
-        <Button variant="subtle" onClick={onCancel} autoFocus>
+      {error === undefined ? null : <p className="form-error" role="alert">{error}</p>}
+      <div className="ui-confirm-dialog__actions">
+        <Button variant="subtle" onClick={onCancel} autoFocus disabled={pending}>
           {cancelLabel}
         </Button>
-        <Button variant="primary" danger={danger} onClick={onConfirm}>
+        {alternative === undefined ? null : <Button variant="neutral" onClick={alternative.onClick} disabled={pending}>{alternative.label}</Button>}
+        <Button variant="primary" danger={danger} onClick={onConfirm} disabled={pending}>
           {confirmLabel}
         </Button>
       </div>

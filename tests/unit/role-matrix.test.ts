@@ -268,6 +268,10 @@ const actions: readonly RoleAction[] = [
         enabled: false,
         onlyToggle: true,
         cooldownSeconds: 5,
+        aliases: [],
+        userCooldownSeconds: 0,
+        streamCondition: "any",
+        responseType: "say",
         now: timestamp,
       }, actor);
       return result.ok;
@@ -291,6 +295,10 @@ const actions: readonly RoleAction[] = [
         enabled: true,
         cooldownSeconds: 5,
         minimumTier: "everyone",
+        aliases: [],
+        userCooldownSeconds: 0,
+        streamCondition: "any",
+        responseType: "say",
         now: timestamp,
       }, actor);
       return result.ok;

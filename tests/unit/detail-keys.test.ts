@@ -22,23 +22,41 @@ const moduleSources = (directory: string): string[] => readdirSync(directory, { 
 
 const detailKeys = (): string[] => {
   const found = new Set<string>();
+  const collectObjectKeys = (value: ts.Expression): void => {
+    if (ts.isConditionalExpression(value)) {
+      collectObjectKeys(value.whenTrue);
+      collectObjectKeys(value.whenFalse);
+      return;
+    }
+    if (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)) {
+      collectObjectKeys(value.expression);
+      return;
+    }
+    if (!ts.isObjectLiteralExpression(value)) return;
+    for (const property of value.properties) {
+      if (ts.isSpreadAssignment(property)) {
+        collectObjectKeys(property.expression);
+        continue;
+      }
+      const name = ts.isShorthandPropertyAssignment(property)
+        ? property.name.text
+        : ts.isIdentifier(property.name)
+          ? property.name.text
+          : null;
+      if (name !== null) found.add(name);
+    }
+  };
   for (const file of moduleSources(resolve(import.meta.dirname, "../../src/modules")).sort()) {
     const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
     const visit = (node: ts.Node): void => {
       const isDetail = (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "detail")
-        || (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === "detail");
+        || (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === "detail")
+        || (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "rejection");
       if (isDetail) {
-        const argumentNode = ts.isCallExpression(node) ? node.arguments[0] : node.initializer;
-        if (argumentNode !== undefined && ts.isObjectLiteralExpression(argumentNode)) {
-          for (const property of argumentNode.properties) {
-            const name = ts.isShorthandPropertyAssignment(property)
-              ? property.name.text
-              : property.name !== undefined && ts.isIdentifier(property.name)
-                ? property.name.text
-                : null;
-            if (name !== null) found.add(name);
-          }
-        }
+        const argumentNode = ts.isCallExpression(node)
+          ? ts.isIdentifier(node.expression) && node.expression.text === "rejection" ? node.arguments[1] : node.arguments[0]
+          : node.initializer;
+        if (argumentNode !== undefined) collectObjectKeys(argumentNode);
       }
       ts.forEachChild(node, visit);
     };
@@ -50,10 +68,10 @@ const detailKeys = (): string[] => {
 describe("diagnostic detail keys", () => {
   it("freezes the set of keys that land on the wire", () => {
     expect(detailKeys()).toEqual([
-      "action", "count", "currentTier", "duration", "endsAt", "gifter", "kind",
+      "action", "alias", "allowed", "arguments", "count", "current", "currentTier", "duration", "endsAt", "gifter", "kind",
       "message", "moderator", "name", "person", "reason", "recipient",
       "remainingSeconds", "requiredTier", "response", "scope", "source",
-      "sourceChannelId", "status", "target", "targetChannelId", "text",
+      "sourceChannelId", "startedAt", "status", "streamState", "target", "targetChannelId", "text",
       "threshold", "tier", "viewers",
     ]);
   });

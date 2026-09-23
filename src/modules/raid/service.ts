@@ -1,12 +1,7 @@
 import type { EventCode } from "../../contracts/values";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import type { RaidSettings } from "./contracts";
-import { decideRaid } from "./domain";
-
-const textWithRaid = (template: string, channel: string, viewers: number): string => template
-  .trim()
-  .replaceAll("{channel}", channel)
-  .replaceAll("{viewers}", String(viewers));
+import { decideRaid, renderRaidText } from "./domain";
 
 export const processRaid = (
   event: ModuleEvent<RaidSettings>,
@@ -32,10 +27,9 @@ export const processRaid = (
     return { actions: [], diagnostics: [{ code: "raid.invalid" satisfies EventCode, detail: { reason: decision.reason } }] };
   }
 
-  const chatText = textWithRaid(
+  const chatText = renderRaidText(
     decision.aboveThreshold ? event.settings.textLong : event.settings.textShort,
-    decision.sourceChannelName,
-    decision.viewers,
+    { channel: decision.sourceChannelName, viewers: decision.viewers },
   );
   const shoutoutPossible = event.settings.shoutoutEnabled && decision.viewers >= event.settings.shoutoutThreshold;
   if (!shoutoutPossible) {

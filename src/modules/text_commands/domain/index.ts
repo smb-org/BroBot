@@ -1,5 +1,7 @@
 import type { ModuleChatStatus } from "../contract";
-import type { TextCommandMinimumTier } from "../contracts";
+import type { TEXT_COMMAND_VARIABLES, TextCommandMinimumTier } from "../contracts";
+import { renderTemplate } from "../contract";
+import type { TemplateValues } from "../contract";
 
 export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
@@ -13,7 +15,7 @@ export const commandFromMessage = (message: string): TextCommandInput | null => 
   const trimmed = message.trim();
   const firstWord = trimmed.split(/\s+/u)[0];
   if (firstWord === undefined || !firstWord.startsWith("!")) return null;
-  const name = firstWord.slice(1);
+  const name = firstWord.slice(1).toLowerCase();
   if (!validCommandName(name)) return { kind: "unknown" };
   // Spelled out rather than shorthand: the key travels into
   // `event_log.detail_json`, so renaming the local would rename the stored key
@@ -26,8 +28,10 @@ export const commandFromMessage = (message: string): TextCommandInput | null => 
   };
 };
 
-export const commandTextWithPlaceholders = (text: string, user: string, channel: string): string =>
-  text.replaceAll("{user}", user).replaceAll("{channel}", channel);
+export const renderCommandText = (
+  text: string,
+  values: TemplateValues<typeof TEXT_COMMAND_VARIABLES>,
+): string => renderTemplate(text, values);
 
 export const cooldownRemaining = (lastUsedAt: string | null, now: string, cooldownSeconds: number): number => {
   if (lastUsedAt === null) return 0;
@@ -41,7 +45,7 @@ export const cooldownRemaining = (lastUsedAt: string | null, now: string, cooldo
  * contain multiple badges: moderator and broadcaster also satisfy
  * "subscriber" and "VIP", but a VIP does not satisfy "subscriber".
  */
-const statusForTier: Record<TextCommandMinimumTier, readonly ModuleChatStatus[]> = {
+export const statusForTier: Record<TextCommandMinimumTier, readonly ModuleChatStatus[]> = {
   everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
   subscriber: ["subscriber", "moderator", "broadcaster"],
   vip: ["vip", "moderator", "broadcaster"],

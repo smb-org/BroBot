@@ -1,130 +1,254 @@
 import { dashboardLanguage, type DashboardLanguage, type LocaleCatalog } from "../../../dashboard/locale";
-import type { TextCommandMinimumTier } from "../contracts";
+import type { ModuleChatStatus } from "../contract";
+import type { TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
+import type { TagInputMessages, TextAreaMessages } from "../../../dashboard/ui";
+import type { PanelTemplateWarning } from "../contract";
 
-interface TextCommandsTexts {
+export interface TextCommandsTexts {
   title: string;
+  tabs: { settings: string; advanced: string };
   list: string;
+  details: (name: string) => string;
   add: string;
-  name: string;
-  kind: string;
-  kindText: string;
-  kindList: string;
-  text: string;
-  cooldown: string;
-  minimumTier: string;
-  minimumTierFor: (name: string) => string;
-  minimumTierLocked: string;
-  tiers: Record<TextCommandMinimumTier, string>;
-  toggleLabel: (name: string, enabled: boolean) => string;
-  managementLocked: string;
-  save: (name: string) => string;
-  delete: (name: string) => string;
-  deleteTitle: (name: string) => string;
-  deleteConfirmation: (name: string) => string;
-  confirmDeletion: (name: string) => string;
   empty: string;
   load: string;
-  error: string;
+  loadError: string;
   saveError: string;
   deleteError: string;
+  name: string;
+  aliases: string;
+  variables: { user: string; channel: string };
+  kind: string;
+  kindLabels: Record<TextCommandKind, string>;
+  kindHints: Record<TextCommandKind, string>;
+  response: string;
+  responseHint: string;
+  responseMissing: string;
+  minimumTier: string;
+  minimumTierLocked: string;
+  tierLabels: Record<TextCommandMinimumTier, string>;
+  tierSubjects: Record<ModuleChatStatus, string>;
+  tierDescription: (tier: TextCommandMinimumTier, subjects: readonly string[]) => string;
+  tierHelp: string;
+  responseType: string;
+  responseTypeLabels: Record<TextCommandResponseType, string>;
+  responseTypeHints: Record<TextCommandResponseType, string>;
+  announcementWarning: string;
+  botIsModerator: string;
+  streamCondition: string;
+  streamLabels: Record<TextCommandStreamCondition, string>;
+  streamHints: Record<TextCommandStreamCondition, string>;
+  cooldown: string;
+  userCooldown: string;
+  cooldownHint: string;
+  userCooldownHint: string;
   numberMissing: string;
   nameHint: string;
-  details: (name: string) => string;
+  nameInvalid: string;
+  nameMissing: string;
+  nameExists: string;
+  nameAliasConflict: (trigger: string, command: string) => string;
+  aliasConflict: (trigger: string, command: string) => string;
+  aliasInvalid: (trigger: string) => string;
+  aliasIsName: string;
+  aliasHint: string;
+  aliasCount: (count: number, max: number) => string;
+  aliasAtLimit: string;
+  aliasDuplicate: (alias: string) => string;
+  aliasRemove: (alias: string) => string;
+  aliasList: string;
+  delete: string;
+  deleteTitle: (name: string) => string;
+  deleteConfirmation: (name: string, aliases: readonly string[]) => string;
+  deleteConfirm: (name: string) => string;
+  deleteCancel: string;
+  draftGuardTitle: string;
+  draftGuardDescription: string;
+  continueEditing: string;
+  discardAndSwitch: string;
+  saveAndSwitch: string;
+  close: string;
+  save: string;
+  create: string;
+  discard: string;
+  saved: string;
+  saving: string;
+  pending: string;
+  invalid: string;
+  issueError: string;
+  issueWarning: string;
+  conflictMessage: string;
+  reload: string;
+  managementLocked: string;
+  active: string;
+  activeImmediately: string;
+  enabled: string;
+  disabled: string;
+  noAliases: string;
   never: string;
   secondsAgo: (count: number) => string;
   minutesAgo: (count: number) => string;
   hoursAgo: (count: number) => string;
-  responseMissing: string;
-  nameMissing: string;
-  nameAndResponseMissing: string;
-  columns: {
-    name: string;
-    kind: string;
-    text: string;
-    cooldown: string;
-    last: string;
-    minimumTier: string;
-    active: string;
-  };
+  createdAt: string;
+  updatedAt: string;
+  lastUsed: string;
+  kindListPreview: string;
+  previewLabel: string;
+  previewSpeaker: string;
+  statusLabels: Record<ModuleChatStatus, string>;
+  streamAny: string;
+  streamOnline: string;
+  streamOffline: string;
+  cooldownOff: string;
+  notModerator: string;
+  textAreaMessages: TextAreaMessages;
+  tagInputMessages: TagInputMessages;
+  warningLabel: (warning: PanelTemplateWarning) => string;
+  columns: { name: string; response: string; minimumTier: string; active: string };
 }
 
-const texts: LocaleCatalog<TextCommandsTexts> = {
+const templateMessages: LocaleCatalog<TextAreaMessages> = {
   de: {
-    title: "Textbefehle",
-    list: "Befehle",
-    add: "Befehl anlegen",
-    name: "Name",
-    kind: "Art",
-    kindText: "Antworttext",
-    kindList: "Befehlsliste",
-    text: "Antworttext",
-    cooldown: "Abkühlzeit (Sekunden)",
-    minimumTier: "Mindeststufe",
-    minimumTierFor: (name) => `Mindeststufe für Befehl !${name}`,
-    minimumTierLocked: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern.",
-    tiers: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
-    toggleLabel: (name, enabled) => `Befehl !${name}: ${enabled ? "eingeschaltet" : "ausgeschaltet"}`,
-    managementLocked: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
-    save: (name) => `Befehl !${name} speichern`,
-    delete: (name) => `Befehl !${name} löschen`,
-    deleteTitle: (name) => `Befehl !${name} löschen?`,
-    deleteConfirmation: (name) => `Der Textbefehl !${name} wird dauerhaft gelöscht. Diese Handlung kann nicht rückgängig gemacht werden.`,
-    confirmDeletion: (name) => `Befehl !${name} endgültig löschen`,
-    empty: "Noch keine Textbefehle angelegt.",
-    load: "Textbefehle werden geladen …",
-    error: "Die Textbefehle konnten nicht geladen werden.",
-    saveError: "Der Textbefehl konnte nicht gespeichert werden.",
-    deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
-    numberMissing: "Zahl eingeben",
-    nameHint: "Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.",
-    details: (name) => `Eigenschaften von !${name}`,
-    never: "noch nie",
-    secondsAgo: (count) => `vor ${String(count)} s`,
-    minutesAgo: (count) => `vor ${String(count)} min`,
-    hoursAgo: (count) => `vor ${String(count)} h`,
-    responseMissing: "Antworttext ausfüllen",
-    nameMissing: "Namen ausfüllen",
-    nameAndResponseMissing: "Name und Antworttext ausfüllen",
-    columns: { name: "!Name", kind: "Art", text: "Antwort", cooldown: "Abkühl.", last: "Zuletzt", minimumTier: "Mindeststufe", active: "Schalter" },
+    countLabel: (count, maximum) => `${String(count)} von ${String(maximum)} Zeichen`,
+    previewCountLabel: (count) => `${String(count)} Zeichen`,
+    unknownVariable: (name, suggestion, available) => suggestion === null
+      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Verfügbar: ${available.map((item) => `{${item}}`).join(", ")}`
+      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}?`,
+    insertSuggestionLabel: (name) => `{${name}} einsetzen`,
+    worstCaseLength: (length, maximum) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maximum)} ab.`,
   },
   en: {
-    title: "Text commands",
-    list: "Commands",
-    add: "Add command",
-    name: "Name",
-    kind: "Type",
-    kindText: "Response text",
-    kindList: "Command list",
-    text: "Response text",
-    cooldown: "Cooldown (seconds)",
-    minimumTier: "Minimum level",
-    minimumTierFor: (name) => `Minimum level for !${name}`,
-    minimumTierLocked: "Only broadcasters and managers may change minimum levels.",
-    tiers: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
-    toggleLabel: (name, enabled) => `Command !${name}: ${enabled ? "enabled" : "disabled"}`,
-    managementLocked: "Only broadcasters and managers may add, edit, or delete commands.",
-    save: (name) => `Save !${name}`,
-    delete: (name) => `Delete !${name}`,
-    deleteTitle: (name) => `Delete !${name}?`,
-    deleteConfirmation: (name) => `The text command !${name} will be deleted permanently. This action cannot be undone.`,
-    confirmDeletion: (name) => `Delete !${name} permanently`,
-    empty: "No text commands yet.",
-    load: "Loading text commands …",
-    error: "The text commands could not be loaded.",
-    saveError: "The text command could not be saved.",
-    deleteError: "The text command could not be deleted.",
-    numberMissing: "Enter a number",
-    nameHint: "Lowercase letters, numbers, hyphen and underscore.",
-    details: (name) => `Properties for !${name}`,
-    never: "never",
-    secondsAgo: (count) => `${String(count)} s ago`,
-    minutesAgo: (count) => `${String(count)} min ago`,
-    hoursAgo: (count) => `${String(count)} h ago`,
-    responseMissing: "Fill in a response",
-    nameMissing: "Fill in a name",
-    nameAndResponseMissing: "Fill in a name and response",
-    columns: { name: "!Name", kind: "Type", text: "Response", cooldown: "Cooldown", last: "Last", minimumTier: "Minimum level", active: "Switch" },
+    countLabel: (count, maximum) => `${String(count)} of ${String(maximum)} characters`,
+    previewCountLabel: (count) => `${String(count)} characters`,
+    unknownVariable: (name, suggestion, available) => suggestion === null
+      ? `Unknown variable {${name}} — it will be sent literally. Available: ${available.map((item) => `{${item}}`).join(", ")}`
+      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}?`,
+    insertSuggestionLabel: (name) => `Insert {${name}}`,
+    worstCaseLength: (length, maximum) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maximum)}.`,
   },
 };
 
-export const textCommandsTexts = (language: DashboardLanguage = dashboardLanguage()): TextCommandsTexts => texts[language];
+const catalog: LocaleCatalog<TextCommandsTexts> = {
+  de: {
+    title: "Textbefehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
+    load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.",
+    saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
+    name: "Name", aliases: "Aliase", variables: { user: "Name des Zuschauers, der den Befehl auslöst", channel: "Name des Kanals" }, kind: "Art", kindLabels: { text: "Antworttext", list: "Befehlsliste" },
+    kindHints: { text: "Antwortet mit dem Text unten.", list: "Zählt alle eingeschalteten Befehle auf (ohne Aliase)." },
+    response: "Antwort", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.",
+    minimumTier: "Wer darf auslösen", minimumTierLocked: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern.",
+    tierLabels: { everyone: "Alle", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
+    tierSubjects: { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" },
+    tierDescription: (tier, subjects) => {
+      const joined = subjects.length < 2 ? subjects[0] ?? "" : `${subjects.slice(0, -1).join(", ")} und ${subjects[subjects.length - 1] ?? ""}`;
+      const excluded = tier === "subscriber" ? " VIPs nicht." : tier === "vip" ? " Abonnenten nicht." : "";
+      return `${joined}.${excluded}`;
+    },
+    tierHelp: "Moderatoren und Broadcaster dürfen immer.",
+    responseType: "Antwortart", responseTypeLabels: { say: "Nachricht", reply: "Antwort", announcement: "Ankündigung" },
+    responseTypeHints: {
+      say: "Schreibt eine normale Nachricht in den Chat.",
+      reply: "Antwortet sichtbar auf die Nachricht, die den Befehl ausgelöst hat.",
+      announcement: "Hebt die Nachricht als Ankündigung hervor. Der Bot muss Moderator sein.",
+    },
+    announcementWarning: "Der Bot ist hier kein Moderator — der Text geht als normale Nachricht raus.",
+    botIsModerator: "Der Bot muss Moderator im Kanal sein.",
+    streamCondition: "Stream", streamLabels: { any: "Immer", online: "Online", offline: "Offline" },
+    streamHints: { any: "Wirkt unabhängig vom Stream.", online: "Wirkt nur, während der Stream läuft.", offline: "Wirkt nur, während der Stream aus ist." },
+    cooldown: "Abkühlzeit", userCooldown: "Je Nutzer", cooldownHint: "Für den ganzen Kanal. 0 bis 86 400.", userCooldownHint: "Für jeden Zuschauer einzeln. 0 = aus.", numberMissing: "Zahl eingeben.",
+    nameHint: "Kleinbuchstaben, Zahlen, - und _. Im Chat zählt Groß wie klein.",
+    nameInvalid: "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.", nameMissing: "Namen ausfüllen.", nameExists: "Der Befehl existiert bereits.",
+    nameAliasConflict: (trigger, command) => `!${trigger} ist schon ein Alias von !${command}.`,
+    aliasConflict: (trigger, command) => trigger === command ? `!${trigger} ist schon der Befehl !${command}.` : `!${trigger} ist schon ein Alias von !${command}.`,
+    aliasInvalid: (trigger) => `!${trigger} — nur Kleinbuchstaben, Zahlen, - und _.`,
+    aliasIsName: "Das ist schon der Name.", aliasHint: "Weitere Namen für denselben Befehl. Enter, Komma oder Leerzeichen trennt.",
+    aliasCount: (count, max) => `${String(count)} von ${String(max)}`, aliasAtLimit: "Höchstens 10 Aliase.",
+    aliasDuplicate: (alias) => `${alias} steht schon in der Liste.`, aliasRemove: (alias) => `Alias ${alias} entfernen`, aliasList: "Aliase",
+    delete: "Befehl löschen", deleteTitle: (name) => `Befehl !${name} löschen?`,
+    deleteConfirmation: (name, aliases) => aliases.length === 0
+      ? `Der Textbefehl !${name} wird dauerhaft gelöscht. Diese Handlung kann nicht rückgängig gemacht werden.`
+      : `Der Textbefehl !${name} wird dauerhaft gelöscht. Löscht auch die Aliase ${aliases.map((alias) => `!${alias}`).join(", ")}.`,
+    deleteConfirm: (name) => `Befehl !${name} endgültig löschen`, deleteCancel: "Abbrechen",
+    draftGuardTitle: "Ungespeicherte Änderungen",
+    draftGuardDescription: "Du hast Änderungen an diesem Befehl. Was möchtest du tun?",
+    continueEditing: "Weiter bearbeiten", discardAndSwitch: "Verwerfen und wechseln", saveAndSwitch: "Speichern und wechseln", close: "Schließen",
+    save: "Änderungen speichern", create: "Anlegen", discard: "Verwerfen", saved: "Gespeichert.", saving: "Wird gespeichert …",
+    pending: "Wird gespeichert …", invalid: "Bitte korrigiere die markierten Felder.", issueError: "Fehler", issueWarning: "Hinweis",
+    conflictMessage: "Inzwischen von jemand anderem geändert.", reload: "Serverstand laden",
+    managementLocked: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
+    active: "Aktiv", activeImmediately: "wirkt sofort", enabled: "eingeschaltet", disabled: "ausgeschaltet", noAliases: "keine",
+    never: "noch nie", secondsAgo: (count) => `vor ${String(count)} s`, minutesAgo: (count) => `vor ${String(count)} min`, hoursAgo: (count) => `vor ${String(count)} h`,
+    createdAt: "Angelegt", updatedAt: "Geändert", lastUsed: "Zuletzt verwendet", kindListPreview: "Aktivierte Befehle in der Vorschau:",
+    previewLabel: "Vorschau", previewSpeaker: "Bot",
+    statusLabels: { viewer: "Zuschauer", subscriber: "Abonnent", vip: "VIP", moderator: "Moderator", broadcaster: "Broadcaster" },
+    streamAny: "immer", streamOnline: "nur online", streamOffline: "nur offline", cooldownOff: "aus", notModerator: "kein Moderator",
+    textAreaMessages: templateMessages.de,
+    tagInputMessages: { countLabel: (count, max) => `${String(count)} von ${String(max)}`, atLimitHint: "Höchstens 10 Aliase.", duplicateWarning: (alias) => `${alias} steht schon in der Liste.` },
+    warningLabel: (warning) => warning.code === "unknown_template_variables"
+      ? `Unbekannte Variable${warning.unknownVariables.length === 1 ? "" : "n"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
+      : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
+    columns: { name: "!Name", response: "Antwort", minimumTier: "Mindeststufe", active: "Aktiv" },
+  },
+  en: {
+    title: "Text commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
+    load: "Loading text commands …", loadError: "The text commands could not be loaded.",
+    saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
+    name: "Name", aliases: "Aliases", variables: { user: "Name of the viewer who triggered the command", channel: "Channel name" }, kind: "Type", kindLabels: { text: "Response text", list: "Command list" },
+    kindHints: { text: "Replies with the text below.", list: "Lists all enabled commands (without aliases)." },
+    response: "Response", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.",
+    minimumTier: "Who can use it", minimumTierLocked: "Only broadcasters and managers may change minimum levels.",
+    tierLabels: { everyone: "Everyone", subscriber: "Subscribers", vip: "VIPs", moderator: "Moderators", broadcaster: "Broadcaster" },
+    tierSubjects: { viewer: "viewers", subscriber: "subscribers", vip: "VIPs", moderator: "moderators", broadcaster: "broadcasters" },
+    tierDescription: (tier, subjects) => {
+      const joined = subjects.length < 2 ? subjects[0] ?? "" : `${subjects.slice(0, -1).join(", ")}, and ${subjects[subjects.length - 1] ?? ""}`;
+      const excluded = tier === "subscriber" ? " VIPs are excluded." : tier === "vip" ? " Subscribers are excluded." : "";
+      return `${joined}.${excluded}`;
+    },
+    tierHelp: "Moderators and broadcasters can always use it.",
+    responseType: "Response type", responseTypeLabels: { say: "Message", reply: "Reply", announcement: "Announcement" },
+    responseTypeHints: {
+      say: "Sends a normal chat message.",
+      reply: "Visibly replies to the message that triggered the command.",
+      announcement: "Highlights the message as an announcement. The bot must be a moderator.",
+    },
+    announcementWarning: "The bot is not a moderator here — the text will be sent as a normal message.",
+    botIsModerator: "The bot must be a channel moderator.",
+    streamCondition: "Stream", streamLabels: { any: "Always", online: "Online", offline: "Offline" },
+    streamHints: { any: "Works regardless of stream status.", online: "Works only while the stream is live.", offline: "Works only while the stream is offline." },
+    cooldown: "Cooldown", userCooldown: "Per user", cooldownHint: "For the whole channel. 0 to 86,400.", userCooldownHint: "For each viewer separately. 0 = off.", numberMissing: "Enter a number.",
+    nameHint: "Lowercase letters, numbers, - and _. Chat names are case-insensitive.",
+    nameInvalid: "Use lowercase letters, numbers, hyphen, and underscore.", nameMissing: "Enter a name.", nameExists: "This command already exists.",
+    nameAliasConflict: (trigger, command) => `!${trigger} is already an alias for !${command}.`,
+    aliasConflict: (trigger, command) => trigger === command ? `!${trigger} is already the command !${command}.` : `!${trigger} is already an alias for !${command}.`,
+    aliasInvalid: (trigger) => `!${trigger} — use lowercase letters, numbers, - and _.`,
+    aliasIsName: "This is already the command name.", aliasHint: "Other names for the same command. Enter, comma, or space separates them.",
+    aliasCount: (count, max) => `${String(count)} of ${String(max)}`, aliasAtLimit: "Up to 10 aliases.",
+    aliasDuplicate: (alias) => `${alias} is already in the list.`, aliasRemove: (alias) => `Remove alias ${alias}`, aliasList: "Aliases",
+    delete: "Delete command", deleteTitle: (name) => `Delete !${name}?`,
+    deleteConfirmation: (name, aliases) => aliases.length === 0
+      ? `The text command !${name} will be deleted permanently. This action cannot be undone.`
+      : `The text command !${name} will be deleted permanently. This also deletes aliases ${aliases.map((alias) => `!${alias}`).join(", ")}.`,
+    deleteConfirm: (name) => `Delete !${name} permanently`, deleteCancel: "Cancel",
+    draftGuardTitle: "Unsaved changes",
+    draftGuardDescription: "This command has unsaved changes. What would you like to do?",
+    continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch", close: "Close",
+    save: "Save changes", create: "Create", discard: "Discard", saved: "Saved.", saving: "Saving …",
+    pending: "Saving …", invalid: "Please correct the marked fields.", issueError: "Error", issueWarning: "Warning",
+    conflictMessage: "This command was changed by someone else.", reload: "Load server version",
+    managementLocked: "Only broadcasters and managers may add, edit, or delete commands.",
+    active: "Active", activeImmediately: "takes effect immediately", enabled: "enabled", disabled: "disabled", noAliases: "none",
+    never: "never", secondsAgo: (count) => `${String(count)} s ago`, minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} h ago`,
+    createdAt: "Created", updatedAt: "Updated", lastUsed: "Last used", kindListPreview: "Enabled commands in this preview:",
+    previewLabel: "Preview", previewSpeaker: "Bot",
+    statusLabels: { viewer: "Viewer", subscriber: "Subscriber", vip: "VIP", moderator: "Moderator", broadcaster: "Broadcaster" },
+    streamAny: "always", streamOnline: "online only", streamOffline: "offline only", cooldownOff: "off", notModerator: "not a moderator",
+    textAreaMessages: templateMessages.en,
+    tagInputMessages: { countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "Up to 10 aliases.", duplicateWarning: (alias) => `${alias} is already in the list.` },
+    warningLabel: (warning) => warning.code === "unknown_template_variables"
+      ? `Unknown variable${warning.unknownVariables.length === 1 ? "" : "s"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
+      : `Template can be ${String(warning.worstCaseLength)} characters long.`,
+    columns: { name: "!Name", response: "Response", minimumTier: "Minimum level", active: "Active" },
+  },
+};
+
+export const textCommandsTexts = (language: DashboardLanguage = dashboardLanguage()): TextCommandsTexts => catalog[language];
