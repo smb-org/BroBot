@@ -368,6 +368,7 @@ const realtimeForms = {
 
 const expectedModuleSettings = {
   channel_events: {},
+  clips: {},
   raid: {
     shoutoutEnabled: true,
     shoutoutThreshold: 3,
@@ -678,6 +679,7 @@ describe("serialized contract shapes", () => {
       expect(MODULES.map((module) => module.id).sort()).toEqual([
         "ads",
         "channel_events",
+        "clips",
         "raid",
         "text_commands",
       ]);

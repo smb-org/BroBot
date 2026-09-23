@@ -19,8 +19,11 @@ describe("Schema baseline", () => {
     expect(files.at(-1)).toBe(LATEST_SCHEMA_MIGRATION);
   });
 
-  it("actually creates the table /healthz checks", () => {
-    const baseline = readFileSync(resolve(directory, LATEST_SCHEMA_MIGRATION), "utf8");
-    expect(baseline).toContain(`CREATE TABLE ${LATEST_SCHEMA_TABLE} `);
+  // Not every migration creates a table (0005 only backfills rows), so this
+  // scans the whole history rather than assuming the latest file does it.
+  it("actually creates the table /healthz checks, somewhere in the migration history", () => {
+    const createsTable = files.some((file) =>
+      readFileSync(resolve(directory, file), "utf8").includes(`CREATE TABLE ${LATEST_SCHEMA_TABLE} `));
+    expect(createsTable).toBe(true);
   });
 });

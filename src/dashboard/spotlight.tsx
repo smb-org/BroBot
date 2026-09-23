@@ -6,13 +6,38 @@ import { loadTextCommands } from "../modules/text_commands/panel/service";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelMember, PanelModuleState } from "../panel-contract";
 import { createClip, fetchMembers, sendManualShoutout, setChannelModuleEnabled, startCommercial } from "./api";
-import { dashboardTexts } from "./locale";
+import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
+import { dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
 import { ModuleIcon } from "./module-panels";
 import type { DashboardRoute } from "./router";
 import { Spotlight, type SpotlightItem } from "./ui";
 
 const SHOUTOUT_KEYWORD = "shoutout";
+
+/**
+ * Presence and availability for a module's immediate action, from the exact
+ * same source Stream Manager reads (`ImmediateActions` in stream-manager.tsx)
+ * -- so Spotlight can't offer an action for a disabled module, or gate one
+ * behind a role the endpoint itself doesn't require (#178's ad-now/operator
+ * bug came from a Spotlight-only `manageable` check no module declares).
+ */
+const moduleImmediateActionAvailability = (
+  moduleId: string,
+  modules: readonly Pick<PanelModuleState, "id" | "enabled">[],
+  streamState: "online" | "offline" | null | undefined,
+): { offered: boolean; disabledReason: string | null } => {
+  const module = MODULES.find((entry) => entry.id === moduleId);
+  const state = modules.find((entry) => entry.id === moduleId);
+  if (module?.immediateActions === undefined || state === undefined || !state.enabled) {
+    return { offered: false, disabledReason: null };
+  }
+  const availability = evaluateImmediateActionAvailability(module.immediateActions.requires, streamState);
+  return {
+    offered: true,
+    disabledReason: availability.reason === null ? null : immediateActionUnavailableReasonText(availability.reason),
+  };
+};
 
 interface ChannelSpotlightProperties {
   channelId: string;
@@ -91,17 +116,27 @@ export const ChannelSpotlight = ({ channelId, ownRole, streamState, modules, onN
 
   const actionItems = useMemo<SpotlightItem[]>(() => {
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
-    return [
-      {
+    // Ad now, clip, and shoutout are the same immediate actions Stream
+    // Manager offers -- each hidden when its module is disabled, and
+    // disabled with the module's own reason when the stream isn't live, no
+    // role check invented on top (their endpoints run for any member).
+    const adNow = moduleImmediateActionAvailability("ads", modules, streamState);
+    const clip = moduleImmediateActionAvailability("clips", modules, streamState);
+    const shoutout = moduleImmediateActionAvailability("raid", modules, streamState);
+    const items: SpotlightItem[] = [];
+    if (adNow.offered) {
+      items.push({
         id: "action:ad-now",
         label: texts.streamManager.runAd("60"),
         group: texts.spotlight.groupActions,
         keywords: ["ad", "werbung", "commercial"],
-        disabled: !manageable || streamState === "offline",
-        ...(managementLockReason !== undefined ? { disabledReason: managementLockReason } : streamState === "offline" ? { disabledReason: texts.streamManager.adDisabledOffline } : {}),
+        disabled: adNow.disabledReason !== null,
+        ...(adNow.disabledReason === null ? {} : { disabledReason: adNow.disabledReason }),
         icon: "ad",
         onTrigger: () => { void startCommercial(channelId, 60); },
-      },
+      });
+    }
+    items.push(
       {
         id: "action:ads-off",
         label: texts.spotlight.adOff,
@@ -124,27 +159,34 @@ export const ChannelSpotlight = ({ channelId, ownRole, streamState, modules, onN
         icon: <ModuleIcon moduleId="ads" className="spotlight-module-icon" />,
         onTrigger: () => { void setChannelModuleEnabled(channelId, "ads", true); },
       },
-      {
+    );
+    if (clip.offered) {
+      items.push({
         id: "action:clip",
         label: texts.streamManager.createClip,
         group: texts.spotlight.groupActions,
         keywords: ["clip"],
         icon: "clip",
+        disabled: clip.disabledReason !== null,
+        ...(clip.disabledReason === null ? {} : { disabledReason: clip.disabledReason }),
         onTrigger: () => { void createClip(channelId); },
-      },
-      {
+      });
+    }
+    if (shoutout.offered) {
+      items.push({
         id: "action:shoutout",
         label: texts.streamManager.sendShoutout,
         description: texts.spotlight.shoutoutHint,
         group: texts.spotlight.groupActions,
         keywords: [SHOUTOUT_KEYWORD],
         icon: "shoutout",
-        disabled: shoutoutLogin.length === 0,
-        disabledReason: texts.spotlight.shoutoutMissingLogin,
+        disabled: shoutout.disabledReason !== null || shoutoutLogin.length === 0,
+        disabledReason: shoutout.disabledReason ?? texts.spotlight.shoutoutMissingLogin,
         onTrigger: () => { void sendManualShoutout(channelId, shoutoutLogin); },
-      },
-    ];
-  }, [texts, manageable, adsEnabled, channelId, shoutoutLogin, streamState]);
+      });
+    }
+    return items;
+  }, [texts, manageable, adsEnabled, channelId, shoutoutLogin, streamState, modules]);
 
   const items = [...actionItems, ...moduleItems, ...commandItems, ...memberItems];
 

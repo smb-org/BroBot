@@ -8,7 +8,7 @@ ALTER TABLE text_commands ADD COLUMN stream_condition TEXT NOT NULL DEFAULT 'any
 ALTER TABLE text_commands ADD COLUMN response_type TEXT NOT NULL DEFAULT 'say'
   CHECK (response_type IN ('say', 'reply', 'announcement'));
 
-UPDATE text_commands SET response_type = 'reply';
+UPDATE text_commands SET response_type = 'reply' WHERE response_type = 'say';
 
 CREATE TABLE text_command_user_cooldowns (
   channel_id TEXT NOT NULL,

@@ -25,6 +25,14 @@ export type EventTone = (typeof EVENT_TONES)[number];
 export const CHANNEL_STREAM_STATES = ["online", "offline"] as const;
 export type ChannelStreamState = (typeof CHANNEL_STREAM_STATES)[number];
 
+/** Conditions a registered immediate action can declare before it is rendered as available. */
+export const IMMEDIATE_ACTION_REQUIREMENTS = ["streamLive"] as const;
+export type ImmediateActionRequirement = (typeof IMMEDIATE_ACTION_REQUIREMENTS)[number];
+
+/** Stable catalogue keys for immediate actions that cannot currently run. */
+export const IMMEDIATE_ACTION_UNAVAILABLE_REASONS = ["stream_offline", "stream_state_unknown"] as const;
+export type ImmediateActionUnavailableReason = (typeof IMMEDIATE_ACTION_UNAVAILABLE_REASONS)[number];
+
 /** Durations accepted when a channel member enables an operational brake. */
 export const CHANNEL_CONTROL_DURATIONS = ["15m", "1h", "until_stream_end", "unlimited"] as const;
 export type ChannelControlDuration = (typeof CHANNEL_CONTROL_DURATIONS)[number];
@@ -262,6 +270,7 @@ export const API_ERROR_CODES = [
   "module_management_denied",
   "module_unknown",
   "module_not_configured",
+  "module_disabled",
   "module_settings_invalid",
   "module_settings_changed_concurrently",
   "module_enabled_field_invalid",

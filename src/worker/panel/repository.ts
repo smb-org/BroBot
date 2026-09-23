@@ -72,7 +72,7 @@ interface ChannelStateRow {
   eventsub_error_status: number | null;
   eventsub_error_updated_at: string | null;
   stream_state: ChannelStreamState | null;
-  stream_changed_at: string | null;
+  stream_started_at: string | null;
   muted: ChannelControlFields["muted"];
   muted_until: string | null;
   mute_until_stream_end: ChannelControlFields["mute_until_stream_end"];
@@ -159,11 +159,11 @@ export const channelStateQuery = `
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
              LIMIT 1) AS stream_state,
-           (SELECT stream_state.changed_at
+           (SELECT stream_state.started_at
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
                AND stream_state.state = 'online'
-             LIMIT 1) AS stream_changed_at,
+             LIMIT 1) AS stream_started_at,
            channel_controls.muted AS muted,
            channel_controls.muted_until AS muted_until,
            channel_controls.mute_until_stream_end AS mute_until_stream_end,
@@ -347,7 +347,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   chatSubscription: mapEventSub(row),
   chatSubscriptionNeeded: row.chat_subscription_needed === 1,
   streamState: row.stream_state,
-  streamStartedAt: row.stream_changed_at,
+  streamStartedAt: row.stream_started_at,
   controls: mapChannelControls(row, new Date().toISOString()),
   tokens: mapTokens(row),
   lastError: mapLastError(row),

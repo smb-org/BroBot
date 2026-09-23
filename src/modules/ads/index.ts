@@ -26,7 +26,10 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   routes: adsRoutes,
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
-  immediateActions: () => import("./panel/immediate-actions"),
+  immediateActions: {
+    requires: ["streamLive"],
+    load: () => import("./panel/immediate-actions"),
+  },
   handleEvent: (event) => event.subscriptionType === "channel.ad_break.begin"
     ? processAdBreak(event)
     : { actions: [], diagnostics: [] },
