@@ -335,18 +335,25 @@ export interface DashboardTexts {
     immediateActions: string;
     checksHealthy: (count: string) => string;
     checksNeedAttention: (problems: string, checks: string) => string;
+    /** Header title of the ad action card. */
+    adTitle: string;
     adLength: string;
     /** Hint under the ad-length `SegmentedControl` (3.0, 12.2). */
     adLengthHint: string;
     runAd: (length: string) => string;
     adStarted: (length: string) => string;
     adCooldown: (seconds: string) => string;
+    /** Header title of the shoutout action card. */
+    shoutoutTitle: string;
     shoutoutLogin: string;
-    /** Hint under the shoutout-login `Field` (3.0, 12.2). */
+    /** Hint under the shoutout-login `Field`, shown when a login is entered (3.0, 12.2). */
     shoutoutLoginHint: string;
+    /** Same helper line as `shoutoutLoginHint`, shown instead of it while the field is empty. */
     shoutoutLoginRequired: string;
     sendShoutout: string;
     shoutoutSent: (login: string) => string;
+    /** Header title of the clip action card. */
+    clipTitle: string;
     createClip: string;
     clipCreated: string;
     openClip: string;
@@ -518,16 +525,19 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       immediateActions: "Sofortaktionen",
       checksHealthy: (count) => `Alles in Ordnung · ${count} Prüfungen`,
       checksNeedAttention: (problems, checks) => `${problems} auffällige ${problems === "1" ? "Prüfung" : "Prüfungen"} · ${checks} Prüfungen`,
+      adTitle: "Werbung",
       adLength: "Werbedauer",
       adLengthHint: "Sekunden. Startet sofort.",
       runAd: (length) => `Werbung jetzt (${length}s)`,
       adStarted: (length) => `Werbung gestartet (${length}s)`,
       adCooldown: (seconds) => `Wartezeit: ${seconds}s`,
+      shoutoutTitle: "Shoutout",
       shoutoutLogin: "Twitch-Name",
       shoutoutLoginHint: "Twitch-Name des Kanals, den du empfiehlst.",
       shoutoutLoginRequired: "Bitte gib einen Twitch-Namen ein.",
       sendShoutout: "Shoutout senden",
       shoutoutSent: (login) => `Shoutout an ${login} gesendet`,
+      clipTitle: "Clip",
       createClip: "Clip erstellen",
       clipCreated: "Clip erstellt",
       openClip: "Clip öffnen",
@@ -681,16 +691,19 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       immediateActions: "Immediate actions",
       checksHealthy: (count) => `All clear · ${count} checks`,
       checksNeedAttention: (problems, checks) => `${problems} ${problems === "1" ? "check needs" : "checks need"} attention · ${checks} checks`,
+      adTitle: "Ads",
       adLength: "Ad length",
       adLengthHint: "Seconds. Starts immediately.",
       runAd: (length) => `Run ad now (${length}s)`,
       adStarted: (length) => `Ad started (${length}s)`,
       adCooldown: (seconds) => `Cooldown: ${seconds}s`,
+      shoutoutTitle: "Shoutout",
       shoutoutLogin: "Twitch login",
       shoutoutLoginHint: "Twitch login of the channel you're recommending.",
       shoutoutLoginRequired: "Enter a Twitch login.",
       sendShoutout: "Send shoutout",
       shoutoutSent: (login) => `Shoutout sent to ${login}`,
+      clipTitle: "Clip",
       createClip: "Create clip",
       clipCreated: "Clip created",
       openClip: "Open clip",

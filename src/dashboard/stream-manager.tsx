@@ -42,21 +42,21 @@ const AdNowAction = ({ channelId }: { channelId: string }): ReactElement => {
 
   return (
     <div className="stream-manager-action">
-      <div className="stream-manager-action__controls">
-        <div className="stream-manager-action__field stream-manager-action__field--length">
-          <SegmentedControl
-            label={texts.streamManager.adLength}
-            hint={texts.streamManager.adLengthHint}
-            value={length ?? ""}
-            onChange={(next) => { setLength(next); }}
-            options={AD_LENGTHS.map((value) => ({ value, label: `${value}s` }))}
-            disabled={state.pending}
-          />
-        </div>
-        <Button icon="ad" variant="primary" disabled={state.pending || length === null} onClick={() => { void run(); }}>
-          {texts.streamManager.runAd(length ?? "")}
-        </Button>
+      <div className="stream-manager-action__header"><Icon name="ad" size={20} /><h3>{texts.streamManager.adTitle}</h3></div>
+      <div className="stream-manager-action__body">
+        <SegmentedControl
+          label={texts.streamManager.adLength}
+          hint={texts.streamManager.adLengthHint}
+          value={length ?? ""}
+          onChange={(next) => { setLength(next); }}
+          options={AD_LENGTHS.map((value) => ({ value, label: `${value}s` }))}
+          disabled={state.pending}
+          size="compact"
+        />
       </div>
+      <Button className="stream-manager-action__button" icon="ad" variant="primary" disabled={state.pending || length === null} onClick={() => { void run(); }}>
+        {texts.streamManager.runAd(length ?? "")}
+      </Button>
       {state.success === null ? null : <p className="form-success" role="status">{state.success}</p>}
       {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}
     </div>
@@ -80,27 +80,28 @@ const ShoutoutAction = ({ channelId }: { channelId: string }): ReactElement => {
     }
   };
 
-  const emptyReasonId = "stream-manager-shoutout-reason";
+  const isEmpty = login.trim().length === 0;
+  const loginId = "stream-manager-shoutout-login";
+  const helperId = `${loginId}-description`;
 
   return (
     <div className="stream-manager-action">
-      <div className="stream-manager-action__controls">
-        <div className="stream-manager-action__field">
-          <Field
-            label={texts.streamManager.shoutoutLogin}
-            hint={texts.streamManager.shoutoutLoginHint}
-            prefix="@"
-            value={login}
-            onChange={setLogin}
-            disabled={state.pending}
-            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void run(); } }}
-          />
-        </div>
-        <Button icon="shoutout" variant="primary" disabled={state.pending || login.trim().length === 0} {...(login.trim().length === 0 ? { describedBy: emptyReasonId } : {})} onClick={() => { void run(); }}>
-          {texts.streamManager.sendShoutout}
-        </Button>
+      <div className="stream-manager-action__header"><Icon name="shoutout" size={20} /><h3>{texts.streamManager.shoutoutTitle}</h3></div>
+      <div className="stream-manager-action__body">
+        <Field
+          id={loginId}
+          label={texts.streamManager.shoutoutLogin}
+          hint={isEmpty ? texts.streamManager.shoutoutLoginRequired : texts.streamManager.shoutoutLoginHint}
+          prefix="@"
+          value={login}
+          onChange={setLogin}
+          disabled={state.pending}
+          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void run(); } }}
+        />
       </div>
-      {login.trim().length === 0 ? <p id={emptyReasonId} className="muted stream-manager-action__reason">{texts.streamManager.shoutoutLoginRequired}</p> : null}
+      <Button className="stream-manager-action__button" icon="shoutout" variant="primary" disabled={state.pending || isEmpty} {...(isEmpty ? { describedBy: helperId } : {})} onClick={() => { void run(); }}>
+        {texts.streamManager.sendShoutout}
+      </Button>
       {state.success === null ? null : <p className="form-success" role="status">{state.success}</p>}
       {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}
     </div>
@@ -127,11 +128,10 @@ const ClipAction = ({ channelId }: { channelId: string }): ReactElement => {
 
   return (
     <div className="stream-manager-action">
-      <div className="stream-manager-action__controls">
-        <Button icon="clip" variant="primary" disabled={state.pending} onClick={() => { void run(); }}>
-          {texts.streamManager.createClip}
-        </Button>
-      </div>
+      <div className="stream-manager-action__header"><Icon name="clip" size={20} /><h3>{texts.streamManager.clipTitle}</h3></div>
+      <Button className="stream-manager-action__button" icon="clip" variant="primary" disabled={state.pending} onClick={() => { void run(); }}>
+        {texts.streamManager.createClip}
+      </Button>
       {state.success === null ? null : (
         <p className="form-success" role="status">
           <span>{state.success}</span>{editUrl === null ? null : <> · <a href={editUrl} target="_blank" rel="noreferrer" aria-label={`${texts.streamManager.openClip} (${texts.streamManager.opensNewTab})`}>{texts.streamManager.openClip}<Icon name="external" size={16} /></a></>}
