@@ -533,12 +533,28 @@ Ein `.button` mit `position: fixed`, mittig unter der Kopfleiste (64 px von oben
 ### Schalter (Hauptschalter)
 44×44 Trefferfläche, Spur 36×20 auf Text-4, Knopf 14 px in Text; an: Spur Grün, Knopf um 16 px verschoben (160 ms). In der Kopfleiste mit Etikett links (12 px/600, Text-2). Für Bediener gesperrt (45 %) — der Sperrgrund steht als 11-px-Zeile direkt darunter, nicht als Meldung anderswo.
 
+### Schalterkarte (`Switch` als Karte)
+Ein Schalter mit abhängigen Folgefeldern steht in einer Karte statt einer Zeile: Rand Linie-Stark, {rounded.control}, 12 px Innenabstand, links Titel (14 px/500) und Beschreibung (12 px Text-3), rechts der Schalter; die ganze Karte ist Klickfläche (`<label htmlFor>` des Schalters). Folgefelder stehen unter einer Haarlinie in derselben Karte, sichtbar aber mit 55 % Deckkraft deaktiviert, solange der Schalter aus ist, mit dem Grund als 11-px-Zeile darüber („Shoutout ist ausgeschaltet.“). Ein Schalter ohne Folgefelder — etwa eine Sofortaktion mit „wirkt sofort“ darunter — bleibt die einzeilige (`inline`) Form.
+
 ### Inputs / Fields
 - **Stil:** Rinne mit Linie-Stark-Rand, {rounded.control}, 44 px hoch, 10 px 12 px und Formulartext (Archivo 400, 14 px, 1.5); Textarea mindestens 112 px, senkrecht ziehbar. Beschriftung darüber: Formularname (Archivo 500, 13 px); Hinweis, Fehler und Zähler darunter: 12 px. Select und Schalter in Tabellenzellen bleiben kompakt bei 34 px und 13 px.
 - **Zwei Dichten:** Felder im Formular stehen auf der Formularstufe; Liste, Tabelle, Zustandszeile, Eigenschaftenliste und Tabellenzellen bleiben dicht. Ein Bedienelement trägt die Stufe seiner Fläche. Knopftext bleibt außerhalb des Editors 13 px; innerhalb stellt `FormDensity` 14 px direkt am Knopf ein.
 - **Konfigurationsfeldbreiten:** `config-field--narrow` ist 9 rem für Zahlen und kurze Werte (die bestehende Zahlengrenze); `config-field--medium` ist 20 rem für Namen und Bezeichner (die halbe bestehende Formularbreite); `config-field--wide` ist 40 rem für Fließtext (die bestehende maximal 40 rem breite Formularhülle). Die Stufe gehört an die Feldhülle, nicht an beliebige Einzelregeln.
 - **Hover:** Rand Linie-Hell. **Fokus:** 2 px Marke-Text außen, Abstand 2 px.
 - **Deaktiviert:** 55 % Deckkraft. **Fehler:** rote Zeile mit × unter den Aktionen, `role="alert"`.
+- **Präfix und Symbol:** Ein festes Präfix (`!`, `@`) steht im Feld links in Mono, mit Haarlinie als Trenner; es landet nie im Wert, Eingabe des Präfixzeichens am Anfang wird entfernt. Ein Such- oder Filterfeld trägt stattdessen ein 16-px-Symbol; Präfix und Symbol schließen einander aus.
+
+### Segment (`SegmentedControl`)
+Ersetzt `Select` für zwei bis vier kurze, gleichrangige Werte im Formular: volle Breite, 44 px (`compact` 34 px), Spur Rinne mit Linie-Stark-Rand; gewähltes Segment Tint-1, Text Marke-Text/600, innerer Rand als `box-shadow` (Marke-Linie); Fokus 2 px Marke-Text außen um das fokussierte Segment, Pfeiltasten wechseln. Die Hinweiszeile darunter darf vom gewählten Wert abhängen — sie beschreibt die Option, nicht das Feld. Kein Gleiten beim Wechsel (`transitionDuration: 0`, Kein-Skelett-Regel). Bleibt `Select`, wenn die Liste lang oder dynamisch ist (Kanalwahl, Modulfilter).
+
+### Kartenwahl (`ChoiceCards`)
+Für eine Wahl, deren Optionen eine Erklärung brauchen (mehr als vier Werte, oder kurze Wörter reichen nicht): senkrecht gestapelte Karten, min. 52 px, 10 px 12 px Innenabstand, 8 px Lücke, optional 20-px-Symbol links, Etikett 14 px/500 Text, Beschreibung 12 px Text-3 darunter, Radio-Indikator rechts. Gewählt: Tint-1 mit 2-px-Markenkante links (dieselbe Kante wie die gewählte Tabellenzeile). Pfeiltasten wandern innerhalb der Gruppe (Radio-Semantik, Mantine liefert sie). Nie waagerecht gestapelt — die Beschreibungen würden brechen.
+
+### Stepper (`NumberField`)
+Ersetzt Mantines Standardpfeile (rund 17 px, unter der 44-px-Regel): links und rechts vom Feld je ein 44×44-Knopf „−“/„+“ (16-px-Symbol), verbunden über Mantines `increment`/`decrement` (respektiert `min`/`max`/`step`); am Rand des Bereichs ist der jeweilige Knopf deaktiviert. Die Einheit steht als Suffix im Feld, nie im Etikett; der Bereich steht im Hinweis. Die Gruppe ist höchstens 14 rem breit. Zwei zusammengehörige Stepper (etwa Kanal- und Nutzer-Abkühlzeit) stehen ab 380 px Editorbreite nebeneinander (`FieldPair`, per CSS-Container-Query), sonst untereinander; beide behalten ihre eigene Hilfezeile.
+
+### Hervorhebung im Vorlagenfeld (`TextArea`)
+Eine durchsichtige Spiegelebene hinter dem `<textarea>` zeichnet denselben Text mit markierten Variablen, während das Feld selbst Cursor und Auswahl trägt (`color: transparent`, `caret-color: var(--text)`, Auswahl über `::selection`): eine bekannte Variable steht als getönte Marke (Tint-1-Hintergrund, Marke-Linie als `box-shadow`, keine eigene Schrift oder Innenabstand, damit sich die Textbreite nicht verschiebt), eine unbekannte mit Wellenlinie in Bernstein. Spiegel und Feld teilen eine CSS-Klasse für alles, was Umbruch und Breite bestimmt (Schrift, Zeilenhöhe, Innenabstand, `white-space`), sonst verrutscht der Cursor gegenüber dem sichtbaren Text. Der Spiegel ist `aria-hidden`, rendert synchron mit jedem Tastendruck (keine Verzögerung, sonst hinkt der sichtbare Text hinterher) und bleibt aus, bis `document.fonts.ready` erfüllt ist und unter `forced-colors` — beides Fälle, in denen die Durchsichtigkeit den Feldtext unlesbar machen würde.
 
 ### Konfigurationsfläche
 Eine Modul-Panel-Ansicht liegt in `.module-stack`, damit Beschriftung, Feld,

@@ -14,7 +14,20 @@ export interface DashboardCommonTexts {
   cancel: string;
   close: string;
   save: string;
+  /** `EditorShell.discardLabel` -- reverts an editor draft to its last saved value. */
+  discard: string;
+  /** `EditorShell.savedLabel` -- the save bar's clean-after-save status text. */
+  saved: string;
+  /** `EditorShell.pendingLabel` -- the save bar's in-flight status text. */
+  saving: string;
+  /** `EditorShell.issueLabels` -- appended to a tab's accessible name. */
+  error: string;
+  warning: string;
+  /** `Switch.hint` on an immediate-action switch (2, "Sofort gegen gespeichert"). */
+  immediate: string;
   roles: Record<ChannelRole, string>;
+  /** What a role is allowed to do, for role `ChoiceCards` (ADR 0006). */
+  roleDescriptions: Record<ChannelRole, string>;
 }
 
 const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
@@ -22,20 +35,42 @@ const commonTexts: LocaleCatalog<DashboardCommonTexts> = {
     cancel: "Abbrechen",
     close: "Schließen",
     save: "Speichern",
+    discard: "Verwerfen",
+    saved: "Gespeichert.",
+    saving: "Wird gespeichert …",
+    error: "Fehler",
+    warning: "Hinweis",
+    immediate: "wirkt sofort",
     roles: {
       broadcaster: "Broadcaster",
       manager: "Verwalter",
       operator: "Bediener",
+    },
+    roleDescriptions: {
+      broadcaster: "Vergibt und entzieht auch die Broadcaster-Rolle.",
+      manager: "Verwaltet Mitglieder, Module und Moduleinstellungen.",
+      operator: "Sieht alles, ändert nichts.",
     },
   },
   en: {
     cancel: "Cancel",
     close: "Close",
     save: "Save",
+    discard: "Discard",
+    saved: "Saved.",
+    saving: "Saving …",
+    error: "Error",
+    warning: "Notice",
+    immediate: "takes effect immediately",
     roles: {
       broadcaster: "Broadcaster",
       manager: "Manager",
       operator: "Operator",
+    },
+    roleDescriptions: {
+      broadcaster: "Also grants and revokes the broadcaster role.",
+      manager: "Manages members, modules, and module settings.",
+      operator: "Sees everything, changes nothing.",
     },
   },
 };
@@ -301,10 +336,14 @@ export interface DashboardTexts {
     checksHealthy: (count: string) => string;
     checksNeedAttention: (problems: string, checks: string) => string;
     adLength: string;
+    /** Hint under the ad-length `SegmentedControl` (3.0, 12.2). */
+    adLengthHint: string;
     runAd: (length: string) => string;
     adStarted: (length: string) => string;
     adCooldown: (seconds: string) => string;
     shoutoutLogin: string;
+    /** Hint under the shoutout-login `Field` (3.0, 12.2). */
+    shoutoutLoginHint: string;
     shoutoutLoginRequired: string;
     sendShoutout: string;
     shoutoutSent: (login: string) => string;
@@ -480,10 +519,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       checksHealthy: (count) => `Alles in Ordnung · ${count} Prüfungen`,
       checksNeedAttention: (problems, checks) => `${problems} auffällige ${problems === "1" ? "Prüfung" : "Prüfungen"} · ${checks} Prüfungen`,
       adLength: "Werbedauer",
+      adLengthHint: "Sekunden. Startet sofort.",
       runAd: (length) => `Werbung jetzt (${length}s)`,
       adStarted: (length) => `Werbung gestartet (${length}s)`,
       adCooldown: (seconds) => `Wartezeit: ${seconds}s`,
       shoutoutLogin: "Twitch-Name",
+      shoutoutLoginHint: "Twitch-Name des Kanals, den du empfiehlst.",
       shoutoutLoginRequired: "Bitte gib einen Twitch-Namen ein.",
       sendShoutout: "Shoutout senden",
       shoutoutSent: (login) => `Shoutout an ${login} gesendet`,
@@ -641,10 +682,12 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       checksHealthy: (count) => `All clear · ${count} checks`,
       checksNeedAttention: (problems, checks) => `${problems} ${problems === "1" ? "check needs" : "checks need"} attention · ${checks} checks`,
       adLength: "Ad length",
+      adLengthHint: "Seconds. Starts immediately.",
       runAd: (length) => `Run ad now (${length}s)`,
       adStarted: (length) => `Ad started (${length}s)`,
       adCooldown: (seconds) => `Cooldown: ${seconds}s`,
       shoutoutLogin: "Twitch login",
+      shoutoutLoginHint: "Twitch login of the channel you're recommending.",
       shoutoutLoginRequired: "Enter a Twitch login.",
       sendShoutout: "Send shoutout",
       shoutoutSent: (login) => `Shoutout sent to ${login}`,

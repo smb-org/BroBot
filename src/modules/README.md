@@ -93,6 +93,20 @@ eigene Route zum Bearbeiten von Einstellungen gibt es bewusst nicht — dafür i
 braucht. Ein Modul kann zusätzlich über den Aktivierungshook einmalige, eigene
 Initialdaten anlegen. Das erfordert keinen Deploy.
 
+Für ein Modul, dessen Einstellungen sich vollständig aus den Naht-Bauteilen
+zusammensetzen (Zahl, Text, Vorlage, Segment, Kartenwahl, Schalterkarte), muss
+kein eigenes Formular geschrieben werden: `module.settingsEditor` nimmt
+stattdessen eine `SettingsEditorSpec<Settings>`-Deklaration entgegen — lazy wie
+`panel`, in `modules/<id>/panel/settings-editor.ts`, damit ein ausgeschaltetes
+Modul weiterhin null Bytes kostet. Der Host rendert daraus in
+`module-panels.tsx` den `EditorShell` samt Laden, Speichern, Server-Hinweisen,
+409-Konflikt und der lesenden Fassung für Rollen ohne Recht — einmal gebaut,
+nicht je Modul. Hat `settingsSchema` mindestens einen Schlüssel, verlangt ein
+Guard-Test (`module-settings-editor-guard.test.ts`) die Deklaration; ein leeres
+Schema (etwa Kanalereignisse) bleibt ohne Editor. `panel` bleibt daneben für
+Module mit eigenem Zustand oder Sofortaktionen (Werbung); wo beide stehen,
+erscheint `panel` oben und der `settingsEditor` darunter.
+
 ## Wie ein Modul zu seinem Ereignis kommt
 
 `handleEvent` ist der fachliche Einstiegspunkt. Es beschreibt weiterhin in

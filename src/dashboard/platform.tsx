@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefObject, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type {
   PanelPlatformAuditEntry,
@@ -23,7 +23,8 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Field, Icon, InspectorHeading, ListDetail, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
+import { Button, ConfirmDialog, EditorShell, Field, InspectorHeading, ListDetail, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
+import { MemberGrantEditor } from "./member-grant-editor";
 import { NavigationIcon, StateRow, type StateTone } from "./module-panels";
 
 interface PlatformPageProperties {
@@ -49,17 +50,10 @@ const isAbort = (error: unknown): boolean =>
 const memberName = (member: PanelMember): string =>
   member.displayName ?? (member.login === null ? platformTexts().member : "@" + member.login);
 
-const userName = (user: PanelTwitchUser): string =>
-  user.displayName.length > 0 ? user.displayName : "@" + user.login;
-
 const roleSelectOptions = (): SelectOption[] => CHANNEL_ROLES.filter((role) => role !== "broadcaster").map((role) => ({
   value: role,
   label: roleLabel(role),
 }));
-
-const roleOptions = (): ReactElement[] => roleSelectOptions().map((option) => (
-  <option key={option.value} value={option.value}>{option.label}</option>
-));
 
 const connectionTone = (channel: PanelPlatformChannelOverview): StateTone =>
   channel.broadcasterConnected ? "healthy" : channel.fullConsent ? "warning" : "neutral";
@@ -73,20 +67,14 @@ const connectionWord = (channel: PanelPlatformChannelOverview, compact = false):
 
 const MembersTable = ({
   members: members,
-  pendingRemoval,
+  busyUserId,
   onRoleChange: onRoleChange,
   onRemove: onRemove,
-  onConfirmRemoval: onConfirmRemoval,
-  onCancelRemoval: onCancelRemoval,
-  confirmButton: confirmationButton,
 }: {
   members: PanelMember[];
-  pendingRemoval: string | null;
+  busyUserId: string | null;
   onRoleChange: (member: PanelMember, role: "manager" | "operator") => void;
   onRemove: (member: PanelMember) => void;
-  onConfirmRemoval: (member: PanelMember) => void;
-  onCancelRemoval: () => void;
-  confirmButton: RefObject<HTMLButtonElement | null>;
 }): ReactElement => {
   const texts = platformTexts();
   if (members.length === 0) return <p className="muted">{texts.noMembers}</p>;
@@ -102,62 +90,43 @@ const MembersTable = ({
         </thead>
         <tbody>
           {members.map((member) => (
-            <Fragment key={member.userId}>
-              <tr>
-                <th scope="row">
-                  <span>{memberName(member)}</span>
-                  <span className="login-hint" title={texts.twitchId(member.userId)}>{member.login === null ? texts.member : "@" + member.login}</span>
-                </th>
-                <td>
-                  {member.role === "broadcaster" ? <span>{roleLabel(member.role)}</span> : (
-                    <Select
-                      ariaLabel={texts.role + ": " + memberName(member)}
-                      value={member.role}
-                      onChange={(role) => { if (role !== null) onRoleChange(member, role as "manager" | "operator"); }}
-                      options={roleSelectOptions()}
-                    />
-                  )}
-                </td>
-                <td className="table__action">
-                  {member.role === "broadcaster" ? (
-                    <>
-                      <button
-                        className="button button--danger"
-                        type="button"
-                        disabled
-                        title={texts.removeBroadcasterHint}
-                        aria-describedby={"betreiber-entfernen-hinweis-" + member.userId}
-                      >
-                        {texts.remove}
-                      </button>
-                      <span id={"betreiber-entfernen-hinweis-" + member.userId} className="sr-only">{texts.removeBroadcasterHint}</span>
-                    </>
-                  ) : (
-                    <button className="button button--danger" type="button" onClick={() => { onRemove(member); }}>
+            <tr key={member.userId}>
+              <th scope="row">
+                <span>{memberName(member)}</span>
+                <span className="login-hint" title={texts.twitchId(member.userId)}>{member.login === null ? texts.member : "@" + member.login}</span>
+              </th>
+              <td>
+                {member.role === "broadcaster" ? <span>{roleLabel(member.role)}</span> : (
+                  <Select
+                    ariaLabel={texts.role + ": " + memberName(member)}
+                    value={member.role}
+                    disabled={busyUserId === member.userId}
+                    onChange={(role) => { if (role !== null) onRoleChange(member, role as "manager" | "operator"); }}
+                    options={roleSelectOptions()}
+                  />
+                )}
+              </td>
+              <td className="table__action">
+                {member.role === "broadcaster" ? (
+                  <>
+                    <button
+                      className="button button--danger"
+                      type="button"
+                      disabled
+                      title={texts.removeBroadcasterHint}
+                      aria-describedby={"betreiber-entfernen-hinweis-" + member.userId}
+                    >
                       {texts.remove}
                     </button>
-                  )}
-                </td>
-              </tr>
-              {pendingRemoval === member.userId ? (
-                <tr>
-                  <td colSpan={3}>
-                    <div className="inspector-confirmation" role="alertdialog" aria-label={texts.removeQuestion(memberName(member))}>
-                      <h3>{texts.removeQuestion(memberName(member))}</h3>
-                      <p>{texts.removeQuestion(memberName(member))}</p>
-                      <div className="form-actions form-actions--destructive">
-                        <button ref={confirmationButton} className="button button--danger" type="button" onClick={() => { onConfirmRemoval(member); }}>
-                          {texts.confirmRemove}
-                        </button>
-                        <button className="button button--quiet" type="button" onClick={onCancelRemoval}>
-                          {dashboardCommonTexts().cancel}
-                        </button>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              ) : null}
-            </Fragment>
+                    <span id={"betreiber-entfernen-hinweis-" + member.userId} className="sr-only">{texts.removeBroadcasterHint}</span>
+                  </>
+                ) : (
+                  <button className="button button--danger" type="button" disabled={busyUserId === member.userId} onClick={() => { onRemove(member); }}>
+                    {texts.remove}
+                  </button>
+                )}
+              </td>
+            </tr>
           ))}
         </tbody>
       </table>
@@ -177,17 +146,12 @@ const ChannelInspector = ({
   onClose: () => void;
 }): ReactElement => {
   const texts = platformTexts();
+  const common = dashboardCommonTexts();
   const [members, setMembers] = useState<LoadState<PanelPlatformMembersResponse>>(() => emptyLoadState());
-  const [foundMember, setFoundMember] = useState<PanelTwitchUser | null>(null);
-  const [searchLogin, setSearchLogin] = useState("");
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [searchInProgress, setSearchInProgress] = useState(false);
-  const [newRole, setNewRole] = useState<"manager" | "operator">("operator");
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
-  const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<PanelMember | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [consentInProgress, setConsentInProgress] = useState(false);
-  const confirmationButton = useRef<HTMLButtonElement | null>(null);
 
   const loadMembers = async (): Promise<void> => {
     setMembers((current) => current.data === null ? loadState() : { ...current, status: "loading", error: null });
@@ -216,10 +180,6 @@ const ChannelInspector = ({
     return () => { aborted = true; };
   }, [channel.channelId, onAuthenticationRequired, texts.error]);
 
-  useEffect(() => {
-    if (pendingRemoval !== null) confirmationButton.current?.focus();
-  }, [pendingRemoval]);
-
   const toggleConsent = async (): Promise<void> => {
     setConsentInProgress(true);
     setActionError(null);
@@ -231,38 +191,6 @@ const ChannelInspector = ({
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
       setConsentInProgress(false);
-    }
-  };
-
-  const searchUser = async (event: SyntheticEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    setSearchInProgress(true);
-    setSearchError(null);
-    setFoundMember(null);
-    try {
-      setFoundMember((await searchPlatformUser(searchLogin)).user);
-    } catch (error: unknown) {
-      setSearchError(errorText(error, texts.error));
-      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-    } finally {
-      setSearchInProgress(false);
-    }
-  };
-
-  const addMember = async (): Promise<void> => {
-    if (foundMember === null) return;
-    setBusyUserId(foundMember.userId);
-    setActionError(null);
-    try {
-      await addPlatformMember(channel.channelId, foundMember.userId, newRole);
-      setFoundMember(null);
-      setSearchLogin("");
-      await loadMembers();
-    } catch (error: unknown) {
-      setActionError(errorText(error, texts.error));
-      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-    } finally {
-      setBusyUserId(null);
     }
   };
 
@@ -296,7 +224,7 @@ const ChannelInspector = ({
   };
 
   return (
-    <SubInspector ariaLabel={texts.editChannel(channel.displayName)} title={texts.editChannel(channel.displayName)} identifier={channel.channelId} closeLabel={dashboardCommonTexts().close} onClose={onClose}>
+    <SubInspector ariaLabel={texts.editChannel(channel.displayName)} title={texts.editChannel(channel.displayName)} identifier={channel.channelId} closeLabel={common.close} onClose={onClose}>
       <StateRow
         label={texts.identity}
         tone={connectionTone(channel)}
@@ -304,16 +232,14 @@ const ChannelInspector = ({
         detail={!channel.broadcasterConnected && channel.fullConsent ? texts.consentPendingHint : channel.login}
       />
       <section className="config-section platform-inspector-section" aria-label={texts.toggleConsent}>
-        <div className="section-heading"><h3>{texts.toggleConsent}</h3></div>
-        <div className="form-actions">
-          <Switch
-            ariaLabel={texts.fullConsent}
-            checked={channel.fullConsent}
-            pending={consentInProgress}
-            onChange={() => { void toggleConsent(); }}
-          />
-          <span className="muted">{channel.fullConsent ? texts.yes : texts.no}</span>
-        </div>
+        <Switch
+          layout="inline"
+          label={texts.fullConsent}
+          hint={common.immediate}
+          checked={channel.fullConsent}
+          pending={consentInProgress}
+          onChange={() => { void toggleConsent(); }}
+        />
       </section>
       <InvitationLink channel={channel} />
       <section className="config-section platform-inspector-section" aria-label={texts.members}>
@@ -323,40 +249,49 @@ const ChannelInspector = ({
         {members.data === null ? null : (
           <MembersTable
             members={members.data.members}
-            pendingRemoval={pendingRemoval}
-            confirmButton={confirmationButton}
+            busyUserId={busyUserId}
             onRoleChange={(member, role) => { void changeRole(member, role); }}
-            onRemove={(member) => { setPendingRemoval(member.userId); }}
-            onConfirmRemoval={(member) => { void removeMember(member); }}
-            onCancelRemoval={() => { setPendingRemoval(null); }}
+            onRemove={(member) => { setPendingRemoval(member); }}
           />
-        )}
-      </section>
-      <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
-        <div className="section-heading"><h3>{texts.addMember}</h3></div>
-        <form className="inspector-form" onSubmit={(event) => { void searchUser(event); }}>
-          <Field className="config-field--medium" id={"betreiber-mitglied-suche-" + channel.channelId} label={texts.twitchLogin} value={searchLogin} onChange={setSearchLogin} icon="search" />
-          <div className="form-actions">
-            <button className="button" type="submit" disabled={searchInProgress || searchLogin.trim().length === 0}>{searchInProgress ? texts.searching : texts.search}</button>
-          </div>
-        </form>
-        {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
-        {foundMember === null ? null : (
-          <div className="inspector-result">
-            <div>
-              <strong>{userName(foundMember)}</strong>
-              <span>@{foundMember.login} · {texts.twitchId(foundMember.userId)}</span>
-            </div>
-            <label className="config-field config-field--medium">{texts.role}
-              <select aria-label={texts.newRole} value={newRole} onChange={(event) => { setNewRole(event.target.value as "manager" | "operator"); }}>
-                {roleOptions()}
-              </select>
-            </label>
-            <button className="button button--primary" type="button" disabled={busyUserId === foundMember.userId} onClick={() => { void addMember(); }}>{texts.add}</button>
-          </div>
         )}
         {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
       </section>
+      <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
+        <div className="section-heading"><h3>{texts.addMember}</h3></div>
+        <MemberGrantEditor
+          roles={["manager", "operator"]}
+          defaultRole="operator"
+          texts={{
+            ariaLabel: texts.addMember,
+            title: texts.addMember,
+            searchLabel: texts.twitchLogin,
+            searchHint: texts.twitchLoginHint,
+            searchButton: texts.search,
+            searchingButton: texts.searching,
+            roleLabel: texts.role,
+            roleHint: texts.roleHint,
+            saveLabel: texts.add,
+            confirmTitle: texts.addMemberConfirmTitle,
+            confirmDescription: texts.addMemberConfirmDescription,
+            confirmButton: texts.addMemberConfirmButton,
+          }}
+          onSearch={(login) => searchPlatformUser(login).then((response) => response.user)}
+          onGrant={(userId, role) => addPlatformMember(channel.channelId, userId, role as "manager" | "operator").then(() => undefined)}
+          errorText={(error) => errorText(error, texts.error)}
+          onGranted={() => { void loadMembers(); }}
+          onAuthenticationRequired={onAuthenticationRequired}
+        />
+      </section>
+      <ConfirmDialog
+        opened={pendingRemoval !== null}
+        title={texts.removeConfirmTitle(pendingRemoval === null ? "" : memberName(pendingRemoval))}
+        description={texts.removeQuestion(pendingRemoval === null ? "" : memberName(pendingRemoval))}
+        confirmLabel={texts.confirmRemove}
+        cancelLabel={common.cancel}
+        danger
+        onCancel={() => { setPendingRemoval(null); }}
+        onConfirm={() => { if (pendingRemoval !== null) void removeMember(pendingRemoval); }}
+      />
     </SubInspector>
   );
 };
@@ -371,28 +306,25 @@ const ChannelRelease = ({
   onClose: () => void;
 }): ReactElement => {
   const texts = platformTexts();
+  const common = dashboardCommonTexts();
   const [login, setLogin] = useState("");
   const [searchInProgress, setSearchInProgress] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | undefined>(undefined);
   const [found, setFound] = useState<PanelTwitchUser | null>(null);
   const [fullConsent, setFullConsent] = useState(true);
   const [confirmation, setConfirmation] = useState(false);
   const [releaseInProgress, setReleaseInProgress] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const confirmationButton = useRef<HTMLButtonElement | null>(null);
+  const [actionError, setActionError] = useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    if (confirmation) confirmationButton.current?.focus();
-  }, [confirmation]);
-
-  const searchUser = async (event: SyntheticEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
+  const searchUser = async (): Promise<void> => {
+    const trimmed = login.trim();
+    if (searchInProgress || trimmed.length === 0) return;
     setSearchInProgress(true);
-    setSearchError(null);
+    setSearchError(undefined);
     setFound(null);
-    setConfirmation(false);
     try {
-      setFound((await searchPlatformUser(login)).user);
+      setFound((await searchPlatformUser(trimmed)).user);
+      setFullConsent(true);
     } catch (error: unknown) {
       setSearchError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
@@ -404,14 +336,15 @@ const ChannelRelease = ({
   const releaseChannel = async (): Promise<void> => {
     if (found === null) return;
     setReleaseInProgress(true);
-    setActionError(null);
+    setActionError(undefined);
     try {
       await releasePlatformChannel(found.login, fullConsent);
+      setConfirmation(false);
       setFound(null);
       setLogin("");
-      setConfirmation(false);
       await onReload();
     } catch (error: unknown) {
+      setConfirmation(false);
       setActionError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
@@ -420,41 +353,53 @@ const ChannelRelease = ({
   };
 
   return (
-    <SubInspector ariaLabel={texts.releaseChannel} title={texts.releaseChannel} closeLabel={dashboardCommonTexts().close} onClose={onClose}>
-      <form className="inspector-form" onSubmit={(event) => { void searchUser(event); }}>
-        <label className="config-field config-field--medium" htmlFor="betreiber-kanal-login">{texts.twitchLogin}
-          <input id="betreiber-kanal-login" value={login} onChange={(event) => { setLogin(event.target.value); }} autoComplete="off" />
-        </label>
-        <div className="form-actions">
-          <button className="button" type="submit" disabled={searchInProgress || login.trim().length === 0}>{searchInProgress ? texts.searching : texts.search}</button>
-        </div>
-      </form>
-      {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
+    <>
+      <EditorShell
+        ariaLabel={texts.releaseChannel}
+        title={texts.releaseChannel}
+        sections={[{
+          id: "release",
+          label: texts.releaseChannel,
+          content: (
+            <>
+              <div className="form-row">
+                <Field label={texts.twitchLogin} hint={texts.twitchLoginHint} prefix="@" value={login} onChange={setLogin} {...(searchError === undefined ? {} : { error: searchError })} disabled={searchInProgress} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); void searchUser(); }} />
+                <Button variant="neutral" disabled={searchInProgress || login.trim().length === 0} onClick={() => { void searchUser(); }}>{searchInProgress ? texts.searching : texts.search}</Button>
+              </div>
+              {found === null ? null : (
+                <div className="member-grant-editor__result">
+                  <div><strong>{texts.userFound}: {found.displayName}</strong><span>@{found.login} · {texts.twitchId(found.userId)}</span></div>
+                  <Switch layout="card" label={texts.fullConsent} description={texts.fullConsentCardDescription} checked={fullConsent} onChange={setFullConsent} />
+                </div>
+              )}
+            </>
+          ),
+        }]}
+        dirty={found !== null}
+        pending={releaseInProgress}
+        {...(actionError === undefined ? {} : { error: actionError })}
+        onSave={() => { if (found !== null) setConfirmation(true); }}
+        onDiscard={() => { setFound(null); setSearchError(undefined); }}
+        saveLabel={texts.releaseChannel}
+        discardLabel={common.discard}
+        savedLabel={common.saved}
+        pendingLabel={common.saving}
+        issueLabels={{ error: common.error, warning: common.warning }}
+        onClose={onClose}
+        closeLabel={common.close}
+      />
       {found === null ? null : (
-        <div className="inspector-result">
-          <div>
-            <strong>{texts.userFound}: {found.displayName}</strong>
-            <span>@{found.login} · {texts.twitchId(found.userId)}</span>
-          </div>
-          <label className="config-field config-field--medium">
-            <span>{texts.setFullConsent}</span>
-            <input type="checkbox" checked={fullConsent} onChange={(event) => { setFullConsent(event.target.checked); }} />
-          </label>
-          <button className="button" type="button" onClick={() => { setActionError(null); setConfirmation(true); }}>{texts.releaseChannel}</button>
-        </div>
+        <ConfirmDialog
+          opened={confirmation}
+          title={texts.releaseChannelQuestion(found.displayName)}
+          description={texts.releaseChannelDescription(found.displayName, found.userId, fullConsent ? texts.yes : texts.no)}
+          confirmLabel={texts.confirmRelease}
+          cancelLabel={common.cancel}
+          onCancel={() => { setConfirmation(false); }}
+          onConfirm={() => { void releaseChannel(); }}
+        />
       )}
-      {confirmation && found !== null ? (
-        <div className="inspector-confirmation" role="alertdialog" aria-label={texts.releaseChannelQuestion(found.displayName)}>
-          <h3>{texts.releaseChannelQuestion(found.displayName)}</h3>
-          <p>{texts.releaseChannelDescription(found.displayName, found.userId, fullConsent ? texts.yes : texts.no)}</p>
-          <div className="form-actions">
-            <button ref={confirmationButton} className="button button--primary" type="button" disabled={releaseInProgress} onClick={() => { void releaseChannel(); }}>{texts.confirmRelease}</button>
-            <button className="button button--quiet" type="button" disabled={releaseInProgress} onClick={() => { setConfirmation(false); }}>{dashboardCommonTexts().cancel}</button>
-          </div>
-        </div>
-      ) : null}
-      {actionError === null ? null : <p className="form-error" role="alert">{actionError}</p>}
-    </SubInspector>
+    </>
   );
 };
 
@@ -474,12 +419,9 @@ const InvitationLink = ({ channel: channel }: { channel: PanelPlatformChannelOve
   return (
     <section className="config-section platform-inspector-section" aria-label={texts.invitationLink}>
       <div className="section-heading"><h2>{texts.invitationLink}</h2></div>
-      <p className="muted">{texts.invitationLinkHint}</p>
-      <label className="config-field config-field--wide" htmlFor="betreiber-einladungslink">{texts.invitationLink}
-        <input id="betreiber-einladungslink" readOnly value={link} />
-      </label>
-      <div className="form-actions">
-        <button className="button button--with-icon" type="button" onClick={() => { void copyLinkToClipboard(); }}><Icon name={copied ? "copied" : "copy"} size={16} />{copied ? texts.linkCopied : texts.copyLink}</button>
+      <div className="form-row">
+        <Field label={texts.invitationLink} hint={texts.invitationLinkHint} value={link} onChange={() => {}} readOnly mono />
+        <Button variant="neutral" icon={copied ? "copied" : "copy"} onClick={() => { void copyLinkToClipboard(); }}>{copied ? texts.linkCopied : texts.copyLink}</Button>
       </div>
       {!channel.broadcasterConnected && channel.fullConsent ? <StateRow label={texts.identity} tone="warning" word={texts.consentPending} detail={texts.consentPendingHint} /> : null}
     </section>
