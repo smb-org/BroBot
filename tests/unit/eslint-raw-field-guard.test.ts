@@ -54,12 +54,7 @@ describe("raw-field ESLint guard (editor-konzept 15.5)", () => {
     expect(await lintProbe("src/dashboard/__eslint_probe_string__.tsx", 'export const probe = "<input";\n')).toBe(false);
   }, 20_000);
 
-  it("does not yet cover the module panels -- exempted until they finish migrating (TODO #169)", async () => {
-    // The module panels (text_commands, raid, ads) are mid-migration and
-    // still contain raw fields at the time this guard landed; the rule is
-    // deliberately scoped to skip src/modules/*/panel/** for now (see the
-    // TODO in eslint.config.js). This probe documents that exemption so it
-    // fails loudly, instead of silently, once someone narrows the scope.
-    expect(await lintProbe("src/modules/raid/panel/__eslint_probe_input__.tsx", "export const Probe = () => <input />;\n")).toBe(false);
+  it("covers the module panels too", async () => {
+    expect(await lintProbe("src/modules/raid/panel/__eslint_probe_input__.tsx", "export const Probe = () => <input />;\n")).toBe(true);
   }, 20_000);
 });
