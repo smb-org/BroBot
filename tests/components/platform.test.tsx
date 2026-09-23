@@ -92,12 +92,36 @@ describe("Platform level", () => {
     const table = channelRow.closest("table");
     if (table === null) throw new Error("Kanalübersicht-Tabelle fehlt");
     expect(table).toHaveClass("platform-channel-table");
+    expect(within(table).getByRole("columnheader", { name: "Kennung" })).toBeInTheDocument();
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(5);
     const membersHeader = within(table).getByRole("columnheader", { name: "Mitglieder" });
     const consentHeader = within(table).getByRole("columnheader", { name: "Zustimmung" });
     const counts = within(channelRow).getByText("1 · 1 · 0");
     expect(consentHeader).toHaveAttribute("title", "Vollzustimmung");
     expect(membersHeader).toHaveAttribute("title", expect.stringContaining("·"));
     expect(counts).toHaveAttribute("title", membersHeader.getAttribute("title"));
+  });
+
+  it("hides the channel id and uses the UI Select for member roles while the inspector is open", async () => {
+    setUpPlatform(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const channelRow = await screen.findByRole("row", { name: /alpha_login/ });
+    fireEvent.click(channelRow);
+    const table = channelRow.closest("table");
+    if (table === null) throw new Error("Kanalübersicht-Tabelle fehlt");
+    expect(table).toHaveClass("platform-channel-table--inspector-open");
+    expect(within(table).queryByRole("columnheader", { name: "Kennung" })).not.toBeInTheDocument();
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(4);
+    expect(within(table).getByRole("columnheader", { name: "Identität" })).toBeInTheDocument();
+    expect(within(channelRow).getByRole("rowheader")).toHaveAttribute("title", "123");
+
+    const role = await screen.findByRole("combobox", { name: "Rolle: Helfer" });
+    expect(role).toHaveClass("mantine-Select-input");
+    expect(role).not.toBeInstanceOf(HTMLSelectElement);
+    expect(role).not.toBeDisabled();
   });
 
   it("asks for confirmation before removing a member and does not act yet", async () => {

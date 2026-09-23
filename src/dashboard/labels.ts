@@ -62,8 +62,10 @@ export interface PlatformTexts {
   yes: string;
   no: string;
   identity: string;
+  identityShort: string;
   connected: string;
   consentPending: string;
+  consentPendingShort: string;
   consentPendingHint: string;
   load: string;
   noChannels: string;
@@ -126,8 +128,10 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     yes: "Ja",
     no: "Nein",
     identity: "Broadcaster-Identität",
+    identityShort: "Identität",
     connected: "Verbunden",
     consentPending: "Zustimmung ausstehend",
+    consentPendingShort: "Ausstehend",
     consentPendingHint: "Vollzustimmung ist gesetzt. Der Streamer muss den Einladungslink öffnen und Twitch bestätigen.",
     load: "Betreiberdaten werden geladen …",
     noChannels: "Noch kein Kanal freigegeben.",
@@ -194,8 +198,10 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     yes: "Yes",
     no: "No",
     identity: "Broadcaster identity",
+    identityShort: "Identity",
     connected: "Connected",
     consentPending: "Consent pending",
+    consentPendingShort: "Pending",
     consentPendingHint: "Full consent is set. The streamer must open the invitation link and confirm Twitch.",
     load: "Loading operator data …",
     noChannels: "No channel has been released yet.",

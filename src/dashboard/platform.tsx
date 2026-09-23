@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { InspectorHeading, ListDetail, SubInspector, Switch, useInspectorSelection } from "./ui";
+import { InspectorHeading, ListDetail, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
 import { NavigationIcon, StateRow, type StateTone } from "./module-panels";
 
 interface PlatformPageProperties {
@@ -52,16 +52,23 @@ const memberName = (member: PanelMember): string =>
 const userName = (user: PanelTwitchUser): string =>
   user.displayName.length > 0 ? user.displayName : "@" + user.login;
 
-const roleOptions = (): ReactElement[] => CHANNEL_ROLES.filter((role) => role !== "broadcaster").map((role) => (
-  <option key={role} value={role}>{roleLabel(role)}</option>
+const roleSelectOptions = (): SelectOption[] => CHANNEL_ROLES.filter((role) => role !== "broadcaster").map((role) => ({
+  value: role,
+  label: roleLabel(role),
+}));
+
+const roleOptions = (): ReactElement[] => roleSelectOptions().map((option) => (
+  <option key={option.value} value={option.value}>{option.label}</option>
 ));
 
 const connectionTone = (channel: PanelPlatformChannelOverview): StateTone =>
   channel.broadcasterConnected ? "healthy" : channel.fullConsent ? "warning" : "neutral";
 
-const connectionWord = (channel: PanelPlatformChannelOverview): string => {
+const connectionWord = (channel: PanelPlatformChannelOverview, compact = false): string => {
   const texts = platformTexts();
-  return channel.broadcasterConnected ? texts.connected : channel.fullConsent ? texts.consentPending : texts.no;
+  if (channel.broadcasterConnected) return texts.connected;
+  if (!channel.fullConsent) return texts.no;
+  return compact ? texts.consentPendingShort : texts.consentPending;
 };
 
 const MembersTable = ({
@@ -103,13 +110,12 @@ const MembersTable = ({
                 </th>
                 <td>
                   {member.role === "broadcaster" ? <span>{roleLabel(member.role)}</span> : (
-                    <select
-                      aria-label={texts.role + ": " + memberName(member)}
+                    <Select
+                      ariaLabel={texts.role + ": " + memberName(member)}
                       value={member.role}
-                      onChange={(event) => { onRoleChange(member, event.target.value as "manager" | "operator"); }}
-                    >
-                      {roleOptions()}
-                    </select>
+                      onChange={(role) => { if (role !== null) onRoleChange(member, role as "manager" | "operator"); }}
+                      options={roleSelectOptions()}
+                    />
                   )}
                 </td>
                 <td className="table__action">
@@ -579,6 +585,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
   }, [onAuthenticationRequired, closeChannel, texts.error]);
 
   const selectedChannel = overview.data?.find((channel) => channel.channelId === selectedChannelId) ?? null;
+  const inspectorOpen = selectedChannelId !== null || channelReleaseOpen;
 
   const loadMoreAudit = async (): Promise<void> => {
     if (auditLoadingMore || audit.data?.nextCursor === null || audit.data?.nextCursor === undefined) return;
@@ -610,16 +617,16 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
               {overview.data?.length === 0 ? <p className="muted">{texts.noChannels}</p> : null}
               {overview.data === null ? null : overview.data.length === 0 ? null : (
                 <div className="table-wrap">
-                  <table className="table table--content platform-channel-table">
-                    <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.identifier}</th><th scope="col" title={texts.fullConsent}>{texts.fullConsentColumn}</th><th scope="col" title={`${texts.broadcaster} · ${texts.manager} · ${texts.operator}`}>{texts.members}</th><th scope="col">{texts.identity}</th></tr></thead>
+                  <table className={`table table--content platform-channel-table${inspectorOpen ? " platform-channel-table--inspector-open" : ""}`}>
+                    <thead><tr><th scope="col">{texts.login}</th>{inspectorOpen ? null : <th scope="col">{texts.identifier}</th>}<th scope="col" title={texts.fullConsent}>{texts.fullConsentColumn}</th><th scope="col" title={`${texts.broadcaster} · ${texts.manager} · ${texts.operator}`}>{texts.members}</th><th scope="col">{inspectorOpen ? texts.identityShort : texts.identity}</th></tr></thead>
                     <tbody>{overview.data.map((channel) => {
                       const roleCountsTitle = `${texts.broadcaster} · ${texts.manager} · ${texts.operator}`;
                       return <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}>
-                        <th scope="row" title={channel.login}>{channel.login}</th>
-                        <td className="mono" title={channel.channelId}>{channel.channelId}</td>
+                        <th scope="row" title={inspectorOpen ? channel.channelId : channel.login}>{channel.login}</th>
+                        {inspectorOpen ? null : <td className="mono" title={channel.channelId}>{channel.channelId}</td>}
                         <td>{channel.fullConsent ? texts.yes : texts.no}</td>
                         <td className="number" title={roleCountsTitle}>{[channel.memberCounts.broadcaster, channel.memberCounts.manager, channel.memberCounts.operator].map(formatNumber).join(" · ")}</td>
-                        <td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel)}</span></span></td>
+                        <td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel, inspectorOpen)}</span></span></td>
                       </tr>;
                     })}</tbody>
                   </table>
