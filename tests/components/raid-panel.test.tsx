@@ -31,11 +31,14 @@ const renderRaid = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "ma
   /></UiProvider>);
 };
 
-const settingsFetch = (patch: (body: unknown) => Response = (body) => jsonResponse({ settings: body, warnings: [] })) =>
+const settingsFetch = (patch: (body: unknown) => Response = (body) => {
+  const request = body as { revision: number; settings: typeof settings };
+  return jsonResponse({ settings: request.settings, revision: request.revision + 1, warnings: [] });
+}) =>
   vi.fn<typeof fetch>((input, init) => {
     const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
     if (path.endsWith("/settings") && init?.method === "PATCH") return Promise.resolve(patch(typeof init.body === "string" ? JSON.parse(init.body) as unknown : null));
-    if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings }));
+    if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1 }));
     if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
     return Promise.resolve(jsonResponse({}, 404));
   });

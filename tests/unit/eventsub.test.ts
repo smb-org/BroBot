@@ -255,6 +255,46 @@ describe("EventSub inbound", () => {
     await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 1 });
   });
 
+  it("keeps newer online state and stream-end brakes when a delayed offline reaches the HTTP handler", async () => {
+    const channelId = "channel-stream-order";
+    await insertChannel(database, channelId);
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
+       VALUES (?, 'online', '2026-09-19T10:00:00.500Z', 'eventsub')`,
+    ).bind(channelId).run();
+    await database.prepare(
+      `INSERT INTO channel_controls
+        (channel_id, muted, muted_until, mute_until_stream_end, paused, paused_until, pause_until_stream_end, updated_at)
+       VALUES (?, 1, NULL, 1, 1, NULL, 1, '2026-09-19T10:00:00.500Z')`,
+    ).bind(channelId).run();
+    vi.setSystemTime(new Date("2026-09-19T10:00:01.000Z"));
+
+    const body = JSON.stringify({
+      subscription: {
+        type: "stream.offline",
+        condition: { broadcaster_user_id: channelId },
+      },
+      event: {},
+    });
+    const response = await eventSubRouter.fetch(
+      signedRequest(secret, "notification", body, "delayed-offline", "2026-09-19T10:00:00.100Z"),
+      environment(),
+    );
+
+    expect(response.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT state, changed_at FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(channelId).first()).resolves.toEqual({ state: "online", changed_at: "2026-09-19T10:00:00.500Z" });
+    await expect(database.prepare(
+      "SELECT muted, mute_until_stream_end, paused, pause_until_stream_end FROM channel_controls WHERE channel_id = ?",
+    ).bind(channelId).first()).resolves.toEqual({
+      muted: 1,
+      mute_until_stream_end: 1,
+      paused: 1,
+      pause_until_stream_end: 1,
+    });
+  });
+
   it("rejects a timestamp too far in the future", async () => {
     const timestamp = "2026-09-19T10:10:30.001Z";
     const body = JSON.stringify({ challenge: "zukünftig" });

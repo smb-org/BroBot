@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { EVENT_TONES, type AuditArea, type EventTone } from "../contracts/values";
 import { isAuditArea } from "./audit/areas";
 import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../panel-contract";
+import { runDashboardNavigationGuards } from "./ui/navigation-guard";
 
 export type DashboardRoute =
   | { kind: "overview" }
@@ -15,6 +16,23 @@ export type DashboardRoute =
     auditFilters?: PanelAuditFilters;
   }
   | { kind: "module"; channelId: string; moduleId: string };
+
+let suppressNextPopState = false;
+let historyIndex = 0;
+
+const historyIndexFromState = (state: unknown): number | null => {
+  if (typeof state !== "object" || state === null || Array.isArray(state)) return null;
+  const index: unknown = Reflect.get(state, "__brobotRouteIndex");
+  return typeof index === "number" && Number.isSafeInteger(index) && index >= 0 ? index : null;
+};
+
+const historyStateWithIndex = (index: number): Record<string, unknown> => {
+  const current: unknown = window.history.state;
+  return {
+    ...(typeof current === "object" && current !== null && !Array.isArray(current) ? current : {}),
+    __brobotRouteIndex: index,
+  };
+};
 
 const decodeSegment = (value: string): string | null => {
   try {
@@ -121,30 +139,63 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   return path;
 };
 
-export const navigateToDashboardRoute = (route: DashboardRoute): void => {
+export const navigateToDashboardRoute = (route: DashboardRoute, onNavigated?: () => void): void => {
   const path = dashboardRoutePath(route);
-  if (`${window.location.pathname}${window.location.search}` === path) return;
-  window.history.pushState({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
+  runDashboardNavigationGuards(() => {
+    if (`${window.location.pathname}${window.location.search}` !== path) {
+      historyIndex += 1;
+      window.history.pushState(historyStateWithIndex(historyIndex), "", path);
+      suppressNextPopState = true;
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      suppressNextPopState = false;
+    }
+    onNavigated?.();
+  }, () => undefined);
 };
 
 export const replaceDashboardRoute = (route: DashboardRoute): void => {
-  window.history.replaceState({}, "", dashboardRoutePath(route));
-  window.dispatchEvent(new PopStateEvent("popstate"));
+  const path = dashboardRoutePath(route);
+  if (`${window.location.pathname}${window.location.search}` === path) return;
+  runDashboardNavigationGuards(() => {
+    window.history.replaceState(historyStateWithIndex(historyIndex), "", path);
+    suppressNextPopState = true;
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    suppressNextPopState = false;
+  }, () => undefined);
 };
 
 export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute) => void] => {
   const [route, setRoute] = useState<DashboardRoute>(() => parseDashboardRoute(window.location.pathname, window.location.search));
 
   useEffect(() => {
-    const onPopState = (): void => { setRoute(parseDashboardRoute(window.location.pathname, window.location.search)); };
+    const currentIndex = historyIndexFromState(window.history.state);
+    historyIndex = currentIndex ?? 0;
+    if (currentIndex === null) window.history.replaceState(historyStateWithIndex(historyIndex), "", window.location.href);
+    const onPopState = (): void => {
+      const targetRoute = parseDashboardRoute(window.location.pathname, window.location.search);
+      const targetIndex = historyIndexFromState(window.history.state);
+      if (suppressNextPopState) {
+        setRoute(targetRoute);
+        if (targetIndex !== null) historyIndex = targetIndex;
+        return;
+      }
+      if (targetIndex !== null && targetIndex === historyIndex) {
+        setRoute(targetRoute);
+        return;
+      }
+      const previousIndex = historyIndex;
+      const undoDelta = targetIndex === null || targetIndex < previousIndex ? 1 : -1;
+      runDashboardNavigationGuards(() => {
+        if (targetIndex !== null) historyIndex = targetIndex;
+        setRoute(targetRoute);
+      }, () => { window.history.go(undoDelta); });
+    };
     window.addEventListener("popstate", onPopState);
     return () => { window.removeEventListener("popstate", onPopState); };
   }, []);
 
   const navigate = (nextRoute: DashboardRoute): void => {
-    navigateToDashboardRoute(nextRoute);
-    setRoute(nextRoute);
+    navigateToDashboardRoute(nextRoute, () => { setRoute(nextRoute); });
   };
 
   return [route, navigate];

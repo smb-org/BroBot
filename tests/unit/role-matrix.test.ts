@@ -332,7 +332,7 @@ const actions: readonly RoleAction[] = [
       const result = await createTextCommandRepository(
         database as unknown as D1Database,
         authorizeModuleManagementMutation,
-      ).delete("kanal-a", "hallo", actor, timestamp);
+      ).delete("kanal-a", "hallo", 1, actor, timestamp);
       return result.ok;
     },
   },

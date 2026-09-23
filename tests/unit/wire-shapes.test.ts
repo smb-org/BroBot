@@ -528,6 +528,7 @@ describe("serialized contract shapes", () => {
         lastUsedAt: null,
         createdAt: "2026-09-21T12:00:00.000Z",
         updatedAt: "2026-09-21T12:00:00.000Z",
+        revision: 1,
       };
 
       // The ad schedule response goes to the panel and likewise sat
@@ -673,7 +674,7 @@ describe("serialized contract shapes", () => {
         "$.realtime.panelPrincipal: channelId,expiresAt,kind,role,sessionId,userId,v",
         "$.realtime.systemHello: channelId,createdAt,id,payload,type,version",
         "$.realtime.systemHello.payload: ",
-        "$.textCommand: aliases,channelId,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,streamCondition,text,updatedAt,userCooldownSeconds",
+        "$.textCommand: aliases,channelId,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,updatedAt,userCooldownSeconds",
       ]);
       expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
       expect(MODULES.map((module) => module.id).sort()).toEqual([

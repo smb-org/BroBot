@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
   Button, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
-  SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
+  registerDashboardNavigationGuard, SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, type TextCommand, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
@@ -148,7 +148,7 @@ interface TextCommandEditorProperties {
   botIsModerator: boolean | null;
   onClose: () => void;
   onCreateSuccess?: () => void;
-  onGuardChange: (guard: ((proceed: () => void) => void) | null) => void;
+  onGuardChange: (guard: ((proceed: () => void, cancel?: () => void) => void) | null) => void;
   onRefresh: (selectName?: string) => Promise<TextCommand[]>;
   onDeleted: () => Promise<void>;
 }
@@ -157,6 +157,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
   const labels = useMemo(() => textCommandsTexts(language), [language]);
   const resolvedLanguage = language ?? dashboardLanguage();
   const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial);
+  const draftRevision = useRef(command?.revision ?? null);
   const [active, setActive] = useState(command?.enabled ?? true);
   const [activePending, setActivePending] = useState(false);
   const [pending, setPending] = useState(false);
@@ -240,7 +241,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     try {
       const returnedWarnings = isCreate
         ? await createTextCommand(channelId, payload)
-        : await saveTextCommand(channelId, { oldName: command.name, ...payload });
+        : await saveTextCommand(channelId, { oldName: command.name, revision: draftRevision.current ?? command.revision, ...payload });
+      if (!isCreate && draftRevision.current !== null) draftRevision.current += 1;
       accept({ ...draft, ...payload, name: payload.name });
       setServerWarnings(returnedWarnings);
       await onRefresh(payload.name);
@@ -318,6 +320,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     const latest = data.find((item) => item.name === command?.name || item.name === normalizedName);
     if (latest === undefined) { onClose(); return; }
     accept(draftFromCommand(latest));
+    draftRevision.current = latest.revision;
     setActive(latest.enabled);
     setConcurrentConflict(false); setFieldError(null); setError(undefined); setServerWarnings([]);
   };
@@ -326,7 +329,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     if (command === null) return;
     setActivePending(true); setError(undefined);
     try {
-      await toggleTextCommand(channelId, command.name, next);
+      await toggleTextCommand(channelId, command.name, command.revision, next);
       setActive(next);
       await onRefresh(command.name);
     } catch {
@@ -337,7 +340,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
   const remove = async (): Promise<void> => {
     if (command === null) return;
     setDeleting(true); setError(undefined);
-    try { await deleteTextCommand(channelId, command.name); setConfirmingDelete(false); await onDeleted(); }
+    try { await deleteTextCommand(channelId, command.name, command.revision); setConfirmingDelete(false); await onDeleted(); }
     catch { setError(labels.deleteError); }
     finally { setDeleting(false); }
   };
@@ -607,13 +610,14 @@ export const TextCommandsPanel = ({
   const [error, setError] = useState<string | null>(null);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
   const [minimumBusyName, setMinimumBusyName] = useState<string | null>(null);
-  const guardRef = useRef<((proceed: () => void) => void) | null>(null);
-  const guardSwitch = useCallback((proceed: () => void): void => {
+  const guardRef = useRef<((proceed: () => void, cancel?: () => void) => void) | null>(null);
+  const guardSwitch = useCallback((proceed: () => void, cancel?: () => void): void => {
     const guard = guardRef.current;
     if (guard === null) proceed();
-    else guard(proceed);
+    else guard(proceed, cancel);
   }, []);
-  const registerGuard = useCallback((next: ((proceed: () => void) => void) | null): void => { guardRef.current = next; }, []);
+  const registerGuard = useCallback((next: ((proceed: () => void, cancel?: () => void) => void) | null): void => { guardRef.current = next; }, []);
+  useEffect(() => registerDashboardNavigationGuard(guardSwitch), [guardSwitch]);
   const initialSelectionApplied = useRef(false);
 
   const refresh = useCallback(async (selectAfter?: string): Promise<TextCommand[]> => {
@@ -667,13 +671,13 @@ export const TextCommandsPanel = ({
   });
   const toggle = async (command: TextCommand): Promise<void> => {
     setToggleBusyName(command.name); setError(null);
-    try { await toggleTextCommand(channelId, command.name, !command.enabled); await refresh(); }
+    try { await toggleTextCommand(channelId, command.name, command.revision, !command.enabled); await refresh(); }
     catch { setError(labels.saveError); }
     finally { setToggleBusyName(null); }
   };
   const changeMinimum = async (command: TextCommand, minimumTier: TextCommandMinimumTier): Promise<void> => {
     setMinimumBusyName(command.name); setError(null);
-    try { await setTextCommandMinimumTier(channelId, command.name, minimumTier); await refresh(); }
+    try { await setTextCommandMinimumTier(channelId, command.name, command.revision, minimumTier); await refresh(); }
     catch { setError(labels.saveError); }
     finally { setMinimumBusyName(null); }
   };

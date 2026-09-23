@@ -9,7 +9,7 @@ export interface UseDraftGuardResult {
   saving: boolean;
   /** Runs `proceed` right away if the draft isn't dirty; otherwise holds it
    *  behind the confirmation until one of the three actions below resolves. */
-  guardSwitch: (proceed: () => void) => void;
+  guardSwitch: (proceed: () => void, cancel?: () => void) => void;
   continueEditing: () => void;
   discardAndSwitch: () => void;
   saveAndSwitch: () => Promise<void>;
@@ -31,7 +31,7 @@ export const useDraftGuard = (
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
-  const pending = useRef<(() => void) | null>(null);
+  const pending = useRef<{ proceed: () => void; cancel?: () => void } | null>(null);
 
   useEffect(() => {
     if (!dirty) return;
@@ -43,26 +43,28 @@ export const useDraftGuard = (
     return () => { window.removeEventListener("beforeunload", preventUnload); };
   }, [dirty]);
 
-  const guardSwitch = useCallback((proceed: () => void): void => {
+  const guardSwitch = useCallback((proceed: () => void, cancel?: () => void): void => {
     if (!dirty) {
       proceed();
       return;
     }
-    pending.current = proceed;
+    pending.current = { proceed, ...(cancel === undefined ? {} : { cancel }) };
     setSaveError(undefined);
     setConfirmOpen(true);
   }, [dirty]);
 
   const resolve = (): void => {
-    const proceed = pending.current;
+    const pendingNavigation = pending.current;
     pending.current = null;
     setConfirmOpen(false);
-    proceed?.();
+    pendingNavigation?.proceed();
   };
 
   const continueEditing = useCallback((): void => {
+    const pendingNavigation = pending.current;
     pending.current = null;
     setConfirmOpen(false);
+    pendingNavigation?.cancel?.();
   }, []);
 
   const discardAndSwitch = useCallback((): void => {

@@ -300,6 +300,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     triggerId: messageId,
     payload: target.payload,
     receivedAt: now,
+    eventSubTimestamp: timestamp,
   });
   if (isAdPrewarningTrigger(target.subscriptionType)) {
     try {

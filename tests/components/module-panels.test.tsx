@@ -72,6 +72,7 @@ vi.mock("../../src/modules/registry", () => ({
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
+import { useDashboardRoute } from "../../src/dashboard/router";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
 const editorFixtureSettings = { amount: 2, handle: "ada", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 };
@@ -326,8 +327,10 @@ describe("Module panel loader", () => {
       if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
       if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
         patchBody = typeof init.body === "string" ? JSON.parse(init.body) as unknown : null;
+        const request = patchBody as { revision: number; settings: typeof editorFixtureSettings };
         return Promise.resolve(Response.json({
-          settings: patchBody,
+          settings: request.settings,
+          revision: 2,
           warnings: [{ field: "message", code: "unknown_template_variables", unknownVariables: ["ghost"] }],
         }));
       }
@@ -338,7 +341,7 @@ describe("Module panel loader", () => {
 
     expect(screen.getByText("Modulansichten werden geladen …")).toBeInTheDocument();
     expect(editorFixture.loader).toHaveBeenCalledOnce();
-    resolveSettings?.(Response.json({ settings: editorFixtureSettings }));
+    resolveSettings?.(Response.json({ settings: editorFixtureSettings, revision: 1 }));
 
     const amount = await screen.findByRole("spinbutton", { name: "Menge" });
     const handle = screen.getByRole("textbox", { name: "Konto" });
@@ -367,12 +370,15 @@ describe("Module panel loader", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
     await waitFor(() => expect(patchBody).toEqual({
-      amount: 3,
-      handle: "Ada",
-      message: "Willkommen {viewer}!",
-      mode: "manual",
-      enabled: true,
-      threshold: 4,
+      revision: 1,
+      settings: {
+        amount: 3,
+        handle: "Ada",
+        message: "Willkommen {viewer}!",
+        mode: "manual",
+        enabled: true,
+        threshold: 4,
+      },
     }));
     expect(await screen.findByRole("status")).toHaveTextContent("Gespeichert. Eine Vorlage enthält einen unbekannten Platzhalter.");
   });
@@ -383,7 +389,7 @@ describe("Module panel loader", () => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
       if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") return Promise.resolve(Response.json({ error: "module_settings_changed_concurrently" }, { status: 409 }));
-      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: currentSettings, warnings: [] }));
+      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: currentSettings, revision: 1, warnings: [] }));
       return Promise.resolve(Response.json({}));
     });
     renderSettingsFixture(fetcher);
@@ -399,11 +405,134 @@ describe("Module panel loader", () => {
     expect(await screen.findByRole("textbox", { name: "Nachricht" })).toHaveValue("Serverstand {viewer}");
   });
 
+  it("discards to the last server response after a successful settings save", async () => {
+    const canonicalSettings = { ...editorFixtureSettings, handle: "server-canonical" };
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        return Promise.resolve(Response.json({ settings: canonicalSettings, revision: 2, warnings: [] }));
+      }
+      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1 }));
+      return Promise.resolve(Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const handle = await screen.findByRole("textbox", { name: "Konto" });
+    fireEvent.change(handle, { target: { value: "candidate" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Konto" })).toHaveValue("server-canonical"));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Konto" }), { target: { value: "unsaved-again" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
+    expect(screen.getByRole("textbox", { name: "Konto" })).toHaveValue("server-canonical");
+  });
+
+  it("disables switch cards while a settings save is pending", async () => {
+    let resolvePatch: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        return new Promise<Response>((resolve) => { resolvePatch = resolve; });
+      }
+      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1 }));
+      return Promise.resolve(Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Increase amount" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+    const switchCard = await screen.findByRole("switch", { name: /Zusatzaktion/ });
+    expect(switchCard).toBeDisabled();
+    resolvePatch?.(Response.json({ settings: editorFixtureSettings, revision: 2, warnings: [] }));
+  });
+
+  it("blocks route navigation from a dirty module settings editor", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1 })
+        : Response.json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/editor-fixture");
+    const Harness = (): ReactElement => {
+      const [route, navigate] = useDashboardRoute();
+      return <>
+        <button type="button" onClick={() => { navigate({ kind: "overview" }); }}>Go overview</button>
+        <output>{route.kind}</output>
+        {route.kind === "module" ? <ModulePage
+          channelId="kanal-a"
+          moduleId="editor-fixture"
+          ownRole="manager"
+          modules={[{ id: "editor-fixture", enabled: true, settings: "{}" }]}
+          activeModules={[{ moduleId: "editor-fixture", settings: "{}" }]}
+          onNavigate={vi.fn()}
+          onToggle={vi.fn()}
+        /> : null}
+      </>;
+    };
+    renderWithMantine(<Harness />);
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Konto" }), { target: { value: "draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
+    const guard = await screen.findByRole("dialog");
+    expect(screen.getByText("module")).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Weiter bearbeiten" })).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Verwerfen und wechseln" })).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
+
+    fireEvent.click(within(guard).getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(screen.getByRole("textbox", { name: "Konto" })).toHaveValue("draft");
+    fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
+    await waitFor(() => expect(screen.getByText("overview")).toBeInTheDocument());
+  });
+
+  it("keeps a dirty module draft when browser Back is canceled", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings, revision: 1 })
+        : Response.json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/");
+    const Harness = (): ReactElement => {
+      const [route, navigate] = useDashboardRoute();
+      return <>
+        <button type="button" onClick={() => { navigate({ kind: "module", channelId: "kanal-a", moduleId: "editor-fixture" }); }}>Open module</button>
+        <output>{route.kind}</output>
+        {route.kind === "module" ? <ModulePage
+          channelId="kanal-a"
+          moduleId="editor-fixture"
+          ownRole="manager"
+          modules={[{ id: "editor-fixture", enabled: true, settings: "{}" }]}
+          activeModules={[{ moduleId: "editor-fixture", settings: "{}" }]}
+          onNavigate={vi.fn()}
+          onToggle={vi.fn()}
+        /> : null}
+      </>;
+    };
+    renderWithMantine(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open module" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Konto" }), { target: { value: "keep this draft" } });
+    window.history.back();
+
+    const guard = await screen.findByRole("dialog");
+    expect(window.location.pathname).toBe("/");
+    fireEvent.click(within(guard).getByRole("button", { name: "Weiter bearbeiten" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-a/modules/editor-fixture"));
+    expect(screen.getByRole("textbox", { name: "Konto" })).toHaveValue("keep this draft");
+  });
+
   it("shows all declaration values read-only to an operator without form controls", async () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
-        ? Response.json({ settings: editorFixtureSettings })
+        ? Response.json({ settings: editorFixtureSettings, revision: 1 })
         : Response.json({}));
     });
     renderSettingsFixture(fetcher, "operator");

@@ -163,6 +163,41 @@ describe("module selection", () => {
 });
 
 describe("dispatch and execution", () => {
+  it("delivers mandatory channel events without an activation and through a disabled legacy row", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.offline",
+        triggerId: "offline-without-row",
+        payload: {},
+        receivedAt: NOW,
+      }, sent(), [channelEventsModule]);
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: "channel_events", code: "channel_events.stream.offline" },
+      ]);
+
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+         VALUES ('kanal-a', 'channel_events', 0, '{}')`,
+      ).run();
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.online",
+        triggerId: "online-disabled-row",
+        payload: {},
+        receivedAt: NOW,
+      }, sent(), [channelEventsModule]);
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: "channel_events", code: "channel_events.stream.offline" },
+        { module_id: "channel_events", code: "channel_events.stream.online" },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("runs modules while muted but suppresses chat, announcements, and automatic shoutouts", async () => {
     const database = new TestD1Database();
     try {

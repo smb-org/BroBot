@@ -63,6 +63,7 @@ const commandFor = (text: string): TextCommand => ({
   lastUsedAt: null,
   createdAt: "2026-09-23T00:00:00.000Z",
   updatedAt: "2026-09-23T00:00:00.000Z",
+  revision: 1,
 });
 
 const repositoryFor = (command: TextCommand): TextCommandRepository => ({

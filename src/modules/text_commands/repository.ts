@@ -21,7 +21,7 @@ export interface TextCommandAliasConflict {
 
 export type TextCommandMutationResult =
   | { ok: true }
-  | { ok: false; reason: TextCommandMutationReason; conflict?: TextCommandAliasConflict };
+  | { ok: false; reason: TextCommandMutationReason; conflict?: TextCommandAliasConflict; current?: TextCommand };
 
 export interface TextCommandRepository {
   list(channelId: string): Promise<TextCommand[]>;
@@ -29,7 +29,13 @@ export interface TextCommandRepository {
   findByAlias(channelId: string, alias: string): Promise<TextCommand | null>;
   create(input: NewTextCommand, actor: TextCommandActor): Promise<TextCommandMutationResult>;
   change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult>;
-  delete(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult>;
+  delete(
+    channelId: string,
+    name: string,
+    expectedRevision: number,
+    actor: TextCommandActor,
+    now: string,
+  ): Promise<TextCommandMutationResult>;
   claim(
     channelId: string,
     name: string,

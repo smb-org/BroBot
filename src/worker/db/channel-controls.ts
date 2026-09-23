@@ -154,41 +154,38 @@ export const setChannelControl = async (
   };
   if (JSON.stringify(before[kind]) === JSON.stringify(after[kind])) return { outcome: "unchanged", controls: before };
 
-  const mute = storedControl(after.mute);
-  const pause = storedControl(after.pause);
-  const mutation = db.prepare(
-    `INSERT INTO channel_controls (
-       channel_id, muted, muted_until, mute_until_stream_end,
-       paused, paused_until, pause_until_stream_end, updated_at
-     )
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?
-      WHERE 1 = 1
-      ${actorGuard(ANY_MEMBER_ROLES)}
-     ON CONFLICT (channel_id) DO UPDATE SET
-       muted = excluded.muted,
-       muted_until = excluded.muted_until,
-       mute_until_stream_end = excluded.mute_until_stream_end,
-       paused = excluded.paused,
-       paused_until = excluded.paused_until,
-       pause_until_stream_end = excluded.pause_until_stream_end,
-       updated_at = excluded.updated_at
-     WHERE channel_controls.muted <> excluded.muted
-        OR channel_controls.muted_until IS NOT excluded.muted_until
-        OR channel_controls.mute_until_stream_end <> excluded.mute_until_stream_end
-        OR channel_controls.paused <> excluded.paused
-        OR channel_controls.paused_until IS NOT excluded.paused_until
-        OR channel_controls.pause_until_stream_end <> excluded.pause_until_stream_end`,
-  ).bind(
-    channelId,
-    mute.active,
-    mute.until,
-    mute.untilStreamEnd,
-    pause.active,
-    pause.until,
-    pause.untilStreamEnd,
-    changedAt,
-    ...bindActorGuard(actor, channelId, changedAt),
-  );
+  const requested = storedControl(after[kind]);
+  const mutation = kind === "mute"
+    ? db.prepare(
+      `INSERT INTO channel_controls (channel_id, muted, muted_until, mute_until_stream_end, updated_at)
+       SELECT ?, ?, ?, ?, ?
+        WHERE 1 = 1
+        ${actorGuard(ANY_MEMBER_ROLES)}
+       ON CONFLICT (channel_id) DO UPDATE SET
+         muted = excluded.muted,
+         muted_until = excluded.muted_until,
+         mute_until_stream_end = excluded.mute_until_stream_end,
+         updated_at = excluded.updated_at
+       WHERE channel_controls.muted <> excluded.muted
+          OR channel_controls.muted_until IS NOT excluded.muted_until
+          OR channel_controls.mute_until_stream_end <> excluded.mute_until_stream_end`,
+    ).bind(channelId, requested.active, requested.until, requested.untilStreamEnd, changedAt,
+      ...bindActorGuard(actor, channelId, changedAt))
+    : db.prepare(
+      `INSERT INTO channel_controls (channel_id, paused, paused_until, pause_until_stream_end, updated_at)
+       SELECT ?, ?, ?, ?, ?
+        WHERE 1 = 1
+        ${actorGuard(ANY_MEMBER_ROLES)}
+       ON CONFLICT (channel_id) DO UPDATE SET
+         paused = excluded.paused,
+         paused_until = excluded.paused_until,
+         pause_until_stream_end = excluded.pause_until_stream_end,
+         updated_at = excluded.updated_at
+       WHERE channel_controls.paused <> excluded.paused
+          OR channel_controls.paused_until IS NOT excluded.paused_until
+          OR channel_controls.pause_until_stream_end <> excluded.pause_until_stream_end`,
+    ).bind(channelId, requested.active, requested.until, requested.untilStreamEnd, changedAt,
+      ...bindActorGuard(actor, channelId, changedAt));
 
   const action: AuditWriteAction = kind === "mute"
     ? after.mute.active ? "channel.mute.enabled" : "channel.mute.disabled"
@@ -207,7 +204,7 @@ export const setChannelControl = async (
   if ((results[0]?.meta.changes ?? 0) === 0) {
     return { outcome: "concurrent", controls: await readChannelControls(db, channelId, changedAt) };
   }
-  return { outcome: "changed", controls: after };
+  return { outcome: "changed", controls: await readChannelControls(db, channelId, changedAt) };
 };
 
 /**

@@ -29,6 +29,7 @@ export interface TextCommand {
   lastUsedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  revision: number;
 }
 
 export interface NewTextCommand {
@@ -67,6 +68,7 @@ export interface TextCommandChange {
   userCooldownSeconds: number;
   streamCondition: TextCommandStreamCondition;
   responseType: TextCommandResponseType;
+  expectedRevision?: number;
   now: string;
 }
 
