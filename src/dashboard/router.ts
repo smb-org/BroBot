@@ -6,7 +6,7 @@ import type { PanelEventFilters, PanelEventOrigin } from "../panel-contract";
 export type DashboardRoute =
   | { kind: "overview" }
   | { kind: "platform" }
-  | { kind: "channel"; channelId: string; section: "overview" | "system" | "members" | "events" | "modules"; filters?: PanelEventFilters }
+  | { kind: "channel"; channelId: string; section: "overview" | "system" | "members" | "events" | "modules" | "audit"; filters?: PanelEventFilters }
   | { kind: "module"; channelId: string; moduleId: string };
 
 const decodeSegment = (value: string): string | null => {
@@ -21,16 +21,23 @@ const decodeSegment = (value: string): string | null => {
 const parseEventFilters = (search: string): PanelEventFilters | undefined => {
   const params = new URLSearchParams(search);
   const origin = params.get("origin");
-  const tone = params.get("tone");
+  const tones = [...new Set(params.getAll("tone"))];
   const moduleId = params.get("module");
   const actor = params.get("actor");
   const validOrigin: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
-  const validTone: EventTone | null = tone !== null && EVENT_TONES.includes(tone as EventTone) ? tone as EventTone : null;
+  const validTones = tones.filter((tone): tone is EventTone => EVENT_TONES.includes(tone as EventTone));
+  const validTone: EventTone | null = validTones.length === 1 ? validTones[0] ?? null : null;
   const module = moduleId === null || moduleId.length === 0 ? null : moduleId;
   const person = actor === null || actor.length === 0 ? null : actor;
-  return validOrigin === null && validTone === null && module === null && person === null
+  return validOrigin === null && validTone === null && validTones.length < 2 && module === null && person === null
     ? undefined
-    : { origin: validOrigin, module: module, tone: validTone, person };
+    : {
+      origin: validOrigin,
+      module,
+      tone: validTone,
+      ...(validTones.length > 1 ? { tones: validTones } : {}),
+      person,
+    };
 };
 
 export const parseDashboardRoute = (pathname: string, search = ""): DashboardRoute => {
@@ -46,7 +53,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     if (channelId === null || moduleId === null) return { kind: "overview" };
     return { kind: "module", channelId, moduleId };
   }
-  const channelSections = ["system", "members", "events", "modules"];
+  const channelSections = ["system", "members", "events", "modules", "audit"];
   if (segments[0] !== "channels" || (segments.length !== 2 && segments.length !== 3) ||
       (segments.length === 3 && !channelSections.includes(segments[2] ?? ""))) return { kind: "overview" };
   const channelId = decodeSegment(segments[1] ?? "");
@@ -55,7 +62,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
   const route: DashboardRoute = {
     kind: "channel",
     channelId,
-    section: section === "system" || section === "members" || section === "events" || section === "modules"
+    section: section === "system" || section === "members" || section === "events" || section === "modules" || section === "audit"
       ? section
       : "overview",
   };
@@ -75,7 +82,9 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   const params = new URLSearchParams();
   if (route.filters.origin !== null) params.set("origin", route.filters.origin);
   if (route.filters.module !== null) params.set("module", route.filters.module);
-  if (route.filters.tone !== null) params.set("tone", route.filters.tone);
+  if (route.filters.tones !== undefined && route.filters.tones.length > 1) {
+    for (const tone of route.filters.tones) params.append("tone", tone);
+  } else if (route.filters.tone !== null) params.set("tone", route.filters.tone);
   if (route.filters.person !== null) params.set("actor", route.filters.person);
   const query = params.toString();
   return query.length === 0 ? path : `${path}?${query}`;

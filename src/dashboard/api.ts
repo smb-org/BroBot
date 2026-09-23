@@ -4,6 +4,7 @@ import type {
   PanelPlatformAuditResponse,
   PanelPlatformOverviewResponse,
   PanelChannelOverview,
+  PanelChannelControls,
   PanelChannelsResponse,
   PanelEventsResponse,
   PanelEventFilters,
@@ -16,7 +17,7 @@ import type {
   PanelSystemResponse,
   PanelTwitchUser,
 } from "../panel-contract";
-import type { ChannelRole } from "../contracts/values";
+import type { ChannelControlDuration, ChannelRole } from "../contracts/values";
 
 import { PanelApiError } from "../contracts/panel-error";
 
@@ -205,7 +206,9 @@ export const fetchEvents = (
     params.set("origin", filters.origin);
   }
   if (filters?.module !== null && filters?.module !== undefined) params.set("module", filters.module);
-  if (filters?.tone !== null && filters?.tone !== undefined) params.set("tone", filters.tone);
+  if (filters?.tones !== undefined && filters.tones.length > 1) {
+    for (const tone of filters.tones) params.append("tone", tone);
+  } else if (filters?.tone !== null && filters?.tone !== undefined) params.set("tone", filters.tone);
   if (filters?.person !== null && filters?.person !== undefined) params.set("actor", filters.person);
   const query = params.toString();
   return requestJson<PanelEventsResponse>(
@@ -246,7 +249,7 @@ export const searchTwitchUser = async (
 const requestMutation = <T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
-  body?: Record<string, string | boolean | number>,
+  body?: Record<string, string | boolean | number | null>,
 ): Promise<T> => requestJson<{ token: string }>("/api/csrf").then(({ token }) => requestJson<T>(path, {
   method,
   headers: {
@@ -333,6 +336,16 @@ export const createClip = (
 ): Promise<{ clipId: string | null; editUrl: string | null }> => requestMutation(
   channelPath(channelId, "clips"),
   "POST",
+);
+
+export const setChannelControl = (
+  channelId: string,
+  control: "mute" | "pause",
+  duration: ChannelControlDuration | null,
+): Promise<{ controls: PanelChannelControls }> => requestMutation(
+  channelPath(channelId, `controls/${control}`),
+  "POST",
+  { duration },
 );
 
 export const logout = async (): Promise<void> => {

@@ -1,4 +1,5 @@
 import type { HelixRequest, ModuleRouteVariables } from "../contract";
+import type { CommercialFailureReason } from "../../../contracts/values";
 
 export const START_COMMERCIAL_URL = "https://api.twitch.tv/helix/channels/commercial";
 
@@ -8,7 +9,7 @@ export type CommercialLength = (typeof COMMERCIAL_LENGTHS)[number];
 
 export interface CommercialResult {
   started: boolean;
-  reason: string | null;
+  reason: CommercialFailureReason | null;
   detail: Readonly<Record<string, string | number | boolean | null>>;
   length: number | null;
   message: string | null;
@@ -27,13 +28,17 @@ const numberOrNull = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
 const failure = (
-  reason: string,
+  reason: CommercialFailureReason,
   detail: Readonly<Record<string, string | number | boolean | null>> = {},
 ): CommercialResult => ({ started: false, reason, detail, length: null, message: null, retryAfter: null });
 
 /** The status-to-reason mapping is this endpoint's own business meaning, not `helixRequest`'s. */
-const commercialReasonFor = (status: number): string =>
-  status === 429 ? "rate_limited" : status === 401 ? "scope_missing" : `http_${String(status)}`;
+const commercialReasonFor = (status: number, message: string | null): CommercialFailureReason => {
+  if (status === 429) return "rate_limited";
+  if (status === 401) return "scope_missing";
+  if (status === 400 && message !== null && /offline|not live|must be live/i.test(message)) return "stream_offline";
+  return "twitch_error";
+};
 
 /** Starts a commercial on the app token, the same path as the ads snooze action. */
 export const startCommercial = async (
@@ -64,7 +69,7 @@ export const startCommercial = async (
     if (result.reason === "timeout" || result.reason === "network_error") {
       return failure(result.reason, { status: null, message: result.message });
     }
-    return failure(commercialReasonFor(result.status ?? 0), { status: result.status, message: result.message });
+    return failure(commercialReasonFor(result.status ?? 0, result.message), { status: result.status, message: result.message });
   }
 
   const body = isRecord(result.data) ? result.data : {};

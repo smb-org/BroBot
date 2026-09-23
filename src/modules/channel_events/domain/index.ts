@@ -148,7 +148,7 @@ const chatNotificationDiagnostic = (
   }
   return {
     code: "channel_events.chat.unknown",
-    detail: detail({ kind: truncateTo200Chars(type) }),
+    detail: detail({ art: truncateTo200Chars(type) }),
   };
 };
 

@@ -22,6 +22,7 @@ import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
 import { MANAGING_ROLES } from "../../src/contracts/values";
+import { ANY_MEMBER_ROLES } from "../../src/worker/db/guards";
 
 interface SchemaObject {
   type: string;
@@ -66,6 +67,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],
   ["lastBroadcasterGuard", lastBroadcasterGuard],
   ["actorGuard(MANAGING_ROLES)", actorGuard(MANAGING_ROLES)],
+  ["actorGuard(ANY_MEMBER_ROLES)", actorGuard(ANY_MEMBER_ROLES)],
   ["sqlRole(\"broadcaster\")", sqlRole("broadcaster")],
   ["sqlRole(\"manager\")", sqlRole("manager")],
   ["sqlRole(\"operator\")", sqlRole("operator")],
@@ -141,9 +143,9 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(22);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(23);
       expect(objects.filter((object) => object.type === "index")).toHaveLength(23);
-      expect(objects).toHaveLength(45);
+      expect(objects).toHaveLength(46);
     } finally {
       database.close();
     }

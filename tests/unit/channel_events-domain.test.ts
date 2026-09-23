@@ -103,7 +103,7 @@ describe("channel events domain", () => {
     const noticeType = "x".repeat(240);
     expect(diagnose("channel.chat.notification", { notice_type: noticeType })).toEqual([{
       code: "channel_events.chat.unknown",
-      detail: { kind: `${"x".repeat(199)}…` },
+      detail: { art: `${"x".repeat(199)}…` },
     }]);
   });
 

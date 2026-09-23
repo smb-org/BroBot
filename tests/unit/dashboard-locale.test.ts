@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { dashboardLanguage, eventText, eventToneEntries, type EventCode } from "../../src/dashboard/locale";
+import { apiErrorText, dashboardLanguage, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -69,6 +69,22 @@ describe("dashboard locale", () => {
       .toBe("Shoutout below threshold (2 of 3 viewers)");
   });
 
+  it("renders failure reasons and unknown notification types in both languages", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventText("host.shoutout.failed", { cause: "rate_limited" })).toBe("Shoutout fehlgeschlagen: Twitch-Abklingzeit aktiv");
+    expect(eventText("channel_events.chat.unknown", { art: "channel.chat.bits" })).toBe("Unbekannte Chat-Benachrichtigung: channel.chat.bits");
+    expect(eventText("ads.commercial.failed", { reason: "stream_offline" })).toBe("Werbeeinblendung nicht gestartet: Stream ist offline");
+    expect(apiErrorText("commercial_stream_offline", "Fallback")).toBe("Die Werbeeinblendung ist offline nicht verfügbar.");
+    expect(shoutoutFailureReasonText("twitch_user_not_found")).toBe("Twitch-Nutzer nicht gefunden");
+
+    setBrowserLanguage("en-US");
+    expect(eventText("host.shoutout.failed", { cause: "not_moderator" })).toBe("Shoutout failed: The bot is not a moderator in this channel");
+    expect(eventText("channel_events.chat.unknown", { art: "channel.chat.bits" })).toBe("Unknown chat notification: channel.chat.bits");
+    expect(eventText("ads.commercial.failed", { reason: "stream_offline" })).toBe("Commercial not started: The stream is offline");
+    expect(apiErrorText("commercial_stream_offline", "Fallback")).toBe("A commercial cannot run while the stream is offline.");
+    expect(shoutoutFailureReasonText("twitch_user_not_found")).toBe("Twitch user not found");
+  });
+
   it("renders moderation details bilingually with a meaning-carrying tone", () => {
     setBrowserLanguage("de-DE");
     expect(eventText("channel_events.moderation.timeout", {
@@ -85,7 +101,7 @@ describe("dashboard locale", () => {
 
   it("carries family, tier, word, and number key for every known event code", () => {
     const codes: EventCode[] = [
-      "host.action.failed", "host.chat.failed", "host.chat.sent", "host.announcement.failed", "host.announcement.sent",
+      "host.action.failed", "host.action.suppressed", "host.chat.failed", "host.chat.sent", "host.announcement.failed", "host.announcement.sent",
       "template_truncated", "host.module.error",
       "host.module.unknown", "host.overlay.not_executed", "host.shoutout.failed", "host.shoutout.sent", "host.clip.failed", "channel_events.raid.incoming",
       "channel_events.raid.outgoing", "channel_events.shoutout.sent", "channel_events.shoutout.received",

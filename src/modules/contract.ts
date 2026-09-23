@@ -44,7 +44,7 @@ export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "
  * Adding a key means adding it here, and whoever adds it sees its neighbours.
  */
 export type ModuleDiagnosticDetailKey =
-  | "action" | "allowed" | "arguments" | "cause" | "count" | "current"
+  | "action" | "allowed" | "arguments" | "art" | "cause" | "count" | "current"
   | "currentTier" | "missing"
   | "duration" | "endsAt" | "gifter" | "kind" | "lastAdBreakAt" | "message"
   | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person" | "alias"
@@ -186,6 +186,12 @@ export interface ModulePanelProperties {
    *  mount (e.g. text_commands selects the command by name); most modules
    *  ignore it. */
   initialSelection?: string;
+}
+
+/** Props for one lazily loaded card in the channel's immediate-action row. */
+export interface ModuleImmediateActionProperties {
+  channelId: string;
+  streamState?: "online" | "offline" | null;
 }
 
 export type ModuleLanguage = "de" | "en";
@@ -330,4 +336,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
   /** Lazily loaded editor declaration for this module's settings. */
   settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
+  /** Lazily loaded immediate-action card, shown only while this module is enabled. */
+  immediateActions?: () => Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>;
 };

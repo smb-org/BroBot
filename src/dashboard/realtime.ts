@@ -90,11 +90,13 @@ export const realtimeHintMatchesFilters = (
   if (filters.person !== null && hint.actorUserId !== filters.person) return false;
   const metadata = eventMetadata(hint.code);
   if (filters.origin !== null) {
-    if (metadata === null) return false;
-    const isModuleDiagnostic = metadata.family === "operations";
+    const isModuleDiagnostic = hint.moduleId !== "channel_events";
     if (filters.origin === "module" !== isModuleDiagnostic) return false;
   }
-  if (filters.tone !== null && (metadata === null || metadata.tone !== filters.tone)) return false;
+  const selectedTones = filters.tones !== undefined && filters.tones.length > 0
+    ? filters.tones
+    : filters.tone === null ? [] : [filters.tone];
+  if (selectedTones.length > 0 && (metadata === null || metadata.tone === undefined || !selectedTones.includes(metadata.tone))) return false;
   return true;
 };
 
@@ -102,6 +104,7 @@ const filterKey = (filters: PanelEventFilters): string => [
   filters.origin ?? "",
   filters.module ?? "",
   filters.tone ?? "",
+  [...(filters.tones ?? [])].sort().join(","),
   filters.person ?? "",
 ].join("\u001f");
 

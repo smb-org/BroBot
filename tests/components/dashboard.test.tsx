@@ -31,6 +31,12 @@ const healthyChannel = (channelId: string, displayName: string) => ({
     loginReason: null,
     loginExpiresAt: relativeIso(3 * 60 * 60 * 1000),
   },
+  streamState: "offline" as "online" | "offline" | null,
+  streamStartedAt: null as string | null,
+  controls: {
+    mute: { active: false, until: null as string | null, mode: null as "timed" | "until_stream_end" | "unlimited" | null },
+    pause: { active: false, until: null as string | null, mode: null as "timed" | "until_stream_end" | "unlimited" | null },
+  },
   lastError: null,
 });
 
@@ -82,6 +88,19 @@ const showMembers = async (members: {
   window.history.replaceState({}, "", "/channels/kanal-a/members");
   render(<DashboardApp />);
   await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+};
+
+const showChannelOverview = async (channel: ReturnType<typeof healthyChannel>): Promise<void> => {
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+    const path = requestUrl(input).pathname;
+    if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+    if (path === `/api/channels/${channel.channelId}/overview`) return jsonResponse(overview(channel));
+    if (path === `/api/channels/${channel.channelId}/modules`) return jsonResponse({ modules: [] });
+    return jsonResponse({}, 404);
+  }));
+  window.history.replaceState({}, "", `/channels/${channel.channelId}/overview`);
+  render(<DashboardApp />);
+  await screen.findByRole("combobox", { name: "Kanal auswählen" });
 };
 
 const broadcaster = (userId: string, login: string, displayName: string) => ({
@@ -175,6 +194,24 @@ describe("Dashboard skeleton", () => {
       channelId: "kanal-a",
       section: "events",
     });
+  });
+
+  it("recognizes the channel-bound audit route", () => {
+    expect(parseDashboardRoute("/channels/kanal-a/audit")).toEqual({
+      kind: "channel",
+      channelId: "kanal-a",
+      section: "audit",
+    });
+  });
+
+  it("keeps multiple event tones in a deep link", () => {
+    const route = parseDashboardRoute("/channels/kanal-a/events", "?tone=warning&tone=error");
+    expect(route).toMatchObject({
+      kind: "channel",
+      section: "events",
+      filters: { origin: null, module: null, tone: null, tones: ["warning", "error"], person: null },
+    });
+    expect(dashboardRoutePath(route)).toBe("/channels/kanal-a/events?tone=warning&tone=error");
   });
 
   it("recognizes the subpage of a channel-bound module", () => {
@@ -485,6 +522,67 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByText("Raid von unbekannt mit 7 Zuschauern")).toBeInTheDocument();
     expect(firstPage).toBe(2);
+  });
+
+  it("shows an incoming raid with default filters and inserts new raid hints from realtime", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const incomingRaid = {
+      eventId: "channel-raid",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      moduleId: "channel_events",
+      triggerId: "raid-trigger",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"sensitron","viewers":1}',
+      actorUserId: null,
+      actorLogin: null,
+      actorDisplayName: null,
+    };
+    const raidAction = {
+      eventId: "module-raid",
+      createdAt: incomingRaid.createdAt,
+      moduleId: "raid",
+      triggerId: incomingRaid.triggerId,
+      code: "raid.shoutout",
+      detail: '{"viewers":1,"threshold":5}',
+      actorUserId: null,
+      actorLogin: null,
+      actorDisplayName: null,
+    };
+    const newRaid = { ...incomingRaid, eventId: "channel-raid-live", createdAt: "2026-09-18T04:01:00.000Z", detail: '{"source":"freshraid","viewers":2}' };
+    let eventRequests = 0;
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/channels/kanal-a/events") {
+        eventRequests += 1;
+        return jsonResponse({ entries: eventRequests === 1 ? [raidAction, incomingRaid] : [newRaid, raidAction, incomingRaid], nextCursor: null });
+      }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/events");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByText("Raid von sensitron mit 1 Zuschauern")).toBeInTheDocument();
+    const initialRequest = fetcher.mock.calls.map(([input]) => requestUrl(input)).find((url) => url.pathname.endsWith("/events"));
+    expect(initialRequest?.search).toBe("");
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "raid-hint",
+      createdAt: newRaid.createdAt,
+      channelId: "kanal-a",
+      type: "event_log.new",
+      payload: { entries: [{ eventId: newRaid.eventId, createdAt: newRaid.createdAt, moduleId: "channel_events", code: newRaid.code, actorUserId: null }] },
+    }));
+
+    expect(await screen.findByText("Raid von freshraid mit 2 Zuschauern")).toBeInTheDocument();
+    expect(eventRequests).toBe(2);
   });
 
   it("keeps the list further down and shows only the notice", async () => {
@@ -1246,25 +1344,40 @@ describe("Dashboard skeleton", () => {
     expect(screen.getAllByText(reason)).toHaveLength(1);
   });
 
-  it("shows system state before the audit log arrives", async () => {
+  it("loads system state without requesting the audit log", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    let resolveAudit: ((response: Response) => void) | undefined;
-    const auditResponse = new Promise<Response>((resolve) => { resolveAudit = resolve; });
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname.endsWith("/system")) return Promise.resolve(jsonResponse(system));
-      if (url.pathname.endsWith("/audit-log")) return auditResponse;
       return Promise.resolve(jsonResponse({}, 404));
-    }));
+    });
+    vi.stubGlobal("fetch", fetcher);
     window.history.replaceState({}, "", "/channels/kanal-a/system");
 
     render(<DashboardApp />);
 
     expect(await screen.findByRole("article", { name: "Bot-Account" })).toBeInTheDocument();
-    expect(screen.getByText("Audit-Log wird geladen …")).toBeInTheDocument();
-    resolveAudit?.(jsonResponse(audit));
-    await waitFor(() => expect(screen.queryByText("Audit-Log wird geladen …")).not.toBeInTheDocument());
+    expect(screen.queryByRole("region", { name: "Audit-Log" })).not.toBeInTheDocument();
+    expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/audit-log"))).toBe(false);
+  });
+
+  it("loads the standalone audit page", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname.endsWith("/audit-log")) return Promise.resolve(jsonResponse(audit));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Audit-Log", level: 1 })).toBeInTheDocument();
+    expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/audit-log"))).toBe(true);
+    expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/system"))).toBe(false);
   });
 
   it("opens the selected audit entry in the sub-inspector", async () => {
@@ -1296,7 +1409,7 @@ describe("Dashboard skeleton", () => {
       if (path.endsWith("/audit-log")) return jsonResponse({ entries: [auditEntry, secondAuditEntry], nextCursor: null });
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/system");
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
 
     render(<DashboardApp />);
 
@@ -1949,6 +2062,138 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByText("text_commands", { exact: true })).not.toBeInTheDocument();
   });
 
+  it("shows the stored live duration, offline state, and unknown state in the header", async () => {
+    const liveChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      streamState: "online" as const,
+      streamStartedAt: relativeIso(-83 * 60 * 1000),
+    };
+    await showChannelOverview(liveChannel);
+    expect(screen.getByText("Live · 1:23 h")).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+
+    cleanup();
+    await showChannelOverview(healthyChannel("kanal-a", "Alpha"));
+    expect(screen.getByText("Offline")).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "offline");
+
+    cleanup();
+    await showChannelOverview({ ...healthyChannel("kanal-a", "Alpha"), streamState: null });
+    expect(screen.getByText("Status unbekannt")).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "unknown");
+  });
+
+  it("shows mute time remaining and the paused state beside the stream status", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      controls: {
+        mute: { active: true, until: relativeIso(15 * 60 * 1000), mode: "timed" as const },
+        pause: { active: true, until: null, mode: "unlimited" as const },
+      },
+    };
+    await showChannelOverview(channel);
+
+    expect(screen.getByText("Stumm · 15 min")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stummschaltung aufheben" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Automatische Aktionen fortsetzen" })).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__control-state .ui-icon")).toBeInTheDocument();
+    expect(screen.getByText("Pausiert")).toBeInTheDocument();
+  });
+
+  it("reloads channel state on visibility change and every three minutes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let channelCalls = 0;
+    let overviewCalls = 0;
+    let modulesCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelCalls += 1;
+        return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      }
+      if (path === "/api/channels/kanal-a/overview") {
+        overviewCalls += 1;
+        return Promise.resolve(jsonResponse(overview(channel)));
+      }
+      if (path === "/api/channels/kanal-a/modules") {
+        modulesCalls += 1;
+        return Promise.resolve(jsonResponse({ modules: [] }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([1, 1, 1]);
+
+    fireEvent(document, new Event("visibilitychange"));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([2, 2, 2]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000); });
+    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([3, 3, 3]);
+  });
+
+  it("shows stale token expiry as neutral, reloads, then marks server-confirmed expiry red", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
+    const freshExpiry = "2026-09-23T09:00:01.000Z";
+    const freshChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      tokens: { ...healthyChannel("kanal-a", "Alpha").tokens, botExpiresAt: freshExpiry, loginExpiresAt: freshExpiry },
+    };
+    const expiredChannel = {
+      ...freshChannel,
+      tokens: { ...freshChannel.tokens, botExpiresAt: "2026-09-23T09:00:00.000Z", loginExpiresAt: "2026-09-23T09:00:00.000Z" },
+    };
+    let channelCalls = 0;
+    let overviewCalls = 0;
+    let resolveChannelReload: ((response: Response) => void) | undefined;
+    let resolveOverviewReload: ((response: Response) => void) | undefined;
+    const pendingChannelReload = new Promise<Response>((resolve) => { resolveChannelReload = resolve; });
+    const pendingOverviewReload = new Promise<Response>((resolve) => { resolveOverviewReload = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelCalls += 1;
+        return channelCalls === 1
+          ? Promise.resolve(jsonResponse({ channels: [freshChannel], bot: freshChannel.bot }))
+          : pendingChannelReload;
+      }
+      if (path === "/api/channels/kanal-a/overview") {
+        overviewCalls += 1;
+        return overviewCalls === 1
+          ? Promise.resolve(jsonResponse(overview(freshChannel)))
+          : pendingOverviewReload;
+      }
+      if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(channelCalls).toBe(1);
+    expect(overviewCalls).toBe(1);
+    expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getAllByText("wird aktualisiert").length).toBeGreaterThanOrEqual(1);
+    expect(channelCalls).toBe(2);
+    expect(overviewCalls).toBe(2);
+
+    await act(async () => {
+      resolveChannelReload?.(jsonResponse({ channels: [expiredChannel], bot: expiredChannel.bot }));
+      resolveOverviewReload?.(jsonResponse(overview(expiredChannel)));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getAllByText("Abgelaufen").length).toBeGreaterThanOrEqual(1);
+  });
+
   it("reloads the channel overview after enabling and shows the module view", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
     let overviewAufrufe = 0;
@@ -1965,7 +2210,10 @@ describe("Dashboard skeleton", () => {
       }
       if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
         modulesCalls += 1;
-        return jsonResponse({ modules: [{ id: "text_commands", enabled: modulesCalls > 1, settings: "{}" }] });
+        return jsonResponse({ modules: [
+          { id: "text_commands", enabled: modulesCalls > 1, settings: "{}" },
+          { id: "ads", enabled: true, settings: "{}" },
+        ] });
       }
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
@@ -2057,7 +2305,10 @@ describe("Dashboard skeleton", () => {
       }
       if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
         modulesCalls += 1;
-        return jsonResponse({ modules: [{ id: "text_commands", enabled: modulesCalls > 1, settings: "{}" }] });
+        return jsonResponse({ modules: [
+          { id: "text_commands", enabled: modulesCalls > 1, settings: "{}" },
+          { id: "ads", enabled: true, settings: "{}" },
+        ] });
       }
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
@@ -2078,10 +2329,10 @@ describe("Dashboard skeleton", () => {
     // Immediate actions section is present and reachable.
     expect(screen.getByRole("button", { name: "Clip erstellen" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Shoutout senden" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Werbung jetzt/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Werbung jetzt/ })).toBeInTheDocument();
 
     // Warnings/errors feed needs no interaction to show.
-    expect(await screen.findByText("Werbeeinblendung nicht gestartet: rate_limited")).toBeInTheDocument();
+    expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
   });
 
   it("switches channels through the header select and moves the route", async () => {
@@ -2129,6 +2380,7 @@ describe("Dashboard skeleton", () => {
       { path: "/channels/kanal-a", heading: "Alpha", currentLink: "Kanal" },
       { path: "/channels/kanal-a/system", heading: "System", currentLink: "System" },
       { path: "/channels/kanal-a/members", heading: "Mitglieder", currentLink: "Mitglieder" },
+      { path: "/channels/kanal-a/audit", heading: "Audit-Log", currentLink: "Audit-Log" },
       { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Module" },
       { path: "/channels/kanal-a/events", heading: "Ereignisse", currentLink: "Ereignisse" },
       { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", currentLink: "Textbefehle · Läuft" },
@@ -2140,7 +2392,7 @@ describe("Dashboard skeleton", () => {
       render(<DashboardApp />);
       await screen.findByRole("heading", { name: page.heading, level: 1 });
       const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
-      for (const label of ["Ereignisse", "Kanal", "System", "Mitglieder"]) {
+      for (const label of ["Ereignisse", "Kanal", "System", "Mitglieder", "Audit-Log"]) {
         expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
       }
       expect(within(nav).getByRole("link", { name: "Module" })).toBeInTheDocument();
@@ -2777,7 +3029,6 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [alpha, beta], bot: alpha.bot }));
-      if (url.pathname.endsWith("/system")) return Promise.resolve(jsonResponse(system));
       if (url.pathname === "/api/channels/kanal-a/audit-log") return alphaAudit;
       if (url.pathname === "/api/channels/kanal-b/audit-log") return Promise.resolve(jsonResponse({
         entries: [{ auditId: "audit-b-1", actorUserId: "user-1", createdAt: "2026-09-18T04:00:00.000Z", action: "beta-erster", before: "{}", after: "{}" }],
@@ -2785,13 +3036,13 @@ describe("Dashboard skeleton", () => {
       }));
       return Promise.resolve(jsonResponse({}, 404));
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/system");
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
 
     render(<DashboardApp />);
     await waitFor(() => expect(resolveAlphaAudit).toBeTypeOf("function"));
 
     act(() => {
-      window.history.pushState({}, "", "/channels/kanal-b/system");
+      window.history.pushState({}, "", "/channels/kanal-b/audit");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     await screen.findByText("beta-erster");
@@ -2929,7 +3180,7 @@ describe("Dashboard skeleton", () => {
       if (path.endsWith("/audit-log")) return jsonResponse({ entries: [entry], nextCursor: null });
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/system");
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
 
     render(<DashboardApp />);
 
@@ -2944,7 +3195,7 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
   });
 
-  it("keeps the audit selection intact across a reload", async () => {
+  it("reloads audit data when returning from the system page", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const entry = {
       auditId: "audit-1",
@@ -2969,7 +3220,7 @@ describe("Dashboard skeleton", () => {
       }
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/system");
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
 
     render(<DashboardApp />);
 
@@ -2978,13 +3229,16 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(row as HTMLElement);
     expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: "System" }));
+    await screen.findByRole("heading", { name: "System", level: 1 });
+    expect(auditRequests).toBe(1);
+    fireEvent.click(await screen.findByRole("link", { name: "Audit-Log" }));
     await waitFor(() => expect(auditRequests).toBe(2));
     resolveReload?.(jsonResponse({ entries: [entry], nextCursor: null }));
 
     const restoredRow = (await screen.findAllByRole("row", { name: /Modul aktiviert/ }))[0];
     expect(restoredRow).toBeDefined();
-    expect(restoredRow).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByRole("region", { name: "Änderungsdaten" })).toBeInTheDocument();
+    expect(restoredRow).toHaveAttribute("aria-selected", "false");
+    expect(screen.queryByRole("region", { name: "Änderungsdaten" })).not.toBeInTheDocument();
   });
 
   it("shows the incident inspector only once an event is selected, alongside the list", async () => {
@@ -3166,7 +3420,7 @@ describe("Dashboard skeleton", () => {
       if (path.endsWith("/audit-log")) return jsonResponse({ entries: [entry], nextCursor: null });
       return jsonResponse({}, 404);
     }));
-    window.history.replaceState({}, "", "/channels/kanal-a/system");
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
 
     render(<DashboardApp />);
 

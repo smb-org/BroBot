@@ -479,10 +479,18 @@ describe("EventSub inbound", () => {
         viewers: 23,
       },
     });
+    const realtimeMessages: unknown[] = [];
+    const withRealtime = {
+      ...environment(),
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ publish: (message: unknown) => { realtimeMessages.push(message); } }),
+      },
+    } as unknown as Env;
 
     const response = await eventSubRouter.fetch(
       signedRequest(secret, "notification", body, "message-condition"),
-      environment(),
+      withRealtime,
     );
 
     expect(response.status).toBe(204);
@@ -494,6 +502,12 @@ describe("EventSub inbound", () => {
       module_id: "channel_events",
       code: "channel_events.raid.incoming",
       detail_json: JSON.stringify({ source: "Quelle", viewers: 23 }),
+    });
+    expect(realtimeMessages).toHaveLength(1);
+    expect(realtimeMessages[0]).toMatchObject({
+      type: "event_log.new",
+      channelId: "channel-condition",
+      payload: { entries: [{ code: "channel_events.raid.incoming", moduleId: "channel_events" }] },
     });
   });
 

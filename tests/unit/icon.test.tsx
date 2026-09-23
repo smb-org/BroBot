@@ -33,6 +33,13 @@ const iconNames: Readonly<Record<IconName, true>> = {
   tabAdvanced: true,
   tabMessages: true,
   tabPrewarning: true,
+  broadcast: true,
+  "broadcast-off": true,
+  "volume-3": true,
+  "volume-off": true,
+  "player-pause": true,
+  "player-play": true,
+  "clock-hour-4": true,
 };
 
 afterEach(cleanup);

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../../src/modules/contract";
+import { channelEventsModule } from "../../src/modules/channel_events";
 import { dispatchEventSubNotification, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
@@ -133,6 +134,18 @@ describe("module selection", () => {
     expect(matches).toEqual([]);
   });
 
+  it("keeps only mandatory modules while a channel is paused", () => {
+    const mandatory = { ...silentModule("mandatory"), mandatory: true };
+    const regular = silentModule("regular");
+    const { matches } = selectModulesForEvent(
+      [activation("mandatory"), activation("regular")],
+      CHAT_TYPE,
+      [mandatory, regular],
+      true,
+    );
+    expect(matches.map(({ module }) => module.id)).toEqual(["mandatory"]);
+  });
+
   it("skips modules not responsible for this event type", () => {
     const { matches } = selectModulesForEvent(
       [activation("modul-a")],
@@ -150,6 +163,92 @@ describe("module selection", () => {
 });
 
 describe("dispatch and execution", () => {
+  it("runs modules while muted but suppresses chat, announcements, and automatic shoutouts", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO channel_controls (channel_id, muted, muted_until, mute_until_stream_end,
+          paused, paused_until, pause_until_stream_end, updated_at)
+         VALUES ('kanal-a', 1, NULL, 0, 0, NULL, 0, ?)`
+      ).bind(NOW).run();
+      let executions = 0;
+      const module = fakeModule("modul-a", () => {
+        executions += 1;
+        return {
+          actions: [
+            { kind: "chat", text: "Antwort", replyToMessageId: "message-1" },
+            { kind: "announcement", text: "Ankündigung" },
+            { kind: "shoutout", targetChannelId: "target-channel" },
+          ],
+          diagnostics: [{ code: "text_commands.triggered" }],
+        };
+      });
+      const fetcher = sent();
+      await runDispatch(database, [module], fetcher);
+
+      expect(executions).toBe(1);
+      expect(fetcher).not.toHaveBeenCalled();
+      const rows = await eventLog(database);
+      expect(rows.map((row) => `${row.module_id}:${row.code}`)).toEqual([
+        "modul-a:text_commands.triggered",
+        "modul-a:host.action.suppressed",
+        "modul-a:host.action.suppressed",
+        "modul-a:host.action.suppressed",
+      ]);
+      expect(rows.slice(1).map((row) => JSON.parse(row.detail_json) as unknown)).toEqual([
+        { action: "chat", reason: "channel_muted" },
+        { action: "announcement", reason: "channel_muted" },
+        { action: "shoutout", reason: "channel_muted" },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps channel_events logging on stream.offline while pause skips regular modules and stream brakes clear", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
+         VALUES ('kanal-a', 'online', ?, 'eventsub')`
+      ).bind("2026-09-19T11:00:00.000Z").run();
+      await database.prepare(
+        `INSERT INTO channel_controls (channel_id, muted, muted_until, mute_until_stream_end,
+          paused, paused_until, pause_until_stream_end, updated_at)
+         VALUES ('kanal-a', 1, NULL, 1, 1, NULL, 1, ?)`
+      ).bind(NOW).run();
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'channel_events', 1, '{}')",
+      ).run();
+
+      let regularExecutions = 0;
+      const regular = fakeModule("regular", () => {
+        regularExecutions += 1;
+        return { actions: [], diagnostics: [] };
+      }, ["stream.offline"]);
+      await activate(database, "kanal-a", "regular");
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.offline",
+        triggerId: "offline-1",
+        payload: {},
+        receivedAt: NOW,
+      }, sent(), [channelEventsModule, regular]);
+
+      expect(regularExecutions).toBe(0);
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { module_id: "channel_events", code: "channel_events.stream.offline" },
+      ]);
+      await expect(database.prepare(
+        "SELECT muted, mute_until_stream_end, paused, pause_until_stream_end FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ muted: 0, mute_until_stream_end: 0, paused: 0, pause_until_stream_end: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
   it("sends a module's chat message and logs the success", async () => {
     const database = new TestD1Database();
     try {

@@ -112,6 +112,21 @@ describe("create clip", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "clip_create_failed", reason: "rate_limited" });
   });
 
+  it("maps Twitch's offline response to the readable closed reason", async () => {
+    const environment = await asMember("operator");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "The broadcaster is not live" }),
+      { status: 400 },
+    )));
+
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/clips"), environment);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "clip_stream_offline", reason: "not_live" });
+    await expect(database.prepare("SELECT code FROM event_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ code: "host.clip.failed" });
+  });
+
   it("rejects a request from someone who isn't a channel member", async () => {
     await insertLoginIdentityAndSession(database, "outsider");
     const environment = environmentFor(database);

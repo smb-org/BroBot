@@ -18,6 +18,7 @@ import type {
 } from "../../panel-contract";
 import type {
   AuditActorKind,
+  ChannelStreamState,
   ChannelRole,
   EventSubSubscriptionType,
   IdentityStatus,
@@ -31,6 +32,7 @@ import {
 } from "../db/eventsub-state";
 import { decodeCursor, encodeCursor } from "../db/cursor";
 import { listAllBroadcasterScopes } from "../module-scopes";
+import { mapChannelControls, type ChannelControlFields } from "../db/channel-controls";
 
 interface ChannelStateRow {
   channel_id: string;
@@ -69,6 +71,14 @@ interface ChannelStateRow {
   eventsub_error_message: string | null;
   eventsub_error_status: number | null;
   eventsub_error_updated_at: string | null;
+  stream_state: ChannelStreamState | null;
+  stream_changed_at: string | null;
+  muted: ChannelControlFields["muted"];
+  muted_until: string | null;
+  mute_until_stream_end: ChannelControlFields["mute_until_stream_end"];
+  paused: ChannelControlFields["paused"];
+  paused_until: string | null;
+  pause_until_stream_end: ChannelControlFields["pause_until_stream_end"];
 }
 
 interface ActiveModuleRow {
@@ -102,18 +112,17 @@ export interface LogCursor {
   id: string;
 }
 
-const eventCodesForOrigin = (origin: PanelEventFilters["origin"]): string[] => {
-  if (origin === null) return [];
-  const operational = origin === "module";
-  return Object.entries(eventToneEntries)
-    .filter(([, metadata]) => (metadata.family === "operations") === operational)
-    .map(([code]) => code);
-};
-
 const eventCodesForTone = (tone: PanelEventFilters["tone"]): string[] => {
   if (tone === null) return [];
   return Object.entries(eventToneEntries)
     .filter(([, metadata]) => metadata.tone === tone)
+    .map(([code]) => code);
+};
+
+const eventCodesForTones = (tones: readonly NonNullable<PanelEventFilters["tone"]>[]): string[] => {
+  const selected = new Set(tones);
+  return Object.entries(eventToneEntries)
+    .filter(([, metadata]) => metadata.tone !== undefined && selected.has(metadata.tone))
     .map(([code]) => code);
 };
 
@@ -146,6 +155,21 @@ export const channelStateQuery = `
            login_identity.status AS login_status, login_identity.reason AS login_reason,
            login_identity.expires_at AS login_expires_at,
            login_identity.updated_at AS login_updated_at,
+           (SELECT stream_state.state
+              FROM channel_stream_state AS stream_state
+             WHERE stream_state.channel_id = channel.channel_id
+             LIMIT 1) AS stream_state,
+           (SELECT stream_state.changed_at
+              FROM channel_stream_state AS stream_state
+             WHERE stream_state.channel_id = channel.channel_id
+               AND stream_state.state = 'online'
+             LIMIT 1) AS stream_changed_at,
+           channel_controls.muted AS muted,
+           channel_controls.muted_until AS muted_until,
+           channel_controls.mute_until_stream_end AS mute_until_stream_end,
+           channel_controls.paused AS paused,
+           channel_controls.paused_until AS paused_until,
+           channel_controls.pause_until_stream_end AS pause_until_stream_end,
            moderator.is_moderator AS moderator_is_moderator,
            moderator.checked_at AS moderator_checked_at,
            moderator.reason AS moderator_reason,
@@ -199,6 +223,7 @@ export const channelStateQuery = `
         ON broadcaster_identity.user_id = channel.channel_id
       LEFT JOIN bot_identity_status AS bot_status ON bot_status.id = 1
       LEFT JOIN bot_identity ON bot_identity.id = 1
+      LEFT JOIN channel_controls AS channel_controls ON channel_controls.channel_id = channel.channel_id
       LEFT JOIN twitch_login_identity AS login_identity ON login_identity.user_id = ?
       LEFT JOIN bot_channel_status AS moderator ON moderator.channel_id = channel.channel_id
       LEFT JOIN eventsub_subscriptions AS eventsub
@@ -321,6 +346,9 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   moderator: mapModerator(row),
   chatSubscription: mapEventSub(row),
   chatSubscriptionNeeded: row.chat_subscription_needed === 1,
+  streamState: row.stream_state,
+  streamStartedAt: row.stream_changed_at,
+  controls: mapChannelControls(row, new Date().toISOString()),
   tokens: mapTokens(row),
   lastError: mapLastError(row),
 });
@@ -454,19 +482,20 @@ export const getEventLogForChannel = async (
   const where = ["channel_id = ?"];
   const filterValues: (string | number)[] = [channelId];
   if (filters.origin !== null) {
-    const codes = eventCodesForOrigin(filters.origin);
-    if (codes.length === 0) where.push("1 = 0");
-    else {
-      where.push(`code IN (${codes.map(() => "?").join(", ")})`);
-      filterValues.push(...codes);
-    }
+    where.push(filters.origin === "channel" ? "module_id = ?" : "module_id != ?");
+    filterValues.push("channel_events");
   }
   if (filters.module !== null) {
     where.push("module_id = ?");
     filterValues.push(filters.module);
   }
-  if (filters.tone !== null) {
-    const codes = eventCodesForTone(filters.tone);
+  const selectedTones = filters.tones !== undefined && filters.tones.length > 0
+    ? filters.tones
+    : filters.tone === null ? [] : [filters.tone];
+  if (selectedTones.length > 0) {
+    const codes = filters.tones !== undefined && filters.tones.length > 0
+      ? eventCodesForTones(filters.tones)
+      : eventCodesForTone(filters.tone);
     if (codes.length === 0) where.push("1 = 0");
     else {
       where.push(`code IN (${codes.map(() => "?").join(", ")})`);

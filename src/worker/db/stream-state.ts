@@ -24,14 +24,15 @@ export const writeEventSubStreamState = async (
   channelId: string,
   state: StoredStreamState,
   changedAt: string,
-): Promise<void> => {
-  await db.prepare(
+): Promise<boolean> => {
+  const result = await db.prepare(
     `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
      VALUES (?, ?, ?, 'eventsub')
      ON CONFLICT (channel_id) DO UPDATE
        SET state = excluded.state, changed_at = excluded.changed_at, source = 'eventsub'
      WHERE julianday(excluded.changed_at) >= julianday(channel_stream_state.changed_at)`,
   ).bind(channelId, state, changedAt).run();
+  return result.meta.changes > 0;
 };
 
 export const writeHelixStreamStateIfUnknown = async (

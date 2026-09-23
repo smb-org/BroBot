@@ -2,6 +2,7 @@ import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto
 import { getBotIdentity } from "./db/bot-identity";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
+import type { ShoutoutFailureReason } from "../contracts/values";
 
 export interface TwitchUser {
   userId: string;
@@ -63,7 +64,7 @@ const SHOUTOUT_URL = "https://api.twitch.tv/helix/chat/shoutouts";
 export interface ShoutoutSendResult {
   sent: boolean;
   /** Machine-readable reason when the attempt was not successful. */
-  reason: string | null;
+  reason: ShoutoutFailureReason | null;
   detail: Readonly<Record<string, string | number | boolean | null>>;
 }
 
@@ -110,7 +111,14 @@ export const sendShoutout = async (
   });
 
   if (!result.ok) {
-    return { sent: false, reason: result.reason, detail: { ...detail, status: result.status, message: result.message } };
+    const reason: ShoutoutFailureReason = result.reason === "rate_limited" ? "rate_limited"
+      : result.reason === "timeout" ? "timeout"
+        : result.reason === "network_error" ? "network_error"
+          : result.status === 401 ? "not_moderator"
+            : result.status === 403 ? "scope_missing"
+              : result.status === 404 ? "twitch_user_not_found"
+                : "twitch_error";
+    return { sent: false, reason, detail: { ...detail, status: result.status, message: result.message } };
   }
 
   return { sent: true, reason: null, detail: { ...detail, status: result.status } };

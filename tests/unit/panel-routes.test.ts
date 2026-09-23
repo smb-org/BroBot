@@ -219,6 +219,28 @@ describe("Panel read endpoints", () => {
     expect(system.broadcasterConnection).toBe("not_connected");
   });
 
+  it("exposes the stored stream state additively in channel overview", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
+       VALUES ('kanal-a', 'offline', '2026-09-23T08:00:00.000Z', 'eventsub')`,
+    ).run();
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      channelId: "kanal-a",
+      streamState: "offline",
+      activeModules: [],
+    });
+  });
+
   it("returns the stored scope state and all EventSub subscriptions in the system contract", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");

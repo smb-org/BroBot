@@ -1,4 +1,5 @@
 export type { HelixRequest, ModuleEvent, ModuleResult, ModuleRouteVariables } from "../contract";
+export type { ModuleImmediateActionProperties } from "../contract";
 export {
   closestTemplateVariable,
   renderTemplate,

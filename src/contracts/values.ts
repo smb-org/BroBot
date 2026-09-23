@@ -21,6 +21,41 @@ export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
 export const EVENT_TONES = ["info", "warning", "error"] as const;
 export type EventTone = (typeof EVENT_TONES)[number];
 
+/** Persisted Twitch stream state exposed to the channel dashboard. */
+export const CHANNEL_STREAM_STATES = ["online", "offline"] as const;
+export type ChannelStreamState = (typeof CHANNEL_STREAM_STATES)[number];
+
+/** Durations accepted when a channel member enables an operational brake. */
+export const CHANNEL_CONTROL_DURATIONS = ["15m", "1h", "until_stream_end", "unlimited"] as const;
+export type ChannelControlDuration = (typeof CHANNEL_CONTROL_DURATIONS)[number];
+
+/** Stable reasons for a rejected manual or automatic shoutout. */
+export const SHOUTOUT_FAILURE_REASONS = [
+  "app_token_unavailable",
+  "bot_identity_missing",
+  "network_error",
+  "not_moderator",
+  "rate_limited",
+  "scope_missing",
+  "timeout",
+  "twitch_error",
+  "twitch_user_not_found",
+  "twitch_user_search_failed",
+] as const;
+export type ShoutoutFailureReason = (typeof SHOUTOUT_FAILURE_REASONS)[number];
+
+/** Stable reasons for a rejected Start Commercial request. */
+export const COMMERCIAL_FAILURE_REASONS = [
+  "app_token_unavailable",
+  "network_error",
+  "rate_limited",
+  "scope_missing",
+  "stream_offline",
+  "timeout",
+  "twitch_error",
+] as const;
+export type CommercialFailureReason = (typeof COMMERCIAL_FAILURE_REASONS)[number];
+
 export const IDENTITY_STATUSES = ["connected", "revoked", "error"] as const;
 export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
 
@@ -71,6 +106,7 @@ export const isEventSubSubscriptionType = (value: string): value is EventSubSubs
  */
 export const EVENT_CODES = [
   "host.action.failed",
+  "host.action.suppressed",
   "host.chat.failed",
   "host.chat.sent",
   "host.announcement.failed",
@@ -160,6 +196,10 @@ export const AUDIT_ACTIONS = [
   "text_commands.command.removed",
   "ads.commercial_started",
   "clip.created",
+  "channel.mute.enabled",
+  "channel.mute.disabled",
+  "channel.pause.enabled",
+  "channel.pause.disabled",
   "overlay.token.issued",
   "overlay.token.revoked",
 ] as const;
@@ -240,7 +280,11 @@ export const API_ERROR_CODES = [
   "ad_snooze_failed",
   "commercial_length_invalid",
   "commercial_start_failed",
+  "commercial_stream_offline",
   "clip_create_failed",
+  "clip_stream_offline",
+  "channel_control_input_invalid",
+  "channel_control_changed_concurrently",
   "shoutout_send_failed",
   "overlay_token_manage_denied",
   "overlay_expiry_invalid",

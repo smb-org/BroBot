@@ -1,5 +1,7 @@
 import type {
   AuditActorKind,
+  ChannelControlDuration,
+  ChannelStreamState,
   ChannelRole,
   EventSubSubscriptionType,
   EventTone,
@@ -93,9 +95,29 @@ export interface PanelChannelState {
   moderator: PanelModeratorStatus | null;
   chatSubscription: PanelChatSubscription | null;
   chatSubscriptionNeeded?: boolean;
+  /** Last EventSub-observed state; null or absent means not known yet. */
+  streamState?: ChannelStreamState | null;
+  /** EventSub stream.online time, present only while the stored state is online. */
+  streamStartedAt?: string | null;
+  /** Operational channel brakes; absent only when talking to an older worker. */
+  controls?: PanelChannelControls;
   tokens: PanelTokenStatus;
   lastError: PanelLastError | null;
 }
+
+export interface PanelChannelControl {
+  active: boolean;
+  /** Null for off, until stream end, and unlimited controls. */
+  until: string | null;
+  mode: "timed" | "until_stream_end" | "unlimited" | null;
+}
+
+export interface PanelChannelControls {
+  mute: PanelChannelControl;
+  pause: PanelChannelControl;
+}
+
+export type PanelChannelControlDuration = ChannelControlDuration;
 
 export interface PanelActiveModule {
   moduleId: string;
@@ -257,6 +279,8 @@ export interface PanelEventFilters {
   origin: PanelEventOrigin | null;
   module: string | null;
   tone: EventTone | null;
+  /** Multiple selected tones, used by deep links such as warnings + errors. */
+  tones?: readonly EventTone[];
   person: string | null;
 }
 

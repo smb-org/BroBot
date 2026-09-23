@@ -44,7 +44,7 @@ export function Shell({ header, navbar, navLabel, openSidebarLabel, closeSidebar
     <AppShell
       className="dashboard-shell"
       mode="static"
-      header={{ height: { base: 128, md: 56 } }}
+      header={{ height: { base: 172, md: 56 } }}
       navbar={{
         width: collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED,
         breakpoint: "md",

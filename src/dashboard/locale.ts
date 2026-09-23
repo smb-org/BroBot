@@ -1,4 +1,4 @@
-import { EVENTSUB_NEUTRAL_REASON_CODES, type ApiErrorCode, type AuditAction, type ChannelRole, type EventCode, type EventSubNeutralReasonCode, type EventTone } from "../contracts/values";
+import { COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, SHOUTOUT_FAILURE_REASONS, type ApiErrorCode, type AuditAction, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ShoutoutFailureReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -93,6 +93,9 @@ export interface DashboardTexts {
     noConnection: string;
     switchOn: string;
     switchOff: string;
+    streamLive: (duration: string | null) => string;
+    streamOffline: string;
+    streamUnknown: string;
   };
   status: {
     connected: string;
@@ -101,6 +104,7 @@ export interface DashboardTexts {
     loginIdentityMissing: string;
     notChecked: string;
     expired: string;
+    refreshing: string;
     maintenanceOverdue: string;
     renewalOverdue: string;
     valid: string;
@@ -132,6 +136,7 @@ export interface DashboardTexts {
     members: string;
     module: string;
     events: string;
+    audit: string;
     selectChannel: string;
     selectModule: string;
     signInWithTwitch: string;
@@ -216,18 +221,6 @@ export interface DashboardTexts {
     loginReason: string;
     loginValidUntil: string;
     botValidUntil: string;
-    auditLog: string;
-    entries: string;
-    time: string;
-    action: string;
-    who: string;
-    loadAudit: string;
-    noAuditEntries: string;
-    changeData: string;
-    before: string;
-    after: string;
-    olderEntries: string;
-    loadingOlderEntries: string;
     subscriptions: string;
     noSubscriptions: string;
     subscription: string;
@@ -242,6 +235,20 @@ export interface DashboardTexts {
     httpStatus: string;
     missingBotPermissions: string;
     missingScopes: string;
+  };
+  audit: {
+    title: string;
+    entries: string;
+    time: string;
+    action: string;
+    who: string;
+    load: string;
+    empty: string;
+    changeData: string;
+    before: string;
+    after: string;
+    olderEntries: string;
+    loadingOlderEntries: string;
   };
   events: {
     title: string;
@@ -341,6 +348,7 @@ export interface DashboardTexts {
     /** Hint under the ad-length `SegmentedControl` (3.0, 12.2). */
     adLengthHint: string;
     runAd: (length: string) => string;
+    adDisabledOffline: string;
     adStarted: (length: string) => string;
     adCooldown: (seconds: string) => string;
     /** Header title of the shoutout action card. */
@@ -355,12 +363,43 @@ export interface DashboardTexts {
     /** Header title of the clip action card. */
     clipTitle: string;
     createClip: string;
+    clipDisabledOffline: string;
     clipCreated: string;
     openClip: string;
     opensNewTab: string;
     feedTitle: string;
     feedEmpty: string;
+    feedAll: string;
     yesterday: string;
+  };
+  channelControls: {
+    muteName: string;
+    pauseName: string;
+    muteEnable: string;
+    muteDisable: string;
+    pauseEnable: string;
+    pauseDisable: string;
+    muteActive: string;
+    pauseActive: string;
+    muteRemaining: (minutes: string) => string;
+    pauseRemaining: (minutes: string) => string;
+    untilStreamEnd: string;
+    unlimited: string;
+    durationTitle: (control: string) => string;
+    durationDescription: (control: string) => string;
+    durationLabel: string;
+    durationHint: string;
+    duration15m: string;
+    duration15mDescription: string;
+    duration1h: string;
+    duration1hDescription: string;
+    durationStream: string;
+    durationStreamDescription: string;
+    durationUnlimited: string;
+    durationUnlimitedDescription: string;
+    enable: string;
+    cancel: string;
+    failure: string;
   };
   /** ⌘K/Ctrl+K (#164): jumps to an entity, explicitly not a navigation
    *  replacement -- "raid" opens the module, "!clip" opens that text
@@ -408,10 +447,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noConnection: "Keine Verbindung",
       switchOn: "An",
       switchOff: "Aus",
+      streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
+      streamOffline: "Offline",
+      streamUnknown: "Status unbekannt",
     },
     status: {
       connected: "Verbunden", revoked: "Widerrufen", error: "Fehler",
-      loginIdentityMissing: "Login-Identität fehlt", notChecked: "Nicht geprüft", expired: "Abgelaufen",
+      loginIdentityMissing: "Login-Identität fehlt", notChecked: "Nicht geprüft", expired: "Abgelaufen", refreshing: "wird aktualisiert",
       maintenanceOverdue: "Wartung überfällig", renewalOverdue: "Erneuerung überfällig", valid: "Gültig",
       moderatorRoleMissing: "Moderatorrolle fehlt", chatSubscriptionError: "Chat-Abo-Fehler", chatSubscriptionRevoked: "Chat-Abo widerrufen",
       botError: "Bot-Fehler", botTokenRevoked: "Bot-Token widerrufen", broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt",
@@ -422,7 +464,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Hauptnavigation", overview: "Übersicht", channel: "Kanal", system: "System",
-      members: "Mitglieder", module: "Module", events: "Ereignisse", selectChannel: "Kanal auswählen",
+      members: "Mitglieder", module: "Module", events: "Ereignisse", audit: "Audit-Log", selectChannel: "Kanal auswählen",
       selectModule: "Modul auswählen",
       signInWithTwitch: "Mit Twitch anmelden", twitchAccount: "Twitch-Konto",
       signingOut: "Abmeldung …", signOut: "Abmelden",
@@ -475,14 +517,15 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       title: "System", readOnly: "nur lesend", loadState: "Systemzustand wird geladen …", properties: "Eigenschaften",
       botReason: "Bot-Grund", botUpdated: "Bot zuletzt aktualisiert", chatSubscriptionId: "Chat-Abo-ID", chatSubscriptionReason: "Chat-Abo-Grund",
       chatSubscriptionUpdated: "Chat-Abo zuletzt aktualisiert", loginStatus: "Login-Token-Status", loginReason: "Login-Token-Grund",
-      loginValidUntil: "Login-Token gültig bis", botValidUntil: "Bot-Token gültig bis", auditLog: "Audit-Log",
-      entries: "Einträge", time: "Zeit", action: "Aktion", who: "Wer", loadAudit: "Audit-Log wird geladen …",
-      noAuditEntries: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
-      before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden",
-      loadingOlderEntries: "Ältere Einträge werden geladen …",
+      loginValidUntil: "Login-Token gültig bis", botValidUntil: "Bot-Token gültig bis",
       subscriptions: "Abonnements", noSubscriptions: "Keine Abonnements gespeichert.", subscription: "Abo", state: "Zustand", reason: "Grund",
       subscriptionDetails: "Abo-Details", subscriptionRawType: "Roher Typ", subscriptionVersion: "Version", subscriptionId: "Abo-ID", subscriptionUpdated: "Zuletzt geändert",
       twitchMessage: "Twitch-Meldung", httpStatus: "HTTP-Status", missingBotPermissions: "Fehlende Bot-Berechtigungen", missingScopes: "Fehlende Scopes",
+    },
+    audit: {
+      title: "Audit-Log", entries: "Einträge", time: "Zeit", action: "Aktion", who: "Wer",
+      load: "Audit-Log wird geladen …", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
+      before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
     },
     events: {
       title: "Ereignisse", count: (count) => `${count} Einträge`, log: "Ereignisprotokoll", time: "Zeit", event: "Ereignis",
@@ -529,6 +572,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adLength: "Werbedauer",
       adLengthHint: "Sekunden. Startet sofort.",
       runAd: (length) => `Werbung jetzt (${length}s)`,
+      adDisabledOffline: "Der Stream ist offline.",
       adStarted: (length) => `Werbung gestartet (${length}s)`,
       adCooldown: (seconds) => `Wartezeit: ${seconds}s`,
       shoutoutTitle: "Shoutout",
@@ -539,12 +583,43 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       shoutoutSent: (login) => `Shoutout an ${login} gesendet`,
       clipTitle: "Clip",
       createClip: "Clip erstellen",
+      clipDisabledOffline: "Der Stream ist offline.",
       clipCreated: "Clip erstellt",
       openClip: "Clip öffnen",
       opensNewTab: "öffnet neuen Tab",
       feedTitle: "Warnungen und Fehler",
       feedEmpty: "Keine Warnungen oder Fehler.",
+      feedAll: "Alle im Ereignisprotokoll",
       yesterday: "Gestern",
+    },
+    channelControls: {
+      muteName: "Stummschaltung",
+      pauseName: "Pause",
+      muteEnable: "Kanal stummschalten",
+      muteDisable: "Stummschaltung aufheben",
+      pauseEnable: "Automatische Aktionen pausieren",
+      pauseDisable: "Automatische Aktionen fortsetzen",
+      muteActive: "Kanal stumm",
+      pauseActive: "Pausiert",
+      muteRemaining: (minutes) => `Stumm · ${minutes} min`,
+      pauseRemaining: (minutes) => `Pause · ${minutes} min`,
+      untilStreamEnd: "Bis Streamende",
+      unlimited: "Unbegrenzt",
+      durationTitle: (control) => `${control} aktivieren`,
+      durationDescription: (control) => `Wähle, wie lange ${control.toLowerCase()} aktiv bleibt.`,
+      durationLabel: "Dauer",
+      durationHint: "Der Standard ist unbegrenzt.",
+      duration15m: "15 Minuten",
+      duration15mDescription: "Endet automatisch nach 15 Minuten.",
+      duration1h: "1 Stunde",
+      duration1hDescription: "Endet automatisch nach einer Stunde.",
+      durationStream: "Bis Streamende",
+      durationStreamDescription: "Wird beim nächsten Streamende aufgehoben.",
+      durationUnlimited: "Unbegrenzt",
+      durationUnlimitedDescription: "Bleibt aktiv, bis du es aufhebst.",
+      enable: "Aktivieren",
+      cancel: "Abbrechen",
+      failure: "Die Kanalsteuerung konnte nicht geändert werden.",
     },
     spotlight: {
       placeholder: "Suchen oder Aktion ausführen …",
@@ -584,10 +659,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noConnection: "No connection",
       switchOn: "On",
       switchOff: "Off",
+      streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
+      streamOffline: "Offline",
+      streamUnknown: "Status unknown",
     },
     status: {
       connected: "Connected", revoked: "Revoked", error: "Error", loginIdentityMissing: "Login identity missing",
-      notChecked: "Not checked", expired: "Expired", maintenanceOverdue: "Maintenance overdue",
+      notChecked: "Not checked", expired: "Expired", refreshing: "updating", maintenanceOverdue: "Maintenance overdue",
       renewalOverdue: "Renewal overdue", valid: "Valid", moderatorRoleMissing: "Moderator role missing",
       chatSubscriptionError: "Chat subscription error", chatSubscriptionRevoked: "Chat subscription revoked", botError: "Bot error",
       botTokenRevoked: "Bot token revoked", broadcasterConsentMissing: "Broadcaster consent missing",
@@ -598,7 +676,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Main navigation", overview: "Overview", channel: "Channel", system: "System",
-      members: "Members", module: "Modules", events: "Events", selectChannel: "Select channel",
+      members: "Members", module: "Modules", events: "Events", audit: "Audit log", selectChannel: "Select channel",
       selectModule: "Select module",
       signInWithTwitch: "Sign in with Twitch", twitchAccount: "Twitch account",
       signingOut: "Signing out …", signOut: "Sign out",
@@ -646,13 +724,15 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       title: "System", readOnly: "read-only", loadState: "Loading system status …", properties: "Properties",
       botReason: "Bot reason", botUpdated: "Bot last updated", chatSubscriptionId: "Chat subscription ID", chatSubscriptionReason: "Chat subscription reason",
       chatSubscriptionUpdated: "Chat subscription last updated", loginStatus: "Login token status", loginReason: "Login token reason",
-      loginValidUntil: "Login token valid until", botValidUntil: "Bot token valid until", auditLog: "Audit log", entries: "entries",
-      time: "Time", action: "Action", who: "Who",
-      loadAudit: "Loading audit log …", noAuditEntries: "No audit entries saved yet.", changeData: "Change data",
-      before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
+      loginValidUntil: "Login token valid until", botValidUntil: "Bot token valid until",
       subscriptions: "Subscriptions", noSubscriptions: "No subscriptions saved.", subscription: "Subscription", state: "State", reason: "Reason",
       subscriptionDetails: "Subscription details", subscriptionRawType: "Raw type", subscriptionVersion: "Version", subscriptionId: "Subscription ID", subscriptionUpdated: "Last changed",
       twitchMessage: "Twitch message", httpStatus: "HTTP status", missingBotPermissions: "Missing bot permissions", missingScopes: "Missing scopes",
+    },
+    audit: {
+      title: "Audit log", entries: "entries", time: "Time", action: "Action", who: "Who",
+      load: "Loading audit log …", empty: "No audit entries saved yet.", changeData: "Change data",
+      before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
     },
     events: {
       title: "Events", count: (count) => `${count} entries`, log: "Event log", time: "Time", event: "Event", module: "Module",
@@ -695,6 +775,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       adLength: "Ad length",
       adLengthHint: "Seconds. Starts immediately.",
       runAd: (length) => `Run ad now (${length}s)`,
+      adDisabledOffline: "The stream is offline.",
       adStarted: (length) => `Ad started (${length}s)`,
       adCooldown: (seconds) => `Cooldown: ${seconds}s`,
       shoutoutTitle: "Shoutout",
@@ -705,12 +786,43 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       shoutoutSent: (login) => `Shoutout sent to ${login}`,
       clipTitle: "Clip",
       createClip: "Create clip",
+      clipDisabledOffline: "The stream is offline.",
       clipCreated: "Clip created",
       openClip: "Open clip",
       opensNewTab: "opens a new tab",
       feedTitle: "Warnings and errors",
       feedEmpty: "No warnings or errors.",
+      feedAll: "View all in the event log",
       yesterday: "Yesterday",
+    },
+    channelControls: {
+      muteName: "Mute",
+      pauseName: "Pause",
+      muteEnable: "Mute channel",
+      muteDisable: "Unmute channel",
+      pauseEnable: "Pause automatic actions",
+      pauseDisable: "Resume automatic actions",
+      muteActive: "Muted",
+      pauseActive: "Paused",
+      muteRemaining: (minutes) => `Muted · ${minutes} min`,
+      pauseRemaining: (minutes) => `Paused · ${minutes} min`,
+      untilStreamEnd: "Until stream ends",
+      unlimited: "Unlimited",
+      durationTitle: (control) => `Enable ${control.toLowerCase()}`,
+      durationDescription: (control) => `Choose how long ${control.toLowerCase()} stays active.`,
+      durationLabel: "Duration",
+      durationHint: "Unlimited is selected by default.",
+      duration15m: "15 minutes",
+      duration15mDescription: "Ends automatically after 15 minutes.",
+      duration1h: "1 hour",
+      duration1hDescription: "Ends automatically after one hour.",
+      durationStream: "Until stream ends",
+      durationStreamDescription: "Turns off when the stream next ends.",
+      durationUnlimited: "Unlimited",
+      durationUnlimitedDescription: "Stays on until you turn it off.",
+      enable: "Enable",
+      cancel: "Cancel",
+      failure: "The channel control could not be changed.",
     },
     spotlight: {
       placeholder: "Search or run an action …",
@@ -805,9 +917,70 @@ const detailModerator = (detail: EventDetail, fallback: string): string =>
 const detailModeratorEn = (detail: EventDetail, fallback: string): string =>
   typeof detail.moderator === "string" && detail.moderator.length > 0 ? ` by ${detail.moderator}` : fallback;
 
+const shoutoutFailureTexts: LocaleCatalog<Record<ShoutoutFailureReason, string>> = {
+  de: {
+    app_token_unavailable: "App-Token nicht verfügbar",
+    bot_identity_missing: "Bot-Identität fehlt",
+    network_error: "Netzwerkfehler bei Twitch",
+    not_moderator: "Der Bot ist kein Moderator in diesem Kanal",
+    rate_limited: "Twitch-Abklingzeit aktiv",
+    scope_missing: "Berechtigung zum Senden des Shoutouts fehlt",
+    timeout: "Twitch-Anfrage hat zu lange gedauert",
+    twitch_error: "Twitch hat den Shoutout abgelehnt",
+    twitch_user_not_found: "Twitch-Nutzer nicht gefunden",
+    twitch_user_search_failed: "Twitch-Nutzersuche fehlgeschlagen",
+  },
+  en: {
+    app_token_unavailable: "App token unavailable",
+    bot_identity_missing: "Bot identity is missing",
+    network_error: "Network error from Twitch",
+    not_moderator: "The bot is not a moderator in this channel",
+    rate_limited: "Twitch cooldown is active",
+    scope_missing: "Permission to send shoutouts is missing",
+    timeout: "The Twitch request timed out",
+    twitch_error: "Twitch rejected the shoutout",
+    twitch_user_not_found: "Twitch user not found",
+    twitch_user_search_failed: "Twitch user search failed",
+  },
+};
+
+export const shoutoutFailureReasonText = (
+  reason: unknown,
+  language: DashboardLanguage = dashboardLanguage(),
+): string | null => typeof reason === "string" && SHOUTOUT_FAILURE_REASONS.includes(reason as ShoutoutFailureReason)
+  ? shoutoutFailureTexts[language][reason as ShoutoutFailureReason]
+  : null;
+
+const commercialFailureTexts: LocaleCatalog<Record<CommercialFailureReason, string>> = {
+  de: {
+    app_token_unavailable: "App-Token nicht verfügbar",
+    network_error: "Netzwerkfehler bei Twitch",
+    rate_limited: "Twitch-Abklingzeit aktiv",
+    scope_missing: "Berechtigung für Werbeeinblendungen fehlt",
+    stream_offline: "Stream ist offline",
+    timeout: "Twitch-Anfrage hat zu lange gedauert",
+    twitch_error: "Twitch hat den Start abgelehnt",
+  },
+  en: {
+    app_token_unavailable: "App token unavailable",
+    network_error: "Network error from Twitch",
+    rate_limited: "Twitch cooldown is active",
+    scope_missing: "Permission to run commercials is missing",
+    stream_offline: "The stream is offline",
+    timeout: "The Twitch request timed out",
+    twitch_error: "Twitch rejected the request",
+  },
+};
+
+const commercialFailureReasonText = (reason: unknown, language: DashboardLanguage): string =>
+  typeof reason === "string" && COMMERCIAL_FAILURE_REASONS.includes(reason as CommercialFailureReason)
+    ? commercialFailureTexts[language][reason as CommercialFailureReason]
+    : commercialFailureTexts[language].twitch_error;
+
 export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   de: {
     "host.action.failed": "Aktion fehlgeschlagen",
+    "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : "Shoutout"} wegen Kanal-Stummschaltung`,
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
     "host.announcement.sent": (detail) => `Chat-Ankündigung gesendet: ${detailText(detail, "text", "ohne Text")}`,
@@ -827,11 +1000,11 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.module.error": "Modulfehler",
     "host.module.unknown": "Unbekanntes Modul",
     "host.overlay.not_executed": "Overlay nicht ausgeführt",
-    "host.shoutout.failed": (detail) => detail.cause === "twitch_user_not_found"
-      ? `Shoutout-Ziel ${detailText(detail, "target", "unbekannt")} wurde nicht gefunden`
-      : detail.cause === "rate_limited"
-        ? "Shoutout wegen Twitch-Abklingzeit nicht gesendet"
-        : "Shoutout fehlgeschlagen",
+    "host.shoutout.failed": (detail) => {
+      if (detail.cause === "twitch_user_not_found") return `Shoutout-Ziel ${detailText(detail, "target", "unbekannt")} wurde nicht gefunden`;
+      const reason = shoutoutFailureReasonText(detail.cause, "de");
+      return reason === null ? "Shoutout fehlgeschlagen" : `Shoutout fehlgeschlagen: ${reason}`;
+    },
     "host.shoutout.sent": "Shoutout gesendet",
     "host.clip.failed": "Clip fehlgeschlagen",
     "channel_events.raid.incoming": (detail) => `Raid von ${detailText(detail, "source", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
@@ -875,7 +1048,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.prewarning.scope_missing": "Werbe-Vorwarnung unterdrückt: channel:read:ads fehlt",
     "ads.prewarning.schedule_error": (detail) => `Werbezeitplan nicht gelesen: ${detailText(detail, "reason", "unbekannter Fehler")}`,
     "ads.snooze": (detail) => detail.outcome === "success" ? "Nächste Werbepause verschoben" : `Snooze nicht ausgeführt: ${detailText(detail, "reason", "unbekannter Fehler")}`,
-    "ads.commercial.failed": (detail) => `Werbeeinblendung nicht gestartet: ${detailText(detail, "reason", "unbekannter Fehler")}`,
+    "ads.commercial.failed": (detail) => `Werbeeinblendung nicht gestartet: ${commercialFailureReasonText(detail.reason, "de")}`,
     "text_commands.cooldown": (detail) => {
       const name = textCommandName(detail);
       return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
@@ -905,6 +1078,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   },
   en: {
     "host.action.failed": "Action failed",
+    "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : "shoutout"} while the channel is muted`,
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
     "host.announcement.sent": (detail) => `Chat announcement sent: ${detailText(detail, "text", "no text")}`,
@@ -924,11 +1098,11 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.module.error": "Module error",
     "host.module.unknown": "Unknown module",
     "host.overlay.not_executed": "Overlay not executed",
-    "host.shoutout.failed": (detail) => detail.cause === "twitch_user_not_found"
-      ? `Shoutout target ${detailText(detail, "target", "unknown")} was not found`
-      : detail.cause === "rate_limited"
-        ? "Shoutout was blocked by Twitch's cooldown"
-        : "Shoutout failed",
+    "host.shoutout.failed": (detail) => {
+      if (detail.cause === "twitch_user_not_found") return `Shoutout target ${detailText(detail, "target", "unknown")} was not found`;
+      const reason = shoutoutFailureReasonText(detail.cause, "en");
+      return reason === null ? "Shoutout failed" : `Shoutout failed: ${reason}`;
+    },
     "host.shoutout.sent": "Shoutout sent",
     "host.clip.failed": "Clip failed",
     "channel_events.raid.incoming": (detail) => `Raid from ${detailText(detail, "source", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
@@ -972,7 +1146,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "ads.prewarning.scope_missing": "Ad warning suppressed: channel:read:ads is missing",
     "ads.prewarning.schedule_error": (detail) => `Ad schedule could not be read: ${detailText(detail, "reason", "unknown error")}`,
     "ads.snooze": (detail) => detail.outcome === "success" ? "Next ad break postponed" : `Snooze not executed: ${detailText(detail, "reason", "unknown error")}`,
-    "ads.commercial.failed": (detail) => `Commercial not started: ${detailText(detail, "reason", "unknown error")}`,
+    "ads.commercial.failed": (detail) => `Commercial not started: ${commercialFailureReasonText(detail.reason, "en")}`,
     "text_commands.cooldown": (detail) => {
       const name = textCommandName(detail);
       return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
@@ -1015,6 +1189,7 @@ export interface EventToneEntry {
 
 export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.action.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.action.suppressed": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "host.chat.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.chat.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "host.announcement.failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
@@ -1111,6 +1286,10 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.removed": "Textbefehl entfernt",
     "ads.commercial_started": "Werbung gestartet",
     "clip.created": "Clip erstellt",
+    "channel.mute.enabled": "Kanal stummgeschaltet",
+    "channel.mute.disabled": "Kanal-Stummschaltung aufgehoben",
+    "channel.pause.enabled": "Automatische Aktionen pausiert",
+    "channel.pause.disabled": "Automatische Aktionen fortgesetzt",
     "overlay.token.issued": "Overlay-Token ausgestellt",
     "overlay.token.revoked": "Overlay-Token widerrufen",
   },
@@ -1127,6 +1306,10 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.removed": "Text command removed",
     "ads.commercial_started": "Commercial started",
     "clip.created": "Clip created",
+    "channel.mute.enabled": "Channel muted",
+    "channel.mute.disabled": "Channel unmuted",
+    "channel.pause.enabled": "Automatic actions paused",
+    "channel.pause.disabled": "Automatic actions resumed",
     "overlay.token.issued": "Overlay token issued",
     "overlay.token.revoked": "Overlay token revoked",
   },
@@ -1219,7 +1402,11 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     ad_snooze_failed: "Die nächste Werbepause konnte nicht verschoben werden.",
     commercial_length_invalid: "Die Werbedauer ist ungültig.",
     commercial_start_failed: "Die Werbeeinblendung konnte nicht gestartet werden.",
+    commercial_stream_offline: "Die Werbeeinblendung ist offline nicht verfügbar.",
     clip_create_failed: "Der Clip konnte nicht erstellt werden.",
+    clip_stream_offline: "Ein Clip kann nur erstellt werden, wenn der Stream live ist.",
+    channel_control_input_invalid: "Die Kanalsteuerung ist ungültig.",
+    channel_control_changed_concurrently: "Die Kanalsteuerung wurde inzwischen geändert.",
     shoutout_send_failed: "Der Shoutout konnte nicht gesendet werden.",
     overlay_token_manage_denied: "Nur Broadcaster und Verwalter dürfen Overlay-Token verwalten.",
     overlay_expiry_invalid: "Ablaufzeit ist ungültig.",
@@ -1289,7 +1476,11 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     ad_snooze_failed: "The next ad break could not be postponed.",
     commercial_length_invalid: "The commercial length is invalid.",
     commercial_start_failed: "The commercial could not be started.",
+    commercial_stream_offline: "A commercial cannot run while the stream is offline.",
     clip_create_failed: "The clip could not be created.",
+    clip_stream_offline: "A clip can only be created while the stream is live.",
+    channel_control_input_invalid: "The channel control is invalid.",
+    channel_control_changed_concurrently: "The channel control has changed since it was loaded.",
     shoutout_send_failed: "The shoutout could not be sent.",
     overlay_token_manage_denied: "Only broadcasters and managers may manage overlay tokens.",
     overlay_expiry_invalid: "Expiry is invalid.",

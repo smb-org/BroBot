@@ -108,3 +108,21 @@ Ob es unterhalb von `operator` noch eine reine Leserolle braucht, und ob
 einzelne Module eigene Schwellen setzen dürfen, ist nicht entschieden. Beides
 gehört in den Spike #17. Bis dahin gilt: Ein Modul erbt die Schwellen aus
 dieser Entscheidung und definiert keine eigenen.
+
+## 9. Kanal-Stummschaltung und Pause (Nachtrag, 23. September 2026)
+
+Stummschaltung und Pause sind betriebliche Notbremsen und stehen allen drei
+Kanalrollen offen. Sie nehmen sichtbares Verhalten zurück, schalten aber weder
+Module noch deren Einstellungen frei oder verändern sie. Das Aktivieren eines
+Moduls bleibt deshalb weiterhin verwaltend.
+
+Die Stummschaltung lässt Module, Abklingzeiten und Diagnosen weiterlaufen.
+Der Host unterdrückt anschließend Chat-Nachrichten, Antworten, Ankündigungen
+und automatische Shoutouts an einer Stelle. Manuelle Handlungen aus dem
+Dashboard bleiben verfügbar. Die Pause überspringt beim Dispatch alle
+nicht verpflichtenden Module; channel_events protokolliert weiterhin.
+
+Beide Zustände lassen sich für 15 Minuten, eine Stunde, bis zum Streamende oder
+unbegrenzt setzen. Zeitlich begrenzte Zustände werden beim Lesen nach Ablauf als
+aus behandelt. „Bis Streamende" wird mit dem nächsten frischen
+stream.offline-Ereignis aufgehoben.

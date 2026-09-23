@@ -5,9 +5,6 @@ import { MODULES } from "../modules/registry";
 import {
   getChannelMemberForChannel,
 } from "./db/channel-members";
-import {
-  listChannelModulesForChannel,
-} from "./db/channel-modules";
 import { sendChatMessage } from "./chat";
 import { sendChatAnnouncement } from "./announcement";
 import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
@@ -17,6 +14,7 @@ import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
 import { readChannelStreamState, writeEventSubStreamState, writeHelixStreamStateIfUnknown } from "./db/stream-state";
+import { clearStreamEndChannelControls, readDispatchChannelState } from "./db/channel-controls";
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 
@@ -211,6 +209,7 @@ export const selectModulesForEvent = (
   activations: readonly { moduleId: string; enabled: boolean; settings: string }[],
   subscriptionType: string,
   registry: readonly BotModule[] = MODULES,
+  paused = false,
 ): { matches: { module: BotModule; settings: string }[]; unknownModules: string[] } => {
   const known = new Map(registry.map((module) => [module.id, module]));
   const matches: { module: BotModule; settings: string }[] = [];
@@ -222,6 +221,7 @@ export const selectModulesForEvent = (
       unknownModules.push(activation.moduleId);
       continue;
     }
+    if (paused && module.mandatory !== true) continue;
     if (!(module.eventSubTypes ?? []).includes(subscriptionType)) continue;
     matches.push({ module, settings: activation.settings });
   }
@@ -236,12 +236,20 @@ const runActions = async (
   environment: DispatchEnvironment,
   channelId: string,
   actions: readonly ModuleAction[],
+  muted: boolean,
   fetcher: typeof fetch,
 ): Promise<ModuleDiagnostic[]> => {
   const diagnostics: ModuleDiagnostic[] = [];
   // Order is preserved: a reply after an announcement reads as a different
   // conversation than the reverse.
   for (const action of actions) {
+    if (muted && (action.kind === "chat" || action.kind === "announcement" || action.kind === "shoutout")) {
+      diagnostics.push({
+        code: "host.action.suppressed" satisfies EventCode,
+        detail: { action: action.kind, reason: "channel_muted" },
+      });
+      continue;
+    }
     try {
       if (action.kind === "chat") {
         const result = await sendChatMessage(
@@ -362,16 +370,17 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
+  let streamStateUpdated = false;
   if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
-    await writeEventSubStreamState(
+    streamStateUpdated = await writeEventSubStreamState(
       environment.DB,
       event.channelId,
       event.subscriptionType === "stream.online" ? "online" : "offline",
       event.receivedAt,
     );
   }
-  const activations = await listChannelModulesForChannel(environment.DB, event.channelId);
-  const { matches, unknownModules } = selectModulesForEvent(activations, event.subscriptionType, registry);
+  const dispatchState = await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt);
+  const { matches, unknownModules } = selectModulesForEvent(dispatchState.activations, event.subscriptionType, registry, dispatchState.controls.pause.active);
   const actor = await actorForEvent(environment.DB, event.channelId, event.payload);
   const newEntries: WrittenModuleDiagnostic[] = [];
   let streamStatePromise: Promise<ModuleStreamState> | undefined;
@@ -447,7 +456,7 @@ export const dispatchEventSubNotification = async (
     if (result !== null) {
       diagnostics.push(...result.diagnostics);
       try {
-        diagnostics.push(...await runActions(environment, event.channelId, result.actions, fetcher));
+        diagnostics.push(...await runActions(environment, event.channelId, result.actions, dispatchState.controls.mute.active, fetcher));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }
@@ -464,6 +473,12 @@ export const dispatchEventSubNotification = async (
     ));
   }
 
+  // Keep a stream-scoped pause active through this offline notification, so
+  // only the mandatory channel_events module observes the ending. The next
+  // dispatch and panel reload see it cleared.
+  if (event.subscriptionType === "stream.offline" && streamStateUpdated) {
+    await clearStreamEndChannelControls(environment.DB, event.channelId, event.receivedAt);
+  }
   if (newEntries.length === 0) return;
   const realtimeMessage: RealtimeEnvelope<"event_log.new"> = {
     version: 1,

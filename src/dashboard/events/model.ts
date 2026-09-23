@@ -13,7 +13,8 @@ export const emptyEventFilter: PanelEventFilters = {
 export const PERSON_FILTER_DEBOUNCE_MS = 300;
 
 export const eventFilterIsActive = (filters: PanelEventFilters): boolean =>
-  filters.origin !== null || filters.module !== null || filters.tone !== null || filters.person !== null;
+  filters.origin !== null || filters.module !== null || filters.tone !== null ||
+  (filters.tones?.length ?? 0) > 0 || filters.person !== null;
 
 export const eventMetadata = (code: string) =>
   Object.hasOwn(eventToneEntries, code) ? eventToneEntries[code as EventCode] : null;
@@ -56,8 +57,12 @@ export const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] =
     representative: groupEntries.slice(1).reduce((current, candidate) => {
       const currentRank = eventToneRank(eventTone(current.code));
       const candidateRank = eventToneRank(eventTone(candidate.code));
+      const currentChannelEvent = current.moduleId === "channel_events";
+      const candidateChannelEvent = candidate.moduleId === "channel_events";
       return candidateRank > currentRank ||
-        (candidateRank === currentRank && candidate.createdAt < current.createdAt)
+        (candidateRank === currentRank && candidateChannelEvent && !currentChannelEvent) ||
+        (candidateRank === currentRank && candidateChannelEvent === currentChannelEvent &&
+          (candidateChannelEvent ? candidate.createdAt > current.createdAt : candidate.createdAt < current.createdAt))
         ? candidate
         : current;
     }, groupEntries[0]),

@@ -50,3 +50,17 @@ export const snoozeAds = async (channelId: string): Promise<AdsScheduleResponse>
   });
   return json<AdsScheduleResponse>(response);
 };
+
+export const startCommercialNow = async (
+  channelId: string,
+  length: number,
+): Promise<{ length: number | null }> => {
+  const csrfResponse = await fetch("/api/csrf");
+  const csrf = await json<{ token: string }>(csrfResponse);
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/ads/commercial`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.token },
+    body: JSON.stringify({ length }),
+  });
+  return json<{ length: number | null }>(response);
+};
