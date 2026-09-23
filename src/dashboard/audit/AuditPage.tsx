@@ -67,6 +67,8 @@ const AuditFilterBar = ({
       />
       <Field
         label={texts.audit.person}
+        hint={texts.audit.personHint}
+        placeholder={texts.audit.personPlaceholder}
         icon="search"
         value={personDraft}
         onChange={setPersonDraft}
@@ -115,6 +117,7 @@ const AuditDiffList = ({ rows, moduleCatalog, texts }: {
           {row.kind === "changed" ? <><del>{oldText}</del> <span aria-hidden="true">→</span> {newText}</> : null}
           {row.kind === "added" ? <>{texts.audit.newValue}: {newText}</> : null}
           {row.kind === "removed" ? <>{texts.audit.removedValue}: {oldText}</> : null}
+          {row.kind === "changed-truncated" ? <>{texts.audit.changedTruncated}</> : null}
         </dd>
       </div>;
     })}

@@ -83,6 +83,65 @@ describe("auditDiffRows", () => {
     expect(auditDiffRows(before, after)).toEqual([{ key: "aliases", kind: "changed", oldValue: ["a", "b"], newValue: ["a", "c"], fromSettings: false }]);
     expect(auditDiffRows(before, before)).toEqual([]);
   });
+
+  it("flags a preview-identical field as changed when its fingerprint differs (#181 review)", () => {
+    // An edit past the 200-char preview cutoff (`text.ts`'s `truncateTo200Chars`)
+    // can leave the stored preview identical on both sides -- only the
+    // `${key}Hash` companion field (`textFingerprintIfTruncated`) tells them apart.
+    const before = JSON.stringify({ text: "A".repeat(199) + "…", textHash: "aaa1" });
+    const after = JSON.stringify({ text: "A".repeat(199) + "…", textHash: "bbb2" });
+    expect(auditDiffRows(before, after)).toEqual([
+      { key: "text", kind: "changed-truncated", oldValue: `${"A".repeat(199)}…`, newValue: `${"A".repeat(199)}…`, fromSettings: false },
+    ]);
+  });
+
+  it("doesn't flag a preview-identical field when its fingerprint also matches", () => {
+    const before = JSON.stringify({ text: "same preview", textHash: "aaa1" });
+    const after = JSON.stringify({ text: "same preview", textHash: "aaa1" });
+    expect(auditDiffRows(before, after)).toEqual([]);
+  });
+
+  it("never shows a `Hash` companion field as its own row", () => {
+    const before = JSON.stringify({ text: "old", textHash: "aaa1" });
+    const after = JSON.stringify({ text: "new", textHash: "bbb2" });
+    const rows = auditDiffRows(before, after);
+    expect(rows.map((row) => row.key)).toEqual(["text"]);
+  });
+
+  it("falls back to a raw-string comparison when the nested settings JSON is malformed (#181 review)", () => {
+    const before = JSON.stringify({ channelId: "kanal-a", moduleId: "ads", enabled: true, settings: "{not json" });
+    const after = JSON.stringify({ channelId: "kanal-a", moduleId: "ads", enabled: true, settings: JSON.stringify({ prewarning: true }) });
+    expect(auditDiffRows(before, after)).toEqual([
+      { key: "settings", kind: "changed", oldValue: "{not json", newValue: JSON.stringify({ prewarning: true }), fromSettings: false },
+    ]);
+  });
+
+  it("falls back to a raw-string comparison when settings parses but isn't an object", () => {
+    const before = JSON.stringify({ settings: JSON.stringify(["not", "an", "object"]) });
+    const after = JSON.stringify({ settings: JSON.stringify({ prewarning: true }) });
+    const rows = auditDiffRows(before, after);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.key).toBe("settings");
+    expect(rows[0]?.kind).toBe("changed");
+  });
+
+  it("never silently drops a malformed settings snapshot that didn't change on the other side", () => {
+    // Both sides malformed but identical -- still no diff (nothing changed).
+    const same = JSON.stringify({ settings: "{not json" });
+    expect(auditDiffRows(same, same)).toEqual([]);
+    // Malformed on both sides, but the raw string itself changed.
+    const before = JSON.stringify({ settings: "{not json" });
+    const after = JSON.stringify({ settings: "{also not json" });
+    expect(auditDiffRows(before, after)).toEqual([
+      { key: "settings", kind: "changed", oldValue: "{not json", newValue: "{also not json", fromSettings: false },
+    ]);
+  });
+
+  it("keeps diffing normally when neither side has a settings field at all", () => {
+    const before = JSON.stringify({ role: "operator" });
+    const after = JSON.stringify({ role: "manager" });
+    expect(auditDiffRows(before, after)).toEqual([{ key: "role", kind: "changed", oldValue: "operator", newValue: "manager", fromSettings: false }]);
+  });
 });
 
 describe("auditDiffValueText", () => {
@@ -125,6 +184,7 @@ describe("auditSubjectText", () => {
       action: "member.added",
       before: "null",
       after: JSON.stringify({ role: "operator" }),
+      subjectUserId: "300111222",
       subjectLogin: "sensitron",
       subjectDisplayName: null,
     });
@@ -139,10 +199,26 @@ describe("auditSubjectText", () => {
       action: "member.added",
       before: "null",
       after: JSON.stringify({ role: "operator" }),
+      subjectUserId: "300111222",
       subjectLogin: "sensitron",
       subjectDisplayName: null,
     });
     expect(auditSubjectText(entry, "en")).toContain(" as ");
+  });
+
+  it("falls back to the subject's raw id when the Twitch lookup never resolved it (#181 review)", () => {
+    // The worker still sends `subjectUserId` when it has one to look up, even
+    // if the lookup itself came back empty (e.g. a deleted account) -- the
+    // row must still name *who*, not just the role.
+    const entry = baseEntry({
+      action: "member.added",
+      before: "null",
+      after: JSON.stringify({ role: "operator" }),
+      subjectUserId: "300111222",
+      subjectLogin: null,
+      subjectDisplayName: null,
+    });
+    expect(auditSubjectText(entry, "de")).toBe("300111222 als Bediener");
   });
 
   it("falls back to just the role when the subject's login never resolved", () => {

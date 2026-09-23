@@ -682,8 +682,43 @@ describe("Panel read endpoints", () => {
     expect(body.entries).toEqual([expect.objectContaining({
       actorLogin: "alice",
       actorDisplayName: "Alice",
+      subjectUserId: "user-2",
       subjectLogin: "sensitron",
       subjectDisplayName: "sensitron",
+    })]);
+  });
+
+  it("still sends the subject's raw id when the Twitch lookup can't resolve it (#181 review)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotIdentity(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-member",
+      "user-1",
+      "2026-09-18T04:00:00.000Z",
+      "kanal-a",
+      "member.removed",
+      JSON.stringify({ channelId: "kanal-a", userId: "gelöscht", role: "operator" }),
+      "null",
+    ).run();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ data: [{ id: "user-1", login: "alice", display_name: "Alice" }] }))));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<Record<string, unknown>> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.entries).toEqual([expect.objectContaining({
+      subjectUserId: "gelöscht",
+      subjectLogin: null,
+      subjectDisplayName: null,
     })]);
   });
 
@@ -697,7 +732,7 @@ describe("Panel read endpoints", () => {
        VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       "audit-module", "user-1", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
-      "audit-member", "user-2", "2026-09-18T03:00:00.000Z", "kanal-a", "member.added", "null", "{}",
+      "audit-member", "9002", "2026-09-18T03:00:00.000Z", "kanal-a", "member.added", "null", "{}",
     ).run();
 
     const areaResponse = await panelRouter.fetch(
@@ -709,7 +744,7 @@ describe("Panel read endpoints", () => {
     expect(areaBody.entries.map((entry) => entry.auditId)).toEqual(["audit-member"]);
 
     const personResponse = await panelRouter.fetch(
-      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=user-2"),
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=9002"),
       environment,
     );
     const personBody = await personResponse.json<{ entries: Array<{ auditId: string }> }>();
@@ -722,6 +757,57 @@ describe("Panel read endpoints", () => {
     );
     expect(invalidAreaResponse.status).toBe(400);
     expect(await invalidAreaResponse.json()).toEqual({ error: "audit_area_invalid" });
+  });
+
+  it("resolves a non-numeric person filter as a login before querying (#181 review)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotIdentity(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-9002", "9002", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+      "audit-1", "user-1", "2026-09-18T03:00:00.000Z", "kanal-a", "module.disabled", "{}", "{}",
+    ).run();
+    const twitch = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.searchParams.get("login")).toBe("sensitron");
+      return Promise.resolve(Response.json({ data: [{ id: "9002", login: "sensitron", display_name: "sensitron" }] }));
+    });
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=%40sensitron"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<{ auditId: string }> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-9002"]);
+  });
+
+  it("returns an empty page instead of an error for an unresolvable person login", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotIdentity(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind("audit-1", "user-1", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}").run();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ data: [] }))));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=no_such_login"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ entries: [], nextCursor: null });
   });
 });
 

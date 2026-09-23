@@ -1,4 +1,4 @@
-export { truncateTo200Chars } from "../contract";
+export { truncateTo200Chars, textFingerprintIfTruncated } from "../contract";
 export {
   closestTemplateVariable,
   renderTemplate,

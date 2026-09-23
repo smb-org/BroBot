@@ -253,8 +253,11 @@ export interface DashboardTexts {
     no: string;
     newValue: string;
     removedValue: string;
+    changedTruncated: string;
     filter: string;
     person: string;
+    personHint: string;
+    personPlaceholder: string;
     area: string;
     allAreas: string;
     areaLabels: Record<AuditArea, string>;
@@ -539,7 +542,11 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       load: "Audit-Log wird geladen …", empty: "Noch keine Audit-Einträge gespeichert.", changeData: "Änderungsdaten",
       before: "Vorher", after: "Nachher", olderEntries: "Ältere Einträge laden", loadingOlderEntries: "Ältere Einträge werden geladen …",
       yes: "Ja", no: "Nein", newValue: "neu", removedValue: "entfernt",
-      filter: "Filter", person: "Person", area: "Bereich", allAreas: "Alle Bereiche",
+      changedTruncated: "geändert (Text länger als die Vorschau)",
+      filter: "Filter", person: "Person",
+      personHint: "Wer die Aktion ausgeführt hat, nicht wer betroffen war.",
+      personPlaceholder: "Login oder ID, z. B. sensitron",
+      area: "Bereich", allAreas: "Alle Bereiche",
       areaLabels: { module: "Module", command: "Textbefehle", member: "Mitglieder", channel: "Kanal", overlay: "Overlay" },
       activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen", noMatches: "Keine Einträge passen zu den Filtern.",
     },
@@ -750,7 +757,11 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       load: "Loading audit log …", empty: "No audit entries saved yet.", changeData: "Change data",
       before: "Before", after: "After", olderEntries: "Load older entries", loadingOlderEntries: "Loading older entries …",
       yes: "Yes", no: "No", newValue: "new", removedValue: "removed",
-      filter: "Filters", person: "Person", area: "Area", allAreas: "All areas",
+      changedTruncated: "changed (text longer than preview)",
+      filter: "Filters", person: "Person",
+      personHint: "Who performed the action, not who was affected by it.",
+      personPlaceholder: "Login or ID, e.g. sensitron",
+      area: "Area", allAreas: "All areas",
       areaLabels: { module: "Modules", command: "Text commands", member: "Members", channel: "Channel", overlay: "Overlay" },
       activeFilters: "Active filters:", resetFilters: "Reset filters", noMatches: "No entries match the filters.",
     },

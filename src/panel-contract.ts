@@ -256,7 +256,8 @@ export interface PanelAuditEntry {
   action: string;
   before: string;
   after: string;
-  /** The action's target member, when one is stored in `before`/`after` -- resolved server-side alongside the actor (#181). */
+  /** The action's target member, when one is stored in `before`/`after` -- resolved server-side alongside the actor (#181). `subjectUserId` is the raw id to fall back to (like the actor) when the Twitch lookup can't resolve a login/display name. */
+  subjectUserId?: string | null;
   subjectLogin?: string | null;
   subjectDisplayName?: string | null;
 }

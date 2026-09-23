@@ -101,6 +101,30 @@ const parseAuditFilters = (
   };
 };
 
+const isTwitchUserId = (value: string): boolean => /^\d+$/.test(value);
+
+/**
+ * The "Person" filter's raw id requirement makes it unusable from a search
+ * box -- a Twitch user id is never what's displayed (#181 review). A value
+ * that isn't already numeric is treated as a login (an optional leading "@"
+ * is stripped, matching how a login is shown elsewhere in the dashboard) and
+ * resolved to an id the same way member search already does. `null` here
+ * means "no such person": the caller should short-circuit to an empty page
+ * rather than run a query that can never match.
+ */
+const resolveAuditPersonFilter = async (
+  environment: Env,
+  filters: PanelAuditFilters,
+): Promise<PanelAuditFilters | null> => {
+  if (filters.person === null || isTwitchUserId(filters.person)) return filters;
+  try {
+    const user = await fetchTwitchUserByLogin(fetch, environment, filters.person.replace(/^@/u, ""));
+    return user === null ? null : { ...filters, person: user.userId };
+  } catch {
+    return null;
+  }
+};
+
 // Only shares the parsing/error mechanics between the audit log and the
 // event log. Both logs deliberately have different read permissions and
 // retention periods (see docs/decisions/0004-ereignisprotokoll.md) — that
@@ -405,7 +429,9 @@ panelRouter.get(
     if (parsed instanceof Response) return parsed;
     const filters = parseAuditFilters(context);
     if (filters instanceof Response) return filters;
-    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, filters);
+    const resolvedFilters = await resolveAuditPersonFilter(context.env, filters);
+    if (resolvedFilters === null) return context.json({ entries: [], nextCursor: null });
+    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, resolvedFilters);
     // The subject enrichment (#181 item 2/4) reuses the actor lookup's single
     // batched Twitch call -- a member action's target is just another user id
     // living in `before`/`after`, resolved the same way as the actor.
@@ -425,7 +451,7 @@ panelRouter.get(
           ...entry,
           actorLogin: actor?.login ?? null,
           actorDisplayName: actor?.displayName ?? null,
-          ...(subjectId === null ? {} : { subjectLogin: subject?.login ?? null, subjectDisplayName: subject?.displayName ?? null }),
+          ...(subjectId === null ? {} : { subjectUserId: subjectId, subjectLogin: subject?.login ?? null, subjectDisplayName: subject?.displayName ?? null }),
         };
       }),
     });

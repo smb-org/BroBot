@@ -448,6 +448,11 @@ const auditAreaSqlClause = (area: AuditArea): { sql: string; values: string[] } 
   };
 };
 
+// #181 review: an index on (channel_id, actor_user_id, created_at) would
+// speed up the `?actor=` filter below once audit volume grows -- deferred
+// for now, per-channel volume is small and this query is already capped at
+// `limit + 1` rows, and adding it here means a migration while several
+// other branches are adding migrations of their own.
 export const getAuditLogForChannel = async (
   db: D1Database,
   channelId: string,

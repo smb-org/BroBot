@@ -36,6 +36,13 @@ const parseObject = (json: string): Record<string, unknown> | null => {
   }
 };
 
+interface FlattenedRecord {
+  rest: Record<string, unknown>;
+  /** The `settings` field's own raw JSON string, kept around even when it parses, so a malformed/non-object `settings` on either side can still fall back to a raw-string comparison (#181 review) instead of silently vanishing. */
+  rawSettings: string | null;
+  settings: Record<string, unknown> | null;
+}
+
 /**
  * Settings are stored as a JSON string nested inside the audit row's own
  * JSON object (`{ channelId, moduleId, enabled, settings: "<json>" }`, see
@@ -43,16 +50,20 @@ const parseObject = (json: string): Record<string, unknown> | null => {
  * alongside the top-level ones, tagged `fromSettings` for the field-label
  * lookup (module catalogue vs. generic fallback).
  */
-const flattenSettings = (record: Record<string, unknown> | null): { rest: Record<string, unknown>; settings: Record<string, unknown> | null } => {
-  if (record === null) return { rest: {}, settings: null };
+const flattenSettings = (record: Record<string, unknown> | null): FlattenedRecord => {
+  if (record === null) return { rest: {}, rawSettings: null, settings: null };
   const { settings: rawSettings, ...rest } = record;
-  if (typeof rawSettings !== "string") return { rest, settings: null };
-  return { rest, settings: parseObject(rawSettings) };
+  if (typeof rawSettings !== "string") return { rest, rawSettings: null, settings: null };
+  return { rest, rawSettings, settings: parseObject(rawSettings) };
 };
+
+/** `rest` with the raw (unparsed) `settings` string reattached as a plain field -- the fallback when the nested diff isn't viable. */
+const withRawSettingsField = (flat: FlattenedRecord): Record<string, unknown> =>
+  flat.rawSettings === null ? flat.rest : { ...flat.rest, settings: flat.rawSettings };
 
 const deepEqual = (a: unknown, b: unknown): boolean => a === b || JSON.stringify(a) === JSON.stringify(b);
 
-export type AuditDiffKind = "changed" | "added" | "removed";
+export type AuditDiffKind = "changed" | "added" | "removed" | "changed-truncated";
 
 export interface AuditDiffRow {
   key: string;
@@ -62,6 +73,9 @@ export interface AuditDiffRow {
   /** From the nested `settings` JSON, so the caller should label it via the module's own field catalogue instead of the generic fallback. */
   fromSettings: boolean;
 }
+
+/** The audit-writer convention (`modules/text_commands/adapters/d1.ts`'s `previewField`) for a truncated preview's companion fingerprint field. */
+const HASH_SUFFIX = "Hash";
 
 /**
  * A diff of only the fields that actually changed, per #181 item 3: create
@@ -75,13 +89,25 @@ export const auditDiffRows = (beforeJson: string, afterJson: string): AuditDiffR
   const rows: AuditDiffRow[] = [];
   const pushRows = (beforeFields: Record<string, unknown>, afterFields: Record<string, unknown>, fromSettings: boolean): void => {
     for (const key of new Set([...Object.keys(beforeFields), ...Object.keys(afterFields)])) {
+      if (key.endsWith(HASH_SUFFIX) && key.length > HASH_SUFFIX.length) continue; // a companion field, not its own row
       if (!fromSettings && STRUCTURAL_KEYS.has(key)) continue;
       const hasBefore = Object.hasOwn(beforeFields, key);
       const hasAfter = Object.hasOwn(afterFields, key);
       const oldValue = beforeFields[key];
       const newValue = afterFields[key];
       if (hasBefore && hasAfter) {
-        if (deepEqual(oldValue, newValue)) continue;
+        if (deepEqual(oldValue, newValue)) {
+          // A preview can be identical on both sides while the full value
+          // (only its fingerprint is stored) differs -- an edit past the
+          // preview's truncation cutoff must still surface as a change.
+          const hashKey = `${key}${HASH_SUFFIX}`;
+          const oldHash = beforeFields[hashKey];
+          const newHash = afterFields[hashKey];
+          if (oldHash !== undefined && newHash !== undefined && !deepEqual(oldHash, newHash)) {
+            rows.push({ key, kind: "changed-truncated", oldValue, newValue, fromSettings });
+          }
+          continue;
+        }
         rows.push({ key, kind: "changed", oldValue, newValue, fromSettings });
       } else if (hasAfter) {
         if (newValue === null || newValue === undefined) continue;
@@ -92,8 +118,15 @@ export const auditDiffRows = (beforeJson: string, afterJson: string): AuditDiffR
       }
     }
   };
-  pushRows(before.rest, after.rest, false);
-  if (before.settings !== null || after.settings !== null) pushRows(before.settings ?? {}, after.settings ?? {}, true);
+  if (before.settings !== null && after.settings !== null) {
+    pushRows(before.rest, after.rest, false);
+    pushRows(before.settings, after.settings, true);
+  } else {
+    // At least one side's `settings` JSON was malformed, not an object, or
+    // simply absent: nothing to diff field by field. Compare the raw
+    // strings instead of dropping the field outright.
+    pushRows(withRawSettingsField(before), withRawSettingsField(after), false);
+  }
   return rows;
 };
 
@@ -130,9 +163,14 @@ export const auditSubjectText = (entry: PanelAuditEntry, language: DashboardLang
   }
   if (area === "member") {
     const role = record !== null && typeof record.role === "string" ? record.role as ChannelRole : null;
-    const login = entry.subjectDisplayName ?? (entry.subjectLogin === null || entry.subjectLogin === undefined ? null : `@${entry.subjectLogin}`);
-    if (login === null) return role === null ? null : roleLabel(role);
-    return role === null ? login : `${login} ${memberAsWord(language)} ${roleLabel(role)}`;
+    // Falls back to the raw subject id, the same chain `auditActorLabel`
+    // uses for the actor -- a failed Twitch lookup (e.g. a deleted account)
+    // must still name *who*, not just the role (#181 review).
+    const identity = entry.subjectUserId === null || entry.subjectUserId === undefined
+      ? null
+      : auditActorLabel({ actorUserId: entry.subjectUserId, actorLogin: entry.subjectLogin ?? null, actorDisplayName: entry.subjectDisplayName ?? null });
+    if (identity === null) return role === null ? null : roleLabel(role);
+    return role === null ? identity : `${identity} ${memberAsWord(language)} ${roleLabel(role)}`;
   }
   if (area === "channel") {
     const login = record !== null && typeof record.login === "string" && record.login.length > 0 ? record.login : null;

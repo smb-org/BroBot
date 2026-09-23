@@ -9,7 +9,7 @@ import type {
   TextCommandResponseType,
   TextCommandStreamCondition,
 } from "../contracts";
-import { truncateTo200Chars, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
+import { textFingerprintIfTruncated, truncateTo200Chars, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
 import type {
   TextCommandAliasConflict,
   TextCommandMutationResult,
@@ -20,21 +20,32 @@ import { cooldownRemaining } from "../domain";
 const MODULE_ID = "text_commands";
 const extraTemplateKeys = ["offlineText", "notFollowingText", "unavailableText", "usageText"] as const;
 
+/**
+ * Preview plus, only past the truncation cutoff, a `${key}Hash` fingerprint
+ * of the full value (#181 review): otherwise an edit that only touches text
+ * after character 200 truncates to the same preview on both sides and the
+ * audit diff would show no change at all.
+ */
+const previewField = (key: string, text: string): Record<string, string> => {
+  const hash = textFingerprintIfTruncated(text);
+  return hash === undefined ? { [key]: truncateTo200Chars(text) } : { [key]: truncateTo200Chars(text), [`${key}Hash`]: hash };
+};
+
 const auditValues = (command: TextCommand) => ({
   name: command.name,
   kind: command.kind,
   enabled: command.enabled,
   minimumTier: command.minimumTier,
-  text: truncateTo200Chars(command.text),
+  ...previewField("text", command.text),
   cooldownSeconds: command.cooldownSeconds,
   aliases: [...command.aliases],
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
   responseType: command.responseType,
-  ...(command.offlineText === undefined ? {} : { offlineText: truncateTo200Chars(command.offlineText) }),
-  ...(command.notFollowingText === undefined ? {} : { notFollowingText: truncateTo200Chars(command.notFollowingText) }),
-  ...(command.unavailableText === undefined ? {} : { unavailableText: truncateTo200Chars(command.unavailableText) }),
-  ...(command.usageText === undefined ? {} : { usageText: truncateTo200Chars(command.usageText) }),
+  ...(command.offlineText === undefined ? {} : previewField("offlineText", command.offlineText)),
+  ...(command.notFollowingText === undefined ? {} : previewField("notFollowingText", command.notFollowingText)),
+  ...(command.unavailableText === undefined ? {} : previewField("unavailableText", command.unavailableText)),
+  ...(command.usageText === undefined ? {} : previewField("usageText", command.usageText)),
 });
 
 const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
