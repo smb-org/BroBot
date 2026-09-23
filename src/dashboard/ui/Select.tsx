@@ -71,6 +71,7 @@ export function Select({
       label={label}
       aria-label={ariaLabel}
       description={hint}
+      inputWrapperOrder={["label", "input", "description", "error"]}
       error={error ? `× ${error}` : undefined}
       value={value}
       onChange={onChange}

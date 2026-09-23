@@ -116,6 +116,24 @@ describe("Text command editor", () => {
     });
   });
 
+  it("puts the Art select's hint below the field, not between the label and the control", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+    const combobox = screen.getByRole("combobox", { name: "Art" });
+    const hint = combobox.closest(".mantine-Select-root")?.querySelector(".mantine-Select-description");
+    expect(hint).toHaveTextContent("Antwortet mit dem Text unten.");
+    expect(combobox.compareDocumentPosition(hint as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("labels the response variable chips with their placeholder, not an empty pill", async () => {
+    const fetcher = panelFetch({ commands: () => [] });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    expect(screen.getByRole("button", { name: "{user}" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "{channel}" })).toBeInTheDocument();
+  });
+
   it("uses the chat preview, not plain text, for a command list's response", async () => {
     const rows = [makeCommand({ name: "commands", kind: "list", aliases: [] }), makeCommand({ name: "hallo" })];
     const fetcher = panelFetch({ commands: () => rows });
