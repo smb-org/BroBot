@@ -29,15 +29,16 @@ this rests on.
 **Modules** (`src/modules/registry.ts` is the single place that lists them):
 
 - **`text_commands`** — chat-triggered `!commands`, configured entirely in
-  the panel. Each command has a kind: `text` (fixed reply), `list` (rotates
-  through all enabled rows), `uptime`, `followage`, `game` (current
-  category/title), or `shoutout`. Commands support aliases, a minimum tier
-  (`everyone`/`subscriber`/`vip`/`moderator`/`broadcaster`), a per-channel and
+  the panel. Each command has a kind: `text` (fixed reply), `list` (replies
+  with enabled command names in alphabetical order), `uptime`, `followage`,
+  `game` (current category/title), or `shoutout`. Commands support aliases, a
+  minimum tier (`everyone`/`subscriber`/`vip`/`moderator`/`broadcaster`), a
+  per-channel and
   optional per-user cooldown, and an "online only"/"offline only" condition.
-- **`raid`** — reacts to `channel.raid`: an automatic shoutout above a
-  viewer-count threshold, plus a short or long chat message depending on raid
-  size. Also contributes the Stream Manager's manual-shoutout immediate
-  action. The dashboard shows this module as "Shoutout", not "Raid".
+- **`raid`** — reacts to `channel.raid`: an automatic shoutout at or above a
+  viewer-count threshold, plus a separate threshold selecting a short or long
+  chat message. Also contributes the Stream Manager's manual-shoutout
+  immediate action. The dashboard shows this module as "Shoutout", not "Raid".
 - **`ads`** — reacts to `stream.online` and `channel.ad_break.begin`: an
   optional lead-time pre-warning message and a message for the ad break
   itself. Also contributes a "start commercial now" immediate action.
@@ -49,9 +50,10 @@ this rests on.
   stream online/offline events into entries in the channel's event log,
   without a chat reply.
 
-A module is either a settings-only slice (`ads`, `raid`: template texts,
-thresholds, toggles — edited through a generated settings editor) or one with
-its own panel UI and persisted rows (`text_commands`: full CRUD for commands).
+A module's settings can be a generated settings editor alone (`raid`:
+template texts, thresholds, toggles), a generated editor combined with a
+custom panel (`ads`: schedule, snooze and recent breaks), or a hand-written
+panel with its own persisted rows (`text_commands`: full CRUD for commands).
 
 **Host features** (not modules, built into the Worker/dashboard):
 
@@ -63,9 +65,10 @@ its own panel UI and persisted rows (`text_commands`: full CRUD for commands).
   why.
 - **Mute / pause**: a channel can be muted or paused for a duration or until
   the current stream ends, independent of any module.
-- **Event log**: every module decision — including *why* a module did
-  nothing — is recorded with a machine-readable `code` and small detail
-  fields, filterable by module, origin, tone and actor.
+- **Event log**: diagnostics a module emits — including *why* it took no
+  action, when it reports a reason — are recorded with a machine-readable
+  `code` and small detail fields, filterable by module, origin, tone and
+  actor; a module that emits no diagnostics for an event leaves no row.
 - **Audit log**: every administrative change (member roles, module
   enable/disable, channel controls, platform-level actions) is written in the
   same D1 batch as the change itself.
@@ -90,7 +93,9 @@ section is the short path.
   OAuth redirect URL set to `<PUBLIC_ORIGIN>/auth/twitch/callback` for each
   environment you deploy.
 - A dedicated Twitch account for the bot itself, separate from any personal
-  or broadcaster account. The bot connects once, globally — not per channel.
+  or broadcaster account. Set `vars.TWITCH_BOT_LOGIN` in each Wrangler
+  environment (`wrangler.jsonc`) to that account's Twitch login before
+  connecting it. The bot connects once, globally — not per channel.
 
 ### Environments
 
@@ -175,9 +180,12 @@ pnpm run deploy:production:ci-code-only
 
 These are the code-only scripts CI itself runs; in normal operation GitHub
 Actions deploys staging automatically after a green CI run on `main`, and
-production only via a manually triggered `workflow_dispatch`, gated by the
-`production` GitHub environment's required reviewers. For first-time secret
-provisioning or an emergency deploy outside CI,
+production only via a manually triggered `workflow_dispatch` against the
+`production` GitHub environment. Before either deploy job can run, configure
+repository variable `CLOUDFLARE_ACCOUNT_ID` and repository secret
+`CLOUDFLARE_API_TOKEN`, and configure required reviewers on the `production`
+environment — the workflow only names that environment, GitHub enforces the
+review. For first-time secret provisioning or an emergency deploy outside CI,
 `pnpm run deploy:staging:local-with-secrets` /
 `...production:local-with-secrets` read a local `.env.staging` /
 `.env.production` file and pass all secrets via `wrangler deploy
@@ -186,18 +194,21 @@ provisioning or an emergency deploy outside CI,
 Set secrets once per environment with `wrangler secret put <NAME> --env
 <environment>` (interactive prompt — never pass values on the command line).
 
-After any deploy, `GET /healthz` returns `200` when all required secrets,
-bindings and the expected D1 schema are present, or `503` naming only the
-missing item (never a value).
+After any deploy, `GET /healthz` checks required binding and secret names
+and formats, the latest recorded migration, and a schema sentinel table; it
+returns `200` when all are present, or `503` listing every missing name (or
+`DB_SCHEMA` for a schema mismatch), never a secret value.
 
 ### First-time setup flow
 
 1. Sign in to the dashboard with a Twitch account listed in
    `PLATFORM_USER_IDS` — that account becomes a platform admin and sees the
    `/platform` page.
-2. Connect the bot once, globally: sign in to Twitch as the **bot's** account,
-   then call `GET /auth/bot/login` from a browser already logged into the
-   dashboard panel, and approve the consent screen.
+2. Connect the bot once, globally: `/auth/bot/login` checks the *dashboard
+   session's* own Twitch login, not just the account you sign in with next —
+   use a separate browser session, or visit `/auth/login?switch=1` to sign
+   into the dashboard as the bot's account, then visit `GET /auth/bot/login`
+   and approve the consent screen.
 3. On `/platform`, release a channel by searching its broadcaster's Twitch
    login. That adds the row to `channels` that makes it active; the bot must
    also be modded in that channel's Twitch chat.
@@ -212,9 +223,9 @@ missing item (never a value).
 
 A scheduled handler (`triggers.crons` in `wrangler.jsonc`, hourly in every
 environment) refreshes Twitch tokens, checks the bot's moderator status per
-channel, prunes the event log after 14 days, and backfills each channel's
-live/offline state via Helix for channels EventSub hasn't reported one for
-yet (the same Helix lookup also runs on demand when a channel's overview
+channel, prunes the event log after 14 days, and backfills missing
+live/offline states and refreshes stale ones via Helix, up to 50 channels per
+tick (the same Helix lookup also runs on demand when a channel's overview
 page opens). Cloudflare Workers, D1 and Durable Objects all have free tiers;
 nothing here requires a paid plan.
 Watch Twitch's own limits instead — EventSub quota and Helix rate limits
@@ -228,15 +239,16 @@ pins `pnpm@12.1.0` via `packageManager`).
 
 ```bash
 pnpm install
-cp .dev.vars.example .dev.vars   # replace the placeholder values
+cp .dev.vars.example .dev.vars   # replace the placeholder values, set PLATFORM_USER_IDS to your numeric Twitch user ID
+pnpm exec wrangler d1 migrations apply DB   # creates local D1 under .wrangler/ and applies migrations
 pnpm run dev
 ```
 
 `pnpm run dev` starts Vite with the Cloudflare plugin, simulating Worker
 bindings locally. The dashboard is at `http://localhost:5173/`, the overlay
-at `http://localhost:5173/overlay.html`. Local D1 is created automatically
-under `.wrangler/` the first time you run migrations against it
-(`pnpm exec wrangler d1 migrations apply DB`).
+at `http://localhost:5173/overlay.html`; sign in with the Twitch account
+listed in `PLATFORM_USER_IDS` to reach the `/platform` admin pages.
+`/healthz` reports `503` until migrations have been applied.
 
 Twitch EventSub delivers webhooks to `PUBLIC_ORIGIN/api/twitch/eventsub`,
 which must be a real, publicly reachable HTTPS URL — Twitch cannot call
@@ -268,9 +280,10 @@ Individual scripts, if you only need one: `pnpm run typecheck`,
 
 `.github/workflows/ci.yml` runs the same four jobs (`static`, `unit`,
 `worker`, `e2e`) on every pull request and on push to `main`, plus a
-`quality` job that gates on all four. `main` is a protected branch — merges
-require a green `quality` check, an up-to-date branch, and no unresolved
-review comments; direct pushes are rejected even for admins. See
+`quality` job that gates on all four. `main`'s branch protection — configured
+on GitHub, not by these workflow files — requires a green `quality` check, an
+up-to-date branch, and no unresolved review comments before merging, and
+rejects direct pushes even for admins. See
 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) (German) for the full branch
 and review rules.
 
@@ -305,9 +318,12 @@ Fields that exist today (`src/modules/contract.ts`):
 
 - `id: string` — stable module identifier.
 - `mandatory?: boolean` — always enabled, cannot be turned off (`channel_events`).
-- `settingsSchema` (a Zod schema) and `defaultSettings` — written into
-  `channel_modules.settings` on enable; there is no separate
-  settings-editing route.
+- `defaultEnabled?: boolean` — create an enabled settings row when a channel
+  is released; existing channels need a backfill migration.
+- `settingsSchema` (a Zod schema) and `defaultSettings` — `defaultSettings` is
+  written into `channel_modules.settings` on enable; the host exposes
+  GET/PATCH settings routes that validate reads and writes against
+  `settingsSchema`.
 - `templateFields?` — which template variables are valid per settings field,
   used by both panel validation and worker rendering.
 - `broadcasterScopes?: readonly string[]` — broadcaster OAuth scopes the host
@@ -316,23 +332,26 @@ Fields that exist today (`src/modules/contract.ts`):
   receives.
 - `routes?: Hono<ModuleRouteEnvironment>` — mounted under
   `/api/channels/:channelId/modules/<id>`.
-- `handleEvent?(event, context)` — the business entry point. A pure
-  function returning `{ actions, diagnostics }`, executing nothing itself.
-  A throw becomes a diagnostic in the event log; it never blocks the Worker
-  or other modules.
-- `onEnable?(context, channelId)` — prepared statements for one-time initial
-  data when the module is switched on.
+- `handleEvent?(event, context)` — the business entry point. May be async and
+  use the provided context for module state; it returns
+  `{ actions, diagnostics }` and executes nothing itself — the host executes
+  the actions. A throw becomes a diagnostic in the event log; it never blocks
+  the Worker or other modules.
+- `onEnable?(context, channelId)` — may asynchronously prepare statements for
+  initial data when the module is enabled; the panel route calls it on every
+  enable request, not only the first, so it must be idempotent.
 - `overlay?` / `panel?: () => Promise<{ default: ComponentType<...> }>` —
-  must stay lazy `import()` promises so a disabled module costs zero bytes in
-  either bundle. Never turn these into direct imports.
+  must stay lazy `import()` promises, so a disabled module's panel or overlay
+  view chunk never loads. Never turn these into direct imports.
 - `settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<Settings> }>`
   — for settings fully expressible as the built-in field kinds (`number`,
   `text`, `template`, `segment`, `choice`, `switchCard`; see
   `src/dashboard/ui/SettingsEditor.tsx`). The host renders load/save,
   server hints, 409-conflict handling and the read-only view once, for every
   module. If `settingsSchema` has any key, a guard test
-  (`tests/unit/module-settings-editor-guard.test.ts`) requires this or a
-  hand-written `panel`.
+  (`tests/unit/module-settings-editor-guard.test.ts`) requires this — a
+  hand-written `panel` does not satisfy it, even when the module also has
+  one (e.g. `ads`).
 - `immediateActions?: { requires: readonly ImmediateActionRequirement[]; load: () =>
   Promise<{ default: ComponentType<ModuleImmediateActionProperties> }> }` — a
   lazily loaded card in the Stream Manager's immediate-action row, shown
@@ -355,8 +374,9 @@ Fields that exist today (`src/modules/contract.ts`):
 `ModuleEvent` carries `channelId`, `subscriptionType`, `triggerId` (Twitch's
 message ID, correlating all event-log rows from one trigger), the verified
 `payload`, the module's own `settings`, `actor` (resolved from
-`channel_members`; `null` means "not a member", distinct from an event with
-no user at all), and — for chat events only — `chatStatus` (badge-derived
+`channel_members`; `actor.role: null` means the user is not a channel member,
+while `actor: null` means the event has no resolved chatter at all), and —
+for chat events only — `chatStatus` (badge-derived
 tiers; `founder` counts as `subscriber`, `moderator`/`broadcaster` also
 satisfy lower tiers).
 
@@ -367,10 +387,12 @@ module `DB`, a host-issued `authorizeMutation`, and lazy host lookups:
 never queries `channel_members` or Twitch directly for these.
 
 A module returns `ModuleResult`: an ordered `actions` list (`chat`,
-`announcement`, `shoutout`, `overlay` — the host executes these, never the
-module itself) and `diagnostics` — a stable, machine-readable `code` plus
-small `detail` values, reported even when no action was taken, so the event
-log can answer "why didn't it fire".
+`announcement`, `shoutout`, `overlay`) and `diagnostics` — a stable,
+machine-readable `code` plus small `detail` values, reported even when no
+action was taken, so the event log can answer "why didn't it fire". The host
+executes `chat`, `announcement` and `shoutout`; `overlay` actions are
+currently logged as not executed (`host.overlay.not_executed`) — the
+realtime path for them doesn't exist yet.
 
 ### Where a feature belongs
 
@@ -426,9 +448,10 @@ export const exampleModule: BotModule<typeof exampleSettingsSchema> = {
 Then run `pnpm run check`. Follow existing modules' test files (e.g.
 `tests/unit/ads-module.test.ts`, `tests/unit/channel_events-module.test.ts`)
 for the expected coverage: `handleEvent` decisions, EventSub type
-registration, and — if you add settings or D1 columns — a migration plus a
-`tests/unit/sql-contract.test.ts`-style check against
-`migrations/0000_baseline.sql`.
+registration, and — for a SQL schema change — a numbered migration under
+`migrations/` plus updated `tests/unit/sql-contract.test.ts` coverage against
+the schema produced by all migrations together, with a data backfill plan
+when persisted settings need one.
 
 ## Contributing
 
