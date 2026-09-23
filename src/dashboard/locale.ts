@@ -302,8 +302,9 @@ export interface DashboardTexts {
     moderator: string;
     affectedPerson: string;
     /** Accessible name of the hover/focus icon that reveals a warning or
-     *  error row's cause without opening the inspector. */
-    showCause: string;
+     *  error row's cause without opening the inspector -- takes the row's
+     *  own event label so two icons on screen never share one name. */
+    showCause: (eventLabel: string) => string;
   };
   signIn: {
     required: string;
@@ -544,7 +545,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       connectionLost: "Verbindung unterbrochen. Die Ereignisse konnten nicht geladen werden.",
       retry: "Erneut versuchen", technicalDetails: "Technische Details", copyId: "ID kopieren", copied: "Kopiert",
       trigger: "Auslöser", moderator: "Moderator", affectedPerson: "Betroffene Person",
-      showCause: "Ursache anzeigen",
+      showCause: (eventLabel) => `Ursache anzeigen: ${eventLabel}`,
     },
     signIn: {
       required: "Anmeldung erforderlich", explanation: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -751,7 +752,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       connectionLost: "Connection lost. The events could not be loaded.",
       retry: "Retry", technicalDetails: "Technical details", copyId: "Copy ID", copied: "Copied",
       trigger: "Trigger", moderator: "Moderator", affectedPerson: "Affected person",
-      showCause: "Show cause",
+      showCause: (eventLabel) => `Show cause: ${eventLabel}`,
     },
     signIn: {
       required: "Sign-in required", explanation: "Sign in with your Twitch account to see available channels.",
@@ -983,28 +984,76 @@ const commercialFailureReasonText = (reason: unknown, language: DashboardLanguag
     : commercialFailureTexts[language].twitch_error;
 
 /**
+ * `createClip` (`worker/clip.ts`)'s own reasons: `rate_limited` (429),
+ * `scope_missing` (401), `not_live` (400 -- Twitch rejects Create Clip while
+ * the channel isn't live), `timeout`/`network_error` from `helixRequest`, or
+ * an uncatalogued `http_<status>` that falls through to the raw value below.
+ */
+const clipFailureTexts: LocaleCatalog<Record<string, string>> = {
+  de: {
+    rate_limited: "Twitch-Abklingzeit aktiv",
+    scope_missing: "Berechtigung zum Erstellen von Clips fehlt",
+    not_live: "Der Stream ist nicht live",
+    timeout: "Twitch-Anfrage hat zu lange gedauert",
+    network_error: "Netzwerkfehler bei Twitch",
+  },
+  en: {
+    rate_limited: "Twitch cooldown is active",
+    scope_missing: "Permission to create clips is missing",
+    not_live: "The stream is not live",
+    timeout: "The Twitch request timed out",
+    network_error: "Network error from Twitch",
+  },
+};
+
+/**
+ * The last-resort catalog for a code with no reason vocabulary of its own
+ * (`host.chat.failed`, `host.action.failed`, ...): only the handful of
+ * reasons common enough across producers to word neutrally, worded so they
+ * don't imply a specific action ("a required permission", not "to send the
+ * shoutout"). Anything more specific belongs in that code's own catalog
+ * instead of here -- see `REASON_CATALOG_BY_CODE`.
+ */
+const genericFailureTexts: LocaleCatalog<Record<string, string>> = {
+  de: {
+    rate_limited: "Twitch-Abklingzeit aktiv",
+    scope_missing: "Eine erforderliche Berechtigung fehlt",
+    not_live: "Der Stream ist nicht live",
+    twitch_error: "Twitch hat die Anfrage abgelehnt",
+  },
+  en: {
+    rate_limited: "Twitch cooldown is active",
+    scope_missing: "A required permission is missing",
+    not_live: "The stream is not live",
+    twitch_error: "Twitch rejected the request",
+  },
+};
+
+/**
  * Which failure catalog a code's own `eventTexts` entry draws its reason
- * from -- `"twitch_error"` means something different in each ("Twitch
- * rejected the shoutout" vs. "... the request"), so the cause popover has to
- * pick the same one the row's own text already used, not guess from the
- * value alone.
+ * from -- `"twitch_error"` and `"scope_missing"` mean something different
+ * for each producer ("Twitch rejected the shoutout" vs. "... the request";
+ * "permission to send shoutouts" vs. "... to create clips"), so the cause
+ * popover has to pick the same catalog the row's own text used, never guess
+ * from the value alone across catalogs.
  */
 const REASON_CATALOG_BY_CODE: Partial<Record<EventCode, LocaleCatalog<Record<string, string>>>> = {
   "host.shoutout.failed": shoutoutFailureTexts,
   "ads.commercial.failed": commercialFailureTexts,
+  "host.clip.failed": clipFailureTexts,
 };
 
 /**
- * The localized cause behind a warning/error event, read from the same
- * `reason`/`cause`/`message` diagnostic keys and the same shoutout/commercial
- * failure catalogs `eventTexts` itself draws on (rate limits, an offline
- * stream, a missing scope, ...). Reused by the events list's hover icon so
- * the cause is readable without opening the inspector, even for codes whose
- * own row text stays generic (`host.chat.failed`, `host.action.failed`, ...).
- * Falls back to the raw value when no catalog covers it -- the same
- * raw-reason fallback `detailText` already uses elsewhere in this file --
- * and to null when the detail carries none of those keys, so the row gets
- * no icon at all.
+ * The localized cause behind a warning/error event, read from the
+ * `reason`/`cause`/`message` diagnostic keys. Looks up the code's own
+ * failure catalog first (`REASON_CATALOG_BY_CODE`), falls back to the small
+ * shared `genericFailureTexts` only when the code has none, and to the raw
+ * value when neither covers it -- the same raw-reason fallback `detailText`
+ * already uses elsewhere in this file. Reused by the events list's hover
+ * icon so the cause is readable without opening the inspector, even for
+ * codes whose own row text stays generic (`host.chat.failed`,
+ * `host.action.failed`, ...). Returns null when the detail carries none of
+ * those keys, so the row gets no icon at all.
  */
 export const eventCauseText = (
   code: string,
@@ -1015,8 +1064,7 @@ export const eventCauseText = (
   if (typeof raw !== "string" || raw.length === 0) return null;
   const ownCatalog = REASON_CATALOG_BY_CODE[code as EventCode];
   return (ownCatalog === undefined ? undefined : catalogString(ownCatalog[language], raw))
-    ?? catalogString(shoutoutFailureTexts[language], raw)
-    ?? catalogString(commercialFailureTexts[language], raw)
+    ?? catalogString(genericFailureTexts[language], raw)
     ?? raw;
 };
 

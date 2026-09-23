@@ -447,4 +447,26 @@ describe("Stream Manager warnings and errors feed", () => {
       "href", "/channels/kanal-a/events?tone=warning&tone=error",
     );
   });
+
+  it("shows the cause icon for a row with a diagnostic cause, named after that row's own text", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels/kanal-a/events") {
+        return Promise.resolve(jsonResponse({
+          entries: [
+            { eventId: "clip", createdAt: "2026-09-22T10:03:00.000Z", moduleId: "host", triggerId: "t3", code: "host.clip.failed", detail: "{\"reason\":\"scope_missing\"}", actorUserId: null, actorLogin: null, actorDisplayName: null },
+          ],
+          nextCursor: null,
+        }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    renderWithMantine(<WarningsAndErrorsFeed channelId="kanal-a" />);
+
+    await screen.findByText("Clip fehlgeschlagen");
+    const trigger = screen.getByRole("button", { name: "Ursache anzeigen: Clip fehlgeschlagen" });
+    fireEvent.mouseEnter(trigger);
+    expect(await screen.findByText("Berechtigung zum Erstellen von Clips fehlt")).toBeInTheDocument();
+  });
 });

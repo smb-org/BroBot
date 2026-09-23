@@ -216,7 +216,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
                   <span className="stream-manager-feed__text">{label}</span>
                   <time className="stream-manager-feed__time mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatStreamManagerFeedTime(entry.createdAt)}</time>
                 </a>
-                {cause === null ? null : <Popover triggerLabel={texts.events.showCause} icon="cause">{cause}</Popover>}
+                {cause === null ? null : <Popover triggerLabel={texts.events.showCause(label)} icon="cause">{cause}</Popover>}
               </li>
             );
           })}

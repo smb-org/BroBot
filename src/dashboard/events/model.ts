@@ -1,6 +1,6 @@
 import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
-import { eventCauseText, eventText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
+import { eventCauseText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
 import { moduleName } from "../module-labels";
 
 export const emptyEventFilter: PanelEventFilters = {
@@ -28,19 +28,41 @@ export const eventToneRank = (tone: EventTone | null): number =>
 export const eventToneFromValue = (value: string): EventTone | null =>
   EVENT_TONES.includes(value as EventTone) ? value as EventTone : null;
 
+/**
+ * Codes whose own `locale.ts` `eventTexts` formatter always folds the
+ * diagnostic reason/cause into the rendered row text, in every branch --
+ * an icon repeating it would be clutter, not help. Listed explicitly
+ * (derived by reading each formatter, not by comparing rendered strings at
+ * runtime): a wording mismatch would otherwise slip through unnoticed, e.g.
+ * `host.announcement.failed`'s own hand-rolled phrase for `not_moderator`
+ * ("bot is not a moderator") doesn't literally contain the shoutout
+ * catalog's phrasing for the same reason ("the bot is not a moderator in
+ * this channel"), so a substring check keeps the icon exactly where it
+ * shouldn't be.
+ *
+ * `ads.skipped` and `shoutout.suppressed` are deliberately left out: they
+ * only recognize one or two specific reason values and fall back to a
+ * generic phrase for anything else, so their row text doesn't reliably
+ * disclose an unrecognized reason -- the icon still earns its place there.
+ */
+const CODES_WITH_CAUSE_IN_TEXT = new Set<EventCode>([
+  "host.announcement.failed",
+  "host.shoutout.failed",
+  "ads.commercial.failed",
+  "raid.invalid",
+  "ads.prewarning.schedule_error",
+]);
+
 /** The row's failure cause for the hover/focus icon -- null on any tone
  *  other than warning/error, when the diagnostic detail carries none of the
- *  usual reason/cause/message keys, or when the row's own event text already
- *  spells the cause out (e.g. `ads.commercial.failed`'s text already ends in
- *  "Twitch hat den Start abgelehnt" -- an icon repeating it is clutter, not
- *  help). The row then gets no icon either way. */
+ *  usual reason/cause/message keys, or when the code is in
+ *  `CODES_WITH_CAUSE_IN_TEXT` (the row already spells the cause out). The
+ *  row then gets no icon either way. */
 export const eventCause = (entry: PanelEventEntry): string | null => {
   const tone = eventTone(entry.code);
   if (tone !== "warning" && tone !== "error") return null;
-  const detail = eventDetail(entry.detail);
-  const cause = eventCauseText(entry.code, detail);
-  if (cause === null) return null;
-  return eventText(entry.code, detail).includes(cause) ? null : cause;
+  if (CODES_WITH_CAUSE_IN_TEXT.has(entry.code as EventCode)) return null;
+  return eventCauseText(entry.code, eventDetail(entry.detail));
 };
 
 export interface EventGroup {

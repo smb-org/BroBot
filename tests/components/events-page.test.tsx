@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -41,27 +41,38 @@ const renderPage = (entries: readonly PanelEventEntry[]) => {
   );
 };
 
+/** The trigger's accessible name is "Ursache anzeigen: <row label>" (DE) or
+ *  "Show cause: <row label>" (EN) -- tests that don't care about the exact
+ *  label match on the language-fixed prefix. */
+const causeButtonName = /^(Ursache anzeigen|Show cause):/;
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // `dashboardLanguage()` reads `navigator.language`; reset it to the suite
+  // default (`tests/setup.ts`) so an English test doesn't leak into the next.
+  Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
 });
 
 describe("EventsPage failure cause icon", () => {
   it("shows the cause icon only on warning/error rows whose diagnostic detail carries a cause", () => {
-    const { container } = renderPage([
+    renderPage([
       entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" }),
       entry({ eventId: "no-cause", code: "host.action.failed", detail: "{}" }),
-      entry({ eventId: "info-row", code: "channel_events.chat.sub", detail: "{\"tier\":\"1000\"}" }),
+      // An info-tone row with a `reason` key still gets no icon -- the tone
+      // guard runs before the cause lookup, not just when there's nothing
+      // to show.
+      entry({ eventId: "info-row", code: "channel_events.chat.sub", detail: "{\"tier\":\"1000\",\"reason\":\"rate_limited\"}" }),
     ]);
 
-    expect(screen.getAllByRole("button", { name: "Ursache anzeigen" })).toHaveLength(1);
-    expect(container.querySelectorAll("tr").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: causeButtonName })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Ursache anzeigen: Chat-Nachricht fehlgeschlagen" })).toBeInTheDocument();
   });
 
   it("shows the localized cause in a popover on hover, without opening the inspector", async () => {
     renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
 
-    const trigger = screen.getByRole("button", { name: "Ursache anzeigen" });
+    const trigger = screen.getByRole("button", { name: causeButtonName });
     fireEvent.mouseEnter(trigger);
 
     expect(await screen.findByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
@@ -71,16 +82,59 @@ describe("EventsPage failure cause icon", () => {
   it("shows the cause on keyboard focus", async () => {
     renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
 
-    const trigger = screen.getByRole("button", { name: "Ursache anzeigen" });
+    const trigger = screen.getByRole("button", { name: causeButtonName });
     fireEvent.focus(trigger);
 
     expect(await screen.findByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
   });
 
+  it("opens on click, the same way it does on tap", async () => {
+    renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
+
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.click(trigger);
+
+    expect(await screen.findByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+  });
+
+  it("dismisses on Escape", async () => {
+    renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
+
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.focus(trigger);
+    expect(await screen.findByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+
+    fireEvent.keyDown(trigger, { key: "Escape", code: "Escape" });
+    await waitFor(() => { expect(screen.queryByText("Twitch-Abklingzeit aktiv")).not.toBeInTheDocument(); });
+  });
+
+  it("stays open while the pointer moves from the trigger to the dropdown", async () => {
+    renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
+
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.mouseEnter(trigger);
+    const content = await screen.findByText("Twitch-Abklingzeit aktiv");
+    // jsdom never resolves Mantine's open transition, so the dropdown stays
+    // `display: none` inline and `getByRole("tooltip")` (which filters
+    // hidden elements) can't see it -- reach it via the text node instead.
+    const dropdown = content.closest("[role='tooltip']");
+    if (dropdown === null) throw new Error("dropdown missing");
+
+    // Leaving the trigger for the dropdown before the close delay elapses
+    // must not close it -- this is the pointer-transition case a plain
+    // `onMouseLeave` on the trigger alone gets wrong.
+    fireEvent.mouseLeave(trigger);
+    fireEvent.mouseEnter(dropdown);
+    expect(screen.getByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(dropdown);
+    await waitFor(() => { expect(screen.queryByText("Twitch-Abklingzeit aktiv")).not.toBeInTheDocument(); });
+  });
+
   it("does not open the inspector when the cause icon is clicked", () => {
     renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
 
-    const trigger = screen.getByRole("button", { name: "Ursache anzeigen" });
+    const trigger = screen.getByRole("button", { name: causeButtonName });
     fireEvent.click(trigger);
 
     expect(screen.queryByText("Vorgang")).not.toBeInTheDocument();
@@ -98,14 +152,47 @@ describe("EventsPage failure cause icon", () => {
       entry({ eventId: "still-hidden", moduleId: "host", code: "host.clip.failed", detail: "{\"reason\":\"twitch_error\"}" }),
     ]);
 
-    expect(screen.getAllByRole("button", { name: "Ursache anzeigen" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: causeButtonName })).toHaveLength(1);
     expect(screen.getByText(/Werbeeinblendung nicht gestartet: Twitch hat den Start abgelehnt/)).toBeInTheDocument();
+  });
+
+  it("hides the icon for a code whose row wording differs from the reason catalog's (host.announcement.failed)", () => {
+    // Row text: "... (Bot ist kein Moderator) ..." -- not a substring of the
+    // shoutout catalog's "Der Bot ist kein Moderator in diesem Kanal", so a
+    // plain string-containment check would have kept the icon here.
+    renderPage([entry({
+      eventId: "announcement-failed", moduleId: "host", code: "host.announcement.failed",
+      detail: "{\"reason\":\"not_moderator\",\"outcome\":\"not_sent\"}",
+    })]);
+
+    expect(screen.queryByRole("button", { name: causeButtonName })).not.toBeInTheDocument();
+    expect(screen.getByText(/Bot ist kein Moderator/)).toBeInTheDocument();
+  });
+
+  it("uses the clip catalog's wording, not the shoutout one, for host.clip.failed", async () => {
+    renderPage([entry({ eventId: "clip-failed", moduleId: "host", code: "host.clip.failed", detail: "{\"reason\":\"scope_missing\"}" })]);
+
+    const trigger = screen.getByRole("button", { name: "Ursache anzeigen: Clip fehlgeschlagen" });
+    fireEvent.mouseEnter(trigger);
+
+    expect(await screen.findByText("Berechtigung zum Erstellen von Clips fehlt")).toBeInTheDocument();
+    expect(screen.queryByText("Berechtigung zum Senden des Shoutouts fehlt")).not.toBeInTheDocument();
+  });
+
+  it("follows the browser language for both the cause text and the trigger's accessible name", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
+
+    const trigger = screen.getByRole("button", { name: "Show cause: Chat message failed" });
+    fireEvent.mouseEnter(trigger);
+
+    expect(await screen.findByText("Twitch cooldown is active")).toBeInTheDocument();
   });
 
   it("still opens the inspector when the row itself is clicked", () => {
     renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
 
-    const trigger = screen.getByRole("button", { name: "Ursache anzeigen" });
+    const trigger = screen.getByRole("button", { name: causeButtonName });
     const row = trigger.closest("tr");
     if (row === null) throw new Error("row missing");
     fireEvent.click(row);
