@@ -1,5 +1,8 @@
+import { render, screen } from "@testing-library/react";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
+import { Button, FormDensity, UiProvider } from "../../src/dashboard/ui";
 import { colors, luminanceThreshold, theme } from "../../src/dashboard/ui/theme";
 
 // Mirrors Mantine's own `luminance()`/`isLightColor()` (see
@@ -27,6 +30,13 @@ function contrastRatio(hexA: string, hexB: string): number {
 }
 
 const WCAG_AA_NORMAL_TEXT = 4.5;
+
+interface ComponentThemeValues {
+  vars?: (theme: unknown, props: { size: string }, context: unknown) => { root?: Record<string, string>; wrapper?: Record<string, string> };
+  styles?: Record<string, Record<string, string | number>>;
+}
+
+const componentValues = theme.components as unknown as Record<string, ComponentThemeValues>;
 
 describe("theme contrast rule", () => {
   it("keeps luminanceThreshold at 0.2, not Mantine's 0.3 default", () => {
@@ -70,5 +80,41 @@ describe("theme contrast rule", () => {
 
     const onBrandOnBrand = contrastRatio(colors.onBrand, colors.brand);
     expect(onBrandOnBrand).toBeGreaterThanOrEqual(WCAG_AA_NORMAL_TEXT);
+  });
+});
+
+describe("form density size step", () => {
+  it("uses 14px and 44px for md inputs while compact-md stays 13px and 34px", () => {
+    const inputVars = componentValues.Input?.vars?.(theme, { size: "md" }, {});
+    const compactInputVars = componentValues.Input?.vars?.(theme, { size: "compact-md" }, {});
+    expect(inputVars?.wrapper).toMatchObject({
+      "--input-fz": "14px",
+      "--input-padding": "12px",
+      "--input-padding-y-md": "10px",
+      "--input-height-md": "44px",
+      "--input-height-compact-md": "34px",
+    });
+    expect(compactInputVars?.wrapper?.["--input-fz"]).toBe("13px");
+    expect(componentValues.InputWrapper?.styles).toMatchObject({
+      label: { fontSize: "13px", fontWeight: 500 },
+      description: { fontSize: "12px" },
+      error: { fontSize: "12px" },
+    });
+  });
+
+  it("keeps button text at 13px by default and sets 14px on buttons inside FormDensity", () => {
+    const { container } = render(
+      createElement(
+        UiProvider,
+        null,
+        createElement(Button, null, "Outside"),
+        createElement(FormDensity.Provider, { value: "form" }, createElement(Button, null, "Inside")),
+      ),
+    );
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>("button"));
+
+    expect(componentValues.Button?.vars?.(theme, { size: "md" }, {}).root?.["--button-fz"]).toBe("13px");
+    expect(buttons[0]?.style.getPropertyValue("--button-fz")).toBe("13px");
+    expect(screen.getByRole("button", { name: "Inside" }).style.getPropertyValue("--button-fz")).toBe("14px");
   });
 });

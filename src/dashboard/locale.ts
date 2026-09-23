@@ -310,6 +310,7 @@ export interface DashboardTexts {
     createClip: string;
     clipCreated: string;
     openClip: string;
+    opensNewTab: string;
     feedTitle: string;
     feedEmpty: string;
     yesterday: string;
@@ -487,6 +488,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       createClip: "Clip erstellen",
       clipCreated: "Clip erstellt",
       openClip: "Clip öffnen",
+      opensNewTab: "öffnet neuen Tab",
       feedTitle: "Warnungen und Fehler",
       feedEmpty: "Keine Warnungen oder Fehler.",
       yesterday: "Gestern",
@@ -647,6 +649,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       createClip: "Create clip",
       clipCreated: "Clip created",
       openClip: "Open clip",
+      opensNewTab: "opens a new tab",
       feedTitle: "Warnings and errors",
       feedEmpty: "No warnings or errors.",
       yesterday: "Yesterday",

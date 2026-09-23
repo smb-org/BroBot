@@ -5,6 +5,7 @@ import { createClip, fetchEvents, PanelApiError, sendManualShoutout, startCommer
 import { apiErrorText, dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime } from "./locale";
 import { eventDetail, eventMetadata } from "./events/model";
 import { Button, Field, Select } from "./ui";
+import { Icon } from "./ui/Icon";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 /** Twitch's own accepted Start Commercial lengths (seconds); kept here, not
@@ -51,7 +52,7 @@ const AdNowAction = ({ channelId }: { channelId: string }): ReactElement => {
             disabled={state.pending}
           />
         </div>
-        <Button variant="primary" disabled={state.pending || length === null} onClick={() => { void run(); }}>
+        <Button icon="ad" variant="primary" disabled={state.pending || length === null} onClick={() => { void run(); }}>
           {texts.streamManager.runAd(length ?? "")}
         </Button>
       </div>
@@ -90,7 +91,7 @@ const ShoutoutAction = ({ channelId }: { channelId: string }): ReactElement => {
             onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void run(); } }}
           />
         </div>
-        <Button variant="primary" disabled={state.pending || login.trim().length === 0} onClick={() => { void run(); }}>
+        <Button icon="shoutout" variant="primary" disabled={state.pending || login.trim().length === 0} onClick={() => { void run(); }}>
           {texts.streamManager.sendShoutout}
         </Button>
       </div>
@@ -122,13 +123,13 @@ const ClipAction = ({ channelId }: { channelId: string }): ReactElement => {
   return (
     <div className="stream-manager-action">
       <div className="stream-manager-action__controls">
-        <Button variant="primary" disabled={state.pending} onClick={() => { void run(); }}>
+        <Button icon="clip" variant="primary" disabled={state.pending} onClick={() => { void run(); }}>
           {texts.streamManager.createClip}
         </Button>
       </div>
       {state.success === null ? null : (
         <p className="form-success" role="status">
-          <span>{state.success}</span>{editUrl === null ? null : <> · <a href={editUrl} target="_blank" rel="noreferrer">{texts.streamManager.openClip}</a></>}
+          <span>{state.success}</span>{editUrl === null ? null : <> · <a href={editUrl} target="_blank" rel="noreferrer" aria-label={`${texts.streamManager.openClip} (${texts.streamManager.opensNewTab})`}>{texts.streamManager.openClip}<Icon name="external" size={16} /></a></>}
         </p>
       )}
       {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}

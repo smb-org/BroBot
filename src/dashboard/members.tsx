@@ -5,7 +5,7 @@ import type { PanelMember, PanelTwitchUser } from "../panel-contract";
 import { membersTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
-import { ListDetail, Select as UiSelect, SubInspector, useInspectorSelection } from "./ui";
+import { Field, Icon, ListDetail, Select as UiSelect, SubInspector, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -212,13 +212,13 @@ const MemberEditor = ({
       />
       <div className="form-actions form-actions--destructive">
         <button
-          className="button button--quiet"
+          className="button button--quiet button--with-icon"
           type="button"
           aria-label={texts.removeAccessFor(name)}
           disabled={!canManageMembers || busy || locked !== null}
           title={managementLocked ?? locked ?? undefined}
           onClick={onRemove}
-        >{texts.remove}</button>
+        ><Icon name="memberRemove" size={16} />{texts.remove}</button>
       </div>
     </SubInspector>
   );
@@ -343,8 +343,10 @@ export const MembersPage = ({
         <div className="section-heading"><h2>{texts.grantAccessTitle}</h2></div>
         {!canManageMembers ? <p className="lock-reason">{texts.managementLocked}</p> : null}
         <form className="inspector-form" onSubmit={(event) => { void handleSearch(event); }}>
-          <label htmlFor="member-search">{texts.twitchName}</label>
-          <div className="form-row"><input id="member-search" value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="off" disabled={!canManageMembers} title={!canManageMembers ? texts.managementLocked : undefined} /><button className="button" type="submit" disabled={!canManageMembers || searching || login.trim().length === 0} title={!canManageMembers ? texts.managementLocked : undefined}>{searching ? texts.searching : texts.search}</button></div>
+          <div className="form-row">
+            <Field className="member-search-field" id="member-search" label={texts.twitchName} value={login} onChange={setLogin} icon="search" disabled={!canManageMembers} />
+            <button className="button" type="submit" disabled={!canManageMembers || searching || login.trim().length === 0} title={!canManageMembers ? texts.managementLocked : undefined}>{searching ? texts.searching : texts.search}</button>
+          </div>
         </form>
         {!canManageMembers && foundUser === null ? <div><button className="button" type="button" disabled title={texts.managementLocked}>{texts.grantAccess}</button><span className="lock-reason">{texts.managementLocked}</span></div> : null}
         {searchError === null ? null : <p className="form-error" role="alert">{searchError}</p>}
@@ -365,7 +367,7 @@ export const MembersPage = ({
             </div>
             <label>{texts.role}<select aria-label={texts.newMemberRoleLabel} value={newRole} disabled={!canManageMembers} title={!canManageMembers ? texts.managementLocked : undefined} onChange={(event) => setNewRole(event.target.value as ChannelRole)}>{roleOptions()}</select></label>
             <div>
-              <button className="button" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texts.managementLocked : undefined}>{texts.grantAccess}</button>
+              <button className="button button--with-icon" type="button" onClick={() => { setActionError(null); setConfirmingAdd(true); }} disabled={!canManageMembers || busyUserId === foundUser.userId} title={!canManageMembers ? texts.managementLocked : undefined}><Icon name="memberAdd" size={16} />{texts.grantAccess}</button>
               {!canManageMembers ? <span className="lock-reason">{texts.managementLocked}</span> : null}
             </div>
           </div>

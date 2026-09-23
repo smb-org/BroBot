@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { InspectorHeading, ListDetail, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
+import { Field, Icon, InspectorHeading, ListDetail, Select, SubInspector, Switch, useInspectorSelection, type SelectOption } from "./ui";
 import { NavigationIcon, StateRow, type StateTone } from "./module-panels";
 
 interface PlatformPageProperties {
@@ -335,9 +335,7 @@ const ChannelInspector = ({
       <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
         <div className="section-heading"><h3>{texts.addMember}</h3></div>
         <form className="inspector-form" onSubmit={(event) => { void searchUser(event); }}>
-          <label className="config-field config-field--medium" htmlFor={"betreiber-mitglied-suche-" + channel.channelId}>{texts.twitchLogin}
-            <input id={"betreiber-mitglied-suche-" + channel.channelId} value={searchLogin} onChange={(event) => { setSearchLogin(event.target.value); }} autoComplete="off" />
-          </label>
+          <Field className="config-field--medium" id={"betreiber-mitglied-suche-" + channel.channelId} label={texts.twitchLogin} value={searchLogin} onChange={setSearchLogin} icon="search" />
           <div className="form-actions">
             <button className="button" type="submit" disabled={searchInProgress || searchLogin.trim().length === 0}>{searchInProgress ? texts.searching : texts.search}</button>
           </div>
@@ -462,14 +460,15 @@ const ChannelRelease = ({
 
 const InvitationLink = ({ channel: channel }: { channel: PanelPlatformChannelOverview }): ReactElement => {
   const texts = platformTexts();
-  const [status, setStatus] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const link = window.location.origin + "/auth/login?channel=" + encodeURIComponent(channel.login);
 
   const copyLinkToClipboard = async (): Promise<void> => {
+    setCopied(false);
     const clipboard = Reflect.get(navigator, "clipboard") as { writeText: (text: string) => Promise<void> } | undefined;
     if (clipboard === undefined) return;
     await clipboard.writeText(link);
-    setStatus(texts.linkCopied);
+    setCopied(true);
   };
 
   return (
@@ -480,8 +479,7 @@ const InvitationLink = ({ channel: channel }: { channel: PanelPlatformChannelOve
         <input id="betreiber-einladungslink" readOnly value={link} />
       </label>
       <div className="form-actions">
-        <button className="button" type="button" onClick={() => { void copyLinkToClipboard(); }}>{texts.copyLink}</button>
-        {status === null ? null : <span className="muted">{status}</span>}
+        <button className="button button--with-icon" type="button" onClick={() => { void copyLinkToClipboard(); }}><Icon name={copied ? "copied" : "copy"} size={16} />{copied ? texts.linkCopied : texts.copyLink}</button>
       </div>
       {!channel.broadcasterConnected && channel.fullConsent ? <StateRow label={texts.identity} tone="warning" word={texts.consentPending} detail={texts.consentPendingHint} /> : null}
     </section>

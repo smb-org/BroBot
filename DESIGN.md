@@ -73,6 +73,18 @@ typography:
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "normal"
+  formulartext:
+    fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
+  formularname:
+    fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "13px"
+    fontWeight: 500
+    lineHeight: 1.5
+    letterSpacing: "normal"
   feldname:
     fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif"
     fontSize: "12px"
@@ -196,7 +208,7 @@ components:
     backgroundColor: "{colors.surface-well}"
     textColor: "{colors.text}"
     rounded: "{rounded.control}"
-    padding: "8px 10px"
+    padding: "10px 12px"
     height: "44px"
   config-section:
     backgroundColor: "transparent"
@@ -508,7 +520,7 @@ Vor jedem Ereignistext — in der Tabelle wie im Verlauf des Sub-Inspectors — 
 Ein `.button` mit `position: fixed`, mittig unter der Kopfleiste (64 px von oben, `translateX(-50%)`, `z-index: 10`). Er meldet, dass neue Ereignisse eingetroffen sind, während der Bediener weiter unten im Protokoll liest — genau dort fügt die Liste sie nicht sichtbar ein, ein Zeileneinschub am unteren Bildschirmrand bliebe unbemerkt. Er trägt nur die Zahl und „neue Ereignisse“ (`aria-live="polite"`); ein Klick springt an den Anfang der Liste und ist zugleich die einzige Handlung, die ihn schließt — er löscht sich, sobald die Ereignisse eingeholt sind. Er erscheint ohne Übergang und verschwindet ohne Übergang, wie jede andere Zustandsänderung im System (siehe Kein-Skelett-Regel): Bewegung im Augenwinkel wäre neben einem laufenden Stream die teuerste Fehlinterpretation.
 
 ### Buttons
-- **Form:** {rounded.control}, 44 px hoch, 10 px 16 px, 13 px/500. In einer Tabellenzelle 34 px hoch, 6 px 12 px.
+- **Form:** {rounded.control}, 44 px hoch, 10 px 16 px, 13 px/500 außerhalb eines Editors und 14 px innerhalb `FormDensity`. In einer Tabellenzelle 34 px hoch, 6 px 12 px, weiter 13 px.
 - **Neutral:** Taste mit Linie-Stark-Rand; Hover Taste-Hover mit Linie-Hell.
 - **Primär:** Marke mit Marke-Auf-Text, 600; Hover Marke-Hover, Druck Marke-Press. Genau einer pro Bereich. Auf der Kanalseite ist die Moderatorprüfung nur dann primär, wenn der Moderatorstatus fehlt (`dringend`); sonst neutral.
 - **Gedeckt:** Der Anlege-Knopf ist neutral, solange das Formular unvollständig ist, und wird erst mit gültigen Feldern primär; der Grund steht als Hinweis (Text-3, 12 px) direkt daneben.
@@ -522,7 +534,8 @@ Ein `.button` mit `position: fixed`, mittig unter der Kopfleiste (64 px von oben
 44×44 Trefferfläche, Spur 36×20 auf Text-4, Knopf 14 px in Text; an: Spur Grün, Knopf um 16 px verschoben (160 ms). In der Kopfleiste mit Etikett links (12 px/600, Text-2). Für Bediener gesperrt (45 %) — der Sperrgrund steht als 11-px-Zeile direkt darunter, nicht als Meldung anderswo.
 
 ### Inputs / Fields
-- **Stil:** Rinne mit Linie-Stark-Rand, {rounded.control}, 44 px hoch, 8 px 10 px; Textarea 88 px, senkrecht ziehbar; Select in Tabellenzellen 34 px.
+- **Stil:** Rinne mit Linie-Stark-Rand, {rounded.control}, 44 px hoch, 10 px 12 px und Formulartext (Archivo 400, 14 px, 1.5); Textarea mindestens 112 px, senkrecht ziehbar. Beschriftung darüber: Formularname (Archivo 500, 13 px); Hinweis, Fehler und Zähler darunter: 12 px. Select und Schalter in Tabellenzellen bleiben kompakt bei 34 px und 13 px.
+- **Zwei Dichten:** Felder im Formular stehen auf der Formularstufe; Liste, Tabelle, Zustandszeile, Eigenschaftenliste und Tabellenzellen bleiben dicht. Ein Bedienelement trägt die Stufe seiner Fläche. Knopftext bleibt außerhalb des Editors 13 px; innerhalb stellt `FormDensity` 14 px direkt am Knopf ein.
 - **Konfigurationsfeldbreiten:** `config-field--narrow` ist 9 rem für Zahlen und kurze Werte (die bestehende Zahlengrenze); `config-field--medium` ist 20 rem für Namen und Bezeichner (die halbe bestehende Formularbreite); `config-field--wide` ist 40 rem für Fließtext (die bestehende maximal 40 rem breite Formularhülle). Die Stufe gehört an die Feldhülle, nicht an beliebige Einzelregeln.
 - **Hover:** Rand Linie-Hell. **Fokus:** 2 px Marke-Text außen, Abstand 2 px.
 - **Deaktiviert:** 55 % Deckkraft. **Fehler:** rote Zeile mit × unter den Aktionen, `role="alert"`.
@@ -579,7 +592,9 @@ Die Fläche für die gewählte Zeile einer Tabelle: 18 px 16 px Innenabstand, Ha
 `empty-state` / `module-empty`: gestrichelter Linie-Stark-Rand, {rounded.container}, 18–20 px Innenabstand, Text-2, 13 px; Titel als Bereichstitel in Text. `error-panel`: durchgezogen, 45 % Rot auf Fehler-Grund, Titel in Rot.
 
 ### Symbole
-Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 1,5, runde Enden und Ecken. Schiene 20 px, Taste 25 px, Seitenkopf 28 px, Brotkrume 20 px. Seitensymbole (Übersicht, Kanal, System, Mitglieder, Module, Ereignisse) und Modulsymbole kommen aus derselben `NavigationIcon`/`iconFor`-Quelle. Inline-SVG, `aria-hidden`. Kein Emoji, keine Icon-Schrift, keine zweite Strichstärke.
+Eine Familie: `viewBox 0 0 24 24`, `fill: none`, `stroke: currentColor`, Strich 1,5, runde Enden und Ecken. Handlungssymbole (Schließen, Hinzufügen, Löschen, Kopieren, Neu laden, Suchen, Sperre, Hinweis, externe Verweise und Twitch-Handlungen wie Werbung, Shoutout und Clip) kommen aus `@tabler/icons-react` mit `stroke={1.5}`. Identitätssymbole (Seiten und Module) bleiben handgezeichnet aus derselben `NavigationIcon`/`iconFor`-Quelle. Tabler wird ausschließlich in `src/dashboard/ui/Icon.tsx` importiert und unter Projektnamen (`IconName`) herausgegeben; ESLint verbietet den Import überall sonst.
+
+Größen: 16 px führend in Knöpfen mit Wort, in Feldern und Hinweiszeilen; 20 px in Symbolknöpfen ohne Wort (44 × 44; `compact` 34 × 34 mit 16-px-Symbol), Schiene, Brotkrume, Spotlight und Kartenwahl; Modultaste 25 px; Seitenkopf 28 px. Abstand Symbol–Wort 8 px. Symbole sind immer `aria-hidden`; die Bedeutung trägt das Wort oder der `aria-label` des Knopfs. Symbole stehen nur, wo sie eine bekannte Twitch-Handlung benennen, ein Wort ersetzen, eine Folge ankündigen (neuer Tab, neu laden, nach oben, gesperrt, Hinweis) oder ein Suchfeld kennzeichnen. Editor-Reiter erhalten nach dem Nachtrag vom 23. September 2026 ein 16-px-Symbol vor dem Text. Keine Symbole vor Formularbeschriftungen, in Zustandszeilen, Chips, Leerzuständen oder Tabellenzellen. Inline-SVG, kein Emoji, keine Icon-Schrift, keine zweite Strichstärke.
 
 ## Do's and Don'ts
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import { dashboardCommonTexts, type DashboardLanguage } from "../../../dashboard/locale";
-import { ListDetail, Select as UiSelect, SubInspector, useInspectorSelection } from "../../../dashboard/ui";
+import { Icon, ListDetail, Select as UiSelect, SubInspector, useInspectorSelection } from "../../../dashboard/ui";
 import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand, type TextCommandMinimumTier } from "../contracts";
 import { validCommandName } from "../domain";
 import { deleteTextCommand, loadTextCommands, createTextCommand, toggleTextCommand, setTextCommandMinimumTier, saveTextCommand } from "./service";
@@ -331,9 +331,7 @@ export const TextCommandsPanel = ({ channelId, language, canManage: canManageCon
       <div className="section-heading">
         <h2>{labels.list}</h2>
         <button ref={createButton} className="button button--quiet inspector-close" type="button" aria-label={labels.add} onClick={openCreate}>
-          <svg className="inspector-close__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
+          <Icon name="add" size={20} className="inspector-close__icon" />
         </button>
       </div>
       {loading ? <p className="loading-line">{labels.load}</p> : null}

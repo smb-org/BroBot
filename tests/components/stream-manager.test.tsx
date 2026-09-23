@@ -59,6 +59,21 @@ describe("Stream Manager immediate actions", () => {
     expect(screen.getByText("Bitte gib einen Twitch-Namen ein.")).toBeInTheDocument();
   });
 
+  it("shows the matching aria-hidden Tabler icon without changing each action's accessible name", () => {
+    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+
+    for (const [name, iconName] of [
+      [/Werbung jetzt \(60s\)/u, "ad"],
+      ["Shoutout senden", "shoutout"],
+      ["Clip erstellen", "clip"],
+    ] as const) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAccessibleName(name);
+      expect(button.querySelector("svg[aria-hidden='true']"), iconName).not.toBeNull();
+      expect(button.textContent).not.toContain(iconName);
+    }
+  });
+
   it("reports a failed commercial start inline, without touching the shoutout or clip actions", async () => {
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = requestUrl(input).pathname;
@@ -111,7 +126,10 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clip erstellen" }));
 
     expect(await screen.findByText("Clip erstellt")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Clip öffnen" })).toHaveAttribute("href", "https://clips.twitch.tv/clip-1/edit");
+    const openClip = screen.getByRole("link", { name: "Clip öffnen (öffnet neuen Tab)" });
+    expect(openClip).toHaveAccessibleName("Clip öffnen (öffnet neuen Tab)");
+    expect(openClip).toHaveAttribute("href", "https://clips.twitch.tv/clip-1/edit");
+    expect(openClip.querySelector("svg[aria-hidden='true']")).toBeInTheDocument();
   });
 
   it("ignores a second click on the same action while the first is in flight", async () => {

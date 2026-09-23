@@ -1,5 +1,5 @@
 import { createTheme } from "@mantine/core";
-import type { MantineColorsTuple, MantineThemeOverride } from "@mantine/core";
+import type { MantineColorsTuple, MantineTheme, MantineThemeOverride } from "@mantine/core";
 
 export interface StateToken {
   readonly color: string;
@@ -218,18 +218,28 @@ export const theme: MantineThemeOverride = createTheme({
     // Textarea (Mantine keys every one of them under `["Input", <own
     // name>]`), so this one override moves every field's surface into the
     // well without repeating it per field type.
-    Input: {
-      defaultProps: { size: "md" },
-      vars: () => ({
-        wrapper: {
-          "--input-bg": colors.well,
-          "--input-bd": colors.hairlineStrong,
-          "--input-height-md": "44px",
-          "--input-height-compact-md": "34px",
-        },
-      }),
+  Input: {
+    defaultProps: { size: "md" },
+    vars: (_theme: MantineTheme, props: { size?: string }) => ({
+      wrapper: {
+        "--input-bg": colors.well,
+        "--input-bd": colors.hairlineStrong,
+        "--input-height-md": "44px",
+        "--input-height-compact-md": "34px",
+        "--input-fz": typeof props.size === "string" && props.size.startsWith("compact-") ? "13px" : "14px",
+        "--input-padding": "12px",
+        "--input-padding-y-md": "10px",
+      },
+    }),
+  },
+  InputWrapper: {
+    styles: {
+      label: { fontSize: "13px", fontWeight: 500 },
+      description: { fontSize: "12px" },
+      error: { fontSize: "12px" },
     },
-    Switch: {
+  },
+  Switch: {
       defaultProps: { size: "md", radius: "md" },
       styles: {
         thumb: { borderRadius: "var(--mantine-radius-sm)" },

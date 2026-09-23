@@ -27,7 +27,11 @@ export { Switch } from "./Switch";
 export type { SwitchProps } from "./Switch";
 
 export { Button } from "./Button";
-export type { ButtonProps, ButtonVariant } from "./Button";
+export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button";
+export { FormDensity } from "./FormDensity";
+
+export { Icon } from "./Icon";
+export type { IconName } from "./Icon";
 
 export { Led } from "./Led";
 export type { LedProps, LedStatus } from "./Led";

@@ -2,6 +2,7 @@ import { NavLink } from "@mantine/core";
 import { type MouseEvent, type ReactNode } from "react";
 
 import { Led, type LedStatus } from "./Led";
+import { Icon } from "./Icon";
 
 export interface SidebarEntry {
   id: string;
@@ -107,9 +108,7 @@ export function Sidebar({ groups, modules, platform, collapsed, onToggleCollapse
         aria-label={collapsed ? expandLabel : collapseLabel}
         onClick={onToggleCollapsed}
       >
-        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          {collapsed ? <path d="m10 6 6 6-6 6" /> : <path d="m14 6-6 6 6 6" />}
-        </svg>
+        <Icon name="collapse" size={20} className={collapsed ? "sidebar-nav-icon sidebar-nav-icon--reversed" : "sidebar-nav-icon"} />
       </button>
     </div>
   );

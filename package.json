@@ -37,6 +37,7 @@
     "@mantine/core": "^9.6.2",
     "@mantine/hooks": "^9.6.2",
     "@mantine/spotlight": "9.6.2",
+    "@tabler/icons-react": "^3.47.0",
     "hono": "^4.13.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

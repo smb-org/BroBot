@@ -5,9 +5,10 @@ import type { TextCommand } from "../modules/text_commands/contracts";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
 import { canManage, type ChannelRole } from "../contracts/values";
 import type { PanelMember, PanelModuleState } from "../panel-contract";
-import { createClip, fetchMembers, sendManualShoutout, setChannelModuleEnabled } from "./api";
+import { createClip, fetchMembers, sendManualShoutout, setChannelModuleEnabled, startCommercial } from "./api";
 import { dashboardTexts } from "./locale";
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
+import { ModuleIcon } from "./module-panels";
 import type { DashboardRoute } from "./router";
 import { Spotlight, type SpotlightItem } from "./ui";
 
@@ -52,6 +53,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
     return {
       id: `module:${module.id}`,
       label: moduleName(module.id),
+      icon: <ModuleIcon moduleId={module.id} className="spotlight-module-icon" />,
       ...(accessibleDescription === null || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
       group: texts.spotlight.groupModules,
       onTrigger: () => { onNavigate({ kind: "module", channelId, moduleId: module.id }); },
@@ -62,6 +64,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
     id: `command:${command.name}`,
     label: `!${command.name}`,
     description: texts.spotlight.openCommand(command.name),
+    icon: <ModuleIcon moduleId="text_commands" className="spotlight-module-icon" />,
     group: texts.spotlight.groupCommands,
     keywords: [command.name],
     onTrigger: () => {
@@ -74,6 +77,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
     id: `member:${member.userId}`,
     label: member.displayName ?? member.login ?? member.userId,
     description: texts.spotlight.openMember,
+    icon: "member",
     group: texts.spotlight.groupMembers,
     ...(member.login === null ? {} : { keywords: [member.login] }),
     onTrigger: () => { onNavigate({ kind: "channel", channelId, section: "members" }); },
@@ -88,6 +92,16 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
     return [
       {
+        id: "action:ad-now",
+        label: texts.streamManager.runAd("60"),
+        group: texts.spotlight.groupActions,
+        keywords: ["ad", "werbung", "commercial"],
+        disabled: !manageable,
+        ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
+        icon: "ad",
+        onTrigger: () => { void startCommercial(channelId, 60); },
+      },
+      {
         id: "action:ads-off",
         label: texts.spotlight.adOff,
         group: texts.spotlight.groupActions,
@@ -96,6 +110,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
         keywords: ["ads off", "werbung aus"],
         disabled: !manageable || !adsEnabled,
         ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
+        icon: <ModuleIcon moduleId="ads" className="spotlight-module-icon" />,
         onTrigger: () => { void setChannelModuleEnabled(channelId, "ads", false); },
       },
       {
@@ -105,6 +120,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
         keywords: ["ads on", "werbung an"],
         disabled: !manageable || adsEnabled,
         ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
+        icon: <ModuleIcon moduleId="ads" className="spotlight-module-icon" />,
         onTrigger: () => { void setChannelModuleEnabled(channelId, "ads", true); },
       },
       {
@@ -112,6 +128,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
         label: texts.streamManager.createClip,
         group: texts.spotlight.groupActions,
         keywords: ["clip"],
+        icon: "clip",
         onTrigger: () => { void createClip(channelId); },
       },
       {
@@ -120,6 +137,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
         description: texts.spotlight.shoutoutHint,
         group: texts.spotlight.groupActions,
         keywords: [SHOUTOUT_KEYWORD],
+        icon: "shoutout",
         disabled: shoutoutLogin.length === 0,
         disabledReason: texts.spotlight.shoutoutMissingLogin,
         onTrigger: () => { void sendManualShoutout(channelId, shoutoutLogin); },

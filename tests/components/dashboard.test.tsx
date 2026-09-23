@@ -555,7 +555,10 @@ describe("Dashboard skeleton", () => {
     socket.open();
     socket.receive(JSON.stringify({ version: 1, id: "message-jump", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
-    fireEvent.click(await screen.findByRole("button", { name: "1 neue Ereignisse" }));
+    const newEventsNotice = await screen.findByRole("button", { name: "1 neue Ereignisse" });
+    expect(newEventsNotice).toHaveAccessibleName("1 neue Ereignisse");
+    expect(newEventsNotice.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    fireEvent.click(newEventsNotice);
     expect(await screen.findByText("Raid von unbekannt mit 9 Zuschauern")).toBeInTheDocument();
     expect(eventRequests).toBe(2);
     expect(scrollTo).toHaveBeenCalledOnce();
@@ -1002,6 +1005,8 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     const person = await screen.findByRole("textbox", { name: "Person" });
+    expect(person).toHaveAccessibleName("Person");
+    expect(person.closest(".mantine-Input-wrapper")?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     const initialRequests = eventRequests.length;
     for (const value of ["a", "al", "ali", "alic", "alice"]) {
       fireEvent.change(person, { target: { value } });
@@ -1168,6 +1173,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    const memberSearch = screen.getByRole("textbox", { name: "Twitch-Name" });
+    expect(memberSearch).toHaveAccessibleName("Twitch-Name");
+    expect(memberSearch.closest(".mantine-Input-wrapper")?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     const reason = "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.";
     const search = screen.getByRole("button", { name: "Suchen" });
     expect(search).toBeDisabled();
@@ -1178,6 +1186,8 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("row", { name: /Moderation/ }));
     expect(await screen.findByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
     const entziehen = screen.getByRole("button", { name: "Zugriff für Moderation entziehen" });
+    expect(entziehen).toHaveAccessibleName("Zugriff für Moderation entziehen");
+    expect(entziehen.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(entziehen).toBeDisabled();
     expect(screen.getAllByText(reason).length).toBeGreaterThan(0);
   });
@@ -1202,7 +1212,10 @@ describe("Dashboard skeleton", () => {
     fireEvent.change(search, { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     expect(await screen.findByText("Neue Person")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    const grantAccess = screen.getByRole("button", { name: "Zugriff freigeben" });
+    expect(grantAccess).toHaveAccessibleName("Zugriff freigeben");
+    expect(grantAccess.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    fireEvent.click(grantAccess);
     expect(screen.getByRole("button", { name: "Zugriff endgültig freigeben" })).toBeInTheDocument();
 
     act(() => {

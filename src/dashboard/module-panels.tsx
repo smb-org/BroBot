@@ -8,6 +8,7 @@ import { PanelApiError, setChannelModuleEnabled } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
+import { Icon } from "./ui/Icon";
 import { ListRow, Switch } from "./ui";
 
 const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
@@ -67,10 +68,7 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
 
 const LockedModuleStatus = ({ status, reason }: { status: string; reason: string }): ReactElement => (
   <span className="module-locked-status" aria-label={status} aria-description={reason} title={reason}>
-    <svg className="module-locked-status__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <rect x="5" y="10" width="14" height="11" rx="1" />
-      <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" />
-    </svg>
+    <Icon name="lock" size={16} className="module-locked-status__icon" />
     <span>{status}</span>
   </span>
 );
@@ -440,7 +438,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
               : <Led status={effectiveEnabled ? "green" : "off"} label={statusWord(effectiveEnabled)} />}
           </div>
           {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}
-          {disabledReason === null || mandatory ? null : <p className="lock-reason">{disabledReason}</p>}
+          {disabledReason === null || mandatory ? null : <p className="lock-reason lock-reason--with-icon"><Icon name="lock" size={16} />{disabledReason}</p>}
         </section>
         {missingScopes.length === 0 ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>

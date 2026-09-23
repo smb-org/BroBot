@@ -69,6 +69,10 @@ describe("Channel Spotlight", () => {
         .map((group) => group.style.getPropertyValue("--spotlight-label"))).toEqual(groupLabels);
     });
     expect(screen.getByText("Clip erstellen")).toBeInTheDocument();
+    const clipAction = screen.getByText("Clip erstellen").closest(".mantine-Spotlight-action");
+    expect(clipAction).not.toBeNull();
+    expect(clipAction?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(clipAction).toHaveAccessibleName("Clip erstellen");
   });
 
   it("explains that mandatory channel events remain active from Spotlight", async () => {
@@ -149,8 +153,10 @@ describe("Channel Spotlight", () => {
     await screen.findByRole("dialog");
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "ads off" } });
 
-    expect(await screen.findByText("Werbung aus")).toBeInTheDocument();
-    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.")).toBeInTheDocument();
+    const adsOffAction = (await screen.findByText("Werbung aus")).closest(".mantine-Spotlight-action");
+    expect(adsOffAction).not.toBeNull();
+    expect(adsOffAction?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(adsOffAction).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Module ändern.");
   });
 
   it("runs the parametrized shoutout action with the typed login", async () => {

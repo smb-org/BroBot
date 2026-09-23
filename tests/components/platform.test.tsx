@@ -166,6 +166,23 @@ describe("Platform level", () => {
     expect(link).toHaveValue("http://localhost:3000/auth/login?channel=alpha_login");
   });
 
+  it("puts hidden Tabler icons in the member-search field and copy action", async () => {
+    setUpPlatform(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
+    const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    const search = within(inspector).getByRole("textbox", { name: "Twitch-Login" });
+    expect(search).toHaveAccessibleName("Twitch-Login");
+    expect(search.closest(".mantine-Input-wrapper")?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+
+    const copy = within(inspector).getByRole("button", { name: "Link kopieren" });
+    expect(copy).toHaveAccessibleName("Link kopieren");
+    expect(copy.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+  });
+
   it("shows the display name in the platform audit log, falling back to the ID when it can't be resolved", async () => {
     setUpPlatform(true, {
       entries: [{

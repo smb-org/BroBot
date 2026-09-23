@@ -1,6 +1,9 @@
 import "@mantine/spotlight/styles.css";
 
 import { Spotlight as MantineSpotlight, type SpotlightActionData, type SpotlightFilterFunction } from "@mantine/spotlight";
+import type { ReactNode } from "react";
+
+import { Icon, type IconName } from "./Icon";
 
 type SpotlightActionGroupData = { group: string; actions: SpotlightActionData[] };
 type SpotlightActions = SpotlightActionData | SpotlightActionGroupData;
@@ -14,6 +17,7 @@ export interface SpotlightItem {
   group?: string;
   /** Terms matched in addition to the label/description (e.g. an English + German alias). */
   keywords?: string[];
+  icon?: IconName | Exclude<ReactNode, string>;
   disabled?: boolean;
   disabledReason?: string;
   onTrigger: () => void;
@@ -99,9 +103,13 @@ const filterItems: SpotlightFilterFunction = (query, actions) => {
 export function Spotlight({ items, emptyMessage, placeholder, forceOpened, query, onQueryChange, onOpen }: SpotlightProps) {
   const actionItems: SpotlightActionData[] = items.map((item) => {
     const description = item.disabled ? item.disabledReason ?? item.description : item.description;
+    const leftSection = typeof item.icon === "string"
+      ? <Icon name={item.icon as IconName} size={20} />
+      : item.icon;
     return {
       id: item.id,
       label: item.label,
+      ...(leftSection === undefined ? {} : { leftSection }),
       ...(item.group === undefined ? {} : { group: item.group }),
       ...(item.keywords === undefined ? {} : { keywords: item.keywords }),
       ...(item.disabled === undefined ? {} : { disabled: item.disabled }),
@@ -116,7 +124,7 @@ export function Spotlight({ items, emptyMessage, placeholder, forceOpened, query
       actions={actions}
       filter={filterItems}
       nothingFound={emptyMessage}
-      searchProps={{ placeholder }}
+      searchProps={{ placeholder, leftSection: <Icon name="search" size={20} /> }}
       {...(forceOpened === undefined ? {} : { forceOpened })}
       {...(query === undefined ? {} : { query })}
       {...(onQueryChange === undefined ? {} : { onQueryChange })}

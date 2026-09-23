@@ -200,7 +200,10 @@ describe("Module panel loader", () => {
 
     const toggle = screen.getByRole("switch", { name: /aktiv/i });
     expect(toggle).toBeDisabled();
-    expect(screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.")).toBeInTheDocument();
+    const reason = screen.getByText("Nur Broadcaster und Verwalter dürfen Module ändern.");
+    expect(reason).toBeInTheDocument();
+    expect(reason.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(reason).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Module ändern.");
   });
 
   it("shows the module icon in the detail header; the breadcrumb lives in the top bar", () => {

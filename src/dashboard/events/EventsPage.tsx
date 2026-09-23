@@ -5,6 +5,7 @@ import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, for
 import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
+import { Icon } from "../ui/Icon";
 import { ChipGroup, EmptyState, ErrorPanel, Field, ListDetail, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import type { LoadState } from "../load-state";
 import {
@@ -126,6 +127,7 @@ const EventFilterBar = ({
       />
       <Field
         label={texts.events.person}
+        icon="search"
         value={personDraft}
         onChange={setPersonDraft}
         onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); commitPerson(personDraft); }}
@@ -260,7 +262,7 @@ export const EventsPage = ({
           <section className="content-section" aria-label={texts.events.log}>
             <div className="section-heading"><h2>{texts.events.log}</h2><RealtimeFeedStatus status={realtime.status} /></div>
             <EventFilterBar filters={filters} moduleOptions={moduleOptions} onChange={onFiltersChange} />
-            {realtime.pendingCount === 0 ? null : <button className="button realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite">{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
+            {realtime.pendingCount === 0 ? null : <button className="button button--with-icon realtime-feed__notice" type="button" onClick={realtime.jumpToBeginning} aria-live="polite"><Icon name="jumpToTop" size={16} />{texts.events.realtimeNew(formatNumber(realtime.pendingCount))}</button>}
             {eventsState.status === "loading" && eventsState.data === null ? <p className="loading-line">{texts.events.load}</p> : null}
             {/* Connection lost: nothing could ever be loaded -- distinct from a background refresh failing once data already exists. */}
             {eventsState.status === "error" && eventsState.data === null ? (
