@@ -72,6 +72,9 @@ export type { ChipGroupOption, ChipGroupProps } from "./ChipGroup";
 export { ConfirmDialog } from "./ConfirmDialog";
 export type { ConfirmDialogProps } from "./ConfirmDialog";
 
+export { Popover } from "./Popover";
+export type { PopoverProps } from "./Popover";
+
 export { ControlDurationDialog } from "./ControlDurationDialog";
 export type { ControlDurationDialogProps } from "./ControlDurationDialog";
 
@@ -99,6 +102,8 @@ export type { UseDraftResult } from "./useDraft";
 
 export { useDraftGuard } from "./useDraftGuard";
 export type { UseDraftGuardResult } from "./useDraftGuard";
+export { registerDashboardNavigationGuard } from "./navigation-guard";
+export type { DashboardNavigationGuard } from "./navigation-guard";
 
 export { ListDetail } from "./ListDetail";
 export type { ListDetailProps } from "./ListDetail";

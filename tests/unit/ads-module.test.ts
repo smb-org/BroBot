@@ -56,7 +56,7 @@ describe("ads module", () => {
       actions: [],
       diagnostics: [{
         code: "ads.skipped",
-        detail: { reason: "dauer_null", duration: 0, automatic: false },
+        detail: { reason: "duration_zero", duration: 0, automatic: false },
       }],
     });
   });

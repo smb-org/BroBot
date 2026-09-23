@@ -36,7 +36,8 @@ import {
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
 import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
-import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
+import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
+import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
 import { createClip, type CreateClipResult } from "../clip";
 import { fetchTwitchUserByLogin, sendShoutout, type ShoutoutSendResult } from "../shoutout";
 import { writeModuleAudit } from "../module-audit";
@@ -88,6 +89,47 @@ const parseEventFilters = (
     ...(validTones.length > 1 ? { tones: validTones } : {}),
     person,
   };
+};
+
+const parseAuditFilters = (
+  context: Context<PanelEnvironment>,
+): PanelAuditFilters | Response => {
+  const area = context.req.query("area");
+  if (area !== undefined && !isAuditArea(area)) return context.json({ error: "audit_area_invalid" }, 400);
+  const actor = context.req.query("actor");
+  return {
+    person: actor === undefined || actor.length === 0 ? null : actor,
+    area: area === undefined ? null : area,
+  };
+};
+
+const isTwitchUserId = (value: string): boolean => /^\d+$/.test(value);
+
+/**
+ * The "Person" filter's raw id requirement makes it unusable from a search
+ * box -- a Twitch user id is never what's displayed (#181 review). A value
+ * that isn't already numeric is treated as a login (an optional leading "@"
+ * is stripped, matching how a login is shown elsewhere in the dashboard) and
+ * resolved to an id. A confirmed empty result means "no such person"; an
+ * upstream failure stays distinct so the caller can report it instead of
+ * presenting an empty page as if the login were missing.
+ */
+type AuditPersonFilterResolution =
+  | { kind: "resolved"; filters: PanelAuditFilters }
+  | { kind: "missing" }
+  | { kind: "failed" };
+
+const resolveAuditPersonFilter = async (
+  environment: Env,
+  filters: PanelAuditFilters,
+): Promise<AuditPersonFilterResolution> => {
+  if (filters.person === null || isTwitchUserId(filters.person)) return { kind: "resolved", filters };
+  try {
+    const user = await fetchTwitchUserByLogin(fetch, environment, filters.person.replace(/^@/u, ""), "app");
+    return user === null ? { kind: "missing" } : { kind: "resolved", filters: { ...filters, person: user.userId } };
+  } catch {
+    return { kind: "failed" };
+  }
 };
 
 // Only shares the parsing/error mechanics between the audit log and the
@@ -403,17 +445,32 @@ panelRouter.get(
     const channelId = context.req.param("channelId");
     const parsed = parseLogQuery(context);
     if (parsed instanceof Response) return parsed;
-    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor);
-    const actorIds = audit.entries.map((entry) => entry.actorUserId);
-    const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
+    const filters = parseAuditFilters(context);
+    if (filters instanceof Response) return filters;
+    const personResolution = await resolveAuditPersonFilter(context.env, filters);
+    if (personResolution.kind === "missing") return context.json({ entries: [], nextCursor: null });
+    if (personResolution.kind === "failed") return context.json({ error: "twitch_user_search_failed" }, 502);
+    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, personResolution.filters);
+    // The subject enrichment (#181 item 2/4) reuses the actor lookup's single
+    // batched Twitch call -- a member action's target is just another user id
+    // living in `before`/`after`, resolved the same way as the actor.
+    const subjectIds = audit.entries.flatMap((entry) => {
+      const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
+      return subjectId === null ? [] : [subjectId];
+    });
+    const userIds = [...new Set([...audit.entries.map((entry) => entry.actorUserId), ...subjectIds])];
+    const users = await fetchTwitchUsersById(fetch, context.env, userIds);
     return context.json({
       ...audit,
       entries: audit.entries.map((entry) => {
-        const actor = actors.get(entry.actorUserId);
+        const actor = users.get(entry.actorUserId);
+        const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
+        const subject = subjectId === null ? undefined : users.get(subjectId);
         return {
           ...entry,
           actorLogin: actor?.login ?? null,
           actorDisplayName: actor?.displayName ?? null,
+          ...(subjectId === null ? {} : { subjectUserId: subjectId, subjectLogin: subject?.login ?? null, subjectDisplayName: subject?.displayName ?? null }),
         };
       }),
     });

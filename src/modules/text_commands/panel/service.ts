@@ -27,10 +27,11 @@ const mutation = async (
   method: "POST" | "PATCH" | "DELETE",
   body?: unknown,
   name?: string,
+  query?: string,
 ): Promise<readonly PanelTemplateWarning[]> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
-  const response = await fetch(pathFor(channelId, name), {
+  const response = await fetch(`${pathFor(channelId, name)}${query === undefined ? "" : `?${query}`}`, {
     method,
     headers: {
       "X-CSRF-Token": csrf.token,
@@ -54,6 +55,7 @@ export const saveTextCommand = async (
   channelId: string,
   command: {
     oldName: string;
+    revision: number;
     name: string;
     kind: TextCommandKind;
     text: string;
@@ -67,8 +69,9 @@ export const saveTextCommand = async (
     userCooldownSeconds: number;
     streamCondition: TextCommandStreamCondition;
     responseType: TextCommandResponseType;
-  },
+},
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", {
+  revision: command.revision,
   name: command.name,
   kind: command.kind,
   text: command.text,
@@ -87,15 +90,17 @@ export const saveTextCommand = async (
 export const toggleTextCommand = async (
   channelId: string,
   name: string,
+  revision: number,
   enabled: boolean,
-): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { enabled }, name);
+): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { revision, enabled }, name);
 
 export const setTextCommandMinimumTier = async (
   channelId: string,
   name: string,
+  revision: number,
   minimumTier: TextCommandMinimumTier,
-): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { minimumTier: minimumTier }, name);
+): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { revision, minimumTier: minimumTier }, name);
 
-export const deleteTextCommand = async (channelId: string, name: string): Promise<void> => {
-  await mutation(channelId, "DELETE", undefined, name);
+export const deleteTextCommand = async (channelId: string, name: string, revision: number): Promise<void> => {
+  await mutation(channelId, "DELETE", undefined, name, `revision=${String(revision)}`);
 };

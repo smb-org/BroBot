@@ -14,6 +14,42 @@ const seedOperator = async (database: TestD1Database): Promise<void> => {
 };
 
 describe("channel controls", () => {
+  it("preserves concurrent mute and pause writes and audits each requested control", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      const db = database as unknown as D1Database;
+      const [mute, pause] = await Promise.all([
+        setChannelControl(db, actor, "kanal-a", "mute", "until_stream_end", NOW),
+        setChannelControl(db, actor, "kanal-a", "pause", "1h", NOW),
+      ]);
+
+      expect(mute.outcome).toBe("changed");
+      expect(pause.outcome).toBe("changed");
+      await expect(readChannelControls(db, "kanal-a", NOW)).resolves.toEqual({
+        mute: { active: true, until: null, mode: "until_stream_end" },
+        pause: { active: true, until: "2026-09-23T10:00:00.000Z", mode: "timed" },
+      });
+      const auditRows = await database.prepare(
+        "SELECT action, before_json, after_json FROM audit_log ORDER BY rowid",
+      ).all<{ action: string; before_json: string; after_json: string }>();
+      expect(auditRows.results).toEqual([
+        {
+          action: "channel.mute.enabled",
+          before_json: JSON.stringify({ active: false, mode: null, until: null }),
+          after_json: JSON.stringify({ active: true, mode: "until_stream_end", until: null }),
+        },
+        {
+          action: "channel.pause.enabled",
+          before_json: JSON.stringify({ active: false, mode: null, until: null }),
+          after_json: JSON.stringify({ active: true, mode: "timed", until: "2026-09-23T10:00:00.000Z" }),
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("expires timed mute and pause from fresh reads and audits member toggles", async () => {
     const database = new TestD1Database();
     try {

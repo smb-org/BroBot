@@ -1,4 +1,5 @@
 import type {
+  PanelAuditFilters,
   PanelAuditResponse,
   PanelPlatformMembersResponse,
   PanelPlatformAuditResponse,
@@ -184,9 +185,12 @@ export const fetchAuditLog = (
   channelId: string,
   cursor: string | null = null,
   signal?: AbortSignal,
+  filters?: PanelAuditFilters,
 ): Promise<PanelAuditResponse> => {
   const params = new URLSearchParams();
   if (cursor !== null) params.set("cursor", cursor);
+  if (filters?.person !== null && filters?.person !== undefined) params.set("actor", filters.person);
+  if (filters?.area !== null && filters?.area !== undefined) params.set("area", filters.area);
   const query = params.toString();
   return requestJson<PanelAuditResponse>(
     `${channelPath(channelId, "audit-log")}${query.length > 0 ? `?${query}` : ""}`,
@@ -292,18 +296,19 @@ export const setChannelModuleEnabled = (
   { enabled },
 );
 
-export const getChannelModuleSettings = (channelId: string, moduleId: string): Promise<{ settings: Record<string, unknown> }> =>
-  requestJson<{ settings: Record<string, unknown> }>(`${modulePath(channelId, moduleId)}/settings`);
+export const getChannelModuleSettings = (channelId: string, moduleId: string): Promise<{ settings: Record<string, unknown>; revision: number }> =>
+  requestJson<{ settings: Record<string, unknown>; revision: number }>(`${modulePath(channelId, moduleId)}/settings`);
 
 export const saveChannelModuleSettings = <Settings extends object>(
   channelId: string,
   moduleId: string,
+  revision: number,
   settings: Settings,
-): Promise<{ settings: Settings; warnings: PanelTemplateWarningResponse["warnings"] }> => requestJson<{ token: string }>("/api/csrf")
-  .then(({ token }) => requestJson<{ settings: Settings; warnings: PanelTemplateWarningResponse["warnings"] }>(`${modulePath(channelId, moduleId)}/settings`, {
+): Promise<{ settings: Settings; revision: number; warnings: PanelTemplateWarningResponse["warnings"] }> => requestJson<{ token: string }>("/api/csrf")
+  .then(({ token }) => requestJson<{ settings: Settings; revision: number; warnings: PanelTemplateWarningResponse["warnings"] }>(`${modulePath(channelId, moduleId)}/settings`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
-    body: JSON.stringify(settings),
+    body: JSON.stringify({ revision, settings }),
   }));
 
 export const refreshModeratorStatus = (

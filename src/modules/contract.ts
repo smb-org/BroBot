@@ -6,7 +6,7 @@ import type { TemplateFields } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
-export { truncateTo200Chars } from "../text";
+export { truncateTo200Chars, textFingerprintIfTruncated } from "../text";
 export {
   closestTemplateVariable,
   renderTemplate,

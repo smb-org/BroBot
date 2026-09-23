@@ -1,6 +1,7 @@
 import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
-import { eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
+import { eventCauseText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
+import { LEGACY_REASON_CODES, LEGACY_REASON_VALUES } from "./legacy-reasons";
 import { moduleName } from "../module-labels";
 
 export const emptyEventFilter: PanelEventFilters = {
@@ -27,6 +28,50 @@ export const eventToneRank = (tone: EventTone | null): number =>
 
 export const eventToneFromValue = (value: string): EventTone | null =>
   EVENT_TONES.includes(value as EventTone) ? value as EventTone : null;
+
+/**
+ * Codes whose own `locale.ts` `eventTexts` formatter always folds the
+ * diagnostic reason/cause into the rendered row text, in every branch --
+ * an icon repeating it would be clutter, not help. Listed explicitly
+ * (derived by reading each formatter, not by comparing rendered strings at
+ * runtime): a wording mismatch would otherwise slip through unnoticed. That
+ * used to be a real risk for `host.announcement.failed`, which hand-rolled
+ * its own phrase for `not_moderator` ("bot is not a moderator") instead of
+ * the shoutout catalog's wording for the same reason ("the bot is not a
+ * moderator in this channel") -- a substring check would have kept the icon
+ * exactly where it shouldn't be. It and `ads.prewarning.schedule_error` now
+ * call `eventCauseText` directly for their row text instead of hand-rolling
+ * or embedding the raw reason, which also closed the gap where an
+ * uncatalogued reason (e.g. an `http_<status>`) showed up raw in the row.
+ *
+ * `raid.invalid`, `shoutout.suppressed`, and `ads.skipped` only got here
+ * once their formatters switched from embedding the raw reason value (or
+ * only recognizing one or two of several known values) to a full lookup
+ * against their own closed reason set (`RaidInvalidReason`,
+ * `ShoutoutSuppressedReason`, `AdsSkippedReason` in `contracts/values.ts`)
+ * -- every value a current producer can emit is now spelled out.
+ */
+const CODES_WITH_CAUSE_IN_TEXT = new Set<EventCode>([
+  "host.announcement.failed",
+  "host.shoutout.failed",
+  "ads.commercial.failed",
+  "raid.invalid",
+  "ads.prewarning.schedule_error",
+  "shoutout.suppressed",
+  "ads.skipped",
+]);
+
+/** The row's failure cause for the hover/focus icon -- null on any tone
+ *  other than warning/error, when the diagnostic detail carries none of the
+ *  usual reason/cause/message keys, or when the code is in
+ *  `CODES_WITH_CAUSE_IN_TEXT` (the row already spells the cause out). The
+ *  row then gets no icon either way. */
+export const eventCause = (entry: PanelEventEntry): string | null => {
+  const tone = eventTone(entry.code);
+  if (tone !== "warning" && tone !== "error") return null;
+  if (CODES_WITH_CAUSE_IN_TEXT.has(entry.code as EventCode)) return null;
+  return eventCauseText(entry.code, eventDetail(entry.detail, entry.code));
+};
 
 export interface EventGroup {
   key: string;
@@ -93,8 +138,8 @@ export interface EventDayGroup {
   groups: readonly EventGroup[];
 }
 
-/** The viewer's local calendar day, matching `formatTimestamp`'s zone. */
-const dayKey = (createdAt: string): string => {
+/** The viewer's local calendar day, matching `formatTimestamp`'s zone. Exported for reuse by the audit log's own day grouping (`dashboard/audit/model.ts`). */
+export const dayKey = (createdAt: string): string => {
   const date = new Date(createdAt);
   if (Number.isNaN(date.getTime())) return createdAt;
   return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -116,12 +161,19 @@ export const eventDayGroups = (groups: readonly EventGroup[]): EventDayGroup[] =
   }));
 };
 
-export const eventDetail = (detail: string): EventDetail => {
+/** `code` scopes the legacy-value rewrite (`LEGACY_REASON_CODES`) to the
+ *  handful of codes the rename actually touched -- a moderation event's
+ *  free-text `reason` (or any other code's) is left exactly as stored, even
+ *  if it happens to spell one of the old renamed values (see
+ *  `legacy-reasons.ts` for the exact list). */
+export const eventDetail = (detail: string, code: string): EventDetail => {
   try {
     const parsed: unknown = JSON.parse(detail);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? parsed as EventDetail
-      : {};
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const record = parsed as Record<string, unknown>;
+    return LEGACY_REASON_CODES.has(code) && typeof record.reason === "string" && Object.hasOwn(LEGACY_REASON_VALUES, record.reason)
+      ? { ...record, reason: LEGACY_REASON_VALUES[record.reason] }
+      : record;
   } catch {
     return {};
   }
@@ -145,9 +197,17 @@ export const eventChipNumber = (detail: EventDetail, key: EventNumberKey): strin
   return formatNumber(value);
 };
 
-export const formatEventDetail = (detail: string): string => {
+/** Pretty-prints the diagnostic detail for the inspector's technical
+ *  details, through the same legacy-value normalization (`eventDetail`)
+ *  every other reader goes through -- otherwise a row persisted before
+ *  issue #191's rename would show its old German reason here even though
+ *  the row text and cause popover both show the new English one. Malformed
+ *  JSON still falls back to the raw string (`JSON.parse` throwing is what
+ *  distinguishes that from a legitimately empty `{}`). */
+export const formatEventDetail = (detail: string, code: string): string => {
   try {
-    return JSON.stringify(JSON.parse(detail), null, 2);
+    JSON.parse(detail);
+    return JSON.stringify(eventDetail(detail, code), null, 2);
   } catch {
     return detail;
   }

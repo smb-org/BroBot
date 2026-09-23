@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { apiErrorText, dashboardLanguage, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
+import {
+  ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, SHOUTOUT_SUPPRESSED_REASONS,
+} from "../../src/contracts/values";
+import { apiErrorText, dashboardLanguage, eventCauseText, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -59,13 +62,13 @@ describe("dashboard locale", () => {
 
   it("distinguishes a disabled shoutout from the threshold", () => {
     setBrowserLanguage("de-DE");
-    expect(eventText("shoutout.suppressed", { reason: "abgeschaltet" })).toBe("Shoutout abgeschaltet");
-    expect(eventText("shoutout.suppressed", { reason: "unter_schwelle", viewers: 2, threshold: 3 }))
+    expect(eventText("shoutout.suppressed", { reason: "disabled" })).toBe("Shoutout abgeschaltet");
+    expect(eventText("shoutout.suppressed", { reason: "below_threshold", viewers: 2, threshold: 3 }))
       .toBe("Shoutout unter der Schwelle (2 von 3 Zuschauern)");
 
     setBrowserLanguage("en-US");
-    expect(eventText("shoutout.suppressed", { reason: "abgeschaltet" })).toBe("Shoutout disabled");
-    expect(eventText("shoutout.suppressed", { reason: "unter_schwelle", viewers: 2, threshold: 3 }))
+    expect(eventText("shoutout.suppressed", { reason: "disabled" })).toBe("Shoutout disabled");
+    expect(eventText("shoutout.suppressed", { reason: "below_threshold", viewers: 2, threshold: 3 }))
       .toBe("Shoutout below threshold (2 of 3 viewers)");
   });
 
@@ -180,5 +183,76 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.suspicious.cleared", {
       person: "Alice", moderator: "Mod",
     })).toBe("Classification for Alice cleared by Mod");
+  });
+
+  it("gives the clip route's own bot_identity_missing a label distinct from the shoutout one", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventCauseText("host.clip.failed", { reason: "bot_identity_missing" })).toBe("Bot-Identität fehlt");
+    expect(eventCauseText("host.clip.failed", { reason: "not_live" })).toBe("Der Stream ist nicht live");
+
+    setBrowserLanguage("en-US");
+    expect(eventCauseText("host.clip.failed", { reason: "bot_identity_missing" })).toBe("Bot identity is missing");
+  });
+
+  it("labels host.chat.failed's own not_sent reason and the shared infra reasons it has no catalog of its own for", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventCauseText("host.chat.failed", { reason: "not_sent" })).toBe("Twitch hat die Nachricht nicht bestätigt");
+    expect(eventCauseText("host.chat.failed", { reason: "bot_identity_missing" })).toBe("Bot-Identität fehlt");
+    expect(eventCauseText("host.chat.failed", { reason: "app_token_unavailable" })).toBe("App-Token nicht verfügbar");
+    expect(eventCauseText("host.chat.failed", { reason: "rate_limited" })).toBe("Twitch-Abklingzeit aktiv");
+
+    setBrowserLanguage("en-US");
+    expect(eventCauseText("host.chat.failed", { reason: "not_sent" })).toBe("Twitch did not confirm the message");
+  });
+
+  it("prefers a nonempty detail.message over the raw code for an uncatalogued reason", () => {
+    setBrowserLanguage("de-DE");
+    // "http_403" isn't in any catalog (an arbitrary Twitch status code) --
+    // Twitch's own message reads better than the bare code.
+    expect(eventCauseText("host.chat.failed", { reason: "http_403", message: "You are banned from chatting in this channel" }))
+      .toBe("You are banned from chatting in this channel");
+    // No message at all: an http_<status> pattern gets a generic localized
+    // fallback, never the raw code.
+    expect(eventCauseText("host.chat.failed", { reason: "http_403" })).toBe("Twitch antwortete mit Fehler 403");
+    // An empty message doesn't count as "nonempty".
+    expect(eventCauseText("host.chat.failed", { reason: "http_403", message: "" })).toBe("Twitch antwortete mit Fehler 403");
+
+    setBrowserLanguage("en-US");
+    expect(eventCauseText("host.chat.failed", { reason: "http_500" })).toBe("Twitch responded with error 500");
+  });
+
+  it("falls back to a localized generic cause for a reason that isn't http_<status> either", () => {
+    setBrowserLanguage("de-DE");
+    // An arbitrary Twitch chat moderation code, uncatalogued and without a
+    // message -- the raw value never reaches the popover, even here.
+    expect(eventCauseText("host.chat.failed", { reason: "banned_word" })).toBe("Unbekannte Ursache");
+
+    setBrowserLanguage("en-US");
+    expect(eventCauseText("host.chat.failed", { reason: "banned_word" })).toBe("Unknown cause");
+  });
+
+  it("never returns a raw snake_case reason for any value a current producer can emit", () => {
+    const rawSnakeCase = /^[a-z]+(_[a-z]+)*$/;
+    const producerReasons: ReadonlyArray<readonly [EventCode, readonly string[]]> = [
+      ["host.shoutout.failed", SHOUTOUT_FAILURE_REASONS],
+      ["ads.commercial.failed", COMMERCIAL_FAILURE_REASONS],
+      ["host.clip.failed", ["rate_limited", "scope_missing", "not_live", "bot_identity_missing", "timeout", "network_error"]],
+      ["host.chat.failed", ["bot_identity_missing", "app_token_unavailable", "not_sent", "rate_limited", "timeout", "network_error"]],
+      ["ads.skipped", ADS_SKIPPED_REASONS],
+      ["raid.invalid", RAID_INVALID_REASONS],
+      ["shoutout.suppressed", SHOUTOUT_SUPPRESSED_REASONS],
+    ];
+
+    for (const language of ["de-DE", "en-US"] as const) {
+      setBrowserLanguage(language);
+      for (const [code, reasons] of producerReasons) {
+        for (const reason of reasons) {
+          const cause = eventCauseText(code, { reason });
+          expect(cause, `${code}/${reason} (${language})`).not.toBeNull();
+          expect(cause, `${code}/${reason} (${language})`).not.toBe(reason);
+          expect(cause, `${code}/${reason} (${language})`).not.toMatch(rawSnakeCase);
+        }
+      }
+    }
   });
 });

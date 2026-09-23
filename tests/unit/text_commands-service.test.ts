@@ -22,6 +22,7 @@ const command = (name: string, text: string, lastUsedAt: string | null = null): 
   lastUsedAt,
   createdAt: NOW,
   updatedAt: NOW,
+  revision: 1,
 });
 
 const repositoryFor = (commands: TextCommand[]): TextCommandRepository => ({

@@ -6,6 +6,7 @@ import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand } from "../../src/modules/
 import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
+import { useDashboardRoute } from "../../src/dashboard/router";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
@@ -28,6 +29,7 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
   lastUsedAt: null,
   createdAt: "2026-09-19T12:00:00.000Z",
   updatedAt: "2026-09-19T12:00:00.000Z",
+  revision: 1,
   ...overrides,
 });
 
@@ -218,6 +220,7 @@ describe("Text command editor", () => {
     await waitFor(() => {
       const patch = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
       expect(patch?.[1]?.body).toBe(JSON.stringify({
+        revision: 1,
         name: "hallo",
         kind: "text",
         text: "Hallo {user} aus {channel}",
@@ -368,6 +371,36 @@ describe("Text command editor", () => {
     expect(document.querySelector(".ui-editor-shell")).not.toBeInTheDocument();
   });
 
+  it("blocks route navigation from a dirty command editor", async () => {
+    const fetcher = panelFetch();
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
+    const Harness = (): React.ReactElement => {
+      const [route, navigate] = useDashboardRoute();
+      return <>
+        <button type="button" onClick={() => { navigate({ kind: "overview" }); }}>Go overview</button>
+        <output>{route.kind}</output>
+        {route.kind === "module" ? <TextCommandsPanel channelId="kanal-a" language="de" initialSelection="hallo" /> : null}
+      </>;
+    };
+    render(<UiProvider><Harness /></UiProvider>);
+
+    const response = await screen.findByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "Entwurf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
+    const guard = await screen.findByRole("dialog");
+    expect(screen.getByText("module")).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Weiter bearbeiten" })).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Verwerfen und wechseln" })).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
+
+    fireEvent.click(within(guard).getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf");
+    fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
+    await waitFor(() => expect(screen.getByText("overview")).toBeInTheDocument());
+  });
+
   it("saves and switches from the draft guard, and keeps the new row selected", async () => {
     const rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
     const fetcher = panelFetch({ commands: () => rows });
@@ -470,7 +503,7 @@ describe("Text command editor", () => {
     await waitFor(() => {
       const toggle = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
       expect(toggle).toBeDefined();
-      expect(toggle?.[1]?.body).toBe(JSON.stringify({ enabled: false }));
+      expect(toggle?.[1]?.body).toBe(JSON.stringify({ revision: 1, enabled: false }));
     });
   });
 
@@ -494,7 +527,7 @@ describe("Text command editor", () => {
     fireEvent.click(tierSelect);
     fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) =>
-      init?.method === "PATCH" && init.body === JSON.stringify({ minimumTier: "moderator" }))).toBe(true));
+      init?.method === "PATCH" && init.body === JSON.stringify({ revision: 1, minimumTier: "moderator" }))).toBe(true));
 
     row.focus();
     fireEvent.click(row);
@@ -511,6 +544,62 @@ describe("Text command editor", () => {
     expect(onCloseInspector).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the inspector draft's loaded revision when the row minimum tier changes", async () => {
+    let current = makeCommand();
+    const fetcher = panelFetch({
+      commands: () => [current],
+      onMutation: (method, _path, body) => {
+        if (method !== "PATCH" || typeof body !== "object" || body === null || !("revision" in body)) {
+          return jsonResponse({ warnings: [] });
+        }
+        if (body.revision !== current.revision) {
+          return jsonResponse({ error: "command_changed_concurrently", current }, 409);
+        }
+        if ("minimumTier" in body && typeof body.minimumTier === "string") {
+          current = { ...current, minimumTier: body.minimumTier as TextCommand["minimumTier"], revision: current.revision + 1 };
+        } else if ("text" in body && typeof body.text === "string") {
+          current = { ...current, text: body.text, revision: current.revision + 1 };
+        }
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf" } });
+
+    const row = screen.getByRole("row", { name: /!hallo/u });
+    fireEvent.click(within(row).getByRole("combobox", { name: "Wer darf auslösen: !hallo" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
+    await waitFor(() => expect(current).toMatchObject({ minimumTier: "moderator", revision: 2 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(2));
+    const patches = fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH");
+    const patchBodies = patches.map(([, init]) => {
+      if (typeof init?.body !== "string") throw new Error("PATCH body is missing.");
+      return JSON.parse(init.body) as unknown;
+    });
+    expect(patchBodies).toEqual([
+      { revision: 1, minimumTier: "moderator" },
+      {
+        revision: 1,
+        name: "hallo",
+        kind: "text",
+        text: "Entwurf",
+        minimumTier: "everyone",
+        cooldownSeconds: 5,
+        aliases: ["hey"],
+        userCooldownSeconds: 15,
+        streamCondition: "online",
+        responseType: "reply",
+      },
+    ]);
+    expect(await screen.findByRole("button", { name: "Serverstand laden" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Inzwischen von jemand anderem geändert.");
+    expect(screen.getByRole("button", { name: "Änderungen speichern" })).toBeDisabled();
+    expect(current).toMatchObject({ text: "Hallo {user} aus {channel}", minimumTier: "moderator", revision: 2 });
+  });
+
   it("deletes through ConfirmDialog", async () => {
     const fetcher = panelFetch();
     renderPanel(fetcher);
@@ -520,6 +609,8 @@ describe("Text command editor", () => {
     expect(within(dialog).getByText(/Aliase !hey/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo endgültig löschen" }));
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true));
+    const deleteCall = fetcher.mock.calls.find(([, init]) => init?.method === "DELETE");
+    expect(deleteCall?.[0]).toBe("/api/channels/kanal-a/modules/text_commands/commands/hallo?revision=1");
   });
 
   it("follows the browser language when the host does not pass one", async () => {

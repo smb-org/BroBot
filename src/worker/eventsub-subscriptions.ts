@@ -462,7 +462,11 @@ const adoptRemoteSubscription = async (
     await mark(env.DB, target, "missing", "pending_adoption", null, now);
     return false;
   }
-  await mark(env.DB, target, "enabled", null, adopted.id, now, activeSecretId);
+  // Twitch does not disclose which webhook secret a remote subscription uses.
+  // An untracked subscription therefore cannot be assigned the active key id.
+  await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, adopted.id);
+  const replacement = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
+  await mark(env.DB, target, "enabled", null, replacement.id, now, activeSecretId);
   return true;
 };
 
@@ -574,7 +578,8 @@ export const reconcileEventSubSubscriptions = async (
     if (valid) {
       kept.add(targetKey);
       const state = currentStates.get(targetKey);
-      if (state !== undefined && (state.status !== "enabled" || state.secretId !== activeSecretId)) {
+      if (state === undefined || state.status !== "enabled" || state.secretId !== activeSecretId ||
+          state.subscriptionId !== subscription.id) {
         try {
           await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, subscription.id);
         } catch (error: unknown) {

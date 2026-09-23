@@ -1,4 +1,4 @@
-import type { EventCode } from "../../contracts/values";
+import type { EventCode, ShoutoutSuppressedReason } from "../../contracts/values";
 import type { ModuleEvent, ModuleResult } from "../contract";
 import type { RaidSettings } from "./contracts";
 import { decideRaid, renderRaidText } from "./domain";
@@ -38,7 +38,7 @@ export const processRaid = (
       diagnostics: [{
         code: "shoutout.suppressed" satisfies EventCode,
         detail: {
-          reason: event.settings.shoutoutEnabled ? "unter_schwelle" : "abgeschaltet",
+          reason: (event.settings.shoutoutEnabled ? "below_threshold" : "disabled") satisfies ShoutoutSuppressedReason,
           viewers: decision.viewers,
           threshold: event.settings.shoutoutThreshold,
         },
