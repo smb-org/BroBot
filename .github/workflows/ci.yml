@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  quality:
+  static:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -20,7 +20,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
       - name: Lokale Testkonfiguration erzeugen
         run: |
           key() { openssl rand -base64 32 | tr '+/' '-_' | tr -d '='; }
@@ -30,7 +29,94 @@ jobs:
               -e "s|^SESSION_COOKIE_KEYS=.*|SESSION_COOKIE_KEYS={\"active\":{\"id\":\"ci-cookie-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
               -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
               .dev.vars.example > .dev.vars
-      - run: pnpm run check
+      - run: pnpm run config:verify
+      - run: pnpm run types:check
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lokale Testkonfiguration erzeugen
+        run: |
+          key() { openssl rand -base64 32 | tr '+/' '-_' | tr -d '='; }
+          sed -e "s|^TWITCH_CLIENT_SECRET=.*|TWITCH_CLIENT_SECRET=local-twitch-client-secret|" \
+              -e "s|^TWITCH_EVENTSUB_SECRET=.*|TWITCH_EVENTSUB_SECRET={\"active\":{\"id\":\"ci-eventsub-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^TOKEN_ENCRYPTION_KEYS=.*|TOKEN_ENCRYPTION_KEYS={\"active\":{\"id\":\"ci-encryption-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^SESSION_COOKIE_KEYS=.*|SESSION_COOKIE_KEYS={\"active\":{\"id\":\"ci-cookie-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
+              .dev.vars.example > .dev.vars
+      - run: pnpm run test
+
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lokale Testkonfiguration erzeugen
+        run: |
+          key() { openssl rand -base64 32 | tr '+/' '-_' | tr -d '='; }
+          sed -e "s|^TWITCH_CLIENT_SECRET=.*|TWITCH_CLIENT_SECRET=local-twitch-client-secret|" \
+              -e "s|^TWITCH_EVENTSUB_SECRET=.*|TWITCH_EVENTSUB_SECRET={\"active\":{\"id\":\"ci-eventsub-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^TOKEN_ENCRYPTION_KEYS=.*|TOKEN_ENCRYPTION_KEYS={\"active\":{\"id\":\"ci-encryption-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^SESSION_COOKIE_KEYS=.*|SESSION_COOKIE_KEYS={\"active\":{\"id\":\"ci-cookie-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
+              .dev.vars.example > .dev.vars
+      - run: pnpm run test:worker
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Playwright-Version ermitteln
+        id: pw-version
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      # Playwright-Tests laufen headless (kein `headless: false` in
+      # playwright.config.ts), deshalb reicht die schlanke Headless-Shell statt
+      # des vollen Chromium-Browsers — kleinerer Download, weniger OS-Pakete.
+      - name: Playwright-Browser-Cache
+        id: playwright-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-shell-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+      - name: Playwright-Browser installieren
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+      - name: Playwright-OS-Abhängigkeiten installieren
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium-headless-shell
+      - name: Lokale Testkonfiguration erzeugen
+        run: |
+          key() { openssl rand -base64 32 | tr '+/' '-_' | tr -d '='; }
+          sed -e "s|^TWITCH_CLIENT_SECRET=.*|TWITCH_CLIENT_SECRET=local-twitch-client-secret|" \
+              -e "s|^TWITCH_EVENTSUB_SECRET=.*|TWITCH_EVENTSUB_SECRET={\"active\":{\"id\":\"ci-eventsub-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^TOKEN_ENCRYPTION_KEYS=.*|TOKEN_ENCRYPTION_KEYS={\"active\":{\"id\":\"ci-encryption-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^SESSION_COOKIE_KEYS=.*|SESSION_COOKIE_KEYS={\"active\":{\"id\":\"ci-cookie-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
+              -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
+              .dev.vars.example > .dev.vars
+      - run: pnpm run test:e2e
       - name: Browser-Artefakte hochladen
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -41,3 +127,19 @@ jobs:
             test-results
           if-no-files-found: ignore
           retention-days: 14
+
+  # Einziger Pflicht-Check für Branch-Protection und den `workflow_run`-Trigger
+  # von deploy.yml — die gesplitteten Jobs laufen parallel, dieser fasst sie
+  # zu einem Ergebnis zusammen.
+  quality:
+    needs: [static, unit, worker, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ergebnisse der Teil-Jobs prüfen
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "Mindestens ein Teil-Job ist fehlgeschlagen oder wurde abgebrochen."
+            exit 1
+          fi
