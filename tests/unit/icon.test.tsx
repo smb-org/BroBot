@@ -29,6 +29,10 @@ const iconNames: Readonly<Record<IconName, true>> = {
   tierVip: true,
   tierModerator: true,
   tierBroadcaster: true,
+  tabSettings: true,
+  tabAdvanced: true,
+  tabMessages: true,
+  tabPrewarning: true,
 };
 
 afterEach(cleanup);

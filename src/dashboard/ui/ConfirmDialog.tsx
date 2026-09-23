@@ -18,6 +18,7 @@ export interface ConfirmDialogProps {
   cancelLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
+  alternative?: { label: string; onClick: () => void };
   /** "Deleting actions carry it permanently" -- deleting actions render
    *  the confirm button as `danger` instead of `filled`. */
   danger?: boolean;
@@ -31,6 +32,7 @@ export function ConfirmDialog({
   cancelLabel,
   onConfirm,
   onCancel,
+  alternative,
   danger = false,
 }: ConfirmDialogProps) {
   return (
@@ -42,6 +44,7 @@ export function ConfirmDialog({
         <Button variant="subtle" onClick={onCancel} autoFocus>
           {cancelLabel}
         </Button>
+        {alternative === undefined ? null : <Button variant="neutral" onClick={alternative.onClick}>{alternative.label}</Button>}
         <Button variant="primary" danger={danger} onClick={onConfirm}>
           {confirmLabel}
         </Button>

@@ -16,6 +16,7 @@ interface ButtonBaseProps {
    *  "quiet". */
   danger?: boolean;
   disabled?: boolean;
+  ariaDisabled?: boolean;
   onClick?: () => void;
   type?: "button" | "submit";
   /** Initial focus inside a `ConfirmDialog`: Mantine honors the focus target. */
@@ -69,6 +70,7 @@ export function Button(props: ButtonProps) {
     variant = "neutral",
     danger = false,
     disabled = false,
+    ariaDisabled = false,
     onClick,
     type = "button",
     autoFocus = false,
@@ -89,7 +91,7 @@ export function Button(props: ButtonProps) {
     ...(formDensity === "form" ? { "--button-fz": "14px" } : undefined),
     ...(iconOnly ? { width: size === "compact" ? 34 : 44, minWidth: size === "compact" ? 34 : 44, paddingInline: 0 } : undefined),
     fontWeight,
-    ...(disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined),
+    ...(disabled || ariaDisabled ? { opacity: 0.55, cursor: "not-allowed" } : undefined),
   } as CSSProperties;
   const label = iconOnly ? undefined : props.children;
   const leadingIcon = iconOnly || icon === undefined ? undefined : <Icon name={icon} size={16} />;
@@ -103,6 +105,7 @@ export function Button(props: ButtonProps) {
       variant={mantineVariant}
       size={size === "compact" ? "compact-md" : "md"}
       disabled={disabled}
+      aria-disabled={ariaDisabled || undefined}
       onClick={onClick}
       type={type}
       aria-label={iconOnly ? props.ariaLabel : undefined}

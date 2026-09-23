@@ -1,15 +1,23 @@
-import { colors } from "./theme";
+import type { ReactNode } from "react";
+
 import { Button } from "./Button";
+import { Icon } from "./Icon";
+import { colors } from "./theme";
 
 export interface SaveBarProps {
-  /** Visible only while the draft differs from the saved value. */
   dirty: boolean;
   pending?: boolean;
   error?: string;
-  /** "Gespeichert", shown once after a successful save until the next edit;
-   *  the caller clears it on the next change, not on a timer. */
   saved?: boolean;
+  invalid?: boolean;
+  invalidMessage?: string;
+  persistent?: boolean;
+  warnings?: readonly string[];
+  warningStatusLabel?: (warnings: readonly string[], saved: boolean) => ReactNode;
+  conflict?: { message: string; reloadLabel: string; onReload: () => void };
+  footer?: ReactNode;
   onSave: () => void;
+  onInvalidSave?: () => void;
   onDiscard: () => void;
   saveLabel: string;
   discardLabel: string;
@@ -17,41 +25,65 @@ export interface SaveBarProps {
   pendingLabel: string;
 }
 
-/**
- * "Speichern-Leiste (`SaveBar`)" in docs/input/DESIGN-neu.md: sits at the
- * inspector's foot, appears once the draft is dirty, disappears again once
- * it is not (except for the one-shot "Gespeichert" confirmation, which has
- * no timer and clears only on the next edit).
- */
 export function SaveBar({
   dirty,
   pending = false,
   error,
   saved = false,
+  invalid = false,
+  invalidMessage,
+  persistent = false,
+  warnings = [],
+  warningStatusLabel,
+  conflict,
+  footer,
   onSave,
+  onInvalidSave,
   onDiscard,
   saveLabel,
   discardLabel,
   savedLabel,
   pendingLabel,
 }: SaveBarProps) {
-  if (!dirty && !saved) {
-    return null;
-  }
+  if (!persistent && !dirty && !saved) return null;
 
-  const statusText = error ? `× ${error}` : pending ? pendingLabel : saved && !dirty ? savedLabel : undefined;
+  const warningStatus = warnings.length === 0 ? null : warningStatusLabel?.(warnings, saved && !dirty) ?? warnings[0];
+  const statusText = conflict !== undefined
+    ? `× ${conflict.message}`
+    : pending
+      ? pendingLabel
+      : error !== undefined
+        ? `× ${error}`
+        : saved && !dirty
+          ? warningStatus ?? savedLabel
+          : invalid && dirty
+            ? invalidMessage === undefined ? "" : `× ${invalidMessage}`
+            : dirty
+              ? warningStatus
+              : null;
+  const invalidAction = persistent && invalid && dirty && !pending && conflict === undefined;
+  const saveDisabled = pending || conflict !== undefined || !dirty;
+  const showButtons = dirty || persistent;
 
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-      <span role="status" aria-live="polite" style={{ fontSize: "12px", color: error ? colors.errorText : colors.text3 }}>
-        {statusText}
-      </span>
-      {dirty ? (
-        <div style={{ display: "flex", gap: "8px" }}>
-          <Button variant="subtle" onClick={onDiscard} disabled={pending}>
-            {discardLabel}
-          </Button>
-          <Button variant="primary" onClick={onSave} disabled={pending}>
+    <div className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}`} aria-busy={pending}>
+      <div className="ui-save-bar__status" role="status" aria-live="polite">
+        {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
+        <span style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>
+          {statusText}
+        </span>
+        {conflict === undefined ? null : <Button variant="neutral" icon="reload" onClick={conflict.onReload}>{conflict.reloadLabel}</Button>}
+      </div>
+      {footer === undefined || conflict !== undefined ? null : <div className="ui-save-bar__footer">{footer}</div>}
+      {showButtons ? (
+        <div className="ui-save-bar__actions">
+          {dirty && conflict === undefined ? <Button variant="subtle" onClick={onDiscard} disabled={pending}>{discardLabel}</Button> : null}
+          <Button
+            variant={persistent && invalid ? "neutral" : "primary"}
+            onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
+            disabled={saveDisabled && !invalidAction}
+            ariaDisabled={invalidAction}
+          >
             {saveLabel}
           </Button>
         </div>

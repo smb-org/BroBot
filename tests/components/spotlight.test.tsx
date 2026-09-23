@@ -4,7 +4,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { Spotlight } from "../../src/dashboard/ui/Spotlight";
 import { ChannelSpotlight } from "../../src/dashboard/spotlight";
+import { ModuleIcon } from "../../src/dashboard/module-panels";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
 
@@ -73,6 +75,34 @@ describe("Channel Spotlight", () => {
     expect(clipAction).not.toBeNull();
     expect(clipAction?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(clipAction).toHaveAccessibleName("Clip erstellen");
+  });
+
+  it("keeps hand-drawn module glyphs outlined for ads actions", async () => {
+    stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[{ id: "ads", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "ads off" } });
+    const adsAction = (await screen.findByText("Werbung aus")).closest(".mantine-Spotlight-action");
+    const adsGlyph = adsAction?.querySelector("svg.spotlight-module-icon");
+    expect(adsGlyph).toHaveClass("module-glyph");
+    expect(adsGlyph).toHaveAttribute("aria-hidden", "true");
+
+    expect(adsAction?.querySelector(".mantine-Spotlight-action-icon-dot")).toBeNull();
+  });
+
+  it("renders a text-command result with the shared hand-drawn module icon family", () => {
+    renderWithMantine(<Spotlight
+      forceOpened
+      emptyMessage="No results."
+      items={[{ id: "command:clip", label: "!clip", group: "Befehle", icon: <ModuleIcon moduleId="text_commands" className="spotlight-module-icon" />, onTrigger: vi.fn() }]}
+    />);
+    const commandAction = screen.getByText("!clip").closest(".mantine-Spotlight-action");
+    const commandGlyph = commandAction?.querySelector("svg.spotlight-module-icon");
+    expect(commandGlyph).toHaveClass("module-glyph");
+    expect(commandGlyph).toHaveAttribute("aria-hidden", "true");
+    expect(commandAction?.querySelector(".mantine-Spotlight-action-icon-dot")).toBeNull();
   });
 
   it("explains that mandatory channel events remain active from Spotlight", async () => {

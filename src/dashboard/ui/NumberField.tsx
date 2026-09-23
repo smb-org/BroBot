@@ -1,8 +1,11 @@
-import { NumberInput } from "@mantine/core";
+import { NumberInput, type NumberInputHandlers } from "@mantine/core";
+import { useRef } from "react";
 
+import { Button } from "./Button";
 import { colors } from "./theme";
+import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 
-export interface NumberFieldProps {
+interface NumberFieldBaseProps {
   label: string;
   hint?: string;
   error?: string;
@@ -16,6 +19,11 @@ export interface NumberFieldProps {
   name?: string;
   id?: string;
 }
+
+export type NumberFieldProps = NumberFieldBaseProps & (
+  | { step: number; increaseLabel: string; decreaseLabel: string }
+  | { step?: undefined; increaseLabel?: never; decreaseLabel?: never }
+);
 
 /**
  * "Number fields carry their unit as a suffix in the field ('5 s', '50
@@ -36,23 +44,49 @@ export function NumberField({
   required = false,
   name,
   id,
+  step,
+  increaseLabel,
+  decreaseLabel,
 }: NumberFieldProps) {
-  return (
+  const disabledReason = useDisabledFieldReason();
+  const handlers = useRef<NumberInputHandlers>(null);
+  const atMin = min !== undefined && typeof value === "number" && value <= min;
+  const atMax = max !== undefined && typeof value === "number" && value >= max;
+
+  const input = (
     <NumberInput
       label={label}
-      description={hint}
+      description={hint === undefined && disabledReason === null ? undefined : <span className="ui-number-field__description">{describedHelper(hint, disabledReason, `number-${id ?? label}`)}</span>}
       error={error ? `× ${error}` : undefined}
+      inputWrapperOrder={["label", "input", "description", "error"]}
       value={value}
       onChange={(next) => onChange(next === "" ? "" : Number(next))}
       disabled={disabled}
       required={required}
       name={name}
       id={id}
+      role="spinbutton"
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={typeof value === "number" ? value : undefined}
       {...(min !== undefined ? { min } : undefined)}
       {...(max !== undefined ? { max } : undefined)}
+      {...(step === undefined ? {} : { step, hideControls: true, handlersRef: handlers })}
       rightSection={unit ? <span style={{ color: colors.text3, fontSize: "12px" }}>{unit}</span> : undefined}
       rightSectionWidth={unit ? Math.max(28, unit.length * 8 + 12) : undefined}
       rightSectionPointerEvents="none"
     />
+  );
+
+  return (
+    step === undefined ? input : (
+      <div className="ui-number-field">
+        <div className="ui-number-field__stepper">
+          <Button icon="minus" iconOnly ariaLabel={decreaseLabel} disabled={disabled || atMin} onClick={() => { handlers.current?.decrement(); }} />
+          {input}
+          <Button icon="plus" iconOnly ariaLabel={increaseLabel} disabled={disabled || atMax} onClick={() => { handlers.current?.increment(); }} />
+        </div>
+      </div>
+    )
   );
 }

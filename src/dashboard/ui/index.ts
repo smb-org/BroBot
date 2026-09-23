@@ -17,6 +17,30 @@ export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } fr
 export { Field } from "./Field";
 export type { FieldProps } from "./Field";
 
+export { FieldPair } from "./FieldPair";
+export type { FieldPairProps } from "./FieldPair";
+
+export { SegmentedControl } from "./SegmentedControl";
+export type { SegmentedControlOption, SegmentedControlProps } from "./SegmentedControl";
+
+export { ChoiceCards } from "./ChoiceCards";
+export type { ChoiceCardOption, ChoiceCardsProps } from "./ChoiceCards";
+
+export { TagInput } from "./TagInput";
+export type { TagInputMessages, TagInputProps } from "./TagInput";
+
+export { TextArea } from "./TextArea";
+export type { TemplateVariableOption, TextAreaMessages, TextAreaProps } from "./TextArea";
+
+export { TemplateText } from "./TemplateText";
+export type { TemplateTextProps } from "./TemplateText";
+
+export { EditorShell } from "./EditorShell";
+export type { EditorSection, EditorShellProps } from "./EditorShell";
+
+export { SettingsEditor } from "./SettingsEditor";
+export type { SettingsEditorProps, SettingsEditorSpec, SettingsEditorTexts, SettingsFieldSpec, SettingsFieldText } from "./SettingsEditor";
+
 export { NumberField } from "./NumberField";
 export type { NumberFieldProps } from "./NumberField";
 
