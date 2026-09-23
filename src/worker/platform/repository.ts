@@ -11,6 +11,7 @@ import {
 import { prepareAudit } from "../db/audit";
 import { decodeCursor, encodeCursor } from "../db/cursor";
 import { PLATFORM_ASSIGNABLE_ROLES, type AuditActorKind } from "../../contracts/values";
+import { MODULES } from "../../modules/registry";
 
 export interface PlatformChannel {
   channelId: string;
@@ -201,6 +202,22 @@ export const releasePlatformChannel = async (
       WHERE channel_id = ?
         AND changes() > 0`,
   ).bind(channel.userId, timestamp, timestamp, channel.userId);
+  // One source of truth for module activation: a released channel gets a
+  // real row for every default-enabled module here, the same row every
+  // reader (overview, sidebar, dispatch, EventSub targets) checks. Gated on
+  // memberMutation's changes() the same way memberMutation itself is gated
+  // on channelMutation's, so a re-release attempt on an existing channel
+  // inserts nothing.
+  const moduleMutations = MODULES
+    .filter((module) => module.defaultEnabled === true)
+    .map((module) => db.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       SELECT ?, ?, 1, ?
+        WHERE changes() > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = ?
+          )`,
+    ).bind(channel.userId, module.id, JSON.stringify(module.defaultSettings), channel.userId, module.id));
   const after: PlatformChannel = {
     channelId: channel.userId,
     login: channel.login,
@@ -216,7 +233,7 @@ export const releasePlatformChannel = async (
     null,
     after,
   );
-  const results = await db.batch([channelMutation, memberMutation, audit]);
+  const results = await db.batch([channelMutation, memberMutation, ...moduleMutations, audit]);
   return (results[0]?.meta.changes ?? 0) > 0 && (results[1]?.meta.changes ?? 0) > 0;
 };
 

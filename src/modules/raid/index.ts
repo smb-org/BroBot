@@ -21,5 +21,9 @@ export const raidModule: BotModule<typeof raidSettingsSchema> = {
   },
   eventSubTypes: ["channel.raid"],
   settingsEditor: () => import("./panel/settings-editor"),
+  immediateActions: {
+    requires: ["streamLive"],
+    load: () => import("./panel/immediate-actions"),
+  },
   handleEvent: (event) => processRaid(event),
 };

@@ -51,7 +51,7 @@ describe("Channel Spotlight", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "raid" } });
-    const action = await screen.findByText("Raid-Shoutout");
+    const action = await screen.findByText("Shoutout");
     fireEvent.click(action);
 
     expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "raid" });
@@ -63,6 +63,8 @@ describe("Channel Spotlight", () => {
 
     fireEvent.keyDown(document.body, { key: "k", metaKey: true });
     await screen.findByRole("dialog");
+    await screen.findByText("!clip");
+    await screen.findByText("Max");
 
     const dialog = screen.getByRole("dialog");
     const groupLabels = ["Aktionen", "Module", "Befehle", "Mitglieder"].map((label) => `'${label}'`);
