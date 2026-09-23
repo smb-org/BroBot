@@ -1,7 +1,7 @@
 import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
 import { eventCauseText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
-import { LEGACY_REASON_VALUES } from "./legacy-reasons";
+import { LEGACY_REASON_CODES, LEGACY_REASON_VALUES } from "./legacy-reasons";
 import { moduleName } from "../module-labels";
 
 export const emptyEventFilter: PanelEventFilters = {
@@ -70,7 +70,7 @@ export const eventCause = (entry: PanelEventEntry): string | null => {
   const tone = eventTone(entry.code);
   if (tone !== "warning" && tone !== "error") return null;
   if (CODES_WITH_CAUSE_IN_TEXT.has(entry.code as EventCode)) return null;
-  return eventCauseText(entry.code, eventDetail(entry.detail));
+  return eventCauseText(entry.code, eventDetail(entry.detail, entry.code));
 };
 
 export interface EventGroup {
@@ -161,12 +161,17 @@ export const eventDayGroups = (groups: readonly EventGroup[]): EventDayGroup[] =
   }));
 };
 
-export const eventDetail = (detail: string): EventDetail => {
+/** `code` scopes the legacy-value rewrite (`LEGACY_REASON_CODES`) to the
+ *  handful of codes the rename actually touched -- a moderation event's
+ *  free-text `reason` (or any other code's) is left exactly as stored, even
+ *  if it happens to spell one of the old renamed values (see
+ *  `legacy-reasons.ts` for the exact list). */
+export const eventDetail = (detail: string, code: string): EventDetail => {
   try {
     const parsed: unknown = JSON.parse(detail);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
     const record = parsed as Record<string, unknown>;
-    return typeof record.reason === "string" && Object.hasOwn(LEGACY_REASON_VALUES, record.reason)
+    return LEGACY_REASON_CODES.has(code) && typeof record.reason === "string" && Object.hasOwn(LEGACY_REASON_VALUES, record.reason)
       ? { ...record, reason: LEGACY_REASON_VALUES[record.reason] }
       : record;
   } catch {
@@ -199,10 +204,10 @@ export const eventChipNumber = (detail: EventDetail, key: EventNumberKey): strin
  *  the row text and cause popover both show the new English one. Malformed
  *  JSON still falls back to the raw string (`JSON.parse` throwing is what
  *  distinguishes that from a legitimately empty `{}`). */
-export const formatEventDetail = (detail: string): string => {
+export const formatEventDetail = (detail: string, code: string): string => {
   try {
     JSON.parse(detail);
-    return JSON.stringify(eventDetail(detail), null, 2);
+    return JSON.stringify(eventDetail(detail, code), null, 2);
   } catch {
     return detail;
   }

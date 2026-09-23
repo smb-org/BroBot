@@ -164,9 +164,10 @@ describe("EventsPage failure cause icon", () => {
     }
   });
 
-  it("clears its pending close timer on unmount instead of updating state afterwards", () => {
+  it("clears its pending close timer on unmount instead of leaving it running", () => {
     vi.useFakeTimers();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
     try {
       const { unmount } = renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
 
@@ -175,15 +176,22 @@ describe("EventsPage failure cause icon", () => {
       vi.advanceTimersByTime(50);
       expect(screen.getByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
 
-      // A hover-out schedules a delayed close; unmounting before it fires
-      // must cancel it, not let it update state on an unmounted component.
+      // A hover-out schedules exactly one delayed close.
+      setTimeoutSpy.mockClear();
       fireEvent.mouseLeave(trigger);
-      unmount();
-      vi.advanceTimersByTime(1000);
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+      const closeTimerId: unknown = setTimeoutSpy.mock.results[0]?.value;
 
-      expect(errorSpy).not.toHaveBeenCalled();
+      // Unmounting before it fires must cancel that specific timer, not
+      // leave it running against an unmounted component. (React 18+ no
+      // longer warns to console.error on a state update after unmount, so
+      // that can't be used to detect a missing cleanup here -- this checks
+      // the timer directly instead.)
+      unmount();
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(closeTimerId);
     } finally {
-      errorSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -225,6 +233,25 @@ describe("EventsPage failure cause icon", () => {
     fireEvent.click(screen.getByText("Aktion fehlgeschlagen").closest("tr") as HTMLElement);
     const technicalDetails = document.querySelector(".event-detail-json");
     expect(technicalDetails?.textContent).toBe("not json");
+  });
+
+  it("leaves a moderation event's free-text reason untouched even when it equals an old legacy value", () => {
+    // "abgeschaltet" is only a legacy machine-code value for ads.skipped,
+    // raid.invalid, and shoutout.suppressed (issue #191) -- a moderator's
+    // own ban reason happening to be that word is unrelated content and
+    // must not be rewritten to "disabled".
+    renderPage([entry({
+      eventId: "moderation-ban", moduleId: "channel_events", code: "channel_events.moderation.ban",
+      detail: "{\"person\":\"chattyfan\",\"moderator\":\"mod1\",\"reason\":\"abgeschaltet\"}",
+    })]);
+
+    expect(screen.getByText("chattyfan gebannt von mod1: abgeschaltet")).toBeInTheDocument();
+    expect(screen.queryByText(/disabled/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("chattyfan gebannt von mod1: abgeschaltet").closest("tr") as HTMLElement);
+    const technicalDetails = document.querySelector(".event-detail-json");
+    expect(technicalDetails?.textContent).toContain("abgeschaltet");
+    expect(technicalDetails?.textContent).not.toContain("disabled");
   });
 
   it("hides the icon when the row's own event text already spells the cause out", () => {

@@ -111,7 +111,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
       ) : (
         <ul className="stream-manager-feed">
           {entries.map((entry) => {
-            const label = eventText(entry.code, eventDetail(entry.detail));
+            const label = eventText(entry.code, eventDetail(entry.detail, entry.code));
             const metadata = eventMetadata(entry.code);
             const tone = metadata?.tone === "error" ? "error" : metadata?.tone === "warning" ? "warning" : "neutral";
             const cause = eventCause(entry);

@@ -20,3 +20,13 @@ export const LEGACY_REASON_VALUES: Readonly<Record<string, string>> = {
   unter_schwelle: "below_threshold",
   abgeschaltet: "disabled",
 };
+
+/**
+ * The only codes whose `reason` vocabulary the rename touched. `eventDetail`
+ * applies `LEGACY_REASON_VALUES` only when a row's code is in here --
+ * elsewhere, `reason` (or a similarly named field) is free text a producer
+ * writes for its own purposes, e.g. a moderation event's actual reason
+ * happening to be the word "abgeschaltet" -- rewriting that to "disabled"
+ * would silently corrupt real content that was never one of these codes.
+ */
+export const LEGACY_REASON_CODES = new Set(["ads.skipped", "raid.invalid", "shoutout.suppressed"]);
