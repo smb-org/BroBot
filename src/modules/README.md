@@ -67,9 +67,9 @@ Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
 4. Prüfen: `pnpm run check`.
 
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
-`text_commands` eingetragen, abonniert `channel.chat.message` und besitzt die
-zentrale Migration `migrations/0010_modul_textbefehle.sql`. Die Tabelle
-`text_commands` ist kanalgebunden; der D1-Adapter dieses Moduls liest
+`text_commands` eingetragen, abonniert `channel.chat.message` und definiert
+seine Tabelle `text_commands` in der zentralen D1-Kette unter `migrations/`.
+Die Tabelle ist kanalgebunden; der D1-Adapter dieses Moduls liest
 und schreibt ausschließlich diese Tabelle.
 
 Der Host mountet registrierte Modulrouten kanalbezogen unter

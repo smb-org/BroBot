@@ -164,8 +164,10 @@ pnpm exec wrangler d1 migrations apply DB --env production --remote
 ```
 
 Staging migrates automatically as part of the deploy workflow. Production
-migrates by hand, on purpose — D1 cannot roll back DDL, so an unattended
-failed migration there would leave an unreviewed intermediate schema.
+migrates by hand, on purpose — Wrangler rolls back an individual failing
+migration itself, but migrations that already succeeded in the same run
+stay applied, so an unattended run with several pending migrations could
+still leave the schema between two states with nobody having looked.
 `/healthz` fails deploys that forgot the migration instead of reporting
 green.
 

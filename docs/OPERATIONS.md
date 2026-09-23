@@ -11,7 +11,7 @@
    pnpm exec wrangler d1 create brobot-production
    ```
 
-   Die D1-IDs sind in `wrangler.jsonc` bereits eingetragen; die früher dokumentierten Null-UUID-Platzhalter sind überholt. Für eine neu angelegte Umgebung die von Wrangler gelieferte `database_id` in der passenden Umgebung eintragen und vor der Migration prüfen. Danach die Migrationen von `0000_init.sql` bis zur jeweils letzten mit Wrangler ausführen, sobald die Datenbank verfügbar ist.
+   Die D1-IDs sind in `wrangler.jsonc` bereits eingetragen; die früher dokumentierten Null-UUID-Platzhalter sind überholt. Für eine neu angelegte Umgebung die von Wrangler gelieferte `database_id` in der passenden Umgebung eintragen und vor der Migration prüfen. Danach alle Migrationen aus `migrations/` der Reihe nach mit Wrangler ausführen, sobald die Datenbank verfügbar ist.
 3. Für Schlüssel jeweils erzeugen:
 
    ```bash
@@ -44,12 +44,8 @@ zeigt nach einem erfolgreichen HTTP-Statusabruf die Version aus
 
 ### Migration und Token ausgeben
 
-Vor dem ersten Rollout die D1-Migrationen `0003_overlay_tokens.sql`,
-`0004_moderator_status_check_lock.sql` und
-`0005_moderator_status_check_owner.sql`,
-`0006_ereignisprotokoll.sql` und
-`0007_ereignisprotokoll-trigger.sql` und `0008_eventsub_eingang.sql` in jeder
-Zielumgebung anwenden. Der
+Vor dem ersten Rollout alle ausstehenden D1-Migrationen aus `migrations/` in
+jeder Zielumgebung anwenden (siehe „Prüfung und Deployment" unten). Der
 Pepper bleibt ein Secret und wird nicht in die
 Browserquelle oder in die URL geschrieben.
 
@@ -132,10 +128,10 @@ ohne jeden Statusabruf als D1-Schreibvorgang zu speichern.
 - Eine eigene OBS-CSS-Regel mit schwarzem `body`-Hintergrund entfernen. Die
   Seite setzt `html`, `body`, `#root` und die gerenderte Fläche selbst auf
   transparent.
-- Wenn die Version fehlt, zuerst Deployment und D1-Migration prüfen. Ohne
-  `0003_overlay_tokens.sql` kann der Worker keine Overlay-Zugänge validieren;
-  ohne gültige `CF_VERSION_METADATA`-Bindung kann keine aktuelle
-  Deployment-ID angezeigt werden.
+- Wenn die Version fehlt, zuerst Deployment und D1-Migration prüfen. Ohne die
+  `overlay_tokens`-Tabelle aus `migrations/` kann der Worker keine
+  Overlay-Zugänge validieren; ohne gültige `CF_VERSION_METADATA`-Bindung kann
+  keine aktuelle Deployment-ID angezeigt werden.
 
 Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` dokumentiert. Die aktuelle Wrangler-Konfiguration akzeptiert dieses Feld und nutzt es auch für die Typgenerierung; Secret-Werte werden ausschließlich über Secret-Bindings beziehungsweise lokale Env-Dateien bereitgestellt.
 
@@ -283,24 +279,24 @@ pnpm install --frozen-lockfile
 pnpm run check
 ```
 
-Vor dem ersten Rollout dieser Version die D1-Migrationen in jeder Zielumgebung
-anwenden. Der Worker darf erst danach ausgerollt werden, weil `0001` die
-Session-, OAuth- und Token-Tabellen, `0002` die feste Rollenmenge sowie das
-Audit-Log, `0003` die Overlay-Token-Tabelle, `0004` die kanalbezogene Sperre
-und `0005` deren Besitzerbindung für manuelle Moderatorstatus-Prüfungen
-anlegen, `0006` das Ereignisprotokoll, `0007` die Korrelation über den
-Auslöser und `0008` den signaturgeprüften EventSub-Eingang mit
-Message-ID-Deduplizierung und sichtbaren Widerrufen.
+Vor dem ersten Rollout dieser Version alle ausstehenden D1-Migrationen aus
+`migrations/` in jeder Zielumgebung anwenden. Der Worker darf erst danach
+ausgerollt werden: Er erwartet bereits das Schema, das diese Migrationen
+anlegen. Welche Datei welche Tabelle betrifft, steht als Kommentar in der
+jeweiligen Migration selbst — eine Liste hier würde bei jeder neuen Migration
+veralten.
 
 **Staging migriert automatisch.** Der Deploy-Workflow wendet ausstehende
 Migrationen vor dem Code-Deploy an. Schlägt das fehl, bricht der Job ab und
 der bisherige Worker läuft unverändert gegen das bisherige Schema weiter.
 
-**Production migriert von Hand.** Das ist Absicht: D1 kann DDL nicht
-zurückrollen, eine in der Mitte abgebrochene Migration hinterlässt dort einen
-Zwischenzustand, den niemand angesehen hat. Eine vergessene Migration fängt
-stattdessen der Healthcheck ab — er prüft den Schema-Sentinel und lässt den
-Deploy scheitern, statt ihn grün zu melden.
+**Production migriert von Hand.** Das ist Absicht: Eine einzelne
+fehlschlagende Migration rollt Wrangler selbst zurück, doch bereits
+erfolgreich angewandte Migrationen aus demselben Lauf bleiben bestehen — bei
+mehreren ausstehenden Migrationen kann das Schema dadurch zwischen zwei
+Ständen landen, ohne dass jemand hingesehen hat. Eine vergessene Migration
+fängt stattdessen der Healthcheck ab — er prüft den Schema-Sentinel und lässt
+den Deploy scheitern, statt ihn grün zu melden.
 
 Migration vor dem Deploy, nie danach: Der neue Code erwartet das neue Schema.
 
@@ -320,11 +316,12 @@ gelesen.
 die Buchführungstabelle `d1_migrations` leer. Der Healthcheck meldet dann ein
 fehlendes Schema, obwohl alle Tabellen stehen, und jeder spätere
 `migrations apply` scheitert mit `table … already exists`. In diesem Fall die
-bereits angewandten Dateinamen in der Reihenfolge ihrer Nummern nachtragen:
+bereits angewandten Dateinamen aus `migrations/`, in der Reihenfolge ihrer
+Nummern, nachtragen:
 
 ```bash
 pnpm exec wrangler d1 execute DB --env staging --remote \
-  --command "INSERT INTO d1_migrations (name, applied_at) VALUES ('0000_init.sql', CURRENT_TIMESTAMP), ...;"
+  --command "INSERT INTO d1_migrations (name, applied_at) VALUES ('0000_baseline.sql', CURRENT_TIMESTAMP), ...;"
 ```
 
 Staging und Production werden im Normalfall durch GitHub deployed: Staging nach
