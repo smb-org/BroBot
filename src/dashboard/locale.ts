@@ -1,4 +1,4 @@
-import { COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, SHOUTOUT_FAILURE_REASONS, type ApiErrorCode, type AuditAction, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ShoutoutFailureReason } from "../contracts/values";
+import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -984,16 +984,19 @@ const commercialFailureReasonText = (reason: unknown, language: DashboardLanguag
     : commercialFailureTexts[language].twitch_error;
 
 /**
- * `createClip` (`worker/clip.ts`)'s own reasons: `rate_limited` (429),
+ * `createClip` (`worker/clip.ts`) and its route (`worker/panel/routes.ts`,
+ * when no bot credentials exist at all): `rate_limited` (429),
  * `scope_missing` (401), `not_live` (400 -- Twitch rejects Create Clip while
- * the channel isn't live), `timeout`/`network_error` from `helixRequest`, or
- * an uncatalogued `http_<status>` that falls through to the raw value below.
+ * the channel isn't live), `bot_identity_missing`, `timeout`/`network_error`
+ * from `helixRequest`, or an uncatalogued `http_<status>` that falls through
+ * to the raw value below.
  */
 const clipFailureTexts: LocaleCatalog<Record<string, string>> = {
   de: {
     rate_limited: "Twitch-Abklingzeit aktiv",
     scope_missing: "Berechtigung zum Erstellen von Clips fehlt",
     not_live: "Der Stream ist nicht live",
+    bot_identity_missing: "Bot-Identität fehlt",
     timeout: "Twitch-Anfrage hat zu lange gedauert",
     network_error: "Netzwerkfehler bei Twitch",
   },
@@ -1001,14 +1004,89 @@ const clipFailureTexts: LocaleCatalog<Record<string, string>> = {
     rate_limited: "Twitch cooldown is active",
     scope_missing: "Permission to create clips is missing",
     not_live: "The stream is not live",
+    bot_identity_missing: "Bot identity is missing",
     timeout: "The Twitch request timed out",
     network_error: "Network error from Twitch",
   },
 };
 
 /**
+ * `sendChatMessage` (`worker/chat.ts`)'s own reason beyond what the generic
+ * catalog already covers: `not_sent` is its fallback when Twitch reports the
+ * message as not sent (`is_sent: false`) but without a `drop_reason.code` to
+ * go with it. Its other reasons (`bot_identity_missing`,
+ * `app_token_unavailable`, `rate_limited`, `timeout`, `network_error`) are
+ * shared infra concepts that resolve through `genericFailureTexts` instead.
+ * An `http_<status>` or Twitch's own arbitrary `drop_reason.code` (e.g. a
+ * moderation reason) stays uncatalogued -- there is no fixed set of those to
+ * translate.
+ */
+const chatFailureTexts: LocaleCatalog<Record<string, string>> = {
+  de: { not_sent: "Twitch hat die Nachricht nicht bestätigt" },
+  en: { not_sent: "Twitch did not confirm the message" },
+};
+
+/**
+ * `decideAdBreak` (`modules/ads/domain`)'s closed reason set for a skipped
+ * ad break -- see `AdsSkippedReason`/`ADS_SKIPPED_REASONS`.
+ */
+const adsSkipReasonTexts: LocaleCatalog<Record<AdsSkippedReason, string>> = {
+  de: {
+    duration_zero: "Dauer ist null",
+    duration_invalid: "Werbedauer ist ungültig",
+    start_invalid: "Startzeitpunkt ist ungültig",
+  },
+  en: {
+    duration_zero: "Duration is zero",
+    duration_invalid: "Ad duration is invalid",
+    start_invalid: "Start time is invalid",
+  },
+};
+
+const adsSkipReasonText = (reason: unknown, language: DashboardLanguage): string =>
+  typeof reason === "string" && (ADS_SKIPPED_REASONS as readonly string[]).includes(reason)
+    ? adsSkipReasonTexts[language][reason as AdsSkippedReason]
+    : adsSkipReasonTexts[language].duration_invalid;
+
+/**
+ * `decideRaid` (`modules/raid/domain`)'s closed reason set for a discarded
+ * raid -- see `RaidInvalidReason`/`RAID_INVALID_REASONS`.
+ */
+const raidInvalidReasonTexts: LocaleCatalog<Record<RaidInvalidReason, string>> = {
+  de: {
+    target_invalid: "Ziel ungültig",
+    source_invalid: "Quelle ungültig",
+    viewers_invalid: "Zuschauerzahl ungültig",
+  },
+  en: {
+    target_invalid: "Invalid target",
+    source_invalid: "Invalid source",
+    viewers_invalid: "Invalid viewer count",
+  },
+};
+
+const raidInvalidReasonText = (reason: unknown, language: DashboardLanguage): string =>
+  typeof reason === "string" && (RAID_INVALID_REASONS as readonly string[]).includes(reason)
+    ? raidInvalidReasonTexts[language][reason as RaidInvalidReason]
+    : language === "de" ? "ungültige Daten" : "invalid data";
+
+/**
+ * `processRaid` (`modules/raid/service`)'s closed reason set for a
+ * suppressed shoutout -- see `ShoutoutSuppressedReason`/
+ * `SHOUTOUT_SUPPRESSED_REASONS`. The row text (`eventTexts["shoutout.
+ * suppressed"]`) stays a hand-rolled formatter instead of reading this --
+ * it also folds in the viewer/threshold numbers, which a flat string
+ * catalog can't carry. This one only backs `eventCauseText`, defensively
+ * (see `REASON_CATALOG_BY_CODE`'s comment).
+ */
+const shoutoutSuppressedReasonTexts: LocaleCatalog<Record<ShoutoutSuppressedReason, string>> = {
+  de: { disabled: "Shoutout abgeschaltet", below_threshold: "Shoutout unter der Schwelle" },
+  en: { disabled: "Shoutout disabled", below_threshold: "Shoutout below threshold" },
+};
+
+/**
  * The last-resort catalog for a code with no reason vocabulary of its own
- * (`host.chat.failed`, `host.action.failed`, ...): only the handful of
+ * (`host.action.failed`, `host.module.error`, ...): only the handful of
  * reasons common enough across producers to word neutrally, worded so they
  * don't imply a specific action ("a required permission", not "to send the
  * shoutout"). Anything more specific belongs in that code's own catalog
@@ -1020,12 +1098,20 @@ const genericFailureTexts: LocaleCatalog<Record<string, string>> = {
     scope_missing: "Eine erforderliche Berechtigung fehlt",
     not_live: "Der Stream ist nicht live",
     twitch_error: "Twitch hat die Anfrage abgelehnt",
+    app_token_unavailable: "App-Token nicht verfügbar",
+    bot_identity_missing: "Bot-Identität fehlt",
+    timeout: "Twitch-Anfrage hat zu lange gedauert",
+    network_error: "Netzwerkfehler bei Twitch",
   },
   en: {
     rate_limited: "Twitch cooldown is active",
     scope_missing: "A required permission is missing",
     not_live: "The stream is not live",
     twitch_error: "Twitch rejected the request",
+    app_token_unavailable: "App token unavailable",
+    bot_identity_missing: "Bot identity is missing",
+    timeout: "The Twitch request timed out",
+    network_error: "Network error from Twitch",
   },
 };
 
@@ -1035,23 +1121,35 @@ const genericFailureTexts: LocaleCatalog<Record<string, string>> = {
  * for each producer ("Twitch rejected the shoutout" vs. "... the request";
  * "permission to send shoutouts" vs. "... to create clips"), so the cause
  * popover has to pick the same catalog the row's own text used, never guess
- * from the value alone across catalogs.
+ * from the value alone across catalogs. `ads.skipped`, `raid.invalid`, and
+ * `shoutout.suppressed` are listed here too even though `events/model.ts`'s
+ * `CODES_WITH_CAUSE_IN_TEXT` currently suppresses their icon outright (their
+ * row text is exhaustive over every reason their producer emits) -- belt
+ * and suspenders: if that suppression ever changes, no machine id leaks
+ * through by accident.
  */
 const REASON_CATALOG_BY_CODE: Partial<Record<EventCode, LocaleCatalog<Record<string, string>>>> = {
   "host.shoutout.failed": shoutoutFailureTexts,
   "ads.commercial.failed": commercialFailureTexts,
   "host.clip.failed": clipFailureTexts,
+  "host.chat.failed": chatFailureTexts,
+  "ads.skipped": adsSkipReasonTexts,
+  "raid.invalid": raidInvalidReasonTexts,
+  "shoutout.suppressed": shoutoutSuppressedReasonTexts,
 };
 
 /**
  * The localized cause behind a warning/error event, read from the
  * `reason`/`cause`/`message` diagnostic keys. Looks up the code's own
  * failure catalog first (`REASON_CATALOG_BY_CODE`), falls back to the small
- * shared `genericFailureTexts` only when the code has none, and to the raw
- * value when neither covers it -- the same raw-reason fallback `detailText`
- * already uses elsewhere in this file. Reused by the events list's hover
- * icon so the cause is readable without opening the inspector, even for
- * codes whose own row text stays generic (`host.chat.failed`,
+ * shared `genericFailureTexts` only when the code has none. When neither
+ * covers the value, prefers a nonempty `detail.message` over the bare code
+ * -- Twitch's own message (e.g. a chat drop reason's `message`, or a Helix
+ * error body's `message`) reads better than `http_403` or an arbitrary
+ * moderation code we don't have a translation for. Falls back to the raw
+ * value only when there's no message either. Reused by the events list's
+ * hover icon so the cause is readable without opening the inspector, even
+ * for codes whose own row text stays generic (`host.chat.failed`,
  * `host.action.failed`, ...). Returns null when the detail carries none of
  * those keys, so the row gets no icon at all.
  */
@@ -1063,9 +1161,11 @@ export const eventCauseText = (
   const raw = detail.reason ?? detail.cause ?? detail.message;
   if (typeof raw !== "string" || raw.length === 0) return null;
   const ownCatalog = REASON_CATALOG_BY_CODE[code as EventCode];
-  return (ownCatalog === undefined ? undefined : catalogString(ownCatalog[language], raw))
-    ?? catalogString(genericFailureTexts[language], raw)
-    ?? raw;
+  const localized = (ownCatalog === undefined ? undefined : catalogString(ownCatalog[language], raw))
+    ?? catalogString(genericFailureTexts[language], raw);
+  if (localized !== undefined) return localized;
+  const message = detail.message;
+  return typeof message === "string" && message.length > 0 ? message : raw;
 };
 
 export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
@@ -1123,14 +1223,14 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "channel_events.stream.offline": "Stream beendet",
     "raid.outgoing": (detail) => `Ausgehender Raid zu ${detailText(detail, "targetChannelId", "unbekannt")}`,
     "raid.shoutout": (detail) => `Raid über der Schwelle (${detailNumber(detail, "viewers", "unbekannt")} von ${detailNumber(detail, "threshold", "unbekannt")}): Shoutout und Chatzeile`,
-    "raid.invalid": (detail) => `Raid verworfen: ${detailText(detail, "reason", "ungültige Daten")}`,
-    "shoutout.suppressed": (detail) => detail.reason === "abgeschaltet"
+    "raid.invalid": (detail) => `Raid verworfen: ${raidInvalidReasonText(detail.reason, "de")}`,
+    "shoutout.suppressed": (detail) => detail.reason === ("disabled" satisfies ShoutoutSuppressedReason)
       ? "Shoutout abgeschaltet"
-      : detail.reason === "unter_schwelle"
+      : detail.reason === ("below_threshold" satisfies ShoutoutSuppressedReason)
         ? `Shoutout unter der Schwelle (${detailNumber(detail, "viewers", "unbekannt")} von ${detailNumber(detail, "threshold", "unbekannt")} Zuschauern)`
         : "Shoutout unterdrückt",
     "ads.announcement": (detail) => `Werbepause ${detail.automatic === true ? "automatisch" : "manuell"} startedAt: ${detailNumber(detail, "duration", "unbekannte Dauer")} Sekunden`,
-    "ads.skipped": (detail) => `Werbepause übersprungen: ${detail.reason === "dauer_null" ? "Dauer ist null" : "Ereignisdaten sind ungültig"}`,
+    "ads.skipped": (detail) => `Werbepause übersprungen: ${adsSkipReasonText(detail.reason, "de")}`,
     "ads.prewarning.announced": (detail) => `Vorwarnung: Werbung in ${detailNumber(detail, "sekunden", "unbekannter Zeit")} Sekunden`,
     "ads.prewarning.no_schedule": "Keine nächste Werbepause geplant",
     "ads.prewarning.too_late": "Werbe-Vorwarnung unterdrückt: Termin zu nah",
@@ -1221,14 +1321,14 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "channel_events.stream.offline": "Stream ended",
     "raid.outgoing": (detail) => `Outgoing raid to ${detailText(detail, "targetChannelId", "unknown")}`,
     "raid.shoutout": (detail) => `Raid above threshold (${detailNumber(detail, "viewers", "unknown")} of ${detailNumber(detail, "threshold", "unknown")}): shoutout and chat line`,
-    "raid.invalid": (detail) => `Raid discarded: ${detailText(detail, "reason", "invalid data")}`,
-    "shoutout.suppressed": (detail) => detail.reason === "abgeschaltet"
+    "raid.invalid": (detail) => `Raid discarded: ${raidInvalidReasonText(detail.reason, "en")}`,
+    "shoutout.suppressed": (detail) => detail.reason === ("disabled" satisfies ShoutoutSuppressedReason)
       ? "Shoutout disabled"
-      : detail.reason === "unter_schwelle"
+      : detail.reason === ("below_threshold" satisfies ShoutoutSuppressedReason)
         ? `Shoutout below threshold (${detailNumber(detail, "viewers", "unknown")} of ${detailNumber(detail, "threshold", "unknown")} viewers)`
         : "Shoutout suppressed",
     "ads.announcement": (detail) => `Ad break ${detail.automatic === true ? "automatically" : "manually"} started: ${detailNumber(detail, "duration", "unknown duration")} seconds`,
-    "ads.skipped": (detail) => `Ad break skipped: ${detail.reason === "dauer_null" ? "duration is zero" : "event data is invalid"}`,
+    "ads.skipped": (detail) => `Ad break skipped: ${adsSkipReasonText(detail.reason, "en")}`,
     "ads.prewarning.announced": (detail) => `Ad warning: ad in ${detailNumber(detail, "sekunden", "unknown time")} seconds`,
     "ads.prewarning.no_schedule": "No next ad break scheduled",
     "ads.prewarning.too_late": "Ad warning suppressed: ad is too close",

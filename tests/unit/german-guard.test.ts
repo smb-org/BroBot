@@ -33,16 +33,62 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/raid/contracts/chat-defaults.ts": "Default chat text the bot posts in the channel; chat templates are channel content and stay in the channel language (umbau-plan.md, section on chat templates).",
   "src/modules/text_commands/contracts/chat-defaults.ts": "Default chat text the bot posts in the channel; chat templates are channel content and stay in the channel language (umbau-plan.md, section on chat templates).",
   "src/worker/auth/oauth-error-texts.ts": "Bilingual DE/EN catalogue for OAuth redirect pages the browser shows directly -- no dashboard script sits between Twitch's redirect and the page to translate a code, so this stays prose (see the file's own comment).",
+  "src/dashboard/events/legacy-reasons.ts": "Migration map from old German event-log reason values (issue #191) to their English replacements -- the old values are map keys, not prose, and have to appear as literal source text for 14 days of event-log retention; see the file's own comment for the drop date.",
 };
 
 const GERMAN_WORDS = [
   "nicht", "konnte", "fehlgeschlagen", "ungültig", "wird", "ist", "und",
   "der", "die", "das", "für", "kein", "keine", "bereits", "zuerst",
   "breit", "schmal", "mittel", "linie", "stark", "erhoben", "ausgestellt",
-  "widerrufen", "zeile", "liste",
+  "widerrufen", "zeile", "liste", "abgeschaltet",
 ];
 const wordPattern = new RegExp(`\\b(${GERMAN_WORDS.join("|")})\\b`, "iu");
 const umlautPattern = /[äöüÄÖÜß]/u;
+
+/**
+ * A machine-code value made of German words survives the two checks above:
+ * transliterated ASCII (`ungueltig`, not `ungültig`) has no umlaut, and an
+ * underscore is a word character, so `\bziel\b` never matches inside
+ * `ziel_ungueltig` (issue #191 -- these strings shipped as real
+ * `EventCode`/reason values before anyone noticed the guard couldn't see
+ * them). This second, narrower check looks specifically at quoted
+ * snake_case string literals, segment by segment, for two things: a known
+ * German fragment, or a segment that reads as a `ue`/`oe`/`ae`
+ * transliteration of an umlaut. The transliteration check needs an
+ * allowlist (`UE_OE_AE_ALLOWLIST`) -- plenty of ordinary English words
+ * ("request", "queue", "issue", "true", ...) contain those letter pairs
+ * too, and without it every one of them would be a false positive.
+ */
+const GERMAN_SNAKE_FRAGMENTS = new Set([
+  "ungueltig", "schwelle", "dauer", "abgeschaltet", "ziel", "quelle", "zuschauer",
+]);
+const UE_OE_AE_ALLOWLIST = new Set([
+  "request", "true", "false", "value", "values", "queue", "issue", "issues",
+  "continue", "unique", "due", "blue", "glue", "argue", "argued", "statue",
+  "virtue", "rescue", "avenue", "revenue", "fuel", "cue", "hue", "sue",
+  "does", "goes", "toe", "toes", "shoe", "shoes", "subdue", "overdue",
+  "residue", "coexist", "aerial", "aesthetic", "aeon", "algae",
+]);
+const transliteratedUmlautPattern = /ue|oe|ae/;
+
+/** True when `segment` (one `_`-delimited piece of a lowercase snake_case
+ *  token, already stripped of quotes) reads as a German-language machine
+ *  code -- see the block comment above. */
+const looksGermanSnakeCase = (segment: string): boolean =>
+  GERMAN_SNAKE_FRAGMENTS.has(segment) ||
+  (transliteratedUmlautPattern.test(segment) && !UE_OE_AE_ALLOWLIST.has(segment));
+
+/** Every quoted, lowercase, underscore-joined string literal in `line`
+ *  (`"foo_bar"`, not a bare `"foo"` -- see `looksGermanSnakeCase`'s comment)
+ *  where at least one segment looks German. */
+const germanSnakeCaseLiteralsIn = (line: string): string[] => {
+  const hits: string[] = [];
+  for (const match of line.matchAll(/"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"/g)) {
+    const value = match[1];
+    if (value !== undefined && value.split("_").some(looksGermanSnakeCase)) hits.push(value);
+  }
+  return hits;
+};
 
 const srcRoot = path.resolve(import.meta.dirname, "../../src");
 const repoRoot = path.resolve(import.meta.dirname, "../..");
@@ -78,11 +124,41 @@ describe("German guard", () => {
       if (Object.prototype.hasOwnProperty.call(ALLOWLIST, relative)) continue;
       const lines = readFileSync(filePath, "utf8").split("\n");
       lines.forEach((line, index) => {
-        if (umlautPattern.test(line) || wordPattern.test(line)) {
+        const snakeCaseHits = germanSnakeCaseLiteralsIn(line);
+        if (umlautPattern.test(line) || wordPattern.test(line) || snakeCaseHits.length > 0) {
           hits.push(`${relative}:${String(index + 1)}: ${line.trim().slice(0, 160)}`);
         }
       });
     }
     expect(hits).toEqual([]);
+  });
+
+  it("flags German-language snake_case code values without over-flagging ordinary English ones", () => {
+    // The values #191 actually shipped, renamed since (see `contracts/
+    // values.ts`'s `RaidInvalidReason`/`ShoutoutSuppressedReason`/
+    // `AdsSkippedReason`) -- still checked here as regression fixtures, not
+    // because they exist in source anymore.
+    expect(germanSnakeCaseLiteralsIn('reason: "dauer_null"')).toEqual(["dauer_null"]);
+    expect(germanSnakeCaseLiteralsIn('reason: "dauer_ungueltig"')).toEqual(["dauer_ungueltig"]);
+    expect(germanSnakeCaseLiteralsIn('reason: "start_ungueltig"')).toEqual(["start_ungueltig"]);
+    expect(germanSnakeCaseLiteralsIn('reason: "ziel_ungueltig"')).toEqual(["ziel_ungueltig"]);
+    expect(germanSnakeCaseLiteralsIn('reason: "quelle_ungueltig"')).toEqual(["quelle_ungueltig"]);
+    expect(germanSnakeCaseLiteralsIn('reason: "zuschauer_ungueltig"')).toEqual(["zuschauer_ungueltig"]);
+    expect(germanSnakeCaseLiteralsIn('reason: "unter_schwelle"')).toEqual(["unter_schwelle"]);
+    // A single German word with no underscore isn't this check's job --
+    // `wordPattern` above already catches "abgeschaltet" as a whole word.
+    expect(germanSnakeCaseLiteralsIn('reason: "abgeschaltet"')).toEqual([]);
+
+    // Ordinary English snake_case machine values, including ones containing
+    // "ue"/"oe"/"ae", must not trip it.
+    expect(germanSnakeCaseLiteralsIn('code: "request_failed"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn('code: "panel_request_not_allowed"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn('code: "channel_owner_only_consent_request"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn('reason: "rate_limited"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn('reason: "not_live"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn('reason: "duration_zero"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn('reason: "below_threshold"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn('reason: "target_invalid"')).toEqual([]);
+    expect(germanSnakeCaseLiteralsIn('reason: "bot_identity_missing"')).toEqual([]);
   });
 });

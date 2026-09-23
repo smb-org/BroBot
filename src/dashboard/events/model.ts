@@ -1,6 +1,7 @@
 import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
 import { eventCauseText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
+import { LEGACY_REASON_VALUES } from "./legacy-reasons";
 import { moduleName } from "../module-labels";
 
 export const emptyEventFilter: PanelEventFilters = {
@@ -40,10 +41,12 @@ export const eventToneFromValue = (value: string): EventTone | null =>
  * this channel"), so a substring check keeps the icon exactly where it
  * shouldn't be.
  *
- * `ads.skipped` and `shoutout.suppressed` are deliberately left out: they
- * only recognize one or two specific reason values and fall back to a
- * generic phrase for anything else, so their row text doesn't reliably
- * disclose an unrecognized reason -- the icon still earns its place there.
+ * `raid.invalid`, `shoutout.suppressed`, and `ads.skipped` only got here
+ * once their formatters switched from embedding the raw reason value (or
+ * only recognizing one or two of several known values) to a full lookup
+ * against their own closed reason set (`RaidInvalidReason`,
+ * `ShoutoutSuppressedReason`, `AdsSkippedReason` in `contracts/values.ts`)
+ * -- every value a current producer can emit is now spelled out.
  */
 const CODES_WITH_CAUSE_IN_TEXT = new Set<EventCode>([
   "host.announcement.failed",
@@ -51,6 +54,8 @@ const CODES_WITH_CAUSE_IN_TEXT = new Set<EventCode>([
   "ads.commercial.failed",
   "raid.invalid",
   "ads.prewarning.schedule_error",
+  "shoutout.suppressed",
+  "ads.skipped",
 ]);
 
 /** The row's failure cause for the hover/focus icon -- null on any tone
@@ -156,9 +161,11 @@ export const eventDayGroups = (groups: readonly EventGroup[]): EventDayGroup[] =
 export const eventDetail = (detail: string): EventDetail => {
   try {
     const parsed: unknown = JSON.parse(detail);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? parsed as EventDetail
-      : {};
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const record = parsed as Record<string, unknown>;
+    return typeof record.reason === "string" && Object.hasOwn(LEGACY_REASON_VALUES, record.reason)
+      ? { ...record, reason: LEGACY_REASON_VALUES[record.reason] }
+      : record;
   } catch {
     return {};
   }

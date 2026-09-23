@@ -131,6 +131,63 @@ describe("EventsPage failure cause icon", () => {
     await waitFor(() => { expect(screen.queryByText("Twitch-Abklingzeit aktiv")).not.toBeInTheDocument(); });
   });
 
+  it("stays open when the mouse leaves while the trigger still has keyboard focus", () => {
+    vi.useFakeTimers();
+    try {
+      renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
+
+      const trigger = screen.getByRole("button", { name: causeButtonName });
+      // Hover and focus together, e.g. a mouse click that both hovers and
+      // focuses the button -- then only the hover ends.
+      fireEvent.mouseEnter(trigger);
+      fireEvent.focus(trigger);
+      // Mantine mounts the dropdown a tick after `opened` flips, via its own
+      // (now fake) timer -- advance past it before the content is queryable.
+      vi.advanceTimersByTime(50);
+      expect(screen.getByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+
+      fireEvent.mouseLeave(trigger);
+      // Past the close delay: a mouseleave-only close would have fired by
+      // now, but focus is still active, so it must stay open.
+      vi.advanceTimersByTime(1000);
+      expect(screen.getByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+
+      // Losing focus too, with hover already gone, closes it -- checked via
+      // `aria-describedby` (this component's own `opened` state, updated
+      // synchronously) rather than the dropdown's removal from the DOM:
+      // Mantine's exit transition never resolves in jsdom (no real
+      // `transitionend`), so the node lingers there regardless.
+      fireEvent.blur(trigger);
+      expect(trigger).not.toHaveAttribute("aria-describedby");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears its pending close timer on unmount instead of updating state afterwards", () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const { unmount } = renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
+
+      const trigger = screen.getByRole("button", { name: causeButtonName });
+      fireEvent.mouseEnter(trigger);
+      vi.advanceTimersByTime(50);
+      expect(screen.getByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
+
+      // A hover-out schedules a delayed close; unmounting before it fires
+      // must cancel it, not let it update state on an unmounted component.
+      fireEvent.mouseLeave(trigger);
+      unmount();
+      vi.advanceTimersByTime(1000);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not open the inspector when the cause icon is clicked", () => {
     renderPage([entry({ eventId: "with-cause", code: "host.chat.failed", detail: "{\"reason\":\"rate_limited\"}" })]);
 
@@ -140,6 +197,16 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.queryByText("Vorgang")).not.toBeInTheDocument();
     const row = trigger.closest("tr");
     expect(row).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("renders a legacy German reason value from before issue #191's rename correctly", () => {
+    // Rows persisted before the rename still carry the old value for up to
+    // 14 days (event log retention) -- `eventDetail` migrates it before any
+    // formatter sees it.
+    renderPage([entry({ eventId: "legacy", moduleId: "raid", code: "raid.invalid", detail: "{\"reason\":\"ziel_ungueltig\"}" })]);
+
+    expect(screen.getByText("Raid verworfen: Ziel ungültig")).toBeInTheDocument();
+    expect(screen.queryByText(/ziel_ungueltig/)).not.toBeInTheDocument();
   });
 
   it("hides the icon when the row's own event text already spells the cause out", () => {
