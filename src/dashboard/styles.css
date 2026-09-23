@@ -331,13 +331,21 @@ pre {
 
 /* Header layout: see Layout in docs/input/DESIGN-neu.md. Mantine AppShell and Burger provide the frame through ui/Shell; this block arranges the supplied header content. */
 .dashboard-header {
-  display: grid; grid-template-columns: auto minmax(0, 280px) 1fr auto auto;
-  grid-template-areas: "brand channel . status logout";
+  display: grid; grid-template-columns: auto minmax(0, 280px) minmax(12px, 1fr) auto auto auto;
+  grid-template-areas: "brand channel . status controls logout";
   align-items: center; gap: 16px; height: 100%; min-width: 0;
 }
 .dashboard-header__brand { grid-area: brand; }
 .dashboard-header__channel { grid-area: channel; min-width: 0; }
 .dashboard-header__status { grid-area: status; display: flex; align-items: center; gap: 16px; }
+.dashboard-header__stream { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 14px; font-weight: 650; }
+.dashboard-header__stream[data-state="live"] { color: var(--green); }
+.dashboard-header__stream[data-state="offline"] { color: var(--text-2); }
+.dashboard-header__stream[data-state="unknown"] { color: var(--text-3); font-weight: 500; }
+.dashboard-header__controls { grid-area: controls; display: flex; align-items: center; min-width: 0; }
+.dashboard-header__control-buttons { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.dashboard-header__control-state { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.dashboard-header__control-error { max-width: 160px; color: var(--error-text); font-size: 11px; }
 .dashboard-header__logout { grid-area: logout; min-height: 44px; }
 
 /* Sidebar layout: see Sidebar in docs/input/DESIGN-neu.md. Replaces the rail and breadcrumb switcher. */
@@ -516,21 +524,28 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .form-hint { color: var(--text-3); font-size: 12px; }
 @media (max-width: 768px) {
   .dashboard-shell[data-mode="static"] { display: block; grid-template-rows: none; }
-  .dashboard-shell .dashboard-shell__navbar { position: fixed; top: 128px; grid-row: auto; height: calc(100dvh - 128px); min-height: 0; }
+  .dashboard-shell .dashboard-shell__navbar { position: fixed; top: 172px; grid-row: auto; height: calc(100dvh - 172px); min-height: 0; }
   .dashboard-shell .sidebar { position: static; height: 100%; }
   .dashboard-shell__header-inner { align-items: flex-start; }
   .dashboard-shell__header-inner > .dashboard-shell__burger { align-self: flex-start; height: 44px; margin-top: 6px; }
   /* Four columns (name, response, minimum level, toggle). Type and cooldown moved into the inspector; last-used time is its identifier line. The response column uses auto instead of a fixed width, preventing header overlap and truncated text from the old six-column table. Long text uses minmax(0, 1fr), never a fixed width, as documented in docs/input/DESIGN-neu.md. */
   .dashboard-header {
-    grid-template-columns: auto auto 1fr auto;
-    grid-template-rows: 56px 44px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: 44px 44px 44px;
     grid-template-areas:
-      "brand status . logout"
-      "channel channel channel channel";
+      "brand . logout"
+      "status controls controls"
+      "channel channel channel";
+    gap: 8px 12px;
     height: auto;
   }
   .dashboard-header__channel { min-width: 0; }
+  .dashboard-header__status .led,
   .dashboard-header__status .data-age { display: none; }
+  .dashboard-header__status { gap: 8px; min-width: 0; }
+  .dashboard-header__controls { justify-self: end; }
+  .dashboard-header__control-buttons { gap: 4px; }
+  .dashboard-header__control-error { max-width: 120px; }
   .main-content { padding: 16px; }
   .module-workspace { min-height: auto; margin: -16px -16px -40px; }
   .module-workspace__main { padding: 20px 16px 28px; }
@@ -541,6 +556,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .brand-mark__word { display: none; }
   .module-grid { gap: 8px; }
   .module-tile { width: 132px; height: 132px; }
+  .dashboard-header__status { gap: 6px; }
+  .dashboard-header__stream { gap: 4px; font-size: 12px; }
 }
 
 @container inspector (max-width: 640px) {

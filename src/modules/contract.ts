@@ -188,6 +188,12 @@ export interface ModulePanelProperties {
   initialSelection?: string;
 }
 
+/** Props for one lazily loaded card in the channel's immediate-action row. */
+export interface ModuleImmediateActionProperties {
+  channelId: string;
+  streamState?: "online" | "offline" | null;
+}
+
 export type ModuleLanguage = "de" | "en";
 
 export const browserModuleLanguage = (): ModuleLanguage => {
@@ -330,4 +336,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
   /** Lazily loaded editor declaration for this module's settings. */
   settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
+  /** Lazily loaded immediate-action card, shown only while this module is enabled. */
+  immediateActions?: () => Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>;
 };

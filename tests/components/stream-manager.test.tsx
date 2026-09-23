@@ -13,6 +13,8 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   headers: { "Content-Type": "application/json" },
 });
 
+const ADS_ENABLED = [{ id: "ads", enabled: true }] as const;
+
 const requestUrl = (input: RequestInfo | URL): URL =>
   input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);
 
@@ -60,30 +62,31 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Werbung jetzt/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 
     expect(await screen.findByText("Werbung gestartet (60s)")).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input, init]) =>
       requestUrl(input).pathname === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST")).toBe(true);
   });
 
-  it("disables the commercial action and explains why for a known offline stream", () => {
+  it("disables the commercial action and explains why for a known offline stream", async () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="offline" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="offline" modules={ADS_ENABLED} />);
 
-    const button = screen.getByRole("button", { name: /Werbung jetzt/ });
+    const button = await screen.findByRole("button", { name: /Werbung jetzt/ });
     expect(button).toBeDisabled();
-    expect(screen.getByText("Der Stream ist offline.")).toBeInTheDocument();
+    expect(screen.getAllByText("Der Stream ist offline.")).toHaveLength(2);
+    expect(button).toHaveAttribute("aria-describedby", expect.stringContaining("stream-manager-ads-offline-reason"));
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("keeps each action's control and button inside its own card, button pinned last", () => {
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+  it("keeps each action's control and button inside its own card, button pinned last", async () => {
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
-    const adButton = screen.getByRole("button", { name: /Werbung jetzt/ });
+    const adButton = await screen.findByRole("button", { name: /Werbung jetzt/ });
     const adCard = adButton.closest(".stream-manager-action");
     const adLength = within(adCard as HTMLElement).getByRole("radiogroup");
     expect(adCard).toContainElement(adLength);
@@ -103,7 +106,7 @@ describe("Stream Manager immediate actions", () => {
   });
 
   it("shows the hint instead of the reason once a login is entered, still one helper line", () => {
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
 
@@ -123,14 +126,15 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
+    await screen.findByRole("heading", { name: "Werbung", level: 3 });
     const group = screen.getByRole("radiogroup", { name: "Werbedauer" });
     for (const seconds of ["30", "60", "90", "120", "150", "180"]) {
       expect(within(group).getByRole("radio", { name: `${seconds}s` })).toBeInTheDocument();
     }
     fireEvent.click(within(group).getByRole("radio", { name: "180s" }));
-    fireEvent.click(screen.getByRole("button", { name: "Werbung jetzt (180s)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Werbung jetzt (180s)" }));
 
     expect(await screen.findByText("Werbung gestartet (180s)")).toBeInTheDocument();
   });
@@ -146,7 +150,7 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "@streamerin" } });
     expect(screen.getByLabelText("Twitch-Name")).toHaveValue("streamerin");
@@ -155,21 +159,43 @@ describe("Stream Manager immediate actions", () => {
     expect(await screen.findByText("Shoutout an streamerin gesendet")).toBeInTheDocument();
   });
 
-  it("lays out the three actions as equal cards in one grid, each with a header icon and title", () => {
-    const { container } = renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+  it("lays out the three actions as equal cards in one grid, each with a header icon and title", async () => {
+    const { container } = renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
+    await screen.findByRole("heading", { name: "Werbung", level: 3 });
 
     const grid = container.querySelector(".stream-manager-actions");
     const cards = grid?.querySelectorAll(":scope > .stream-manager-action");
     expect(cards).toHaveLength(3);
     const titles = Array.from(cards ?? [], (card) => card.querySelector(".stream-manager-action__header")?.textContent);
-    expect(titles).toEqual(["Werbung", "Shoutout", "Clip"]);
+    expect(titles).toEqual(["Shoutout", "Clip", "Werbung"]);
     for (const card of cards ?? []) {
       expect(card.querySelector(".stream-manager-action__header .ui-icon")).toBeInTheDocument();
     }
   });
 
-  it("shows the matching aria-hidden Tabler icon without changing each action's accessible name", () => {
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+  it("renders the ads action card only while the ads module is enabled", async () => {
+    const { container, unmount } = renderWithMantine(
+      <ImmediateActions channelId="kanal-a" modules={[{ id: "ads", enabled: false }]} />,
+    );
+    expect(container.querySelector(".stream-manager-action__header h3")?.textContent).not.toBe("Werbung");
+    unmount();
+
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
+    expect(await screen.findByRole("heading", { name: "Werbung", level: 3 })).toBeInTheDocument();
+  });
+
+  it("disables clip creation with an accessible reason while the stream is offline", () => {
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="offline" modules={ADS_ENABLED} />);
+
+    const button = screen.getByRole("button", { name: "Clip erstellen" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-describedby", expect.stringContaining("stream-manager-clip-offline-reason"));
+    expect(screen.getAllByText("Der Stream ist offline.")).toHaveLength(2);
+  });
+
+  it("shows the matching aria-hidden Tabler icon without changing each action's accessible name", async () => {
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
+    await screen.findByRole("button", { name: /Werbung jetzt \(60s\)/u });
 
     for (const [name, iconName] of [
       [/Werbung jetzt \(60s\)/u, "ad"],
@@ -193,9 +219,9 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Werbung jetzt/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Werbung jetzt/ }));
 
     expect(await screen.findByText("Die Werbeeinblendung konnte nicht gestartet werden.")).toBeInTheDocument();
     expect(screen.queryByText("Clip erstellt")).not.toBeInTheDocument();
@@ -212,7 +238,7 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
@@ -229,7 +255,7 @@ describe("Stream Manager immediate actions", () => {
       }
       return Promise.resolve(jsonResponse({}, 404));
     }));
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
@@ -247,7 +273,7 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Clip erstellen" }));
 
@@ -268,7 +294,7 @@ describe("Stream Manager immediate actions", () => {
       return Promise.resolve(jsonResponse({}, 404));
     });
     vi.stubGlobal("fetch", fetcher);
-    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" modules={ADS_ENABLED} />);
 
     const button = screen.getByRole("button", { name: "Clip erstellen" });
     fireEvent.click(button);

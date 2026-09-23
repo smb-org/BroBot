@@ -32,6 +32,7 @@ import {
 } from "../db/eventsub-state";
 import { decodeCursor, encodeCursor } from "../db/cursor";
 import { listAllBroadcasterScopes } from "../module-scopes";
+import { mapChannelControls, type ChannelControlFields } from "../db/channel-controls";
 
 interface ChannelStateRow {
   channel_id: string;
@@ -71,6 +72,13 @@ interface ChannelStateRow {
   eventsub_error_status: number | null;
   eventsub_error_updated_at: string | null;
   stream_state: ChannelStreamState | null;
+  stream_changed_at: string | null;
+  muted: ChannelControlFields["muted"];
+  muted_until: string | null;
+  mute_until_stream_end: ChannelControlFields["mute_until_stream_end"];
+  paused: ChannelControlFields["paused"];
+  paused_until: string | null;
+  pause_until_stream_end: ChannelControlFields["pause_until_stream_end"];
 }
 
 interface ActiveModuleRow {
@@ -151,6 +159,17 @@ export const channelStateQuery = `
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
              LIMIT 1) AS stream_state,
+           (SELECT stream_state.changed_at
+              FROM channel_stream_state AS stream_state
+             WHERE stream_state.channel_id = channel.channel_id
+               AND stream_state.state = 'online'
+             LIMIT 1) AS stream_changed_at,
+           channel_controls.muted AS muted,
+           channel_controls.muted_until AS muted_until,
+           channel_controls.mute_until_stream_end AS mute_until_stream_end,
+           channel_controls.paused AS paused,
+           channel_controls.paused_until AS paused_until,
+           channel_controls.pause_until_stream_end AS pause_until_stream_end,
            moderator.is_moderator AS moderator_is_moderator,
            moderator.checked_at AS moderator_checked_at,
            moderator.reason AS moderator_reason,
@@ -204,6 +223,7 @@ export const channelStateQuery = `
         ON broadcaster_identity.user_id = channel.channel_id
       LEFT JOIN bot_identity_status AS bot_status ON bot_status.id = 1
       LEFT JOIN bot_identity ON bot_identity.id = 1
+      LEFT JOIN channel_controls AS channel_controls ON channel_controls.channel_id = channel.channel_id
       LEFT JOIN twitch_login_identity AS login_identity ON login_identity.user_id = ?
       LEFT JOIN bot_channel_status AS moderator ON moderator.channel_id = channel.channel_id
       LEFT JOIN eventsub_subscriptions AS eventsub
@@ -327,6 +347,8 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   chatSubscription: mapEventSub(row),
   chatSubscriptionNeeded: row.chat_subscription_needed === 1,
   streamState: row.stream_state,
+  streamStartedAt: row.stream_changed_at,
+  controls: mapChannelControls(row, new Date().toISOString()),
   tokens: mapTokens(row),
   lastError: mapLastError(row),
 });

@@ -20,6 +20,13 @@ export interface AdsPanelTexts {
   recentTime: (timestamp: string) => string;
   loading: string;
   loadError: string;
+  immediateTitle: string;
+  immediateLength: string;
+  immediateLengthHint: string;
+  immediateRun: (length: string) => string;
+  immediateStarted: (length: string) => string;
+  immediateOffline: string;
+  immediateFailed: string;
 }
 
 const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
@@ -42,6 +49,13 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     recentTime: (timestamp) => timestamp,
     loading: "Werbeplan wird geladen …",
     loadError: "Der Werbeplan konnte nicht geladen werden.",
+    immediateTitle: "Werbung",
+    immediateLength: "Werbedauer",
+    immediateLengthHint: "Sekunden. Startet sofort.",
+    immediateRun: (length) => `Werbung jetzt (${length}s)`,
+    immediateStarted: (length) => `Werbung gestartet (${length}s)`,
+    immediateOffline: "Der Stream ist offline.",
+    immediateFailed: "Die Werbeeinblendung konnte nicht gestartet werden.",
   },
   en: {
     title: "Announcements",
@@ -62,6 +76,13 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     recentTime: (timestamp) => timestamp,
     loading: "Loading the ad schedule …",
     loadError: "The ad schedule could not be loaded.",
+    immediateTitle: "Ads",
+    immediateLength: "Ad length",
+    immediateLengthHint: "Seconds. Starts immediately.",
+    immediateRun: (length) => `Run ad now (${length}s)`,
+    immediateStarted: (length) => `Ad started (${length}s)`,
+    immediateOffline: "The stream is offline.",
+    immediateFailed: "The commercial could not be started.",
   },
 };
 

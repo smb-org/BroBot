@@ -2,7 +2,8 @@ import {
   IconAd2, IconAdjustmentsHorizontal, IconAlertTriangle, IconArrowUp, IconBellRinging, IconCheck, IconChevronLeft, IconCopy,
   IconDiamond, IconExternalLink, IconLock, IconMinus, IconMovie, IconPlus, IconRefresh,
   IconMessage, IconSearch, IconSettings, IconSpeakerphone, IconStar, IconSword, IconTrash, IconUser, IconUserMinus,
-  IconUserPlus, IconUsers, IconVideo, IconX,
+  IconUserPlus, IconUsers, IconVideo, IconX, IconBroadcast, IconBroadcastOff, IconClockHour4,
+  IconPlayerPause, IconPlayerPlay, IconVolume3, IconVolumeOff,
 } from "@tabler/icons-react";
 import type { TablerIcon } from "@tabler/icons-react";
 import type { ReactElement } from "react";
@@ -17,6 +18,9 @@ const glyphs = {
   tierModerator: IconSword, tierBroadcaster: IconVideo,
   tabSettings: IconSettings, tabAdvanced: IconAdjustmentsHorizontal,
   tabMessages: IconMessage, tabPrewarning: IconBellRinging,
+  broadcast: IconBroadcast, "broadcast-off": IconBroadcastOff, "volume-3": IconVolume3,
+  "volume-off": IconVolumeOff, "player-pause": IconPlayerPause, "player-play": IconPlayerPlay,
+  "clock-hour-4": IconClockHour4,
 } as const satisfies Record<string, TablerIcon>;
 
 export type IconName = keyof typeof glyphs;

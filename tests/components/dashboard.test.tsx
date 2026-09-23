@@ -31,6 +31,12 @@ const healthyChannel = (channelId: string, displayName: string) => ({
     loginReason: null,
     loginExpiresAt: relativeIso(3 * 60 * 60 * 1000),
   },
+  streamState: "offline" as "online" | "offline" | null,
+  streamStartedAt: null as string | null,
+  controls: {
+    mute: { active: false, until: null as string | null, mode: null as "timed" | "until_stream_end" | "unlimited" | null },
+    pause: { active: false, until: null as string | null, mode: null as "timed" | "until_stream_end" | "unlimited" | null },
+  },
   lastError: null,
 });
 
@@ -82,6 +88,19 @@ const showMembers = async (members: {
   window.history.replaceState({}, "", "/channels/kanal-a/members");
   render(<DashboardApp />);
   await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+};
+
+const showChannelOverview = async (channel: ReturnType<typeof healthyChannel>): Promise<void> => {
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+    const path = requestUrl(input).pathname;
+    if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+    if (path === `/api/channels/${channel.channelId}/overview`) return jsonResponse(overview(channel));
+    if (path === `/api/channels/${channel.channelId}/modules`) return jsonResponse({ modules: [] });
+    return jsonResponse({}, 404);
+  }));
+  window.history.replaceState({}, "", `/channels/${channel.channelId}/overview`);
+  render(<DashboardApp />);
+  await screen.findByRole("combobox", { name: "Kanal auswählen" });
 };
 
 const broadcaster = (userId: string, login: string, displayName: string) => ({
@@ -2043,6 +2062,138 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByText("text_commands", { exact: true })).not.toBeInTheDocument();
   });
 
+  it("shows the stored live duration, offline state, and unknown state in the header", async () => {
+    const liveChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      streamState: "online" as const,
+      streamStartedAt: relativeIso(-83 * 60 * 1000),
+    };
+    await showChannelOverview(liveChannel);
+    expect(screen.getByText("Live · 1:23 h")).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+
+    cleanup();
+    await showChannelOverview(healthyChannel("kanal-a", "Alpha"));
+    expect(screen.getByText("Offline")).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "offline");
+
+    cleanup();
+    await showChannelOverview({ ...healthyChannel("kanal-a", "Alpha"), streamState: null });
+    expect(screen.getByText("Status unbekannt")).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "unknown");
+  });
+
+  it("shows mute time remaining and the paused state beside the stream status", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      controls: {
+        mute: { active: true, until: relativeIso(15 * 60 * 1000), mode: "timed" as const },
+        pause: { active: true, until: null, mode: "unlimited" as const },
+      },
+    };
+    await showChannelOverview(channel);
+
+    expect(screen.getByText("Stumm · 15 min")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stummschaltung aufheben" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Automatische Aktionen fortsetzen" })).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__control-state .ui-icon")).toBeInTheDocument();
+    expect(screen.getByText("Pausiert")).toBeInTheDocument();
+  });
+
+  it("reloads channel state on visibility change and every three minutes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
+    const channel = healthyChannel("kanal-a", "Alpha");
+    let channelCalls = 0;
+    let overviewCalls = 0;
+    let modulesCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelCalls += 1;
+        return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      }
+      if (path === "/api/channels/kanal-a/overview") {
+        overviewCalls += 1;
+        return Promise.resolve(jsonResponse(overview(channel)));
+      }
+      if (path === "/api/channels/kanal-a/modules") {
+        modulesCalls += 1;
+        return Promise.resolve(jsonResponse({ modules: [] }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([1, 1, 1]);
+
+    fireEvent(document, new Event("visibilitychange"));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([2, 2, 2]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000); });
+    expect([channelCalls, overviewCalls, modulesCalls]).toEqual([3, 3, 3]);
+  });
+
+  it("shows stale token expiry as neutral, reloads, then marks server-confirmed expiry red", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
+    const freshExpiry = "2026-09-23T09:00:01.000Z";
+    const freshChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      tokens: { ...healthyChannel("kanal-a", "Alpha").tokens, botExpiresAt: freshExpiry, loginExpiresAt: freshExpiry },
+    };
+    const expiredChannel = {
+      ...freshChannel,
+      tokens: { ...freshChannel.tokens, botExpiresAt: "2026-09-23T09:00:00.000Z", loginExpiresAt: "2026-09-23T09:00:00.000Z" },
+    };
+    let channelCalls = 0;
+    let overviewCalls = 0;
+    let resolveChannelReload: ((response: Response) => void) | undefined;
+    let resolveOverviewReload: ((response: Response) => void) | undefined;
+    const pendingChannelReload = new Promise<Response>((resolve) => { resolveChannelReload = resolve; });
+    const pendingOverviewReload = new Promise<Response>((resolve) => { resolveOverviewReload = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelCalls += 1;
+        return channelCalls === 1
+          ? Promise.resolve(jsonResponse({ channels: [freshChannel], bot: freshChannel.bot }))
+          : pendingChannelReload;
+      }
+      if (path === "/api/channels/kanal-a/overview") {
+        overviewCalls += 1;
+        return overviewCalls === 1
+          ? Promise.resolve(jsonResponse(overview(freshChannel)))
+          : pendingOverviewReload;
+      }
+      if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(channelCalls).toBe(1);
+    expect(overviewCalls).toBe(1);
+    expect(screen.getByRole("combobox", { name: "Kanal auswählen" })).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getAllByText("wird aktualisiert").length).toBeGreaterThanOrEqual(1);
+    expect(channelCalls).toBe(2);
+    expect(overviewCalls).toBe(2);
+
+    await act(async () => {
+      resolveChannelReload?.(jsonResponse({ channels: [expiredChannel], bot: expiredChannel.bot }));
+      resolveOverviewReload?.(jsonResponse(overview(expiredChannel)));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getAllByText("Abgelaufen").length).toBeGreaterThanOrEqual(1);
+  });
+
   it("reloads the channel overview after enabling and shows the module view", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), role: "broadcaster" as const };
     let overviewAufrufe = 0;
@@ -2059,7 +2210,10 @@ describe("Dashboard skeleton", () => {
       }
       if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
         modulesCalls += 1;
-        return jsonResponse({ modules: [{ id: "text_commands", enabled: modulesCalls > 1, settings: "{}" }] });
+        return jsonResponse({ modules: [
+          { id: "text_commands", enabled: modulesCalls > 1, settings: "{}" },
+          { id: "ads", enabled: true, settings: "{}" },
+        ] });
       }
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
@@ -2151,7 +2305,10 @@ describe("Dashboard skeleton", () => {
       }
       if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
         modulesCalls += 1;
-        return jsonResponse({ modules: [{ id: "text_commands", enabled: modulesCalls > 1, settings: "{}" }] });
+        return jsonResponse({ modules: [
+          { id: "text_commands", enabled: modulesCalls > 1, settings: "{}" },
+          { id: "ads", enabled: true, settings: "{}" },
+        ] });
       }
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       if (url.pathname === "/api/channels/kanal-a/modules/text_commands" && init?.method === "PATCH") {
@@ -2172,7 +2329,7 @@ describe("Dashboard skeleton", () => {
     // Immediate actions section is present and reachable.
     expect(screen.getByRole("button", { name: "Clip erstellen" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Shoutout senden" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Werbung jetzt/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Werbung jetzt/ })).toBeInTheDocument();
 
     // Warnings/errors feed needs no interaction to show.
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();

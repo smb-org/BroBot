@@ -93,6 +93,9 @@ export interface DashboardTexts {
     noConnection: string;
     switchOn: string;
     switchOff: string;
+    streamLive: (duration: string | null) => string;
+    streamOffline: string;
+    streamUnknown: string;
   };
   status: {
     connected: string;
@@ -101,6 +104,7 @@ export interface DashboardTexts {
     loginIdentityMissing: string;
     notChecked: string;
     expired: string;
+    refreshing: string;
     maintenanceOverdue: string;
     renewalOverdue: string;
     valid: string;
@@ -359,6 +363,7 @@ export interface DashboardTexts {
     /** Header title of the clip action card. */
     clipTitle: string;
     createClip: string;
+    clipDisabledOffline: string;
     clipCreated: string;
     openClip: string;
     opensNewTab: string;
@@ -366,6 +371,35 @@ export interface DashboardTexts {
     feedEmpty: string;
     feedAll: string;
     yesterday: string;
+  };
+  channelControls: {
+    muteName: string;
+    pauseName: string;
+    muteEnable: string;
+    muteDisable: string;
+    pauseEnable: string;
+    pauseDisable: string;
+    muteActive: string;
+    pauseActive: string;
+    muteRemaining: (minutes: string) => string;
+    pauseRemaining: (minutes: string) => string;
+    untilStreamEnd: string;
+    unlimited: string;
+    durationTitle: (control: string) => string;
+    durationDescription: (control: string) => string;
+    durationLabel: string;
+    durationHint: string;
+    duration15m: string;
+    duration15mDescription: string;
+    duration1h: string;
+    duration1hDescription: string;
+    durationStream: string;
+    durationStreamDescription: string;
+    durationUnlimited: string;
+    durationUnlimitedDescription: string;
+    enable: string;
+    cancel: string;
+    failure: string;
   };
   /** ⌘K/Ctrl+K (#164): jumps to an entity, explicitly not a navigation
    *  replacement -- "raid" opens the module, "!clip" opens that text
@@ -413,10 +447,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noConnection: "Keine Verbindung",
       switchOn: "An",
       switchOff: "Aus",
+      streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
+      streamOffline: "Offline",
+      streamUnknown: "Status unbekannt",
     },
     status: {
       connected: "Verbunden", revoked: "Widerrufen", error: "Fehler",
-      loginIdentityMissing: "Login-Identität fehlt", notChecked: "Nicht geprüft", expired: "Abgelaufen",
+      loginIdentityMissing: "Login-Identität fehlt", notChecked: "Nicht geprüft", expired: "Abgelaufen", refreshing: "wird aktualisiert",
       maintenanceOverdue: "Wartung überfällig", renewalOverdue: "Erneuerung überfällig", valid: "Gültig",
       moderatorRoleMissing: "Moderatorrolle fehlt", chatSubscriptionError: "Chat-Abo-Fehler", chatSubscriptionRevoked: "Chat-Abo widerrufen",
       botError: "Bot-Fehler", botTokenRevoked: "Bot-Token widerrufen", broadcasterConsentMissing: "Broadcaster-Zustimmung fehlt",
@@ -546,6 +583,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       shoutoutSent: (login) => `Shoutout an ${login} gesendet`,
       clipTitle: "Clip",
       createClip: "Clip erstellen",
+      clipDisabledOffline: "Der Stream ist offline.",
       clipCreated: "Clip erstellt",
       openClip: "Clip öffnen",
       opensNewTab: "öffnet neuen Tab",
@@ -553,6 +591,35 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedEmpty: "Keine Warnungen oder Fehler.",
       feedAll: "Alle im Ereignisprotokoll",
       yesterday: "Gestern",
+    },
+    channelControls: {
+      muteName: "Stummschaltung",
+      pauseName: "Pause",
+      muteEnable: "Kanal stummschalten",
+      muteDisable: "Stummschaltung aufheben",
+      pauseEnable: "Automatische Aktionen pausieren",
+      pauseDisable: "Automatische Aktionen fortsetzen",
+      muteActive: "Kanal stumm",
+      pauseActive: "Pausiert",
+      muteRemaining: (minutes) => `Stumm · ${minutes} min`,
+      pauseRemaining: (minutes) => `Pause · ${minutes} min`,
+      untilStreamEnd: "Bis Streamende",
+      unlimited: "Unbegrenzt",
+      durationTitle: (control) => `${control} aktivieren`,
+      durationDescription: (control) => `Wähle, wie lange ${control.toLowerCase()} aktiv bleibt.`,
+      durationLabel: "Dauer",
+      durationHint: "Der Standard ist unbegrenzt.",
+      duration15m: "15 Minuten",
+      duration15mDescription: "Endet automatisch nach 15 Minuten.",
+      duration1h: "1 Stunde",
+      duration1hDescription: "Endet automatisch nach einer Stunde.",
+      durationStream: "Bis Streamende",
+      durationStreamDescription: "Wird beim nächsten Streamende aufgehoben.",
+      durationUnlimited: "Unbegrenzt",
+      durationUnlimitedDescription: "Bleibt aktiv, bis du es aufhebst.",
+      enable: "Aktivieren",
+      cancel: "Abbrechen",
+      failure: "Die Kanalsteuerung konnte nicht geändert werden.",
     },
     spotlight: {
       placeholder: "Suchen oder Aktion ausführen …",
@@ -592,10 +659,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       noConnection: "No connection",
       switchOn: "On",
       switchOff: "Off",
+      streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
+      streamOffline: "Offline",
+      streamUnknown: "Status unknown",
     },
     status: {
       connected: "Connected", revoked: "Revoked", error: "Error", loginIdentityMissing: "Login identity missing",
-      notChecked: "Not checked", expired: "Expired", maintenanceOverdue: "Maintenance overdue",
+      notChecked: "Not checked", expired: "Expired", refreshing: "updating", maintenanceOverdue: "Maintenance overdue",
       renewalOverdue: "Renewal overdue", valid: "Valid", moderatorRoleMissing: "Moderator role missing",
       chatSubscriptionError: "Chat subscription error", chatSubscriptionRevoked: "Chat subscription revoked", botError: "Bot error",
       botTokenRevoked: "Bot token revoked", broadcasterConsentMissing: "Broadcaster consent missing",
@@ -716,6 +786,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       shoutoutSent: (login) => `Shoutout sent to ${login}`,
       clipTitle: "Clip",
       createClip: "Create clip",
+      clipDisabledOffline: "The stream is offline.",
       clipCreated: "Clip created",
       openClip: "Open clip",
       opensNewTab: "opens a new tab",
@@ -723,6 +794,35 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       feedEmpty: "No warnings or errors.",
       feedAll: "View all in the event log",
       yesterday: "Yesterday",
+    },
+    channelControls: {
+      muteName: "Mute",
+      pauseName: "Pause",
+      muteEnable: "Mute channel",
+      muteDisable: "Unmute channel",
+      pauseEnable: "Pause automatic actions",
+      pauseDisable: "Resume automatic actions",
+      muteActive: "Muted",
+      pauseActive: "Paused",
+      muteRemaining: (minutes) => `Muted · ${minutes} min`,
+      pauseRemaining: (minutes) => `Paused · ${minutes} min`,
+      untilStreamEnd: "Until stream ends",
+      unlimited: "Unlimited",
+      durationTitle: (control) => `Enable ${control.toLowerCase()}`,
+      durationDescription: (control) => `Choose how long ${control.toLowerCase()} stays active.`,
+      durationLabel: "Duration",
+      durationHint: "Unlimited is selected by default.",
+      duration15m: "15 minutes",
+      duration15mDescription: "Ends automatically after 15 minutes.",
+      duration1h: "1 hour",
+      duration1hDescription: "Ends automatically after one hour.",
+      durationStream: "Until stream ends",
+      durationStreamDescription: "Turns off when the stream next ends.",
+      durationUnlimited: "Unlimited",
+      durationUnlimitedDescription: "Stays on until you turn it off.",
+      enable: "Enable",
+      cancel: "Cancel",
+      failure: "The channel control could not be changed.",
     },
     spotlight: {
       placeholder: "Search or run an action …",
@@ -880,6 +980,7 @@ const commercialFailureReasonText = (reason: unknown, language: DashboardLanguag
 export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   de: {
     "host.action.failed": "Aktion fehlgeschlagen",
+    "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : "Shoutout"} wegen Kanal-Stummschaltung`,
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
     "host.announcement.sent": (detail) => `Chat-Ankündigung gesendet: ${detailText(detail, "text", "ohne Text")}`,
@@ -977,6 +1078,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   },
   en: {
     "host.action.failed": "Action failed",
+    "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : "shoutout"} while the channel is muted`,
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
     "host.announcement.sent": (detail) => `Chat announcement sent: ${detailText(detail, "text", "no text")}`,
@@ -1087,6 +1189,7 @@ export interface EventToneEntry {
 
 export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.action.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "host.action.suppressed": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "host.chat.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.chat.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "host.announcement.failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
@@ -1183,6 +1286,10 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.removed": "Textbefehl entfernt",
     "ads.commercial_started": "Werbung gestartet",
     "clip.created": "Clip erstellt",
+    "channel.mute.enabled": "Kanal stummgeschaltet",
+    "channel.mute.disabled": "Kanal-Stummschaltung aufgehoben",
+    "channel.pause.enabled": "Automatische Aktionen pausiert",
+    "channel.pause.disabled": "Automatische Aktionen fortgesetzt",
     "overlay.token.issued": "Overlay-Token ausgestellt",
     "overlay.token.revoked": "Overlay-Token widerrufen",
   },
@@ -1199,6 +1306,10 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.removed": "Text command removed",
     "ads.commercial_started": "Commercial started",
     "clip.created": "Clip created",
+    "channel.mute.enabled": "Channel muted",
+    "channel.mute.disabled": "Channel unmuted",
+    "channel.pause.enabled": "Automatic actions paused",
+    "channel.pause.disabled": "Automatic actions resumed",
     "overlay.token.issued": "Overlay token issued",
     "overlay.token.revoked": "Overlay token revoked",
   },
@@ -1293,6 +1404,9 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     commercial_start_failed: "Die Werbeeinblendung konnte nicht gestartet werden.",
     commercial_stream_offline: "Die Werbeeinblendung ist offline nicht verfügbar.",
     clip_create_failed: "Der Clip konnte nicht erstellt werden.",
+    clip_stream_offline: "Ein Clip kann nur erstellt werden, wenn der Stream live ist.",
+    channel_control_input_invalid: "Die Kanalsteuerung ist ungültig.",
+    channel_control_changed_concurrently: "Die Kanalsteuerung wurde inzwischen geändert.",
     shoutout_send_failed: "Der Shoutout konnte nicht gesendet werden.",
     overlay_token_manage_denied: "Nur Broadcaster und Verwalter dürfen Overlay-Token verwalten.",
     overlay_expiry_invalid: "Ablaufzeit ist ungültig.",
@@ -1364,6 +1478,9 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     commercial_start_failed: "The commercial could not be started.",
     commercial_stream_offline: "A commercial cannot run while the stream is offline.",
     clip_create_failed: "The clip could not be created.",
+    clip_stream_offline: "A clip can only be created while the stream is live.",
+    channel_control_input_invalid: "The channel control is invalid.",
+    channel_control_changed_concurrently: "The channel control has changed since it was loaded.",
     shoutout_send_failed: "The shoutout could not be sent.",
     overlay_token_manage_denied: "Only broadcasters and managers may manage overlay tokens.",
     overlay_expiry_invalid: "Expiry is invalid.",

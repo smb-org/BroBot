@@ -72,6 +72,9 @@ export type { ChipGroupOption, ChipGroupProps } from "./ChipGroup";
 export { ConfirmDialog } from "./ConfirmDialog";
 export type { ConfirmDialogProps } from "./ConfirmDialog";
 
+export { ControlDurationDialog } from "./ControlDurationDialog";
+export type { ControlDurationDialogProps } from "./ControlDurationDialog";
+
 export { SaveBar } from "./SaveBar";
 export type { SaveBarProps } from "./SaveBar";
 

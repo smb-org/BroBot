@@ -42,6 +42,7 @@ import { fetchTwitchUserByLogin, sendShoutout, type ShoutoutSendResult } from ".
 import { writeModuleAudit } from "../module-audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
+import { isChannelControlInput, setChannelControl, type ChannelControlKind } from "../db/channel-controls";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -124,10 +125,41 @@ const clipStatusFor = (reason: string | null): 400 | 401 | 429 | 502 | 503 => {
   return 502;
 };
 
+const isChannelControlKind = (value: string): value is ChannelControlKind =>
+  value === "mute" || value === "pause";
+
 export const panelRouter = new Hono<PanelEnvironment>();
 
 panelRouter.route("/", memberRouter);
 panelRouter.route("/", moduleRouter);
+
+panelRouter.post(
+  "/api/channels/:channelId/controls/:control",
+  requireChannelAuthorization(),
+  async (context) => {
+    const control = context.req.param("control");
+    if (!isChannelControlKind(control)) return context.json({ error: "channel_control_input_invalid" }, 400);
+    const body: unknown = await context.req.json().catch(() => null);
+    const duration = body !== null && typeof body === "object" && !Array.isArray(body) && "duration" in body
+      ? body.duration
+      : undefined;
+    if (!isChannelControlInput(duration)) return context.json({ error: "channel_control_input_invalid" }, 400);
+
+    const changedAt = nowIso();
+    const result = await setChannelControl(
+      context.env.DB,
+      context.get("actor"),
+      context.req.param("channelId"),
+      control,
+      duration,
+      changedAt,
+    );
+    if (result.outcome === "concurrent") {
+      return context.json({ error: "channel_control_changed_concurrently" }, 409);
+    }
+    return context.json({ controls: result.controls });
+  },
+);
 
 panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) => {
   const session = context.get("session");
@@ -267,7 +299,7 @@ panelRouter.post(
         { code: "host.clip.failed" satisfies EventCode, detail: { reason: result.reason, ...result.detail } },
       ], now);
       return context.json({
-        error: "clip_create_failed",
+        error: result.reason === "not_live" ? "clip_stream_offline" : "clip_create_failed",
         reason: result.reason,
         detail: result.detail,
       }, clipStatusFor(result.reason));

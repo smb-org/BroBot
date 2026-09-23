@@ -25,6 +25,10 @@ export type EventTone = (typeof EVENT_TONES)[number];
 export const CHANNEL_STREAM_STATES = ["online", "offline"] as const;
 export type ChannelStreamState = (typeof CHANNEL_STREAM_STATES)[number];
 
+/** Durations accepted when a channel member enables an operational brake. */
+export const CHANNEL_CONTROL_DURATIONS = ["15m", "1h", "until_stream_end", "unlimited"] as const;
+export type ChannelControlDuration = (typeof CHANNEL_CONTROL_DURATIONS)[number];
+
 /** Stable reasons for a rejected manual or automatic shoutout. */
 export const SHOUTOUT_FAILURE_REASONS = [
   "app_token_unavailable",
@@ -102,6 +106,7 @@ export const isEventSubSubscriptionType = (value: string): value is EventSubSubs
  */
 export const EVENT_CODES = [
   "host.action.failed",
+  "host.action.suppressed",
   "host.chat.failed",
   "host.chat.sent",
   "host.announcement.failed",
@@ -191,6 +196,10 @@ export const AUDIT_ACTIONS = [
   "text_commands.command.removed",
   "ads.commercial_started",
   "clip.created",
+  "channel.mute.enabled",
+  "channel.mute.disabled",
+  "channel.pause.enabled",
+  "channel.pause.disabled",
   "overlay.token.issued",
   "overlay.token.revoked",
 ] as const;
@@ -273,6 +282,9 @@ export const API_ERROR_CODES = [
   "commercial_start_failed",
   "commercial_stream_offline",
   "clip_create_failed",
+  "clip_stream_offline",
+  "channel_control_input_invalid",
+  "channel_control_changed_concurrently",
   "shoutout_send_failed",
   "overlay_token_manage_denied",
   "overlay_expiry_invalid",

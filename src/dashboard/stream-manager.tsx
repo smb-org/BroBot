@@ -1,19 +1,28 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
 
-import type { PanelEventEntry } from "../panel-contract";
-import { createClip, fetchEvents, PanelApiError, sendManualShoutout, startCommercial } from "./api";
+import type { PanelEventEntry, PanelModuleState } from "../panel-contract";
+import type { ModuleImmediateActionProperties } from "../modules/contract";
+import { MODULES } from "../modules/registry";
+import { createClip, fetchEvents, PanelApiError, sendManualShoutout } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime, shoutoutFailureReasonText } from "./locale";
 import { eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
 import { useRealtimeEventFeed } from "./realtime";
-import { Button, Field, SegmentedControl } from "./ui";
+import { Button, Field } from "./ui";
 import { Icon } from "./ui/Icon";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
-/** Twitch's own accepted Start Commercial lengths (seconds); kept here, not
- *  imported from the ads module's adapter -- the dashboard doesn't reach
- *  into a module's internals, only its panel contract. */
-const AD_LENGTHS = ["30", "60", "90", "120", "150", "180"];
+const lazyActions = new Map<string, LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>>>();
+
+const getLazyImmediateAction = (moduleId: string): LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>> | null => {
+  const module = MODULES.find((entry) => entry.id === moduleId);
+  if (module?.immediateActions === undefined) return null;
+  const cached = lazyActions.get(moduleId);
+  if (cached !== undefined) return cached;
+  const component = lazy(module.immediateActions);
+  lazyActions.set(moduleId, component);
+  return component;
+};
 
 interface ActionState {
   pending: boolean;
@@ -25,46 +34,6 @@ const idleAction: ActionState = { pending: false, error: null, success: null };
 
 const failureText = (error: unknown, fallback: string): string =>
   error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
-
-const AdNowAction = ({ channelId, streamState }: { channelId: string; streamState?: "online" | "offline" | null | undefined }): ReactElement => {
-  const texts = dashboardTexts();
-  const [length, setLength] = useState<string | null>(AD_LENGTHS[1] ?? null);
-  const [state, setState] = useState<ActionState>(idleAction);
-
-  const run = async (): Promise<void> => {
-    if (state.pending || length === null) return;
-    setState({ pending: true, error: null, success: null });
-    try {
-      const result = await startCommercial(channelId, Number(length));
-      setState({ pending: false, error: null, success: texts.streamManager.adStarted(String(result.length ?? length)) });
-    } catch (error: unknown) {
-      setState({ pending: false, error: failureText(error, texts.errors.changeFailed), success: null });
-    }
-  };
-
-  return (
-    <div className="stream-manager-action">
-      <div className="stream-manager-action__header"><Icon name="ad" size={20} /><h3>{texts.streamManager.adTitle}</h3></div>
-      <div className="stream-manager-action__body">
-        <SegmentedControl
-          label={texts.streamManager.adLength}
-          hint={texts.streamManager.adLengthHint}
-          value={length ?? ""}
-          onChange={(next) => { setLength(next); }}
-          options={AD_LENGTHS.map((value) => ({ value, label: `${value}s` }))}
-          disabled={state.pending}
-          size="compact"
-        />
-      </div>
-      <Button className="stream-manager-action__button" icon="ad" variant="primary" disabled={state.pending || length === null || streamState === "offline"} onClick={() => { void run(); }}>
-        {texts.streamManager.runAd(length ?? "")}
-      </Button>
-      {streamState === "offline" ? <p className="lock-reason">{texts.streamManager.adDisabledOffline}</p> : null}
-      {state.success === null ? null : <p className="form-success" role="status">{state.success}</p>}
-      {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}
-    </div>
-  );
-};
 
 const ShoutoutAction = ({ channelId }: { channelId: string }): ReactElement => {
   const texts = dashboardTexts();
@@ -115,7 +84,7 @@ const ShoutoutAction = ({ channelId }: { channelId: string }): ReactElement => {
   );
 };
 
-const ClipAction = ({ channelId }: { channelId: string }): ReactElement => {
+const ClipAction = ({ channelId, streamState }: { channelId: string; streamState?: "online" | "offline" | null | undefined }): ReactElement => {
   const texts = dashboardTexts();
   const [state, setState] = useState<ActionState>(idleAction);
   const [editUrl, setEditUrl] = useState<string | null>(null);
@@ -133,12 +102,14 @@ const ClipAction = ({ channelId }: { channelId: string }): ReactElement => {
     }
   };
 
+  const offlineReasonId = "stream-manager-clip-offline-reason";
   return (
     <div className="stream-manager-action">
       <div className="stream-manager-action__header"><Icon name="clip" size={20} /><h3>{texts.streamManager.clipTitle}</h3></div>
-      <Button className="stream-manager-action__button" icon="clip" variant="primary" disabled={state.pending} onClick={() => { void run(); }}>
+      <Button className="stream-manager-action__button" icon="clip" variant="primary" disabled={state.pending || streamState === "offline"} {...(streamState === "offline" ? { describedBy: offlineReasonId } : {})} onClick={() => { void run(); }}>
         {texts.streamManager.createClip}
       </Button>
+      {streamState === "offline" ? <p className="lock-reason" id={offlineReasonId}>{texts.streamManager.clipDisabledOffline}</p> : null}
       {state.success === null ? null : (
         <p className="form-success" role="status">
           <span>{state.success}</span>{editUrl === null ? null : <> · <a href={editUrl} target="_blank" rel="noreferrer" aria-label={`${texts.streamManager.openClip} (${texts.streamManager.opensNewTab})`}>{texts.streamManager.openClip}<Icon name="external" size={16} /></a></>}
@@ -150,19 +121,28 @@ const ClipAction = ({ channelId }: { channelId: string }): ReactElement => {
 };
 
 /**
- * The three immediate actions from Epic 4: each reports success/failure at
+ * The immediate actions from Epic 4: each reports success/failure at
  * itself (inline, next to its own button), never a global toast, and each
  * guards its own in-flight request the same way `Switch`'s `pending` does.
  */
-export const ImmediateActions = ({ channelId, streamState }: { channelId: string; streamState?: "online" | "offline" | null | undefined }): ReactElement => {
+export const ImmediateActions = ({ channelId, streamState, modules = [] }: { channelId: string; streamState?: "online" | "offline" | null | undefined; modules?: readonly Pick<PanelModuleState, "id" | "enabled">[] }): ReactElement => {
   const texts = dashboardTexts();
+  const moduleCards = modules.flatMap((state) => {
+    if (!state.enabled) return [];
+    const ActionCard = getLazyImmediateAction(state.id);
+    return ActionCard === null ? [] : [{ id: state.id, ActionCard }];
+  });
   return (
     <section className="content-section" aria-label={texts.streamManager.immediateActions}>
       <div className="section-heading"><h2>{texts.streamManager.immediateActions}</h2></div>
       <div className="stream-manager-actions">
-        <AdNowAction channelId={channelId} streamState={streamState} />
         <ShoutoutAction channelId={channelId} />
-        <ClipAction channelId={channelId} />
+        <ClipAction channelId={channelId} streamState={streamState} />
+        {moduleCards.map(({ id, ActionCard }) => (
+          <Suspense key={id} fallback={null}>
+            <ActionCard channelId={channelId} {...(streamState === undefined ? {} : { streamState })} />
+          </Suspense>
+        ))}
       </div>
     </section>
   );
