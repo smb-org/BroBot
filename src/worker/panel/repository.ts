@@ -476,6 +476,8 @@ export const auditAreaSqlClause = (area: AuditArea): { sql: string; values: stri
   };
 };
 
+const NO_AUDIT_FILTERS: PanelAuditFilters = Object.freeze({ person: null, area: null });
+
 // The channel + actor and channel + action indexes keep both optional filters
 // selective before the descending timestamp scan as each channel's audit log
 // grows.
@@ -484,7 +486,7 @@ export const getAuditLogForChannel = async (
   channelId: string,
   limit: number,
   cursor: LogCursor | null,
-  filters: PanelAuditFilters = { person: null, area: null },
+  filters: PanelAuditFilters = NO_AUDIT_FILTERS,
 ): Promise<PanelAuditResponse> => {
   const where = ["channel_id = ?"];
   const filterValues: string[] = [channelId];
