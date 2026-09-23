@@ -17,7 +17,7 @@ Key routing rules:
 - Full review pipeline → invoke /autoplan
 - Bugs/errors → invoke /investigate
 - QA/testing site behavior → invoke /qa or /qa-only
-- Code review/diff check → invoke /review
+- Code review/diff check on work in progress (writes fixes) → invoke /review — not the merge-gate review; that is a separate, read-only Codex run (`codex exec -m gpt-6-sol -s read-only` in its own worktree), see `docs/AI-WORKFLOW.md`, Abschnitt „Vor dem Merge“
 - Visual polish → invoke /design-review
 - Ship/deploy/PR → invoke /ship or /land-and-deploy
 - Save progress → invoke /context-save
