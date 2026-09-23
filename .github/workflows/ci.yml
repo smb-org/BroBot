@@ -139,7 +139,9 @@ jobs:
     steps:
       - name: Ergebnisse der Teil-Jobs prüfen
         run: |
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
-            echo "Mindestens ein Teil-Job ist fehlgeschlagen oder wurde abgebrochen."
-            exit 1
-          fi
+          for result in "${{ needs.static.result }}" "${{ needs.unit.result }}" "${{ needs.worker.result }}" "${{ needs.e2e.result }}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "Mindestens ein Teil-Job war nicht erfolgreich (Ergebnis: $result)."
+              exit 1
+            fi
+          done
