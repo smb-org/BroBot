@@ -337,7 +337,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
   const remove = async (): Promise<void> => {
     if (command === null) return;
     setDeleting(true); setError(undefined);
-    try { await deleteTextCommand(channelId, command.name); setConfirmingDelete(false); await onDeleted(); }
+    try { await deleteTextCommand(channelId, command.name, command.revision); setConfirmingDelete(false); await onDeleted(); }
     catch { setError(labels.deleteError); }
     finally { setDeleting(false); }
   };

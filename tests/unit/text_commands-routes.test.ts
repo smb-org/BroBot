@@ -84,7 +84,7 @@ describe("Text commands panel", () => {
     expect(edit.status).toBe(200);
 
     const remove = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/hallo", "DELETE"),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/hallo?revision=2", "DELETE"),
       environment,
     );
     expect(remove.status).toBe(204);
@@ -169,6 +169,43 @@ describe("Text commands panel", () => {
     await expect(database.prepare(
       "SELECT response_text, revision FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'hello'",
     ).first()).resolves.toEqual({ response_text: "Saved by editor A", revision: 2 });
+  });
+
+  it("requires the displayed revision to delete and preserves a newer command", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+    const collection = "/api/channels/kanal-a/modules/text_commands/commands";
+    await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", { name: "hello", text: "Original", cooldownSeconds: 0 }),
+      environment,
+    );
+
+    const missingRevision = await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/hello`, "DELETE"),
+      environment,
+    );
+    expect(missingRevision.status).toBe(400);
+    await expect(missingRevision.json()).resolves.toEqual({ error: "command_data_invalid" });
+
+    await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/hello`, "PATCH", { revision: 1, text: "Saved elsewhere" }),
+      environment,
+    );
+    const staleDelete = await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/hello?revision=1`, "DELETE"),
+      environment,
+    );
+
+    expect(staleDelete.status).toBe(409);
+    await expect(staleDelete.json()).resolves.toMatchObject({
+      error: "command_changed_concurrently",
+      current: { name: "hello", text: "Saved elsewhere", revision: 2 },
+    });
+    await expect(database.prepare(
+      "SELECT response_text, revision FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'hello'",
+    ).first()).resolves.toEqual({ response_text: "Saved elsewhere", revision: 2 });
   });
 
   it("distinguishes missing commands when editing and deleting", async () => {

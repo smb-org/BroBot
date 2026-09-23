@@ -232,9 +232,9 @@ describe("Text commands D1 adapter", () => {
       aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say", now: NOW,
     }, foreignActor)).resolves.toEqual({ ok: false, reason: "not_authorized" });
 
-    await expect(verweigert.delete("kanal-a", "hallo", foreignActor, NOW))
+    await expect(verweigert.delete("kanal-a", "hallo", 1, foreignActor, NOW))
       .resolves.toEqual({ ok: false, reason: "not_authorized" });
-    await expect(verweigert.delete("kanal-a", "fehlt", ACTOR, NOW))
+    await expect(verweigert.delete("kanal-a", "fehlt", 1, ACTOR, NOW))
       .resolves.toEqual({ ok: false, reason: "not_found" });
   });
 
@@ -258,7 +258,7 @@ describe("Text commands D1 adapter", () => {
       channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Neu", kind: "text", enabled: true, cooldownSeconds: 10,
       aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say", now: NOW,
     }, ACTOR)).resolves.toEqual({ ok: false, reason: "not_authorized" });
-    await expect(repository.delete("kanal-a", "hallo", ACTOR, NOW))
+    await expect(repository.delete("kanal-a", "hallo", 1, ACTOR, NOW))
       .resolves.toEqual({ ok: false, reason: "not_authorized" });
   });
 
@@ -342,7 +342,7 @@ describe("Text commands D1 adapter", () => {
       authorizeModuleMutation,
       (entry, changedAt) => prepareModuleAudit(deleteDb, ACTOR.userId, changedAt, entry),
     );
-    await expect(deleteRepository.delete("kanal-a", "loeschen", ACTOR, "2026-09-19T12:01:00.000Z"))
+    await expect(deleteRepository.delete("kanal-a", "loeschen", 1, ACTOR, "2026-09-19T12:01:00.000Z"))
       .resolves.toMatchObject({ ok: false, reason: "conflict", current: { revision: 2, text: "Neu" } });
     await expect(database.prepare("SELECT response_text, minimum_level FROM text_commands WHERE command_name = 'loeschen'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "vip" });
@@ -421,7 +421,7 @@ describe("Text commands D1 adapter", () => {
       `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
        VALUES ('kanal-a', 'renamed', 'viewer-a', ?)`,
     ).bind(NOW).run();
-    await expect(repository.delete("kanal-a", "renamed", ACTOR, NOW)).resolves.toEqual({ ok: true });
+    await expect(repository.delete("kanal-a", "renamed", 2, ACTOR, NOW)).resolves.toEqual({ ok: true });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM text_command_user_cooldowns").first())
       .resolves.toEqual({ count: 0 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM text_command_aliases").first())
@@ -491,6 +491,57 @@ describe("Text commands D1 adapter", () => {
     });
     await expect(database.prepare("SELECT stream_condition FROM text_commands WHERE command_name = 'first'").first())
       .resolves.toEqual({ stream_condition: "offline" });
+  });
+
+  it("keeps the winning save's aliases when a competing CAS loses", async () => {
+    await insertChannel(database, "kanal-a");
+    const baseRepository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await baseRepository.create({
+      channelId: "kanal-a", name: "first", text: "Original", kind: "text", cooldownSeconds: 0,
+      aliases: ["original"], now: NOW,
+    }, ACTOR);
+
+    const competingDb = {
+      prepare: database.prepare.bind(database),
+      batch: async (statements: TestPreparedStatement[]) => {
+        await database.batch([
+          database.prepare(
+            `UPDATE text_commands SET aliases_json = '["winner"]', revision = revision + 1
+              WHERE channel_id = 'kanal-a' AND command_name = 'first' AND revision = 1`,
+          ),
+          database.prepare(
+            "DELETE FROM text_command_aliases WHERE channel_id = 'kanal-a' AND command_name = 'first'",
+          ),
+          database.prepare(
+            `INSERT INTO text_command_aliases (channel_id, alias, command_name)
+             VALUES ('kanal-a', 'winner', 'first')`,
+          ),
+        ]);
+        return database.batch(statements);
+      },
+    } as unknown as D1Database;
+    const repository = createTextCommandRepository(
+      competingDb,
+      authorize,
+      (entry, changedAt) => prepareModuleAudit(competingDb, ACTOR.userId, changedAt, entry),
+    );
+
+    await expect(repository.change({
+      channelId: "kanal-a", name: "first", newName: "first", text: "Losing save", kind: "text", enabled: true,
+      cooldownSeconds: 0, aliases: ["loser"], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
+      expectedRevision: 1, now: NOW,
+    }, ACTOR)).resolves.toMatchObject({
+      ok: false,
+      reason: "conflict",
+      current: { name: "first", aliases: ["winner"], revision: 2 },
+    });
+    await expect(database.prepare(
+      "SELECT aliases_json FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'first'",
+    ).first()).resolves.toEqual({ aliases_json: '["winner"]' });
+    await expect(database.prepare(
+      "SELECT alias, command_name FROM text_command_aliases WHERE channel_id = 'kanal-a' ORDER BY alias",
+    ).all()).resolves.toMatchObject({ results: [{ alias: "winner", command_name: "first" }] });
+    await expect(baseRepository.findByAlias("kanal-a", "loser")).resolves.toBeNull();
   });
 
   it("allows lists without response text but requires it for text lines", async () => {

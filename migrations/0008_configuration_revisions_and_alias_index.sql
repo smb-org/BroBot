@@ -22,3 +22,25 @@ SELECT text_commands.channel_id, aliases.value, text_commands.command_name
   FROM text_commands, json_each(text_commands.aliases_json) AS aliases
  WHERE aliases.type = 'text'
  ORDER BY text_commands.channel_id, aliases.value, text_commands.command_name;
+
+UPDATE text_commands
+   SET aliases_json = (
+     SELECT json_group_array(aliases.value)
+       FROM json_each(text_commands.aliases_json) AS aliases
+      WHERE aliases.type = 'text'
+        AND EXISTS (
+          SELECT 1 FROM text_command_aliases AS indexed_alias
+           WHERE indexed_alias.channel_id = text_commands.channel_id
+             AND indexed_alias.alias = aliases.value
+             AND indexed_alias.command_name = text_commands.command_name
+        )
+   )
+ WHERE EXISTS (
+   SELECT 1
+     FROM json_each(text_commands.aliases_json) AS aliases
+     JOIN text_command_aliases AS indexed_alias
+       ON indexed_alias.channel_id = text_commands.channel_id
+      AND indexed_alias.alias = aliases.value
+      AND indexed_alias.command_name <> text_commands.command_name
+    WHERE aliases.type = 'text'
+ );

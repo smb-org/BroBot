@@ -512,4 +512,38 @@ describe("Module management in the panel", () => {
       "SELECT settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
     ).first()).resolves.toEqual({ settings: '{"betrag":41}', revision: 2 });
   });
+
+  it("returns the revision written by this save when a later save interleaves before the response", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'test-modul', 1, '{"betrag":42}')`,
+    ).run();
+    const racingDatabase = {
+      prepare: database.prepare.bind(database),
+      batch: async (statements: TestPreparedStatement[]) => {
+        const result = await database.batch(statements);
+        await database.prepare(
+          `UPDATE channel_modules SET settings = '{"betrag":99}', revision = revision + 1
+            WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'`,
+        ).run();
+        return result;
+      },
+    } as unknown as TestD1Database;
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul/settings", "PATCH", {
+        revision: 1, settings: { betrag: 41 },
+      }),
+      environmentFor(racingDatabase),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ settings: { betrag: 41 }, revision: 2, warnings: [] });
+    await expect(database.prepare(
+      "SELECT settings, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
+    ).first()).resolves.toEqual({ settings: '{"betrag":99}', revision: 3 });
+  });
 });

@@ -553,6 +553,8 @@ describe("Text command editor", () => {
     expect(within(dialog).getByText(/Aliase !hey/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo endgültig löschen" }));
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true));
+    const deleteCall = fetcher.mock.calls.find(([, init]) => init?.method === "DELETE");
+    expect(deleteCall?.[0]).toBe("/api/channels/kanal-a/modules/text_commands/commands/hallo?revision=1");
   });
 
   it("follows the browser language when the host does not pass one", async () => {

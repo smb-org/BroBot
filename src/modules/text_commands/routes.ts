@@ -290,11 +290,23 @@ textCommandRoutes.delete("/commands/:name", async (context) => {
   );
   const channelId = param(context, "channelId");
   const name = param(context, "name");
-  if (await repository.find(channelId, name) === null) return context.json({ error: "command_not_found" }, 404);
+  const before = await repository.find(channelId, name);
+  if (before === null) return context.json({ error: "command_not_found" }, 404);
   if (!canManage(context.get("channelRole"))) return managementDenied(context);
-  const deleted = await repository.delete(channelId, name, context.get("actor"), nowIso());
+  const revisionValue = context.req.query("revision");
+  const expectedRevision = revisionValue === undefined ? Number.NaN : Number(revisionValue);
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+    return context.json({ error: "command_data_invalid" }, 400);
+  }
+  if (expectedRevision !== before.revision) {
+    return context.json({ error: "command_changed_concurrently", current: before }, 409);
+  }
+  const deleted = await repository.delete(channelId, name, expectedRevision, context.get("actor"), nowIso());
   if (deleted.ok) return new Response(null, { status: 204 });
   if (deleted.reason === "not_found") return context.json({ error: "command_not_found" }, 404);
   if (deleted.reason === "not_authorized") return context.json({ error: "command_delete_denied" }, 403);
+  if (deleted.reason === "conflict" && deleted.current !== undefined) {
+    return context.json({ error: "command_changed_concurrently", current: deleted.current }, 409);
+  }
   return context.json({ error: "command_changed_concurrently" }, 409);
 });

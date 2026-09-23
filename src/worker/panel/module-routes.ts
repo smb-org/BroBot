@@ -164,8 +164,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
       current: current === null ? null : { settings: currentSettings, revision: current.revision },
     }, 409);
   }
-  const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
-  return context.json({ settings: settings.data, revision: current?.revision ?? expectedRevision + 1, warnings });
+  return context.json({ settings: settings.data, revision: expectedRevision + 1, warnings });
 });
 
 moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context) => {

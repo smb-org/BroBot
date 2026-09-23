@@ -428,17 +428,32 @@ export const createTextCommandRepository = (
         `DELETE FROM text_command_aliases
           WHERE channel_id = ? AND command_name = ?
             AND EXISTS (
-              SELECT 1 FROM text_commands
-               WHERE channel_id = ? AND command_name = ? AND revision = ?
+            SELECT 1 FROM text_commands
+               WHERE channel_id = ? AND command_name = ? AND revision = ? AND aliases_json = ?
             )`,
-      ).bind(input.channelId, input.newName, input.channelId, input.newName, expectedRevision + 1));
+      ).bind(
+        input.channelId,
+        input.newName,
+        input.channelId,
+        input.newName,
+        expectedRevision + 1,
+        JSON.stringify(input.aliases),
+      ));
       sideEffects.push(...input.aliases.map((alias) => db.prepare(
         `INSERT INTO text_command_aliases (channel_id, alias, command_name)
          SELECT ?, ?, ? WHERE EXISTS (
            SELECT 1 FROM text_commands
-            WHERE channel_id = ? AND command_name = ? AND revision = ?
+            WHERE channel_id = ? AND command_name = ? AND revision = ? AND aliases_json = ?
          )`,
-      ).bind(input.channelId, alias, input.newName, input.channelId, input.newName, expectedRevision + 1)));
+      ).bind(
+        input.channelId,
+        alias,
+        input.newName,
+        input.channelId,
+        input.newName,
+        expectedRevision + 1,
+        JSON.stringify(input.aliases),
+      )));
       if (input.newName !== input.name) {
         // Cooldowns are command-name keyed; renames intentionally discard them.
         sideEffects.push(db.prepare(
@@ -472,9 +487,16 @@ export const createTextCommandRepository = (
       : failed("conflict", undefined, current);
   },
 
-  async delete(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult> {
+  async delete(
+    channelId: string,
+    name: string,
+    expectedRevision: number,
+    actor: TextCommandActor,
+    now: string,
+  ): Promise<TextCommandMutationResult> {
     const before = await this.find(channelId, name);
     if (before === null) return failed("not_found");
+    if (before.revision !== expectedRevision) return failed("conflict", undefined, before);
     const authorization = authorizeMutation(channelId, actor, now);
     const mutation = db.prepare(
       `DELETE FROM text_commands
@@ -488,7 +510,7 @@ export const createTextCommandRepository = (
     ).bind(
       channelId,
       name,
-      before.revision,
+      expectedRevision,
       before.text,
       before.kind,
       before.enabled ? 1 : 0,
@@ -515,7 +537,7 @@ export const createTextCommandRepository = (
     if (changes > 0) return succeeded();
     const current = await this.find(channelId, name);
     if (current === null) return failed("not_found");
-    if (current.revision !== before.revision) return failed("conflict", undefined, current);
+    if (current.revision !== expectedRevision) return failed("conflict", undefined, current);
     return failed(sameMutationValues(current, before) ? "not_authorized" : "conflict");
   },
 

@@ -27,10 +27,11 @@ const mutation = async (
   method: "POST" | "PATCH" | "DELETE",
   body?: unknown,
   name?: string,
+  query?: string,
 ): Promise<readonly PanelTemplateWarning[]> => {
   const csrfResponse = await fetch("/api/csrf");
   const csrf = await json<{ token: string }>(csrfResponse);
-  const response = await fetch(pathFor(channelId, name), {
+  const response = await fetch(`${pathFor(channelId, name)}${query === undefined ? "" : `?${query}`}`, {
     method,
     headers: {
       "X-CSRF-Token": csrf.token,
@@ -100,6 +101,6 @@ export const setTextCommandMinimumTier = async (
   minimumTier: TextCommandMinimumTier,
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { revision, minimumTier: minimumTier }, name);
 
-export const deleteTextCommand = async (channelId: string, name: string): Promise<void> => {
-  await mutation(channelId, "DELETE", undefined, name);
+export const deleteTextCommand = async (channelId: string, name: string, revision: number): Promise<void> => {
+  await mutation(channelId, "DELETE", undefined, name, `revision=${String(revision)}`);
 };
