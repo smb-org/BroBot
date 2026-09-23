@@ -104,7 +104,7 @@ const filterKey = (filters: PanelEventFilters): string => [
   filters.origin ?? "",
   filters.module ?? "",
   filters.tone ?? "",
-  [...(filters.tones ?? [])].sort().join(","),
+  [...(filters.tones ?? [])].sort((a, b) => a.localeCompare(b)).join(","),
   filters.person ?? "",
 ].join("\u001f");
 
