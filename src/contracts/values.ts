@@ -228,6 +228,16 @@ export type ModuleSettingsChangedAction = `${string}.settings_changed`;
 export type AuditWriteAction = AuditAction | ModuleSettingsChangedAction;
 
 /**
+ * The audit log's "area" filter (#181): every `AuditWriteAction` sorts into
+ * exactly one of these by its prefix (`dashboard/audit/model.ts`'s
+ * `auditAreaForAction`), shared verbatim by the worker's SQL predicate
+ * (`worker/panel/repository.ts`) so the filter and the family icon can't
+ * drift apart.
+ */
+export const AUDIT_AREAS = ["module", "command", "member", "channel", "overlay"] as const;
+export type AuditArea = (typeof AUDIT_AREAS)[number];
+
+/**
  * The closed vocabulary of `{ "error": "<code>" }` responses the worker
  * (and, client-side, `dashboard/api.ts`'s own request guard) sends instead
  * of German prose. `dashboard/locale.ts`'s `apiErrorTexts` is a
@@ -276,6 +286,7 @@ export const API_ERROR_CODES = [
   "last_broadcaster_cannot_be_removed",
   "event_origin_invalid",
   "event_tone_invalid",
+  "audit_area_invalid",
   "moderator_status_check_denied",
   "moderator_status_check_rate_limited",
   "moderator_status_check_failed",

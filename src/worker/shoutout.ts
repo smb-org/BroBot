@@ -45,10 +45,11 @@ export const fetchTwitchUserByLogin = async (
   });
   if (!result.ok) throw new Error("Twitch user search failed.");
   const userData: unknown = result.data.data;
-  if (!Array.isArray(userData)) return null;
+  if (!Array.isArray(userData)) throw new Error("Twitch user search returned an invalid response.");
+  if (userData.length === 0) return null;
   const first: unknown = userData[0];
   if (!isRecord(first) || typeof first.id !== "string" || typeof first.login !== "string" ||
-      typeof first.display_name !== "string") return null;
+      typeof first.display_name !== "string") throw new Error("Twitch user search returned an invalid user.");
   return {
     userId: first.id,
     login: first.login,
