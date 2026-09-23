@@ -305,6 +305,7 @@ export function TextArea({
               multiline
               variant="unstyled"
               className="template-field__input"
+              styles={{ input: { backgroundColor: "transparent", border: 0, boxShadow: "none" } }}
               ref={textareaRef}
               value={value}
               onChange={(event) => { handleValueChange(event.currentTarget.value, event.currentTarget); }}

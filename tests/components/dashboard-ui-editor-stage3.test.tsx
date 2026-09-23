@@ -3,7 +3,7 @@ import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TemplateVariable } from "../../src/template";
-import { ConfirmDialog, EditorShell, Field, FieldPair, NumberField, SettingsEditor, TagInput, TemplateText, TextArea, UiProvider, type SettingsEditorSpec, type TextAreaMessages, type TemplateVariableOption } from "../../src/dashboard/ui";
+import { Button, ConfirmDialog, EditorShell, Field, FieldPair, NumberField, SettingsEditor, TagInput, TemplateText, TextArea, UiProvider, type SettingsEditorSpec, type TextAreaMessages, type TemplateVariableOption } from "../../src/dashboard/ui";
 import { ChoiceCards } from "../../src/dashboard/ui/ChoiceCards";
 import { SegmentedControl } from "../../src/dashboard/ui/SegmentedControl";
 import { Switch } from "../../src/dashboard/ui/Switch";
@@ -52,6 +52,8 @@ describe("editor field seam", () => {
     );
 
     const name = screen.getByRole("textbox", { name: "Command name" });
+    expect(name.closest(".ui-field--prefixed")).toBeInTheDocument();
+    expect(document.querySelector(".ui-field__prefix")).toHaveTextContent("!");
     fireEvent.change(name, { target: { value: "!HELLO" } });
     expect(onChange).toHaveBeenCalledWith("hello");
     fireEvent.change(screen.getByRole("textbox", { name: "Shoutout name" }), { target: { value: "@VIEWER" } });
@@ -104,6 +106,14 @@ describe("editor field seam", () => {
     }
     renderUi(<Harness />);
     const field = screen.getByRole("spinbutton", { name: "Cooldown" });
+    const stepper = field.closest(".ui-number-field__stepper");
+    expect(stepper?.children).toHaveLength(3);
+    expect(stepper?.children[0]).toHaveClass("mantine-Button-root");
+    expect(stepper?.children[1]).toContainElement(field);
+    expect(stepper?.children[2]).toHaveClass("mantine-Button-root");
+    const helperId = field.getAttribute("aria-describedby")?.split(" ").find((part) => (document.getElementById(part)?.textContent ?? "").includes("From zero to ten"));
+    expect(helperId).toBeDefined();
+    expect(document.getElementById(helperId ?? "")?.closest(".ui-number-field__stepper")).toBe(stepper);
     fireEvent.click(screen.getByRole("button", { name: "Increase cooldown" }));
     expect(field).toHaveValue("10");
     expect(screen.getByRole("button", { name: "Increase cooldown" })).toBeDisabled();
@@ -193,6 +203,7 @@ describe("editor field seam", () => {
     fireEvent.paste(input, { clipboardData: { getData: () => "!Hi, hey" } });
     expect(await screen.findByText("!hi")).toBeInTheDocument();
     expect(screen.getByText("!hey")).toBeInTheDocument();
+    expect(document.querySelectorAll(".ui-tag-input__pill-label")).toHaveLength(2);
     expect(screen.getByText("2 von 2")).toBeInTheDocument();
     expect(input).toBeDisabled();
     expect(screen.getByRole("button", { name: "Remove alias !hi" })).toBeEnabled();
@@ -234,9 +245,11 @@ describe("template field", () => {
     try {
       renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user} {viewer}" variables={templateOptions} onChange={() => {}} messages={textAreaMessages} />);
       expect(document.querySelector(".template-field__mirror")).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hi {user} {viewer}");
       await act(async () => { resolveFonts?.(); await ready; });
       const mirror = document.querySelector<HTMLElement>(".template-field__mirror");
       expect(mirror).toHaveAttribute("aria-hidden", "true");
+      expect(mirror).toHaveTextContent("Hi {user} {viewer}");
       expect(Array.from(mirror?.querySelectorAll("[data-kind='known']") ?? []).map((part) => [part.textContent, part.getAttribute("data-start")])).toEqual([["{user}", "3"]]);
       expect(Array.from(mirror?.querySelectorAll("[data-kind='unknown']") ?? []).map((part) => [part.textContent, part.getAttribute("data-start")])).toEqual([["{viewer}", "10"]]);
       const input = screen.getByRole("textbox", { name: "Reply" });
@@ -460,6 +473,26 @@ describe("EditorShell and declaration renderer", () => {
     renderUi(<ConfirmDialog opened title="Discard changes?" description="Unsaved data will be lost." cancelLabel="Keep editing" onCancel={() => {}} alternative={{ label: "Save and switch", onClick: () => {} }} confirmLabel="Discard and switch" onConfirm={() => {}} danger />);
     const buttons = within(screen.getByRole("dialog")).getAllByRole("button").map((button) => button.textContent).filter((text) => text.length > 0);
     expect(buttons).toEqual(["Keep editing", "Save and switch", "Discard and switch"]);
+  });
+
+  it("keeps the persistent save bar after the form body as the editor's final child", () => {
+    renderUi(<EditorShell {...baseProps} />);
+    const editor = document.querySelector(".ui-editor-shell");
+    expect(editor?.lastElementChild).toHaveClass("ui-save-bar");
+    expect(editor?.querySelector(".ui-editor-shell__form")?.lastElementChild).toHaveClass("ui-editor-shell__body");
+  });
+
+  it("renders every confirmation action in full and gives subtle danger buttons an outline", () => {
+    renderUi(<div>
+      <ConfirmDialog opened title="Unsaved changes" description="Choose what to do." cancelLabel="Weiter bearbeiten" onCancel={() => {}} alternative={{ label: "Speichern und wechseln", onClick: () => {} }} confirmLabel="Verwerfen und wechseln" onConfirm={() => {}} />
+      <Button icon="remove" danger="subtle">Delete command</Button>
+    </div>);
+    expect(screen.getByRole("button", { name: "Weiter bearbeiten" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Verwerfen und wechseln" })).toBeInTheDocument();
+    const deleteButton = screen.getByRole("button", { name: "Delete command" });
+    expect(deleteButton).toHaveAttribute("data-variant", "default");
+    expect(deleteButton.style.getPropertyValue("--button-bd")).toBe("1px solid #403c38");
   });
 
   it("renders settings from a typed declaration and catalogue with helper descriptions on every field", () => {

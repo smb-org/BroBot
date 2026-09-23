@@ -441,7 +441,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
 
   const propertyList = <dl className="properties command-properties">
     <div><dt>{labels.name}</dt><dd className="mono">!{draft.name}</dd></div>
-    <div><dt>{labels.active}</dt><dd><Switch label={labels.active} hint={labels.activeImmediately} checked={active} pending={activePending} onChange={(next) => { void toggleActive(next); }} layout="inline" /></dd></div>
+    <div><dt>{labels.active}</dt><dd><Switch ariaLabel={labels.active} hint={labels.activeImmediately} checked={active} pending={activePending} onChange={(next) => { void toggleActive(next); }} layout="inline" /></dd></div>
     <div><dt>{labels.aliases}</dt><dd className="mono">{props.aliases.length === 0 ? labels.noAliases : props.aliases.map((alias) => `!${alias}`).join(", ")}</dd></div>
     <div><dt>{labels.kind}</dt><dd>{props.kind}</dd></div>
     <div><dt>{labels.response}</dt><dd>{draft.kind === "text" ? <TemplateText value={props.text} variables={labelsForVariables} /> : <TemplateText value={listPreview} variables={[]} />}</dd></div>
@@ -457,7 +457,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     </>}
   </dl>;
 
-  const deleteButton = command === null ? undefined : <Button icon="remove" danger onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>;
+  const deleteButton = command === null ? undefined : <Button icon="remove" danger="subtle" onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>;
   return <>
     <EditorShell
       ariaLabel={isCreate ? labels.add : labels.details(command.name)}

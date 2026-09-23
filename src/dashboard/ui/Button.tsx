@@ -14,7 +14,7 @@ interface ButtonBaseProps {
    *  red" in docs/input/DESIGN-neu.md. A deleting action carries this
    *  permanently; it overrides `variant` because a danger button is never
    *  "quiet". */
-  danger?: boolean;
+  danger?: boolean | "subtle";
   disabled?: boolean;
   ariaDisabled?: boolean;
   /** Points at the reason line for a disabled action -- visible, disabled,
@@ -62,6 +62,14 @@ const dangerStyle: CSSProperties = {
   "--button-hover-color": "#ffffff",
 } as CSSProperties;
 
+const subtleDangerStyle: CSSProperties = {
+  "--button-color": colors.errorText,
+  "--button-hover-color": colors.errorText,
+  "--button-bg": "transparent",
+  "--button-hover": colors.errorFill,
+  "--button-bd": `1px solid ${colors.hairlineStrong}`,
+} as CSSProperties;
+
 /**
  * Neutral is Mantine's `default`, primary is `filled` on the brand color,
  * subtle is recolored to Text-2, secondary reuses `default`, and danger is
@@ -84,9 +92,11 @@ export function Button(props: ButtonProps) {
   } = props;
   const iconOnly = props.iconOnly === true;
   const icon = props.icon;
-  const mantineVariant = danger ? "filled" : variant === "primary" ? "filled" : variant === "subtle" ? "subtle" : "default";
-  const buttonStyle = danger ? dangerStyle : variant === "subtle" ? subtleStyle : undefined;
-  const fontWeight = danger ? undefined : variant === "primary" ? 600 : 500;
+  const filledDanger = danger === true;
+  const subtleDanger = danger === "subtle";
+  const mantineVariant = filledDanger ? "filled" : variant === "primary" ? "filled" : variant === "subtle" ? "subtle" : "default";
+  const buttonStyle = filledDanger ? dangerStyle : subtleDanger ? subtleDangerStyle : variant === "subtle" ? subtleStyle : undefined;
+  const fontWeight = filledDanger ? undefined : variant === "primary" ? 600 : 500;
   const buttonClassName = [className, leadingIconClassName(props), iconOnly ? "ui-button--icon-only" : "", iconOnly && size === "compact" ? "ui-button--icon-only-compact" : ""]
     .filter(Boolean)
     .join(" ") || undefined;

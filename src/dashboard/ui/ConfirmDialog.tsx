@@ -7,7 +7,7 @@ import { Button } from "./Button";
  * a title, a description and two actions, never children -- the seam
  * enforces that this is only ever used for confirmations, never a form or
  * an editor. Cancel is `subtle` and starts focused; the action is `danger`
- * or `filled`. Modal chrome (radius, shadow, surface, 420px width, the
+ * or `filled`. Modal chrome (radius, shadow, surface, 720px width, the
  * 60%-opacity backdrop) comes from the theme's `Modal` override.
  */
 export interface ConfirmDialogProps {
@@ -42,12 +42,12 @@ export function ConfirmDialog({
   error,
 }: ConfirmDialogProps) {
   return (
-    <Modal opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={420} centered closeOnEscape={!pending} trapFocus returnFocus>
+    <Modal opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={720} centered closeOnEscape={!pending} trapFocus returnFocus>
       <Text size="sm" c="dimmed">
         {description}
       </Text>
       {error === undefined ? null : <p className="form-error" role="alert">{error}</p>}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
+      <div className="ui-confirm-dialog__actions">
         <Button variant="subtle" onClick={onCancel} autoFocus disabled={pending}>
           {cancelLabel}
         </Button>

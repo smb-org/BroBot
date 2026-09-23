@@ -192,27 +192,27 @@ export function EditorShell({
               </div>
             )}
           </div>
-          <SaveBar
-            persistent
-            dirty={dirty}
-            pending={pending}
-            saved={saved}
-            {...(error === undefined ? {} : { error })}
-            invalid={hasInvalid}
-            {...(invalidMessage === undefined ? {} : { invalidMessage })}
-            {...(warnings === undefined ? {} : { warnings })}
-            {...(warningStatusLabel === undefined ? {} : { warningStatusLabel })}
-            {...(conflict === undefined ? {} : { conflict })}
-            {...(footer === undefined ? {} : { footer })}
-            onSave={onSave}
-            onInvalidSave={focusFirstInvalid}
-            onDiscard={onDiscard}
-            saveLabel={saveLabel}
-            discardLabel={discardLabel}
-            savedLabel={savedLabel}
-            pendingLabel={pendingLabel}
-          />
         </form>
+        <SaveBar
+          persistent
+          dirty={dirty}
+          pending={pending}
+          saved={saved}
+          {...(error === undefined ? {} : { error })}
+          invalid={hasInvalid}
+          {...(invalidMessage === undefined ? {} : { invalidMessage })}
+          {...(warnings === undefined ? {} : { warnings })}
+          {...(warningStatusLabel === undefined ? {} : { warningStatusLabel })}
+          {...(conflict === undefined ? {} : { conflict })}
+          {...(footer === undefined ? {} : { footer })}
+          onSave={onSave}
+          onInvalidSave={focusFirstInvalid}
+          onDiscard={onDiscard}
+          saveLabel={saveLabel}
+          discardLabel={discardLabel}
+          savedLabel={savedLabel}
+          pendingLabel={pendingLabel}
+        />
       </section>
     </FormDensity.Provider>
   );

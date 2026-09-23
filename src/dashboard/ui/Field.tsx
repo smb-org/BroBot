@@ -64,7 +64,7 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
 
   return (
     <TextInput
-      className={className}
+      className={[className, prefix === undefined ? undefined : "ui-field--prefixed"].filter(Boolean).join(" ") || undefined}
       label={label}
       description={description}
       error={errorNode}
@@ -83,6 +83,7 @@ export function Field({ label, hint, error, value, onChange, placeholder, disabl
       name={name}
       id={id}
       leftSection={leading}
+      leftSectionWidth={prefix === undefined ? undefined : 36}
       leftSectionPointerEvents="none"
       styles={{
         ...(prefix === undefined ? {} : { section: { color: "var(--text-3)", fontFamily: "var(--mantine-font-family-monospace)", borderRight: "1px solid var(--line)" } }),

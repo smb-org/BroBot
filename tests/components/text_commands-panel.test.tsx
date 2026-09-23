@@ -377,6 +377,7 @@ describe("Text command editor", () => {
     const readonly = editor();
     expect(within(readonly).getByText("Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.")).toBeInTheDocument();
     expect(within(readonly).getByText("!hey")).toBeInTheDocument();
+    expect(within(readonly).getAllByText("Aktiv")).toHaveLength(1);
     expect(within(readonly).getAllByText("Antwort")).toHaveLength(2);
     expect(within(readonly).getByText("nur online")).toBeInTheDocument();
     expect(within(readonly).getByText("aus")).toBeInTheDocument();
