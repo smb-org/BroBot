@@ -134,6 +134,8 @@ export const EVENT_CODES = [
   "text_commands.not_authorized",
   "text_commands.unknown",
   "text_commands.invalid",
+  "text_commands.lookup_unavailable",
+  "text_commands.argument_missing",
 ] as const;
 export type EventCode = (typeof EVENT_CODES)[number];
 

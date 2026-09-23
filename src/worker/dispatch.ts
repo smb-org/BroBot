@@ -1,5 +1,5 @@
 import type { EventCode } from "../contracts/values";
-import type { BotModule, ModuleAction, ModuleActor, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleResult, ModuleStreamState } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState } from "../modules/contract";
 import type { RealtimeEnvelope } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
 import {
@@ -10,13 +10,15 @@ import {
 } from "./db/channel-modules";
 import { sendChatMessage } from "./chat";
 import { sendChatAnnouncement } from "./announcement";
-import { sendShoutout } from "./shoutout";
+import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
 import { publishRealtimeMessage } from "./realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
 import { readChannelStreamState, writeEventSubStreamState, writeHelixStreamStateIfUnknown } from "./db/stream-state";
+import { getBotIdentity } from "./db/bot-identity";
+import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -77,6 +79,85 @@ const streamStateForEvent = async (
   const storedByHelix = await writeHelixStreamStateIfUnknown(environment.DB, channelId, fromHelix, new Date().toISOString());
   if (storedByHelix) return fromHelix;
   return await readChannelStreamState(environment.DB, channelId) ?? fromHelix;
+};
+
+const firstDataRecord = (result: unknown): Readonly<Record<string, unknown>> | null => {
+  if (!recordValue(result) || !arrayValue(result.data)) return null;
+  const first = result.data[0];
+  return recordValue(first) ? first : null;
+};
+
+const channelInfoFor = async (
+  environment: DispatchEnvironment,
+  channelId: string,
+  fetcher: typeof fetch,
+): Promise<ModuleChannelInfo | null> => {
+  try {
+    const accessToken = await getAppAccessToken(environment as unknown as Env, new Date().toISOString(), fetcher);
+    const [channelResult, streamResult] = await Promise.all([
+      helixRequest<{ data?: unknown }>({
+        url: "https://api.twitch.tv/helix/channels",
+        query: { broadcaster_id: channelId },
+        accessToken,
+        clientId: environment.TWITCH_CLIENT_ID,
+        fetcher,
+      }),
+      helixRequest<{ data?: unknown }>({
+        url: "https://api.twitch.tv/helix/streams",
+        query: { user_id: channelId, type: "live" },
+        accessToken,
+        clientId: environment.TWITCH_CLIENT_ID,
+        fetcher,
+      }),
+    ]);
+    if (!channelResult.ok || !streamResult.ok) return null;
+    const channel = firstDataRecord(channelResult.data);
+    if (channel === null || typeof channel.title !== "string" || typeof channel.game_name !== "string") return null;
+    const streams = recordValue(streamResult.data) && arrayValue(streamResult.data.data) ? streamResult.data.data : null;
+    if (streams === null) return null;
+    const stream = streams[0];
+    if (stream === undefined) return { title: channel.title, gameName: channel.game_name, startedAt: null };
+    if (!recordValue(stream) || typeof stream.started_at !== "string") return null;
+    return { title: channel.title, gameName: channel.game_name, startedAt: stream.started_at };
+  } catch {
+    return null;
+  }
+};
+
+const followedAtFor = async (
+  environment: DispatchEnvironment,
+  channelId: string,
+  userId: string,
+  fetcher: typeof fetch,
+): Promise<ModuleFollowedAt> => {
+  try {
+    const identity = await getBotIdentity(environment.DB);
+    if (identity === null) return "unavailable";
+    const value = await decryptJson<{ token?: unknown }>(
+      identity.accessTokenCiphertext,
+      parseKeyRing(getTokenEncryptionKeys(environment)),
+    );
+    if (value === null || typeof value.token !== "string" || value.token.length === 0) return "unavailable";
+    const result = await helixRequest<{ data?: unknown }>({
+      url: "https://api.twitch.tv/helix/channels/followers",
+      query: { broadcaster_id: channelId, user_id: userId, moderator_id: identity.userId },
+      accessToken: value.token,
+      clientId: environment.TWITCH_CLIENT_ID,
+      fetcher,
+    });
+    if (!result.ok || !recordValue(result.data) || !arrayValue(result.data.data)) return "unavailable";
+    if (result.data.data.length === 0) return null;
+    const first = result.data.data[0];
+    return recordValue(first) && typeof first.followed_at === "string" ? first.followed_at : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+};
+
+const channelLanguageFor = async (db: D1Database, channelId: string): Promise<ModuleLanguage> => {
+  const row = await db.prepare("SELECT language FROM channels WHERE channel_id = ?").bind(channelId)
+    .first<{ language: ModuleLanguage }>();
+  return row?.language === "en" ? "en" : "de";
 };
 
 const recordValue = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -218,7 +299,29 @@ const runActions = async (
         continue;
       }
       if (action.kind === "shoutout") {
-        const result = await sendShoutout(environment, channelId, action.targetChannelId, fetcher);
+        let targetChannelId: string;
+        if ("targetLogin" in action) {
+          try {
+            const user = await fetchTwitchUserByLogin(fetcher, environment as unknown as Env, action.targetLogin, "app");
+            if (user === null) {
+              diagnostics.push({
+                code: "host.shoutout.failed" satisfies EventCode,
+                detail: { cause: "twitch_user_not_found", target: action.targetLogin },
+              });
+              continue;
+            }
+            targetChannelId = user.userId;
+          } catch {
+            diagnostics.push({
+              code: "host.shoutout.failed" satisfies EventCode,
+              detail: { cause: "twitch_user_search_failed", target: action.targetLogin },
+            });
+            continue;
+          }
+        } else {
+          targetChannelId = action.targetChannelId;
+        }
+        const result = await sendShoutout(environment, channelId, targetChannelId, fetcher);
         diagnostics.push(result.sent
           ? { code: "host.shoutout.sent" satisfies EventCode, detail: result.detail }
           : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } });
@@ -272,9 +375,28 @@ export const dispatchEventSubNotification = async (
   const actor = await actorForEvent(environment.DB, event.channelId, event.payload);
   const newEntries: WrittenModuleDiagnostic[] = [];
   let streamStatePromise: Promise<ModuleStreamState> | undefined;
+  let channelInfoPromise: Promise<ModuleChannelInfo | null> | undefined;
+  let channelLanguagePromise: Promise<ModuleLanguage> | undefined;
+  const followedAtPromises = new Map<string, Promise<ModuleFollowedAt>>();
   const streamState = (): Promise<ModuleStreamState> => {
     streamStatePromise ??= streamStateForEvent(environment, event.channelId, fetcher);
     return streamStatePromise;
+  };
+  const channelInfo = (): Promise<ModuleChannelInfo | null> => {
+    channelInfoPromise ??= channelInfoFor(environment, event.channelId, fetcher);
+    return channelInfoPromise;
+  };
+  const followedAt = (userId: string): Promise<ModuleFollowedAt> => {
+    let pending = followedAtPromises.get(userId);
+    if (pending === undefined) {
+      pending = followedAtFor(environment, event.channelId, userId, fetcher);
+      followedAtPromises.set(userId, pending);
+    }
+    return pending;
+  };
+  const channelLanguage = (): Promise<ModuleLanguage> => {
+    channelLanguagePromise ??= channelLanguageFor(environment.DB, event.channelId);
+    return channelLanguagePromise;
   };
 
   for (const moduleId of unknownModules) {
@@ -312,6 +434,9 @@ export const dispatchEventSubNotification = async (
             DB: environment.DB,
             authorizeMutation: authorizeModuleMutation,
             streamState,
+            channelInfo,
+            followedAt,
+            channelLanguage,
           });
     } catch (error: unknown) {
       // A module that throws doesn't take down the worker or the other

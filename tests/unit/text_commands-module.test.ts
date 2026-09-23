@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { textCommandModule, type TextCommandMinimumTier } from "../../src/modules/text_commands";
+import { textCommandModule, type TextCommandKind, type TextCommandMinimumTier } from "../../src/modules/text_commands";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import {
@@ -77,6 +77,22 @@ const createCommand = async (
     minimumTier: minimumTier,
     cooldownSeconds: 5,
     now: NOW,
+  }, { userId: "user-1" });
+};
+
+const createBuiltinCommand = async (
+  database: TestD1Database,
+  name: string,
+  kind: TextCommandKind,
+  text: string,
+  templates: { offlineText?: string; notFollowingText?: string; unavailableText?: string; usageText?: string } = {},
+): Promise<void> => {
+  const repository = createTextCommandRepository(
+    database as unknown as D1Database,
+    () => ({ sql: "AND 1 = 1", values: [] as const }),
+  );
+  await repository.create({
+    channelId: "kanal-a", name, kind, text, cooldownSeconds: 0, now: NOW, ...templates,
   }, { userId: "user-1" });
 };
 
@@ -223,6 +239,150 @@ describe("Text commands module", () => {
       expect(preparedSql.some((sql) => sql.includes("channel_stream_state"))).toBe(false);
       expect(batchSizes).toEqual([2]);
       expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses Helix channel data for uptime and game, and diagnoses a failed channel lookup", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "laufzeit", "uptime", "{channel}|{uptime}", { offlineText: "{channel} ist offline" });
+      await createBuiltinCommand(database, "spiel", "game", "{game}|{title}");
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+        const url = requestedUrl(input);
+        if (url.includes("/helix/channels?")) return Promise.resolve(new Response(JSON.stringify({ data: [{ title: "Streamtitel", game_name: "Stardew Valley" }] }), { status: 200 }));
+        if (url.includes("/helix/streams?")) return Promise.resolve(new Response(JSON.stringify({ data: [{ started_at: "2026-09-19T10:00:00.000Z" }] }), { status: 200 }));
+        return Promise.resolve(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+      });
+
+      await dispatchEventSubNotification(environment(database), eventFor("!laufzeit"), fetcher, [textCommandModule]);
+      await dispatchEventSubNotification(environment(database), eventFor("!spiel", "kanal-a", NOW, "game-trigger"), fetcher, [textCommandModule]);
+
+      expect(fetcher.mock.calls.map(([input]) => requestedUrl(input))).toEqual(expect.arrayContaining([
+        expect.stringContaining("/helix/channels?broadcaster_id=kanal-a"),
+        expect.stringContaining("/helix/streams?user_id=kanal-a&type=live"),
+        expect.stringContaining("/helix/chat/messages"),
+      ]));
+      const chatBodies = fetcher.mock.calls.flatMap(([input, init]) => {
+        if (typeof init?.body !== "string") return [];
+        return requestedUrl(input).includes("/helix/chat/messages") ? [JSON.parse(init.body) as Record<string, unknown>] : [];
+      });
+      expect(chatBodies.map((entry) => entry.message)).toEqual(expect.arrayContaining([
+        "kanal-a|2 Std. 0 Min.", "Stardew Valley|Streamtitel",
+      ]));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("records a Helix lookup failure and keeps uptime chat silent", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "uptime", "uptime", "Live seit {uptime}", { offlineText: "Offline" });
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => Promise.resolve(
+        new Response(JSON.stringify({ message: "temporary failure" }), {
+          status: requestedUrl(input).includes("/helix/channels?") ? 503 : 200,
+        }),
+      ));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!uptime"), fetcher, [textCommandModule]);
+
+      expect(fetcher.mock.calls).toHaveLength(2);
+      expect(fetcher.mock.calls.some(([input]) => requestedUrl(input).includes("/helix/chat/messages"))).toBe(false);
+      expect(await eventCodes(database)).toContain("text_commands.lookup_unavailable");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("returns the followage unavailable template on a BOT USER Helix failure and logs it", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "followage", "followage", "{user} folgt seit {followage}", {
+        notFollowingText: "{user} folgt noch nicht", unavailableText: "Daten fehlen",
+      });
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ message: "not moderator" }), { status: 403 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!followage"), fetcher, [textCommandModule]);
+
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/channels/followers?");
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("broadcaster_id=kanal-a");
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("user_id=user-1");
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("moderator_id=bot-1");
+      expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("Authorization")).toBe("Bearer bot-token");
+      expect(body(fetcher, 1).message).toBe("Daten fehlen");
+      expect(await eventCodes(database)).toContain("text_commands.lookup_unavailable");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("resolves shoutout logins in the host, logs Twitch cooldowns, and still sends the template", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "so", "shoutout", "Schaut bei {target} vorbei");
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "target-id", login: "streamerin", display_name: "Streamerin" }] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ message: "cooldown" }), { status: 429 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!so Streamerin"), fetcher, [textCommandModule]);
+
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/users?login=streamerin");
+      expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("Authorization")).toBe("Bearer app-token");
+      expect(requestedUrl(fetcher.mock.calls[1]?.[0])).toContain("/helix/chat/shoutouts?");
+      expect(requestedUrl(fetcher.mock.calls[2]?.[0])).toContain("/helix/chat/messages");
+      expect(body(fetcher, 2).message).toBe("Schaut bei streamerin vorbei");
+      const failure = await database.prepare("SELECT code, detail_json FROM event_log WHERE code = 'host.shoutout.failed'")
+        .first<{ code: string; detail_json: string }>();
+      expect(failure?.code).toBe("host.shoutout.failed");
+      expect(failure?.detail_json).toContain("rate_limited");
+      expect(await eventCodes(database)).toContain("host.chat.sent");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("diagnoses an unknown shoutout target and still sends the following template chat", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "so", "shoutout", "Schaut bei {target} vorbei", { usageText: "Nutzung: !so <name>" });
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!so unbekannt"), fetcher, [textCommandModule]);
+
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/users?login=unbekannt");
+      expect(requestedUrl(fetcher.mock.calls[1]?.[0])).toContain("/helix/chat/messages");
+      expect(body(fetcher, 1).message).toBe("Schaut bei unbekannt vorbei");
+      const failure = await database.prepare("SELECT detail_json FROM event_log WHERE code = 'host.shoutout.failed'")
+        .first<{ detail_json: string }>();
+      expect(failure?.detail_json).toContain("twitch_user_not_found");
+      expect(await eventCodes(database)).toContain("host.chat.sent");
     } finally {
       database.close();
     }

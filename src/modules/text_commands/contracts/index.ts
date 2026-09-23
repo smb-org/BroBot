@@ -1,6 +1,7 @@
 import type { TemplateFields, TemplateVariable } from "../contract";
 
-export type TextCommandKind = "text" | "list";
+export const TEXT_COMMAND_KINDS = ["text", "list", "uptime", "followage", "game", "shoutout"] as const;
+export type TextCommandKind = (typeof TEXT_COMMAND_KINDS)[number];
 export const TEXT_COMMAND_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
 export type TextCommandMinimumTier = (typeof TEXT_COMMAND_MINIMUM_TIERS)[number];
 export const TEXT_COMMAND_RESPONSE_TYPES = ["say", "reply", "announcement"] as const;
@@ -14,6 +15,10 @@ export interface TextCommand {
   name: string;
   text: string;
   kind: TextCommandKind;
+  offlineText?: string;
+  notFollowingText?: string;
+  unavailableText?: string;
+  usageText?: string;
   enabled: boolean;
   minimumTier: TextCommandMinimumTier;
   cooldownSeconds: number;
@@ -31,6 +36,10 @@ export interface NewTextCommand {
   name: string;
   text: string;
   kind: TextCommandKind;
+  offlineText?: string;
+  notFollowingText?: string;
+  unavailableText?: string;
+  usageText?: string;
   minimumTier?: TextCommandMinimumTier;
   cooldownSeconds: number;
   aliases?: readonly string[];
@@ -46,6 +55,10 @@ export interface TextCommandChange {
   newName: string;
   text: string;
   kind: TextCommandKind;
+  offlineText?: string;
+  notFollowingText?: string;
+  unavailableText?: string;
+  usageText?: string;
   enabled: boolean;
   onlyToggle?: boolean;
   minimumTier?: TextCommandMinimumTier;
@@ -74,6 +87,42 @@ export const TEXT_COMMAND_VARIABLES = [
   { name: "channel", sample: "beispielkanal", maxLength: 25 },
 ] as const satisfies readonly TemplateVariable[];
 
+export const TEXT_COMMAND_UPTIME_VARIABLES = [
+  ...TEXT_COMMAND_VARIABLES,
+  { name: "uptime", sample: "2 Std. 14 Min.", maxLength: 32 },
+] as const satisfies readonly TemplateVariable[];
+
+export const TEXT_COMMAND_FOLLOWAGE_VARIABLES = [
+  ...TEXT_COMMAND_VARIABLES,
+  { name: "followage", sample: "1 Jahr, 3 Monate", maxLength: 48 },
+] as const satisfies readonly TemplateVariable[];
+
+export const TEXT_COMMAND_GAME_VARIABLES = [
+  TEXT_COMMAND_VARIABLES[1],
+  { name: "game", sample: "Minecraft", maxLength: 100 },
+  { name: "title", sample: "A cozy evening", maxLength: 140 },
+] as const satisfies readonly TemplateVariable[];
+
+export const TEXT_COMMAND_SHOUTOUT_VARIABLES = [
+  TEXT_COMMAND_VARIABLES[0],
+  { name: "target", sample: "streamerin", maxLength: 25 },
+] as const satisfies readonly TemplateVariable[];
+
 export const TEXT_COMMAND_TEMPLATE_FIELDS = {
-  text: TEXT_COMMAND_VARIABLES,
-} as const satisfies TemplateFields<Pick<TextCommand, "text">>;
+  text: { text: TEXT_COMMAND_VARIABLES },
+  list: {},
+  uptime: {
+    text: TEXT_COMMAND_UPTIME_VARIABLES,
+    offlineText: [TEXT_COMMAND_VARIABLES[1]],
+  },
+  followage: {
+    text: TEXT_COMMAND_FOLLOWAGE_VARIABLES,
+    notFollowingText: TEXT_COMMAND_VARIABLES,
+    unavailableText: [],
+  },
+  game: { text: TEXT_COMMAND_GAME_VARIABLES },
+  shoutout: {
+    text: TEXT_COMMAND_SHOUTOUT_VARIABLES,
+    usageText: [],
+  },
+} as const satisfies Readonly<Record<TextCommandKind, TemplateFields<TextCommand>>>;

@@ -6,6 +6,7 @@ import type { TextCommand } from "./contracts";
 import type { TextCommandAliasConflict } from "./repository";
 import {
   TEXT_COMMAND_MAX_ALIASES,
+  TEXT_COMMAND_KINDS,
   TEXT_COMMAND_MINIMUM_TIERS,
   TEXT_COMMAND_RESPONSE_TYPES,
   TEXT_COMMAND_STREAM_CONDITIONS,
@@ -15,6 +16,7 @@ import type { ModuleRouteEnvironment } from "../contract";
 import { createTextCommandRepository } from "./adapters/d1";
 import { COMMAND_NAME_PATTERN, validCommandName } from "./domain";
 import { templateFieldsWarnings } from "../contract";
+import { textCommandDefaultsFor } from "./contracts/chat-defaults";
 
 const aliasesSchema = z.array(z.string().regex(COMMAND_NAME_PATTERN))
   .max(TEXT_COMMAND_MAX_ALIASES)
@@ -22,9 +24,13 @@ const aliasesSchema = z.array(z.string().regex(COMMAND_NAME_PATTERN))
 
 const bodySchema = z.object({
   name: z.string(),
-  kind: z.enum(["text", "list"]).default("text"),
+  kind: z.enum(TEXT_COMMAND_KINDS).default("text"),
   minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).default("everyone"),
   text: z.string().max(500).optional(),
+  offlineText: z.string().max(500).optional(),
+  notFollowingText: z.string().max(500).optional(),
+  unavailableText: z.string().max(500).optional(),
+  usageText: z.string().max(500).optional(),
   cooldownSeconds: z.number().int().min(0).max(86400),
   aliases: aliasesSchema.default([]),
   userCooldownSeconds: z.number().int().min(0).max(86400).default(0),
@@ -35,7 +41,11 @@ const bodySchema = z.object({
 const editBodySchema = z.object({
   name: z.string().optional(),
   text: z.string().max(500).optional(),
-  kind: z.enum(["text", "list"]).optional(),
+  kind: z.enum(TEXT_COMMAND_KINDS).optional(),
+  offlineText: z.string().max(500).optional(),
+  notFollowingText: z.string().max(500).optional(),
+  unavailableText: z.string().max(500).optional(),
+  usageText: z.string().max(500).optional(),
   cooldownSeconds: z.number().int().min(0).max(86400).optional(),
   minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).optional(),
   enabled: z.boolean().optional(),
@@ -47,6 +57,13 @@ const editBodySchema = z.object({
 
 const nowIso = (): string => new Date().toISOString();
 
+type TemplateInput = Pick<TextCommand, "offlineText" | "notFollowingText" | "unavailableText" | "usageText"> & { text: string };
+
+const defaultsForKind = (kind: TextCommand["kind"]): Partial<TemplateInput> =>
+  kind === "uptime" || kind === "followage" || kind === "game" || kind === "shoutout"
+    ? textCommandDefaultsFor(kind)
+    : {};
+
 const readBody = async (request: Request): Promise<unknown> => {
   try {
     return await request.json();
@@ -55,11 +72,37 @@ const readBody = async (request: Request): Promise<unknown> => {
   }
 };
 
-const validBody = async (request: Request): Promise<z.infer<typeof bodySchema> | null> => {
+type ValidTextCommandBody = Omit<z.infer<typeof bodySchema>, "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText"> & TemplateInput;
+
+const validBody = async (request: Request): Promise<ValidTextCommandBody | null> => {
   const parsed = bodySchema.safeParse(await readBody(request));
   if (!parsed.success || !validCommandName(parsed.data.name) || parsed.data.aliases.includes(parsed.data.name)) return null;
-  if (parsed.data.kind === "text" && (parsed.data.text === undefined || parsed.data.text.trim().length === 0)) return null;
-  return { ...parsed.data, text: parsed.data.kind === "list" ? "" : parsed.data.text ?? "" };
+  const defaults = defaultsForKind(parsed.data.kind);
+  const text = parsed.data.kind === "list" ? "" : parsed.data.text ?? defaults.text ?? "";
+  if (parsed.data.kind !== "list" && text.trim().length === 0) return null;
+  const offlineText = parsed.data.offlineText ?? defaults.offlineText;
+  const notFollowingText = parsed.data.notFollowingText ?? defaults.notFollowingText;
+  const unavailableText = parsed.data.unavailableText ?? defaults.unavailableText;
+  const usageText = parsed.data.usageText ?? defaults.usageText;
+  const body: ValidTextCommandBody = {
+    name: parsed.data.name,
+    kind: parsed.data.kind,
+    minimumTier: parsed.data.minimumTier,
+    cooldownSeconds: parsed.data.cooldownSeconds,
+    aliases: parsed.data.aliases,
+    userCooldownSeconds: parsed.data.userCooldownSeconds,
+    streamCondition: parsed.data.streamCondition,
+    responseType: parsed.data.responseType,
+    text,
+    ...(offlineText === undefined ? {} : { offlineText }),
+    ...(notFollowingText === undefined ? {} : { notFollowingText }),
+    ...(unavailableText === undefined ? {} : { unavailableText }),
+    ...(usageText === undefined ? {} : { usageText }),
+  };
+  if (parsed.data.kind === "uptime" && body.offlineText?.trim().length === 0) return null;
+  if (parsed.data.kind === "followage" && (body.notFollowingText?.trim().length === 0 || body.unavailableText?.trim().length === 0)) return null;
+  if (parsed.data.kind === "shoutout" && body.usageText?.trim().length === 0) return null;
+  return body;
 };
 
 const validEditBody = async (request: Request): Promise<z.infer<typeof editBodySchema> | null> => {
@@ -99,14 +142,18 @@ textCommandRoutes.post("/commands", async (context) => {
   const now = nowIso();
   const warnings = body.kind === "list"
     ? []
-    : templateFieldsWarnings({ text: body.text ?? "" }, TEXT_COMMAND_TEMPLATE_FIELDS);
-  const created = await repository.create({ channelId, ...body, text: body.text ?? "", now }, context.get("actor"));
+    : templateFieldsWarnings(body, TEXT_COMMAND_TEMPLATE_FIELDS[body.kind]);
+  const created = await repository.create({ channelId, ...body, now }, context.get("actor"));
   if (created.ok) {
     const command: TextCommand = {
       channelId,
       name: body.name,
-      text: body.text ?? "",
+      text: body.text,
       kind: body.kind,
+      ...(body.offlineText === undefined ? {} : { offlineText: body.offlineText }),
+      ...(body.notFollowingText === undefined ? {} : { notFollowingText: body.notFollowingText }),
+      ...(body.unavailableText === undefined ? {} : { unavailableText: body.unavailableText }),
+      ...(body.usageText === undefined ? {} : { usageText: body.usageText }),
       enabled: true,
       minimumTier: body.minimumTier,
       cooldownSeconds: body.cooldownSeconds,
@@ -142,8 +189,25 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const contentChanged = Object.keys(body).some((key) => key !== "enabled");
   if (contentChanged && !canManage(context.get("channelRole"))) return managementDenied(context);
   const kind = body.kind ?? before.kind;
-  const text = kind === "list" ? "" : body.text ?? before.text;
-  if (kind === "text" && text.trim().length === 0) {
+  const defaults = defaultsForKind(kind);
+  const kindChanged = kind !== before.kind;
+  const text = kind === "list" ? "" : body.text ?? (kindChanged ? defaults.text ?? before.text : before.text);
+  const offlineText = body.offlineText ?? (kindChanged ? defaults.offlineText : before.offlineText);
+  const notFollowingText = body.notFollowingText ?? (kindChanged ? defaults.notFollowingText : before.notFollowingText);
+  const unavailableText = body.unavailableText ?? (kindChanged ? defaults.unavailableText : before.unavailableText);
+  const usageText = body.usageText ?? (kindChanged ? defaults.usageText : before.usageText);
+  const templateValues: Pick<TextCommand, "offlineText" | "notFollowingText" | "unavailableText" | "usageText"> = {
+    ...(offlineText === undefined ? {} : { offlineText }),
+    ...(notFollowingText === undefined ? {} : { notFollowingText }),
+    ...(unavailableText === undefined ? {} : { unavailableText }),
+    ...(usageText === undefined ? {} : { usageText }),
+  };
+  if (kind !== "list" && text.trim().length === 0) {
+    return context.json({ error: "command_data_invalid" }, 400);
+  }
+  if ((kind === "uptime" && !templateValues.offlineText?.trim()) ||
+      (kind === "followage" && (!templateValues.notFollowingText?.trim() || !templateValues.unavailableText?.trim())) ||
+      (kind === "shoutout" && !templateValues.usageText?.trim())) {
     return context.json({ error: "command_data_invalid" }, 400);
   }
   const cooldownSeconds = body.cooldownSeconds ?? before.cooldownSeconds;
@@ -153,7 +217,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const responseType = body.responseType ?? before.responseType;
   const warnings = kind === "list"
     ? []
-    : templateFieldsWarnings({ text }, TEXT_COMMAND_TEMPLATE_FIELDS);
+    : templateFieldsWarnings({ text, ...templateValues }, TEXT_COMMAND_TEMPLATE_FIELDS[kind]);
   const authorizeMutation = contentChanged
     ? context.get("authorizeManagementMutation")
     : context.get("authorizeMutation");
@@ -168,6 +232,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     newName,
     text,
     kind,
+    ...templateValues,
     cooldownSeconds,
     minimumTier,
     enabled: body.enabled ?? before.enabled,
@@ -181,11 +246,11 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   if (changed.ok) {
     const command: TextCommand = {
       ...before,
-      ...body,
       channelId,
       name: newName,
       text,
       kind,
+      ...templateValues,
       cooldownSeconds,
       minimumTier,
       aliases: [...aliases],

@@ -1,13 +1,11 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactNode, type SyntheticEvent } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TemplateVariable } from "../../src/template";
 import { Button, ConfirmDialog, EditorShell, Field, FieldPair, NumberField, SettingsEditor, TagInput, TemplateText, TextArea, UiProvider, type SettingsEditorSpec, type TextAreaMessages, type TemplateVariableOption } from "../../src/dashboard/ui";
 import { ChoiceCards } from "../../src/dashboard/ui/ChoiceCards";
 import { SegmentedControl } from "../../src/dashboard/ui/SegmentedControl";
 import { Switch } from "../../src/dashboard/ui/Switch";
-import { templateHighlightParts } from "../../src/dashboard/ui/template-highlight";
 
 const renderUi = (node: ReactNode): ReturnType<typeof render> => render(<UiProvider>{node}</UiProvider>);
 
@@ -35,9 +33,22 @@ const textAreaMessages: TextAreaMessages = {
   worstCaseLength: (length) => `Mit den längsten Werten bis zu ${String(length)} Zeichen.`,
 };
 
+const originalRangeBounds = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
+
+beforeEach(() => {
+  if (originalRangeBounds === undefined) {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(0, 0, 0, 0),
+    });
+  }
+});
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  if (originalRangeBounds === undefined) delete (Range.prototype as unknown as { getBoundingClientRect?: () => DOMRect }).getBoundingClientRect;
+  else Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRangeBounds);
 });
 
 describe("editor field seam", () => {
@@ -237,31 +248,15 @@ describe("template field", () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
-  it("keeps the mirror hidden until fonts are ready, then marks token kinds and offsets, hides it from assistive technology, and syncs scroll", async () => {
-    const originalDescriptor = Object.getOwnPropertyDescriptor(document, "fonts");
-    let resolveFonts: (() => void) | undefined;
-    const ready = new Promise<void>((resolve) => { resolveFonts = resolve; });
-    Object.defineProperty(document, "fonts", { configurable: true, value: { ready } });
-    try {
-      renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user} {viewer}" variables={templateOptions} onChange={() => {}} messages={textAreaMessages} />);
-      expect(document.querySelector(".template-field__mirror")).not.toBeInTheDocument();
-      expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hi {user} {viewer}");
-      await act(async () => { resolveFonts?.(); await ready; });
-      const mirror = document.querySelector<HTMLElement>(".template-field__mirror");
-      expect(mirror).toHaveAttribute("aria-hidden", "true");
-      expect(mirror).toHaveTextContent("Hi {user} {viewer}");
-      expect(Array.from(mirror?.querySelectorAll("[data-kind='known']") ?? []).map((part) => [part.textContent, part.getAttribute("data-start")])).toEqual([["{user}", "3"]]);
-      expect(Array.from(mirror?.querySelectorAll("[data-kind='unknown']") ?? []).map((part) => [part.textContent, part.getAttribute("data-start")])).toEqual([["{viewer}", "10"]]);
-      const input = screen.getByRole("textbox", { name: "Reply" });
-      Object.defineProperty(input, "scrollTop", { configurable: true, writable: true, value: 38 });
-      Object.defineProperty(input, "scrollLeft", { configurable: true, writable: true, value: 4 });
-      fireEvent.scroll(input);
-      expect(mirror?.scrollTop).toBe(38);
-      expect(mirror?.scrollLeft).toBe(4);
-    } finally {
-      if (originalDescriptor === undefined) delete (document as unknown as { fonts?: FontFaceSet }).fonts;
-      else Object.defineProperty(document, "fonts", originalDescriptor);
-    }
+  it("renders known variable tint and unknown variable warning decorations around the same text", () => {
+    const { container } = renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user} {viewer}" variables={templateOptions} onChange={() => {}} messages={textAreaMessages} />);
+    const known = container.querySelectorAll(".template-field__decoration--known");
+    const unknown = container.querySelectorAll(".template-field__decoration--unknown");
+    expect(Array.from(known, (part) => part.textContent)).toEqual(["{user}"]);
+    expect(Array.from(unknown, (part) => part.textContent)).toEqual(["{viewer}"]);
+    expect(known[0]).toHaveAttribute("data-kind", "known");
+    expect(unknown[0]).toHaveAttribute("data-kind", "unknown");
+    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hi {user} {viewer}");
   });
 
   it("shows composing text, delays issue checks until composition ends, inserts chips at the saved selection, and handles suggestions", async () => {
@@ -336,23 +331,36 @@ describe("template field", () => {
     expect(parentKeyDown).not.toHaveBeenCalledWith(expect.objectContaining({ key: "Escape" }));
   });
 
+  it("keeps read-only text selectable and disables editing chips", () => {
+    renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user}" variables={templateOptions} readOnly onChange={() => {}} messages={textAreaMessages} />);
+    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "{user}" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "{viewers}" })).toBeDisabled();
+  });
+
   it("suggests replacement for an unknown token, shows worst-case warnings without blocking, and previews sample rendering", () => {
     const onIssuesChange = vi.fn();
+    function Harness() {
+      const [value, setValue] = useState("Hi {viewer}");
+      return (
+        <TextArea
+          label="Reply"
+          hint="What the bot writes."
+          value={value}
+          variables={templateOptions}
+          worstCaseLength={512}
+          maxLength={500}
+          onChange={setValue}
+          onIssuesChange={onIssuesChange}
+          preview={(template, values) => template.replace("{user}", values.user ?? "").replace("{viewer}", values.viewers ?? "")}
+          previewLabel="Preview"
+          previewSpeaker="BroBot"
+          messages={textAreaMessages}
+        />
+      );
+    }
     renderUi(
-      <TextArea
-        label="Reply"
-        hint="What the bot writes."
-        value="Hi {viewer}"
-        variables={templateOptions}
-        worstCaseLength={512}
-        maxLength={500}
-        onChange={() => {}}
-        onIssuesChange={onIssuesChange}
-        preview={(template, values) => template.replace("{user}", values.user ?? "").replace("{viewer}", values.viewers ?? "")}
-        previewLabel="Preview"
-        previewSpeaker="BroBot"
-        messages={textAreaMessages}
-      />,
+      <Harness />,
     );
     expect(screen.getByText(/Meintest du \{viewers\}/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "{viewers} einsetzen" })).toBeInTheDocument();
@@ -372,16 +380,6 @@ describe("template field", () => {
     expect(document.querySelector(".ui-template-text")).toHaveTextContent("{user} {viewer}");
   });
 
-  it("splits variable pieces with stable offsets inside the four millisecond render budget", () => {
-    const variable: TemplateVariable = { name: "a", sample: "sample", maxLength: 25 };
-    const value = "{a}".repeat(100) + "x".repeat(200);
-    const started = performance.now();
-    const pieces = templateHighlightParts(value, [variable]);
-    const duration = performance.now() - started;
-    expect(value.length).toBe(500);
-    expect(pieces.filter((piece) => piece.kind === "known")).toHaveLength(100);
-    expect(duration).toBeLessThan(4);
-  });
 });
 
 describe("EditorShell and declaration renderer", () => {

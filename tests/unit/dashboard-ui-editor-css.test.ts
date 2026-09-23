@@ -10,20 +10,20 @@ describe("editor seam styles", () => {
     expect(styles).toMatch(/\.ui-field-pair \{\s*display: grid; grid-template-columns: minmax\(0, 1fr\);/u);
   });
 
-  it("keeps the text mirror and textarea geometry shared, with fonts and forced-colors fallbacks", () => {
-    const geometry = styles.match(/\.template-field__mirror, \.template-field__input\s*\{([^}]+)\}/u)?.[1] ?? "";
+  it("keeps rich-textarea geometry and token decoration metrics aligned", () => {
+    const geometry = styles.match(/\.template-field \.template-field__input\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(geometry).toContain("font-size: 14px;");
     expect(geometry).toContain("line-height: 1.5;");
     expect(geometry).toContain("padding: 10px 12px;");
-    expect(styles).toContain(".template-field[data-highlight-ready=\"false\"] .template-field__mirror { visibility: hidden; }");
-    expect(styles).toContain("@media (forced-colors: active)");
-    expect(styles).toContain(".template-field[data-highlight-ready=\"true\"] .template-field__mirror { display: none; }");
-    expect(styles).toContain("color: CanvasText !important;");
-    expect(styles).toMatch(/\.template-field__input, \.template-field textarea, \.template-field \.mantine-Input-input \{[^}]*position: relative; z-index: 2;/u);
-    expect(styles).toContain("background: transparent !important; box-shadow: none !important;");
-    expect(styles).toContain("color: transparent !important; -webkit-text-fill-color: transparent !important;");
-    expect(styles).toContain("color: var(--text) !important; -webkit-text-fill-color: var(--text) !important;");
-    expect(styles).toContain("border: 0 !important;");
+    expect(styles).not.toContain("template-field__mirror");
+    expect(styles).not.toContain("data-highlight-ready");
+    const known = styles.match(/\.template-field__decoration--known\s*\{([^}]+)\}/u)?.[1] ?? "";
+    expect(known).toContain("color: var(--brand-text);");
+    expect(known).toContain("background: var(--tint-1);");
+    expect(known).not.toMatch(/padding|border|letter-spacing|font(?:-family|-size|-weight)?\s*:/u);
+    const unknown = styles.match(/\.template-field__decoration--unknown\s*\{([^}]+)\}/u)?.[1] ?? "";
+    expect(unknown).toContain("text-decoration: underline wavy var(--warn);");
+    expect(unknown).not.toMatch(/padding|border|letter-spacing|font(?:-family|-size|-weight)?\s*:/u);
   });
 
   it("keeps stepped number fields in one row and confirmation actions readable at narrow widths", () => {

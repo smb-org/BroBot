@@ -1,10 +1,11 @@
 import { Combobox, Input, Pill, useCombobox } from "@mantine/core";
+import { RichTextarea, type CaretPosition, type RichTextareaHandle } from "rich-textarea";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 
 import { closestTemplateVariable, tokenizeTemplate, unknownTemplateVariables, type TemplateVariable } from "../../template";
 import { Button } from "./Button";
+import { ChatPreview } from "./ChatPreview";
 import { Icon } from "./Icon";
-import { templateHighlightParts } from "./template-highlight";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 
 export interface TemplateVariableOption {
@@ -35,6 +36,7 @@ export interface TextAreaProps {
   previewSpeaker?: string;
   onIssuesChange?: (issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   disabled?: boolean;
+  readOnly?: boolean;
   required?: boolean;
   minRows?: number;
   id?: string;
@@ -46,6 +48,11 @@ interface SuggestionQuery {
   fragment: string;
   start: number;
   end: number;
+}
+
+interface CaretAnchor {
+  left: number;
+  top: number;
 }
 
 const templateDeclarations = (options: readonly TemplateVariableOption[]): TemplateVariable[] =>
@@ -74,6 +81,7 @@ export function TextArea({
   previewSpeaker,
   onIssuesChange,
   disabled = false,
+  readOnly = false,
   required = false,
   minRows = 4,
   id: suppliedId,
@@ -84,80 +92,96 @@ export function TextArea({
   const disabledReason = useDisabledFieldReason();
   const id = suppliedId ?? `template-${generatedId}`;
   const listboxId = `${id}-suggestions`;
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const mirrorRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<RichTextareaHandle>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const selection = useRef({ start: 0, end: 0 });
+  const programmaticEdit = useRef(false);
   const composingRef = useRef(false);
   const [composing, setComposing] = useState(false);
-  const [fontsReady, setFontsReady] = useState(false);
   const [query, setQuery] = useState<SuggestionQuery | null>(null);
+  const [caretAnchor, setCaretAnchor] = useState<CaretAnchor>({ left: 12, top: 32 });
   const [activeIndex, setActiveIndex] = useState(0);
   const declarations = useMemo(() => templateDeclarations(variables ?? []), [variables]);
   const variableNames = variables?.map((variable) => variable.name) ?? [];
   const count = value.length;
   const overLimit = maxLength !== undefined && count > maxLength;
   const nearLimit = maxLength !== undefined && count >= maxLength * 0.9;
-  const effectiveError = error ?? (maxLength !== undefined && count > maxLength ? messages.countLabel(count, maxLength) : undefined);
+  const effectiveError = error ?? (overLimit ? messages.countLabel(count, maxLength) : undefined);
   const worstCase = suppliedWorstCaseLength;
   const worstCaseExceeded = maxLength !== undefined && worstCase !== undefined && worstCase > maxLength;
-  const unknownVariables = useMemo(() => variables === undefined ? [] : unknownTemplateVariables(value, declarations), [declarations, value, variables]);
-  const unknownPieces = useMemo(() => variables === undefined ? [] : tokenizeTemplate(value, declarations).filter((part) => part.kind === "unknown"), [declarations, value, variables]);
+  const unknownVariables = useMemo(
+    () => variables === undefined ? [] : unknownTemplateVariables(value, declarations),
+    [declarations, value, variables],
+  );
+  const unknownPieces = useMemo(
+    () => variables === undefined ? [] : tokenizeTemplate(value, declarations).filter((part) => part.kind === "unknown"),
+    [declarations, value, variables],
+  );
   const deferredValue = useDeferredValue(value);
-  const previewText = preview === undefined ? undefined : preview(deferredValue, Object.fromEntries((variables ?? []).map((variable) => [variable.name, variable.sample])));
+  const previewText = preview === undefined
+    ? undefined
+    : preview(deferredValue, Object.fromEntries((variables ?? []).map((variable) => [variable.name, variable.sample])));
   const previewCount = previewText?.length ?? 0;
   const suggestions = query === null || variables === undefined
     ? []
     : variables.filter((variable) => variable.name.toLowerCase().startsWith(query.fragment.toLowerCase()));
-  const suggestionOpen = suggestions.length > 0;
+  const suggestionOpen = !disabled && !readOnly && !composing && suggestions.length > 0;
   const activeSuggestion = suggestions[activeIndex] ?? suggestions[0];
-  const pieces = useMemo(() => templateHighlightParts(value, declarations, query), [declarations, query, value]);
   const unknownAdvice = useMemo(() => unknownVariables.map((tokenName) => ({
     tokenName,
     suggestion: closestTemplateVariable(tokenName, declarations),
   })), [declarations, unknownVariables]);
-  const combobox = useCombobox({
-    onDropdownClose: () => { setActiveIndex(0); },
-  });
-
-  useEffect(() => {
-    if (typeof document === "undefined" || !("fonts" in document)) return;
-    let active = true;
-    void document.fonts.ready.then(() => {
-      if (active) setFontsReady(true);
-    });
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    if (composing) return;
-    onIssuesChange?.({ unknown: unknownVariables, worstCaseExceeded });
-  }, [composing, onIssuesChange, unknownVariables, worstCaseExceeded]);
-
-  useEffect(() => {
-    if (suggestionOpen) combobox.openDropdown();
-    else combobox.closeDropdown();
-  }, [combobox, suggestionOpen]);
+  const combobox = useCombobox({ onDropdownClose: () => { setActiveIndex(0); } });
 
   const rememberSelection = (target: HTMLTextAreaElement): void => {
     selection.current = { start: target.selectionStart, end: target.selectionEnd };
   };
 
+  const updateSuggestionQuery = (next: string, caret: number): void => {
+    if (composingRef.current || disabled || readOnly || variables === undefined) {
+      setQuery(null);
+      return;
+    }
+    setQuery(getSuggestionQuery(next, caret));
+    setActiveIndex(0);
+  };
+
   const handleValueChange = (next: string, target: HTMLTextAreaElement): void => {
     onChange(next);
     rememberSelection(target);
-    const nextQuery = getSuggestionQuery(next, target.selectionStart);
-    setQuery(nextQuery);
-    setActiveIndex(0);
+    const caret = target.selectionStart === 0 && target.selectionEnd === 0 && next.length > value.length
+      ? next.length
+      : target.selectionStart;
+    updateSuggestionQuery(next, caret);
+  };
+
+  const handleSelectionChange = (position: CaretPosition): void => {
+    selection.current = { start: position.selectionStart, end: position.selectionEnd };
+    const textarea = textareaRef.current;
+    const frame = frameRef.current;
+    if (position.focused && textarea !== null && frame !== null) {
+      const frameRect = frame.getBoundingClientRect();
+      setCaretAnchor({
+        left: position.left - frameRect.left,
+        top: position.top - frameRect.top + position.height,
+      });
+      updateSuggestionQuery(textarea.value, position.selectionStart);
+    } else if (!position.focused) {
+      setQuery(null);
+    }
   };
 
   const insertText = (insert: string, start: number, end: number): void => {
     const textarea = textareaRef.current;
-    if (textarea === null) return;
+    if (textarea === null || disabled || readOnly) return;
+    const nextValue = `${textarea.value.slice(0, start)}${insert}${textarea.value.slice(end)}`;
+    programmaticEdit.current = true;
     textarea.setRangeText(insert, start, end, "end");
-    onChange(textarea.value);
+    programmaticEdit.current = false;
+    onChange(nextValue);
     const caret = start + insert.length;
     selection.current = { start: caret, end: caret };
-    setQuery(getSuggestionQuery(textarea.value, caret));
+    setQuery(null);
     combobox.closeDropdown();
     window.requestAnimationFrame(() => {
       textarea.focus();
@@ -207,6 +231,16 @@ export function TextArea({
     }
   };
 
+  useEffect(() => {
+    if (composing) return;
+    onIssuesChange?.({ unknown: unknownVariables, worstCaseExceeded });
+  }, [composing, onIssuesChange, unknownVariables, worstCaseExceeded]);
+
+  useEffect(() => {
+    if (suggestionOpen) combobox.openDropdown();
+    else combobox.closeDropdown();
+  }, [combobox, suggestionOpen]);
+
   const countNode = maxLength === undefined ? null : (
     <span className={`ui-textarea__count${nearLimit && !overLimit ? " ui-textarea__count--warning" : ""}${overLimit ? " ui-textarea__count--error" : ""}`} id={`${id}-count`}>
       {messages.countLabel(count, maxLength)}
@@ -228,7 +262,7 @@ export function TextArea({
                 <Icon name="warning" size={16} />
                 <span>{messages.unknownVariable(tokenName, suggestion, variableNames)}</span>
                 {suggestion === null || token === undefined ? null : (
-                  <Button size="compact" variant="subtle" type="button" onClick={() => insertText(`{${suggestion}}`, token.start, token.start + token.text.length)}>
+                  <Button size="compact" variant="subtle" type="button" disabled={disabled || readOnly} onClick={() => insertText(`{${suggestion}}`, token.start, token.start + token.text.length)}>
                     {messages.insertSuggestionLabel(suggestion)}
                   </Button>
                 )}
@@ -248,7 +282,7 @@ export function TextArea({
                 type="button"
                 title={variable.description}
                 aria-description={variable.description}
-                disabled={disabled}
+                disabled={disabled || readOnly}
                 onClick={() => {
                   const saved = selection.current;
                   insertText(`{${variable.name}}`, saved.start, saved.end);
@@ -259,30 +293,24 @@ export function TextArea({
         </div>
       )}
       {preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
-        <div className="ui-textarea__preview">
-          <span className="ui-textarea__preview-label">{previewLabel}</span>
-          <span className="ui-textarea__preview-speaker">{previewSpeaker}</span>
-          <span className="ui-textarea__preview-text">{previewText}</span>
-          <span className="ui-textarea__preview-count">{messages.previewCountLabel(previewCount)}</span>
-        </div>
+        <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""} countLabel={messages.previewCountLabel(previewCount)} />
       )}
     </div>
   );
 
-  const mirror = variables === undefined || !fontsReady ? null : (
-    <div className="template-field__mirror" aria-hidden="true" ref={mirrorRef}>
-      {pieces.map((part) => (
-        <span key={`${String(part.start)}-${part.kind}`} data-kind={part.kind} data-start={part.start}>{part.text}</span>
-      ))}
-      {value.endsWith("\n") ? <span aria-hidden="true">{"\u200b"}</span> : null}
-    </div>
-  );
+  const renderDecoratedValue = (text: string): ReactNode => variables === undefined
+    ? text
+    : tokenizeTemplate(text, declarations).map((part) => (
+      part.kind === "text"
+        ? part.text
+        : <span key={`${String(part.start)}-${part.kind}`} data-kind={part.kind} className={`template-field__decoration template-field__decoration--${part.kind}`}>{part.text}</span>
+    ));
 
   return (
     <Combobox
       store={combobox}
       onOptionSubmit={chooseSuggestion}
-      withinPortal={false}
+      withinPortal
       position="bottom-start"
       middlewares={{ flip: true, shift: true }}
       shadow="xs"
@@ -297,47 +325,49 @@ export function TextArea({
         error={effectiveError === undefined ? undefined : `× ${effectiveError}`}
         withAsterisk={required}
       >
-        <Combobox.Target>
-          <div className="template-field" data-composing={composing ? "true" : undefined} data-highlight-ready={variables !== undefined && fontsReady ? "true" : "false"}>
-            {mirror}
-            <Input
-              component="textarea"
-              multiline
-              variant="unstyled"
-              className="template-field__input"
-              styles={{ input: { backgroundColor: "transparent", border: 0, boxShadow: "none" } }}
-              ref={textareaRef}
-              value={value}
-              onChange={(event) => { handleValueChange(event.currentTarget.value, event.currentTarget); }}
-              onScroll={(event) => {
-                const mirrorElement = mirrorRef.current;
-                if (mirrorElement === null) return;
-                mirrorElement.scrollTop = event.currentTarget.scrollTop;
-                mirrorElement.scrollLeft = event.currentTarget.scrollLeft;
-              }}
-              onSelect={(event) => {
-                rememberSelection(event.currentTarget);
-                setQuery(getSuggestionQuery(value, event.currentTarget.selectionStart));
-                setActiveIndex(0);
-              }}
-              onClick={(event) => { rememberSelection(event.currentTarget); }}
-              onKeyDown={handleKeyDown}
-              onCompositionStart={() => { composingRef.current = true; setComposing(true); }}
-              onCompositionEnd={onCompositionEnd}
-              id={id}
-              name={name}
-              rows={minRows}
-              required={required}
-              disabled={disabled}
-              error={effectiveError !== undefined}
-              aria-autocomplete="list"
-              aria-expanded={suggestionOpen}
-              aria-controls={suggestionOpen ? listboxId : undefined}
-              aria-activedescendant={suggestionOpen && activeSuggestion !== undefined ? `${listboxId}-${activeSuggestion.name}` : undefined}
-              spellCheck
-            />
-          </div>
-        </Combobox.Target>
+        <div ref={frameRef} className="template-field" data-composing={composing ? "true" : undefined} data-readonly={readOnly ? "true" : undefined}>
+          <RichTextarea
+            className="template-field__input"
+            ref={textareaRef}
+            style={{ width: "100%" }}
+            value={value}
+            onChange={(event) => {
+              if (programmaticEdit.current) {
+                programmaticEdit.current = false;
+                return;
+              }
+              handleValueChange(event.currentTarget.value, event.currentTarget);
+            }}
+            onSelectionChange={handleSelectionChange}
+            onSelect={(event) => {
+              rememberSelection(event.currentTarget);
+              updateSuggestionQuery(value, event.currentTarget.selectionStart);
+            }}
+            onClick={(event) => { rememberSelection(event.currentTarget); }}
+            onKeyDown={handleKeyDown}
+            onCompositionStart={() => { composingRef.current = true; setComposing(true); setQuery(null); }}
+            onCompositionEnd={onCompositionEnd}
+            onBlur={() => { setQuery(null); }}
+            id={id}
+            name={name}
+            rows={minRows}
+            required={required}
+            disabled={disabled}
+            readOnly={readOnly}
+            aria-invalid={effectiveError !== undefined || undefined}
+            aria-describedby={`${id}-description${effectiveError === undefined ? "" : ` ${id}-error`}`}
+            aria-autocomplete="list"
+            aria-expanded={suggestionOpen}
+            aria-controls={suggestionOpen ? listboxId : undefined}
+            aria-activedescendant={suggestionOpen && activeSuggestion !== undefined ? `${listboxId}-${activeSuggestion.name}` : undefined}
+            spellCheck
+          >
+            {renderDecoratedValue}
+          </RichTextarea>
+          <Combobox.Target withKeyboardNavigation={false} withAriaAttributes={false}>
+            <span aria-hidden="true" className="template-field__caret-anchor" style={{ left: caretAnchor.left, top: caretAnchor.top }} />
+          </Combobox.Target>
+        </div>
       </Input.Wrapper>
       {suggestionOpen ? (
         <Combobox.Dropdown className="ui-textarea__suggestions-dropdown">
@@ -350,6 +380,7 @@ export function TextArea({
                 active={index === activeIndex}
                 className="ui-textarea__suggestion"
                 aria-selected={index === activeIndex}
+                onMouseDown={(event) => { event.preventDefault(); }}
               >
                 <span className="ui-textarea__suggestion-name mono">{variable.name}</span>
                 <span className="ui-textarea__suggestion-description">{variable.description}</span>

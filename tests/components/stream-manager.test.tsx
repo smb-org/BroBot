@@ -41,23 +41,36 @@ describe("Stream Manager immediate actions", () => {
       requestUrl(input).pathname === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST")).toBe(true);
   });
 
-  it("keeps each action input directly beside its own button", () => {
+  it("keeps each action's control and button inside its own card, button pinned last", () => {
     renderWithMantine(<ImmediateActions channelId="kanal-a" />);
 
     const adButton = screen.getByRole("button", { name: /Werbung jetzt/ });
-    const adControls = adButton.closest(".stream-manager-action__controls");
-    const adLength = within(adControls as HTMLElement).getByRole("radiogroup");
-    expect(adControls?.firstElementChild).toContainElement(adLength);
-    expect(adControls?.lastElementChild).toBe(adButton);
+    const adCard = adButton.closest(".stream-manager-action");
+    const adLength = within(adCard as HTMLElement).getByRole("radiogroup");
+    expect(adCard).toContainElement(adLength);
+    expect(adCard?.lastElementChild).toBe(adButton);
 
     const shoutoutButton = screen.getByRole("button", { name: "Shoutout senden" });
-    const shoutoutControls = shoutoutButton.closest(".stream-manager-action__controls");
+    const shoutoutCard = shoutoutButton.closest(".stream-manager-action");
     const shoutoutLogin = screen.getByLabelText("Twitch-Name");
-    expect(shoutoutControls).toContainElement(shoutoutLogin.closest(".stream-manager-action__field"));
-    expect(shoutoutControls?.lastElementChild).toBe(shoutoutButton);
+    expect(shoutoutCard).toContainElement(shoutoutLogin);
+    expect(shoutoutCard?.lastElementChild).toBe(shoutoutButton);
     expect(shoutoutButton).toBeDisabled();
+    // Exactly one helper line under the field: the reason, not the hint beside it.
     expect(screen.getByText("Bitte gib einen Twitch-Namen ein.")).toBeInTheDocument();
-    expect(shoutoutButton).toHaveAttribute("aria-describedby", expect.stringContaining("stream-manager-shoutout-reason"));
+    expect(screen.queryByText("Twitch-Name des Kanals, den du empfiehlst.")).not.toBeInTheDocument();
+    expect(within(shoutoutCard as HTMLElement).getAllByText(/Twitch-Name|Bitte gib/u).length).toBeLessThanOrEqual(2);
+    expect(shoutoutButton).toHaveAttribute("aria-describedby", expect.stringContaining("stream-manager-shoutout-login-description"));
+  });
+
+  it("shows the hint instead of the reason once a login is entered, still one helper line", () => {
+    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
+
+    expect(screen.getByText("Twitch-Name des Kanals, den du empfiehlst.")).toBeInTheDocument();
+    expect(screen.queryByText("Bitte gib einen Twitch-Namen ein.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Shoutout senden" })).not.toHaveAttribute("aria-describedby");
   });
 
   it("offers all six ad lengths as a segment and runs the one that's clicked", async () => {
@@ -101,6 +114,19 @@ describe("Stream Manager immediate actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
 
     expect(await screen.findByText("Shoutout an streamerin gesendet")).toBeInTheDocument();
+  });
+
+  it("lays out the three actions as equal cards in one grid, each with a header icon and title", () => {
+    const { container } = renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+
+    const grid = container.querySelector(".stream-manager-actions");
+    const cards = grid?.querySelectorAll(":scope > .stream-manager-action");
+    expect(cards).toHaveLength(3);
+    const titles = Array.from(cards ?? [], (card) => card.querySelector(".stream-manager-action__header")?.textContent);
+    expect(titles).toEqual(["Werbung", "Shoutout", "Clip"]);
+    for (const card of cards ?? []) {
+      expect(card.querySelector(".stream-manager-action__header .ui-icon")).toBeInTheDocument();
+    }
   });
 
   it("shows the matching aria-hidden Tabler icon without changing each action's accessible name", () => {

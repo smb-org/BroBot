@@ -12,10 +12,9 @@ import {
   type ChannelMemberRecord,
 } from "../db/channel-members";
 import {
-  fetchTwitchUserByLogin,
   fetchTwitchUsersById,
-  type TwitchUser,
 } from "../panel/member-routes";
+import { fetchTwitchUserByLogin, type TwitchUser } from "../shoutout";
 import {
   changePlatformMember,
   changeFullConsent,

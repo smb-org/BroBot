@@ -60,4 +60,18 @@ describe("effective ESLint module boundaries", () => {
     expect(rejects(testRestrictions, "@tabler/icons-react")).toBe(true);
     expect(rejects(iconRestrictions, "@tabler/icons-react")).toBe(false);
   });
+
+  it("keeps rich-textarea imports inside the dashboard UI seam", async () => {
+    const dashboardRestrictions = await restrictionsFor("src/dashboard/main.tsx");
+    const overlayRestrictions = await restrictionsFor("src/overlay/main.tsx");
+    const testRestrictions = await restrictionsFor("tests/example.test.ts");
+    const uiRestrictions = await restrictionsFor("src/dashboard/ui/TextArea.tsx");
+
+    expect(rejects(dashboardRestrictions, "rich-textarea")).toBe(true);
+    expect(rejects(dashboardRestrictions, "rich-textarea/lib/types")).toBe(true);
+    expect(rejects(overlayRestrictions, "rich-textarea")).toBe(true);
+    expect(rejects(testRestrictions, "rich-textarea")).toBe(true);
+    expect(rejects(uiRestrictions, "rich-textarea")).toBe(false);
+    expect(rejects(uiRestrictions, "rich-textarea/lib/types")).toBe(false);
+  });
 });

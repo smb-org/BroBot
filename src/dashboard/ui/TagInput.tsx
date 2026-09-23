@@ -133,6 +133,7 @@ export function TagInput({ label, hint, error, warning, invalidValues = [], valu
         leftSection={prefix === undefined ? undefined : <span className="ui-field__prefix" aria-hidden="true">{prefix}</span>}
         leftSectionWidth={prefix === undefined ? undefined : 36}
         leftSectionPointerEvents="none"
+        {...(prefix === undefined ? {} : { styles: { section: { borderRight: "1px solid var(--line)" } } })}
         renderPill={({ value: tag, onRemove }) => tag === undefined ? null : (
           <Pill className="ui-tag-input__pill" size="sm" withRemoveButton={false} key={tag} aria-invalid={invalidValues.includes(tag)} data-invalid={invalidValues.includes(tag) || undefined}>
             <span className="ui-tag-input__pill-label">{prefixed(tag)}</span>

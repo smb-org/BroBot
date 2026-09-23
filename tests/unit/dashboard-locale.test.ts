@@ -39,6 +39,8 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.permission_denied", { name: "wiki", requiredTier: "moderator", currentTier: ["viewer"] })).toBe("Befehl !wiki nicht ausgelöst: Mindeststufe Moderatoren, vorhanden Zuschauer");
     expect(eventText("host.chat.sent", { name: "wiki" })).toBe("Chat-Nachricht gesendet");
     expect(eventText("template_truncated", { current: 508 })).toBe("Chatnachricht auf 500 Zeichen gekürzt (ursprünglich 508)");
+    expect(eventText("text_commands.lookup_unavailable", { name: "uptime", kind: "uptime" })).toBe("Textbefehl !uptime: Stream-Daten nicht verfügbar");
+    expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Befehl !so: Twitch-Name fehlt");
   });
 
   it("returns the English detail texts", () => {
@@ -51,6 +53,8 @@ describe("dashboard locale", () => {
     expect(eventText("text_commands.disabled", { name: "wiki" })).toBe("Text command !wiki disabled");
     expect(eventText("text_commands.permission_denied", { name: "wiki", requiredTier: "moderator", currentTier: ["viewer"] })).toBe("Command !wiki not executed: minimum level moderators, present viewer");
     expect(eventText("template_truncated", { current: 508 })).toBe("Chat message shortened to 500 characters (originally 508)");
+    expect(eventText("text_commands.lookup_unavailable", { name: "game", kind: "game" })).toBe("Command !game: game information unavailable");
+    expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Command !so: Twitch login missing");
   });
 
   it("distinguishes a disabled shoutout from the threshold", () => {
@@ -98,6 +102,7 @@ describe("dashboard locale", () => {
       "text_commands.user_cooldown", "text_commands.stream_state", "text_commands.triggered",
       "text_commands.disabled", "text_commands.permission_denied", "text_commands.already_exists",
       "text_commands.not_authorized", "text_commands.unknown", "text_commands.invalid",
+      "text_commands.lookup_unavailable", "text_commands.argument_missing",
     ];
 
     expect(Object.keys(eventToneEntries).sort()).toEqual([...codes].sort());

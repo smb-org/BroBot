@@ -85,8 +85,10 @@ describe("Text command editor", () => {
     expect(settingsTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(advancedTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(screen.getByText("5 von 32")).toBeInTheDocument();
+    expect(screen.getByText("a–z, 0–9, - und _")).toBeInTheDocument();
     expect(editor().querySelector(".ui-field__prefix")).toHaveTextContent("!");
     expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
+    expect(within(editor()).queryByRole("switch")).not.toBeInTheDocument();
 
     fireEvent.click(advancedTab);
     const copy = textCommandsTexts("de");
@@ -101,6 +103,85 @@ describe("Text command editor", () => {
       const exclusion = tier === "subscriber" ? " VIPs nicht." : tier === "vip" ? " Abonnenten nicht." : "";
       expect(within(group).getByRole("radio", { name: `${copy.tierLabels[tier]}. ${description}.${exclusion}` })).toBeInTheDocument();
     }
+  });
+
+  it("shows a one-line description for each kind option in the Art select", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    await waitFor(() => {
+      expect(screen.getByRole("listbox")).toHaveTextContent("AntworttextAntwortet mit dem Text unten.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("BefehlslisteZählt alle eingeschalteten Befehle auf (ohne Aliase).");
+      expect(screen.getByRole("listbox")).toHaveTextContent("Stream-LaufzeitZeigt die aktuelle Laufzeit des Streams.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("FollowageZeigt, seit wann die auslösende Person folgt.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("Spiel und TitelZeigt die aktuelle Kategorie und den Streamtitel.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("Shoutout!so <name> empfiehlt einen Twitch-Kanal im Chat.");
+    });
+  });
+
+  it("shows each kind's template fields and variable chips in its editor", async () => {
+    const createWithKind = async (label: RegExp): Promise<void> => {
+      cleanup();
+      renderPanel(panelFetch({ commands: () => [] }));
+      fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+      fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+      fireEvent.click(await screen.findByRole("option", { name: label }));
+    };
+
+    await createWithKind(/Stream-Laufzeit/u);
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Offline-Antwort" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "{uptime}" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "{channel}" })).toHaveLength(2);
+
+    await createWithKind(/Followage/u);
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Antwort ohne Follow" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Antwort bei fehlenden Daten" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "{followage}" })).toBeInTheDocument();
+
+    await createWithKind(/Spiel und Titel/u);
+    expect(screen.getByRole("button", { name: "{game}" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "{title}" })).toBeInTheDocument();
+
+    await createWithKind(/Shoutout/u);
+    expect(screen.getByRole("textbox", { name: "Nutzungshinweis" })).toBeInTheDocument();
+    expect(screen.getByText("Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
+    const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
+    const selectedTier = within(tierGroup).getByRole("radio", { checked: true });
+    expect(selectedTier).toHaveAccessibleName("Moderatoren. Moderatoren und Broadcaster.");
+  });
+
+  it("puts the Art select's hint below the field, not between the label and the control", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+    const combobox = screen.getByRole("combobox", { name: "Art" });
+    const hint = combobox.closest(".mantine-Select-root")?.querySelector(".mantine-Select-description");
+    expect(hint).toHaveTextContent("Antwortet mit dem Text unten.");
+    expect(combobox.compareDocumentPosition(hint as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("labels the response variable chips with their placeholder, not an empty pill", async () => {
+    const fetcher = panelFetch({ commands: () => [] });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    expect(screen.getByRole("button", { name: "{user}" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "{channel}" })).toBeInTheDocument();
+  });
+
+  it("uses the chat preview, not plain text, for a command list's response", async () => {
+    const rows = [makeCommand({ name: "commands", kind: "list", aliases: [] }), makeCommand({ name: "hallo" })];
+    const fetcher = panelFetch({ commands: () => rows });
+    renderPanel(fetcher);
+    await selectCommand("commands");
+    const panel = editor();
+    expect(within(panel).getByText("Vorschau")).toBeInTheDocument();
+    expect(within(panel).getByText("Bot")).toBeInTheDocument();
+    expect(within(panel).getByText("Befehle: !hallo")).toBeInTheDocument();
+    expect(within(panel).queryByRole("textbox", { name: "Antwort" })).not.toBeInTheDocument();
   });
 
   it("gives every editor field a non-empty helper line and edits aliases and cooldowns", async () => {
@@ -189,7 +270,8 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.click(screen.getByRole("radio", { name: "Befehlsliste" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Befehlsliste/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "befehle" } });
     expect(screen.queryByRole("textbox", { name: "Antwort" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));

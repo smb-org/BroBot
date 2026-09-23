@@ -5,6 +5,7 @@ import type {
   TextCommandChange,
   TextCommandClaim,
   TextCommandActor,
+  TextCommandKind,
   TextCommandResponseType,
   TextCommandStreamCondition,
 } from "../contracts";
@@ -17,6 +18,7 @@ import type {
 import { cooldownRemaining } from "../domain";
 
 const MODULE_ID = "text_commands";
+const extraTemplateKeys = ["offlineText", "notFollowingText", "unavailableText", "usageText"] as const;
 
 const auditValues = (command: TextCommand) => ({
   name: command.name,
@@ -29,6 +31,10 @@ const auditValues = (command: TextCommand) => ({
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
   responseType: command.responseType,
+  ...(command.offlineText === undefined ? {} : { offlineText: truncateTo200Chars(command.offlineText) }),
+  ...(command.notFollowingText === undefined ? {} : { notFollowingText: truncateTo200Chars(command.notFollowingText) }),
+  ...(command.unavailableText === undefined ? {} : { unavailableText: truncateTo200Chars(command.unavailableText) }),
+  ...(command.usageText === undefined ? {} : { usageText: truncateTo200Chars(command.usageText) }),
 });
 
 const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
@@ -42,7 +48,33 @@ const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
   left.aliases.every((alias, index) => alias === right.aliases[index]) &&
   left.userCooldownSeconds === right.userCooldownSeconds &&
   left.streamCondition === right.streamCondition &&
-  left.responseType === right.responseType;
+  left.responseType === right.responseType &&
+  extraTemplateKeys.every((key) => left[key] === right[key]);
+
+const extraTemplatesOf = (value: Pick<TextCommand, typeof extraTemplateKeys[number]>): Record<string, string> => {
+  const entries: [string, string][] = [];
+  for (const key of extraTemplateKeys) {
+    const template = value[key];
+    if (template !== undefined) entries.push([key, template]);
+  }
+  return Object.fromEntries(entries);
+};
+
+const storedExtraTemplates = (value: unknown): Pick<TextCommand, typeof extraTemplateKeys[number]> => {
+  let parsed: unknown;
+  try {
+    parsed = typeof value === "string" ? JSON.parse(value) as unknown : null;
+  } catch {
+    parsed = null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  const templates: Partial<Record<(typeof extraTemplateKeys)[number], string>> = {};
+  for (const key of extraTemplateKeys) {
+    const template: unknown = Reflect.get(parsed, key);
+    if (typeof template === "string") templates[key] = template;
+  }
+  return templates;
+};
 
 const succeeded = (): TextCommandMutationResult => ({ ok: true });
 
@@ -67,7 +99,7 @@ interface TextCommandRow {
   channel_id: string;
   command_name: string;
   response_text: string;
-  kind: "text" | "list";
+  kind: TextCommandKind;
   enabled: number;
   minimum_level: "everyone" | "subscriber" | "vip" | "moderator" | "broadcaster";
   cooldown_seconds: number;
@@ -75,6 +107,7 @@ interface TextCommandRow {
   user_cooldown_seconds: number;
   stream_condition: TextCommandStreamCondition;
   response_type: TextCommandResponseType;
+  template_fields_json: string;
   last_used_at: string | null;
   created_at: string;
   updated_at: string;
@@ -85,6 +118,7 @@ const mapTextCommand = (row: TextCommandRow): TextCommand => ({
   name: row.command_name,
   text: row.response_text,
   kind: row.kind,
+  ...storedExtraTemplates(row.template_fields_json),
   enabled: row.enabled === 1,
   minimumTier: row.minimum_level,
   cooldownSeconds: row.cooldown_seconds,
@@ -136,7 +170,7 @@ const aliasConflict = async (
 
 export const textCommandSelectColumns = `channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
                                        aliases_json, user_cooldown_seconds, stream_condition, response_type,
-                                       last_used_at, created_at, updated_at`;
+                                       template_fields_json, last_used_at, created_at, updated_at`;
 
 export const createTextCommandRepository = (
   db: D1Database,
@@ -181,12 +215,13 @@ export const createTextCommandRepository = (
     const streamCondition = input.streamCondition ?? "any";
     const responseType = input.responseType ?? "say";
     const aliasesJson = JSON.stringify(aliases);
+    const extraTemplatesJson = JSON.stringify(extraTemplatesOf(input));
     const mutation = db.prepare(
       `INSERT INTO text_commands
         (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
          aliases_json, user_cooldown_seconds, stream_condition, response_type,
-         last_used_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, NULL, ?, ?
+         template_fields_json, last_used_at, created_at, updated_at)
+       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM text_commands AS other
            WHERE other.channel_id = ? AND other.command_name = ?
@@ -213,6 +248,7 @@ export const createTextCommandRepository = (
       userCooldownSeconds,
       streamCondition,
       responseType,
+      extraTemplatesJson,
       input.now,
       input.now,
       input.channelId,
@@ -232,6 +268,7 @@ export const createTextCommandRepository = (
       name: input.name,
       text: input.text,
       kind: input.kind,
+      ...extraTemplatesOf(input),
       enabled: true,
       minimumTier,
       cooldownSeconds: input.cooldownSeconds,
@@ -265,6 +302,8 @@ export const createTextCommandRepository = (
     }
     const authorization = authorizeMutation(input.channelId, actor, input.now);
     const minimumTier = input.minimumTier ?? before.minimumTier;
+    const extraTemplates = extraTemplatesOf({ ...before, ...input });
+    const extraTemplatesJson = JSON.stringify(extraTemplates);
     const mutation = input.onlyToggle === true
       ? db.prepare(
         `UPDATE text_commands
@@ -273,6 +312,7 @@ export const createTextCommandRepository = (
             AND response_text = ? AND kind = ? AND enabled = ?
             AND minimum_level = ? AND cooldown_seconds = ? AND aliases_json = ?
             AND user_cooldown_seconds = ? AND stream_condition = ? AND response_type = ?
+            AND template_fields_json = ?
             ${authorization.sql}`,
       ).bind(
         input.enabled ? 1 : 0,
@@ -288,16 +328,19 @@ export const createTextCommandRepository = (
         before.userCooldownSeconds,
         before.streamCondition,
         before.responseType,
+        JSON.stringify(extraTemplatesOf(before)),
         ...authorization.values,
       )
       : db.prepare(
         `UPDATE text_commands
             SET command_name = ?, response_text = ?, kind = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?,
-                aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?, updated_at = ?
+                aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?,
+                template_fields_json = ?, updated_at = ?
           WHERE channel_id = ? AND command_name = ?
             AND response_text = ? AND kind = ? AND enabled = ?
             AND minimum_level = ? AND cooldown_seconds = ? AND aliases_json = ?
             AND user_cooldown_seconds = ? AND stream_condition = ? AND response_type = ?
+            AND template_fields_json = ?
             AND (? = command_name OR NOT EXISTS (
               SELECT 1 FROM text_commands AS other
                WHERE other.channel_id = ? AND other.command_name = ?
@@ -324,6 +367,7 @@ export const createTextCommandRepository = (
         input.userCooldownSeconds,
         input.streamCondition,
         input.responseType,
+        extraTemplatesJson,
         input.now,
         input.channelId,
         input.name,
@@ -336,6 +380,7 @@ export const createTextCommandRepository = (
         before.userCooldownSeconds,
         before.streamCondition,
         before.responseType,
+        JSON.stringify(extraTemplatesOf(before)),
         input.newName,
         input.channelId,
         input.newName,
@@ -363,6 +408,7 @@ export const createTextCommandRepository = (
         userCooldownSeconds: input.userCooldownSeconds,
         streamCondition: input.streamCondition,
         responseType: input.responseType,
+        ...extraTemplates,
         updatedAt: input.now,
       };
     const changes = await runMutation(db, prepareModuleAudit, mutation, {
@@ -393,6 +439,7 @@ export const createTextCommandRepository = (
           AND response_text = ? AND kind = ? AND enabled = ?
           AND minimum_level = ? AND cooldown_seconds = ? AND aliases_json = ?
           AND user_cooldown_seconds = ? AND stream_condition = ? AND response_type = ?
+          AND template_fields_json = ?
           ${authorization.sql}`,
     ).bind(
       channelId,
@@ -406,6 +453,7 @@ export const createTextCommandRepository = (
       before.userCooldownSeconds,
       before.streamCondition,
       before.responseType,
+      JSON.stringify(extraTemplatesOf(before)),
       ...authorization.values,
     );
     const changes = await runMutation(db, prepareModuleAudit, mutation, {

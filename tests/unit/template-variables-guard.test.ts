@@ -26,7 +26,12 @@ import {
   DEFAULT_TEXT_LONG,
   DEFAULT_TEXT_SHORT,
 } from "../../src/modules/raid/contracts/chat-defaults";
-import { commandListReply, NO_COMMANDS_REPLY } from "../../src/modules/text_commands/contracts/chat-defaults";
+import {
+  commandListReply,
+  NO_COMMANDS_REPLY,
+  TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES,
+  TEXT_COMMAND_DEFAULT_TEXTS,
+} from "../../src/modules/text_commands/contracts/chat-defaults";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
 import {
   TEXT_COMMAND_TEMPLATE_FIELDS,
@@ -124,12 +129,75 @@ const chatText = (result: { actions: readonly { kind: string; text?: string }[] 
 
 describe("template declaration guard", () => {
   it("consumes every declaration through its real service path and leaves undeclared tokens literal", async () => {
-    const commandTemplate = templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.text);
+    const commandTemplate = templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.text.text);
     const commandText = chatText(await processTextCommandMessage(
       textCommandEvent,
       repositoryFor(commandFor(commandTemplate)),
     ));
     expect(commandText).toBe("alice|livechannel|{zzz}");
+
+    const uptime = await processTextCommandMessage(
+      { ...textCommandEvent, payload: { ...textCommandEvent.payload, message: { text: "!guard" } } },
+      repositoryFor({ ...commandFor(templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.uptime.text)), kind: "uptime" }),
+      {
+        channelInfo: () => Promise.resolve({ title: "A title", gameName: "A game", startedAt: "2026-09-22T22:00:00.000Z" }),
+        channelLanguage: () => Promise.resolve("de"),
+      },
+    );
+    expect(chatText(uptime)).toBe("alice|livechannel|2 Std. 0 Min.|{zzz}");
+
+    const offline = await processTextCommandMessage(
+      textCommandEvent,
+      repositoryFor({
+        ...commandFor("unused"), kind: "uptime",
+        offlineText: templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.uptime.offlineText),
+      }),
+      { channelInfo: () => Promise.resolve({ title: "", gameName: "", startedAt: null }) },
+    );
+    expect(chatText(offline)).toBe("livechannel|{zzz}");
+
+    const followage = await processTextCommandMessage(
+      textCommandEvent,
+      repositoryFor({ ...commandFor(templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.followage.text)), kind: "followage" }),
+      { followedAt: () => Promise.resolve("2025-09-23T00:00:00.000Z"), channelLanguage: () => Promise.resolve("de") },
+    );
+    expect(chatText(followage)).toBe("alice|livechannel|1 Jahr|{zzz}");
+    const notFollowing = await processTextCommandMessage(
+      textCommandEvent,
+      repositoryFor({
+        ...commandFor("unused"), kind: "followage",
+        notFollowingText: templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.followage.notFollowingText),
+      }),
+      { followedAt: () => Promise.resolve(null) },
+    );
+    expect(chatText(notFollowing)).toBe("alice|livechannel|{zzz}");
+    const unavailable = await processTextCommandMessage(
+      textCommandEvent,
+      repositoryFor({
+        ...commandFor("unused"), kind: "followage",
+        unavailableText: templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.followage.unavailableText),
+      }),
+      { followedAt: () => Promise.resolve("unavailable") },
+    );
+    expect(chatText(unavailable)).toBe("|{zzz}");
+
+    const game = await processTextCommandMessage(
+      textCommandEvent,
+      repositoryFor({ ...commandFor(templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.game.text)), kind: "game" }),
+      { channelInfo: () => Promise.resolve({ title: "A title", gameName: "A game", startedAt: null }) },
+    );
+    expect(chatText(game)).toBe("livechannel|A game|A title|{zzz}");
+
+    const shoutout = await processTextCommandMessage(
+      { ...textCommandEvent, payload: { ...textCommandEvent.payload, message: { text: "!guard someone" } } },
+      repositoryFor({ ...commandFor(templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.shoutout.text)), kind: "shoutout" }),
+    );
+    expect(chatText(shoutout)).toBe("alice|someone|{zzz}");
+    const usage = await processTextCommandMessage(
+      textCommandEvent,
+      repositoryFor({ ...commandFor("unused"), kind: "shoutout", usageText: templateFor(TEXT_COMMAND_TEMPLATE_FIELDS.shoutout.usageText) }),
+    );
+    expect(chatText(usage)).toBe("|{zzz}");
 
     for (const field of ["textLong", "textShort"] as const) {
       const template = templateFor(RAID_TEMPLATE_FIELDS[field]);
@@ -174,8 +242,16 @@ describe("template declaration guard", () => {
       { text: DEFAULT_AUTOMATIC_TEXT, variables: ADS_TEMPLATE_FIELDS.automatic },
       { text: DEFAULT_MANUAL_TEXT, variables: ADS_TEMPLATE_FIELDS.manual },
       { text: DEFAULT_PREWARNING_TEXT, variables: ADS_TEMPLATE_FIELDS.prewarningText },
-      { text: NO_COMMANDS_REPLY, variables: TEXT_COMMAND_TEMPLATE_FIELDS.text },
-      { text: commandListReply(["hallo", "wiki"]), variables: TEXT_COMMAND_TEMPLATE_FIELDS.text },
+      { text: TEXT_COMMAND_DEFAULT_TEXTS.uptime, variables: TEXT_COMMAND_TEMPLATE_FIELDS.uptime.text },
+      { text: TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.offlineText, variables: TEXT_COMMAND_TEMPLATE_FIELDS.uptime.offlineText },
+      { text: TEXT_COMMAND_DEFAULT_TEXTS.followage, variables: TEXT_COMMAND_TEMPLATE_FIELDS.followage.text },
+      { text: TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.notFollowingText, variables: TEXT_COMMAND_TEMPLATE_FIELDS.followage.notFollowingText },
+      { text: TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.unavailableText, variables: TEXT_COMMAND_TEMPLATE_FIELDS.followage.unavailableText },
+      { text: TEXT_COMMAND_DEFAULT_TEXTS.game, variables: TEXT_COMMAND_TEMPLATE_FIELDS.game.text },
+      { text: TEXT_COMMAND_DEFAULT_TEXTS.shoutout, variables: TEXT_COMMAND_TEMPLATE_FIELDS.shoutout.text },
+      { text: TEXT_COMMAND_DEFAULT_EXTRA_TEMPLATES.usageText, variables: TEXT_COMMAND_TEMPLATE_FIELDS.shoutout.usageText },
+      { text: NO_COMMANDS_REPLY, variables: [] },
+      { text: commandListReply(["hallo", "wiki"]), variables: [] },
     ];
     for (const { text, variables } of defaults) {
       expect(unknownTemplateVariables(text, variables)).toEqual([]);
@@ -227,7 +303,24 @@ describe("template declaration guard", () => {
       },
     };
     const declarations: Record<keyof typeof catalogues, readonly TemplateVariable[]> = {
-      text_commands: TEXT_COMMAND_TEMPLATE_FIELDS.text,
+      text_commands: (() => {
+        const fields: readonly (readonly TemplateVariable[])[] = [
+          TEXT_COMMAND_TEMPLATE_FIELDS.text.text,
+          TEXT_COMMAND_TEMPLATE_FIELDS.uptime.text,
+          TEXT_COMMAND_TEMPLATE_FIELDS.uptime.offlineText,
+          TEXT_COMMAND_TEMPLATE_FIELDS.followage.text,
+          TEXT_COMMAND_TEMPLATE_FIELDS.followage.notFollowingText,
+          TEXT_COMMAND_TEMPLATE_FIELDS.followage.unavailableText,
+          TEXT_COMMAND_TEMPLATE_FIELDS.game.text,
+          TEXT_COMMAND_TEMPLATE_FIELDS.shoutout.text,
+          TEXT_COMMAND_TEMPLATE_FIELDS.shoutout.usageText,
+        ];
+        const variables = new Map<string, TemplateVariable>();
+        for (const fieldVariables of fields) {
+          for (const variable of fieldVariables) variables.set(variable.name, variable);
+        }
+        return [...variables.values()];
+      })(),
       raid: [...RAID_TEMPLATE_FIELDS.textLong],
       ads: [...new Map(Object.values(ADS_TEMPLATE_FIELDS).flat().map((variable) => [variable.name, variable])).values()],
     };
@@ -241,7 +334,10 @@ describe("template declaration guard", () => {
   });
 
   it("freezes the template field set of each module", () => {
-    expect(Object.keys(TEXT_COMMAND_TEMPLATE_FIELDS)).toEqual(["text"]);
+    expect(Object.keys(TEXT_COMMAND_TEMPLATE_FIELDS)).toEqual(["text", "list", "uptime", "followage", "game", "shoutout"]);
+    expect(Object.keys(TEXT_COMMAND_TEMPLATE_FIELDS.uptime)).toEqual(["text", "offlineText"]);
+    expect(Object.keys(TEXT_COMMAND_TEMPLATE_FIELDS.followage)).toEqual(["text", "notFollowingText", "unavailableText"]);
+    expect(Object.keys(TEXT_COMMAND_TEMPLATE_FIELDS.shoutout)).toEqual(["text", "usageText"]);
     expect(Object.keys(RAID_TEMPLATE_FIELDS)).toEqual(["textLong", "textShort"]);
     expect(Object.keys(ADS_TEMPLATE_FIELDS)).toEqual(["automatic", "manual", "prewarningText"]);
   });

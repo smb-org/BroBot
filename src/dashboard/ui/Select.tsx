@@ -1,11 +1,28 @@
 import { Select as MantineSelect } from "@mantine/core";
+import type { ComboboxItem, ComboboxLikeRenderOptionInput } from "@mantine/core";
+import type { ReactNode } from "react";
 
 import { colors } from "./theme";
 
 export interface SelectOption {
   value: string;
   label: string;
+  /** One-line explanation rendered under the label in the dropdown. */
+  description?: string;
 }
+
+/** Renders `label` alone, or `label` + a one-line `description` underneath
+ *  when the option carries one (see `ChoiceCards` for the same shape). */
+const renderOption = ({ option }: ComboboxLikeRenderOptionInput<ComboboxItem>): ReactNode => {
+  const description = (option as SelectOption).description;
+  if (description === undefined) return <span>{option.label}</span>;
+  return (
+    <span className="ui-select__option">
+      <span className="ui-select__option-label">{option.label}</span>
+      <span className="ui-select__option-description">{description}</span>
+    </span>
+  );
+};
 
 export interface SelectProps {
   label?: string;
@@ -54,6 +71,7 @@ export function Select({
       label={label}
       aria-label={ariaLabel}
       description={hint}
+      inputWrapperOrder={["label", "input", "description", "error"]}
       error={error ? `× ${error}` : undefined}
       value={value}
       onChange={onChange}
@@ -67,6 +85,7 @@ export function Select({
       title={title}
       allowDeselect={false}
       comboboxProps={{ shadow: "xs" }}
+      renderOption={renderOption}
       styles={{
         dropdown: { backgroundColor: colors.surface, borderColor: colors.hairlineStrong },
         option: { fontSize: "13px" },

@@ -41,6 +41,7 @@
     "hono": "^4.13.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "rich-textarea": "^0.27.1",
     "zod": "^4.5.1"
   },
   "devDependencies": {

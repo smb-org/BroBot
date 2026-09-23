@@ -47,7 +47,7 @@ const mutation = async (
 
 export const createTextCommand = async (
   channelId: string,
-  command: Pick<TextCommand, "name" | "kind" | "text" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "responseType">,
+  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "responseType">,
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "POST", command);
 
 export const saveTextCommand = async (
@@ -57,6 +57,10 @@ export const saveTextCommand = async (
     name: string;
     kind: TextCommandKind;
     text: string;
+    offlineText?: string;
+    notFollowingText?: string;
+    unavailableText?: string;
+    usageText?: string;
     minimumTier: TextCommandMinimumTier;
     cooldownSeconds: number;
     aliases: readonly string[];
@@ -68,6 +72,10 @@ export const saveTextCommand = async (
   name: command.name,
   kind: command.kind,
   text: command.text,
+  offlineText: command.offlineText,
+  notFollowingText: command.notFollowingText,
+  unavailableText: command.unavailableText,
+  usageText: command.usageText,
   minimumTier: command.minimumTier,
   cooldownSeconds: command.cooldownSeconds,
   aliases: command.aliases,

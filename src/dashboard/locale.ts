@@ -335,18 +335,25 @@ export interface DashboardTexts {
     immediateActions: string;
     checksHealthy: (count: string) => string;
     checksNeedAttention: (problems: string, checks: string) => string;
+    /** Header title of the ad action card. */
+    adTitle: string;
     adLength: string;
     /** Hint under the ad-length `SegmentedControl` (3.0, 12.2). */
     adLengthHint: string;
     runAd: (length: string) => string;
     adStarted: (length: string) => string;
     adCooldown: (seconds: string) => string;
+    /** Header title of the shoutout action card. */
+    shoutoutTitle: string;
     shoutoutLogin: string;
-    /** Hint under the shoutout-login `Field` (3.0, 12.2). */
+    /** Hint under the shoutout-login `Field`, shown when a login is entered (3.0, 12.2). */
     shoutoutLoginHint: string;
+    /** Same helper line as `shoutoutLoginHint`, shown instead of it while the field is empty. */
     shoutoutLoginRequired: string;
     sendShoutout: string;
     shoutoutSent: (login: string) => string;
+    /** Header title of the clip action card. */
+    clipTitle: string;
     createClip: string;
     clipCreated: string;
     openClip: string;
@@ -518,16 +525,19 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       immediateActions: "Sofortaktionen",
       checksHealthy: (count) => `Alles in Ordnung · ${count} Prüfungen`,
       checksNeedAttention: (problems, checks) => `${problems} auffällige ${problems === "1" ? "Prüfung" : "Prüfungen"} · ${checks} Prüfungen`,
+      adTitle: "Werbung",
       adLength: "Werbedauer",
       adLengthHint: "Sekunden. Startet sofort.",
       runAd: (length) => `Werbung jetzt (${length}s)`,
       adStarted: (length) => `Werbung gestartet (${length}s)`,
       adCooldown: (seconds) => `Wartezeit: ${seconds}s`,
+      shoutoutTitle: "Shoutout",
       shoutoutLogin: "Twitch-Name",
       shoutoutLoginHint: "Twitch-Name des Kanals, den du empfiehlst.",
       shoutoutLoginRequired: "Bitte gib einen Twitch-Namen ein.",
       sendShoutout: "Shoutout senden",
       shoutoutSent: (login) => `Shoutout an ${login} gesendet`,
+      clipTitle: "Clip",
       createClip: "Clip erstellen",
       clipCreated: "Clip erstellt",
       openClip: "Clip öffnen",
@@ -681,16 +691,19 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       immediateActions: "Immediate actions",
       checksHealthy: (count) => `All clear · ${count} checks`,
       checksNeedAttention: (problems, checks) => `${problems} ${problems === "1" ? "check needs" : "checks need"} attention · ${checks} checks`,
+      adTitle: "Ads",
       adLength: "Ad length",
       adLengthHint: "Seconds. Starts immediately.",
       runAd: (length) => `Run ad now (${length}s)`,
       adStarted: (length) => `Ad started (${length}s)`,
       adCooldown: (seconds) => `Cooldown: ${seconds}s`,
+      shoutoutTitle: "Shoutout",
       shoutoutLogin: "Twitch login",
       shoutoutLoginHint: "Twitch login of the channel you're recommending.",
       shoutoutLoginRequired: "Enter a Twitch login.",
       sendShoutout: "Send shoutout",
       shoutoutSent: (login) => `Shoutout sent to ${login}`,
+      clipTitle: "Clip",
       createClip: "Create clip",
       clipCreated: "Clip created",
       openClip: "Open clip",
@@ -814,7 +827,11 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.module.error": "Modulfehler",
     "host.module.unknown": "Unbekanntes Modul",
     "host.overlay.not_executed": "Overlay nicht ausgeführt",
-    "host.shoutout.failed": "Shoutout fehlgeschlagen",
+    "host.shoutout.failed": (detail) => detail.cause === "twitch_user_not_found"
+      ? `Shoutout-Ziel ${detailText(detail, "target", "unbekannt")} wurde nicht gefunden`
+      : detail.cause === "rate_limited"
+        ? "Shoutout wegen Twitch-Abklingzeit nicht gesendet"
+        : "Shoutout fehlgeschlagen",
     "host.shoutout.sent": "Shoutout gesendet",
     "host.clip.failed": "Clip fehlgeschlagen",
     "channel_events.raid.incoming": (detail) => `Raid von ${detailText(detail, "source", "unbekannt")} mit ${detailNumber(detail, "viewers", "unbekannter Anzahl")} Zuschauern`,
@@ -883,6 +900,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.not_authorized": "Textbefehl nicht berechtigt",
     "text_commands.unknown": (detail) => eventTextWithName(detail, "Textbefehl unbekannt", (name) => `Textbefehl !${name} unbekannt`),
     "text_commands.invalid": "Textbefehl ungültig",
+    "text_commands.lookup_unavailable": (detail) => `Textbefehl !${detailText(detail, "name", "unbekannt")}: ${detail.kind === "uptime" ? "Stream-Daten" : detail.kind === "followage" ? "Followage" : "Spielinformationen"} nicht verfügbar`,
+    "text_commands.argument_missing": (detail) => eventTextWithName(detail, "Shoutout-Ziel fehlt", (name) => `Befehl !${name}: Twitch-Name fehlt`),
   },
   en: {
     "host.action.failed": "Action failed",
@@ -905,7 +924,11 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.module.error": "Module error",
     "host.module.unknown": "Unknown module",
     "host.overlay.not_executed": "Overlay not executed",
-    "host.shoutout.failed": "Shoutout failed",
+    "host.shoutout.failed": (detail) => detail.cause === "twitch_user_not_found"
+      ? `Shoutout target ${detailText(detail, "target", "unknown")} was not found`
+      : detail.cause === "rate_limited"
+        ? "Shoutout was blocked by Twitch's cooldown"
+        : "Shoutout failed",
     "host.shoutout.sent": "Shoutout sent",
     "host.clip.failed": "Clip failed",
     "channel_events.raid.incoming": (detail) => `Raid from ${detailText(detail, "source", "unknown")} with ${detailNumber(detail, "viewers", "unknown number")} viewers`,
@@ -974,6 +997,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.not_authorized": "Text command not authorized",
     "text_commands.unknown": (detail) => eventTextWithName(detail, "Unknown text command", (name) => `Unknown text command !${name}`),
     "text_commands.invalid": "Invalid text command",
+    "text_commands.lookup_unavailable": (detail) => `Command !${detailText(detail, "name", "unknown")}: ${detail.kind === "uptime" ? "stream data" : detail.kind === "followage" ? "followage" : "game information"} unavailable`,
+    "text_commands.argument_missing": (detail) => eventTextWithName(detail, "Shoutout target missing", (name) => `Command !${name}: Twitch login missing`),
   },
 };
 
@@ -1049,6 +1074,8 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "text_commands.not_authorized": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "text_commands.unknown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "text_commands.invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "text_commands.lookup_unavailable": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "text_commands.argument_missing": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
 };
 
 export function eventText(code: string, language?: DashboardLanguage): string;
