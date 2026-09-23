@@ -92,7 +92,6 @@ export interface TextCommandsTexts {
   createdAt: string;
   updatedAt: string;
   lastUsed: string;
-  kindListPreview: string;
   previewLabel: string;
   previewSpeaker: string;
   statusLabels: Record<ModuleChatStatus, string>;
@@ -156,7 +155,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     streamCondition: "Stream", streamLabels: { any: "Immer", online: "Online", offline: "Offline" },
     streamHints: { any: "Wirkt unabhängig vom Stream.", online: "Wirkt nur, während der Stream läuft.", offline: "Wirkt nur, während der Stream aus ist." },
     cooldown: "Abkühlzeit", userCooldown: "Je Nutzer", cooldownHint: "Für den ganzen Kanal. 0 bis 86 400.", userCooldownHint: "Für jeden Zuschauer einzeln. 0 = aus.", numberMissing: "Zahl eingeben.",
-    nameHint: "Kleinbuchstaben, Zahlen, - und _. Im Chat zählt Groß wie klein.",
+    nameHint: "a–z, 0–9, - und _",
     nameInvalid: "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich.", nameMissing: "Namen ausfüllen.", nameExists: "Der Befehl existiert bereits.",
     nameAliasConflict: (trigger, command) => `!${trigger} ist schon ein Alias von !${command}.`,
     aliasConflict: (trigger, command) => trigger === command ? `!${trigger} ist schon der Befehl !${command}.` : `!${trigger} ist schon ein Alias von !${command}.`,
@@ -178,7 +177,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.",
     active: "Aktiv", activeImmediately: "wirkt sofort", enabled: "eingeschaltet", disabled: "ausgeschaltet", noAliases: "keine",
     never: "noch nie", secondsAgo: (count) => `vor ${String(count)} s`, minutesAgo: (count) => `vor ${String(count)} min`, hoursAgo: (count) => `vor ${String(count)} h`,
-    createdAt: "Angelegt", updatedAt: "Geändert", lastUsed: "Zuletzt verwendet", kindListPreview: "Aktivierte Befehle in der Vorschau:",
+    createdAt: "Angelegt", updatedAt: "Geändert", lastUsed: "Zuletzt verwendet",
     previewLabel: "Vorschau", previewSpeaker: "Bot",
     statusLabels: { viewer: "Zuschauer", subscriber: "Abonnent", vip: "VIP", moderator: "Moderator", broadcaster: "Broadcaster" },
     streamAny: "immer", streamOnline: "nur online", streamOffline: "nur offline", cooldownOff: "aus", notModerator: "kein Moderator",
@@ -216,7 +215,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     streamCondition: "Stream", streamLabels: { any: "Always", online: "Online", offline: "Offline" },
     streamHints: { any: "Works regardless of stream status.", online: "Works only while the stream is live.", offline: "Works only while the stream is offline." },
     cooldown: "Cooldown", userCooldown: "Per user", cooldownHint: "For the whole channel. 0 to 86,400.", userCooldownHint: "For each viewer separately. 0 = off.", numberMissing: "Enter a number.",
-    nameHint: "Lowercase letters, numbers, - and _. Chat names are case-insensitive.",
+    nameHint: "a–z, 0–9, - and _",
     nameInvalid: "Use lowercase letters, numbers, hyphen, and underscore.", nameMissing: "Enter a name.", nameExists: "This command already exists.",
     nameAliasConflict: (trigger, command) => `!${trigger} is already an alias for !${command}.`,
     aliasConflict: (trigger, command) => trigger === command ? `!${trigger} is already the command !${command}.` : `!${trigger} is already an alias for !${command}.`,
@@ -238,7 +237,7 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     managementLocked: "Only broadcasters and managers may add, edit, or delete commands.",
     active: "Active", activeImmediately: "takes effect immediately", enabled: "enabled", disabled: "disabled", noAliases: "none",
     never: "never", secondsAgo: (count) => `${String(count)} s ago`, minutesAgo: (count) => `${String(count)} min ago`, hoursAgo: (count) => `${String(count)} h ago`,
-    createdAt: "Created", updatedAt: "Updated", lastUsed: "Last used", kindListPreview: "Enabled commands in this preview:",
+    createdAt: "Created", updatedAt: "Updated", lastUsed: "Last used",
     previewLabel: "Preview", previewSpeaker: "Bot",
     statusLabels: { viewer: "Viewer", subscriber: "Subscriber", vip: "VIP", moderator: "Moderator", broadcaster: "Broadcaster" },
     streamAny: "always", streamOnline: "online only", streamOffline: "offline only", cooldownOff: "off", notModerator: "not a moderator",

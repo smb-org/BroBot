@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 
 import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
 import {
-  Button, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
+  Button, ChatPreview, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
   SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
-import { TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_VARIABLES, type TextCommand, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
+import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_VARIABLES, type TextCommand, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
 import { commandListReply } from "../contracts/chat-defaults";
 import { renderCommandText, statusForTier, validCommandName } from "../domain";
 import { worstCaseTemplateLength, type PanelTemplateWarning } from "../contract";
@@ -180,6 +180,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     description: tierDescription(tier, labels),
     icon: `tier${tier[0]?.toUpperCase() ?? ""}${tier.slice(1)}` as "tierEveryone" | "tierSubscriber" | "tierVip" | "tierModerator" | "tierBroadcaster",
   }));
+  const kindOptions = TEXT_COMMAND_KINDS.map((kind) => ({ value: kind, label: labels.kindLabels[kind], description: labels.kindHints[kind] }));
   const announcementWarning = draft.responseType === "announcement" && botIsModerator === false ? labels.announcementWarning : undefined;
   const advancedIssue = fieldError?.field === "aliases" || cooldownInvalid || userCooldownInvalid
     ? "error" as const
@@ -299,23 +300,20 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
       icon: "tabSettings" as const,
       ...(settingsIssue === undefined ? {} : { issue: settingsIssue }),
       content: <>
-        <div className="command-editor-name-row">
-          <Field
-            id="command-name"
-            label={labels.name}
-            hint={labels.nameHint}
-            prefix="!"
-            normalize={normalizeCommandName}
-            maxLength={32}
-            countLabel={(count, maximum) => `${String(count)} ${language === "en" ? "of" : "von"} ${String(maximum)}`}
-            value={draft.name}
-            {...(nameError === undefined ? {} : { error: nameError })}
-            required
-            disabled={!canManageContent || pending}
-            onChange={(value) => { setDraftField("name", value); }}
-          />
-          {command === null ? null : <Switch label={labels.active} hint={labels.activeImmediately} checked={active} pending={activePending} onChange={(next) => { void toggleActive(next); }} layout="inline" />}
-        </div>
+        <Field
+          id="command-name"
+          label={labels.name}
+          hint={labels.nameHint}
+          prefix="!"
+          normalize={normalizeCommandName}
+          maxLength={32}
+          countLabel={(count, maximum) => `${String(count)} ${language === "en" ? "of" : "von"} ${String(maximum)}`}
+          value={draft.name}
+          {...(nameError === undefined ? {} : { error: nameError })}
+          required
+          disabled={!canManageContent || pending}
+          onChange={(value) => { setDraftField("name", value); }}
+        />
         <TagInput
           label={labels.aliases}
           hint={labels.aliasHint}
@@ -332,13 +330,13 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
           listLabel={labels.aliasList}
           disabled={!canManageContent || pending}
         />
-        <SegmentedControl
+        <Select
           label={labels.kind}
           hint={labels.kindHints[draft.kind]}
           value={draft.kind}
-          options={[{ value: "text", label: labels.kindLabels.text }, { value: "list", label: labels.kindLabels.list }]}
+          options={kindOptions}
           disabled={!canManageContent || pending}
-          onChange={(value) => { setDraftField("kind", value as TextCommandKind); }}
+          onChange={(value) => { if (value !== null) setDraftField("kind", value as TextCommandKind); }}
         />
         {draft.kind === "text" ? <TextArea
           id="command-response"
@@ -357,7 +355,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
           messages={labels.textAreaMessages}
           onIssuesChange={setTemplateIssues}
           {...(attemptedSave && draft.text.trim().length === 0 ? { error: labels.responseMissing } : {})}
-        /> : <div className="command-list-preview"><p>{labels.kindListPreview}</p><TemplateText value={listPreview} variables={[]} /></div>}
+        /> : <ChatPreview label={labels.previewLabel} speaker={labels.previewSpeaker} text={listPreview} countLabel={labels.textAreaMessages.previewCountLabel(listPreview.length)} />}
         <SegmentedControl
           label={labels.responseType}
           hint={labels.responseTypeHints[draft.responseType]}

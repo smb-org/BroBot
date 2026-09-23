@@ -3,6 +3,7 @@ import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type Rea
 
 import { closestTemplateVariable, tokenizeTemplate, unknownTemplateVariables, type TemplateVariable } from "../../template";
 import { Button } from "./Button";
+import { ChatPreview } from "./ChatPreview";
 import { Icon } from "./Icon";
 import { templateHighlightParts } from "./template-highlight";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
@@ -259,12 +260,7 @@ export function TextArea({
         </div>
       )}
       {preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
-        <div className="ui-textarea__preview">
-          <span className="ui-textarea__preview-label">{previewLabel}</span>
-          <span className="ui-textarea__preview-speaker">{previewSpeaker}</span>
-          <span className="ui-textarea__preview-text">{previewText}</span>
-          <span className="ui-textarea__preview-count">{messages.previewCountLabel(previewCount)}</span>
-        </div>
+        <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""} countLabel={messages.previewCountLabel(previewCount)} />
       )}
     </div>
   );

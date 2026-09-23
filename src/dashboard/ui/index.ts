@@ -35,6 +35,9 @@ export type { TemplateVariableOption, TextAreaMessages, TextAreaProps } from "./
 export { TemplateText } from "./TemplateText";
 export type { TemplateTextProps } from "./TemplateText";
 
+export { ChatPreview } from "./ChatPreview";
+export type { ChatPreviewProps } from "./ChatPreview";
+
 export { EditorShell } from "./EditorShell";
 export type { EditorSection, EditorShellProps } from "./EditorShell";
 

@@ -85,8 +85,10 @@ describe("Text command editor", () => {
     expect(settingsTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(advancedTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(screen.getByText("5 von 32")).toBeInTheDocument();
+    expect(screen.getByText("a–z, 0–9, - und _")).toBeInTheDocument();
     expect(editor().querySelector(".ui-field__prefix")).toHaveTextContent("!");
     expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
+    expect(within(editor()).queryByRole("switch")).not.toBeInTheDocument();
 
     fireEvent.click(advancedTab);
     const copy = textCommandsTexts("de");
@@ -101,6 +103,29 @@ describe("Text command editor", () => {
       const exclusion = tier === "subscriber" ? " VIPs nicht." : tier === "vip" ? " Abonnenten nicht." : "";
       expect(within(group).getByRole("radio", { name: `${copy.tierLabels[tier]}. ${description}.${exclusion}` })).toBeInTheDocument();
     }
+  });
+
+  it("shows a one-line description for each kind option in the Art select", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    await waitFor(() => {
+      expect(screen.getByRole("listbox")).toHaveTextContent("AntworttextAntwortet mit dem Text unten.");
+      expect(screen.getByRole("listbox")).toHaveTextContent("BefehlslisteZählt alle eingeschalteten Befehle auf (ohne Aliase).");
+    });
+  });
+
+  it("uses the chat preview, not plain text, for a command list's response", async () => {
+    const rows = [makeCommand({ name: "commands", kind: "list", aliases: [] }), makeCommand({ name: "hallo" })];
+    const fetcher = panelFetch({ commands: () => rows });
+    renderPanel(fetcher);
+    await selectCommand("commands");
+    const panel = editor();
+    expect(within(panel).getByText("Vorschau")).toBeInTheDocument();
+    expect(within(panel).getByText("Bot")).toBeInTheDocument();
+    expect(within(panel).getByText("Befehle: !hallo")).toBeInTheDocument();
+    expect(within(panel).queryByRole("textbox", { name: "Antwort" })).not.toBeInTheDocument();
   });
 
   it("gives every editor field a non-empty helper line and edits aliases and cooldowns", async () => {
@@ -189,7 +214,8 @@ describe("Text command editor", () => {
     });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.click(screen.getByRole("radio", { name: "Befehlsliste" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Befehlsliste/u }));
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "befehle" } });
     expect(screen.queryByRole("textbox", { name: "Antwort" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));

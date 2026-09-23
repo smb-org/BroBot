@@ -647,6 +647,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-choice-cards__indicator { flex: none; }
 .ui-choice-cards [data-disabled] { cursor: not-allowed; opacity: .55; }
 
+.ui-select__option { display: grid; gap: 2px; min-width: 0; }
+.ui-select__option-label { color: var(--text); font-size: 13px; }
+.ui-select__option-description { overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+
 .ui-switch__control { position: relative; display: grid; place-items: center; width: 44px; height: 44px; }
 .ui-switch__input { position: absolute; z-index: 1; inset: 0; width: 44px; height: 44px; margin: 0; opacity: 0; cursor: pointer; }
 .ui-switch__input:disabled { cursor: not-allowed; }
@@ -729,11 +733,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-textarea__chip button { min-height: 32px; padding: 4px 8px; border: 0; border-radius: var(--r-control); color: inherit; background: transparent; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; cursor: pointer; }
 .ui-textarea__chip button:hover { background: var(--surface-hover); }
 .ui-textarea__chip button:disabled { cursor: not-allowed; opacity: .55; }
-.ui-textarea__preview { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-width: 0; padding: 8px 10px; border-radius: var(--r-control); background: var(--surface-well); font-size: 14px; line-height: 1.4; }
-.ui-textarea__preview-label { flex: none; color: var(--text-3); font-size: 11px; font-weight: 600; }
-.ui-textarea__preview-speaker { flex: none; color: var(--brand-text); }
-.ui-textarea__preview-text { min-width: 0; overflow-wrap: anywhere; }
-.ui-textarea__preview-count { flex: none; margin-left: auto; color: var(--text-3); font-size: 12px; }
+.ui-chat-preview { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-width: 0; padding: 8px 10px; border-radius: var(--r-control); background: var(--surface-well); font-size: 14px; line-height: 1.4; }
+.ui-chat-preview__label { flex: none; color: var(--text-3); font-size: 11px; font-weight: 600; }
+.ui-chat-preview__speaker { flex: none; color: var(--brand-text); }
+.ui-chat-preview__text { min-width: 0; overflow-wrap: anywhere; }
+.ui-chat-preview__count { flex: none; margin-left: auto; color: var(--text-3); font-size: 12px; }
 .ui-textarea__suggestions-dropdown { max-height: min(320px, 40vh); overflow-y: auto; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-raised); box-shadow: var(--mantine-shadow-xs); }
 .ui-textarea__suggestion { display: flex; align-items: baseline; gap: 12px; min-height: 36px; padding: 8px 10px; }
 .ui-textarea__suggestion[data-combobox-selected] { background: var(--tint-1); }

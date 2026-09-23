@@ -1,6 +1,7 @@
 import type { TemplateFields, TemplateVariable } from "../contract";
 
-export type TextCommandKind = "text" | "list";
+export const TEXT_COMMAND_KINDS = ["text", "list"] as const;
+export type TextCommandKind = (typeof TEXT_COMMAND_KINDS)[number];
 export const TEXT_COMMAND_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
 export type TextCommandMinimumTier = (typeof TEXT_COMMAND_MINIMUM_TIERS)[number];
 export const TEXT_COMMAND_RESPONSE_TYPES = ["say", "reply", "announcement"] as const;
