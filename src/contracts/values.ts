@@ -64,6 +64,18 @@ export const COMMERCIAL_FAILURE_REASONS = [
 ] as const;
 export type CommercialFailureReason = (typeof COMMERCIAL_FAILURE_REASONS)[number];
 
+/** Stable reasons a `raid.invalid` diagnostic can carry -- see `modules/raid/domain`. */
+export const RAID_INVALID_REASONS = ["target_invalid", "source_invalid", "viewers_invalid"] as const;
+export type RaidInvalidReason = (typeof RAID_INVALID_REASONS)[number];
+
+/** Stable reasons a `shoutout.suppressed` diagnostic can carry -- see `modules/raid/service`. */
+export const SHOUTOUT_SUPPRESSED_REASONS = ["below_threshold", "disabled"] as const;
+export type ShoutoutSuppressedReason = (typeof SHOUTOUT_SUPPRESSED_REASONS)[number];
+
+/** Stable reasons an `ads.skipped` diagnostic can carry -- see `modules/ads/domain`. */
+export const ADS_SKIPPED_REASONS = ["duration_zero", "duration_invalid", "start_invalid"] as const;
+export type AdsSkippedReason = (typeof ADS_SKIPPED_REASONS)[number];
+
 export const IDENTITY_STATUSES = ["connected", "revoked", "error"] as const;
 export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
 

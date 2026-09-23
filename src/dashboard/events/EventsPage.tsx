@@ -7,13 +7,14 @@ import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, ErrorPanel, Field, ListDetail, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
+import { ChipGroup, EmptyState, ErrorPanel, Field, ListDetail, Popover, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   actorLabel,
   affectedPersonLabel,
   chronological,
   emptyEventFilter,
+  eventCause,
   eventChipNumber,
   eventDayGroups,
   eventDetail,
@@ -272,10 +273,10 @@ export const EventsPage = ({
   const selectedHistory = selectedGroup === null ? [] : [...selectedGroup.entries].sort(chronological);
   const triggerNames = Array.from(new Set(selectedHistory.map((entry) => actorLabel(entry, texts))));
   const moderatorNames = Array.from(new Set(
-    selectedHistory.map((entry) => moderatorLabel(eventDetail(entry.detail))).filter((name): name is string => name !== null),
+    selectedHistory.map((entry) => moderatorLabel(eventDetail(entry.detail, entry.code))).filter((name): name is string => name !== null),
   ));
   const affectedNames = Array.from(new Set(
-    selectedHistory.map((entry) => affectedPersonLabel(eventDetail(entry.detail))).filter((name): name is string => name !== null),
+    selectedHistory.map((entry) => affectedPersonLabel(eventDetail(entry.detail, entry.code))).filter((name): name is string => name !== null),
   ));
   const eventEntries = eventsState.data?.entries ?? [];
   const filterActive = eventFilterIsActive(filters);
@@ -327,12 +328,14 @@ export const EventsPage = ({
                         <thead><tr><th scope="col">{texts.events.event}</th><th scope="col">{texts.events.module}</th><th scope="col">{texts.events.who}</th><th scope="col">{texts.events.time}</th></tr></thead>
                         <tbody>{day.groups.map((group) => {
                           const entry = group.representative;
-                          const eventLabel = eventText(entry.code, eventDetail(entry.detail));
+                          const eventLabel = eventText(entry.code, eventDetail(entry.detail, entry.code));
+                          const cause = eventCause(entry);
                           return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}>
                             <td>
                               <span className="event-label event-table__primary">
-                                <EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} />
+                                <EventChipPair code={entry.code} detail={eventDetail(entry.detail, entry.code)} texts={texts} />
                                 <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`}>{eventLabel}</span>
+                                {cause === null ? null : <Popover triggerLabel={texts.events.showCause(eventLabel)} icon="cause">{cause}</Popover>}
                               </span>
                               <span className="event-table__mobile-meta muted">
                                 <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>
@@ -377,13 +380,13 @@ export const EventsPage = ({
             <ol className="event-history">{selectedHistory.map((entry) => {
               return <li key={entry.eventId}>
                 <div className="event-history__heading">
-                  <span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventText(entry.code, eventDetail(entry.detail))}</span></span>
+                  <span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail, entry.code)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventText(entry.code, eventDetail(entry.detail, entry.code))}</span></span>
                   <span className="mono muted">{entry.code}</span>
                 </div>
                 <details>
                   <summary>{texts.events.technicalDetails}</summary>
                   <CopyableId id={entry.triggerId || entry.eventId} texts={texts} />
-                  <pre className="event-detail-json">{formatEventDetail(entry.detail)}</pre>
+                  <pre className="event-detail-json">{formatEventDetail(entry.detail, entry.code)}</pre>
                 </details>
               </li>;
             })}</ol>

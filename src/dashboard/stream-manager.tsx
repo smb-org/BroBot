@@ -6,10 +6,11 @@ import type { ModuleImmediateActionProperties } from "../modules/contract";
 import { MODULES } from "../modules/registry";
 import { fetchEvents } from "./api";
 import { dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime, immediateActionUnavailableReasonText } from "./locale";
-import { eventDetail, eventMetadata } from "./events/model";
+import { eventCause, eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
 import { useRealtimeEventFeed } from "./realtime";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
+import { Popover } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 const lazyActions = new Map<string, LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>>>();
@@ -110,11 +111,12 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
       ) : (
         <ul className="stream-manager-feed">
           {entries.map((entry) => {
-            const label = eventText(entry.code, eventDetail(entry.detail));
+            const label = eventText(entry.code, eventDetail(entry.detail, entry.code));
             const metadata = eventMetadata(entry.code);
             const tone = metadata?.tone === "error" ? "error" : metadata?.tone === "warning" ? "warning" : "neutral";
+            const cause = eventCause(entry);
             return (
-              <li key={entry.eventId}>
+              <li key={entry.eventId} className="stream-manager-feed__item">
                 <a
                   className="stream-manager-feed__row"
                   href={dashboardRoutePath(allAlertsRoute)}
@@ -124,6 +126,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
                   <span className="stream-manager-feed__text">{label}</span>
                   <time className="stream-manager-feed__time mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatStreamManagerFeedTime(entry.createdAt)}</time>
                 </a>
+                {cause === null ? null : <Popover triggerLabel={texts.events.showCause(label)} icon="cause">{cause}</Popover>}
               </li>
             );
           })}
