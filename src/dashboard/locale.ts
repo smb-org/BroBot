@@ -1,4 +1,4 @@
-import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
+import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
 
 export type DashboardLanguage = ModuleLanguage;
@@ -344,33 +344,13 @@ export interface DashboardTexts {
    *  itself, never a global toast (see docs/input/umbau-plan.md Epic 4). */
   streamManager: {
     immediateActions: string;
+    availabilityReasons: Record<ImmediateActionUnavailableReason, string>;
     checksHealthy: (count: string) => string;
     checksNeedAttention: (problems: string, checks: string) => string;
-    /** Header title of the ad action card. */
-    adTitle: string;
-    adLength: string;
-    /** Hint under the ad-length `SegmentedControl` (3.0, 12.2). */
-    adLengthHint: string;
+    /** Shortcut labels used by Spotlight; action cards use their module catalogue. */
     runAd: (length: string) => string;
-    adDisabledOffline: string;
-    adStarted: (length: string) => string;
-    adCooldown: (seconds: string) => string;
-    /** Header title of the shoutout action card. */
-    shoutoutTitle: string;
-    shoutoutLogin: string;
-    /** Hint under the shoutout-login `Field`, shown when a login is entered (3.0, 12.2). */
-    shoutoutLoginHint: string;
-    /** Same helper line as `shoutoutLoginHint`, shown instead of it while the field is empty. */
-    shoutoutLoginRequired: string;
-    sendShoutout: string;
-    shoutoutSent: (login: string) => string;
-    /** Header title of the clip action card. */
-    clipTitle: string;
     createClip: string;
-    clipDisabledOffline: string;
-    clipCreated: string;
-    openClip: string;
-    opensNewTab: string;
+    sendShoutout: string;
     feedTitle: string;
     feedEmpty: string;
     feedAll: string;
@@ -571,27 +551,15 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Sofortaktionen",
+      availabilityReasons: {
+        stream_offline: "Der Stream ist offline.",
+        stream_state_unknown: "Der Streamstatus ist derzeit nicht verfügbar.",
+      },
       checksHealthy: (count) => `Alles in Ordnung · ${count} Prüfungen`,
       checksNeedAttention: (problems, checks) => `${problems} auffällige ${problems === "1" ? "Prüfung" : "Prüfungen"} · ${checks} Prüfungen`,
-      adTitle: "Werbung",
-      adLength: "Werbedauer",
-      adLengthHint: "Sekunden. Startet sofort.",
       runAd: (length) => `Werbung jetzt (${length}s)`,
-      adDisabledOffline: "Der Stream ist offline.",
-      adStarted: (length) => `Werbung gestartet (${length}s)`,
-      adCooldown: (seconds) => `Wartezeit: ${seconds}s`,
-      shoutoutTitle: "Shoutout",
-      shoutoutLogin: "Twitch-Name",
-      shoutoutLoginHint: "Twitch-Name des Kanals, den du empfiehlst.",
-      shoutoutLoginRequired: "Bitte gib einen Twitch-Namen ein.",
-      sendShoutout: "Shoutout senden",
-      shoutoutSent: (login) => `Shoutout an ${login} gesendet`,
-      clipTitle: "Clip",
       createClip: "Clip erstellen",
-      clipDisabledOffline: "Der Stream ist offline.",
-      clipCreated: "Clip erstellt",
-      openClip: "Clip öffnen",
-      opensNewTab: "öffnet neuen Tab",
+      sendShoutout: "Shoutout senden",
       feedTitle: "Warnungen und Fehler",
       feedEmpty: "Keine Warnungen oder Fehler.",
       feedAll: "Alle im Ereignisprotokoll",
@@ -775,27 +743,15 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Immediate actions",
+      availabilityReasons: {
+        stream_offline: "The stream is offline.",
+        stream_state_unknown: "The stream status is currently unavailable.",
+      },
       checksHealthy: (count) => `All clear · ${count} checks`,
       checksNeedAttention: (problems, checks) => `${problems} ${problems === "1" ? "check needs" : "checks need"} attention · ${checks} checks`,
-      adTitle: "Ads",
-      adLength: "Ad length",
-      adLengthHint: "Seconds. Starts immediately.",
       runAd: (length) => `Run ad now (${length}s)`,
-      adDisabledOffline: "The stream is offline.",
-      adStarted: (length) => `Ad started (${length}s)`,
-      adCooldown: (seconds) => `Cooldown: ${seconds}s`,
-      shoutoutTitle: "Shoutout",
-      shoutoutLogin: "Twitch login",
-      shoutoutLoginHint: "Twitch login of the channel you're recommending.",
-      shoutoutLoginRequired: "Enter a Twitch login.",
-      sendShoutout: "Send shoutout",
-      shoutoutSent: (login) => `Shoutout sent to ${login}`,
-      clipTitle: "Clip",
       createClip: "Create clip",
-      clipDisabledOffline: "The stream is offline.",
-      clipCreated: "Clip created",
-      openClip: "Open clip",
-      opensNewTab: "opens a new tab",
+      sendShoutout: "Send shoutout",
       feedTitle: "Warnings and errors",
       feedEmpty: "No warnings or errors.",
       feedAll: "View all in the event log",
@@ -1575,6 +1531,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     module_management_denied: "Nur Broadcaster und Verwalter dürfen Module ändern.",
     module_unknown: "Unbekanntes Modul.",
     module_not_configured: "Modul ist in diesem Kanal nicht eingerichtet.",
+    module_disabled: "Modul ist in diesem Kanal nicht aktiv.",
     module_settings_invalid: "Moduleinstellungen sind ungültig.",
     module_settings_changed_concurrently: "Moduleinstellungen wurden inzwischen geändert.",
     module_enabled_field_invalid: "Feld enabled ist ungültig.",
@@ -1649,6 +1606,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     module_management_denied: "Only broadcasters and managers may change modules.",
     module_unknown: "Unknown module.",
     module_not_configured: "This module is not set up for this channel.",
+    module_disabled: "This module is not active for this channel.",
     module_settings_invalid: "The module settings are invalid.",
     module_settings_changed_concurrently: "The module settings have since changed.",
     module_enabled_field_invalid: "The enabled field is invalid.",
@@ -1759,6 +1717,11 @@ export const maintenanceReasonText = (
 };
 
 export const dashboardTexts = (): DashboardTexts => dashboardTextsCatalog[dashboardLanguage()];
+
+export const immediateActionUnavailableReasonText = (
+  reason: ImmediateActionUnavailableReason,
+  language: DashboardLanguage = dashboardLanguage(),
+): string => dashboardTextsCatalog[language].streamManager.availabilityReasons[reason];
 
 export const formatDashboardDate = (
   value: string,

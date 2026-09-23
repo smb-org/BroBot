@@ -51,8 +51,8 @@ describe("audit actions", () => {
   });
 
   it("composes module settings labels from the bilingual module catalogue", () => {
-    expect(auditActionLabel("raid.settings_changed", "de")).toBe("Einstellungen geändert: Raid-Shoutout");
-    expect(auditActionLabel("raid.settings_changed", "en")).toBe("Settings changed: Raid shoutout");
+    expect(auditActionLabel("raid.settings_changed", "de")).toBe("Einstellungen geändert: Shoutout");
+    expect(auditActionLabel("raid.settings_changed", "en")).toBe("Settings changed: Shoutout");
     expect(auditActionLabel("__proto__.settings_changed", "de")).toBe("__proto__.settings_changed");
   });
 

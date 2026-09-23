@@ -6,10 +6,8 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
-// MODULES is deliberately empty in the registry (see src/modules/registry.ts).
-// These tests need a registered module to verify activation end-to-end
-// through the route — hence a small double instead of a real
-// module, mocked before the route imports it.
+// This suite supplies small module doubles to keep route activation checks
+// focused on persistence and authorization, independent of product modules.
 const testModuleSchema = z.object({ betrag: z.number() });
 let prepareEnableCommand = false;
 const testModule: BotModule<typeof testModuleSchema> = {
@@ -49,7 +47,15 @@ const mandatoryTestModule: BotModule<typeof testModuleSchema> = {
   defaultSettings: { betrag: 42 },
 };
 
-vi.mock("../../src/modules/registry", () => ({ MODULES: [testModule, mandatoryTestModule] }));
+const clipsTestSchema = z.object({});
+const defaultEnabledTestModule: BotModule<typeof clipsTestSchema> = {
+  id: "clips",
+  defaultEnabled: true,
+  settingsSchema: clipsTestSchema,
+  defaultSettings: {},
+};
+
+vi.mock("../../src/modules/registry", () => ({ MODULES: [testModule, mandatoryTestModule, defaultEnabledTestModule] }));
 
 const { createCsrfToken } = await import("../../src/worker/auth/csrf");
 const { createSessionCookie } = await import("../../src/worker/auth/session");
@@ -187,6 +193,9 @@ describe("Module management in the panel", () => {
     expect(body.modules).toEqual([
       { id: "test-modul", enabled: false, settings: '{"betrag":42}', mandatory: false },
       { id: "channel_events", enabled: true, settings: '{"betrag":42}', mandatory: true },
+      // No fallback: a default-enabled module with no row reports disabled,
+      // exactly like any other module. Only a real row makes it enabled.
+      { id: "clips", enabled: false, settings: "{}", mandatory: false },
     ]);
   });
 
@@ -213,7 +222,33 @@ describe("Module management in the panel", () => {
     expect(list.modules).toEqual([
       { id: "test-modul", enabled: true, settings: '{"betrag":42}', mandatory: false },
       { id: "channel_events", enabled: true, settings: '{"betrag":42}', mandatory: true },
+      { id: "clips", enabled: false, settings: "{}", mandatory: false },
     ]);
+  });
+
+  it("toggles a default-enabled module off and keeps it off with no fallback resurrecting it", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+
+    const enable = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/clips", "PATCH", { enabled: true }),
+      environment,
+    );
+    expect(enable.status).toBe(200);
+
+    const disable = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/clips", "PATCH", { enabled: false }),
+      environment,
+    );
+    expect(disable.status).toBe(200);
+
+    const listResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules"),
+      environment,
+    );
+    const list = await listResponse.json<{ modules: Array<{ id: string; enabled: boolean }> }>();
+    expect(list.modules).toContainEqual(expect.objectContaining({ id: "clips", enabled: false }));
   });
 
   it("rejects disabling mandatory channel events with the closed API error", async () => {

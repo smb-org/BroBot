@@ -8,16 +8,17 @@ import { startCommercialNow } from "./service";
 
 const AD_LENGTHS = ["30", "60", "90", "120", "150", "180"];
 
-const AdNowAction = ({ channelId, streamState }: ModuleImmediateActionProperties): ReactElement => {
+const AdNowAction = ({ channelId, availabilityReason }: ModuleImmediateActionProperties): ReactElement => {
   const labels = adsPanelTexts(typeof navigator === "undefined" || !navigator.language.toLowerCase().startsWith("en") ? "de" : "en");
   const [length, setLength] = useState<string | null>("60");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [succeeded, setSucceeded] = useState(false);
-  const offlineReasonId = "stream-manager-ads-offline-reason";
+  const availabilityReasonId = "stream-manager-ads-availability-reason";
+  const unavailable = availabilityReason !== null;
 
   const run = async (): Promise<void> => {
-    if (pending || length === null) return;
+    if (pending || length === null || availabilityReason !== null) return;
     setPending(true);
     setMessage(null);
     setSucceeded(false);
@@ -44,14 +45,14 @@ const AdNowAction = ({ channelId, streamState }: ModuleImmediateActionProperties
           value={length ?? ""}
           onChange={setLength}
           options={AD_LENGTHS.map((value) => ({ value, label: `${value}s` }))}
-          disabled={pending}
+          disabled={pending || unavailable}
           size="compact"
         />
       </div>
-      <Button className="stream-manager-action__button" icon="ad" variant="primary" disabled={pending || length === null || streamState === "offline"} {...(streamState === "offline" ? { describedBy: offlineReasonId } : {})} onClick={() => { void run(); }}>
+      <Button className="stream-manager-action__button" icon="ad" variant="primary" disabled={pending || length === null || unavailable} {...(unavailable ? { describedBy: availabilityReasonId } : {})} onClick={() => { void run(); }}>
         {labels.immediateRun(length ?? "")}
       </Button>
-      {streamState === "offline" ? <p className="lock-reason" id={offlineReasonId}>{labels.immediateOffline}</p> : null}
+      {availabilityReason === null ? null : <p className="lock-reason" id={availabilityReasonId}>{availabilityReason}</p>}
       {message === null ? null : <p className={succeeded ? "form-success" : "form-error"} role={succeeded ? "status" : "alert"}>{message}</p>}
     </div>
   );

@@ -3,6 +3,7 @@ import { channelEventsModule } from "./channel_events";
 import { raidModule } from "./raid";
 import { textCommandModule } from "./text_commands";
 import { adsModule } from "./ads";
+import { clipsModule } from "./clips";
 
 // This is the only place that knows all modules.
-export const MODULES: readonly BotModule[] = [textCommandModule, channelEventsModule, adsModule, raidModule];
+export const MODULES: readonly BotModule[] = [textCommandModule, channelEventsModule, adsModule, raidModule, clipsModule];

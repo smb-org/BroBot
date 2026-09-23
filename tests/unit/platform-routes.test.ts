@@ -9,6 +9,7 @@ import {
   addPlatformMember,
 } from "../../src/worker/platform/repository";
 import { platformRouter } from "../../src/worker/platform/routes";
+import { MODULES } from "../../src/modules/registry";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -168,6 +169,44 @@ describe("Platform admin level", () => {
     await expect(searchResponse.json()).resolves.toEqual({
       user: { userId: "user-7", login: "neuerkanal", displayName: "Neuer Kanal", profileImageUrl: null },
     });
+  });
+
+  it("provisions every default-enabled module as an enabled row on release", async () => {
+    await setPlatform(database);
+    await setBotIdentity(database);
+    vi.mocked(fetch).mockResolvedValueOnce(responseFromHelix([
+      { id: "kanal-8", login: "kanal-acht", display_name: "Kanal Acht" },
+    ]));
+
+    const response = await platformRouter.fetch(
+      await requestFor(platformId, "/api/platform/channels", "POST", {
+        login: "kanal-acht",
+        fullConsent: true,
+      }),
+      environment,
+    );
+    const modules = (await database.prepare(
+      "SELECT module_id, enabled, settings FROM channel_modules WHERE channel_id = ? ORDER BY module_id",
+    ).bind("kanal-8").all<{ module_id: string; enabled: number; settings: string }>()).results;
+
+    expect(response.status).toBe(201);
+    expect(modules).toEqual(
+      MODULES.filter((module) => module.defaultEnabled === true).map((module) => ({
+        module_id: module.id,
+        enabled: 1,
+        settings: JSON.stringify(module.defaultSettings),
+      })).sort((a, b) => a.module_id.localeCompare(b.module_id)),
+    );
+    // The release audit trail stays exactly one entry: default module
+    // provisioning is bookkeeping for the release, not a separate action.
+    await expect(leseAudit(database)).resolves.toEqual([
+      {
+        actor_user_id: platformId,
+        actor_kind: "platform_admin",
+        action: "channel.released",
+        channel_id: "kanal-8",
+      },
+    ]);
   });
 
   it("creates the channel, broadcaster row, and platform-admin audit entry in one batch on approval", async () => {

@@ -35,4 +35,13 @@ describe("Module labels", () => {
     expect(moduleName("gibtesnicht", "de")).toBe("gibtesnicht");
     expect(moduleDescription("gibtesnicht", "de")).toBeNull();
   });
+
+  it("uses the Shoutout name for the existing raid module id in both catalogues", () => {
+    expect(moduleName("raid", "de")).toBe("Shoutout");
+    expect(moduleName("raid", "en")).toBe("Shoutout");
+    expect(moduleDescription("raid", "de")).toContain("Raids");
+    expect(moduleDescription("raid", "de")).toContain("manuelle Shoutouts");
+    expect(moduleDescription("raid", "en")).toContain("incoming raids");
+    expect(moduleDescription("raid", "en")).toContain("manual shoutouts");
+  });
 });

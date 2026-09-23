@@ -1,15 +1,16 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type LazyExoticComponent, type ReactElement } from "react";
 
+import type { ChannelStreamState } from "../contracts/values";
 import type { PanelEventEntry, PanelModuleState } from "../panel-contract";
 import type { ModuleImmediateActionProperties } from "../modules/contract";
 import { MODULES } from "../modules/registry";
-import { createClip, fetchEvents, PanelApiError, sendManualShoutout } from "./api";
-import { apiErrorText, dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime, shoutoutFailureReasonText } from "./locale";
+import { fetchEvents } from "./api";
+import { dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime, immediateActionUnavailableReasonText } from "./locale";
 import { eventCause, eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
 import { useRealtimeEventFeed } from "./realtime";
-import { Button, Field, Popover } from "./ui";
-import { Icon } from "./ui/Icon";
+import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
+import { Popover } from "./ui";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 const lazyActions = new Map<string, LazyExoticComponent<ComponentType<ModuleImmediateActionProperties>>>();
@@ -19,105 +20,9 @@ const getLazyImmediateAction = (moduleId: string): LazyExoticComponent<Component
   if (module?.immediateActions === undefined) return null;
   const cached = lazyActions.get(moduleId);
   if (cached !== undefined) return cached;
-  const component = lazy(module.immediateActions);
+  const component = lazy(module.immediateActions.load);
   lazyActions.set(moduleId, component);
   return component;
-};
-
-interface ActionState {
-  pending: boolean;
-  error: string | null;
-  success: string | null;
-}
-
-const idleAction: ActionState = { pending: false, error: null, success: null };
-
-const failureText = (error: unknown, fallback: string): string =>
-  error instanceof PanelApiError ? apiErrorText(error.code, fallback) : fallback;
-
-const ShoutoutAction = ({ channelId }: { channelId: string }): ReactElement => {
-  const texts = dashboardTexts();
-  const [login, setLogin] = useState("");
-  const [state, setState] = useState<ActionState>(idleAction);
-
-  const run = async (): Promise<void> => {
-    const trimmed = login.trim();
-    if (state.pending || trimmed.length === 0) return;
-    setState({ pending: true, error: null, success: null });
-    try {
-      await sendManualShoutout(channelId, trimmed);
-      setState({ pending: false, error: null, success: texts.streamManager.shoutoutSent(trimmed) });
-    } catch (error: unknown) {
-      const reason = error instanceof PanelApiError && error.details !== null && typeof error.details === "object" && !Array.isArray(error.details)
-        ? (error.details as Record<string, unknown>).reason
-        : null;
-      const reasonText = shoutoutFailureReasonText(reason);
-      setState({ pending: false, error: reasonText ?? failureText(error, texts.errors.changeFailed), success: null });
-    }
-  };
-
-  const isEmpty = login.trim().length === 0;
-  const loginId = "stream-manager-shoutout-login";
-  const helperId = `${loginId}-description`;
-
-  return (
-    <div className="stream-manager-action">
-      <div className="stream-manager-action__header"><Icon name="shoutout" size={20} /><h3>{texts.streamManager.shoutoutTitle}</h3></div>
-      <div className="stream-manager-action__body">
-        <Field
-          id={loginId}
-          label={texts.streamManager.shoutoutLogin}
-          hint={isEmpty ? texts.streamManager.shoutoutLoginRequired : texts.streamManager.shoutoutLoginHint}
-          prefix="@"
-          value={login}
-          onChange={setLogin}
-          disabled={state.pending}
-          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void run(); } }}
-        />
-      </div>
-      <Button className="stream-manager-action__button" icon="shoutout" variant="primary" disabled={state.pending || isEmpty} {...(isEmpty ? { describedBy: helperId } : {})} onClick={() => { void run(); }}>
-        {texts.streamManager.sendShoutout}
-      </Button>
-      {state.success === null ? null : <p className="form-success" role="status">{state.success}</p>}
-      {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}
-    </div>
-  );
-};
-
-const ClipAction = ({ channelId, streamState }: { channelId: string; streamState?: "online" | "offline" | null | undefined }): ReactElement => {
-  const texts = dashboardTexts();
-  const [state, setState] = useState<ActionState>(idleAction);
-  const [editUrl, setEditUrl] = useState<string | null>(null);
-
-  const run = async (): Promise<void> => {
-    if (state.pending) return;
-    setState({ pending: true, error: null, success: null });
-    setEditUrl(null);
-    try {
-      const result = await createClip(channelId);
-      setEditUrl(result.editUrl);
-      setState({ pending: false, error: null, success: texts.streamManager.clipCreated });
-    } catch (error: unknown) {
-      setState({ pending: false, error: failureText(error, texts.errors.changeFailed), success: null });
-    }
-  };
-
-  const offlineReasonId = "stream-manager-clip-offline-reason";
-  return (
-    <div className="stream-manager-action">
-      <div className="stream-manager-action__header"><Icon name="clip" size={20} /><h3>{texts.streamManager.clipTitle}</h3></div>
-      <Button className="stream-manager-action__button" icon="clip" variant="primary" disabled={state.pending || streamState === "offline"} {...(streamState === "offline" ? { describedBy: offlineReasonId } : {})} onClick={() => { void run(); }}>
-        {texts.streamManager.createClip}
-      </Button>
-      {streamState === "offline" ? <p className="lock-reason" id={offlineReasonId}>{texts.streamManager.clipDisabledOffline}</p> : null}
-      {state.success === null ? null : (
-        <p className="form-success" role="status">
-          <span>{state.success}</span>{editUrl === null ? null : <> · <a href={editUrl} target="_blank" rel="noreferrer" aria-label={`${texts.streamManager.openClip} (${texts.streamManager.opensNewTab})`}>{texts.streamManager.openClip}<Icon name="external" size={16} /></a></>}
-        </p>
-      )}
-      {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}
-    </div>
-  );
 };
 
 /**
@@ -125,22 +30,27 @@ const ClipAction = ({ channelId, streamState }: { channelId: string; streamState
  * itself (inline, next to its own button), never a global toast, and each
  * guards its own in-flight request the same way `Switch`'s `pending` does.
  */
-export const ImmediateActions = ({ channelId, streamState, modules = [] }: { channelId: string; streamState?: "online" | "offline" | null | undefined; modules?: readonly Pick<PanelModuleState, "id" | "enabled">[] }): ReactElement => {
+export const ImmediateActions = ({ channelId, streamState, modules = [] }: { channelId: string; streamState?: ChannelStreamState | null | undefined; modules?: readonly Pick<PanelModuleState, "id" | "enabled">[] }): ReactElement => {
   const texts = dashboardTexts();
-  const moduleCards = modules.flatMap((state) => {
-    if (!state.enabled) return [];
-    const ActionCard = getLazyImmediateAction(state.id);
-    return ActionCard === null ? [] : [{ id: state.id, ActionCard }];
+  const modulesById = new Map(modules.map((state) => [state.id, state]));
+  const moduleCards = MODULES.flatMap((module) => {
+    const state = modulesById.get(module.id);
+    if (state === undefined || !state.enabled || module.immediateActions === undefined) return [];
+    const ActionCard = getLazyImmediateAction(module.id);
+    if (ActionCard === null) return [];
+    const availability = evaluateImmediateActionAvailability(module.immediateActions.requires, streamState);
+    const availabilityReason = availability.reason === null
+      ? null
+      : immediateActionUnavailableReasonText(availability.reason);
+    return [{ id: module.id, ActionCard, availabilityReason }];
   });
   return (
     <section className="content-section" aria-label={texts.streamManager.immediateActions}>
       <div className="section-heading"><h2>{texts.streamManager.immediateActions}</h2></div>
       <div className="stream-manager-actions">
-        <ShoutoutAction channelId={channelId} />
-        <ClipAction channelId={channelId} streamState={streamState} />
-        {moduleCards.map(({ id, ActionCard }) => (
+        {moduleCards.map(({ id, ActionCard, availabilityReason }) => (
           <Suspense key={id} fallback={null}>
-            <ActionCard channelId={channelId} {...(streamState === undefined ? {} : { streamState })} />
+            <ActionCard channelId={channelId} streamState={streamState ?? null} availabilityReason={availabilityReason} />
           </Suspense>
         ))}
       </div>
