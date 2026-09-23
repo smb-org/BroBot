@@ -62,6 +62,23 @@ const insertBotIdentity = async (database: TestD1Database): Promise<void> => {
   ).run();
 };
 
+const insertDefaultAppAccessToken = async (database: TestD1Database): Promise<void> => {
+  const ciphertext = await encryptJson(
+    { token: "app-access-token" },
+    parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS),
+  );
+  await database.prepare(
+    `INSERT INTO twitch_app_access_token
+      (id, access_token_ciphertext, expires_at, created_at, updated_at)
+     VALUES (1, ?, ?, ?, ?)`,
+  ).bind(
+    ciphertext,
+    "2099-09-19T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+  ).run();
+};
+
 const insertBotChannelStatus = async (
   database: TestD1Database,
   channelId: string,
@@ -84,6 +101,7 @@ const insertSessionCookie = async (userId: string): Promise<string> => createSes
 const makeEnvironment = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
   ...environmentKeys,
+  TWITCH_CLIENT_ID: "client-id",
   TWITCH_BOT_LOGIN: "brobot",
   PLATFORM_USER_IDS: JSON.stringify(["4711"]),
 } as unknown as Env);
@@ -797,6 +815,190 @@ describe("Panel read endpoints", () => {
       expect.objectContaining({ actorUserId: "auflösbar", actorLogin: "alice", actorDisplayName: "Alice" }),
       expect.objectContaining({ actorUserId: "gelöscht", actorLogin: null, actorDisplayName: null }),
     ]);
+  });
+
+  it("resolves a member action's subject alongside the actor in the same Twitch call (#181)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotIdentity(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-member",
+      "user-1",
+      "2026-09-18T04:00:00.000Z",
+      "kanal-a",
+      "member.added",
+      "null",
+      JSON.stringify({ channelId: "kanal-a", userId: "user-2", role: "operator", createdAt: "2026-09-18T04:00:00.000Z", updatedAt: "2026-09-18T04:00:00.000Z" }),
+    ).run();
+    const twitch = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.searchParams.getAll("id").sort()).toEqual(["user-1", "user-2"]);
+      return Promise.resolve(Response.json({ data: [
+        { id: "user-1", login: "alice", display_name: "Alice" },
+        { id: "user-2", login: "sensitron", display_name: "sensitron" },
+      ] }));
+    });
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<Record<string, unknown>> }>();
+
+    expect(response.status).toBe(200);
+    expect(twitch).toHaveBeenCalledTimes(1);
+    expect(body.entries).toEqual([expect.objectContaining({
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+      subjectUserId: "user-2",
+      subjectLogin: "sensitron",
+      subjectDisplayName: "sensitron",
+    })]);
+  });
+
+  it("still sends the subject's raw id when the Twitch lookup can't resolve it (#181 review)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBotIdentity(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-member",
+      "user-1",
+      "2026-09-18T04:00:00.000Z",
+      "kanal-a",
+      "member.removed",
+      JSON.stringify({ channelId: "kanal-a", userId: "gelöscht", role: "operator" }),
+      "null",
+    ).run();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ data: [{ id: "user-1", login: "alice", display_name: "Alice" }] }))));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<Record<string, unknown>> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.entries).toEqual([expect.objectContaining({
+      subjectUserId: "gelöscht",
+      subjectLogin: null,
+      subjectDisplayName: null,
+    })]);
+  });
+
+  it("filters the audit log by area and by person", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-module", "user-1", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+      "audit-member", "9002", "2026-09-18T03:00:00.000Z", "kanal-a", "member.added", "null", "{}",
+    ).run();
+
+    const areaResponse = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?area=member"),
+      environment,
+    );
+    const areaBody = await areaResponse.json<{ entries: Array<{ auditId: string }> }>();
+    expect(areaResponse.status).toBe(200);
+    expect(areaBody.entries.map((entry) => entry.auditId)).toEqual(["audit-member"]);
+
+    const personResponse = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=9002"),
+      environment,
+    );
+    const personBody = await personResponse.json<{ entries: Array<{ auditId: string }> }>();
+    expect(personResponse.status).toBe(200);
+    expect(personBody.entries.map((entry) => entry.auditId)).toEqual(["audit-member"]);
+
+    const invalidAreaResponse = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?area=bogus"),
+      environment,
+    );
+    expect(invalidAreaResponse.status).toBe(400);
+    expect(await invalidAreaResponse.json()).toEqual({ error: "audit_area_invalid" });
+  });
+
+  it("resolves a non-numeric person filter as a login before querying (#181 review)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertDefaultAppAccessToken(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-9002", "9002", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+      "audit-1", "user-1", "2026-09-18T03:00:00.000Z", "kanal-a", "module.disabled", "{}", "{}",
+    ).run();
+    const twitch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.searchParams.get("login")).toBe("sensitron");
+      expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer app-access-token");
+      return Promise.resolve(Response.json({ data: [{ id: "9002", login: "sensitron", display_name: "sensitron" }] }));
+    });
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=%40sensitron"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<{ auditId: string }> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-9002"]);
+  });
+
+  it("returns an empty page instead of an error for an unresolvable person login", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertDefaultAppAccessToken(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind("audit-1", "user-1", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}").run();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ data: [] }))));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=no_such_login"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ entries: [], nextCursor: null });
+  });
+
+  it("returns a Twitch search error when resolving a person login fails", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertDefaultAppAccessToken(database);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("upstream unavailable", { status: 503 }))));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=some_login"),
+      environment,
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "twitch_user_search_failed" });
   });
 });
 

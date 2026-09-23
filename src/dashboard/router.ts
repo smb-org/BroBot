@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
 
-import { EVENT_TONES, type EventTone } from "../contracts/values";
-import type { PanelEventFilters, PanelEventOrigin } from "../panel-contract";
+import { EVENT_TONES, type AuditArea, type EventTone } from "../contracts/values";
+import { isAuditArea } from "./audit/areas";
+import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../panel-contract";
 
 export type DashboardRoute =
   | { kind: "overview" }
   | { kind: "platform" }
-  | { kind: "channel"; channelId: string; section: "overview" | "system" | "members" | "events" | "modules" | "audit"; filters?: PanelEventFilters }
+  | {
+    kind: "channel";
+    channelId: string;
+    section: "overview" | "system" | "members" | "events" | "modules" | "audit";
+    filters?: PanelEventFilters;
+    auditFilters?: PanelAuditFilters;
+  }
   | { kind: "module"; channelId: string; moduleId: string };
 
 const decodeSegment = (value: string): string | null => {
@@ -40,6 +47,15 @@ const parseEventFilters = (search: string): PanelEventFilters | undefined => {
     };
 };
 
+const parseAuditFilters = (search: string): PanelAuditFilters | undefined => {
+  const params = new URLSearchParams(search);
+  const actor = params.get("actor");
+  const area = params.get("area");
+  const validArea: AuditArea | null = area !== null && isAuditArea(area) ? area : null;
+  const person = actor === null || actor.length === 0 ? null : actor;
+  return validArea === null && person === null ? undefined : { person, area: validArea };
+};
+
 export const parseDashboardRoute = (pathname: string, search = ""): DashboardRoute => {
   const segments = pathname.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) return { kind: "overview" };
@@ -66,9 +82,15 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
       ? section
       : "overview",
   };
-  if (route.section !== "events") return route;
-  const filters = parseEventFilters(search);
-  return filters === undefined ? route : { ...route, filters };
+  if (route.section === "events") {
+    const filters = parseEventFilters(search);
+    return filters === undefined ? route : { ...route, filters };
+  }
+  if (route.section === "audit") {
+    const auditFilters = parseAuditFilters(search);
+    return auditFilters === undefined ? route : { ...route, auditFilters };
+  }
+  return route;
 };
 
 export const dashboardRoutePath = (route: DashboardRoute): string => {
@@ -78,16 +100,25 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "module") return `${base}/modules/${encodeURIComponent(route.moduleId)}`;
   if (route.section === "overview") return base;
   const path = `${base}/${route.section}`;
-  if (route.section !== "events" || route.filters === undefined) return path;
-  const params = new URLSearchParams();
-  if (route.filters.origin !== null) params.set("origin", route.filters.origin);
-  if (route.filters.module !== null) params.set("module", route.filters.module);
-  if (route.filters.tones !== undefined && route.filters.tones.length > 1) {
-    for (const tone of route.filters.tones) params.append("tone", tone);
-  } else if (route.filters.tone !== null) params.set("tone", route.filters.tone);
-  if (route.filters.person !== null) params.set("actor", route.filters.person);
-  const query = params.toString();
-  return query.length === 0 ? path : `${path}?${query}`;
+  if (route.section === "events" && route.filters !== undefined) {
+    const params = new URLSearchParams();
+    if (route.filters.origin !== null) params.set("origin", route.filters.origin);
+    if (route.filters.module !== null) params.set("module", route.filters.module);
+    if (route.filters.tones !== undefined && route.filters.tones.length > 1) {
+      for (const tone of route.filters.tones) params.append("tone", tone);
+    } else if (route.filters.tone !== null) params.set("tone", route.filters.tone);
+    if (route.filters.person !== null) params.set("actor", route.filters.person);
+    const query = params.toString();
+    return query.length === 0 ? path : `${path}?${query}`;
+  }
+  if (route.section === "audit" && route.auditFilters !== undefined) {
+    const params = new URLSearchParams();
+    if (route.auditFilters.person !== null) params.set("actor", route.auditFilters.person);
+    if (route.auditFilters.area !== null) params.set("area", route.auditFilters.area);
+    const query = params.toString();
+    return query.length === 0 ? path : `${path}?${query}`;
+  }
+  return path;
 };
 
 export const navigateToDashboardRoute = (route: DashboardRoute): void => {
