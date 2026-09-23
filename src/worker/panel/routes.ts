@@ -38,7 +38,7 @@ import { moduleRouter } from "./module-routes";
 import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import type { PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
 import { createClip, type CreateClipResult } from "../clip";
-import { fetchTwitchUserByLogin, sendShoutout } from "../shoutout";
+import { fetchTwitchUserByLogin, sendShoutout, type ShoutoutSendResult } from "../shoutout";
 import { writeModuleAudit } from "../module-audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
@@ -68,16 +68,23 @@ const parseEventFilters = (
   context: Context<PanelEnvironment>,
 ): PanelEventFilters | Response => {
   const origin = context.req.query("origin");
-  const tone = context.req.query("tone");
+  const tones = [...new Set(new URL(context.req.url).searchParams.getAll("tone"))];
   const moduleId = context.req.query("module");
   const actor = context.req.query("actor");
   if (origin !== undefined && origin !== "channel" && origin !== "module") return context.json({ error: "event_origin_invalid" }, 400);
-  if (tone !== undefined && !EVENT_TONES.includes(tone as EventTone)) return context.json({ error: "event_tone_invalid" }, 400);
+  if (tones.some((tone) => !EVENT_TONES.includes(tone as EventTone))) return context.json({ error: "event_tone_invalid" }, 400);
   const validOrigin: PanelEventOrigin | null = origin === "channel" || origin === "module" ? origin : null;
-  const validTone: EventTone | null = tone === undefined ? null : tone as EventTone;
+  const validTones = tones as EventTone[];
+  const validTone: EventTone | null = validTones.length === 1 ? validTones[0] ?? null : null;
   const module = moduleId === undefined || moduleId.length === 0 ? null : moduleId;
   const person = actor === undefined || actor.length === 0 ? null : actor;
-  return { origin: validOrigin, module: module, tone: validTone, person };
+  return {
+    origin: validOrigin,
+    module,
+    tone: validTone,
+    ...(validTones.length > 1 ? { tones: validTones } : {}),
+    person,
+  };
 };
 
 // Only shares the parsing/error mechanics between the audit log and the
@@ -281,9 +288,11 @@ panelRouter.post(
 const isShoutoutLogin = (value: string | undefined): value is string =>
   value !== undefined && value.trim().length > 0 && value.trim().length <= 25 && !/\s/.test(value.trim());
 
-const shoutoutStatusFor = (reason: string | null): 400 | 429 | 502 | 503 => {
+const shoutoutStatusFor = (reason: ShoutoutSendResult["reason"]): 400 | 403 | 404 | 429 | 502 | 503 => {
   if (reason === "rate_limited") return 429;
   if (reason === "network_error" || reason === "app_token_unavailable" || reason === "bot_identity_missing") return 503;
+  if (reason === "not_moderator" || reason === "scope_missing") return 403;
+  if (reason === "twitch_user_not_found") return 404;
   return 502;
 };
 

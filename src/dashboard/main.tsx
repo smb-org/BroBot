@@ -242,7 +242,7 @@ const ErrorPanel = ({ message }: { message: string }): ReactElement => (
   </section>
 );
 
-type PageLoadedAt = Record<"overview" | "system" | "members" | "modules" | "events", number | undefined>;
+type PageLoadedAt = Record<"overview" | "system" | "members" | "modules" | "events" | "audit", number | undefined>;
 
 const loadedAtForRoute = (route: DashboardRoute, loadedAt: PageLoadedAt): number | undefined => {
   if (route.kind === "overview") return undefined;
@@ -273,7 +273,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
     ? route.channelId
     : channels[0]?.channelId ?? "";
 
-  const sectionEntry = (section: "overview" | "system" | "members" | "events", label: string, iconKind: string): SidebarEntry => {
+  const sectionEntry = (section: "overview" | "system" | "members" | "events" | "audit", label: string, iconKind: string): SidebarEntry => {
     const entryRoute: DashboardRoute = { kind: "channel", channelId: navigationChannelId, section };
     return {
       id: section,
@@ -297,6 +297,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       sectionEntry("overview", texts.navigation.channel, "channel"),
       sectionEntry("system", texts.navigation.system, "system"),
       sectionEntry("members", texts.navigation.members, "members"),
+      sectionEntry("audit", texts.navigation.audit, "audit"),
     ],
   };
 
@@ -788,7 +789,7 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
       />
-      <ImmediateActions channelId={overview.channelId} />
+      <ImmediateActions channelId={overview.channelId} streamState={overview.streamState} />
       <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <section className="content-section" aria-label={dashboardTexts().navigation.module}>
         <div className="section-heading"><h2>{dashboardTexts().navigation.module}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>
@@ -805,15 +806,10 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
 interface SystemPageProperties {
   system: PanelSystemResponse | null;
   systemState: LoadState<PanelSystemResponse>;
-  auditState: LoadState<PanelAuditResponse>;
-  onNextPage: () => void;
-  loadingNextPage: boolean;
 }
 
-const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPage }: SystemPageProperties): ReactElement => {
+const SystemPage = ({ system, systemState }: SystemPageProperties): ReactElement => {
   const texts = dashboardTexts();
-  const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>();
-  const selectedAudit = auditState.data?.entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
   return (
     <>
       <ModuleHeading kind="system" title={texts.system.title} subtitle={texts.system.readOnly} />
@@ -826,29 +822,46 @@ const SystemPage = ({ system, systemState, auditState, onNextPage, loadingNextPa
         <SubscriptionsSection subscriptions={system.subscriptions ?? []} />
         <SystemProperties system={system} />
       </>}
+    </>
+  );
+};
+
+interface AuditPageProperties {
+  auditState: LoadState<PanelAuditResponse>;
+  onNextPage: () => void;
+  loadingNextPage: boolean;
+}
+
+const AuditPage = ({ auditState, onNextPage, loadingNextPage }: AuditPageProperties): ReactElement => {
+  const texts = dashboardTexts();
+  const { selectedKey: selectedAuditId, select: selectAudit, rowRef: auditRowRef, close: closeAudit } = useInspectorSelection<string>();
+  const selectedAudit = auditState.data?.entries.find((entry) => entry.auditId === selectedAuditId) ?? null;
+  return (
+    <>
+      <ModuleHeading kind="system" title={texts.audit.title} subtitle={texts.system.readOnly} />
       <ListDetail
         onCloseInspector={closeAudit}
         list={
-          <section className="content-section" aria-label={texts.system.auditLog}>
-            <div className="section-heading"><h2>{texts.system.auditLog}</h2>{auditState.data === null ? null : <span className="muted"><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.system.entries}</span>}</div>
-            {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.system.loadAudit}</p> : null}
+          <section className="content-section" aria-label={texts.audit.title}>
+            <div className="section-heading"><h2>{texts.audit.title}</h2>{auditState.data === null ? null : <span className="muted"><span className="number">{formatNumber(auditState.data.entries.length)}</span> {texts.audit.entries}</span>}</div>
+            {auditState.status === "loading" && auditState.data === null ? <p className="loading-line">{texts.audit.load}</p> : null}
             {auditState.error !== null ? <ErrorPanel message={auditState.error} /> : null}
-            {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="empty-state">{texts.system.noAuditEntries}</p> : null}
+            {auditState.data !== null && auditState.data.entries.length === 0 ? <p className="empty-state">{texts.audit.empty}</p> : null}
             {auditState.data !== null && auditState.data.entries.length > 0 ? <>
               <div className={auditState.status === "loading" ? "stale" : undefined}>
                 <table className="table audit-table">
-                  <thead><tr><th scope="col">{texts.system.time}</th><th scope="col">{texts.system.action}</th><th scope="col">{texts.system.who}</th></tr></thead>
+                  <thead><tr><th scope="col">{texts.audit.time}</th><th scope="col">{texts.audit.action}</th><th scope="col">{texts.audit.who}</th></tr></thead>
                   <tbody>{auditState.data.entries.map((entry) => <tr key={entry.auditId} ref={auditRowRef(entry.auditId)} tabIndex={0} aria-selected={selectedAuditId === entry.auditId} onClick={() => { selectAudit(entry.auditId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectAudit(entry.auditId); } }}><td className="mono">{formatTimestamp(entry.createdAt)}</td><th scope="row">{auditActionLabel(entry.action)}</th><td>{auditActorLabel(entry)}</td></tr>)}</tbody>
                 </table>
               </div>
-              {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.system.loadingOlderEntries : texts.system.olderEntries}</button>}
+              {auditState.data.nextCursor === null ? null : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.audit.loadingOlderEntries : texts.audit.olderEntries}</button>}
             </> : null}
           </section>
         }
         inspector={selectedAudit === null ? null : (
-          <SubInspector ariaLabel={texts.system.changeData} title={selectedAudit.action} identifier={selectedAudit.auditId} closeLabel={dashboardCommonTexts().close} onClose={closeAudit}>
-            <dl className="properties"><div><dt>{texts.system.who}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
-            <div className="inspector-columns"><div><h4>{texts.system.before}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texts.system.after}</h4><pre>{selectedAudit.after}</pre></div></div>
+          <SubInspector ariaLabel={texts.audit.changeData} title={selectedAudit.action} identifier={selectedAudit.auditId} closeLabel={dashboardCommonTexts().close} onClose={closeAudit}>
+            <dl className="properties"><div><dt>{texts.audit.who}</dt><dd className="mono">{selectedAudit.actorUserId}</dd></div></dl>
+            <div className="inspector-columns"><div><h4>{texts.audit.before}</h4><pre>{selectedAudit.before}</pre></div><div><h4>{texts.audit.after}</h4><pre>{selectedAudit.after}</pre></div></div>
           </SubInspector>
         )}
       />
@@ -1181,25 +1194,9 @@ export const DashboardApp = (): ReactElement => {
         return;
       }
       setOverview(idleState());
-      setSystem(loadingState());
-      setAudit(loadingState());
-      setSystemChannelId(route.channelId);
-      setAuditChannelId(route.channelId);
-      const loadSystem = async (): Promise<void> => {
-        try {
-          const response = await fetchSystemOverview(route.channelId, controller.signal);
-          if (!cancelled && !controller.signal.aborted) {
-            setSystem(loadedState(response));
-            setSystemChannelId(route.channelId);
-          }
-        } catch (error) {
-          if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-            setSystem({ status: "error", data: null, error: errorMessage(error) });
-            if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-          }
-        }
-      };
-      const loadAudit = async (): Promise<void> => {
+      if (route.section === "audit") {
+        setAudit(loadingState());
+        setAuditChannelId(route.channelId);
         try {
           const response = await fetchAuditLog(route.channelId, null, controller.signal);
           if (!cancelled && !controller.signal.aborted) {
@@ -1212,9 +1209,23 @@ export const DashboardApp = (): ReactElement => {
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
           }
         }
-      };
-      void loadSystem();
-      void loadAudit();
+        return;
+      }
+
+      setSystem(loadingState());
+      setSystemChannelId(route.channelId);
+      try {
+        const response = await fetchSystemOverview(route.channelId, controller.signal);
+        if (!cancelled && !controller.signal.aborted) {
+          setSystem(loadedState(response));
+          setSystemChannelId(route.channelId);
+        }
+      } catch (error) {
+        if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+          setSystem({ status: "error", data: null, error: errorMessage(error) });
+          if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+        }
+      }
     };
     void load();
     return cleanup;
@@ -1415,11 +1426,11 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const loadNextAuditPage = async (): Promise<void> => {
-    if (route.kind !== "channel" || route.section !== "system" || loadingNextAuditPage ||
+    if (route.kind !== "channel" || route.section !== "audit" || loadingNextAuditPage ||
         audit.data?.nextCursor === null || audit.data?.nextCursor === undefined) return;
     const channelId = route.channelId;
     const cursor = audit.data.nextCursor;
-    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "system" });
+    const routePath = dashboardRoutePath({ kind: "channel", channelId, section: "audit" });
     const controller = new AbortController();
     auditPageController.current = controller;
     setLoadingNextAuditPage(true);
@@ -1506,7 +1517,7 @@ export const DashboardApp = (): ReactElement => {
   // say it). The system page (bot status + sign-in live there) and the
   // platform page (releases channels) must stay reachable, or the block
   // would also lock the only places that fix it.
-  const botBlockingApplies = route.kind === "overview" || route.kind === "module" || (route.kind === "channel" && route.section !== "system");
+  const botBlockingApplies = route.kind === "overview" || route.kind === "module" || (route.kind === "channel" && route.section !== "system" && route.section !== "audit");
   const showBotBlocking = botBlockingApplies && channels.status === "success" && !botSignedIn;
   // Per-user/channel authorization, not an outage -- loses to the bot state
   // above: installation-wide beats per-viewer, and without the bot nothing
@@ -1516,7 +1527,7 @@ export const DashboardApp = (): ReactElement => {
   return (
     <UiProvider>
       <Shell
-        header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />}
+        header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt, audit: audit.loadedAt })} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />}
         navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
         navLabel={dashboardTexts().navigation.mainNavigation}
         openSidebarLabel={dashboardTexts().navigation.openSidebar}
@@ -1557,9 +1568,10 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && (system.status !== "idle" || audit.status !== "idle") ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && system.status !== "idle" ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && audit.status !== "idle" ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
-        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} /> : null}
+        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} streamState={selectedChannel.streamState} modules={modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} /> : null}
         </div>
       </Shell>
     </UiProvider>

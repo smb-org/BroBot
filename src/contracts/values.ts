@@ -21,6 +21,37 @@ export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
 export const EVENT_TONES = ["info", "warning", "error"] as const;
 export type EventTone = (typeof EVENT_TONES)[number];
 
+/** Persisted Twitch stream state exposed to the channel dashboard. */
+export const CHANNEL_STREAM_STATES = ["online", "offline"] as const;
+export type ChannelStreamState = (typeof CHANNEL_STREAM_STATES)[number];
+
+/** Stable reasons for a rejected manual or automatic shoutout. */
+export const SHOUTOUT_FAILURE_REASONS = [
+  "app_token_unavailable",
+  "bot_identity_missing",
+  "network_error",
+  "not_moderator",
+  "rate_limited",
+  "scope_missing",
+  "timeout",
+  "twitch_error",
+  "twitch_user_not_found",
+  "twitch_user_search_failed",
+] as const;
+export type ShoutoutFailureReason = (typeof SHOUTOUT_FAILURE_REASONS)[number];
+
+/** Stable reasons for a rejected Start Commercial request. */
+export const COMMERCIAL_FAILURE_REASONS = [
+  "app_token_unavailable",
+  "network_error",
+  "rate_limited",
+  "scope_missing",
+  "stream_offline",
+  "timeout",
+  "twitch_error",
+] as const;
+export type CommercialFailureReason = (typeof COMMERCIAL_FAILURE_REASONS)[number];
+
 export const IDENTITY_STATUSES = ["connected", "revoked", "error"] as const;
 export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
 
@@ -240,6 +271,7 @@ export const API_ERROR_CODES = [
   "ad_snooze_failed",
   "commercial_length_invalid",
   "commercial_start_failed",
+  "commercial_stream_offline",
   "clip_create_failed",
   "shoutout_send_failed",
   "overlay_token_manage_denied",

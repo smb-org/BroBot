@@ -433,8 +433,10 @@ describe("event log", () => {
     await insertLoginIdentityAndSession(database, "viewer-1");
     await insertMember(database, "kanal-a", "viewer-1", "operator");
     await insertCustomEvent(database, "channel-event", "kanal-a", "channel_events", "channel_events.raid.incoming");
+    await insertCustomEvent(database, "channel-stream-event", "kanal-a", "channel_events", "channel_events.stream.offline");
     await insertCustomEvent(database, "module-event", "kanal-a", "text_commands", "text_commands.triggered", "person-a");
     await insertCustomEvent(database, "error-event", "kanal-a", "text_commands", "host.chat.failed", "person-a");
+    await insertCustomEvent(database, "warning-event", "kanal-a", "raid", "raid.invalid");
     await insertCustomEvent(database, "info-event", "kanal-a", "text_commands", "host.chat.sent", "person-b");
     await insertCustomEvent(database, "other-channel-event", "kanal-b", "channel_events", "channel_events.raid.incoming");
 
@@ -449,9 +451,10 @@ describe("event log", () => {
       return body.entries.map((entry) => entry.eventId);
     };
 
-    await expect(eventIds("origin=channel")).resolves.toEqual(["channel-event"]);
+    await expect(eventIds("origin=channel")).resolves.toEqual(["channel-stream-event", "channel-event"]);
     await expect(eventIds("module=text_commands")).resolves.toEqual(["module-event", "info-event", "error-event"]);
     await expect(eventIds("tone=error")).resolves.toEqual(["error-event"]);
+    await expect(eventIds("tone=warning&tone=error")).resolves.toEqual(["warning-event", "error-event"]);
     await expect(eventIds("actor=person-a")).resolves.toEqual(["module-event", "error-event"]);
     await expect(eventIds("module=text_commands&tone=error")).resolves.toEqual(["error-event"]);
     await expect(eventIds("module=werbung&actor=person-a")).resolves.toEqual([]);

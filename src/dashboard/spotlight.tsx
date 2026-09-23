@@ -17,6 +17,7 @@ const SHOUTOUT_KEYWORD = "shoutout";
 interface ChannelSpotlightProperties {
   channelId: string;
   ownRole: ChannelRole;
+  streamState?: "online" | "offline" | null | undefined;
   modules: PanelModuleState[];
   onNavigate: (route: DashboardRoute) => void;
   /** Set right before navigating to the text_commands module, so its panel can pre-select the command. */
@@ -29,7 +30,7 @@ interface ChannelSpotlightProperties {
  * a navigation replacement -- selecting a module or member still opens
  * that page, same as clicking it would.
  */
-export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOpenCommand }: ChannelSpotlightProperties): ReactElement => {
+export const ChannelSpotlight = ({ channelId, ownRole, streamState, modules, onNavigate, onOpenCommand }: ChannelSpotlightProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = canManage(ownRole);
   const [commands, setCommands] = useState<TextCommand[]>([]);
@@ -96,8 +97,8 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
         label: texts.streamManager.runAd("60"),
         group: texts.spotlight.groupActions,
         keywords: ["ad", "werbung", "commercial"],
-        disabled: !manageable,
-        ...(managementLockReason === undefined ? {} : { disabledReason: managementLockReason }),
+        disabled: !manageable || streamState === "offline",
+        ...(managementLockReason !== undefined ? { disabledReason: managementLockReason } : streamState === "offline" ? { disabledReason: texts.streamManager.adDisabledOffline } : {}),
         icon: "ad",
         onTrigger: () => { void startCommercial(channelId, 60); },
       },
@@ -143,7 +144,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
         onTrigger: () => { void sendManualShoutout(channelId, shoutoutLogin); },
       },
     ];
-  }, [texts, manageable, adsEnabled, channelId, shoutoutLogin]);
+  }, [texts, manageable, adsEnabled, channelId, shoutoutLogin, streamState]);
 
   const items = [...actionItems, ...moduleItems, ...commandItems, ...memberItems];
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModuleState } from "../../panel-contract";
+import { EVENT_TONES, type EventTone } from "../../contracts/values";
 import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
 import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
@@ -91,7 +92,10 @@ const EventFilterBar = ({
   if (filters.origin === "channel") activeFilter.push(texts.events.channelEvents);
   if (filters.origin === "module") activeFilter.push(texts.events.moduleDiagnostics);
   if (filters.module !== null) activeFilter.push(moduleName(filters.module));
-  if (filters.tone !== null) activeFilter.push(filters.tone === "info" ? texts.events.info : filters.tone === "warning" ? texts.events.notice : texts.events.error);
+  const selectedTones = filters.tones !== undefined && filters.tones.length > 0
+    ? filters.tones
+    : filters.tone === null ? [] : [filters.tone];
+  activeFilter.push(...selectedTones.map((tone) => tone === "info" ? texts.events.info : tone === "warning" ? texts.events.notice : texts.events.error));
   if (filters.person !== null) activeFilter.push(filters.person);
   const moduleSelectOptions: SelectOption[] = moduleOptions.map((module) => ({ value: module.id, label: moduleName(module.id) }));
   return <div className="event-filter" aria-label={texts.events.filter}>
@@ -110,14 +114,36 @@ const EventFilterBar = ({
       <ChipGroup
         className="event-filter__chips"
         ariaLabel={texts.events.tone}
-        value={filters.tone}
-        onChange={(value) => { onChange({ ...filters, tone: eventToneFromValue(value ?? "") }); }}
-        options={[
-          { value: "", label: texts.events.all },
-          { value: "error", label: texts.events.error },
-          { value: "warning", label: texts.events.notice },
-          { value: "info", label: texts.events.info },
-        ]}
+        {...(selectedTones.length > 1 ? {
+          value: null,
+          onChange: () => undefined,
+          selectedValues: selectedTones,
+          onSelectedValuesChange: (values: readonly string[]) => {
+            const tones = values.filter((tone): tone is EventTone => EVENT_TONES.includes(tone as EventTone));
+            const nextFilters = { ...filters, tone: tones.length === 1 ? tones[0] ?? null : null };
+            delete nextFilters.tones;
+            if (tones.length > 1) nextFilters.tones = tones;
+            onChange(nextFilters);
+          },
+          options: [
+            { value: "error", label: texts.events.error },
+            { value: "warning", label: texts.events.notice },
+            { value: "info", label: texts.events.info },
+          ],
+        } : {
+          value: filters.tone,
+          onChange: (value: string | null) => {
+            const nextFilters = { ...filters, tone: eventToneFromValue(value ?? "") };
+            delete nextFilters.tones;
+            onChange(nextFilters);
+          },
+          options: [
+            { value: "", label: texts.events.all },
+            { value: "error", label: texts.events.error },
+            { value: "warning", label: texts.events.notice },
+            { value: "info", label: texts.events.info },
+          ],
+        })}
       />
       <UiSelect
         label={texts.events.moduleFilter}
@@ -253,6 +279,9 @@ export const EventsPage = ({
   ));
   const eventEntries = eventsState.data?.entries ?? [];
   const filterActive = eventFilterIsActive(filters);
+  const selectedTones = filters.tones !== undefined && filters.tones.length > 0
+    ? filters.tones
+    : filters.tone === null ? [] : [filters.tone];
   return (
     <>
       <ModuleHeading kind="events" title={texts.events.title} subtitle={eventsState.data === null ? "" : <ModuleCount count={eventsState.data.entries.length} label={texts.events.count} />} />
@@ -281,7 +310,7 @@ export const EventsPage = ({
                     filters.origin === "channel" ? texts.events.channelEvents : null,
                     filters.origin === "module" ? texts.events.moduleDiagnostics : null,
                     filters.module === null ? null : moduleName(filters.module),
-                    filters.tone === null ? null : (filters.tone === "info" ? texts.events.info : filters.tone === "warning" ? texts.events.notice : texts.events.error),
+                    ...selectedTones.map((tone) => tone === "info" ? texts.events.info : tone === "warning" ? texts.events.notice : texts.events.error),
                     filters.person,
                   ].filter((value): value is string => value !== null).join(" · ")}`}
                   action={{ label: texts.events.resetFilters, onClick: () => { onFiltersChange(emptyEventFilter); } }}

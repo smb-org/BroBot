@@ -18,6 +18,7 @@ import type {
 } from "../../panel-contract";
 import type {
   AuditActorKind,
+  ChannelStreamState,
   ChannelRole,
   EventSubSubscriptionType,
   IdentityStatus,
@@ -69,6 +70,7 @@ interface ChannelStateRow {
   eventsub_error_message: string | null;
   eventsub_error_status: number | null;
   eventsub_error_updated_at: string | null;
+  stream_state: ChannelStreamState | null;
 }
 
 interface ActiveModuleRow {
@@ -102,18 +104,17 @@ export interface LogCursor {
   id: string;
 }
 
-const eventCodesForOrigin = (origin: PanelEventFilters["origin"]): string[] => {
-  if (origin === null) return [];
-  const operational = origin === "module";
-  return Object.entries(eventToneEntries)
-    .filter(([, metadata]) => (metadata.family === "operations") === operational)
-    .map(([code]) => code);
-};
-
 const eventCodesForTone = (tone: PanelEventFilters["tone"]): string[] => {
   if (tone === null) return [];
   return Object.entries(eventToneEntries)
     .filter(([, metadata]) => metadata.tone === tone)
+    .map(([code]) => code);
+};
+
+const eventCodesForTones = (tones: readonly NonNullable<PanelEventFilters["tone"]>[]): string[] => {
+  const selected = new Set(tones);
+  return Object.entries(eventToneEntries)
+    .filter(([, metadata]) => metadata.tone !== undefined && selected.has(metadata.tone))
     .map(([code]) => code);
 };
 
@@ -146,6 +147,10 @@ export const channelStateQuery = `
            login_identity.status AS login_status, login_identity.reason AS login_reason,
            login_identity.expires_at AS login_expires_at,
            login_identity.updated_at AS login_updated_at,
+           (SELECT stream_state.state
+              FROM channel_stream_state AS stream_state
+             WHERE stream_state.channel_id = channel.channel_id
+             LIMIT 1) AS stream_state,
            moderator.is_moderator AS moderator_is_moderator,
            moderator.checked_at AS moderator_checked_at,
            moderator.reason AS moderator_reason,
@@ -321,6 +326,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   moderator: mapModerator(row),
   chatSubscription: mapEventSub(row),
   chatSubscriptionNeeded: row.chat_subscription_needed === 1,
+  streamState: row.stream_state,
   tokens: mapTokens(row),
   lastError: mapLastError(row),
 });
@@ -454,19 +460,20 @@ export const getEventLogForChannel = async (
   const where = ["channel_id = ?"];
   const filterValues: (string | number)[] = [channelId];
   if (filters.origin !== null) {
-    const codes = eventCodesForOrigin(filters.origin);
-    if (codes.length === 0) where.push("1 = 0");
-    else {
-      where.push(`code IN (${codes.map(() => "?").join(", ")})`);
-      filterValues.push(...codes);
-    }
+    where.push(filters.origin === "channel" ? "module_id = ?" : "module_id != ?");
+    filterValues.push("channel_events");
   }
   if (filters.module !== null) {
     where.push("module_id = ?");
     filterValues.push(filters.module);
   }
-  if (filters.tone !== null) {
-    const codes = eventCodesForTone(filters.tone);
+  const selectedTones = filters.tones !== undefined && filters.tones.length > 0
+    ? filters.tones
+    : filters.tone === null ? [] : [filters.tone];
+  if (selectedTones.length > 0) {
+    const codes = filters.tones !== undefined && filters.tones.length > 0
+      ? eventCodesForTones(filters.tones)
+      : eventCodesForTone(filters.tone);
     if (codes.length === 0) where.push("1 = 0");
     else {
       where.push(`code IN (${codes.map(() => "?").join(", ")})`);

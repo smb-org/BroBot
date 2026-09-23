@@ -307,6 +307,32 @@ describe("start commercial", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "commercial_start_failed", reason: "rate_limited" });
   });
 
+  it("maps Twitch's offline rejection to a closed error and diagnostic reason", async () => {
+    const environment = await setup("manager");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "The broadcaster must be live to start a commercial." }),
+      { status: 400 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/commercial", "POST", { length: 90 }),
+      environment,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "commercial_stream_offline", reason: "stream_offline" });
+    const diagnostic = await database.prepare(
+      "SELECT code, detail_json FROM event_log WHERE channel_id = 'kanal-a'",
+    ).first<{ code: string; detail_json: string }>();
+    expect(diagnostic?.code).toBe("ads.commercial.failed");
+    expect(JSON.parse(diagnostic?.detail_json ?? "{}") as unknown).toMatchObject({
+      outcome: "failed",
+      reason: "stream_offline",
+      status: 400,
+      message: "The broadcaster must be live to start a commercial.",
+    });
+  });
+
   it("rejects an invalid length before calling Twitch", async () => {
     const environment = await setup("operator");
     const fetcher = vi.fn<typeof fetch>();

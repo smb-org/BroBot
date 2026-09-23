@@ -78,7 +78,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isCommercialLength = (value: unknown): value is CommercialLength =>
   typeof value === "number" && (COMMERCIAL_LENGTHS as readonly number[]).includes(value);
 
-const commercialStatusFor = (reason: string | null): 400 | 403 | 429 | 502 | 503 => {
+const commercialStatusFor = (reason: CommercialResult["reason"]): 400 | 403 | 429 | 502 | 503 => {
+  if (reason === "stream_offline") return 400;
   if (reason === "scope_missing") return 403;
   if (reason === "rate_limited") return 429;
   if (reason === "network_error" || reason === "app_token_unavailable") return 503;
@@ -193,7 +194,7 @@ adsRoutes.post("/commercial", async (context) => {
   if (!result.started) {
     await log(context, channelId, triggerId, "ads.commercial.failed", commercialOutcome(result));
     return context.json({
-      error: "commercial_start_failed",
+      error: result.reason === "stream_offline" ? "commercial_stream_offline" : "commercial_start_failed",
       reason: result.reason,
       detail: result.detail,
     }, commercialStatusFor(result.reason));

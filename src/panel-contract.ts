@@ -1,5 +1,6 @@
 import type {
   AuditActorKind,
+  ChannelStreamState,
   ChannelRole,
   EventSubSubscriptionType,
   EventTone,
@@ -93,6 +94,8 @@ export interface PanelChannelState {
   moderator: PanelModeratorStatus | null;
   chatSubscription: PanelChatSubscription | null;
   chatSubscriptionNeeded?: boolean;
+  /** Last EventSub-observed state; null or absent means not known yet. */
+  streamState?: ChannelStreamState | null;
   tokens: PanelTokenStatus;
   lastError: PanelLastError | null;
 }
@@ -257,6 +260,8 @@ export interface PanelEventFilters {
   origin: PanelEventOrigin | null;
   module: string | null;
   tone: EventTone | null;
+  /** Multiple selected tones, used by deep links such as warnings + errors. */
+  tones?: readonly EventTone[];
   person: string | null;
 }
 

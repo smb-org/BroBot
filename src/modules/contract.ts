@@ -44,7 +44,7 @@ export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "
  * Adding a key means adding it here, and whoever adds it sees its neighbours.
  */
 export type ModuleDiagnosticDetailKey =
-  | "action" | "allowed" | "arguments" | "cause" | "count" | "current"
+  | "action" | "allowed" | "arguments" | "art" | "cause" | "count" | "current"
   | "currentTier" | "missing"
   | "duration" | "endsAt" | "gifter" | "kind" | "lastAdBreakAt" | "message"
   | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person" | "alias"

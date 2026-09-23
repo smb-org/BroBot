@@ -205,7 +205,9 @@ export const fetchEvents = (
     params.set("origin", filters.origin);
   }
   if (filters?.module !== null && filters?.module !== undefined) params.set("module", filters.module);
-  if (filters?.tone !== null && filters?.tone !== undefined) params.set("tone", filters.tone);
+  if (filters?.tones !== undefined && filters.tones.length > 1) {
+    for (const tone of filters.tones) params.append("tone", tone);
+  } else if (filters?.tone !== null && filters?.tone !== undefined) params.set("tone", filters.tone);
   if (filters?.person !== null && filters?.person !== undefined) params.set("actor", filters.person);
   const query = params.toString();
   return requestJson<PanelEventsResponse>(
