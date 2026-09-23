@@ -1,6 +1,6 @@
 import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
-import { eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
+import { eventCauseText, eventToneEntries, formatDate, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
 import { moduleName } from "../module-labels";
 
 export const emptyEventFilter: PanelEventFilters = {
@@ -27,6 +27,15 @@ export const eventToneRank = (tone: EventTone | null): number =>
 
 export const eventToneFromValue = (value: string): EventTone | null =>
   EVENT_TONES.includes(value as EventTone) ? value as EventTone : null;
+
+/** The row's failure cause for the hover/focus icon -- null on any tone
+ *  other than warning/error, or when the diagnostic detail carries none of
+ *  the usual reason/cause/message keys (the row then gets no icon). */
+export const eventCause = (entry: PanelEventEntry): string | null => {
+  const tone = eventTone(entry.code);
+  if (tone !== "warning" && tone !== "error") return null;
+  return eventCauseText(entry.code, eventDetail(entry.detail));
+};
 
 export interface EventGroup {
   key: string;

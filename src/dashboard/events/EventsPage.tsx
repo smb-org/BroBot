@@ -7,13 +7,14 @@ import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
 import { Icon } from "../ui/Icon";
-import { ChipGroup, EmptyState, ErrorPanel, Field, ListDetail, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
+import { ChipGroup, EmptyState, ErrorPanel, Field, ListDetail, Popover, Select as UiSelect, SubInspector, useInspectorSelection, type SelectOption } from "../ui";
 import type { LoadState } from "../load-state";
 import {
   actorLabel,
   affectedPersonLabel,
   chronological,
   emptyEventFilter,
+  eventCause,
   eventChipNumber,
   eventDayGroups,
   eventDetail,
@@ -328,11 +329,13 @@ export const EventsPage = ({
                         <tbody>{day.groups.map((group) => {
                           const entry = group.representative;
                           const eventLabel = eventText(entry.code, eventDetail(entry.detail));
+                          const cause = eventCause(entry);
                           return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}>
                             <td>
                               <span className="event-label event-table__primary">
                                 <EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} />
                                 <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`}>{eventLabel}</span>
+                                {cause === null ? null : <Popover triggerLabel={texts.events.showCause} icon="cause">{cause}</Popover>}
                               </span>
                               <span className="event-table__mobile-meta muted">
                                 <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>

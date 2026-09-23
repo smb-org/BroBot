@@ -301,6 +301,9 @@ export interface DashboardTexts {
     trigger: string;
     moderator: string;
     affectedPerson: string;
+    /** Accessible name of the hover/focus icon that reveals a warning or
+     *  error row's cause without opening the inspector. */
+    showCause: string;
   };
   signIn: {
     required: string;
@@ -541,6 +544,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       connectionLost: "Verbindung unterbrochen. Die Ereignisse konnten nicht geladen werden.",
       retry: "Erneut versuchen", technicalDetails: "Technische Details", copyId: "ID kopieren", copied: "Kopiert",
       trigger: "Auslöser", moderator: "Moderator", affectedPerson: "Betroffene Person",
+      showCause: "Ursache anzeigen",
     },
     signIn: {
       required: "Anmeldung erforderlich", explanation: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -747,6 +751,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       connectionLost: "Connection lost. The events could not be loaded.",
       retry: "Retry", technicalDetails: "Technical details", copyId: "Copy ID", copied: "Copied",
       trigger: "Trigger", moderator: "Moderator", affectedPerson: "Affected person",
+      showCause: "Show cause",
     },
     signIn: {
       required: "Sign-in required", explanation: "Sign in with your Twitch account to see available channels.",
@@ -976,6 +981,44 @@ const commercialFailureReasonText = (reason: unknown, language: DashboardLanguag
   typeof reason === "string" && COMMERCIAL_FAILURE_REASONS.includes(reason as CommercialFailureReason)
     ? commercialFailureTexts[language][reason as CommercialFailureReason]
     : commercialFailureTexts[language].twitch_error;
+
+/**
+ * Which failure catalog a code's own `eventTexts` entry draws its reason
+ * from -- `"twitch_error"` means something different in each ("Twitch
+ * rejected the shoutout" vs. "... the request"), so the cause popover has to
+ * pick the same one the row's own text already used, not guess from the
+ * value alone.
+ */
+const REASON_CATALOG_BY_CODE: Partial<Record<EventCode, LocaleCatalog<Record<string, string>>>> = {
+  "host.shoutout.failed": shoutoutFailureTexts,
+  "ads.commercial.failed": commercialFailureTexts,
+};
+
+/**
+ * The localized cause behind a warning/error event, read from the same
+ * `reason`/`cause`/`message` diagnostic keys and the same shoutout/commercial
+ * failure catalogs `eventTexts` itself draws on (rate limits, an offline
+ * stream, a missing scope, ...). Reused by the events list's hover icon so
+ * the cause is readable without opening the inspector, even for codes whose
+ * own row text stays generic (`host.chat.failed`, `host.action.failed`, ...).
+ * Falls back to the raw value when no catalog covers it -- the same
+ * raw-reason fallback `detailText` already uses elsewhere in this file --
+ * and to null when the detail carries none of those keys, so the row gets
+ * no icon at all.
+ */
+export const eventCauseText = (
+  code: string,
+  detail: EventDetail,
+  language: DashboardLanguage = dashboardLanguage(),
+): string | null => {
+  const raw = detail.reason ?? detail.cause ?? detail.message;
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  const ownCatalog = REASON_CATALOG_BY_CODE[code as EventCode];
+  return (ownCatalog === undefined ? undefined : catalogString(ownCatalog[language], raw))
+    ?? catalogString(shoutoutFailureTexts[language], raw)
+    ?? catalogString(commercialFailureTexts[language], raw)
+    ?? raw;
+};
 
 export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   de: {

@@ -5,10 +5,10 @@ import type { ModuleImmediateActionProperties } from "../modules/contract";
 import { MODULES } from "../modules/registry";
 import { createClip, fetchEvents, PanelApiError, sendManualShoutout } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime, shoutoutFailureReasonText } from "./locale";
-import { eventDetail, eventMetadata } from "./events/model";
+import { eventCause, eventDetail, eventMetadata } from "./events/model";
 import { emptyEventFilter } from "./events/model";
 import { useRealtimeEventFeed } from "./realtime";
-import { Button, Field } from "./ui";
+import { Button, Field, Popover } from "./ui";
 import { Icon } from "./ui/Icon";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
@@ -204,8 +204,9 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
             const label = eventText(entry.code, eventDetail(entry.detail));
             const metadata = eventMetadata(entry.code);
             const tone = metadata?.tone === "error" ? "error" : metadata?.tone === "warning" ? "warning" : "neutral";
+            const cause = eventCause(entry);
             return (
-              <li key={entry.eventId}>
+              <li key={entry.eventId} className="stream-manager-feed__item">
                 <a
                   className="stream-manager-feed__row"
                   href={dashboardRoutePath(allAlertsRoute)}
@@ -215,6 +216,7 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
                   <span className="stream-manager-feed__text">{label}</span>
                   <time className="stream-manager-feed__time mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatStreamManagerFeedTime(entry.createdAt)}</time>
                 </a>
+                {cause === null ? null : <Popover triggerLabel={texts.events.showCause} icon="cause">{cause}</Popover>}
               </li>
             );
           })}
