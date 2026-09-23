@@ -149,7 +149,7 @@ describe("ad routes", () => {
     };
 
     const response = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/settings", "PATCH", settings),
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/settings", "PATCH", { revision: 1, settings }),
       environment,
     );
 
@@ -163,8 +163,8 @@ describe("ad routes", () => {
 
     const oversized = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/kanal-a/modules/ads/settings", "PATCH", {
-        ...settings,
-        automatic: "x".repeat(501),
+        revision: 1,
+        settings: { ...settings, automatic: "x".repeat(501) },
       }),
       environment,
     );

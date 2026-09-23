@@ -6,6 +6,7 @@ import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand } from "../../src/modules/
 import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
+import { useDashboardRoute } from "../../src/dashboard/router";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
@@ -28,6 +29,7 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
   lastUsedAt: null,
   createdAt: "2026-09-19T12:00:00.000Z",
   updatedAt: "2026-09-19T12:00:00.000Z",
+  revision: 1,
   ...overrides,
 });
 
@@ -218,6 +220,7 @@ describe("Text command editor", () => {
     await waitFor(() => {
       const patch = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
       expect(patch?.[1]?.body).toBe(JSON.stringify({
+        revision: 1,
         name: "hallo",
         kind: "text",
         text: "Hallo {user} aus {channel}",
@@ -368,6 +371,36 @@ describe("Text command editor", () => {
     expect(document.querySelector(".ui-editor-shell")).not.toBeInTheDocument();
   });
 
+  it("blocks route navigation from a dirty command editor", async () => {
+    const fetcher = panelFetch();
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
+    const Harness = (): React.ReactElement => {
+      const [route, navigate] = useDashboardRoute();
+      return <>
+        <button type="button" onClick={() => { navigate({ kind: "overview" }); }}>Go overview</button>
+        <output>{route.kind}</output>
+        {route.kind === "module" ? <TextCommandsPanel channelId="kanal-a" language="de" initialSelection="hallo" /> : null}
+      </>;
+    };
+    render(<UiProvider><Harness /></UiProvider>);
+
+    const response = await screen.findByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "Entwurf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
+    const guard = await screen.findByRole("dialog");
+    expect(screen.getByText("module")).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Weiter bearbeiten" })).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Verwerfen und wechseln" })).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
+
+    fireEvent.click(within(guard).getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf");
+    fireEvent.click(screen.getByRole("button", { name: "Go overview" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
+    await waitFor(() => expect(screen.getByText("overview")).toBeInTheDocument());
+  });
+
   it("saves and switches from the draft guard, and keeps the new row selected", async () => {
     const rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
     const fetcher = panelFetch({ commands: () => rows });
@@ -470,7 +503,7 @@ describe("Text command editor", () => {
     await waitFor(() => {
       const toggle = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
       expect(toggle).toBeDefined();
-      expect(toggle?.[1]?.body).toBe(JSON.stringify({ enabled: false }));
+      expect(toggle?.[1]?.body).toBe(JSON.stringify({ revision: 1, enabled: false }));
     });
   });
 
@@ -494,7 +527,7 @@ describe("Text command editor", () => {
     fireEvent.click(tierSelect);
     fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) =>
-      init?.method === "PATCH" && init.body === JSON.stringify({ minimumTier: "moderator" }))).toBe(true));
+      init?.method === "PATCH" && init.body === JSON.stringify({ revision: 1, minimumTier: "moderator" }))).toBe(true));
 
     row.focus();
     fireEvent.click(row);

@@ -48,8 +48,11 @@ describe("Text commands D1 adapter", () => {
     await repository.create({
       channelId: "kanal-a", name: "hallo", text: "Antwort", kind: "text", cooldownSeconds: 5, now: NOW,
     }, ACTOR);
+    const loaded = await repository.find("kanal-a", "hallo");
+    expect(loaded?.revision).toBe(1);
 
     await expect(repository.claim("kanal-a", "hallo", NOW)).resolves.toMatchObject({ claimed: true });
+    await expect(repository.find("kanal-a", "hallo")).resolves.toMatchObject({ revision: 1, lastUsedAt: NOW });
     await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:01.000Z"))
       .resolves.toMatchObject({ claimed: false, command: { lastUsedAt: NOW } });
     await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:05.000Z"))
@@ -199,6 +202,7 @@ describe("Text commands D1 adapter", () => {
     ).all<{ name: string }>();
 
     expect(tables.results).toEqual([
+      { name: "text_command_aliases" },
       { name: "text_command_user_cooldowns" },
       { name: "text_commands" },
     ]);
@@ -302,7 +306,7 @@ describe("Text commands D1 adapter", () => {
       prepare: database.prepare.bind(database),
       batch: async (statements: TestPreparedStatement[]) => {
         await database.prepare(
-          "UPDATE text_commands SET response_text = 'Neu', minimum_level = 'moderator', updated_at = ? WHERE command_name = 'hallo'",
+          "UPDATE text_commands SET response_text = 'Neu', minimum_level = 'moderator', updated_at = ?, revision = revision + 1 WHERE command_name = 'hallo'",
         ).bind("2026-09-19T12:00:30.000Z").run();
         return database.batch(statements);
       },
@@ -316,7 +320,7 @@ describe("Text commands D1 adapter", () => {
       channelId: "kanal-a", name: "hallo", newName: "hallo", text: "Antwort", kind: "text",
       enabled: false, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
       now: "2026-09-19T12:01:00.000Z", onlyToggle: true,
-    }, ACTOR)).resolves.toEqual({ ok: false, reason: "conflict" });
+    }, ACTOR)).resolves.toMatchObject({ ok: false, reason: "conflict", current: { revision: 2 } });
     await expect(database.prepare("SELECT response_text, minimum_level, enabled FROM text_commands WHERE command_name = 'hallo'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "moderator", enabled: 1 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
@@ -328,7 +332,7 @@ describe("Text commands D1 adapter", () => {
       prepare: database.prepare.bind(database),
       batch: async (statements: TestPreparedStatement[]) => {
         await database.prepare(
-          "UPDATE text_commands SET response_text = 'Neu', minimum_level = 'vip', updated_at = ? WHERE command_name = 'loeschen'",
+          "UPDATE text_commands SET response_text = 'Neu', minimum_level = 'vip', updated_at = ?, revision = revision + 1 WHERE command_name = 'loeschen'",
         ).bind("2026-09-19T12:00:30.000Z").run();
         return database.batch(statements);
       },
@@ -339,7 +343,7 @@ describe("Text commands D1 adapter", () => {
       (entry, changedAt) => prepareModuleAudit(deleteDb, ACTOR.userId, changedAt, entry),
     );
     await expect(deleteRepository.delete("kanal-a", "loeschen", ACTOR, "2026-09-19T12:01:00.000Z"))
-      .resolves.toEqual({ ok: false, reason: "conflict" });
+      .resolves.toMatchObject({ ok: false, reason: "conflict", current: { revision: 2, text: "Neu" } });
     await expect(database.prepare("SELECT response_text, minimum_level FROM text_commands WHERE command_name = 'loeschen'").first())
       .resolves.toEqual({ response_text: "Neu", minimum_level: "vip" });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual({ count: 0 });
@@ -378,6 +382,52 @@ describe("Text commands D1 adapter", () => {
     });
   });
 
+  it("clears per-user cooldown rows on command delete and rename", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await repository.create({
+      channelId: "kanal-a", name: "hello", text: "Hello", kind: "text", cooldownSeconds: 0,
+      aliases: ["greeting"], userCooldownSeconds: 60, now: NOW,
+    }, ACTOR);
+    await database.prepare(
+      `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
+       VALUES ('kanal-a', 'hello', 'viewer-a', ?)`,
+    ).bind(NOW).run();
+    const loaded = await repository.find("kanal-a", "hello");
+    if (loaded === null) throw new Error("Created command was not found.");
+
+    await expect(repository.change({
+      channelId: loaded.channelId,
+      name: loaded.name,
+      newName: "renamed",
+      text: loaded.text,
+      kind: loaded.kind,
+      enabled: loaded.enabled,
+      minimumTier: loaded.minimumTier,
+      cooldownSeconds: loaded.cooldownSeconds,
+      aliases: loaded.aliases,
+      userCooldownSeconds: loaded.userCooldownSeconds,
+      streamCondition: loaded.streamCondition,
+      responseType: loaded.responseType,
+      expectedRevision: loaded.revision,
+      now: NOW,
+    }, ACTOR)).resolves.toEqual({ ok: true });
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM text_command_user_cooldowns WHERE command_name = 'hello'",
+    ).first()).resolves.toEqual({ count: 0 });
+    await expect(repository.findByAlias("kanal-a", "greeting")).resolves.toMatchObject({ name: "renamed" });
+
+    await database.prepare(
+      `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
+       VALUES ('kanal-a', 'renamed', 'viewer-a', ?)`,
+    ).bind(NOW).run();
+    await expect(repository.delete("kanal-a", "renamed", ACTOR, NOW)).resolves.toEqual({ ok: true });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_command_user_cooldowns").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_command_aliases").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
   it("checks alias uniqueness and stream state inside their CAS updates", async () => {
     await insertChannel(database, "kanal-a");
     const baseRepository = createTextCommandRepository(database as unknown as D1Database, authorize);
@@ -395,6 +445,10 @@ describe("Text commands D1 adapter", () => {
            VALUES ('kanal-a', 'competitor', 'Other', 'text', 1, 'everyone', 0,
                    '["raced"]', 0, 'any', 'say', ?, ?)`,
         ).bind(NOW, NOW).run();
+        await database.prepare(
+          `INSERT INTO text_command_aliases (channel_id, alias, command_name)
+           VALUES ('kanal-a', 'raced', 'competitor')`,
+        ).run();
         return database.batch(statements);
       },
     } as unknown as D1Database;
@@ -418,7 +472,7 @@ describe("Text commands D1 adapter", () => {
     const streamDb = {
       prepare: database.prepare.bind(database),
       batch: async (statements: TestPreparedStatement[]) => {
-        await database.prepare("UPDATE text_commands SET stream_condition = 'offline' WHERE command_name = 'first'").run();
+        await database.prepare("UPDATE text_commands SET stream_condition = 'offline', revision = revision + 1 WHERE command_name = 'first'").run();
         return database.batch(statements);
       },
     } as unknown as D1Database;
@@ -430,7 +484,11 @@ describe("Text commands D1 adapter", () => {
     await expect(streamRepository.change({
       channelId: "kanal-a", name: "first", newName: "first", text: "Andere Antwort", kind: "text", enabled: true,
       cooldownSeconds: 0, aliases: ["friendly"], userCooldownSeconds: 0, streamCondition: "any", responseType: "say", now: NOW,
-    }, ACTOR)).resolves.toEqual({ ok: false, reason: "conflict" });
+    }, ACTOR)).resolves.toMatchObject({
+      ok: false,
+      reason: "conflict",
+      current: { name: "first", streamCondition: "offline", revision: 2 },
+    });
     await expect(database.prepare("SELECT stream_condition FROM text_commands WHERE command_name = 'first'").first())
       .resolves.toEqual({ stream_condition: "offline" });
   });

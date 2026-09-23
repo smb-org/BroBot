@@ -39,6 +39,7 @@ const bodySchema = z.object({
 });
 
 const editBodySchema = z.object({
+  revision: z.number().int().min(1).optional(),
   name: z.string().optional(),
   text: z.string().max(500).optional(),
   kind: z.enum(TEXT_COMMAND_KINDS).optional(),
@@ -107,7 +108,7 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
 
 const validEditBody = async (request: Request): Promise<z.infer<typeof editBodySchema> | null> => {
   const parsed = editBodySchema.safeParse(await readBody(request));
-  if (!parsed.success || Object.keys(parsed.data).length === 0) return null;
+  if (!parsed.success || Object.keys(parsed.data).every((key) => key === "revision")) return null;
   return parsed.data;
 };
 
@@ -164,6 +165,7 @@ textCommandRoutes.post("/commands", async (context) => {
       lastUsedAt: null,
       createdAt: now,
       updatedAt: now,
+      revision: 1,
     };
     return context.json({ command, warnings }, 201);
   }
@@ -182,11 +184,15 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const repository = createTextCommandRepository(context.env.DB, context.get("authorizeMutation"));
   const before = await repository.find(channelId, oldName);
   if (before === null) return context.json({ error: "command_not_found" }, 404);
+  if (body.revision === undefined) return context.json({ error: "command_data_invalid" }, 400);
+  if (body.revision !== before.revision) {
+    return context.json({ error: "command_changed_concurrently", current: before }, 409);
+  }
   const newName = body.name ?? before.name;
   if (!validCommandName(newName)) return context.json({ error: "command_data_invalid" }, 400);
   const aliases = body.aliases ?? before.aliases;
   if (aliases.includes(newName)) return context.json({ error: "command_data_invalid" }, 400);
-  const contentChanged = Object.keys(body).some((key) => key !== "enabled");
+  const contentChanged = Object.keys(body).some((key) => key !== "enabled" && key !== "revision");
   if (contentChanged && !canManage(context.get("channelRole"))) return managementDenied(context);
   const kind = body.kind ?? before.kind;
   const defaults = defaultsForKind(kind);
@@ -240,6 +246,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     userCooldownSeconds,
     streamCondition,
     responseType,
+    expectedRevision: body.revision,
     onlyToggle: !contentChanged,
     now,
   }, context.get("actor"));
@@ -259,6 +266,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
       responseType,
       enabled: body.enabled ?? before.enabled,
       updatedAt: now,
+      revision: before.revision + 1,
     };
     return context.json({ command, warnings });
   }
@@ -267,6 +275,9 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   if (changed.reason === "already_exists") return context.json({ error: "command_already_exists" }, 409);
   if (changed.reason === "alias_conflict" && changed.conflict !== undefined) {
     return aliasConflictResponse(context, changed.conflict);
+  }
+  if (changed.reason === "conflict" && changed.current !== undefined) {
+    return context.json({ error: "command_changed_concurrently", current: changed.current }, 409);
   }
   return context.json({ error: "command_changed_concurrently" }, 409);
 });

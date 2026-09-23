@@ -292,18 +292,19 @@ export const setChannelModuleEnabled = (
   { enabled },
 );
 
-export const getChannelModuleSettings = (channelId: string, moduleId: string): Promise<{ settings: Record<string, unknown> }> =>
-  requestJson<{ settings: Record<string, unknown> }>(`${modulePath(channelId, moduleId)}/settings`);
+export const getChannelModuleSettings = (channelId: string, moduleId: string): Promise<{ settings: Record<string, unknown>; revision: number }> =>
+  requestJson<{ settings: Record<string, unknown>; revision: number }>(`${modulePath(channelId, moduleId)}/settings`);
 
 export const saveChannelModuleSettings = <Settings extends object>(
   channelId: string,
   moduleId: string,
+  revision: number,
   settings: Settings,
-): Promise<{ settings: Settings; warnings: PanelTemplateWarningResponse["warnings"] }> => requestJson<{ token: string }>("/api/csrf")
-  .then(({ token }) => requestJson<{ settings: Settings; warnings: PanelTemplateWarningResponse["warnings"] }>(`${modulePath(channelId, moduleId)}/settings`, {
+): Promise<{ settings: Settings; revision: number; warnings: PanelTemplateWarningResponse["warnings"] }> => requestJson<{ token: string }>("/api/csrf")
+  .then(({ token }) => requestJson<{ settings: Settings; revision: number; warnings: PanelTemplateWarningResponse["warnings"] }>(`${modulePath(channelId, moduleId)}/settings`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
-    body: JSON.stringify(settings),
+    body: JSON.stringify({ revision, settings }),
   }));
 
 export const refreshModeratorStatus = (

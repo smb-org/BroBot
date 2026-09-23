@@ -54,6 +54,7 @@ export const saveTextCommand = async (
   channelId: string,
   command: {
     oldName: string;
+    revision: number;
     name: string;
     kind: TextCommandKind;
     text: string;
@@ -67,8 +68,9 @@ export const saveTextCommand = async (
     userCooldownSeconds: number;
     streamCondition: TextCommandStreamCondition;
     responseType: TextCommandResponseType;
-  },
+},
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", {
+  revision: command.revision,
   name: command.name,
   kind: command.kind,
   text: command.text,
@@ -87,14 +89,16 @@ export const saveTextCommand = async (
 export const toggleTextCommand = async (
   channelId: string,
   name: string,
+  revision: number,
   enabled: boolean,
-): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { enabled }, name);
+): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { revision, enabled }, name);
 
 export const setTextCommandMinimumTier = async (
   channelId: string,
   name: string,
+  revision: number,
   minimumTier: TextCommandMinimumTier,
-): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { minimumTier: minimumTier }, name);
+): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", { revision, minimumTier: minimumTier }, name);
 
 export const deleteTextCommand = async (channelId: string, name: string): Promise<void> => {
   await mutation(channelId, "DELETE", undefined, name);

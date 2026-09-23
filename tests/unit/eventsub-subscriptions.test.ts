@@ -187,7 +187,7 @@ describe("EventSub reconciliation", () => {
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-1" });
   });
 
-  it("adopts an owned subscription after create returns the already-exists conflict", async () => {
+  it("replaces an untracked owned subscription after create returns the already-exists conflict", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
@@ -212,18 +212,20 @@ describe("EventSub reconciliation", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Conflict", message: "subscription already exists; id=e6c8e776-adopted" }), { status: 409 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [remote], pagination: {} }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [remote], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ ...remote, id: "replacement-id" }] }), { status: 202 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher, "kanal-a");
 
     expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET"))
-      .toEqual(["GET", "POST", "GET"]);
+      .toEqual(["GET", "POST", "GET", "DELETE", "POST"]);
     await expect(database.prepare(
       "SELECT status, reason, subscription_id, secret_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
     ).first()).resolves.toEqual({
       status: "enabled",
       reason: null,
-      subscription_id: "e6c8e776-adopted",
+      subscription_id: "replacement-id",
       secret_id: "eventsub-v1",
     });
   });
@@ -382,6 +384,13 @@ describe("EventSub reconciliation", () => {
        VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
     ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
     await insertAppToken(database);
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
+       VALUES
+        ('kanal-a', 'channel.moderate', '', '2', 'v2', 'eventsub-v1', 'enabled', NULL, '2026-09-19T00:00:00.000Z'),
+        ('kanal-a', 'channel.shoutout.create', '', '1', 'shoutout-subscription', 'eventsub-v1', 'enabled', NULL, '2026-09-19T00:00:00.000Z')`,
+    ).run();
     const subscription = (version: string, id: string) => ({
       id,
       type: "channel.moderate",
@@ -493,6 +502,11 @@ describe("EventSub reconciliation", () => {
        VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
     ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
     await insertAppToken(database);
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, updated_at)
+       VALUES ('kanal-a', 'channel.shoutout.create', '', '1', 'shoutout-subscription', 'eventsub-v1', 'enabled', NULL, '2026-09-19T00:00:00.000Z')`,
+    ).run();
 
     const subscription = {
       id: "shoutout-subscription",
@@ -535,6 +549,7 @@ describe("EventSub reconciliation", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "quota" }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         data: [{ id: "subscription-b", type: "channel.chat.message", version: "1", status: "enabled", condition: { broadcaster_user_id: "kanal-b", user_id: "bot-user" }, transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" } }],
       }), { status: 202 }));

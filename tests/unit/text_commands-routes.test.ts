@@ -20,12 +20,24 @@ const environmentFor = (database: TestD1Database): Env => ({
   ...environmentKeys,
 } as unknown as Env);
 
+let database: TestD1Database;
+
 const requestFor = async (
   userId: string,
   path: string,
   method = "GET",
   body?: Record<string, unknown>,
 ): Promise<Request> => {
+  let requestBody = body;
+  const commandPath = /^\/api\/channels\/([^/]+)\/modules\/text_commands\/commands\/([^/]+)$/u.exec(path);
+  if (method === "PATCH" && body !== undefined && body.revision === undefined && commandPath !== null) {
+    const channelId = decodeURIComponent(commandPath[1] ?? "");
+    const name = decodeURIComponent(commandPath[2] ?? "");
+    const current = await database.prepare(
+      "SELECT revision FROM text_commands WHERE channel_id = ? AND command_name = ?",
+    ).bind(channelId, name).first<{ revision: number }>();
+    if (current !== null) requestBody = { ...body, revision: current.revision };
+  }
   const cookie = await createSessionCookie(
     { sessionId: `session-${userId}` },
     environmentKeys.SESSION_COOKIE_KEYS,
@@ -40,13 +52,11 @@ const requestFor = async (
   return new Request(`https://brobot.example${path}`, {
     method,
     headers,
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }),
   });
 };
 
 describe("Text commands panel", () => {
-  let database: TestD1Database;
-
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
@@ -122,6 +132,41 @@ describe("Text commands panel", () => {
         after_json: "null",
       }),
     ]));
+  });
+
+  it("returns the current command when a second editor saves an old revision", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+    const collection = "/api/channels/kanal-a/modules/text_commands/commands";
+    const created = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", { name: "hello", text: "Original", cooldownSeconds: 0 }),
+      environment,
+    );
+    expect(created.status).toBe(201);
+    const loadedAResponse = await panelRouter.fetch(await requestFor("user-1", collection), environment);
+    const loadedA = await loadedAResponse.json<{ commands: Array<{ name: string; revision: number }> }>();
+    const revision = loadedA.commands[0]?.revision;
+    expect(revision).toBe(1);
+
+    const savedA = await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/hello`, "PATCH", { revision, text: "Saved by editor A" }),
+      environment,
+    );
+    expect(savedA.status).toBe(200);
+    const savedB = await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/hello`, "PATCH", { revision, text: "Stale editor B" }),
+      environment,
+    );
+    expect(savedB.status).toBe(409);
+    await expect(savedB.json()).resolves.toMatchObject({
+      error: "command_changed_concurrently",
+      current: { name: "hello", text: "Saved by editor A", revision: 2 },
+    });
+    await expect(database.prepare(
+      "SELECT response_text, revision FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'hello'",
+    ).first()).resolves.toEqual({ response_text: "Saved by editor A", revision: 2 });
   });
 
   it("distinguishes missing commands when editing and deleting", async () => {

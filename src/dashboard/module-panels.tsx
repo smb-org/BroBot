@@ -8,7 +8,7 @@ import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, set
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
-import { EditorShell, Icon, ListRow, SettingsEditor, Switch, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { ConfirmDialog, EditorShell, Icon, ListRow, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 
@@ -191,7 +191,7 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }:
   canManageContent: boolean;
   language: DashboardLanguage;
 }): ReactElement | null => {
-  const [loaded, setLoaded] = useState<{ definition: SettingsEditorDefinition<Record<string, unknown>>; settings: Record<string, unknown> } | null>(null);
+  const [loaded, setLoaded] = useState<{ definition: SettingsEditorDefinition<Record<string, unknown>>; settings: Record<string, unknown>; revision: number } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
@@ -202,7 +202,7 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }:
       getChannelModuleSettings(channelId, module.id),
     ]).then(([definition, response]) => {
       if (!active) return;
-      setLoaded({ definition: definition.default, settings: response.settings });
+      setLoaded({ definition: definition.default, settings: response.settings, revision: response.revision });
       setLoadError(null);
     }).catch((error: unknown) => {
       if (!active) return;
@@ -222,20 +222,23 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }:
     definition={loaded.definition}
     copy={copy}
     initial={loaded.settings}
+    initialRevision={loaded.revision}
     onReload={() => { setLoaded(null); setLoadError(null); setGeneration((current) => current + 1); }}
   />;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, initial, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, initial, initialRevision, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   definition: SettingsEditorDefinition<Record<string, unknown>>;
   copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
   initial: Record<string, unknown>;
+  initialRevision: number;
   onReload: () => void;
 }): ReactElement => {
   const [value, setValue] = useState(initial);
+  const [baseline, setBaseline] = useState({ settings: initial, revision: initialRevision });
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
@@ -323,23 +326,34 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       ...(hasError ? { issue: "error" as const } : hasWarning ? { issue: "warning" as const } : {}),
     };
   });
-  const save = async (): Promise<void> => {
-    if (invalid || pending || conflict) return;
+  const save = async (): Promise<string | null> => {
+    if (invalid) return copy.invalidMessage;
+    if (pending || conflict || !canManageContent) return copy.saveError;
     setPending(true); setError(undefined); setSaved(false);
     try {
-      const response = await saveChannelModuleSettings(channelId, module.id, value);
+      const response = await saveChannelModuleSettings(channelId, module.id, baseline.revision, value);
       setValue(response.settings);
+      setBaseline({ settings: response.settings, revision: response.revision });
       setDirty(false);
       setSaved(true);
       setServerWarnings(response.warnings);
+      return null;
     } catch (caught) {
-      if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "module_settings_changed_concurrently") setConflict(true);
-      else setError(caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError);
+      if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "module_settings_changed_concurrently") {
+        setConflict(true);
+        return copy.conflictMessage;
+      }
+      const message = caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError;
+      setError(message);
+      return message;
     } finally { setPending(false); }
   };
-  const discard = (): void => { setValue(initial); setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({}); };
+  const discard = (): void => { setValue(baseline.settings); setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({}); };
+  const navigationGuard = useDraftGuard(dirty, save, discard);
+  useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
   const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={value} onChange={() => undefined} texts={copy} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
-  return <EditorShell
+  return <>
+    <EditorShell
     ariaLabel={copy.ariaLabel}
     title={copy.title}
     sections={sections}
@@ -359,8 +373,28 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
     discardLabel={copy.discardLabel}
     savedLabel={copy.savedLabel}
     pendingLabel={copy.pendingLabel}
-    issueLabels={copy.issueLabels}
-  />;
+      issueLabels={copy.issueLabels}
+    />
+    <ConfirmDialog
+      opened={navigationGuard.confirmOpen}
+      title={dashboardTexts().module.unsavedChangesTitle}
+      description={navigationGuard.saveError === undefined
+        ? dashboardTexts().module.unsavedChangesDescription
+        : `${dashboardTexts().module.unsavedChangesDescription} ${navigationGuard.saveError}`}
+      cancelLabel={dashboardTexts().module.continueEditing}
+      confirmLabel={dashboardTexts().module.discardAndSwitch}
+      onCancel={navigationGuard.continueEditing}
+      onConfirm={navigationGuard.discardAndSwitch}
+      {...(invalid || conflict || !canManageContent ? {} : {
+        alternative: {
+          label: dashboardTexts().module.saveAndSwitch,
+          onClick: () => { void navigationGuard.saveAndSwitch(); },
+        },
+      })}
+      pending={navigationGuard.saving}
+      danger
+    />
+  </>;
 };
 
 export const ModulePanelMount = ({ channelId, activeModules, canManage = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {

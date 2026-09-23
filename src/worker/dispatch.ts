@@ -181,16 +181,24 @@ export const selectModulesForEvent = (
   const known = new Map(registry.map((module) => [module.id, module]));
   const matches: { module: BotModule; settings: string }[] = [];
   const unknownModules: string[] = [];
+  const matchedModules = new Set<string>();
   for (const activation of activations) {
-    if (!activation.enabled) continue;
     const module = known.get(activation.moduleId);
     if (module === undefined) {
-      unknownModules.push(activation.moduleId);
+      if (activation.enabled) unknownModules.push(activation.moduleId);
       continue;
     }
-    if (paused && module.mandatory !== true) continue;
+    const mandatory = module.mandatory === true;
+    if (!activation.enabled && !mandatory) continue;
+    if (paused && !mandatory) continue;
     if (!(module.eventSubTypes ?? []).includes(subscriptionType)) continue;
     matches.push({ module, settings: activation.settings });
+    matchedModules.add(module.id);
+  }
+  for (const module of registry) {
+    if (module.mandatory !== true || matchedModules.has(module.id) ||
+        !(module.eventSubTypes ?? []).includes(subscriptionType)) continue;
+    matches.push({ module, settings: JSON.stringify(module.defaultSettings) });
   }
   return { matches, unknownModules };
 };
@@ -333,6 +341,7 @@ export const dispatchEventSubNotification = async (
     triggerId: string;
     payload: Readonly<Record<string, unknown>>;
     receivedAt: string;
+    eventSubTimestamp?: string;
   },
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
@@ -343,7 +352,7 @@ export const dispatchEventSubNotification = async (
       environment.DB,
       event.channelId,
       event.subscriptionType === "stream.online" ? "online" : "offline",
-      event.receivedAt,
+      event.eventSubTimestamp ?? event.receivedAt,
     );
   }
   const dispatchState = await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt);

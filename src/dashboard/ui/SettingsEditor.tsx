@@ -224,6 +224,7 @@ export function SettingsEditor<Settings extends object>({
         description={copy.description ?? copy.hint}
         checked={fieldValue === true}
         onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
+        disabled={disabled}
         {...(lockedReason === undefined ? {} : { lockedReason })}
       >
         {field.children === undefined ? undefined : children as ReactElement[]}

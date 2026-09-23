@@ -81,7 +81,13 @@ const succeeded = (): TextCommandMutationResult => ({ ok: true });
 const failed = (
   reason: Exclude<TextCommandMutationResult, { ok: true }>['reason'],
   conflict?: TextCommandAliasConflict,
-): TextCommandMutationResult => ({ ok: false, reason, ...(conflict === undefined ? {} : { conflict }) });
+  current?: TextCommand,
+): TextCommandMutationResult => ({
+  ok: false,
+  reason,
+  ...(conflict === undefined ? {} : { conflict }),
+  ...(current === undefined ? {} : { current }),
+});
 
 const runMutation = async (
   db: D1Database,
@@ -89,9 +95,14 @@ const runMutation = async (
   mutation: D1PreparedStatement,
   audit: Parameters<PrepareModuleAudit>[0],
   changedAt: string,
+  sideEffects: readonly D1PreparedStatement[] = [],
 ): Promise<number> => {
-  if (prepareModuleAudit === undefined) return (await mutation.run()).meta.changes;
-  const results = await db.batch([mutation, prepareModuleAudit(audit, changedAt)]);
+  if (prepareModuleAudit === undefined) {
+    if (sideEffects.length === 0) return (await mutation.run()).meta.changes;
+    const results = await db.batch([mutation, ...sideEffects]);
+    return results[0]?.meta.changes ?? 0;
+  }
+  const results = await db.batch([mutation, prepareModuleAudit(audit, changedAt), ...sideEffects]);
   return results[0]?.meta.changes ?? 0;
 };
 
@@ -111,6 +122,7 @@ interface TextCommandRow {
   last_used_at: string | null;
   created_at: string;
   updated_at: string;
+  revision: number;
 }
 
 const mapTextCommand = (row: TextCommandRow): TextCommand => ({
@@ -129,6 +141,7 @@ const mapTextCommand = (row: TextCommandRow): TextCommand => ({
   lastUsedAt: row.last_used_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+  revision: row.revision,
 });
 
 interface UserCooldownRow {
@@ -158,8 +171,10 @@ const aliasConflict = async (
        JOIN proposed
          ON other.command_name = proposed.value
          OR EXISTS (
-           SELECT 1 FROM json_each(other.aliases_json) AS existing_alias
-            WHERE existing_alias.value = proposed.value
+           SELECT 1 FROM text_command_aliases AS existing_alias
+            WHERE existing_alias.channel_id = other.channel_id
+              AND existing_alias.command_name = other.command_name
+              AND existing_alias.alias = proposed.value
          )
       WHERE other.channel_id = ? AND (? IS NULL OR other.command_name <> ?)
       ORDER BY CASE proposed.field WHEN 'name' THEN 0 ELSE 1 END, other.command_name
@@ -170,7 +185,7 @@ const aliasConflict = async (
 
 export const textCommandSelectColumns = `channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
                                        aliases_json, user_cooldown_seconds, stream_condition, response_type,
-                                       template_fields_json, last_used_at, created_at, updated_at`;
+                                       template_fields_json, last_used_at, created_at, updated_at, revision`;
 
 export const createTextCommandRepository = (
   db: D1Database,
@@ -198,10 +213,15 @@ export const createTextCommandRepository = (
 
   async findByAlias(channelId: string, alias: string): Promise<TextCommand | null> {
     const row = await db.prepare(
-      `SELECT ${textCommandSelectColumns}
-         FROM text_commands AS command, json_each(command.aliases_json) AS alias
-        WHERE command.channel_id = ? AND alias.value = ?
-        LIMIT 1`,
+      `SELECT command.channel_id, command.command_name, command.response_text, command.kind, command.enabled,
+              command.minimum_level, command.cooldown_seconds, command.aliases_json,
+              command.user_cooldown_seconds, command.stream_condition, command.response_type,
+              command.template_fields_json, command.last_used_at, command.created_at, command.updated_at,
+              command.revision
+         FROM text_command_aliases AS alias
+         JOIN text_commands AS command
+           ON command.channel_id = alias.channel_id AND command.command_name = alias.command_name
+        WHERE alias.channel_id = ? AND alias.alias = ?`,
     ).bind(channelId, alias).first<TextCommandRow>();
     return row === null ? null : mapTextCommand(row);
   },
@@ -228,13 +248,13 @@ export const createTextCommandRepository = (
         )
           AND NOT EXISTS (
             SELECT 1 FROM text_commands AS other
-             WHERE other.channel_id = ? AND other.command_name <> ?
+             WHERE other.channel_id = ?
                AND (other.command_name = ? OR other.command_name IN (SELECT value FROM json_each(?)))
           )
           AND NOT EXISTS (
-            SELECT 1 FROM text_commands AS other, json_each(other.aliases_json) AS existing_alias
-             WHERE other.channel_id = ? AND other.command_name <> ?
-               AND (existing_alias.value = ? OR existing_alias.value IN (SELECT value FROM json_each(?)))
+            SELECT 1 FROM text_command_aliases AS existing_alias
+             WHERE existing_alias.channel_id = ?
+               AND (existing_alias.alias = ? OR existing_alias.alias IN (SELECT value FROM json_each(?)))
           )
           ${authorization.sql}`,
     ).bind(
@@ -255,10 +275,8 @@ export const createTextCommandRepository = (
       input.name,
       input.channelId,
       input.name,
-      input.name,
       aliasesJson,
       input.channelId,
-      input.name,
       input.name,
       aliasesJson,
       ...authorization.values,
@@ -279,14 +297,19 @@ export const createTextCommandRepository = (
       lastUsedAt: null,
       createdAt: input.now,
       updatedAt: input.now,
+      revision: 1,
     };
+    const aliasWrites = aliases.map((alias) => db.prepare(
+      `INSERT INTO text_command_aliases (channel_id, alias, command_name)
+       SELECT ?, ?, ? WHERE changes() > 0`,
+    ).bind(input.channelId, alias, input.name));
     const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
       action: "text_commands.command.created" satisfies AuditAction,
       before: null,
       after: auditValues(after),
-    }, input.now);
+    }, input.now, aliasWrites);
     if (changes > 0) return succeeded();
     if (await this.find(input.channelId, input.name) !== null) return failed("already_exists");
     const conflict = await aliasConflict(db, input.channelId, input.name, aliases, null);
@@ -296,6 +319,8 @@ export const createTextCommandRepository = (
   async change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult> {
     const before = await this.find(input.channelId, input.name);
     if (before === null) return failed("not_found");
+    const expectedRevision = input.expectedRevision ?? before.revision;
+    if (expectedRevision !== before.revision) return failed("conflict", undefined, before);
     if (input.onlyToggle !== true && input.newName !== input.name &&
         await this.find(input.channelId, input.newName) !== null) {
       return failed("already_exists");
@@ -307,41 +332,24 @@ export const createTextCommandRepository = (
     const mutation = input.onlyToggle === true
       ? db.prepare(
         `UPDATE text_commands
-            SET enabled = ?, updated_at = ?
-          WHERE channel_id = ? AND command_name = ?
-            AND response_text = ? AND kind = ? AND enabled = ?
-            AND minimum_level = ? AND cooldown_seconds = ? AND aliases_json = ?
-            AND user_cooldown_seconds = ? AND stream_condition = ? AND response_type = ?
-            AND template_fields_json = ?
+            SET enabled = ?, updated_at = ?, revision = revision + 1
+          WHERE channel_id = ? AND command_name = ? AND revision = ?
             ${authorization.sql}`,
       ).bind(
         input.enabled ? 1 : 0,
         input.now,
         input.channelId,
         input.name,
-        before.text,
-        before.kind,
-        before.enabled ? 1 : 0,
-        before.minimumTier,
-        before.cooldownSeconds,
-        JSON.stringify(before.aliases),
-        before.userCooldownSeconds,
-        before.streamCondition,
-        before.responseType,
-        JSON.stringify(extraTemplatesOf(before)),
+        expectedRevision,
         ...authorization.values,
       )
       : db.prepare(
         `UPDATE text_commands
             SET command_name = ?, response_text = ?, kind = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?,
                 aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?,
-                template_fields_json = ?, updated_at = ?
-          WHERE channel_id = ? AND command_name = ?
-            AND response_text = ? AND kind = ? AND enabled = ?
-            AND minimum_level = ? AND cooldown_seconds = ? AND aliases_json = ?
-            AND user_cooldown_seconds = ? AND stream_condition = ? AND response_type = ?
-            AND template_fields_json = ?
-            AND (? = command_name OR NOT EXISTS (
+                template_fields_json = ?, updated_at = ?, revision = revision + 1
+          WHERE channel_id = ? AND command_name = ? AND revision = ?
+            AND (command_name = ? OR NOT EXISTS (
               SELECT 1 FROM text_commands AS other
                WHERE other.channel_id = ? AND other.command_name = ?
             ))
@@ -351,9 +359,9 @@ export const createTextCommandRepository = (
                  AND (other.command_name = ? OR other.command_name IN (SELECT value FROM json_each(?)))
             )
             AND NOT EXISTS (
-              SELECT 1 FROM text_commands AS other, json_each(other.aliases_json) AS existing_alias
-               WHERE other.channel_id = ? AND other.command_name <> ?
-                 AND (existing_alias.value = ? OR existing_alias.value IN (SELECT value FROM json_each(?)))
+              SELECT 1 FROM text_command_aliases AS existing_alias
+               WHERE existing_alias.channel_id = ? AND existing_alias.command_name <> ?
+                 AND (existing_alias.alias = ? OR existing_alias.alias IN (SELECT value FROM json_each(?)))
             )
             ${authorization.sql}`,
       ).bind(
@@ -371,17 +379,8 @@ export const createTextCommandRepository = (
         input.now,
         input.channelId,
         input.name,
-        before.text,
-        before.kind,
-        before.enabled ? 1 : 0,
-        before.minimumTier,
-        before.cooldownSeconds,
-        JSON.stringify(before.aliases),
-        before.userCooldownSeconds,
-        before.streamCondition,
-        before.responseType,
-        JSON.stringify(extraTemplatesOf(before)),
-        input.newName,
+        expectedRevision,
+        input.name,
         input.channelId,
         input.newName,
         input.channelId,
@@ -395,7 +394,7 @@ export const createTextCommandRepository = (
         ...authorization.values,
       );
     const after: TextCommand = input.onlyToggle === true
-      ? { ...before, enabled: input.enabled, updatedAt: input.now }
+      ? { ...before, enabled: input.enabled, updatedAt: input.now, revision: before.revision + 1 }
       : {
         ...before,
         name: input.newName,
@@ -410,23 +409,56 @@ export const createTextCommandRepository = (
         responseType: input.responseType,
         ...extraTemplates,
         updatedAt: input.now,
+        revision: before.revision + 1,
       };
+    const sideEffects: D1PreparedStatement[] = [];
+    if (input.onlyToggle !== true) {
+      sideEffects.push(db.prepare(
+        `DELETE FROM text_command_aliases
+          WHERE channel_id = ? AND command_name = ?
+            AND EXISTS (
+              SELECT 1 FROM text_commands
+               WHERE channel_id = ? AND command_name = ? AND revision = ?
+            )`,
+      ).bind(input.channelId, input.newName, input.channelId, input.newName, expectedRevision + 1));
+      sideEffects.push(...input.aliases.map((alias) => db.prepare(
+        `INSERT INTO text_command_aliases (channel_id, alias, command_name)
+         SELECT ?, ?, ? WHERE EXISTS (
+           SELECT 1 FROM text_commands
+            WHERE channel_id = ? AND command_name = ? AND revision = ?
+         )`,
+      ).bind(input.channelId, alias, input.newName, input.channelId, input.newName, expectedRevision + 1)));
+      if (input.newName !== input.name) {
+        // Cooldowns are command-name keyed; renames intentionally discard them.
+        sideEffects.push(db.prepare(
+          `DELETE FROM text_command_user_cooldowns
+            WHERE channel_id = ? AND command_name = ?
+              AND EXISTS (
+                SELECT 1 FROM text_commands
+                 WHERE channel_id = ? AND command_name = ? AND revision = ?
+              )`,
+        ).bind(input.channelId, input.name, input.channelId, input.newName, expectedRevision + 1));
+      }
+    }
     const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId: input.channelId,
       moduleId: MODULE_ID,
       action: "text_commands.command.updated" satisfies AuditAction,
       before: auditValues(before),
       after: auditValues(after),
-    }, input.now);
+    }, input.now, sideEffects);
     if (changes > 0) return succeeded();
 
     const current = await this.find(input.channelId, input.name);
+    if (current !== null && current.revision !== expectedRevision) return failed("conflict", undefined, current);
     const nameConflict = input.newName === input.name ? null : await this.find(input.channelId, input.newName);
     if (nameConflict !== null) return failed("already_exists");
     const conflict = await aliasConflict(db, input.channelId, input.newName, input.aliases, input.name);
     if (conflict !== null) return failed("alias_conflict", conflict);
     if (current === null) return failed("not_found");
-    return failed(sameMutationValues(current, before) ? "not_authorized" : "conflict");
+    return sameMutationValues(current, before)
+      ? failed("not_authorized")
+      : failed("conflict", undefined, current);
   },
 
   async delete(channelId: string, name: string, actor: TextCommandActor, now: string): Promise<TextCommandMutationResult> {
@@ -436,6 +468,7 @@ export const createTextCommandRepository = (
     const mutation = db.prepare(
       `DELETE FROM text_commands
         WHERE channel_id = ? AND command_name = ?
+          AND revision = ?
           AND response_text = ? AND kind = ? AND enabled = ?
           AND minimum_level = ? AND cooldown_seconds = ? AND aliases_json = ?
           AND user_cooldown_seconds = ? AND stream_condition = ? AND response_type = ?
@@ -444,6 +477,7 @@ export const createTextCommandRepository = (
     ).bind(
       channelId,
       name,
+      before.revision,
       before.text,
       before.kind,
       before.enabled ? 1 : 0,
@@ -456,16 +490,21 @@ export const createTextCommandRepository = (
       JSON.stringify(extraTemplatesOf(before)),
       ...authorization.values,
     );
+    const cleanupCooldowns = db.prepare(
+      `DELETE FROM text_command_user_cooldowns
+        WHERE channel_id = ? AND command_name = ? AND changes() > 0`,
+    ).bind(channelId, name);
     const changes = await runMutation(db, prepareModuleAudit, mutation, {
       channelId,
       moduleId: MODULE_ID,
       action: "text_commands.command.removed" satisfies AuditAction,
       before: auditValues(before),
       after: null,
-    }, now);
+    }, now, [cleanupCooldowns]);
     if (changes > 0) return succeeded();
     const current = await this.find(channelId, name);
     if (current === null) return failed("not_found");
+    if (current.revision !== before.revision) return failed("conflict", undefined, current);
     return failed(sameMutationValues(current, before) ? "not_authorized" : "conflict");
   },
 

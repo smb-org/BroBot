@@ -21,7 +21,7 @@ export interface TextCommandAliasConflict {
 
 export type TextCommandMutationResult =
   | { ok: true }
-  | { ok: false; reason: TextCommandMutationReason; conflict?: TextCommandAliasConflict };
+  | { ok: false; reason: TextCommandMutationReason; conflict?: TextCommandAliasConflict; current?: TextCommand };
 
 export interface TextCommandRepository {
   list(channelId: string): Promise<TextCommand[]>;

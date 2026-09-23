@@ -109,7 +109,9 @@ moduleRouter.get("/api/channels/:channelId/modules/:moduleId/settings", async (c
     return context.json({ error: "module_settings_invalid" }, 500);
   }
   const settings = module.settingsSchema.safeParse(rawSettings);
-  return settings.success ? context.json({ settings: settings.data }) : context.json({ error: "module_settings_invalid" }, 500);
+  return settings.success
+    ? context.json({ settings: settings.data, revision: stored.revision })
+    : context.json({ error: "module_settings_invalid" }, 500);
 });
 
 moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async (context) => {
@@ -119,7 +121,13 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   const channelId = context.req.param("channelId");
   const stored = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
   if (stored === null) return context.json({ error: "module_not_configured" }, 404);
-  const settings = module.settingsSchema.safeParse(await readJsonBody(context.req.raw));
+  const body = await readJsonBody(context.req.raw);
+  if (body === null || typeof body !== "object" || Array.isArray(body) ||
+      !Number.isSafeInteger(Reflect.get(body, "revision")) || (Reflect.get(body, "revision") as number) < 1) {
+    return context.json({ error: "module_settings_invalid" }, 400);
+  }
+  const expectedRevision = Reflect.get(body, "revision") as number;
+  const settings = module.settingsSchema.safeParse(Reflect.get(body, "settings"));
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 400);
   const warnings = module.templateFields === undefined
     ? []
@@ -136,9 +144,28 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     JSON.stringify(settings.data),
     `${module.id}.settings_changed`,
     nowIso(),
+    [],
+    expectedRevision,
   );
-  if (!changed) return context.json({ error: "module_settings_changed_concurrently" }, 409);
-  return context.json({ settings: settings.data, warnings });
+  if (!changed) {
+    const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
+    let currentSettings: unknown = null;
+    if (current !== null) {
+      try {
+        const parsed: unknown = JSON.parse(current.settings);
+        const validated = module.settingsSchema.safeParse(parsed);
+        currentSettings = validated.success ? validated.data : null;
+      } catch {
+        currentSettings = null;
+      }
+    }
+    return context.json({
+      error: "module_settings_changed_concurrently",
+      current: current === null ? null : { settings: currentSettings, revision: current.revision },
+    }, 409);
+  }
+  const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
+  return context.json({ settings: settings.data, revision: current?.revision ?? expectedRevision + 1, warnings });
 });
 
 moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context) => {

@@ -26,6 +26,7 @@ const record = (channelId: string, moduleId: string, enabled: boolean): ChannelM
   moduleId,
   enabled,
   settings: SETTINGS,
+  revision: 1,
 });
 
 const auditCount = async (database: TestD1Database): Promise<number> => {
@@ -132,7 +133,7 @@ describe("module activation in the repository", () => {
 
     expect(changed).toBe(true);
     await expect(getChannelModuleForChannel(asD1(database), "kanal-a", "test-modul"))
-      .resolves.toEqual(record("kanal-a", "test-modul", false));
+      .resolves.toEqual({ ...record("kanal-a", "test-modul", false), revision: 2 });
     await expect(auditCount(database)).resolves.toBe(2);
   });
 

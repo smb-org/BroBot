@@ -99,6 +99,8 @@ export type { UseDraftResult } from "./useDraft";
 
 export { useDraftGuard } from "./useDraftGuard";
 export type { UseDraftGuardResult } from "./useDraftGuard";
+export { registerDashboardNavigationGuard } from "./navigation-guard";
+export type { DashboardNavigationGuard } from "./navigation-guard";
 
 export { ListDetail } from "./ListDetail";
 export type { ListDetailProps } from "./ListDetail";
