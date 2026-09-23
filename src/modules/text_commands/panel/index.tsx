@@ -1,135 +1,59 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
-import { dashboardCommonTexts, type DashboardLanguage } from "../../../dashboard/locale";
-import { Icon, ListDetail, Select as UiSelect, SubInspector, useInspectorSelection } from "../../../dashboard/ui";
-import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand, type TextCommandMinimumTier } from "../contracts";
-import { validCommandName } from "../domain";
-import { deleteTextCommand, loadTextCommands, createTextCommand, toggleTextCommand, setTextCommandMinimumTier, saveTextCommand } from "./service";
+import { dashboardLanguage, type DashboardLanguage } from "../../../dashboard/locale";
+import {
+  Button, ChoiceCards, ConfirmDialog, EditorShell, Field, FieldPair, ListDetail, NumberField, Select,
+  SegmentedControl, Switch, TagInput, TemplateText, TextArea, useDraft, useDraftGuard, useInspectorSelection,
+} from "../../../dashboard/ui";
+import { PanelApiError } from "../../../contracts/panel-error";
+import { TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_VARIABLES, type TextCommand, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
+import { commandListReply } from "../contracts/chat-defaults";
+import { renderCommandText, statusForTier, validCommandName } from "../domain";
+import { worstCaseTemplateLength, type PanelTemplateWarning } from "../contract";
+import { createTextCommand, deleteTextCommand, loadTextCommands, saveTextCommand, setTextCommandMinimumTier, toggleTextCommand } from "./service";
 import { textCommandsTexts } from "./locale";
 
 const normalizeCommandName = (name: string): string => name.trim().replace(/^!/u, "").toLowerCase();
 
-interface TextCommandRowProperties {
-  channelId: string;
-  language?: DashboardLanguage | undefined;
-  initial: TextCommand;
-  onChanged: () => Promise<void>;
-  selected: boolean;
-  onSelect: () => void;
-  rowRef: (row: HTMLTableRowElement | null) => void;
-  canManageContent: boolean;
-  toggleBusy: boolean;
-  onToggle: () => Promise<void>;
-  minimumBusy: boolean;
-  onMinimumChange: (minimumTier: TextCommandMinimumTier) => Promise<void>;
+interface CommandDraft {
+  name: string;
+  text: string;
+  kind: TextCommandKind;
+  minimumTier: TextCommandMinimumTier;
+  cooldownSeconds: number | "";
+  aliases: string[];
+  userCooldownSeconds: number | "";
+  streamCondition: TextCommandStreamCondition;
+  responseType: TextCommandResponseType;
 }
 
-type TextCommandEditorProperties = Pick<TextCommandRowProperties, "channelId" | "language" | "initial" | "onChanged" | "canManageContent"> & { onClose: () => void };
+const draftFromCommand = (command: TextCommand): CommandDraft => ({
+  name: command.name,
+  text: command.text,
+  kind: command.kind,
+  minimumTier: command.minimumTier,
+  cooldownSeconds: command.cooldownSeconds,
+  aliases: [...command.aliases],
+  userCooldownSeconds: command.userCooldownSeconds,
+  streamCondition: command.streamCondition,
+  responseType: command.responseType,
+});
 
-const TextCommandEditor = ({ channelId, language, initial, onChanged, canManageContent, onClose }: TextCommandEditorProperties): ReactElement => {
-  const labels = textCommandsTexts(language);
-  const [name, setName] = useState(initial.name);
-  const [text, setText] = useState(initial.text);
-  const [kind, setKind] = useState(initial.kind);
-  const [cooldownSeconds, setCooldownSeconds] = useState<number | "">(initial.cooldownSeconds);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [cooldownError, setCooldownError] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
-  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+const newCommandDraft = (): CommandDraft => ({
+  name: "",
+  text: "",
+  kind: "text",
+  minimumTier: "everyone",
+  cooldownSeconds: 5,
+  aliases: [],
+  userCooldownSeconds: 0,
+  streamCondition: "any",
+  responseType: "say",
+});
 
-  useEffect(() => {
-    if (confirmingDelete) cancelButtonRef.current?.focus();
-  }, [confirmingDelete]);
-
-  const save = async (): Promise<void> => {
-    if (cooldownSeconds === "") {
-      setCooldownError(true);
-      return;
-    }
-    setCooldownError(false);
-    setBusy(true);
-    setError(null);
-    try {
-      await saveTextCommand(channelId, {
-        oldName: initial.name,
-        name: name.trim(),
-        kind,
-        ...(kind === "text" ? { text } : {}),
-        cooldownSeconds,
-      });
-      await onChanged();
-    } catch {
-      setError(labels.saveError);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async (): Promise<void> => {
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteTextCommand(channelId, initial.name);
-      setConfirmingDelete(false);
-      await onChanged();
-    } catch {
-      setError(labels.deleteError);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <SubInspector ariaLabel={labels.details(initial.name)} title={`!${initial.name}`} identifier={initial.name} meta={<span className="command-inspector__meta">{labels.columns.last} {relativeTime(initial.lastUsedAt, labels)}</span>} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={onClose}>
-      {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
-      <label className="config-field config-field--medium">
-        {labels.name}
-        <input value={name} onChange={(event) => { setName(event.target.value); }} disabled={!canManageContent || busy} pattern="[a-z0-9][a-z0-9_-]{0,31}" />
-      </label>
-      <label className="config-field config-field--narrow">
-        {labels.kind}
-        <select aria-label={labels.kind} value={kind} onChange={(event) => { setKind(event.target.value as "text" | "list"); }} disabled={!canManageContent || busy}>
-          <option value="text">{labels.kindText}</option>
-          <option value="list">{labels.kindList}</option>
-        </select>
-      </label>
-      {kind === "text" ? <label className="config-field config-field--wide">
-        {labels.text}
-        <textarea value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent || busy} />
-      </label> : null}
-      <label className="config-field config-field--narrow">
-        {labels.cooldown}
-        <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSeconds(event.target.value === "" ? "" : Number(event.target.value)); }} disabled={!canManageContent || busy} />
-        {cooldownError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
-      </label>
-      <div className="form-actions">
-        <button className="button button--primary" type="button" onClick={() => { void save(); }} disabled={!canManageContent || busy}>{labels.save(initial.name)}</button>
-      </div>
-      <div className="form-actions form-actions--destructive">
-        <button className="button button--danger" type="button" onClick={() => { setError(null); setConfirmingDelete(true); }} disabled={!canManageContent || busy}>{labels.delete(initial.name)}</button>
-      </div>
-      {confirmingDelete ? (
-        <div
-          className="inspector-confirmation"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="text-command-delete-confirmation-title"
-          aria-describedby="text-command-delete-confirmation-description"
-          onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setConfirmingDelete(false); } }}
-        >
-          <h3 id="text-command-delete-confirmation-title">{labels.deleteTitle(initial.name)}</h3>
-          <p id="text-command-delete-confirmation-description">{labels.deleteConfirmation(initial.name)}</p>
-          <div className="form-actions">
-            <button ref={confirmButtonRef} className="button button--danger" type="button" onClick={() => { void remove(); }} disabled={!canManageContent || busy}>{labels.confirmDeletion(initial.name)}</button>
-            <button ref={cancelButtonRef} className="button button--quiet" type="button" onClick={() => { setConfirmingDelete(false); }} disabled={busy}>{dashboardCommonTexts().cancel}</button>
-          </div>
-        </div>
-      ) : null}
-      {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-    </SubInspector>
-  );
+const tierDescription = (tier: TextCommandMinimumTier, labels: ReturnType<typeof textCommandsTexts>): string => {
+  const included = statusForTier[tier].map((status) => labels.tierSubjects[status]);
+  return labels.tierDescription(tier, included);
 };
 
 const relativeTime = (value: string | null, labels: ReturnType<typeof textCommandsTexts>): string => {
@@ -143,6 +67,11 @@ const relativeTime = (value: string | null, labels: ReturnType<typeof textComman
   return labels.hoursAgo(Math.round(minutes / 60));
 };
 
+const formatDate = (value: string, language: DashboardLanguage): string => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", { dateStyle: "medium" }).format(date);
+};
+
 const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: () => void): void => {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
@@ -150,236 +79,596 @@ const commandRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: 
   }
 };
 
-/**
- * Four columns -- name, response, minimum level, toggle. Kind is readable
- * from the response itself (a "list" command shows "—", same as before);
- * cooldown and "last used" moved into the inspector (`TextCommandEditor`'s
- * cooldown field, and the identifier line above) rather than staying
- * visible in the list -- an accepted cost, not a gap. See "The
- * text-commands table loses two columns" in the epic's task description.
- */
+interface TextCommandRowProperties {
+  initial: TextCommand;
+  language?: DashboardLanguage | undefined;
+  selected: boolean;
+  onSelect: () => void;
+  rowRef: (row: HTMLTableRowElement | null) => void;
+  canManageContent: boolean;
+  toggleBusy: boolean;
+  onToggle: () => Promise<void>;
+  minimumBusy: boolean;
+  onMinimumChange: (minimumTier: TextCommandMinimumTier) => Promise<void>;
+}
+
 const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canManageContent, toggleBusy, onToggle, minimumBusy, onMinimumChange }: TextCommandRowProperties): ReactElement => {
   const labels = textCommandsTexts(language);
-  const minimumDisabledReason = canManageContent ? undefined : labels.minimumTierLocked;
-  const minimumTier = (initial as { minimumTier?: TextCommandMinimumTier }).minimumTier ?? "everyone";
   return (
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
       <td className="table__answer" title={initial.kind === "text" ? initial.text : undefined}>{initial.kind === "text" ? initial.text : "—"}</td>
       <td>
-        <div
-          className="minimum-tier-select"
-          onClick={(event) => { event.stopPropagation(); }}
-          onKeyDown={(event) => { event.stopPropagation(); }}
-        >
-          <UiSelect
-            ariaLabel={labels.minimumTierFor(initial.name)}
-            value={minimumTier}
+        <div className="minimum-tier-select" onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
+          <Select
+            ariaLabel={`${labels.minimumTier}: !${initial.name}`}
+            value={initial.minimumTier}
             disabled={!canManageContent || minimumBusy}
             busy={minimumBusy}
-            {...(minimumDisabledReason === undefined ? {} : { title: minimumDisabledReason })}
-            options={TEXT_COMMAND_MINIMUM_TIERS.map((tier) => ({ value: tier, label: labels.tiers[tier] }))}
+            {...(canManageContent ? {} : { title: labels.minimumTierLocked })}
+            options={TEXT_COMMAND_MINIMUM_TIERS.map((tier) => ({ value: tier, label: labels.tierLabels[tier] }))}
             onChange={(value) => { if (value !== null) void onMinimumChange(value as TextCommandMinimumTier); }}
           />
         </div>
       </td>
-      <td>
-        <button
-          className="switch"
-          type="button"
-          role="switch"
-          aria-label={labels.toggleLabel(initial.name, initial.enabled)}
-          aria-checked={initial.enabled}
-          aria-busy={toggleBusy}
-          disabled={toggleBusy}
-          onClick={(event) => { event.stopPropagation(); void onToggle(); }}
-        >
-          <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>
-        </button>
-      </td>
+      <td><div onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
+        <Switch
+          ariaLabel={`${labels.active}: !${initial.name} · ${initial.enabled ? labels.enabled : labels.disabled}`}
+          checked={initial.enabled}
+          pending={toggleBusy}
+          onChange={() => { void onToggle(); }}
+        />
+      </div></td>
     </tr>
   );
 };
 
-export const TextCommandsPanel = ({ channelId, language, canManage: canManageContent = true, onCloseInspector, initialSelection }: { channelId: string; language?: DashboardLanguage; canManage?: boolean; onCloseInspector?: () => void; initialSelection?: string }): ReactElement => {
+interface TextCommandEditorProperties {
+  channelId: string;
+  language?: DashboardLanguage | undefined;
+  initial: CommandDraft;
+  command: TextCommand | null;
+  commands: readonly TextCommand[];
+  canManageContent: boolean;
+  botIsModerator: boolean | null;
+  onClose: () => void;
+  onCreateSuccess?: () => void;
+  onGuardChange: (guard: ((proceed: () => void) => void) | null) => void;
+  onRefresh: (selectName?: string) => Promise<TextCommand[]>;
+  onDeleted: () => Promise<void>;
+}
+
+const TextCommandEditor = ({ channelId, language, initial, command, commands, canManageContent, botIsModerator, onClose, onCreateSuccess, onGuardChange, onRefresh, onDeleted }: TextCommandEditorProperties): ReactElement => {
+  const labels = textCommandsTexts(language);
+  const resolvedLanguage = language ?? dashboardLanguage();
+  const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial);
+  const [active, setActive] = useState(command?.enabled ?? true);
+  const [activePending, setActivePending] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const [fieldError, setFieldError] = useState<{ field: "name" | "aliases"; message: string; invalidAlias?: string } | null>(null);
+  const [concurrentConflict, setConcurrentConflict] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [attemptedSave, setAttemptedSave] = useState(false);
+  const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
+  const [templateIssues, setTemplateIssues] = useState<{ unknown: readonly string[]; worstCaseExceeded: boolean }>({ unknown: [], worstCaseExceeded: false });
+  const labelsForVariables = useMemo(() => TEXT_COMMAND_VARIABLES.map((variable) => ({
+    name: variable.name,
+    sample: variable.sample,
+    description: variable.name === "user" ? labels.variables.user : labels.variables.channel,
+  })), [labels.variables]);
+  const isCreate = command === null;
+  const normalizedName = normalizeCommandName(draft.name);
+  const nameInvalid = normalizedName.length === 0 || !validCommandName(normalizedName);
+  const sameNameAlias = draft.aliases.includes(normalizedName);
+  const nameError = fieldError?.field === "name" ? fieldError.message : attemptedSave && normalizedName.length === 0 ? labels.nameMissing : attemptedSave && !validCommandName(normalizedName) ? labels.nameInvalid : undefined;
+  const aliasesError = fieldError?.field === "aliases" ? fieldError.message : sameNameAlias ? labels.aliasIsName : undefined;
+  const cooldownInvalid = draft.cooldownSeconds === "" || !Number.isInteger(draft.cooldownSeconds) || draft.cooldownSeconds < 0 || draft.cooldownSeconds > 86400;
+  const userCooldownInvalid = draft.userCooldownSeconds === "" || !Number.isInteger(draft.userCooldownSeconds) || draft.userCooldownSeconds < 0 || draft.userCooldownSeconds > 86400;
+  const responseInvalid = draft.kind === "text" && (draft.text.trim().length === 0 || draft.text.length > 500);
+  const valid = !nameInvalid && !sameNameAlias && !cooldownInvalid && !userCooldownInvalid && !responseInvalid && draft.aliases.length <= TEXT_COMMAND_MAX_ALIASES;
+  const localWarnings = templateIssues.unknown.length === 0 && !templateIssues.worstCaseExceeded ? [] : [
+    ...(templateIssues.unknown.length === 0 ? [] : [labels.warningLabel({ field: "text", code: "unknown_template_variables", unknownVariables: templateIssues.unknown })]),
+    ...(templateIssues.worstCaseExceeded ? [labels.warningLabel({ field: "text", code: "template_worst_case_too_long", worstCaseLength: worstCaseTemplateLength(draft.text, TEXT_COMMAND_VARIABLES) })] : []),
+  ];
+  const warnings = [...serverWarnings.map(labels.warningLabel), ...localWarnings];
+  const tierOptions = TEXT_COMMAND_MINIMUM_TIERS.map((tier) => ({
+    value: tier,
+    label: labels.tierLabels[tier],
+    description: tierDescription(tier, labels),
+    icon: `tier${tier[0]?.toUpperCase() ?? ""}${tier.slice(1)}` as "tierEveryone" | "tierSubscriber" | "tierVip" | "tierModerator" | "tierBroadcaster",
+  }));
+  const announcementWarning = draft.responseType === "announcement" && botIsModerator === false ? labels.announcementWarning : undefined;
+  const advancedIssue = fieldError?.field === "aliases" || cooldownInvalid || userCooldownInvalid
+    ? "error" as const
+    : undefined;
+  const settingsIssue = nameError !== undefined || responseInvalid
+    ? "error" as const
+    : announcementWarning !== undefined || templateIssues.unknown.length > 0 || templateIssues.worstCaseExceeded || serverWarnings.some((warning) => warning.field === "text")
+      ? "warning" as const
+      : undefined;
+  const listPreview = commandListReply(commands.filter((item) => item.enabled && item.name !== command?.name).map((item) => item.name));
+
+  const saveDraft = useCallback(async (): Promise<string | null> => {
+    setAttemptedSave(true);
+    if (!canManageContent || !valid) return labels.invalid;
+    const payload = {
+      name: normalizedName,
+      text: draft.kind === "list" ? "" : draft.text,
+      kind: draft.kind,
+      minimumTier: draft.minimumTier,
+      cooldownSeconds: draft.cooldownSeconds as number,
+      aliases: draft.aliases,
+      userCooldownSeconds: draft.userCooldownSeconds as number,
+      streamCondition: draft.streamCondition,
+      responseType: draft.responseType,
+    };
+    setPending(true); setError(undefined); setFieldError(null); setConcurrentConflict(false); setSaved(false);
+    try {
+      const returnedWarnings = isCreate
+        ? await createTextCommand(channelId, payload)
+        : await saveTextCommand(channelId, { oldName: command.name, ...payload });
+      accept({ ...draft, ...payload, name: payload.name });
+      setServerWarnings(returnedWarnings);
+      await onRefresh(payload.name);
+      setSaved(true);
+      return null;
+    } catch (caught) {
+      if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "command_changed_concurrently") {
+        setConcurrentConflict(true);
+        return labels.conflictMessage;
+      }
+      if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "command_already_exists") {
+        setFieldError({ field: "name", message: labels.nameExists });
+        return labels.nameExists;
+      }
+      if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "command_alias_conflict") {
+        const details = caught.details as { conflict?: { field?: string; trigger?: string; command?: string } } | null;
+        const conflict = details?.conflict;
+        if (conflict !== undefined && typeof conflict.trigger === "string" && typeof conflict.command === "string") {
+          if (conflict.field === "name") {
+            const message = labels.nameAliasConflict(conflict.trigger, conflict.command);
+            setFieldError({ field: "name", message });
+            return message;
+          }
+          if (conflict.field === "aliases") {
+            const message = labels.aliasConflict(conflict.trigger, conflict.command);
+            setFieldError({ field: "aliases", message, invalidAlias: normalizeCommandName(conflict.trigger) });
+            return message;
+          }
+        }
+      }
+      setError(labels.saveError);
+      return labels.saveError;
+    } finally { setPending(false); }
+  }, [accept, canManageContent, channelId, command, draft, isCreate, labels, normalizedName, onRefresh, valid, setAttemptedSave, setConcurrentConflict, setError, setFieldError, setPending, setSaved, setServerWarnings]);
+
+  const guard = useDraftGuard(dirty, saveDraft, reset);
+  useEffect(() => {
+    onGuardChange(guard.guardSwitch);
+    return () => { onGuardChange(null); };
+  }, [guard.guardSwitch, onGuardChange]);
+
+  const setDraftField = <Key extends keyof CommandDraft>(key: Key, value: CommandDraft[Key]): void => {
+    setValue((current) => ({ ...current, [key]: value }));
+    setSaved(false); setError(undefined); setConcurrentConflict(false);
+    if (key === "name" || key === "aliases") setFieldError(null);
+  };
+
+  const handleSave = async (): Promise<void> => {
+    if (!valid) { setAttemptedSave(true); return; }
+    const result = await saveDraft();
+    if (result === null && isCreate) onCreateSuccess?.();
+  };
+
+  const reloadServer = async (): Promise<void> => {
+    const data = await onRefresh();
+    const latest = data.find((item) => item.name === command?.name || item.name === normalizedName);
+    if (latest === undefined) { onClose(); return; }
+    accept(draftFromCommand(latest));
+    setActive(latest.enabled);
+    setConcurrentConflict(false); setFieldError(null); setError(undefined); setServerWarnings([]); setTemplateIssues({ unknown: [], worstCaseExceeded: false });
+  };
+
+  const toggleActive = async (next: boolean): Promise<void> => {
+    if (command === null) return;
+    setActivePending(true); setError(undefined);
+    try {
+      await toggleTextCommand(channelId, command.name, next);
+      setActive(next);
+      await onRefresh(command.name);
+    } catch {
+      setError(labels.saveError);
+    } finally { setActivePending(false); }
+  };
+
+  const remove = async (): Promise<void> => {
+    if (command === null) return;
+    setDeleting(true); setError(undefined);
+    try { await deleteTextCommand(channelId, command.name); setConfirmingDelete(false); await onDeleted(); }
+    catch { setError(labels.deleteError); }
+    finally { setDeleting(false); }
+  };
+
+  const sections = [
+    {
+      id: "settings",
+      label: "",
+      icon: "tabSettings" as const,
+      ...(settingsIssue === undefined ? {} : { issue: settingsIssue }),
+      content: <>
+        <div className="command-editor-name-row">
+          <Field
+            id="command-name"
+            label={labels.name}
+            hint={labels.nameHint}
+            prefix="!"
+            normalize={normalizeCommandName}
+            maxLength={32}
+            countLabel={(count, maximum) => `${String(count)} ${language === "en" ? "of" : "von"} ${String(maximum)}`}
+            value={draft.name}
+            {...(nameError === undefined ? {} : { error: nameError })}
+            required
+            disabled={!canManageContent || pending}
+            onChange={(value) => { setDraftField("name", value); }}
+          />
+          {command === null ? null : <Switch label={labels.active} hint={labels.activeImmediately} checked={active} pending={activePending} onChange={(next) => { void toggleActive(next); }} layout="inline" />}
+        </div>
+        <TagInput
+          label={labels.aliases}
+          hint={labels.aliasHint}
+          value={draft.aliases}
+          onChange={(value) => { setDraftField("aliases", value); }}
+          prefix="!"
+          normalize={normalizeCommandName}
+          validate={(alias) => !validCommandName(alias) ? labels.aliasInvalid(alias) : alias === normalizedName ? labels.aliasIsName : null}
+          maxTags={TEXT_COMMAND_MAX_ALIASES}
+          {...(aliasesError === undefined ? {} : { error: aliasesError })}
+          invalidValues={[fieldError?.field === "aliases" ? fieldError.invalidAlias ?? "" : "", ...(sameNameAlias ? [normalizedName] : [])].filter(Boolean)}
+          removeLabel={labels.aliasRemove}
+          messages={labels.tagInputMessages}
+          listLabel={labels.aliasList}
+          disabled={!canManageContent || pending}
+        />
+        <SegmentedControl
+          label={labels.kind}
+          hint={labels.kindHints[draft.kind]}
+          value={draft.kind}
+          options={[{ value: "text", label: labels.kindLabels.text }, { value: "list", label: labels.kindLabels.list }]}
+          disabled={!canManageContent || pending}
+          onChange={(value) => { setDraftField("kind", value as TextCommandKind); }}
+        />
+        {draft.kind === "text" ? <TextArea
+          id="command-response"
+          name="text"
+          label={labels.response}
+          hint={labels.responseHint}
+          value={draft.text}
+          onChange={(value) => { setDraftField("text", value); }}
+          maxLength={500}
+          variables={labelsForVariables}
+          preview={(template, values) => renderCommandText(template, values)}
+          previewLabel={labels.previewLabel}
+          previewSpeaker={labels.previewSpeaker}
+          required
+          disabled={!canManageContent || pending}
+          messages={labels.textAreaMessages}
+          onIssuesChange={setTemplateIssues}
+          {...(attemptedSave && draft.text.trim().length === 0 ? { error: labels.responseMissing } : {})}
+        /> : <div className="command-list-preview"><p>{labels.kindListPreview}</p><TemplateText value={listPreview} variables={[]} /></div>}
+        <SegmentedControl
+          label={labels.responseType}
+          hint={labels.responseTypeHints[draft.responseType]}
+          value={draft.responseType}
+          options={(["say", "reply", "announcement"] as const).map((value) => ({ value, label: labels.responseTypeLabels[value] }))}
+          {...(announcementWarning === undefined ? {} : { warning: announcementWarning })}
+          disabled={!canManageContent || pending}
+          onChange={(value) => { setDraftField("responseType", value as TextCommandResponseType); }}
+        />
+      </>,
+    },
+    {
+      id: "advanced",
+      label: "",
+      icon: "tabAdvanced" as const,
+      ...(advancedIssue === undefined ? {} : { issue: advancedIssue }),
+      content: <>
+        <ChoiceCards
+          label={labels.minimumTier}
+          hint={labels.tierHelp}
+          value={draft.minimumTier}
+          options={tierOptions}
+          disabled={!canManageContent || pending}
+          onChange={(value) => { setDraftField("minimumTier", value as TextCommandMinimumTier); }}
+        />
+        <SegmentedControl
+          label={labels.streamCondition}
+          hint={labels.streamHints[draft.streamCondition]}
+          value={draft.streamCondition}
+          options={(["any", "online", "offline"] as const).map((value) => ({ value, label: labels.streamLabels[value] }))}
+          disabled={!canManageContent || pending}
+          onChange={(value) => { setDraftField("streamCondition", value as TextCommandStreamCondition); }}
+        />
+        <FieldPair>
+          <NumberField
+            id="command-cooldown"
+            label={labels.cooldown}
+            hint={labels.cooldownHint}
+            unit="s"
+            min={0}
+            max={86400}
+            step={5}
+            value={draft.cooldownSeconds}
+            {...(attemptedSave && cooldownInvalid ? { error: labels.numberMissing } : {})}
+            increaseLabel={`${labels.cooldown} +`}
+            decreaseLabel={`${labels.cooldown} −`}
+            disabled={!canManageContent || pending}
+            onChange={(value) => { setDraftField("cooldownSeconds", value); }}
+          />
+          <NumberField
+            id="command-user-cooldown"
+            label={labels.userCooldown}
+            hint={labels.userCooldownHint}
+            unit="s"
+            min={0}
+            max={86400}
+            step={5}
+            value={draft.userCooldownSeconds}
+            {...(attemptedSave && userCooldownInvalid ? { error: labels.numberMissing } : {})}
+            increaseLabel={`${labels.userCooldown} +`}
+            decreaseLabel={`${labels.userCooldown} −`}
+            disabled={!canManageContent || pending}
+            onChange={(value) => { setDraftField("userCooldownSeconds", value); }}
+          />
+        </FieldPair>
+      </>,
+    },
+  ];
+
+  const props = useMemo(() => ({
+    aliases: draft.aliases,
+    kind: labels.kindLabels[draft.kind],
+    text: draft.text,
+    responseType: labels.responseTypeLabels[draft.responseType],
+    minimumTier: labels.tierLabels[draft.minimumTier],
+    minimumDescription: tierDescription(draft.minimumTier, labels),
+    stream: draft.streamCondition === "any" ? labels.streamAny : draft.streamCondition === "online" ? labels.streamOnline : labels.streamOffline,
+    cooldown: draft.cooldownSeconds === "" ? "—" : `${String(draft.cooldownSeconds)} s`,
+    userCooldown: draft.userCooldownSeconds === 0 ? labels.cooldownOff : draft.userCooldownSeconds === "" ? "—" : `${String(draft.userCooldownSeconds)} s`,
+  }), [draft, labels]);
+
+  const propertyList = <dl className="properties command-properties">
+    <div><dt>{labels.name}</dt><dd className="mono">!{draft.name}</dd></div>
+    <div><dt>{labels.active}</dt><dd><Switch label={labels.active} hint={labels.activeImmediately} checked={active} pending={activePending} onChange={(next) => { void toggleActive(next); }} layout="inline" /></dd></div>
+    <div><dt>{labels.aliases}</dt><dd className="mono">{props.aliases.length === 0 ? labels.noAliases : props.aliases.map((alias) => `!${alias}`).join(", ")}</dd></div>
+    <div><dt>{labels.kind}</dt><dd>{props.kind}</dd></div>
+    <div><dt>{labels.response}</dt><dd>{draft.kind === "text" ? <TemplateText value={props.text} variables={labelsForVariables} /> : <TemplateText value={listPreview} variables={[]} />}</dd></div>
+    <div><dt>{labels.responseType}</dt><dd>{props.responseType}</dd></div>
+    <div><dt>{labels.minimumTier}</dt><dd>{props.minimumTier} · {props.minimumDescription}</dd></div>
+    <div><dt>{labels.streamCondition}</dt><dd>{props.stream}</dd></div>
+    <div><dt>{labels.cooldown}</dt><dd className="mono">{props.cooldown}</dd></div>
+    <div><dt>{labels.userCooldown}</dt><dd className="mono">{props.userCooldown}</dd></div>
+    {command === null ? null : <>
+      <div><dt>{labels.lastUsed}</dt><dd className="mono">{relativeTime(command.lastUsedAt, labels)}</dd></div>
+      <div><dt>{labels.createdAt}</dt><dd>{formatDate(command.createdAt, resolvedLanguage)}</dd></div>
+      <div><dt>{labels.updatedAt}</dt><dd>{formatDate(command.updatedAt, resolvedLanguage)}</dd></div>
+    </>}
+  </dl>;
+
+  const deleteButton = command === null ? undefined : <Button icon="remove" danger onClick={() => { setConfirmingDelete(true); }}>{labels.delete}</Button>;
+  return <>
+    <EditorShell
+      ariaLabel={isCreate ? labels.add : labels.details(command.name)}
+      title={isCreate ? labels.add : <span className="mono">!{command.name}</span>}
+      {...(command === null ? {} : { identifier: command.name })}
+      meta={command === null ? undefined : <span className="command-inspector__meta">{labels.lastUsed}: {relativeTime(command.lastUsedAt, labels)}</span>}
+      sections={sections.map((section) => ({ ...section, label: section.id === "settings" ? labels.tabs.settings : labels.tabs.advanced }))}
+      {...(canManageContent ? {} : { readOnly: { reason: labels.managementLocked, content: propertyList } })}
+      dirty={dirty}
+      pending={pending}
+      saved={saved}
+      {...(error === undefined ? {} : { error })}
+      invalid={!valid}
+      invalidMessage={labels.invalid}
+      warnings={warnings}
+      warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${labels.saved} ${items.join(" ")}` : items.join(" ")}
+      {...(concurrentConflict ? { conflict: { message: labels.conflictMessage, reloadLabel: labels.reload, onReload: () => { void reloadServer(); } } } : {})}
+      onSave={() => { void handleSave(); }}
+      onDiscard={() => { reset(); setAttemptedSave(false); setSaved(false); setFieldError(null); setError(undefined); setServerWarnings([]); setTemplateIssues({ unknown: [], worstCaseExceeded: false }); }}
+      saveLabel={isCreate ? labels.create : labels.save}
+      discardLabel={labels.discard}
+      savedLabel={labels.saved}
+      pendingLabel={labels.pending}
+      issueLabels={{ error: labels.issueError, warning: labels.issueWarning }}
+      {...(isCreate ? {} : { footer: deleteButton })}
+      onClose={onClose}
+      closeLabel={labels.close}
+    />
+    {guard.saveError === undefined ? null : <p className="form-error" role="alert">{guard.saveError}</p>}
+    <ConfirmDialog
+      opened={guard.confirmOpen}
+      title={labels.draftGuardTitle}
+      description={guard.saveError === undefined ? labels.draftGuardDescription : `${labels.draftGuardDescription} ${guard.saveError}`}
+      cancelLabel={labels.continueEditing}
+      confirmLabel={labels.discardAndSwitch}
+      onCancel={guard.continueEditing}
+      onConfirm={guard.discardAndSwitch}
+      {...(valid ? { alternative: { label: labels.saveAndSwitch, onClick: () => { void guard.saveAndSwitch(); } } } : {})}
+      pending={guard.saving}
+      danger
+    />
+    <ConfirmDialog
+      opened={confirmingDelete}
+      title={labels.deleteTitle(command?.name ?? normalizedName)}
+      description={labels.deleteConfirmation(command?.name ?? normalizedName, draft.aliases)}
+      confirmLabel={labels.deleteConfirm(command?.name ?? normalizedName)}
+      cancelLabel={labels.deleteCancel}
+      onCancel={() => { setConfirmingDelete(false); }}
+      onConfirm={() => { void remove(); }}
+      danger
+      pending={deleting}
+    />
+  </>;
+};
+
+export const TextCommandsPanel = ({
+  channelId,
+  language,
+  canManage: canManageContent = true,
+  botIsModerator = null,
+  onCloseInspector,
+  initialSelection,
+}: {
+  channelId: string;
+  language?: DashboardLanguage | undefined;
+  canManage?: boolean;
+  botIsModerator?: boolean | null;
+  onCloseInspector?: () => void;
+  initialSelection?: string;
+}): ReactElement => {
   const labels = textCommandsTexts(language);
   const [commands, setCommands] = useState<TextCommand[]>([]);
   const { selectedKey: selectedName, select: selectName, rowRef, close: closeSelection } = useInspectorSelection<string>();
   const [createOpen, setCreateOpen] = useState(false);
-  const createButton = useRef<HTMLButtonElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [text, setText] = useState("");
-  const [kind, setKind] = useState<"text" | "list">("text");
-  const [cooldownSeconds, setCooldownSeconds] = useState<number | "">(5);
-  const [cooldownError, setCooldownError] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [toggleBusyName, setToggleBusyName] = useState<string | null>(null);
   const [minimumBusyName, setMinimumBusyName] = useState<string | null>(null);
+  const guardRef = useRef<((proceed: () => void) => void) | null>(null);
+  const guardSwitch = useCallback((proceed: () => void): void => {
+    const guard = guardRef.current;
+    if (guard === null) proceed();
+    else guard(proceed);
+  }, []);
+  const registerGuard = useCallback((next: ((proceed: () => void) => void) | null): void => { guardRef.current = next; }, []);
+  const initialSelectionApplied = useRef(false);
 
-  const load = useCallback(async (): Promise<void> => {
-    setLoading(true);
+  const refresh = useCallback(async (selectAfter?: string): Promise<TextCommand[]> => {
+    const data = await loadTextCommands(channelId);
+    setCommands(data);
     setError(null);
-    try {
-      const data = await loadTextCommands(channelId);
-      setCommands(data);
-      if (selectedName !== null && !data.some((command) => command.name === selectedName)) closeSelection();
-    } catch {
-      setError(labels.error);
-    } finally {
-      setLoading(false);
+    if (selectAfter !== undefined && data.some((item) => item.name === selectAfter)) {
+      setCreateOpen(false);
+      selectName(selectAfter);
     }
-  }, [channelId, closeSelection, labels.error, selectedName]);
+    return data;
+  }, [channelId, selectName]);
 
   useEffect(() => {
     let active = true;
     void loadTextCommands(channelId).then((data) => {
       if (!active) return;
-      setCommands(data);
-      setLoading(false);
+      setCommands(data); setLoading(false);
     }).catch(() => {
       if (!active) return;
-      setError(labels.error);
-      setLoading(false);
+      setError(labels.loadError); setLoading(false);
     });
     return () => { active = false; };
-  }, [channelId, labels.error]);
+  }, [channelId, labels.loadError]);
 
-  // Spotlight deep link (#164): select the command it named, once it's loaded.
   useEffect(() => {
-    if (initialSelection === undefined) return;
-    if (commands.some((command) => command.name === initialSelection)) selectName(initialSelection);
-  }, [commands, initialSelection, selectName]);
+    if (loading || initialSelectionApplied.current || initialSelection === undefined || !commands.some((command) => command.name === initialSelection)) return;
+    initialSelectionApplied.current = true;
+    guardSwitch(() => { selectName(initialSelection); });
+  }, [commands, guardSwitch, initialSelection, loading, selectName]);
 
   const selected = useMemo(() => commands.find((command) => command.name === selectedName) ?? null, [commands, selectedName]);
   const closeInspector = useCallback((): void => {
-    closeSelection();
-    onCloseInspector?.();
-  }, [closeSelection, onCloseInspector]);
-  const openCreate = (): void => {
+    guardSwitch(() => {
+      setCreateOpen(false);
+      closeSelection();
+      onCloseInspector?.();
+    });
+  }, [closeSelection, guardSwitch, onCloseInspector]);
+  const closeCreate = useCallback((): void => {
+    guardSwitch(() => { setCreateOpen(false); });
+  }, [guardSwitch]);
+  const finishCreate = useCallback((): void => { setCreateOpen(false); }, []);
+  const openCreate = (): void => guardSwitch(() => {
     closeSelection();
     setCreateOpen(true);
-    createButton.current?.focus();
-  };
-  const closeCreate = (): void => {
+  });
+  const selectCommand = (name: string): void => guardSwitch(() => {
     setCreateOpen(false);
-    createButton.current?.focus();
-  };
-  const closeFloating = useCallback((): void => {
-    if (selected !== null) { closeInspector(); return; }
-    if (createOpen) closeCreate();
-  }, [selected, closeInspector, createOpen]);
-  const normalizedName = normalizeCommandName(name);
-  const nameEmpty = normalizedName.length === 0;
-  const nameValid = validCommandName(normalizedName);
-  const responseMissing = kind === "text" && text.trim().length === 0;
-  const canCreate = nameValid && !responseMissing;
-  const createHint = nameEmpty ? labels.nameMissing : !nameValid ? labels.nameInvalid : responseMissing ? labels.responseMissing : null;
-
-  const create = async (): Promise<void> => {
-    if (!canManageContent || !canCreate || creating) return;
-    if (cooldownSeconds === "") {
-      setCooldownError(true);
-      return;
-    }
-    setCooldownError(false);
-    setError(null);
-    setCreating(true);
-    try {
-      await createTextCommand(channelId, { name: normalizedName, kind, ...(kind === "text" ? { text } : {}), cooldownSeconds });
-      setName("");
-      setText("");
-      setKind("text");
-      setCooldownSeconds(5);
-      await load();
-    } catch {
-      setError(labels.saveError);
-    } finally {
-      setCreating(false);
-    }
-  };
-
+    selectName(name);
+  });
   const toggle = async (command: TextCommand): Promise<void> => {
-    setToggleBusyName(command.name);
-    setError(null);
-    try {
-      await toggleTextCommand(channelId, command.name, !command.enabled);
-      await load();
-    } catch {
-      setError(labels.saveError);
-    } finally {
-      setToggleBusyName(null);
-    }
+    setToggleBusyName(command.name); setError(null);
+    try { await toggleTextCommand(channelId, command.name, !command.enabled); await refresh(); }
+    catch { setError(labels.saveError); }
+    finally { setToggleBusyName(null); }
   };
-
   const changeMinimum = async (command: TextCommand, minimumTier: TextCommandMinimumTier): Promise<void> => {
-    setMinimumBusyName(command.name);
-    setError(null);
-    try {
-      await setTextCommandMinimumTier(channelId, command.name, minimumTier);
-      await load();
-    } catch {
-      setError(labels.saveError);
-    } finally {
-      setMinimumBusyName(null);
-    }
+    setMinimumBusyName(command.name); setError(null);
+    try { await setTextCommandMinimumTier(channelId, command.name, minimumTier); await refresh(); }
+    catch { setError(labels.saveError); }
+    finally { setMinimumBusyName(null); }
+  };
+  const handleDeleted = async (): Promise<void> => {
+    await refresh();
+    setCreateOpen(false);
+    closeSelection();
   };
 
-  const list = (
-    <section className="command-list config-section" aria-label={labels.list}>
-      <div className="section-heading">
-        <h2>{labels.list}</h2>
-        <button ref={createButton} className="button button--quiet inspector-close" type="button" aria-label={labels.add} onClick={openCreate}>
-          <Icon name="add" size={20} className="inspector-close__icon" />
-        </button>
-      </div>
-      {loading ? <p className="loading-line">{labels.load}</p> : null}
-      {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-      {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-      {!loading && error === null && commands.length > 0 ? <div className="table-wrap"><table className="table"><thead><tr><th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.text}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th></tr></thead><tbody>{commands.map((command) => <TextCommandRow key={command.name} channelId={channelId} language={language} initial={command} selected={selectedName === command.name} onSelect={() => { setCreateOpen(false); selectName(command.name); }} rowRef={rowRef(command.name)} onChanged={load} canManageContent={canManageContent} toggleBusy={toggleBusyName === command.name} onToggle={() => toggle(command)} minimumBusy={minimumBusyName === command.name} onMinimumChange={(minimumTier) => changeMinimum(command, minimumTier)} />)}</tbody></table></div> : null}
-    </section>
-  );
+  const list = <section className="command-list config-section" aria-label={labels.list}>
+    <div className="section-heading">
+      <h2>{labels.list}</h2>
+      {canManageContent ? <Button icon="add" iconOnly ariaLabel={labels.add} onClick={openCreate} /> : null}
+    </div>
+    {loading ? <p className="loading-line">{labels.load}</p> : null}
+    {error === null ? null : <p className="form-error" role="alert">{error}</p>}
+    {!loading && error === null && commands.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
+    {!loading && error === null && commands.length > 0 ? <div className="table-wrap"><table className="table"><thead><tr>
+      <th scope="col">{labels.columns.name}</th><th scope="col">{labels.columns.response}</th><th scope="col">{labels.columns.minimumTier}</th><th scope="col">{labels.columns.active}</th>
+    </tr></thead><tbody>{commands.map((command) => <TextCommandRow
+      key={command.name}
+      initial={command}
+      language={language}
+      selected={selectedName === command.name}
+      onSelect={() => { selectCommand(command.name); }}
+      rowRef={rowRef(command.name)}
+      canManageContent={canManageContent}
+      toggleBusy={toggleBusyName === command.name}
+      onToggle={() => toggle(command)}
+      minimumBusy={minimumBusyName === command.name}
+      onMinimumChange={(tier) => changeMinimum(command, tier)}
+    />)}</tbody></table></div> : null}
+  </section>;
 
-  const inspector = selected !== null ? (
-    <TextCommandEditor key={selected.name} channelId={channelId} language={language} initial={selected} onChanged={load} canManageContent={canManageContent} onClose={closeInspector} />
-  ) : createOpen ? (
-    <SubInspector ariaLabel={labels.add} title={labels.add} className="config-section" closeLabel={dashboardCommonTexts().close} onClose={closeCreate}>
-      <form className="config-section" aria-busy={creating} onSubmit={(event) => { event.preventDefault(); void create(); }}>
-        <fieldset disabled={!canManageContent || creating}>
-        {!canManageContent ? <p className="lock-reason">{labels.managementLocked}</p> : null}
-        <label className="config-field config-field--medium">
-          {labels.name}
-          <input aria-label={labels.name} value={normalizedName} onChange={(event) => { setName(event.target.value); }} pattern="[a-z0-9][a-z0-9_-]{0,31}" disabled={!canManageContent} />
-          <span className="muted">{labels.nameHint}</span>
-        </label>
-        <label className="config-field config-field--narrow">
-          {labels.kind}
-          <select aria-label={labels.kind} value={kind} onChange={(event) => { setKind(event.target.value as "text" | "list"); }} disabled={!canManageContent}>
-            <option value="text">{labels.kindText}</option>
-            <option value="list">{labels.kindList}</option>
-          </select>
-        </label>
-        {kind === "text" ? <label className="config-field config-field--wide">
-          {labels.text}
-          <textarea aria-label={labels.text} value={text} onChange={(event) => { setText(event.target.value); }} disabled={!canManageContent} />
-        </label> : null}
-        <label className="config-field config-field--narrow">
-          {labels.cooldown}
-          <input type="number" min="0" max="86400" value={cooldownSeconds} aria-invalid={cooldownError} onChange={(event) => { setCooldownError(false); setCooldownSeconds(event.target.value === "" ? "" : Number(event.target.value)); }} />
-          {cooldownError ? <span className="form-error" role="alert">{labels.numberMissing}</span> : null}
-        </label>
-        <div className="form-actions form-actions--create"><button className={canCreate ? "button button--primary" : "button"} type="submit" disabled={!canCreate}>{labels.add}</button>{createHint === null ? null : <span className="form-hint">{createHint}</span>}</div>
-        </fieldset>
-      </form>
-    </SubInspector>
-  ) : null;
+  const inspector = selected !== null ? <TextCommandEditor
+    key={selected.name}
+    channelId={channelId}
+    language={language}
+    initial={draftFromCommand(selected)}
+    command={selected}
+    commands={commands}
+    canManageContent={canManageContent}
+    botIsModerator={botIsModerator}
+    onClose={closeInspector}
+    onGuardChange={registerGuard}
+    onRefresh={refresh}
+    onDeleted={handleDeleted}
+  /> : createOpen ? <TextCommandEditor
+    key="create"
+    channelId={channelId}
+    language={language}
+    initial={newCommandDraft()}
+    command={null}
+    commands={commands}
+    canManageContent={canManageContent}
+    botIsModerator={botIsModerator}
+    onClose={closeCreate}
+    onCreateSuccess={finishCreate}
+    onGuardChange={registerGuard}
+    onRefresh={refresh}
+    onDeleted={handleDeleted}
+  /> : null;
 
-  return (
-    <section className="module-stack command-panel" aria-label={labels.title}>
-      <ListDetail list={list} inspector={inspector} onCloseInspector={closeFloating} />
-    </section>
-  );
+  return <section className="module-stack command-panel" aria-label={labels.title}>
+    <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />
+  </section>;
 };
 
 export default TextCommandsPanel;

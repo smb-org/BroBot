@@ -1,16 +1,18 @@
 import type { ReactElement } from "react";
 
 import { worstCaseTemplateLength } from "../../template";
+import type { PanelTemplateWarning } from "../../panel-contract";
 import type { IconName } from "./Icon";
 import { ChoiceCards } from "./ChoiceCards";
 import { Field } from "./Field";
 import { NumberField } from "./NumberField";
 import { SegmentedControl } from "./SegmentedControl";
 import { Switch } from "./Switch";
+import { TemplateText } from "./TemplateText";
 import { TextArea, type TemplateVariableOption, type TextAreaMessages } from "./TextArea";
 
 export type SettingsFieldSpec<Settings> =
-  | { kind: "number"; key: keyof Settings & string; unit: string; min: number; max: number; step: number }
+  | { kind: "number"; key: keyof Settings & string; unit?: string; min: number; max: number; step: number }
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string }[] }
@@ -24,6 +26,8 @@ export interface SettingsEditorSpec<Settings> {
 export interface SettingsFieldText {
   label: string;
   hint: string;
+  unit?: string;
+  requiredError?: string;
   description?: string;
   disabledReason?: string;
   increaseLabel?: string;
@@ -32,11 +36,38 @@ export interface SettingsFieldText {
   countLabel?: (count: number, maxLength: number) => string;
   previewLabel?: string;
   previewSpeaker?: string;
+  variables?: readonly TemplateVariableOption[];
 }
 
 export interface SettingsEditorTexts {
   sections: Readonly<Record<string, string>>;
   fields: Readonly<Record<string, SettingsFieldText>>;
+}
+
+export interface SettingsEditorCatalog extends SettingsEditorTexts {
+  title: string;
+  ariaLabel: string;
+  readOnlyReason: string;
+  saveLabel: string;
+  discardLabel: string;
+  savedLabel: string;
+  pendingLabel: string;
+  invalidMessage: string;
+  numberMissing: string;
+  issueLabels: { error: string; warning: string };
+  loadError: string;
+  saveError: string;
+  conflictMessage: string;
+  reloadLabel: string;
+  enabledLabel: string;
+  disabledLabel: string;
+  templateMessages: TextAreaMessages;
+  warningLabel: (warning: PanelTemplateWarning) => string;
+}
+
+export interface SettingsEditorDefinition<Settings> {
+  spec: SettingsEditorSpec<Settings>;
+  locales: Readonly<Record<"de" | "en", SettingsEditorCatalog>>;
 }
 
 export interface SettingsEditorProps<Settings extends object> {
@@ -48,8 +79,17 @@ export interface SettingsEditorProps<Settings extends object> {
   variables?: Readonly<Partial<Record<keyof Settings & string, readonly TemplateVariableOption[]>>>;
   templateMetadata?: Readonly<Partial<Record<keyof Settings & string, readonly (TemplateVariableOption & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   templateMessages: TextAreaMessages;
+  readOnly?: boolean;
+  disabled?: boolean;
+  enabledLabel?: string;
+  disabledLabel?: string;
+  fieldErrors?: Readonly<Record<string, string>>;
+  onIssuesChange?: (key: keyof Settings & string, issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   idPrefix?: string;
 }
+
+const flattenFields = <Settings,>(fields: readonly SettingsFieldSpec<Settings>[]): SettingsFieldSpec<Settings>[] =>
+  fields.flatMap((field) => [field, ...(field.kind === "switchCard" && field.children !== undefined ? flattenFields(field.children) : [])]);
 
 export function SettingsEditor<Settings extends object>({
   spec,
@@ -60,6 +100,12 @@ export function SettingsEditor<Settings extends object>({
   variables,
   templateMetadata,
   templateMessages,
+  readOnly = false,
+  disabled = false,
+  enabledLabel,
+  disabledLabel,
+  fieldErrors = {},
+  onIssuesChange,
   idPrefix = "settings",
 }: SettingsEditorProps<Settings>): ReactElement {
   const section = spec.sections.find((candidate) => candidate.id === sectionId);
@@ -69,6 +115,8 @@ export function SettingsEditor<Settings extends object>({
     if (copy === undefined) return null;
     const id = `${idPrefix}-${field.key}`;
     const fieldValue = settings[field.key];
+    if (readOnly) return renderReadOnlyField(field, copy, fieldValue, enabledLabel, disabledLabel);
+    const error = fieldErrors[field.key];
     if (field.kind === "number") {
       return (
         <NumberField
@@ -76,13 +124,15 @@ export function SettingsEditor<Settings extends object>({
           id={id}
           label={copy.label}
           hint={copy.hint}
-          unit={field.unit}
+          {...((copy.unit ?? field.unit) === undefined ? {} : { unit: copy.unit ?? field.unit })}
+          {...(error === undefined ? {} : { error })}
           min={field.min}
           max={field.max}
           step={field.step}
           increaseLabel={copy.increaseLabel ?? copy.label}
           decreaseLabel={copy.decreaseLabel ?? copy.label}
           value={typeof fieldValue === "number" ? fieldValue : fieldValue === "" ? "" : ""}
+          disabled={disabled}
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
         />
       );
@@ -95,7 +145,9 @@ export function SettingsEditor<Settings extends object>({
           id={id}
           label={copy.label}
           hint={copy.hint}
+          {...(error === undefined ? {} : { error })}
           value={typeof fieldValue === "string" ? fieldValue : ""}
+          disabled={disabled}
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
           {...(field.prefix === undefined ? {} : { prefix: field.prefix })}
           {...(maxLength === undefined ? {} : { maxLength, countLabel: copy.countLabel ?? ((count, maximum) => `${String(count)} / ${String(maximum)}`) })}
@@ -112,12 +164,16 @@ export function SettingsEditor<Settings extends object>({
           name={field.key}
           label={copy.label}
           hint={copy.hint}
+          {...(error === undefined ? {} : { error })}
           value={typeof fieldValue === "string" ? fieldValue : ""}
+          disabled={disabled}
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
           maxLength={500}
           {...(metadata === undefined ? {} : { worstCaseLength: worstCaseTemplateLength(String(fieldValue ?? ""), metadata) })}
           {...(fieldVariables === undefined ? {} : { variables: fieldVariables })}
           preview={field.preview}
+          required
+          onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
           {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
           {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
           {...(field.minRows === undefined ? {} : { minRows: field.minRows })}
@@ -136,6 +192,7 @@ export function SettingsEditor<Settings extends object>({
             value={String(fieldValue ?? "")}
             onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
             options={options}
+            disabled={disabled}
           />
         );
       }
@@ -153,25 +210,38 @@ export function SettingsEditor<Settings extends object>({
           value={String(fieldValue ?? "")}
           onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
           options={options}
+          disabled={disabled}
         />
       );
     }
     const children = field.children?.map(renderField) ?? [];
+    const lockedReason = copy.disabledReason ?? field.children?.map((child) => texts.fields[child.key]?.disabledReason).find((reason) => reason !== undefined);
     return (
       <Switch
         key={field.key}
         layout="card"
         label={copy.label}
-        hint={copy.hint}
-        {...(copy.description === undefined ? {} : { description: copy.description })}
+        description={copy.description ?? copy.hint}
         checked={fieldValue === true}
         onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-        {...(copy.disabledReason === undefined ? {} : { lockedReason: copy.disabledReason })}
+        {...(lockedReason === undefined ? {} : { lockedReason })}
       >
         {field.children === undefined ? undefined : children as ReactElement[]}
       </Switch>
     );
   };
+
+  if (readOnly) {
+    return (
+      <dl className="properties ui-settings-editor__properties">
+        {flattenFields(spec.sections.flatMap((candidate) => candidate.fields)).map((field) => {
+          const copy = texts.fields[field.key];
+          if (copy === undefined) return null;
+          return <div key={field.key}><dt>{copy.label}</dt><dd>{renderReadOnlyField(field, copy, settings[field.key], enabledLabel, disabledLabel)}</dd></div>;
+        })}
+      </dl>
+    );
+  }
 
   return (
     <div className="ui-settings-editor" data-section={sectionId} aria-label={section === undefined ? undefined : texts.sections[section.id]}>
@@ -179,3 +249,20 @@ export function SettingsEditor<Settings extends object>({
     </div>
   );
 }
+
+const renderReadOnlyField = <Settings extends object>(
+  field: SettingsFieldSpec<Settings>,
+  copy: SettingsFieldText,
+  value: Settings[keyof Settings],
+  enabledLabel: string | undefined,
+  disabledLabel: string | undefined,
+): ReactElement => {
+  if (field.kind === "template") {
+    const vars = copy.variables ?? [];
+    return <TemplateText value={typeof value === "string" ? value : ""} variables={vars} />;
+  }
+  if (field.kind === "switchCard") return <>{value === true ? enabledLabel : disabledLabel}</>;
+  if (field.kind === "number") return <>{String(value)}{copy.unit === undefined ? "" : ` ${copy.unit}`}</>;
+  if (field.kind === "text") return <>{field.prefix ?? ""}{String(value)}</>;
+  return <>{copy.options?.[String(value)]?.label ?? String(value)}</>;
+};

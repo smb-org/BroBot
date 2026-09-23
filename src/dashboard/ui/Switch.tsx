@@ -25,10 +25,11 @@ export function Switch({ label, ariaLabel, checked, onChange, disabled, pending,
   const id = useId();
   const reasonId = lockedReason === undefined ? undefined : `switch-reason-${id}`;
   const hintId = hint === undefined ? undefined : `switch-hint-${id}`;
+  const descriptionId = description === undefined ? undefined : `switch-description-${id}`;
   const labelId = label === undefined ? undefined : `switch-label-${id}`;
   const isDisabled = disabled === true || pending === true || (layout !== "card" && lockedReason !== undefined);
   const inputClassName = `ui-switch__input${layout === "inline" ? " ui-switch-field__input" : layout === "card" ? " ui-switch-card__input" : ""}`;
-  const describedBy = [hintId, layout === "card" && checked ? undefined : reasonId].filter((part): part is string => part !== undefined).join(" ") || undefined;
+  const describedBy = [hintId, descriptionId, layout === "card" && checked ? undefined : reasonId].filter((part): part is string => part !== undefined).join(" ") || undefined;
 
   const input = (
     <input
@@ -74,7 +75,7 @@ export function Switch({ label, ariaLabel, checked, onChange, disabled, pending,
           {input}
           <label className="ui-switch-card__label" htmlFor={id}>
             <span className="ui-switch-card__title">{label}</span>
-            {description === undefined ? null : <span className="ui-switch-card__description">{description}</span>}
+            {description === undefined ? null : <span className="ui-switch-card__description" id={descriptionId}>{description}</span>}
           </label>
           {visual}
         </div>

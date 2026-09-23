@@ -85,6 +85,7 @@ const panelRestrictedImportPatterns = [
 
 export default defineConfig(
   globalIgnores([
+    ".claude/**",
     ".wrangler/**",
     "dist/**",
     "coverage/**",

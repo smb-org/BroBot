@@ -45,7 +45,7 @@ export const cooldownRemaining = (lastUsedAt: string | null, now: string, cooldo
  * contain multiple badges: moderator and broadcaster also satisfy
  * "subscriber" and "VIP", but a VIP does not satisfy "subscriber".
  */
-const statusForTier: Record<TextCommandMinimumTier, readonly ModuleChatStatus[]> = {
+export const statusForTier: Record<TextCommandMinimumTier, readonly ModuleChatStatus[]> = {
   everyone: ["viewer", "subscriber", "vip", "moderator", "broadcaster"],
   subscriber: ["subscriber", "moderator", "broadcaster"],
   vip: ["vip", "moderator", "broadcaster"],

@@ -1,15 +1,16 @@
-import { lazy, Suspense, useState, type ComponentType, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { ModulePanelProperties } from "../modules/contract";
 import { canManage, type ChannelRole } from "../contracts/values";
-import type { PanelActiveModule, PanelModuleState } from "../panel-contract";
-import { PanelApiError, setChannelModuleEnabled } from "./api";
+import type { PanelActiveModule, PanelModuleState, PanelTemplateWarning } from "../panel-contract";
+import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, setChannelModuleEnabled } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
-import { Icon } from "./ui/Icon";
-import { ListRow, Switch } from "./ui";
+import { EditorShell, Icon, ListRow, SettingsEditor, Switch, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
+import { worstCaseTemplateLength } from "../template";
+import type { TemplateVariable } from "../template";
 
 const lazyPanels = new Map<string, LazyExoticComponent<ComponentType<ModulePanelProperties>>>();
 
@@ -179,19 +180,199 @@ interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
   canManage?: boolean;
+  botIsModerator?: boolean | null;
   /** Deep-link target from Spotlight (#164); passed through to the panel unchanged. */
   initialSelection?: string;
 }
 
-export const ModulePanelMount = ({ channelId, activeModules, canManage = true, initialSelection }: ModulePanelMountProperties): ReactElement => {
-  const registeredPanels = activeModules.flatMap((activeModule) => {
+const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }: {
+  module: (typeof MODULES)[number];
+  channelId: string;
+  canManageContent: boolean;
+  language: DashboardLanguage;
+}): ReactElement | null => {
+  const [loaded, setLoaded] = useState<{ definition: SettingsEditorDefinition<Record<string, unknown>>; settings: Record<string, unknown> } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    let active = true;
+    if (module.settingsEditor === undefined) return;
+    void Promise.all([
+      module.settingsEditor(),
+      getChannelModuleSettings(channelId, module.id),
+    ]).then(([definition, response]) => {
+      if (!active) return;
+      setLoaded({ definition: definition.default, settings: response.settings });
+      setLoadError(null);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setLoadError(error instanceof PanelApiError ? apiErrorText(error.code, dashboardTexts().module.settingsLoadError) : dashboardTexts().module.settingsLoadError);
+    });
+    return () => { active = false; };
+  }, [channelId, generation, module]);
+
+  if (module.settingsEditor === undefined) return null;
+  if (loaded === null) return <p className="loading-line" role={loadError === null ? undefined : "alert"}>{loadError ?? dashboardTexts().module.loadingViews}</p>;
+  const copy = loaded.definition.locales[language];
+  return <LoadedModuleSettingsEditor
+    key={`${module.id}-${String(generation)}`}
+    module={module}
+    channelId={channelId}
+    canManageContent={canManageContent}
+    definition={loaded.definition}
+    copy={copy}
+    initial={loaded.settings}
+    onReload={() => { setLoaded(null); setLoadError(null); setGeneration((current) => current + 1); }}
+  />;
+};
+
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, initial, onReload }: {
+  module: (typeof MODULES)[number];
+  channelId: string;
+  canManageContent: boolean;
+  definition: SettingsEditorDefinition<Record<string, unknown>>;
+  copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
+  initial: Record<string, unknown>;
+  onReload: () => void;
+}): ReactElement => {
+  const [value, setValue] = useState(initial);
+  const [dirty, setDirty] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const [conflict, setConflict] = useState(false);
+  const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
+  const [localIssues, setLocalIssues] = useState<Readonly<Record<string, { unknown: readonly string[]; worstCaseExceeded: boolean }>>>({});
+  const reportTemplateIssues = useCallback((key: string, issues: { unknown: readonly string[]; worstCaseExceeded: boolean }): void => {
+    setLocalIssues((current) => {
+      const previous = current[key];
+      if (previous !== undefined && previous.worstCaseExceeded === issues.worstCaseExceeded && previous.unknown.length === issues.unknown.length && previous.unknown.every((name, index) => name === issues.unknown[index])) return current;
+      return { ...current, [key]: issues };
+    });
+  }, []);
+  const spec = definition.spec;
+  const templateFields = (module.templateFields ?? {}) as Readonly<Record<string, readonly TemplateVariable[] | undefined>>;
+  const templateMetadata = Object.fromEntries(Object.entries(templateFields).map(([key, variables]) => [
+    key,
+    variables?.map((variable) => ({
+      ...variable,
+      description: copy.fields[key]?.variables?.find((option) => option.name === variable.name)?.description ?? "",
+    })),
+  ])) as Readonly<Partial<Record<string, readonly (TemplateVariableOption & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
+  const settingsEditor = (sectionId: string, fieldErrors: Readonly<Record<string, string>>): ReactElement => (
+    <SettingsEditor
+      spec={spec}
+      sectionId={sectionId}
+      settings={value}
+      onChange={(key, next) => { setValue((current) => ({ ...current, [key]: next })); setDirty(true); setSaved(false); setConflict(false); setError(undefined); }}
+      texts={copy}
+      templateMetadata={templateMetadata}
+      templateMessages={copy.templateMessages}
+      fieldErrors={fieldErrors}
+      disabled={pending}
+      enabledLabel={copy.enabledLabel}
+      disabledLabel={copy.disabledLabel}
+      onIssuesChange={reportTemplateIssues}
+    />
+  );
+  const fieldErrors: Record<string, string> = {};
+  const collectErrors = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
+    for (const field of fields) {
+      const current = value[field.key];
+      if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
+        fieldErrors[field.key] = typeof current !== "number" ? copy.numberMissing : copy.invalidMessage;
+      } else if ((field.kind === "text" || field.kind === "template") && (typeof current !== "string" || current.trim().length === 0)) {
+        fieldErrors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
+      } else if (field.kind === "text" && field.maxLength !== undefined && typeof current === "string" && current.length > field.maxLength) {
+        fieldErrors[field.key] = copy.invalidMessage;
+      } else if (field.kind === "template" && typeof current === "string" && current.length > 500) {
+        fieldErrors[field.key] = copy.invalidMessage;
+      }
+      if (field.kind === "switchCard" && field.children !== undefined) collectErrors(field.children);
+    }
+  };
+  collectErrors(spec.sections.flatMap((section) => section.fields));
+  const invalid = Object.keys(fieldErrors).length > 0;
+  const warnings = [
+    ...serverWarnings.map(copy.warningLabel),
+    ...Object.entries(localIssues).flatMap(([field, issue]) => [
+      ...(issue.unknown.length === 0 ? [] : [copy.warningLabel({ field, code: "unknown_template_variables", unknownVariables: issue.unknown })]),
+      ...(issue.worstCaseExceeded ? [copy.warningLabel({
+        field,
+        code: "template_worst_case_too_long",
+        worstCaseLength: worstCaseTemplateLength(typeof value[field] === "string" ? value[field] : "", templateFields[field] ?? []),
+      })] : []),
+    ]),
+  ];
+  const sections: EditorSection[] = spec.sections.map((section) => {
+    const sectionKeys = new Set<string>();
+    const visit = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
+      for (const field of fields) { sectionKeys.add(field.key); if (field.kind === "switchCard" && field.children !== undefined) visit(field.children); }
+    };
+    visit(section.fields);
+    const hasError = [...sectionKeys].some((key) => fieldErrors[key] !== undefined);
+    const hasWarning = [...sectionKeys].some((key) => {
+      const issues = localIssues[key];
+      return (issues !== undefined && issues.unknown.length > 0) || serverWarnings.some((warning) => warning.field === key);
+    });
+    return {
+      id: section.id,
+      label: copy.sections[section.id] ?? section.id,
+      icon: section.icon,
+      content: settingsEditor(section.id, fieldErrors),
+      ...(hasError ? { issue: "error" as const } : hasWarning ? { issue: "warning" as const } : {}),
+    };
+  });
+  const save = async (): Promise<void> => {
+    if (invalid || pending || conflict) return;
+    setPending(true); setError(undefined); setSaved(false);
+    try {
+      const response = await saveChannelModuleSettings(channelId, module.id, value);
+      setValue(response.settings);
+      setDirty(false);
+      setSaved(true);
+      setServerWarnings(response.warnings);
+    } catch (caught) {
+      if (caught instanceof PanelApiError && caught.status === 409 && caught.code === "module_settings_changed_concurrently") setConflict(true);
+      else setError(caught instanceof PanelApiError ? apiErrorText(caught.code, copy.saveError) : copy.saveError);
+    } finally { setPending(false); }
+  };
+  const discard = (): void => { setValue(initial); setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({}); };
+  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={value} onChange={() => undefined} texts={copy} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
+  return <EditorShell
+    ariaLabel={copy.ariaLabel}
+    title={copy.title}
+    sections={sections}
+    {...(readOnly === undefined ? {} : { readOnly })}
+    dirty={dirty}
+    pending={pending}
+    saved={saved}
+    {...(error === undefined ? {} : { error })}
+    invalid={invalid}
+    invalidMessage={copy.invalidMessage}
+    warnings={warnings}
+    warningStatusLabel={(items, justSaved) => justSaved ? `✓ ${copy.savedLabel} ${items.join(" ")}` : items.join(" ")}
+    {...(conflict ? { conflict: { message: copy.conflictMessage, reloadLabel: copy.reloadLabel, onReload } } : {})}
+    onSave={() => { void save(); }}
+    onDiscard={discard}
+    saveLabel={copy.saveLabel}
+    discardLabel={copy.discardLabel}
+    savedLabel={copy.savedLabel}
+    pendingLabel={copy.pendingLabel}
+    issueLabels={copy.issueLabels}
+  />;
+};
+
+export const ModulePanelMount = ({ channelId, activeModules, canManage = true, botIsModerator = null, initialSelection }: ModulePanelMountProperties): ReactElement => {
+  const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
     const panel = getLazyPanel(module);
-    return panel === null ? [] : [{ id: activeModule.moduleId, Panel: panel }];
+    if (panel === null && module.settingsEditor === undefined) return [];
+    return [{ id: activeModule.moduleId, Panel: panel, module }];
   });
 
-  if (registeredPanels.length === 0) {
+  if (registeredViews.length === 0) {
     const texts = dashboardTexts();
     return (
       <section className="module-empty" aria-label={texts.module.module}>
@@ -203,7 +384,10 @@ export const ModulePanelMount = ({ channelId, activeModules, canManage = true, i
   return (
     <section className="module-stack" aria-label={dashboardTexts().module.views}>
       <Suspense fallback={<p className="muted">{dashboardTexts().module.loadingViews}</p>}>
-        {registeredPanels.map(({ id, Panel }) => <Panel key={id} channelId={channelId} language={dashboardLanguage()} canManage={canManage} {...(initialSelection === undefined ? {} : { initialSelection })} />)}
+        {registeredViews.map(({ id, Panel, module }) => <div className="module-view" key={id}>
+          {Panel === null ? null : <Panel channelId={channelId} language={dashboardLanguage()} canManage={canManage} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />}
+          <ModuleSettingsEditor module={module} channelId={channelId} canManageContent={canManage} language={dashboardLanguage()} />
+        </div>)}
       </Suspense>
     </section>
   );
@@ -387,13 +571,14 @@ interface ModulePageProperties {
   loading?: boolean;
   error?: string | null;
   busy?: boolean;
+  botIsModerator?: boolean | null;
   onNavigate: (route: DashboardRoute) => void;
   onToggle: () => void;
   /** Deep-link target from Spotlight (#164), e.g. a text command name. */
   initialSelection?: string;
 }
 
-export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, loading = false, error = null, busy = false, onNavigate, onToggle, initialSelection }: ModulePageProperties): ReactElement => {
+export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, loading = false, error = null, busy = false, botIsModerator = null, onNavigate, onToggle, initialSelection }: ModulePageProperties): ReactElement => {
   const texts = dashboardTexts();
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
@@ -409,7 +594,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const requiredScopes = moduleState?.requiredBroadcasterScopes ?? registered?.broadcasterScopes ?? [];
   const missingScopeSet = new Set(missingScopes);
   const effectiveEnabled = enabled && missingScopes.length === 0;
-  const viewLoading = loading || moduleState === undefined || (registered?.panel !== undefined && enabled && activeModule === undefined);
+  const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
 
   const stateMessage = registered === undefined
@@ -464,9 +649,9 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         {viewLoading ? <p className="muted">{texts.module.load}</p> : null}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         {stateMessage === null ? (
-          registered?.panel === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
+          registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} {...(initialSelection === undefined ? {} : { initialSelection })} />
+              <ModulePanelMount channelId={channelId} activeModules={[activeModule]} canManage={ownRole !== "operator"} botIsModerator={botIsModerator} {...(initialSelection === undefined ? {} : { initialSelection })} />
             </section>
           )
         ) : (

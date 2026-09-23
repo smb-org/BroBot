@@ -3,6 +3,7 @@ import type { ComponentType } from "react";
 import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole } from "../contracts/values";
 import type { TemplateFields } from "../template";
+import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
 export { truncateTo200Chars } from "../text";
@@ -161,6 +162,8 @@ export interface ModulePanelProperties {
   language?: ModuleLanguage;
   /** May the view execute management controls? */
   canManage?: boolean;
+  /** Last known status of the bot's moderator role in this channel. */
+  botIsModerator?: boolean | null;
   /** Called by the host when an inspector is closed. */
   onCloseInspector?: () => void;
   /** Deep-link target set by the host (Spotlight, #164) -- a module reads
@@ -310,4 +313,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
    * direct import.
    */
   panel?: () => Promise<{ default: ComponentType<ModulePanelProperties> }>;
+  /** Lazily loaded editor declaration for this module's settings. */
+  settingsEditor?: () => Promise<{ default: SettingsEditorDefinition<z.output<SettingsSchema>> }>;
 };

@@ -22,6 +22,7 @@ export interface ConfirmDialogProps {
   /** "Deleting actions carry it permanently" -- deleting actions render
    *  the confirm button as `danger` instead of `filled`. */
   danger?: boolean;
+  pending?: boolean;
 }
 
 export function ConfirmDialog({
@@ -34,18 +35,19 @@ export function ConfirmDialog({
   onCancel,
   alternative,
   danger = false,
+  pending = false,
 }: ConfirmDialogProps) {
   return (
-    <Modal opened={opened} onClose={onCancel} title={title} size={420} centered closeOnEscape trapFocus returnFocus>
+    <Modal opened={opened} onClose={pending ? () => undefined : onCancel} title={title} size={420} centered closeOnEscape={!pending} trapFocus returnFocus>
       <Text size="sm" c="dimmed">
         {description}
       </Text>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
-        <Button variant="subtle" onClick={onCancel} autoFocus>
+        <Button variant="subtle" onClick={onCancel} autoFocus disabled={pending}>
           {cancelLabel}
         </Button>
-        {alternative === undefined ? null : <Button variant="neutral" onClick={alternative.onClick}>{alternative.label}</Button>}
-        <Button variant="primary" danger={danger} onClick={onConfirm}>
+        {alternative === undefined ? null : <Button variant="neutral" onClick={alternative.onClick} disabled={pending}>{alternative.label}</Button>}
+        <Button variant="primary" danger={danger} onClick={onConfirm} disabled={pending}>
           {confirmLabel}
         </Button>
       </div>

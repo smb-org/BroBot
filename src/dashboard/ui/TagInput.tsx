@@ -15,6 +15,7 @@ interface TagInputBaseProps {
   hint: string;
   error?: string;
   warning?: string;
+  invalidValues?: readonly string[];
   value: readonly string[];
   onChange: (value: string[]) => void;
   prefix?: string;
@@ -37,7 +38,7 @@ const normalizeEntry = (entry: string, prefix: string | undefined, normalize: ((
   return next;
 };
 
-export function TagInput({ label, hint, error, warning, value, onChange, prefix, normalize, validate, maxTags, removeLabel, disabled = false, messages, listLabel }: TagInputProps) {
+export function TagInput({ label, hint, error, warning, invalidValues = [], value, onChange, prefix, normalize, validate, maxTags, removeLabel, disabled = false, messages, listLabel }: TagInputProps) {
   const id = useId();
   const disabledReason = useDisabledFieldReason();
   const [searchValue, setSearchValue] = useState("");
@@ -132,7 +133,7 @@ export function TagInput({ label, hint, error, warning, value, onChange, prefix,
         leftSection={prefix === undefined ? undefined : <span className="ui-field__prefix" aria-hidden="true">{prefix}</span>}
         leftSectionPointerEvents="none"
         renderPill={({ value: tag, onRemove }) => tag === undefined ? null : (
-          <Pill className="ui-tag-input__pill" size="sm" withRemoveButton={false} key={tag}>
+          <Pill className="ui-tag-input__pill" size="sm" withRemoveButton={false} key={tag} aria-invalid={invalidValues.includes(tag)} data-invalid={invalidValues.includes(tag) || undefined}>
             <span className="ui-tag-input__pill-label">{prefixed(tag)}</span>
             <button className="ui-tag-input__remove" type="button" aria-label={removeLabel(prefixed(tag))} disabled={disabled} onClick={onRemove}>
               <Icon name="close" size={16} />

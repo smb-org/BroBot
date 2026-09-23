@@ -20,6 +20,6 @@ export const raidModule: BotModule<typeof raidSettingsSchema> = {
     textShort: DEFAULT_TEXT_SHORT,
   },
   eventSubTypes: ["channel.raid"],
-  panel: () => import("./panel"),
+  settingsEditor: () => import("./panel/settings-editor"),
   handleEvent: (event) => processRaid(event),
 };

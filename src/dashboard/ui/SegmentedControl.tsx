@@ -2,6 +2,7 @@ import { SegmentedControl as MantineSegmentedControl } from "@mantine/core";
 import { useId, type KeyboardEvent } from "react";
 
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
+import { Icon } from "./Icon";
 
 export interface SegmentedControlOption {
   value: string;
@@ -16,13 +17,16 @@ export interface SegmentedControlProps {
   options: readonly SegmentedControlOption[];
   size?: "form" | "compact";
   disabled?: boolean;
+  warning?: string;
 }
 
-export function SegmentedControl({ label, hint, value, onChange, options, size = "form", disabled = false }: SegmentedControlProps) {
+export function SegmentedControl({ label, hint, value, onChange, options, size = "form", disabled = false, warning }: SegmentedControlProps) {
   const id = useId();
   const disabledReason = useDisabledFieldReason();
   const labelId = `segment-label-${id}`;
-  const hintId = hint === undefined && disabledReason === null ? undefined : `segment-hint-${id}`;
+  const hintId = hint === undefined && disabledReason === null && warning === undefined ? undefined : `segment-hint-${id}`;
+  const warningId = warning === undefined ? undefined : `segment-warning-${id}`;
+  const describedBy = [hintId, warningId].filter((part): part is string => part !== undefined).join(" ") || undefined;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (disabled || options.length < 2) return;
@@ -50,10 +54,11 @@ export function SegmentedControl({ label, hint, value, onChange, options, size =
         disabled={disabled}
         transitionDuration={0}
         aria-labelledby={labelId}
-        aria-describedby={hintId}
+        aria-describedby={describedBy}
         onKeyDown={handleKeyDown}
       />
       {hintId === undefined ? null : <span className="ui-segmented-control__hint" id={hintId}>{describedHelper(hint, disabledReason, `segment-${id}`)}</span>}
+      {warning === undefined ? null : <span className="ui-segmented-control__warning" id={warningId}><Icon name="warning" size={16} />{warning}</span>}
     </div>
   );
 }

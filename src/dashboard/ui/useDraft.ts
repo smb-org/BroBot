@@ -6,6 +6,8 @@ export interface UseDraftResult<T> {
   /** Structural difference from the value this draft started from. */
   dirty: boolean;
   reset: () => void;
+  /** Accepts a successful server value as the new clean baseline. */
+  accept: (value: T) => void;
 }
 
 /**
@@ -17,8 +19,10 @@ export interface UseDraftResult<T> {
  * does), not by teaching this hook to track identity itself.
  */
 export const useDraft = <T,>(initial: T): UseDraftResult<T> => {
+  const [baseline, setBaseline] = useState(initial);
   const [value, setValue] = useState(initial);
-  const dirty = JSON.stringify(value) !== JSON.stringify(initial);
-  const reset = (): void => { setValue(initial); };
-  return { value, setValue, dirty, reset };
+  const dirty = JSON.stringify(value) !== JSON.stringify(baseline);
+  const reset = (): void => { setValue(baseline); };
+  const accept = (next: T): void => { setBaseline(next); setValue(next); };
+  return { value, setValue, dirty, reset, accept };
 };

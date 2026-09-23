@@ -1,4 +1,4 @@
-import type { TextCommand, TextCommandMinimumTier } from "../contracts";
+import type { TextCommand, TextCommandKind, TextCommandMinimumTier, TextCommandResponseType, TextCommandStreamCondition } from "../contracts";
 import { PanelApiError } from "../../../contracts/panel-error";
 import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
 
@@ -25,7 +25,7 @@ export const loadTextCommands = async (channelId: string): Promise<TextCommand[]
 const mutation = async (
   channelId: string,
   method: "POST" | "PATCH" | "DELETE",
-  body?: Record<string, string | number | boolean>,
+  body?: unknown,
   name?: string,
 ): Promise<readonly PanelTemplateWarning[]> => {
   const csrfResponse = await fetch("/api/csrf");
@@ -47,17 +47,33 @@ const mutation = async (
 
 export const createTextCommand = async (
   channelId: string,
-  command: { name: string; kind: "text" | "list"; text?: string; cooldownSeconds: number },
+  command: Pick<TextCommand, "name" | "kind" | "text" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "responseType">,
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "POST", command);
 
 export const saveTextCommand = async (
   channelId: string,
-  command: { oldName: string; name: string; kind: "text" | "list"; text?: string; cooldownSeconds: number },
+  command: {
+    oldName: string;
+    name: string;
+    kind: TextCommandKind;
+    text: string;
+    minimumTier: TextCommandMinimumTier;
+    cooldownSeconds: number;
+    aliases: readonly string[];
+    userCooldownSeconds: number;
+    streamCondition: TextCommandStreamCondition;
+    responseType: TextCommandResponseType;
+  },
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", {
   name: command.name,
   kind: command.kind,
-  ...(command.text === undefined ? {} : { text: command.text }),
+  text: command.text,
+  minimumTier: command.minimumTier,
   cooldownSeconds: command.cooldownSeconds,
+  aliases: command.aliases,
+  userCooldownSeconds: command.userCooldownSeconds,
+  streamCondition: command.streamCondition,
+  responseType: command.responseType,
 }, command.oldName);
 
 export const toggleTextCommand = async (

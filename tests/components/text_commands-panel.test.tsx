@@ -1,661 +1,458 @@
-import type { ReactElement } from "react";
-
-import { cleanup, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
+import { TEXT_COMMAND_MINIMUM_TIERS, type TextCommand } from "../../src/modules/text_commands/contracts";
+import { statusForTier, renderCommandText } from "../../src/modules/text_commands/domain";
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
-
-const render = (element: ReactElement): ReturnType<typeof renderComponent> => renderComponent(<UiProvider>{element}</UiProvider>);
+import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
 
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
   status,
   headers: { "Content-Type": "application/json" },
 });
+const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
-describe("Text commands panel view", () => {
+const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
+  channelId: "kanal-a",
+  name: "hallo",
+  text: "Hallo {user} aus {channel}",
+  kind: "text",
+  enabled: true,
+  minimumTier: "everyone",
+  cooldownSeconds: 5,
+  aliases: ["hey"],
+  userCooldownSeconds: 15,
+  streamCondition: "online",
+  responseType: "reply",
+  lastUsedAt: null,
+  createdAt: "2026-09-19T12:00:00.000Z",
+  updatedAt: "2026-09-19T12:00:00.000Z",
+  ...overrides,
+});
+
+interface FetchOptions {
+  commands?: () => TextCommand[];
+  onMutation?: (method: string, path: string, body: unknown) => Response | Promise<Response>;
+}
+
+const panelFetch = ({ commands = () => [makeCommand()], onMutation = () => jsonResponse({ warnings: [] }) }: FetchOptions = {}): ReturnType<typeof vi.fn<typeof fetch>> =>
+  vi.fn<typeof fetch>((input, init) => {
+    const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+    const method = init?.method ?? "GET";
+    if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+    if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands() }));
+    if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
+      return Promise.resolve(onMutation(method, url.pathname, body));
+    }
+    return Promise.resolve(jsonResponse({}, 404));
+  });
+
+const renderPanel = (fetcher: typeof fetch, props: { canManage?: boolean; botIsModerator?: boolean | null } = {}): ReturnType<typeof render> => {
+  vi.stubGlobal("fetch", fetcher);
+  return render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" {...props} /></UiProvider>);
+};
+
+const selectCommand = async (name = "hallo"): Promise<HTMLElement> => {
+  const heading = await screen.findByText(`!${name}`);
+  const row = heading.closest("tr");
+  if (!(row instanceof HTMLElement)) throw new Error("Command row is missing");
+  fireEvent.click(row);
+  return row;
+};
+
+const editor = (): HTMLElement => {
+  const node = document.querySelector(".ui-editor-shell");
+  if (!(node instanceof HTMLElement)) throw new Error("Command editor is missing");
+  return node;
+};
+
+describe("Text command editor", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    if (initialLanguage !== undefined) Object.defineProperty(window.navigator, "language", initialLanguage);
   });
 
-  it("lists commands and offers edit and delete", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Hallo {user}",
-          kind: "text",
-          enabled: true,
-          cooldownSeconds: 5,
-          lastUsedAt: new Date(Date.now() - 60_000).toISOString(),
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
+  it("opens in the ListDetail inspector with icon tabs, prefixes, counters, preview, and tier descriptions", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+
+    const settingsTab = screen.getByRole("tab", { name: "Einstellungen" });
+    const advancedTab = screen.getByRole("tab", { name: "Erweitert" });
+    expect(settingsTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(advancedTab.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(screen.getByText("5 von 32")).toBeInTheDocument();
+    expect(editor().querySelector(".ui-field__prefix")).toHaveTextContent("!");
+    expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
+
+    fireEvent.click(advancedTab);
+    const copy = textCommandsTexts("de");
+    const group = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
+    const included = { viewer: "Zuschauer", subscriber: "Abonnenten", vip: "VIPs", moderator: "Moderatoren", broadcaster: "Broadcaster" } as const;
+    for (const tier of TEXT_COMMAND_MINIMUM_TIERS) {
+      const subjects = statusForTier[tier].map((status) => included[status]);
+      const lastSubject = subjects.at(-1) ?? "";
+      const description = subjects.length < 2
+        ? subjects[0] ?? ""
+        : `${subjects.slice(0, -1).join(", ")} und ${lastSubject}`;
+      const exclusion = tier === "subscriber" ? " VIPs nicht." : tier === "vip" ? " Abonnenten nicht." : "";
+      expect(within(group).getByRole("radio", { name: `${copy.tierLabels[tier]}. ${description}.${exclusion}` })).toBeInTheDocument();
+    }
+  });
+
+  it("gives every editor field a non-empty helper line and edits aliases and cooldowns", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+    const panel = editor();
+
+    const assertVisibleFieldHelpers = (): void => {
+      for (const role of ["textbox", "radiogroup", "spinbutton", "switch"] as const) {
+        for (const field of within(panel).queryAllByRole(role)) {
+          const describedBy = field.getAttribute("aria-describedby");
+          expect(describedBy, `${role} should reference its helper line`).toBeTruthy();
+          for (const id of (describedBy ?? "").split(/\s+/u).filter(Boolean)) {
+            const helper = document.getElementById(id)?.textContent ?? "";
+            expect(helper.trim().length, `${role} helper line ${id}`).toBeGreaterThan(0);
+          }
+        }
       }
-      return Promise.resolve(jsonResponse({ command: {} }));
+    };
+    assertVisibleFieldHelpers();
+
+    const aliasGroup = within(panel).getByRole("group", { name: "Aliase" });
+    expect(aliasGroup.querySelector(".ui-field__prefix")).toHaveTextContent("!");
+    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
+    assertVisibleFieldHelpers();
+    const cooldown = screen.getByRole("spinbutton", { name: "Abkühlzeit" });
+    const userCooldown = screen.getByRole("spinbutton", { name: "Je Nutzer" });
+    expect(cooldown).toHaveValue("5");
+    expect(userCooldown).toHaveValue("15");
+    expect(within(panel).getAllByText("s")).toHaveLength(2);
+    fireEvent.change(userCooldown, { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => {
+      const patch = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
+      expect(patch?.[1]?.body).toBe(JSON.stringify({
+        name: "hallo",
+        kind: "text",
+        text: "Hallo {user} aus {channel}",
+        minimumTier: "everyone",
+        cooldownSeconds: 5,
+        aliases: ["hey"],
+        userCooldownSeconds: 0,
+        streamCondition: "online",
+        responseType: "reply",
+      }));
     });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    expect(await screen.findByText("!hallo")).toBeInTheDocument();
-    // Six columns down to four: kind is readable from the response itself,
-    // cooldown and "last used" moved into the inspector -- see below.
-    expect(screen.getByRole("columnheader", { name: "!Name" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Antwort" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Mindeststufe" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Schalter" })).toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: "Art" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: "Abkühl." })).not.toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: "Zuletzt" })).not.toBeInTheDocument();
-    expect(screen.getByRole("row", { name: "!hallo Hallo {user} Alle Befehl !hallo: eingeschaltet" })).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("Hallo {user}")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("row", { name: /!hallo/ }));
-    expect(screen.getByDisplayValue("Hallo {user}")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Eigenschaften von !hallo" })).toHaveTextContent("vor 1 min");
-    expect(screen.getByRole("button", { name: "Befehl !hallo speichern" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Befehl !hallo löschen" })).toBeInTheDocument();
-
-    fireEvent.change(screen.getByDisplayValue("Hallo {user}"), { target: { value: "Neu {channel}" } });
-    fireEvent.click(screen.getByRole("button", { name: "Befehl !hallo speichern" }));
-    await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
   });
 
-  it("normalizes !Test before creating and distinguishes empty, invalid, and missing response hints", async () => {
-    let createdBody: Record<string, unknown> | null = null;
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === "POST") {
-        createdBody = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : null;
-        return Promise.resolve(jsonResponse({ command: {} }));
-      }
-      if (url.pathname.endsWith("/commands")) return Promise.resolve(jsonResponse({ commands: [] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      return Promise.resolve(jsonResponse({}));
+  it("creates with §14 defaults and sends every extended command field", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (method, _path, body) => {
+        if (method === "POST") created = body;
+        return jsonResponse({ warnings: [] });
+      },
     });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
+    renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
-    const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
-    expect(add).toBeDisabled();
-    expect(add).not.toHaveClass("button--primary");
-    expect(screen.getByText("Namen ausfüllen")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "!Neu" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "!Test" } });
-    expect(screen.getByLabelText("Name")).toHaveValue("test");
-    expect(screen.getByText("Antworttext ausfüllen")).toBeInTheDocument();
-    expect(add).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Antworttext"), { target: { value: "Hallo" } });
-    expect(add).toBeEnabled();
-    expect(add).toHaveClass("button--primary");
-    fireEvent.click(add);
-    await waitFor(() => { expect(createdBody).toEqual({ name: "test", kind: "text", text: "Hallo", cooldownSeconds: 5 }); });
+    await waitFor(() => expect(created).toEqual({
+      name: "neu",
+      text: "Hallo",
+      kind: "text",
+      minimumTier: "everyone",
+      cooldownSeconds: 5,
+      aliases: [],
+      userCooldownSeconds: 0,
+      streamCondition: "any",
+      responseType: "say",
+    }));
   });
 
-  it.each([
-    ["de-DE", "Nur Kleinbuchstaben, Zahlen, Bindestrich und Unterstrich; maximal 32 Zeichen."],
-    ["en-US", "Use lowercase letters, numbers, hyphen, or underscore; maximum 32 characters."],
-  ])("shows the invalid-name hint for !te st in %s", async (browserLanguage, expectedHint) => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ commands: [] }));
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-    fireEvent.click(await screen.findByRole("button", { name: browserLanguage === "de-DE" ? "Befehl anlegen" : "Add command" }));
-    const createPanel = await screen.findByRole("region", { name: browserLanguage === "de-DE" ? "Befehl anlegen" : "Add command" });
-    const add = within(createPanel).getByRole("button", { name: browserLanguage === "de-DE" ? "Befehl anlegen" : "Add command" });
-    fireEvent.change(screen.getByLabelText(browserLanguage === "de-DE" ? "Name" : "Name"), { target: { value: "!te st" } });
-
-    expect(screen.getByLabelText("Name")).toHaveValue("te st");
-    expect(screen.getByText(expectedHint)).toBeInTheDocument();
-    expect(add).toBeDisabled();
-  });
-
-  it("locks the create form while the request is in flight", async () => {
-    let resolveCreate!: (response: Response) => void;
-    const createFinished = new Promise<Response>((resolve) => { resolveCreate = resolve; });
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ commands: [] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      if (init?.method === "POST") return createFinished;
-      return Promise.resolve(jsonResponse({}));
+  it("creates a command list without a response field or response text", async () => {
+    let created: unknown;
+    const fetcher = panelFetch({
+      commands: () => [],
+      onMutation: (method, _path, body) => {
+        if (method === "POST") created = body;
+        return jsonResponse({ warnings: [] });
+      },
     });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
+    renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "hallo" } });
-    fireEvent.change(screen.getByLabelText("Antworttext"), { target: { value: "Hallo" } });
-    const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
+    fireEvent.click(screen.getByRole("radio", { name: "Befehlsliste" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "befehle" } });
+    expect(screen.queryByRole("textbox", { name: "Antwort" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
 
-    fireEvent.click(add);
+    await waitFor(() => expect(created).toEqual({
+      name: "befehle",
+      text: "",
+      kind: "list",
+      minimumTier: "everyone",
+      cooldownSeconds: 5,
+      aliases: [],
+      userCooldownSeconds: 0,
+      streamCondition: "any",
+      responseType: "say",
+    }));
+  });
+
+  it("locks the create fields while the request is pending", async () => {
+    let resolveCreate: ((response: Response) => void) | undefined;
+    const createRequest = new Promise<Response>((resolve) => { resolveCreate = resolve; });
+    const fetcher = panelFetch({ commands: () => [], onMutation: () => createRequest });
+    renderPanel(fetcher);
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "neu" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+
     await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
-
-    expect(createPanel.querySelector("form")).toHaveAttribute("aria-busy", "true");
-    expect(add).toBeDisabled();
-    expect(screen.getByLabelText("Name")).toBeDisabled();
-    expect(screen.getByLabelText("Art")).toBeDisabled();
-    expect(screen.getByLabelText("Antworttext")).toBeDisabled();
-    expect(screen.getByRole("spinbutton")).toBeDisabled();
-
-    resolveCreate(jsonResponse({}));
-    await waitFor(() => expect(createPanel.querySelector("form")).toHaveAttribute("aria-busy", "false"));
-    expect(add).toBeDisabled();
+    expect(document.querySelector(".ui-editor-shell .ui-save-bar")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("textbox", { name: "Name" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toBeDisabled();
+    resolveCreate?.(jsonResponse({ warnings: [] }));
+    await waitFor(() => expect(document.querySelector(".ui-editor-shell")).not.toBeInTheDocument());
   });
 
-  it("resets draft values when switching to another command", async () => {
-    const commands = [
-      {
-        channelId: "kanal-a", name: "alpha", text: "Antwort A", kind: "text" as const, enabled: true,
-        cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
-      },
-      {
-        channelId: "kanal-a", name: "beta", text: "Antwort B", kind: "text" as const, enabled: true,
-        cooldownSeconds: 10, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
-      },
-    ];
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ commands: commands })));
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    fireEvent.click(await screen.findByRole("row", { name: /!alpha/ }));
-    fireEvent.change(await screen.findByDisplayValue("Antwort A"), { target: { value: "Entwurf" } });
-    fireEvent.click(screen.getByRole("row", { name: /!beta/ }));
-
-    expect(await screen.findByDisplayValue("Antwort B")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("Entwurf")).not.toBeInTheDocument();
-  });
-
-  it.each([
-    ["de-DE", "Befehl !hallo löschen", "Befehl !hallo endgültig löschen", "Abbrechen"],
-    ["en-US", "Delete !hallo", "Delete !hallo permanently", "Cancel"],
-  ])("confirms deletion in place first (%s)", async (browserLanguage, deleteLabel, confirmLabel, cancelLabel) => {
-    let exists = true;
-    let deleteRequestCount = 0;
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: exists ? [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Hallo",
-          kind: "text",
-          enabled: true,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] : [] }));
-      }
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      if (init?.method === "DELETE") {
-        deleteRequestCount += 1;
-        exists = false;
-        return Promise.resolve(jsonResponse({}));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
-    const deleteButton = await screen.findByRole("button", { name: deleteLabel });
-    expect(deleteButton).toHaveClass("button--danger");
-    expect(deleteButton).not.toHaveClass("button--quiet");
-
-    fireEvent.click(deleteButton);
-    const confirmation = await screen.findByRole("alertdialog");
-    expect(confirmation).toHaveTextContent("hallo");
-    expect(deleteRequestCount).toBe(0);
-    expect(screen.getByRole("button", { name: cancelLabel })).toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: cancelLabel }));
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(deleteRequestCount).toBe(0);
-
-    fireEvent.click(await screen.findByRole("button", { name: deleteLabel }));
-    fireEvent.click(await screen.findByRole("button", { name: confirmLabel }));
-    await waitFor(() => expect(deleteRequestCount).toBe(1));
-  });
-
-  it("keeps a cleared number field empty and does not save it as null", async () => {
-    let created = false;
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ commands: [] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      if (init?.method === "POST") {
-        created = true;
-        return Promise.resolve(jsonResponse({}));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
+  it("keeps a cleared cooldown empty and does not send a null value", async () => {
+    const fetcher = panelFetch({ commands: () => [] });
+    renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "hallo" } });
-    fireEvent.change(screen.getByLabelText("Antworttext"), { target: { value: "Hallo" } });
-    const cooldown = screen.getByRole("spinbutton");
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "neu" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Hallo" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
+    const cooldown = screen.getByRole("spinbutton", { name: "Abkühlzeit" });
     fireEvent.change(cooldown, { target: { value: "" } });
-
-    expect((cooldown as HTMLInputElement).value).toBe("");
-    fireEvent.click(within(await screen.findByRole("region", { name: "Befehl anlegen" })).getByRole("button", { name: "Befehl anlegen" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(created).toBe(false);
-    expect((cooldown as HTMLInputElement).value).toBe("");
+    expect(cooldown).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(cooldown).toHaveValue("");
   });
 
-  it("assigns the three field widths by content type", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Hallo",
-          kind: "text",
-          enabled: true,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
-      }
-      return Promise.resolve(jsonResponse({}));
+  it("saves an unknown variable as a warning and keeps the save action primary", async () => {
+    const fetcher = panelFetch({
+      onMutation: () => jsonResponse({
+        warnings: [{ field: "text", code: "unknown_template_variables", unknownVariables: ["viewer"] }],
+      }),
     });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    expect(await screen.findByRole("heading", { name: "Befehle" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Befehl anlegen" }));
-    await screen.findByRole("region", { name: "Befehl anlegen" });
-    expect(screen.getByLabelText("Name").closest("label")).toHaveClass("config-field--medium");
-    expect(screen.getByLabelText("Antworttext").closest("label")).toHaveClass("config-field--wide");
-    expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual(["config-field config-field--narrow"]);
-
-    fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
-    const editorTextarea = await screen.findByDisplayValue("Hallo");
-    const editorField = editorTextarea.closest("label");
-    expect(editorField).toHaveClass("config-field--wide");
-    expect(screen.getAllByRole("spinbutton").map((field) => field.closest("label")?.className)).toEqual([
-      "config-field config-field--narrow",
-    ]);
+    renderPanel(fetcher);
+    await selectCommand();
+    const response = screen.getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "Hallo {viewer}" } });
+    expect(await screen.findByText(/Unbekannte Variable \{viewer\}/u)).toBeInTheDocument();
+    const save = screen.getByRole("button", { name: "Änderungen speichern" });
+    expect(save).toBeEnabled();
+    expect(save).toHaveAttribute("data-variant", "filled");
+    fireEvent.click(save);
+    await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+    expect(await screen.findByRole("status")).toHaveTextContent("Gespeichert. Unbekannte Variable: {viewer}");
+    expect(response).toHaveValue("Hallo {viewer}");
   });
 
-  it.each([
-    ["de-DE", "Der Textbefehl konnte nicht gelöscht werden."],
-    ["en-US", "The text command could not be deleted."],
-  ])("shows the matching text for a delete error (%s)", async (browserLanguage, expected) => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Hallo",
-          kind: "text",
-          enabled: true,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
-      }
-      if (init?.method === "DELETE") return Promise.resolve(jsonResponse({ error: "forbidden" }, 403));
-      return Promise.resolve(jsonResponse({ token: "csrf" }));
+  it("guards row switching, Escape, and the inspector backdrop with all three choices", async () => {
+    const rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
+    const fetcher = panelFetch({ commands: () => rows });
+    renderPanel(fetcher);
+    await selectCommand("hallo");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf" } });
+    const beta = await screen.findByText("!beta");
+    fireEvent.click(beta.closest("tr") as HTMLElement);
+    const guard = await screen.findByRole("dialog");
+    expect(within(guard).getByRole("button", { name: "Weiter bearbeiten" })).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Verwerfen und wechseln" })).toBeInTheDocument();
+    expect(within(guard).getByRole("button", { name: "Speichern und wechseln" })).toBeInTheDocument();
+    fireEvent.click(within(guard).getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Entwurf");
+
+    fireEvent.keyDown(editor(), { key: "Escape" });
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Weiter bearbeiten" }));
+    const backdrop = document.querySelector(".list-detail__backdrop");
+    if (!(backdrop instanceof HTMLElement)) throw new Error("Inspector backdrop is missing");
+    fireEvent.click(backdrop);
+    fireEvent.click(await screen.findByRole("button", { name: "Verwerfen und wechseln" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.querySelector(".ui-editor-shell")).not.toBeInTheDocument();
+  });
+
+  it("saves and switches from the draft guard, and keeps the new row selected", async () => {
+    const rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
+    const fetcher = panelFetch({ commands: () => rows });
+    renderPanel(fetcher);
+    await selectCommand("hallo");
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Gespeichert" } });
+    fireEvent.click((await screen.findByText("!beta")).closest("tr") as HTMLElement);
+    fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Antwort B"));
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
+  });
+
+  it("preserves the draft on command_changed_concurrently and reloads the server version on request", async () => {
+    const rows = [makeCommand()];
+    const fetcher = panelFetch({
+      commands: () => rows,
+      onMutation: () => jsonResponse({ error: "command_changed_concurrently" }, 409),
     });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: browserLanguage, configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
-    fireEvent.click(await screen.findByRole("button", {
-      name: browserLanguage === "de-DE" ? "Befehl !hallo löschen" : "Delete !hallo",
-    }));
-    fireEvent.click(await screen.findByRole("button", {
-      name: browserLanguage === "de-DE" ? "Befehl !hallo endgültig löschen" : "Delete !hallo permanently",
-    }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(expected);
+    renderPanel(fetcher);
+    await selectCommand();
+    const response = screen.getByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "Mein Entwurf" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Änderungen speichern" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
+    expect(await screen.findByText(/Inzwischen von jemand anderem geändert\./u)).toBeInTheDocument();
+    expect(response).toHaveValue("Mein Entwurf");
+    rows[0] = makeCommand({ text: "Serverstand" });
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Serverstand"));
   });
 
-  it("follows the browser language with the panel", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({ commands: [] })));
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    expect(await screen.findByRole("heading", { name: "Commands" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add command" }));
-    expect(await screen.findByRole("region", { name: "Add command" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Type" })).toBeInTheDocument();
-  });
-
-  it("hides the response field for the type 'list' and creates without text", async () => {
-    let createdBody: Record<string, unknown> | null = null;
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) return Promise.resolve(jsonResponse({ commands: [] }));
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      if (init?.method === "POST") {
-        createdBody = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : null;
-      }
-      return Promise.resolve(jsonResponse({}));
+  it("maps command_already_exists and both command_alias_conflict fields to field errors", async () => {
+    let error: unknown = { error: "command_already_exists" };
+    const fetcher = panelFetch({
+      onMutation: () => jsonResponse(error, 409),
     });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+    renderPanel(fetcher);
+    await selectCommand();
+    const name = screen.getByRole("textbox", { name: "Name" });
+    const save = screen.getByRole("button", { name: "Änderungen speichern" });
 
-    render(<TextCommandsPanel channelId="kanal-a" />);
+    fireEvent.change(name, { target: { value: "neu" } });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
+    expect(await screen.findByText("Der Befehl existiert bereits.")).toBeInTheDocument();
+    expect(name).toHaveAttribute("aria-invalid", "true");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
-    const art = await screen.findByRole("combobox", { name: "Art" });
-    fireEvent.change(art, { target: { value: "list" } });
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "befehle" } });
-    expect(screen.queryByLabelText("Antworttext")).not.toBeInTheDocument();
-    const add = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
-    expect(add).toBeEnabled();
-    fireEvent.click(add);
-    await waitFor(() => expect(createdBody).toEqual({ name: "befehle", kind: "list", cooldownSeconds: 5 }));
+    error = { error: "command_alias_conflict", conflict: { field: "name", trigger: "hallo", command: "anderer" } };
+    fireEvent.change(name, { target: { value: "neu2" } });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(2));
+    expect(await screen.findByText("!hallo ist schon ein Alias von !anderer.")).toBeInTheDocument();
+    expect(name).toHaveAttribute("aria-invalid", "true");
+
+    error = { error: "command_alias_conflict", conflict: { field: "aliases", trigger: "hey", command: "anderer" } };
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(3));
+    await waitFor(() => expect(save).toBeEnabled());
+    expect(await screen.findByText(/!hey ist schon ein Alias von !anderer\./u)).toBeInTheDocument();
+    expect(document.querySelector(".ui-tag-input__pill[aria-invalid='true']")).not.toBeNull();
   });
 
-  it("shows operators the switch open and content actions visible but locked", async () => {
-    let enabled = false;
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Antwort",
-          kind: "text",
-          enabled,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
-      }
-      if (init?.method === "PATCH") {
-        const body = typeof init.body === "string" ? JSON.parse(init.body) as { enabled?: boolean } : {};
-        enabled = body.enabled ?? enabled;
-      }
-      return Promise.resolve(jsonResponse({ command: {} }));
+  it("shows the amber announcement warning only when moderator status is false", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher, { botIsModerator: false });
+    await selectCommand();
+    fireEvent.click(screen.getByRole("radio", { name: "Ankündigung" }));
+    expect(screen.getByText("Der Bot ist hier kein Moderator — der Text geht als normale Nachricht raus.")).toBeInTheDocument();
+    expect(editor().querySelector(".ui-segmented-control__warning")).not.toBeNull();
+    expect(editor().querySelector(".ui-editor-shell__issue-dot--warning")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Änderungen speichern" })).toBeEnabled();
+
+    cleanup();
+    renderPanel(panelFetch(), { botIsModerator: null });
+    await selectCommand();
+    fireEvent.click(screen.getByRole("radio", { name: "Ankündigung" }));
+    expect(screen.queryByText("Der Bot ist hier kein Moderator — der Text geht als normale Nachricht raus.")).not.toBeInTheDocument();
+  });
+
+  it("shows operators a read-only property list and keeps Active as an immediate action", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher, { canManage: false });
+    await selectCommand();
+    const readonly = editor();
+    expect(within(readonly).getByText("Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.")).toBeInTheDocument();
+    expect(within(readonly).getByText("!hey")).toBeInTheDocument();
+    expect(within(readonly).getAllByText("Antwort")).toHaveLength(2);
+    expect(within(readonly).getByText("nur online")).toBeInTheDocument();
+    expect(within(readonly).getByText("aus")).toBeInTheDocument();
+    expect(within(readonly).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(readonly).queryByRole("button", { name: "Änderungen speichern" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(readonly).getByRole("switch", { name: "Aktiv" }));
+    await waitFor(() => {
+      const toggle = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH");
+      expect(toggle).toBeDefined();
+      expect(toggle?.[1]?.body).toBe(JSON.stringify({ enabled: false }));
     });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" canManage={false} />);
-
-    const row = await screen.findByRole("row", { name: /!hallo/ });
-    const toggle = await screen.findByRole("switch", { name: "Befehl !hallo: ausgeschaltet" });
-    expect(toggle).toBeEnabled();
-    expect(within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" })).toBeDisabled();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    const createPanel = await screen.findByRole("region", { name: "Befehl anlegen" });
-    const create = within(createPanel).getByRole("button", { name: "Befehl anlegen" });
-    expect(create).toBeDisabled();
-    expect(screen.getByLabelText("Name")).toBeDisabled();
-    expect(screen.getByLabelText("Art")).toBeDisabled();
-    expect(screen.getByLabelText("Antworttext")).toBeDisabled();
-    expect(screen.getByRole("spinbutton")).toBeDisabled();
-
-    fireEvent.click(toggle);
-    expect(await screen.findByRole("switch", { name: "Befehl !hallo: eingeschaltet" })).toBeEnabled();
-    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ enabled: true }))).toBe(true);
-
-    fireEvent.click(row);
-    const editor = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
-    expect(within(editor).getByLabelText("Name")).toBeDisabled();
-    expect(within(editor).getByLabelText("Antworttext")).toBeDisabled();
-    expect(within(editor).getByLabelText("Abkühlzeit (Sekunden)")).toBeDisabled();
-    expect(within(editor).getByRole("button", { name: "Befehl !hallo speichern" })).toBeDisabled();
-    expect(within(editor).getByRole("button", { name: "Befehl !hallo löschen" })).toBeDisabled();
-    expect(screen.getAllByText("Nur Broadcaster und Verwalter dürfen Befehle anlegen, bearbeiten oder löschen.").length).toBeGreaterThan(0);
   });
 
-  it("shows the minimum tier as its own column and changes it through the management path", async () => {
-    let minimumTier = "everyone";
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Antwort",
-          kind: "text",
-          enabled: true,
-          minimumTier: minimumTier,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
-      }
-      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-      if (init?.method === "PATCH") {
-        const body = typeof init.body === "string" ? JSON.parse(init.body) as { minimumTier?: string } : {};
-        minimumTier = body.minimumTier ?? minimumTier;
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    const row = await screen.findByRole("row", { name: /!hallo/ });
-    expect(screen.getByRole("columnheader", { name: "Mindeststufe" })).toBeInTheDocument();
-    const select = within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" });
-    expect(select.tagName).toBe("INPUT");
-    expect(select).toHaveValue("Alle");
-    fireEvent.click(select);
-    fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
-
-    await waitFor(() => expect(within(row).getByRole("combobox", { name: "Mindeststufe für Befehl !hallo" })).toHaveValue("Moderatoren"));
-    expect(fetcher.mock.calls.some(([, init]) => init?.method === "PATCH" && init.body === JSON.stringify({ minimumTier: "moderator" }))).toBe(true);
-  });
-
-  it("shows the inspector only once a row is selected, alongside the list", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Hallo",
-          kind: "text",
-          enabled: true,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    const list = await screen.findByRole("region", { name: "Befehle" });
-    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
-
-    const row = await screen.findByRole("row", { name: /!hallo/ });
-    fireEvent.click(row);
-
-    expect(list).toBeInTheDocument();
-    expect(await screen.findByRole("region", { name: "Eigenschaften von !hallo" })).toBeInTheDocument();
-  });
-
-  it("closes the command inspector by button and Escape, returning focus to the row", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Hallo",
-          kind: "text",
-          enabled: true,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
-      }
-      return Promise.resolve(jsonResponse({}));
+  it("keeps the row minimum-tier control as an immediate action and restores focus when the editor closes", async () => {
+    let minimumTier: TextCommand["minimumTier"] = "everyone";
+    const fetcher = panelFetch({
+      commands: () => [makeCommand({ minimumTier })],
+      onMutation: (method, _path, body) => {
+        if (method === "PATCH" && typeof body === "object" && body !== null && "minimumTier" in body && typeof body.minimumTier === "string") {
+          minimumTier = body.minimumTier as TextCommand["minimumTier"];
+        }
+        return jsonResponse({ warnings: [] });
+      },
     });
     const onCloseInspector = vi.fn();
     vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+    render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" onCloseInspector={onCloseInspector} /></UiProvider>);
 
-    render(<TextCommandsPanel channelId="kanal-a" onCloseInspector={onCloseInspector} />);
+    const row = await screen.findByRole("row", { name: /!hallo/u });
+    const tierSelect = within(row).getByRole("combobox", { name: "Wer darf auslösen: !hallo" });
+    fireEvent.click(tierSelect);
+    fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
+    await waitFor(() => expect(fetcher.mock.calls.some(([, init]) =>
+      init?.method === "PATCH" && init.body === JSON.stringify({ minimumTier: "moderator" }))).toBe(true));
 
-    const row = await screen.findByRole("row", { name: /!hallo/ });
     row.focus();
     fireEvent.click(row);
-    expect(row).toHaveFocus();
-    await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
-    const closeButton = screen.getByRole("button", { name: "Schließen" });
-    closeButton.focus();
-    fireEvent.click(closeButton);
-    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
-    expect(row).toHaveAttribute("aria-selected", "false");
+    const inspector = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    expect(within(inspector).getByRole("tab", { name: "Einstellungen" })).toBeInTheDocument();
+    fireEvent.click(within(inspector).getByRole("button", { name: "Schließen" }));
     expect(row).toHaveFocus();
     expect(onCloseInspector).toHaveBeenCalledOnce();
 
     fireEvent.click(row);
-    const reopenedInspector = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
-    expect(reopenedInspector).toBeInTheDocument();
-    expect(row).toHaveFocus();
-    const reopenedCloseButton = within(reopenedInspector).getByRole("button", { name: "Schließen" });
-    reopenedCloseButton.focus();
-    fireEvent.keyDown(reopenedCloseButton, { key: "Escape" });
+    const reopened = await screen.findByRole("region", { name: "Eigenschaften von !hallo" });
+    fireEvent.keyDown(within(reopened).getByRole("button", { name: "Schließen" }), { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
-    expect(row).toHaveFocus();
     expect(onCloseInspector).toHaveBeenCalledTimes(2);
   });
 
-  it("opens create in the inspector column and switches without double-occupying it", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Hallo",
-          kind: "text",
-          enabled: true,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
-
-    render(<TextCommandsPanel channelId="kanal-a" />);
-
-    const list = await screen.findByRole("region", { name: "Befehle" });
-    expect(screen.queryByRole("region", { name: "Befehl anlegen" })).not.toBeInTheDocument();
-    const plus = within(list).getByRole("button", { name: "Befehl anlegen" });
-    fireEvent.click(plus);
-    await screen.findByRole("region", { name: "Befehl anlegen" });
-
-    const row = await screen.findByRole("row", { name: /!hallo/ });
-    fireEvent.click(row);
-    expect(screen.queryByRole("region", { name: "Befehl anlegen" })).not.toBeInTheDocument();
-    expect(await screen.findByRole("region", { name: "Eigenschaften von !hallo" })).toBeInTheDocument();
-
-    fireEvent.click(plus);
-    expect(screen.queryByRole("region", { name: "Eigenschaften von !hallo" })).not.toBeInTheDocument();
-    const reopenedCreatePanel = await screen.findByRole("region", { name: "Befehl anlegen" });
-    expect(row).toHaveAttribute("aria-selected", "false");
-
-    fireEvent.click(within(reopenedCreatePanel).getByRole("button", { name: "Schließen" }));
-    expect(screen.queryByRole("region", { name: "Befehl anlegen" })).not.toBeInTheDocument();
-    expect(plus).toHaveFocus();
-
-    fireEvent.click(plus);
-    const escapedCreatePanel = await screen.findByRole("region", { name: "Befehl anlegen" });
-    fireEvent.keyDown(escapedCreatePanel, { key: "Escape" });
-    expect(screen.queryByRole("region", { name: "Befehl anlegen" })).not.toBeInTheDocument();
-    expect(plus).toHaveFocus();
+  it("deletes through ConfirmDialog", async () => {
+    const fetcher = panelFetch();
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.click(screen.getByRole("button", { name: "Befehl löschen" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Aliase !hey/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Befehl !hallo endgültig löschen" }));
+    await waitFor(() => expect(fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true));
   });
 
-  it("propagates the module contract's close path to the host", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [{
-          channelId: "kanal-a",
-          name: "hallo",
-          text: "Hallo",
-          kind: "text",
-          enabled: true,
-          cooldownSeconds: 5,
-          lastUsedAt: null,
-          createdAt: "2026-09-19T12:00:00.000Z",
-          updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    const onCloseInspector = vi.fn();
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+  it("follows the browser language when the host does not pass one", async () => {
+    vi.stubGlobal("fetch", panelFetch());
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    render(<UiProvider><TextCommandsPanel channelId="kanal-a" /></UiProvider>);
 
-    render(<TextCommandsPanel channelId="kanal-a" onCloseInspector={onCloseInspector} />);
-
-    fireEvent.click(await screen.findByRole("row", { name: /!hallo/ }));
-    fireEvent.keyDown(await screen.findByRole("region", { name: "Eigenschaften von !hallo" }), { key: "Escape" });
-
-    expect(onCloseInspector).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("button", { name: "Add command" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Response" })).toBeInTheDocument();
   });
 
-  it("pre-selects the command Spotlight named, once the list has loaded (#164)", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (url.pathname.endsWith("/commands") && init?.method === undefined) {
-        return Promise.resolve(jsonResponse({ commands: [
-          { channelId: "kanal-a", name: "clip", text: "Clip!", kind: "text", enabled: true, cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z" },
-          { channelId: "kanal-a", name: "hallo", text: "Hallo", kind: "text", enabled: true, cooldownSeconds: 5, lastUsedAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z" },
-        ] }));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
+  it("preselects the command requested by Spotlight after the command list loads", async () => {
+    vi.stubGlobal("fetch", panelFetch({ commands: () => [makeCommand({ name: "clip" }), makeCommand()] }));
+    render(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" initialSelection="clip" /></UiProvider>);
 
-    render(<TextCommandsPanel channelId="kanal-a" initialSelection="clip" />);
-
-    expect(await screen.findByDisplayValue("Clip!")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Eigenschaften von !clip" })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /!clip/u })).toHaveAttribute("aria-selected", "true");
   });
 });

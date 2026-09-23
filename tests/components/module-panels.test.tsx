@@ -3,12 +3,69 @@ import { useState, type ReactElement } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const editorFixture = vi.hoisted(() => {
+  const textAreaMessages = {
+    countLabel: (count: number, maximum: number) => `${String(count)} / ${String(maximum)}`,
+    previewCountLabel: (count: number) => `${String(count)} preview characters`,
+    unknownVariable: (name: string) => `Unknown variable {${name}}`,
+    insertSuggestionLabel: (name: string) => `Insert {${name}}`,
+    worstCaseLength: (length: number) => `Worst case: ${String(length)}`,
+  };
+  const catalog = (language: "de" | "en") => ({
+    title: language === "de" ? "Fixture-Einstellungen" : "Fixture settings",
+    ariaLabel: language === "de" ? "Fixture-Einstellungen" : "Fixture settings",
+    readOnlyReason: language === "de" ? "Nur Verwalter dürfen Fixture-Einstellungen ändern." : "Only managers may change fixture settings.",
+    saveLabel: language === "de" ? "Fixture speichern" : "Save fixture",
+    discardLabel: language === "de" ? "Verwerfen" : "Discard",
+    savedLabel: language === "de" ? "Gespeichert." : "Saved.",
+    pendingLabel: language === "de" ? "Wird gespeichert …" : "Saving …",
+    invalidMessage: language === "de" ? "Ungültige Werte." : "Invalid values.",
+    numberMissing: language === "de" ? "Zahl eingeben." : "Enter a number.",
+    issueLabels: { error: language === "de" ? "Fehler" : "Error", warning: language === "de" ? "Hinweis" : "Warning" },
+    loadError: language === "de" ? "Laden fehlgeschlagen." : "Could not load.",
+    saveError: language === "de" ? "Speichern fehlgeschlagen." : "Could not save.",
+    conflictMessage: language === "de" ? "Fixture wurde inzwischen geändert." : "Fixture changed concurrently.",
+    reloadLabel: language === "de" ? "Serverstand laden" : "Reload server version",
+    enabledLabel: language === "de" ? "An" : "On",
+    disabledLabel: language === "de" ? "Aus" : "Off",
+    templateMessages: textAreaMessages,
+    warningLabel: () => language === "de" ? "Eine Vorlage enthält einen unbekannten Platzhalter." : "A template contains an unknown variable.",
+    sections: { general: language === "de" ? "Allgemein" : "General" },
+    fields: {
+      amount: { label: language === "de" ? "Menge" : "Amount", hint: language === "de" ? "Eine ganze Zahl." : "A whole number.", unit: "Stück", increaseLabel: "Increase amount", decreaseLabel: "Decrease amount" },
+      handle: { label: language === "de" ? "Konto" : "Handle", hint: language === "de" ? "Twitch-Name." : "Twitch name." },
+      message: { label: language === "de" ? "Nachricht" : "Message", hint: language === "de" ? "Vorlage für die Nachricht." : "Message template.", previewLabel: "Preview", previewSpeaker: "Bot", variables: [{ name: "viewer", description: "Viewer name.", sample: "Ada" }] },
+      mode: { label: language === "de" ? "Modus" : "Mode", hint: language === "de" ? "Wähle einen Modus." : "Choose a mode.", options: { automatic: { label: language === "de" ? "Automatisch" : "Automatic", description: "Runs automatically." }, manual: { label: language === "de" ? "Von Hand" : "Manual", description: "Runs by hand." } } },
+      enabled: { label: language === "de" ? "Zusatzaktion" : "Extra action", hint: language === "de" ? "Schaltet die Zusatzaktion ein." : "Turns on the extra action.", description: language === "de" ? "Zusätzliche Aktion ausführen." : "Run an extra action." },
+      threshold: { label: language === "de" ? "Schwelle" : "Threshold", hint: language === "de" ? "Mindestmenge." : "Minimum amount.", unit: "Stück", disabledReason: language === "de" ? "Zusatzaktion ist ausgeschaltet." : "Extra action is off.", increaseLabel: "Increase threshold", decreaseLabel: "Decrease threshold" },
+    },
+  });
+  const definition = {
+    spec: { sections: [{ id: "general", icon: "tabSettings", fields: [
+      { kind: "number", key: "amount", min: 0, max: 10, step: 1 },
+      { kind: "text", key: "handle", prefix: "@", maxLength: 32 },
+      { kind: "template", key: "message", preview: (template: string, samples: Readonly<Record<string, string>>) => template.replace("{viewer}", samples.viewer ?? "") },
+      { kind: "segment", key: "mode", options: [{ value: "automatic" }, { value: "manual" }] },
+      { kind: "switchCard", key: "enabled", children: [{ kind: "number", key: "threshold", min: 0, max: 10, step: 1 }] },
+    ] }] },
+    locales: { de: catalog("de"), en: catalog("en") },
+  };
+  return { definition, loader: vi.fn(() => Promise.resolve({ default: definition })) };
+});
+
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
 
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     { id: "aktiv", settingsSchema: {}, defaultSettings: {}, panel: activeLoader },
     { id: "ohne-panel", settingsSchema: {}, defaultSettings: {} },
+    {
+      id: "editor-fixture",
+      settingsSchema: { shape: { amount: {}, handle: {}, message: {}, mode: {}, enabled: {}, threshold: {} } },
+      defaultSettings: { amount: 2, handle: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 },
+      templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
+      settingsEditor: editorFixture.loader,
+    },
     { id: "channel_events", mandatory: true, settingsSchema: {}, defaultSettings: {} },
   ],
 }));
@@ -17,11 +74,26 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { ModuleNavigation, ModulePanelMount, ModulePage, ModuleWorkspace } from "../../src/dashboard/module-panels";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
+const editorFixtureSettings = { amount: 2, handle: "ada", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4 };
+
+const renderSettingsFixture = (fetcher: typeof fetch, ownRole: "manager" | "operator" = "manager"): ReturnType<typeof render> => {
+  vi.stubGlobal("fetch", fetcher);
+  return renderWithMantine(<ModulePage
+    channelId="kanal-a"
+    moduleId="editor-fixture"
+    ownRole={ownRole}
+    modules={[{ id: "editor-fixture", enabled: true, settings: "{}" }]}
+    activeModules={[{ moduleId: "editor-fixture", settings: "{}" }]}
+    onNavigate={vi.fn()}
+    onToggle={vi.fn()}
+  />);
+};
 
 describe("Module panel loader", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    editorFixture.loader.mockClear();
   });
 
   it("links active modules to their own subpage", () => {
@@ -243,5 +315,110 @@ describe("Module panel loader", () => {
       onToggle={vi.fn()}
     />);
     expect(screen.getByText(/ist nicht bekannt/i)).toBeInTheDocument();
+  });
+
+  it("loads a declaration lazily and renders each field with catalog copy before saving only its schema keys", async () => {
+    let resolveSettings: ((response: Response) => void) | undefined;
+    const deferredSettings = new Promise<Response>((resolve) => { resolveSettings = resolve; });
+    let patchBody: unknown;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
+        patchBody = typeof init.body === "string" ? JSON.parse(init.body) as unknown : null;
+        return Promise.resolve(Response.json({
+          settings: patchBody,
+          warnings: [{ field: "message", code: "unknown_template_variables", unknownVariables: ["ghost"] }],
+        }));
+      }
+      if (path.endsWith("/modules/editor-fixture/settings")) return deferredSettings;
+      return Promise.resolve(Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    expect(screen.getByText("Modulansichten werden geladen …")).toBeInTheDocument();
+    expect(editorFixture.loader).toHaveBeenCalledOnce();
+    resolveSettings?.(Response.json({ settings: editorFixtureSettings }));
+
+    const amount = await screen.findByRole("spinbutton", { name: "Menge" });
+    const handle = screen.getByRole("textbox", { name: "Konto" });
+    const message = screen.getByRole("textbox", { name: "Nachricht" });
+    const mode = screen.getByRole("radiogroup", { name: "Modus" });
+    const extraAction = screen.getByRole("switch", { name: /Zusatzaktion/ });
+    const threshold = screen.getByRole("spinbutton", { name: "Schwelle" });
+    expect(document.querySelector(".ui-field__prefix")).toHaveTextContent("@");
+    expect(screen.getByText("Hello Ada")).toBeInTheDocument();
+    for (const field of [amount, handle, message, mode, extraAction, threshold]) {
+      const describedBy = field.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      expect((describedBy ?? "").split(/\s+/u).map((id) => document.getElementById(id)?.textContent ?? "").join(" ").trim()).not.toBe("");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase amount" }));
+    fireEvent.change(handle, { target: { value: "@Ada" } });
+    expect(handle).toHaveValue("Ada");
+    fireEvent.change(message, { target: { value: "Willkommen {viewer}!" } });
+    fireEvent.click(within(mode).getByRole("radio", { name: /Von Hand/ }));
+    fireEvent.click(extraAction);
+    expect(threshold).toBeDisabled();
+    expect(screen.getAllByText("Zusatzaktion ist ausgeschaltet.")).toHaveLength(2);
+    fireEvent.click(extraAction);
+    expect(threshold).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+    await waitFor(() => expect(patchBody).toEqual({
+      amount: 3,
+      handle: "Ada",
+      message: "Willkommen {viewer}!",
+      mode: "manual",
+      enabled: true,
+      threshold: 4,
+    }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Gespeichert. Eine Vorlage enthält einen unbekannten Platzhalter.");
+  });
+
+  it("keeps a module settings draft through a 409 and reloads the server version", async () => {
+    let currentSettings = { ...editorFixtureSettings };
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
+      if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") return Promise.resolve(Response.json({ error: "module_settings_changed_concurrently" }, { status: 409 }));
+      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: currentSettings, warnings: [] }));
+      return Promise.resolve(Response.json({}));
+    });
+    renderSettingsFixture(fetcher);
+
+    const message = await screen.findByRole("textbox", { name: "Nachricht" });
+    fireEvent.change(message, { target: { value: "Mein Entwurf {viewer}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fixture speichern" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Fixture wurde inzwischen geändert.");
+    expect(message).toHaveValue("Mein Entwurf {viewer}");
+
+    currentSettings = { ...currentSettings, message: "Serverstand {viewer}" };
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand laden" }));
+    expect(await screen.findByRole("textbox", { name: "Nachricht" })).toHaveValue("Serverstand {viewer}");
+  });
+
+  it("shows all declaration values read-only to an operator without form controls", async () => {
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
+        ? Response.json({ settings: editorFixtureSettings })
+        : Response.json({}));
+    });
+    renderSettingsFixture(fetcher, "operator");
+
+    expect(await screen.findByText("Nur Verwalter dürfen Fixture-Einstellungen ändern.")).toBeInTheDocument();
+    const properties = document.querySelector("dl.ui-settings-editor__properties");
+    expect(properties).not.toBeNull();
+    expect(within(properties as HTMLElement).getByText("Menge")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Konto")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Nachricht")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Modus")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Zusatzaktion")).toBeInTheDocument();
+    expect(within(properties as HTMLElement).getByText("Schwelle")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(properties?.closest(".ui-editor-shell")?.querySelector("form")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fixture speichern" })).not.toBeInTheDocument();
   });
 });

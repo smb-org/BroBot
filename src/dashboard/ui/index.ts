@@ -39,7 +39,7 @@ export { EditorShell } from "./EditorShell";
 export type { EditorSection, EditorShellProps } from "./EditorShell";
 
 export { SettingsEditor } from "./SettingsEditor";
-export type { SettingsEditorProps, SettingsEditorSpec, SettingsEditorTexts, SettingsFieldSpec, SettingsFieldText } from "./SettingsEditor";
+export type { SettingsEditorCatalog, SettingsEditorDefinition, SettingsEditorProps, SettingsEditorSpec, SettingsEditorTexts, SettingsFieldSpec, SettingsFieldText } from "./SettingsEditor";
 
 export { NumberField } from "./NumberField";
 export type { NumberFieldProps } from "./NumberField";

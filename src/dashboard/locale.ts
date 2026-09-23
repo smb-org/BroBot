@@ -283,6 +283,7 @@ export interface DashboardTexts {
     noView: string;
     views: string;
     loadingViews: string;
+    settingsLoadError: string;
     notActive: (name: string) => string;
     unknown: (name: string) => string;
     scopesMissing: (name: string) => string;
@@ -464,6 +465,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       managementLocked: "Nur Broadcaster und Verwalter dürfen Module ändern.", noneActive: "Keine Module aktiv.",
       noView: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", views: "Modulansichten",
       loadingViews: "Modulansichten werden geladen …",
+      settingsLoadError: "Moduleinstellungen konnten nicht geladen werden.",
       notActive: (name) => `Das Modul „${name}“ ist in diesem Kanal nicht aktiv.`,
       scopesMissing: (name) => `Das Modul „${name}“ ist deaktiviert, weil Broadcaster-Berechtigungen fehlen.`,
       requestScopeConsent: "Broadcaster-Berechtigungen erteilen",
@@ -624,7 +626,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       active: "Active", inactive: "Inactive", enable: "enable", disable: "disable", moduleList: "Module list",
       moduleOverview: "Module overview",
       managementLocked: "Only broadcasters and managers may change modules.", noneActive: "No modules active.",
-      noView: "This active module does not have a panel view yet.", views: "Module views", loadingViews: "Loading module views …",
+      noView: "This active module does not have a panel view yet.", views: "Module views", loadingViews: "Loading module views …", settingsLoadError: "Module settings could not be loaded.",
       notActive: (name) => `The module “${name}” is not active in this channel.`,
       unknown: (name) => `The module “${name}” is unknown.`,
       scopesMissing: (name) => `The module “${name}” is disabled because broadcaster permissions are missing.`,

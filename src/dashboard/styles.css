@@ -749,6 +749,12 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-editor-shell__panel:focus-visible { outline: 2px solid var(--brand-text); outline-offset: -2px; }
 .ui-editor-shell__readonly-reason { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; color: var(--text-3); font-size: 11px; }
 .ui-editor-shell__readonly-reason .ui-icon { flex: none; }
+.ui-settings-editor { display: grid; gap: 16px; min-width: 0; }
+.ui-settings-editor__properties { grid-template-columns: 1fr; }
+.ui-settings-editor__properties dd { overflow-wrap: anywhere; white-space: normal; }
+.ui-segmented-control__warning { display: flex; align-items: flex-start; gap: 8px; color: var(--warn); font-size: 12px; line-height: 1.4; }
+.ui-segmented-control__warning .ui-icon { flex: none; color: var(--warn); }
+.ui-tag-input__pill[aria-invalid="true"] { border-color: var(--error); color: var(--error-text); background: var(--error-surface); }
 .ui-save-bar { display: flex; flex: none; align-items: center; gap: 12px; min-height: 64px; padding: 10px 0; }
 .ui-save-bar--persistent { position: sticky; z-index: 2; bottom: 0; margin-top: auto; border-top: 1px solid var(--line); background: var(--surface-inspector); }
 .ui-save-bar__status { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; color: var(--text-3); font-size: 12px; }

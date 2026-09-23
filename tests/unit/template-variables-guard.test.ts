@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { adsPanelTexts } from "../../src/modules/ads/panel/locale";
+import { adsSettingsEditorCatalog } from "../../src/modules/ads/panel/locale";
 import {
   ADS_TEMPLATE_FIELDS,
   ADS_VARIABLES,
@@ -15,7 +15,7 @@ import {
   DEFAULT_MANUAL_TEXT,
   DEFAULT_PREWARNING_TEXT,
 } from "../../src/modules/ads/contracts/chat-defaults";
-import { raidPanelTexts } from "../../src/modules/raid/panel/locale";
+import { raidSettingsEditorCatalog } from "../../src/modules/raid/panel/locale";
 import {
   processRaid,
   raidModule,
@@ -217,8 +217,14 @@ describe("template declaration guard", () => {
       en: Readonly<Record<string, string>>;
     }> = {
       text_commands: { de: textCommandsTexts("de").variables, en: textCommandsTexts("en").variables },
-      raid: { de: raidPanelTexts("de").variables, en: raidPanelTexts("en").variables },
-      ads: { de: adsPanelTexts("de").variables, en: adsPanelTexts("en").variables },
+      raid: {
+        de: Object.fromEntries(Object.values(raidSettingsEditorCatalog("de").fields).flatMap((field) => field.variables ?? []).map(({ name, description }) => [name, description])),
+        en: Object.fromEntries(Object.values(raidSettingsEditorCatalog("en").fields).flatMap((field) => field.variables ?? []).map(({ name, description }) => [name, description])),
+      },
+      ads: {
+        de: Object.fromEntries(Object.values(adsSettingsEditorCatalog("de").fields).flatMap((field) => field.variables ?? []).map(({ name, description }) => [name, description])),
+        en: Object.fromEntries(Object.values(adsSettingsEditorCatalog("en").fields).flatMap((field) => field.variables ?? []).map(({ name, description }) => [name, description])),
+      },
     };
     const declarations: Record<keyof typeof catalogues, readonly TemplateVariable[]> = {
       text_commands: TEXT_COMMAND_TEMPLATE_FIELDS.text,

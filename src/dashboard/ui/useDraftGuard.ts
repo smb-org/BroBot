@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface UseDraftGuardResult {
   /** Whether the three-way confirmation is open. */
@@ -32,6 +32,16 @@ export const useDraftGuard = (
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const pending = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const preventUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      Reflect.set(event, "returnValue", "");
+    };
+    window.addEventListener("beforeunload", preventUnload);
+    return () => { window.removeEventListener("beforeunload", preventUnload); };
+  }, [dirty]);
 
   const guardSwitch = useCallback((proceed: () => void): void => {
     if (!dirty) {
