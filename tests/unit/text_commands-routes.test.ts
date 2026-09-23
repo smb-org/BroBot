@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
@@ -59,7 +59,7 @@ const requestFor = async (
 
 describe("Text commands panel", () => {
   beforeEach(() => { database = new TestD1Database(); });
-  afterEach(() => { database.close(); });
+  afterEach(() => { vi.useRealTimers(); database.close(); });
 
   it("lets a manager create, edit, and delete commands", async () => {
     await insertChannel(database, "kanal-a");
@@ -83,8 +83,13 @@ describe("Text commands panel", () => {
     );
     expect(edit.status).toBe(200);
 
+    const saved = await database.prepare(
+      "SELECT revision FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'hallo'",
+    ).first<{ revision: number }>();
+    if (saved === null) throw new Error("Updated command was not found.");
+
     const remove = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/hallo?revision=2", "DELETE"),
+      await requestFor("user-1", `/api/channels/kanal-a/modules/text_commands/commands/hallo?revision=${String(saved.revision)}`, "DELETE"),
       environment,
     );
     expect(remove.status).toBe(204);
@@ -148,9 +153,11 @@ describe("Text commands panel", () => {
     );
     expect(created.status).toBe(201);
     const loadedAResponse = await panelRouter.fetch(await requestFor("user-1", collection), environment);
-    const loadedA = await loadedAResponse.json<{ commands: Array<{ name: string; revision: number }> }>();
+    const loadedA = await loadedAResponse.json<{ commands: Array<{ name: string; createdAt: string; revision: number }> }>();
     const revision = loadedA.commands[0]?.revision;
-    expect(revision).toBe(1);
+    expect(revision).toBe(Date.parse(loadedA.commands[0]?.createdAt ?? ""));
+    if (revision === undefined) throw new Error("Created command has no revision.");
+    const nextRevision = revision + 1;
 
     const savedA = await panelRouter.fetch(
       await requestFor("user-1", `${collection}/hello`, "PATCH", { revision, text: "Saved by editor A" }),
@@ -164,11 +171,11 @@ describe("Text commands panel", () => {
     expect(savedB.status).toBe(409);
     await expect(savedB.json()).resolves.toMatchObject({
       error: "command_changed_concurrently",
-      current: { name: "hello", text: "Saved by editor A", revision: 2 },
+      current: { name: "hello", text: "Saved by editor A", revision: nextRevision },
     });
     await expect(database.prepare(
       "SELECT response_text, revision FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'hello'",
-    ).first()).resolves.toEqual({ response_text: "Saved by editor A", revision: 2 });
+    ).first()).resolves.toEqual({ response_text: "Saved by editor A", revision: nextRevision });
   });
 
   it("requires the displayed revision to delete and preserves a newer command", async () => {
@@ -181,6 +188,10 @@ describe("Text commands panel", () => {
       await requestFor("user-1", collection, "POST", { name: "hello", text: "Original", cooldownSeconds: 0 }),
       environment,
     );
+    const original = await database.prepare(
+      "SELECT revision FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'hello'",
+    ).first<{ revision: number }>();
+    if (original === null) throw new Error("Created command was not found.");
 
     const missingRevision = await panelRouter.fetch(
       await requestFor("user-1", `${collection}/hello`, "DELETE"),
@@ -190,22 +201,63 @@ describe("Text commands panel", () => {
     await expect(missingRevision.json()).resolves.toEqual({ error: "command_data_invalid" });
 
     await panelRouter.fetch(
-      await requestFor("user-1", `${collection}/hello`, "PATCH", { revision: 1, text: "Saved elsewhere" }),
+      await requestFor("user-1", `${collection}/hello`, "PATCH", { revision: original.revision, text: "Saved elsewhere" }),
       environment,
     );
     const staleDelete = await panelRouter.fetch(
-      await requestFor("user-1", `${collection}/hello?revision=1`, "DELETE"),
+      await requestFor("user-1", `${collection}/hello?revision=${String(original.revision)}`, "DELETE"),
       environment,
     );
 
     expect(staleDelete.status).toBe(409);
     await expect(staleDelete.json()).resolves.toMatchObject({
       error: "command_changed_concurrently",
-      current: { name: "hello", text: "Saved elsewhere", revision: 2 },
+      current: { name: "hello", text: "Saved elsewhere", revision: original.revision + 1 },
     });
     await expect(database.prepare(
       "SELECT response_text, revision FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'hello'",
-    ).first()).resolves.toEqual({ response_text: "Saved elsewhere", revision: 2 });
+    ).first()).resolves.toEqual({ response_text: "Saved elsewhere", revision: original.revision + 1 });
+  });
+
+  it("rejects a stale save after deleting and recreating the same command name", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-19T12:00:00.000Z"));
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+    const collection = "/api/channels/kanal-a/modules/text_commands/commands";
+    const firstCreate = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", { name: "hello", text: "Original", cooldownSeconds: 0 }),
+      environment,
+    );
+    expect(firstCreate.status).toBe(201);
+    const loaded = await panelRouter.fetch(await requestFor("user-1", collection), environment);
+    const originalCommands = await loaded.json<{ commands: Array<{ revision: number }> }>();
+    const originalRevision = originalCommands.commands[0]?.revision;
+    if (originalRevision === undefined) throw new Error("Created command has no revision.");
+
+    const remove = await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/hello?revision=${String(originalRevision)}`, "DELETE"),
+      environment,
+    );
+    expect(remove.status).toBe(204);
+    vi.setSystemTime(new Date("2026-09-19T12:00:00.010Z"));
+    const replacement = await panelRouter.fetch(
+      await requestFor("user-1", collection, "POST", { name: "hello", text: "Replacement", cooldownSeconds: 0 }),
+      environment,
+    );
+    expect(replacement.status).toBe(201);
+
+    const staleSave = await panelRouter.fetch(
+      await requestFor("user-1", `${collection}/hello`, "PATCH", { revision: originalRevision, text: "Stale save" }),
+      environment,
+    );
+    expect(staleSave.status).toBe(409);
+    await expect(staleSave.json()).resolves.toMatchObject({
+      error: "command_changed_concurrently",
+      current: { name: "hello", text: "Replacement", revision: Date.parse("2026-09-19T12:00:00.010Z") },
+    });
   });
 
   it("distinguishes missing commands when editing and deleting", async () => {

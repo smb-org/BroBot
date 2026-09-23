@@ -544,6 +544,62 @@ describe("Text command editor", () => {
     expect(onCloseInspector).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the inspector draft's loaded revision when the row minimum tier changes", async () => {
+    let current = makeCommand();
+    const fetcher = panelFetch({
+      commands: () => [current],
+      onMutation: (method, _path, body) => {
+        if (method !== "PATCH" || typeof body !== "object" || body === null || !("revision" in body)) {
+          return jsonResponse({ warnings: [] });
+        }
+        if (body.revision !== current.revision) {
+          return jsonResponse({ error: "command_changed_concurrently", current }, 409);
+        }
+        if ("minimumTier" in body && typeof body.minimumTier === "string") {
+          current = { ...current, minimumTier: body.minimumTier as TextCommand["minimumTier"], revision: current.revision + 1 };
+        } else if ("text" in body && typeof body.text === "string") {
+          current = { ...current, text: body.text, revision: current.revision + 1 };
+        }
+        return jsonResponse({ warnings: [] });
+      },
+    });
+    renderPanel(fetcher);
+    await selectCommand();
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort" }), { target: { value: "Entwurf" } });
+
+    const row = screen.getByRole("row", { name: /!hallo/u });
+    fireEvent.click(within(row).getByRole("combobox", { name: "Wer darf auslösen: !hallo" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Moderatoren", hidden: true }));
+    await waitFor(() => expect(current).toMatchObject({ minimumTier: "moderator", revision: 2 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Änderungen speichern" }));
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(2));
+    const patches = fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH");
+    const patchBodies = patches.map(([, init]) => {
+      if (typeof init?.body !== "string") throw new Error("PATCH body is missing.");
+      return JSON.parse(init.body) as unknown;
+    });
+    expect(patchBodies).toEqual([
+      { revision: 1, minimumTier: "moderator" },
+      {
+        revision: 1,
+        name: "hallo",
+        kind: "text",
+        text: "Entwurf",
+        minimumTier: "everyone",
+        cooldownSeconds: 5,
+        aliases: ["hey"],
+        userCooldownSeconds: 15,
+        streamCondition: "online",
+        responseType: "reply",
+      },
+    ]);
+    expect(await screen.findByRole("button", { name: "Serverstand laden" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Inzwischen von jemand anderem geändert.");
+    expect(screen.getByRole("button", { name: "Änderungen speichern" })).toBeDisabled();
+    expect(current).toMatchObject({ text: "Hallo {user} aus {channel}", minimumTier: "moderator", revision: 2 });
+  });
+
   it("deletes through ConfirmDialog", async () => {
     const fetcher = panelFetch();
     renderPanel(fetcher);

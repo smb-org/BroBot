@@ -14,7 +14,7 @@ import {
 } from "./contracts";
 import type { ModuleRouteEnvironment } from "../contract";
 import { createTextCommandRepository } from "./adapters/d1";
-import { COMMAND_NAME_PATTERN, validCommandName } from "./domain";
+import { COMMAND_NAME_PATTERN, initialTextCommandRevision, validCommandName } from "./domain";
 import { templateFieldsWarnings } from "../contract";
 import { textCommandDefaultsFor } from "./contracts/chat-defaults";
 
@@ -165,7 +165,7 @@ textCommandRoutes.post("/commands", async (context) => {
       lastUsedAt: null,
       createdAt: now,
       updatedAt: now,
-      revision: 1,
+      revision: initialTextCommandRevision(now),
     };
     return context.json({ command, warnings }, 201);
   }

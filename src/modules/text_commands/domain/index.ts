@@ -132,6 +132,13 @@ export const cooldownRemaining = (lastUsedAt: string | null, now: string, cooldo
   return Math.max(0, Math.ceil(cooldownSeconds - elapsed / 1000));
 };
 
+/** Use the immutable creation time as the first CAS version so a recreated
+ * name cannot match a stale editor that still holds the old command's revision. */
+export const initialTextCommandRevision = (createdAt: string): number => {
+  const timestamp = Date.parse(createdAt);
+  return Number.isSafeInteger(timestamp) && timestamp >= 1 ? timestamp : 1;
+};
+
 /**
  * The tiers are deliberately not a numeric ladder. The status list can
  * contain multiple badges: moderator and broadcaster also satisfy

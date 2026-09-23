@@ -157,6 +157,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
   const labels = useMemo(() => textCommandsTexts(language), [language]);
   const resolvedLanguage = language ?? dashboardLanguage();
   const { value: draft, setValue, dirty, reset, accept } = useDraft<CommandDraft>(initial);
+  const draftRevision = useRef(command?.revision ?? null);
   const [active, setActive] = useState(command?.enabled ?? true);
   const [activePending, setActivePending] = useState(false);
   const [pending, setPending] = useState(false);
@@ -240,7 +241,8 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     try {
       const returnedWarnings = isCreate
         ? await createTextCommand(channelId, payload)
-        : await saveTextCommand(channelId, { oldName: command.name, revision: command.revision, ...payload });
+        : await saveTextCommand(channelId, { oldName: command.name, revision: draftRevision.current ?? command.revision, ...payload });
+      if (!isCreate && draftRevision.current !== null) draftRevision.current += 1;
       accept({ ...draft, ...payload, name: payload.name });
       setServerWarnings(returnedWarnings);
       await onRefresh(payload.name);
@@ -318,6 +320,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ca
     const latest = data.find((item) => item.name === command?.name || item.name === normalizedName);
     if (latest === undefined) { onClose(); return; }
     accept(draftFromCommand(latest));
+    draftRevision.current = latest.revision;
     setActive(latest.enabled);
     setConcurrentConflict(false); setFieldError(null); setError(undefined); setServerWarnings([]);
   };

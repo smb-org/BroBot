@@ -15,7 +15,7 @@ import type {
   TextCommandMutationResult,
   TextCommandRepository,
 } from "../repository";
-import { cooldownRemaining } from "../domain";
+import { cooldownRemaining, initialTextCommandRevision } from "../domain";
 
 const MODULE_ID = "text_commands";
 const extraTemplateKeys = ["offlineText", "notFollowingText", "unavailableText", "usageText"] as const;
@@ -251,8 +251,8 @@ export const createTextCommandRepository = (
       `INSERT INTO text_commands
         (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
          aliases_json, user_cooldown_seconds, stream_condition, response_type,
-         template_fields_json, last_used_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?
+         template_fields_json, last_used_at, created_at, updated_at, revision)
+       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM text_commands AS other
            WHERE other.channel_id = ? AND other.command_name = ?
@@ -282,6 +282,7 @@ export const createTextCommandRepository = (
       extraTemplatesJson,
       input.now,
       input.now,
+      initialTextCommandRevision(input.now),
       input.channelId,
       input.name,
       input.channelId,
@@ -308,7 +309,7 @@ export const createTextCommandRepository = (
       lastUsedAt: null,
       createdAt: input.now,
       updatedAt: input.now,
-      revision: 1,
+      revision: initialTextCommandRevision(input.now),
     };
     const aliasWrites = aliases.map((alias) => db.prepare(
       `INSERT INTO text_command_aliases (channel_id, alias, command_name)
