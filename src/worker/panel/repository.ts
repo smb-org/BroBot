@@ -430,7 +430,12 @@ export const getSystemOverviewForUser = async (
   };
 };
 
-const escapeLikePrefix = (prefix: string): string => prefix.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+/** All audit action prefixes end in `.`, so `/` is their exclusive upper bound. */
+const actionPrefixUpperBound = (prefix: string): string => {
+  const lastCharacter = prefix.at(-1);
+  if (lastCharacter === undefined) return prefix;
+  return `${prefix.slice(0, -1)}${String.fromCharCode(lastCharacter.charCodeAt(0) + 1)}`;
+};
 
 /**
  * "module" has no prefix of its own in `AUDIT_AREA_PREFIXES` -- it's every
@@ -439,20 +444,41 @@ const escapeLikePrefix = (prefix: string): string => prefix.replaceAll("\\", "\\
  * `dashboard/audit/areas.ts`'s `auditAreaForAction` by construction: both
  * read the same table.
  */
-const auditAreaSqlClause = (area: AuditArea): { sql: string; values: string[] } => {
+export const auditAreaSqlClause = (area: AuditArea): { sql: string; values: string[] } => {
   const match = AUDIT_AREA_PREFIXES.find((entry) => entry.area === area);
-  if (match !== undefined) return { sql: "action LIKE ? ESCAPE '\\'", values: [`${escapeLikePrefix(match.prefix)}%`] };
+  if (match !== undefined) {
+    return {
+      sql: "action >= ? AND action < ?",
+      values: [match.prefix, actionPrefixUpperBound(match.prefix)],
+    };
+  }
+  const prefixes = [...AUDIT_AREA_PREFIXES].sort((left, right) =>
+    left.prefix < right.prefix ? -1 : left.prefix > right.prefix ? 1 : 0,
+  );
+  const ranges: { lower: string | null; upper: string | null }[] = [
+    { lower: null, upper: prefixes[0]?.prefix ?? null },
+    ...prefixes.slice(0, -1).map((entry, index) => ({
+      lower: actionPrefixUpperBound(entry.prefix),
+      upper: prefixes[index + 1]?.prefix ?? null,
+    })),
+    { lower: actionPrefixUpperBound(prefixes.at(-1)?.prefix ?? ""), upper: null },
+  ];
   return {
-    sql: AUDIT_AREA_PREFIXES.map(() => "action NOT LIKE ? ESCAPE '\\'").join(" AND "),
-    values: AUDIT_AREA_PREFIXES.map((entry) => `${escapeLikePrefix(entry.prefix)}%`),
+    sql: `(${ranges.map(({ lower, upper }) => {
+      if (lower === null && upper === null) return "1 = 1";
+      if (lower === null) return "action < ?";
+      if (upper === null) return "action >= ?";
+      return "(action >= ? AND action < ?)";
+    }).join(" OR ")})`,
+    values: ranges.flatMap(({ lower, upper }) => lower === null
+      ? upper === null ? [] : [upper]
+      : upper === null ? [lower] : [lower, upper]),
   };
 };
 
-// #181 review: an index on (channel_id, actor_user_id, created_at) would
-// speed up the `?actor=` filter below once audit volume grows -- deferred
-// for now, per-channel volume is small and this query is already capped at
-// `limit + 1` rows, and adding it here means a migration while several
-// other branches are adding migrations of their own.
+// The channel + actor and channel + action indexes keep both optional filters
+// selective before the descending timestamp scan as each channel's audit log
+// grows.
 export const getAuditLogForChannel = async (
   db: D1Database,
   channelId: string,

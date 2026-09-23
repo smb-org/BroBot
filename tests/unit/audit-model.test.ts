@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PanelAuditEntry } from "../../src/panel-contract";
+import { textFingerprintIfTruncated, truncateTo200Chars } from "../../src/text";
 import {
   auditActorLabel,
   auditAreaForAction,
@@ -69,6 +70,30 @@ describe("auditDiffRows", () => {
     const after = JSON.stringify({ channelId: "kanal-a", userId: "user-2", role: "operator", revokedAt: null });
     const rows = auditDiffRows("null", after);
     expect(rows).toEqual([{ key: "role", kind: "added", oldValue: undefined, newValue: "operator", fromSettings: false }]);
+  });
+
+  it("shows the exact colliding long-text pair as a truncated edit", async () => {
+    const beforeText = `${"A".repeat(200)}aA`;
+    const afterText = `${"A".repeat(200)}b `;
+    const before = JSON.stringify({ text: truncateTo200Chars(beforeText), textHash: await textFingerprintIfTruncated(beforeText) });
+    const after = JSON.stringify({ text: truncateTo200Chars(afterText), textHash: await textFingerprintIfTruncated(afterText) });
+    expect(auditDiffRows(before, after)).toEqual([
+      { key: "text", kind: "changed-truncated", oldValue: truncateTo200Chars(beforeText), newValue: truncateTo200Chars(afterText), fromSettings: false },
+    ]);
+  });
+
+  it("diffs settings field by field when a module is first enabled", () => {
+    const after = JSON.stringify({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      settings: JSON.stringify({ prewarning: true, leadSeconds: 60 }),
+    });
+    expect(auditDiffRows("null", after)).toEqual(expect.arrayContaining([
+      { key: "prewarning", kind: "added", oldValue: undefined, newValue: true, fromSettings: true },
+      { key: "leadSeconds", kind: "added", oldValue: undefined, newValue: 60, fromSettings: true },
+    ]));
+    expect(auditDiffRows("null", after).some((row) => row.key === "settings")).toBe(false);
   });
 
   it("shows a remove entry's fields as removed only, skipping null-ish ones", () => {

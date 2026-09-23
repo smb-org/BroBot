@@ -28,7 +28,7 @@ describe("Schema sentinel drift", () => {
     expect(LATEST_SCHEMA_MIGRATION).toBe(files.at(-1));
   });
 
-  it("names a table that this migration actually creates or alters", () => {
+  it("names a table that this migration actually creates, alters, or indexes", () => {
     const source = readFileSync(path.join(migrationsDirectory, LATEST_SCHEMA_MIGRATION), "utf8");
     const created = [...source.matchAll(/CREATE TABLE(?:\s+IF NOT EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
       .map((match) => match[1]);
@@ -36,7 +36,9 @@ describe("Schema sentinel drift", () => {
       .map((match) => match[1]);
     const renamed = [...source.matchAll(/ALTER TABLE\s+[A-Za-z_][A-Za-z0-9_]*\s+RENAME TO\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
       .map((match) => match[1]);
+    const indexed = [...source.matchAll(/CREATE INDEX(?:\s+IF NOT EXISTS)?\s+[A-Za-z_][A-Za-z0-9_]*\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
+      .map((match) => match[1]);
 
-    expect([...created, ...altered, ...renamed]).toContain(LATEST_SCHEMA_TABLE);
+    expect([...created, ...altered, ...renamed, ...indexed]).toContain(LATEST_SCHEMA_TABLE);
   });
 });

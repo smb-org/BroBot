@@ -108,20 +108,25 @@ const isTwitchUserId = (value: string): boolean => /^\d+$/.test(value);
  * box -- a Twitch user id is never what's displayed (#181 review). A value
  * that isn't already numeric is treated as a login (an optional leading "@"
  * is stripped, matching how a login is shown elsewhere in the dashboard) and
- * resolved to an id the same way member search already does. `null` here
- * means "no such person": the caller should short-circuit to an empty page
- * rather than run a query that can never match.
+ * resolved to an id. A confirmed empty result means "no such person"; an
+ * upstream failure stays distinct so the caller can report it instead of
+ * presenting an empty page as if the login were missing.
  */
+type AuditPersonFilterResolution =
+  | { kind: "resolved"; filters: PanelAuditFilters }
+  | { kind: "missing" }
+  | { kind: "failed" };
+
 const resolveAuditPersonFilter = async (
   environment: Env,
   filters: PanelAuditFilters,
-): Promise<PanelAuditFilters | null> => {
-  if (filters.person === null || isTwitchUserId(filters.person)) return filters;
+): Promise<AuditPersonFilterResolution> => {
+  if (filters.person === null || isTwitchUserId(filters.person)) return { kind: "resolved", filters };
   try {
-    const user = await fetchTwitchUserByLogin(fetch, environment, filters.person.replace(/^@/u, ""));
-    return user === null ? null : { ...filters, person: user.userId };
+    const user = await fetchTwitchUserByLogin(fetch, environment, filters.person.replace(/^@/u, ""), "app");
+    return user === null ? { kind: "missing" } : { kind: "resolved", filters: { ...filters, person: user.userId } };
   } catch {
-    return null;
+    return { kind: "failed" };
   }
 };
 
@@ -429,9 +434,10 @@ panelRouter.get(
     if (parsed instanceof Response) return parsed;
     const filters = parseAuditFilters(context);
     if (filters instanceof Response) return filters;
-    const resolvedFilters = await resolveAuditPersonFilter(context.env, filters);
-    if (resolvedFilters === null) return context.json({ entries: [], nextCursor: null });
-    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, resolvedFilters);
+    const personResolution = await resolveAuditPersonFilter(context.env, filters);
+    if (personResolution.kind === "missing") return context.json({ entries: [], nextCursor: null });
+    if (personResolution.kind === "failed") return context.json({ error: "twitch_user_search_failed" }, 502);
+    const audit = await getAuditLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, personResolution.filters);
     // The subject enrichment (#181 item 2/4) reuses the actor lookup's single
     // batched Twitch call -- a member action's target is just another user id
     // living in `before`/`after`, resolved the same way as the actor.

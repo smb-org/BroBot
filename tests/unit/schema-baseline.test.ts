@@ -19,8 +19,8 @@ describe("Schema baseline", () => {
     expect(files.at(-1)).toBe(LATEST_SCHEMA_MIGRATION);
   });
 
-  it("actually creates the table /healthz checks", () => {
-    const baseline = readFileSync(resolve(directory, LATEST_SCHEMA_MIGRATION), "utf8");
-    expect(baseline).toContain(`CREATE TABLE ${LATEST_SCHEMA_TABLE} `);
+  it("keeps the latest migration's indexed table aligned with the health check", () => {
+    const migration = readFileSync(resolve(directory, LATEST_SCHEMA_MIGRATION), "utf8");
+    expect(migration).toMatch(new RegExp(`CREATE\\s+INDEX\\s+\\w+\\s+ON\\s+${LATEST_SCHEMA_TABLE}\\s*\\(`, "i"));
   });
 });

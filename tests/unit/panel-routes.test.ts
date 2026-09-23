@@ -59,6 +59,23 @@ const insertBotIdentity = async (database: TestD1Database): Promise<void> => {
   ).run();
 };
 
+const insertAppAccessToken = async (database: TestD1Database): Promise<void> => {
+  const ciphertext = await encryptJson(
+    { token: "app-access-token" },
+    parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS),
+  );
+  await database.prepare(
+    `INSERT INTO twitch_app_access_token
+      (id, access_token_ciphertext, expires_at, created_at, updated_at)
+     VALUES (1, ?, ?, ?, ?)`,
+  ).bind(
+    ciphertext,
+    "2099-09-19T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+    "2026-09-18T00:00:00.000Z",
+  ).run();
+};
+
 const insertBotChannelStatus = async (
   database: TestD1Database,
   channelId: string,
@@ -81,6 +98,7 @@ const insertSessionCookie = async (userId: string): Promise<string> => createSes
 const makeEnvironment = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
   ...environmentKeys,
+  TWITCH_CLIENT_ID: "client-id",
   TWITCH_BOT_LOGIN: "brobot",
   PLATFORM_USER_IDS: JSON.stringify(["4711"]),
 } as unknown as Env);
@@ -763,7 +781,7 @@ describe("Panel read endpoints", () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
-    await insertBotIdentity(database);
+    await insertAppAccessToken(database);
     await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
@@ -772,9 +790,10 @@ describe("Panel read endpoints", () => {
       "audit-9002", "9002", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
       "audit-1", "user-1", "2026-09-18T03:00:00.000Z", "kanal-a", "module.disabled", "{}", "{}",
     ).run();
-    const twitch = vi.fn((input: RequestInfo | URL) => {
+    const twitch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       expect(url.searchParams.get("login")).toBe("sensitron");
+      expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer app-access-token");
       return Promise.resolve(Response.json({ data: [{ id: "9002", login: "sensitron", display_name: "sensitron" }] }));
     });
     vi.stubGlobal("fetch", twitch);
@@ -793,7 +812,7 @@ describe("Panel read endpoints", () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
-    await insertBotIdentity(database);
+    await insertAppAccessToken(database);
     await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
@@ -808,6 +827,22 @@ describe("Panel read endpoints", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ entries: [], nextCursor: null });
+  });
+
+  it("returns a Twitch search error when resolving a person login fails", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertAppAccessToken(database);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("upstream unavailable", { status: 503 }))));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=some_login"),
+      environment,
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "twitch_user_search_failed" });
   });
 });
 

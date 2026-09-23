@@ -51,8 +51,9 @@ interface FlattenedRecord {
  * lookup (module catalogue vs. generic fallback).
  */
 const flattenSettings = (record: Record<string, unknown> | null): FlattenedRecord => {
-  if (record === null) return { rest: {}, rawSettings: null, settings: null };
+  if (record === null) return { rest: {}, rawSettings: null, settings: {} };
   const { settings: rawSettings, ...rest } = record;
+  if (!Object.hasOwn(record, "settings")) return { rest, rawSettings: null, settings: {} };
   if (typeof rawSettings !== "string") return { rest, rawSettings: null, settings: null };
   return { rest, rawSettings, settings: parseObject(rawSettings) };
 };

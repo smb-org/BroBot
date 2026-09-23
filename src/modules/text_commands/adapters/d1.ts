@@ -26,26 +26,26 @@ const extraTemplateKeys = ["offlineText", "notFollowingText", "unavailableText",
  * after character 200 truncates to the same preview on both sides and the
  * audit diff would show no change at all.
  */
-const previewField = (key: string, text: string): Record<string, string> => {
-  const hash = textFingerprintIfTruncated(text);
+const previewField = async (key: string, text: string): Promise<Record<string, string>> => {
+  const hash = await textFingerprintIfTruncated(text);
   return hash === undefined ? { [key]: truncateTo200Chars(text) } : { [key]: truncateTo200Chars(text), [`${key}Hash`]: hash };
 };
 
-const auditValues = (command: TextCommand) => ({
+const auditValues = async (command: TextCommand) => ({
   name: command.name,
   kind: command.kind,
   enabled: command.enabled,
   minimumTier: command.minimumTier,
-  ...previewField("text", command.text),
+  ...await previewField("text", command.text),
   cooldownSeconds: command.cooldownSeconds,
   aliases: [...command.aliases],
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
   responseType: command.responseType,
-  ...(command.offlineText === undefined ? {} : previewField("offlineText", command.offlineText)),
-  ...(command.notFollowingText === undefined ? {} : previewField("notFollowingText", command.notFollowingText)),
-  ...(command.unavailableText === undefined ? {} : previewField("unavailableText", command.unavailableText)),
-  ...(command.usageText === undefined ? {} : previewField("usageText", command.usageText)),
+  ...(command.offlineText === undefined ? {} : await previewField("offlineText", command.offlineText)),
+  ...(command.notFollowingText === undefined ? {} : await previewField("notFollowingText", command.notFollowingText)),
+  ...(command.unavailableText === undefined ? {} : await previewField("unavailableText", command.unavailableText)),
+  ...(command.usageText === undefined ? {} : await previewField("usageText", command.usageText)),
 });
 
 const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
@@ -296,7 +296,7 @@ export const createTextCommandRepository = (
       moduleId: MODULE_ID,
       action: "text_commands.command.created" satisfies AuditAction,
       before: null,
-      after: auditValues(after),
+      after: await auditValues(after),
     }, input.now);
     if (changes > 0) return succeeded();
     if (await this.find(input.channelId, input.name) !== null) return failed("already_exists");
@@ -426,8 +426,8 @@ export const createTextCommandRepository = (
       channelId: input.channelId,
       moduleId: MODULE_ID,
       action: "text_commands.command.updated" satisfies AuditAction,
-      before: auditValues(before),
-      after: auditValues(after),
+      before: await auditValues(before),
+      after: await auditValues(after),
     }, input.now);
     if (changes > 0) return succeeded();
 
@@ -471,7 +471,7 @@ export const createTextCommandRepository = (
       channelId,
       moduleId: MODULE_ID,
       action: "text_commands.command.removed" satisfies AuditAction,
-      before: auditValues(before),
+      before: await auditValues(before),
       after: null,
     }, now);
     if (changes > 0) return succeeded();
