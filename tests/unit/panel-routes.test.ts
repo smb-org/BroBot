@@ -298,6 +298,57 @@ describe("Panel read endpoints", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("returns the real Helix stream start, not the check time, when backfilling via Helix (#178)", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+    );
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "live-1", started_at: "2026-09-20T10:00:00.000Z" }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      { ...environment, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      channelId: "kanal-a",
+      streamState: "online",
+      streamStartedAt: "2026-09-20T10:00:00.000Z",
+    });
+  });
+
+  it("returns the stored stream start for an EventSub-sourced online row, not its changed_at (#178)", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
+       VALUES ('kanal-a', 'online', '2026-09-23T08:05:00.000Z', 'eventsub', '2026-09-23T08:00:00.000Z')`,
+    ).run();
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      channelId: "kanal-a",
+      streamState: "online",
+      streamStartedAt: "2026-09-23T08:00:00.000Z",
+    });
+  });
+
   it("returns the stored scope state and all EventSub subscriptions in the system contract", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");

@@ -43,7 +43,7 @@ import { writeModuleAudit } from "../module-audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { isChannelControlInput, setChannelControl, type ChannelControlKind } from "../db/channel-controls";
-import { lookupAndStoreStreamStateIfMissing } from "../stream-state-lookup";
+import { lookupAndRefreshStreamState } from "../stream-state-lookup";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -194,11 +194,11 @@ panelRouter.get(
     if (overview === null) return context.json({ error: "channel_not_found" }, 404);
     if (overview.streamState !== null && overview.streamState !== undefined) return context.json(overview);
     const checkedAt = nowIso();
-    const looked = await lookupAndStoreStreamStateIfMissing(context.env, channelId, checkedAt);
-    return context.json(looked === null ? overview : {
+    const looked = await lookupAndRefreshStreamState(context.env, channelId, checkedAt);
+    return context.json(looked.state === null ? overview : {
       ...overview,
-      streamState: looked,
-      ...(looked === "online" ? { streamStartedAt: checkedAt } : {}),
+      streamState: looked.state,
+      ...(looked.startedAt === null ? {} : { streamStartedAt: looked.startedAt }),
     });
   },
 );

@@ -345,7 +345,6 @@ export interface DashboardTexts {
     checksNeedAttention: (problems: string, checks: string) => string;
     /** Shortcut labels used by Spotlight; action cards use their module catalogue. */
     runAd: (length: string) => string;
-    adDisabledOffline: string;
     createClip: string;
     sendShoutout: string;
     feedTitle: string;
@@ -554,7 +553,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       checksHealthy: (count) => `Alles in Ordnung · ${count} Prüfungen`,
       checksNeedAttention: (problems, checks) => `${problems} auffällige ${problems === "1" ? "Prüfung" : "Prüfungen"} · ${checks} Prüfungen`,
       runAd: (length) => `Werbung jetzt (${length}s)`,
-      adDisabledOffline: "Der Stream ist offline.",
       createClip: "Clip erstellen",
       sendShoutout: "Shoutout senden",
       feedTitle: "Warnungen und Fehler",
@@ -746,7 +744,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       checksHealthy: (count) => `All clear · ${count} checks`,
       checksNeedAttention: (problems, checks) => `${problems} ${problems === "1" ? "check needs" : "checks need"} attention · ${checks} checks`,
       runAd: (length) => `Run ad now (${length}s)`,
-      adDisabledOffline: "The stream is offline.",
       createClip: "Create clip",
       sendShoutout: "Send shoutout",
       feedTitle: "Warnings and errors",
