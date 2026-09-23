@@ -55,6 +55,20 @@ jobs:
               -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
               .dev.vars.example > .dev.vars
       - run: pnpm run test
+      # Non-blocking: reports test duplication, never fails the job or the
+      # `quality` gate. Sonar itself no longer measures duplication over
+      # tests/ (see .sonarcloud.properties) — this is the replacement signal.
+      - name: Testduplikate melden (jscpd)
+        continue-on-error: true
+        run: pnpm run dup:tests
+      - name: jscpd-Report hochladen
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: jscpd-report
+          path: reports/jscpd
+          if-no-files-found: ignore
+          retention-days: 14
 
   worker:
     runs-on: ubuntu-latest
