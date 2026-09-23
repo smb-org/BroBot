@@ -42,6 +42,9 @@ describe("create clip", () => {
   beforeEach(async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'clips', 1, '{}')",
+    ).run();
     await upsertBotIdentity(database as unknown as D1Database, {
       id: 1,
       userId: "bot-1",
@@ -81,6 +84,19 @@ describe("create clip", () => {
     await expect(database.prepare(
       "SELECT action, module_id FROM audit_log WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ action: "clip.created", module_id: null });
+  });
+
+  it("rejects clip creation after the clips module is disabled", async () => {
+    const environment = await asMember("operator");
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = 'kanal-a' AND module_id = 'clips'").run();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/clips"), environment);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "module_disabled" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("reports a missing bot scope as its own outcome", async () => {

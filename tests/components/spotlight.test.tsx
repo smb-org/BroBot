@@ -51,7 +51,7 @@ describe("Channel Spotlight", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "raid" } });
-    const action = await screen.findByText("Raid-Shoutout");
+    const action = await screen.findByText("Shoutout");
     fireEvent.click(action);
 
     expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "raid" });
@@ -59,10 +59,12 @@ describe("Channel Spotlight", () => {
 
   it("shows registered action and entity groups in order when opened", async () => {
     stubFetch();
-    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" streamState="online" modules={[{ id: "clips", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
 
     fireEvent.keyDown(document.body, { key: "k", metaKey: true });
     await screen.findByRole("dialog");
+    await screen.findByText("!clip");
+    await screen.findByText("Max");
 
     const dialog = screen.getByRole("dialog");
     const groupLabels = ["Aktionen", "Module", "Befehle", "Mitglieder"].map((label) => `'${label}'`);
@@ -191,7 +193,7 @@ describe("Channel Spotlight", () => {
 
   it("runs the parametrized shoutout action with the typed login", async () => {
     const fetcher = stubFetch();
-    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="operator" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="operator" streamState="online" modules={[{ id: "raid", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
 
     fireEvent.keyDown(document.body, { key: "k", metaKey: true });
     await screen.findByRole("dialog");
@@ -204,6 +206,49 @@ describe("Channel Spotlight", () => {
       expect(call).toBeDefined();
       const body = call?.[1]?.body;
       expect(JSON.parse(typeof body === "string" ? body : "{}") as unknown).toEqual({ login: "streamerin" });
+    });
+  });
+
+  it("hides ad-now, clip, and shoutout when their modules are disabled (#178)", async () => {
+    stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" streamState="online" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+
+    expect(screen.queryByText("Werbung jetzt (60s)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Clip erstellen")).not.toBeInTheDocument();
+    expect(screen.queryByText("Shoutout senden")).not.toBeInTheDocument();
+  });
+
+  it("disables the clip action while the stream is offline, with the module's own reason (#178)", async () => {
+    stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" streamState="offline" modules={[{ id: "clips", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+
+    const clipAction = (await screen.findByText("Clip erstellen")).closest(".mantine-Spotlight-action");
+    expect(clipAction).toHaveTextContent("Der Stream ist offline.");
+  });
+
+  it("lets an operator run ad-now while live -- the endpoint has no role check (#178)", async () => {
+    const fetcher = stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="operator" streamState="online" modules={[{ id: "ads", enabled: true, settings: "{}" }]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+
+    const adNowAction = (await screen.findByText("Werbung jetzt (60s)")).closest(".mantine-Spotlight-action");
+    expect(adNowAction).not.toHaveTextContent("Nur Broadcaster und Verwalter dürfen Module ändern.");
+    fireEvent.click(await screen.findByText("Werbung jetzt (60s)"));
+
+    await vi.waitFor(() => {
+      const call = fetcher.mock.calls.find(([input, init]) =>
+        requestUrl(input).pathname === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST");
+      expect(call).toBeDefined();
+      const body = call?.[1]?.body;
+      expect(JSON.parse(typeof body === "string" ? body : "{}") as unknown).toEqual({ length: 60 });
     });
   });
 });

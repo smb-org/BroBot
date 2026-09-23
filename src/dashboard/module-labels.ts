@@ -13,13 +13,15 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     text_commands: "Textbefehle",
     channel_events: "Kanalereignisse",
     ads: "Werbung",
-    raid: "Raid-Shoutout",
+    raid: "Shoutout",
+    clips: "Clips",
   },
   en: {
     text_commands: "Text commands",
     channel_events: "Channel events",
     ads: "Ad breaks",
-    raid: "Raid shoutout",
+    raid: "Shoutout",
+    clips: "Clips",
   },
 };
 
@@ -114,13 +116,15 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     text_commands: "Antwortet auf kurze Befehle im Chat.",
     channel_events: "Protokolliert, was im Kanal geschieht.",
     ads: "Kündigt beginnende Werbepausen im Chat an.",
-    raid: "Begrüßt eingehende Raids und löst ab einer Schwelle einen Helix-Shoutout aus.",
+    raid: "Begrüßt eingehende Raids und ermöglicht manuelle Shoutouts.",
+    clips: "Erstellt manuell einen Clip des laufenden Streams.",
   },
   en: {
     text_commands: "Replies to short commands in chat.",
     channel_events: "Records what happens in the channel.",
     ads: "Announces beginning ad breaks in chat.",
-    raid: "Greets incoming raids and sends a Helix shoutout above a threshold.",
+    raid: "Greets incoming raids and lets you send manual shoutouts.",
+    clips: "Creates a clip from the live stream on demand.",
   },
 };
 

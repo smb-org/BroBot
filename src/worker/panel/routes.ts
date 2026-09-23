@@ -43,6 +43,8 @@ import { writeModuleAudit } from "../module-audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { isChannelControlInput, setChannelControl, type ChannelControlKind } from "../db/channel-controls";
+import { lookupAndRefreshStreamState } from "../stream-state-lookup";
+import { getChannelModuleForChannel } from "../db/channel-modules";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -190,9 +192,14 @@ panelRouter.get(
     const session = context.get("session");
     const channelId = context.req.param("channelId");
     const overview = await getChannelOverviewForUser(context.env.DB, session.userId, channelId);
-    return overview === null
-      ? context.json({ error: "channel_not_found" }, 404)
-      : context.json(overview);
+    if (overview === null) return context.json({ error: "channel_not_found" }, 404);
+    const checkedAt = nowIso();
+    const looked = await lookupAndRefreshStreamState(context.env, channelId, checkedAt);
+    return context.json(looked.state === null ? overview : {
+      ...overview,
+      streamState: looked.state,
+      streamStartedAt: looked.startedAt,
+    });
   },
 );
 
@@ -287,6 +294,9 @@ panelRouter.post(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
+    const clipsModule = await getChannelModuleForChannel(context.env.DB, channelId, "clips");
+    if (clipsModule === null) return context.json({ error: "module_not_configured" }, 404);
+    if (!clipsModule.enabled) return context.json({ error: "module_disabled" }, 409);
     const triggerId = `clip:${crypto.randomUUID()}`;
     const now = nowIso();
     const credentials = await readBotCredentials(context.env);
@@ -339,6 +349,9 @@ panelRouter.post(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
+    const raidModule = await getChannelModuleForChannel(context.env.DB, channelId, "raid");
+    if (raidModule === null) return context.json({ error: "module_not_configured" }, 404);
+    if (!raidModule.enabled) return context.json({ error: "module_disabled" }, 409);
     const triggerId = `shoutout:${crypto.randomUUID()}`;
     const now = nowIso();
     const body: unknown = await context.req.json().catch(() => null);
