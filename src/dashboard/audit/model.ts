@@ -100,11 +100,17 @@ export const auditDiffRows = (beforeJson: string, afterJson: string): AuditDiffR
         if (deepEqual(oldValue, newValue)) {
           // A preview can be identical on both sides while the full value
           // (only its fingerprint is stored) differs -- an edit past the
-          // preview's truncation cutoff must still surface as a change.
+          // preview's truncation cutoff must still surface as a change. A
+          // hash on only one side already proves a difference (a literal,
+          // non-truncated preview colliding with a truncated one) without
+          // needing to compare anything else.
           const hashKey = `${key}${HASH_SUFFIX}`;
+          const hasOldHash = Object.hasOwn(beforeFields, hashKey);
+          const hasNewHash = Object.hasOwn(afterFields, hashKey);
           const oldHash = beforeFields[hashKey];
           const newHash = afterFields[hashKey];
-          if (oldHash !== undefined && newHash !== undefined && !deepEqual(oldHash, newHash)) {
+          const differs = hasOldHash !== hasNewHash || (hasOldHash && hasNewHash && !deepEqual(oldHash, newHash));
+          if (differs) {
             rows.push({ key, kind: "changed-truncated", oldValue, newValue, fromSettings });
           }
           continue;

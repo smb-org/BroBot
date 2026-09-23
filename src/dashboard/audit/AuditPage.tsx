@@ -124,13 +124,13 @@ const AuditDiffList = ({ rows, moduleCatalog, texts }: {
   </dl>;
 };
 
-/** Loads the field catalogue for a `${moduleId}.settings_changed` entry's diff labels -- lazily, only while its inspector is open (module settings editors are code-split, see `modules/contract.ts`'s `settingsEditor`). */
+/** Loads the field catalogue for an entry whose diff carries settings fields -- lazily, only while its inspector is open (module settings editors are code-split, see `modules/contract.ts`'s `settingsEditor`). Not just `*.settings_changed`: `module.enabled` (first enable, or a re-enable resetting to defaults) carries settings too, so its diff needs the same labels instead of raw keys. */
 const useModuleFieldCatalog = (entry: PanelAuditEntry | null): SettingsEditorCatalog | null => {
   const [loaded, setLoaded] = useState<{ moduleId: string; catalog: SettingsEditorCatalog } | null>(null);
   const moduleId = entry?.moduleId ?? null;
-  const isSettingsChange = entry !== null && entry.action.endsWith(".settings_changed");
+  const hasSettingsFields = entry !== null && auditDiffRows(entry.before, entry.after).some((row) => row.fromSettings);
   useEffect(() => {
-    if (!isSettingsChange || moduleId === null) return;
+    if (!hasSettingsFields || moduleId === null) return;
     const module = MODULES.find((candidate) => candidate.id === moduleId);
     if (module?.settingsEditor === undefined) return;
     let active = true;
@@ -138,7 +138,7 @@ const useModuleFieldCatalog = (entry: PanelAuditEntry | null): SettingsEditorCat
       if (active) setLoaded({ moduleId, catalog: definition.default.locales[dashboardLanguage()] });
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [isSettingsChange, moduleId]);
+  }, [hasSettingsFields, moduleId]);
   return loaded !== null && loaded.moduleId === moduleId ? loaded.catalog : null;
 };
 

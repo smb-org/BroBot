@@ -126,6 +126,27 @@ describe("auditDiffRows", () => {
     expect(auditDiffRows(before, after)).toEqual([]);
   });
 
+  it("flags a preview-identical field as changed when only the new side has a hash (#187 review)", () => {
+    // A literal 200-char value ending in "…" (not actually truncated, so no
+    // hash) can share its preview with a longer, truncated value (which does
+    // have one) -- a real edit that must not hide behind the matching preview.
+    const preview = `${"A".repeat(199)}…`;
+    const before = JSON.stringify({ text: preview });
+    const after = JSON.stringify({ text: preview, textHash: "bbb2" });
+    expect(auditDiffRows(before, after)).toEqual([
+      { key: "text", kind: "changed-truncated", oldValue: preview, newValue: preview, fromSettings: false },
+    ]);
+  });
+
+  it("flags a preview-identical field as changed when only the old side has a hash (#187 review)", () => {
+    const preview = `${"A".repeat(199)}…`;
+    const before = JSON.stringify({ text: preview, textHash: "aaa1" });
+    const after = JSON.stringify({ text: preview });
+    expect(auditDiffRows(before, after)).toEqual([
+      { key: "text", kind: "changed-truncated", oldValue: preview, newValue: preview, fromSettings: false },
+    ]);
+  });
+
   it("never shows a `Hash` companion field as its own row", () => {
     const before = JSON.stringify({ text: "old", textHash: "aaa1" });
     const after = JSON.stringify({ text: "new", textHash: "bbb2" });

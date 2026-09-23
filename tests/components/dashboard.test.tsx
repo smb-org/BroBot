@@ -1441,6 +1441,40 @@ describe("Dashboard skeleton", () => {
     expect(row).toHaveAttribute("aria-selected", "false");
   });
 
+  it("labels a module.enabled entry's settings diff with the module's own field catalogue, not the raw key", async () => {
+    // #187 review: `module.enabled` carries settings too (first enable, or a
+    // re-enable resetting to defaults) -- its diff needs the module's own
+    // field labels just like `*.settings_changed`, not raw keys like "leadSeconds".
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const auditEntry = {
+      auditId: "audit-1",
+      actorUserId: "user-1",
+      actorLogin: "alice",
+      actorDisplayName: "Alice",
+      createdAt: "2026-09-18T04:00:00.000Z",
+      moduleId: "ads",
+      action: "module.enabled",
+      before: "null",
+      after: JSON.stringify({ channelId: "kanal-a", moduleId: "ads", enabled: true, settings: JSON.stringify({ prewarning: true, leadSeconds: 60 }) }),
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/audit-log")) return jsonResponse({ entries: [auditEntry], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/audit");
+
+    render(<DashboardApp />);
+
+    const row = await screen.findByText("Modul aktiviert: Werbung");
+    fireEvent.click(row);
+    const inspector = await screen.findByRole("region", { name: "Änderungsdaten" });
+    expect(await within(inspector).findByText("Vorlaufzeit")).toBeInTheDocument();
+    expect(within(inspector).queryByText("leadSeconds")).not.toBeInTheDocument();
+  });
+
   it("shows all subscriptions legibly and opens message and status in the sub-inspector", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
     const subscriptions = [
