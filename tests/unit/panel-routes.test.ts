@@ -286,14 +286,15 @@ describe("Panel read endpoints", () => {
     ).first()).resolves.toEqual({ state: "online", source: "helix" });
   });
 
-  it("does not call Helix from the overview route when a stream state row already exists", async () => {
+  it("does not call Helix from the overview route when a fresh stream state row exists", async () => {
+    const changedAt = new Date().toISOString();
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
     await database.prepare(
       `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
-       VALUES ('kanal-a', 'offline', '2026-09-23T08:00:00.000Z', 'eventsub')`,
-    ).run();
+       VALUES ('kanal-a', 'offline', ?, 'eventsub')`,
+    ).bind(changedAt).run();
     await insertStreamEventSubCoverage(database, "kanal-a");
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);

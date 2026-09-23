@@ -1,7 +1,7 @@
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
 import {
-  hasActiveStreamEventSubCoverage,
+  prepareRefreshHelixStreamState,
   readChannelStreamState,
   refreshHelixStreamState,
   writeHelixStreamStateIfUnknown,
@@ -9,7 +9,7 @@ import {
   type StoredStreamStateRecord,
 } from "./db/stream-state";
 import { listChannelIdsNeedingStreamStateRefresh } from "./db/channels";
-import { clearStreamEndChannelControls } from "./db/channel-controls";
+import { prepareHelixOfflineStreamEndControlsCleanup } from "./db/channel-controls";
 import { logMaintenanceError } from "./bot-maintenance";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -17,9 +17,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const arrayValue = (value: unknown): value is readonly unknown[] => Array.isArray(value);
 
 /**
- * A channel without active stream EventSub coverage cannot keep its stored
- * state current from events. Ten minutes bounds how stale a Helix guess is
- * allowed to get before the next read pays for a fresh Helix call.
+ * Ten minutes bounds how stale any stored stream state may get before the
+ * next read pays for a fresh Helix check.
  */
 const HELIX_STREAM_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -63,8 +62,8 @@ const fetchLiveStreamState = async (
   }
 };
 
-const isStaleHelixRow = (row: StoredStreamStateRecord, now: string): boolean =>
-  row.source === "helix" && Date.parse(now) - Date.parse(row.changedAt) >= HELIX_STREAM_STATE_TTL_MS;
+const isStaleRow = (row: StoredStreamStateRecord, now: string): boolean =>
+  Date.parse(now) - Date.parse(row.changedAt) >= HELIX_STREAM_STATE_TTL_MS;
 
 const asResult = (stored: StoredStreamStateRecord | null, rateLimited = false): StreamStateLookupResult => ({
   state: stored?.state ?? null,
@@ -74,16 +73,14 @@ const asResult = (stored: StoredStreamStateRecord | null, rateLimited = false): 
 
 /**
  * Looks up a channel's live state through Helix Get Streams and stores it
- * (`source: 'helix'`) -- on a first lookup, once a Helix-sourced row has gone
- * stale (`HELIX_STREAM_STATE_TTL_MS`), or when either stream EventSub
- * subscription is no longer active. A fresh Helix row or covered EventSub
- * row is returned as-is, with no Helix call at all.
+ * (`source: 'helix'`) -- on a first lookup or once any stored row has gone
+ * stale (`HELIX_STREAM_STATE_TTL_MS`). A fresh row is returned as-is, with
+ * no Helix call at all.
  *
  * Both writes are conditional: `writeHelixStreamStateIfUnknown`'s
  * `ON CONFLICT DO NOTHING` means a concurrent EventSub write always wins the
- * race on a first lookup, and `refreshHelixStreamState` only takes over an
- * EventSub row while coverage is absent. Its SQL guard prevents concurrent
- * restored coverage and an EventSub write from being clobbered.
+ * race on a first lookup. Refresh writes only use timestamp ordering, so a
+ * newer EventSub transition wins over a poll already in flight.
  */
 export const lookupAndRefreshStreamState = async (
   env: Env,
@@ -92,11 +89,7 @@ export const lookupAndRefreshStreamState = async (
   fetcher: typeof fetch = fetch,
 ): Promise<StreamStateLookupResult> => {
   const stored = await readChannelStreamState(env.DB, channelId);
-  const eventSubCoverage = stored?.source === "eventsub"
-    ? await hasActiveStreamEventSubCoverage(env.DB, channelId)
-    : true;
-  const eventSubCoverageLost = stored?.source === "eventsub" && !eventSubCoverage;
-  if (stored !== null && !isStaleHelixRow(stored, now) && !eventSubCoverageLost) return asResult(stored);
+  if (stored !== null && !isStaleRow(stored, now)) return asResult(stored);
 
   const fromHelix = await fetchLiveStreamState(env, channelId, now, fetcher);
   if (fromHelix === "rate_limited") return asResult(stored, true);
@@ -108,15 +101,18 @@ export const lookupAndRefreshStreamState = async (
     return asResult(await readChannelStreamState(env.DB, channelId));
   }
 
-  const refreshed = await refreshHelixStreamState(env.DB, channelId, fromHelix.state, now, fromHelix.startedAt);
-  if (refreshed && stored.state === "online" && fromHelix.state === "offline") {
-    await clearStreamEndChannelControls(env.DB, channelId, now);
+  if (stored.state === "online" && fromHelix.state === "offline") {
+    await env.DB.batch([
+      prepareRefreshHelixStreamState(env.DB, channelId, fromHelix.state, now, fromHelix.startedAt),
+      prepareHelixOfflineStreamEndControlsCleanup(env.DB, channelId, now),
+    ]);
+  } else {
+    await refreshHelixStreamState(env.DB, channelId, fromHelix.state, now, fromHelix.startedAt);
   }
   return asResult(await readChannelStreamState(env.DB, channelId));
 };
 
-/** Hourly cron task: backfills missing states, refreshes stale Helix rows,
- *  and moves uncovered EventSub rows to Helix polling. */
+/** Hourly cron task: backfills missing states and refreshes any stale row. */
 export const maintainStreamStates = async (
   env: Env,
   now: string,

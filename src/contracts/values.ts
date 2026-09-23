@@ -270,6 +270,7 @@ export const API_ERROR_CODES = [
   "module_management_denied",
   "module_unknown",
   "module_not_configured",
+  "module_disabled",
   "module_settings_invalid",
   "module_settings_changed_concurrently",
   "module_enabled_field_invalid",

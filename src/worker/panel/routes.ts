@@ -44,6 +44,7 @@ import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { isChannelControlInput, setChannelControl, type ChannelControlKind } from "../db/channel-controls";
 import { lookupAndRefreshStreamState } from "../stream-state-lookup";
+import { getChannelModuleForChannel } from "../db/channel-modules";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -293,6 +294,9 @@ panelRouter.post(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
+    const clipsModule = await getChannelModuleForChannel(context.env.DB, channelId, "clips");
+    if (clipsModule === null) return context.json({ error: "module_not_configured" }, 404);
+    if (!clipsModule.enabled) return context.json({ error: "module_disabled" }, 409);
     const triggerId = `clip:${crypto.randomUUID()}`;
     const now = nowIso();
     const credentials = await readBotCredentials(context.env);
@@ -345,6 +349,9 @@ panelRouter.post(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
+    const raidModule = await getChannelModuleForChannel(context.env.DB, channelId, "raid");
+    if (raidModule === null) return context.json({ error: "module_not_configured" }, 404);
+    if (!raidModule.enabled) return context.json({ error: "module_disabled" }, 409);
     const triggerId = `shoutout:${crypto.randomUUID()}`;
     const now = nowIso();
     const body: unknown = await context.req.json().catch(() => null);

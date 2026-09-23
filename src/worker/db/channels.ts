@@ -8,10 +8,10 @@ export const listChannelIds = async (db: D1Database): Promise<string[]> => {
 };
 
 /**
- * Channels the stream-state cron should (re-)poll this tick: no row yet,
- * stale Helix rows, or EventSub rows without both active stream transition
- * subscriptions. Missing rows come first, followed by the oldest stored
- * state, so a capped tick does not starve the tail of a backlog.
+ * Channels the stream-state cron should (re-)poll this tick: no row yet or
+ * any stored state older than the refresh TTL. Missing rows come first,
+ * followed by the oldest stored state, so a capped tick does not starve the
+ * tail of a backlog.
  */
 export const listChannelIdsNeedingStreamStateRefresh = async (
   db: D1Database,
@@ -25,22 +25,7 @@ export const listChannelIdsNeedingStreamStateRefresh = async (
        LEFT JOIN channel_stream_state AS stream_state
          ON stream_state.channel_id = channel.channel_id
       WHERE stream_state.channel_id IS NULL
-         OR (stream_state.source = 'helix'
-             AND strftime('%s', ?) - strftime('%s', stream_state.changed_at) >= ?)
-         OR (stream_state.source = 'eventsub' AND (
-              NOT EXISTS (
-                SELECT 1 FROM eventsub_subscriptions
-                 WHERE channel_id = channel.channel_id
-                   AND subscription_type = 'stream.online'
-                   AND status = 'enabled' AND subscription_id IS NOT NULL
-              )
-              OR NOT EXISTS (
-                SELECT 1 FROM eventsub_subscriptions
-                 WHERE channel_id = channel.channel_id
-                   AND subscription_type = 'stream.offline'
-                   AND status = 'enabled' AND subscription_id IS NOT NULL
-              )
-         ))
+         OR julianday(?) - julianday(stream_state.changed_at) >= (? / 86400.0)
       ORDER BY CASE WHEN stream_state.channel_id IS NULL THEN 0 ELSE 1 END,
                stream_state.changed_at ASC,
                channel.channel_id ASC

@@ -291,6 +291,27 @@ describe("Stream Manager immediate actions", () => {
     expect(await screen.findByText("Twitch-Abklingzeit aktiv")).toBeInTheDocument();
   });
 
+  it.each([
+    ["twitch_user_not_found", "Twitch-Nutzer nicht gefunden."],
+    ["twitch_user_search_failed", "Twitch-Nutzersuche ist fehlgeschlagen."],
+  ])("localizes a top-level %s error when a manual shoutout fails", async (code, message) => {
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path === "/api/channels/kanal-a/shoutout" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ error: code }, code === "twitch_user_not_found" ? 404 : 502));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" streamState="online" modules={RAID_ENABLED} />);
+
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "streamerin" } });
+    fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+  });
+
   it("creates a clip and offers a link to it", async () => {
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = requestUrl(input).pathname;
