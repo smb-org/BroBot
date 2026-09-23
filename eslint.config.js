@@ -25,6 +25,10 @@ const tablerBoundaryPath = {
   name: "@tabler/icons-react",
   message: "Tabler icons may only be imported from src/dashboard/ui/Icon.tsx.",
 };
+const richTextareaBoundaryPattern = {
+  group: ["rich-textarea", "rich-textarea/*"],
+  message: "Import rich-textarea only from src/dashboard/ui/.",
+};
 
 const moduleIsolationPatterns = [
   {
@@ -37,6 +41,7 @@ const moduleIsolationPatterns = [
   },
   mantineBoundaryPattern,
   tablerBoundaryPattern,
+  richTextareaBoundaryPattern,
 ];
 
 const overlayBoundaryPatterns = [
@@ -54,11 +59,12 @@ const overlayBoundaryPatterns = [
   },
   mantineBoundaryPattern,
   tablerBoundaryPattern,
+  richTextareaBoundaryPattern,
 ];
 
 const overlayRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
-  ...overlayBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern),
+  ...overlayBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern && pattern !== richTextareaBoundaryPattern),
 ];
 
 const panelBoundaryPatterns = [
@@ -76,11 +82,12 @@ const panelBoundaryPatterns = [
   },
   mantineBoundaryPattern,
   tablerBoundaryPattern,
+  richTextareaBoundaryPattern,
 ];
 
 const panelRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
-  ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern),
+  ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern && pattern !== richTextareaBoundaryPattern),
 ];
 
 export default defineConfig(
@@ -109,7 +116,7 @@ export default defineConfig(
     files: ["**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"],
     ignores: ["src/dashboard/ui/Icon.tsx"],
     rules: {
-      "no-restricted-imports": ["error", { paths: [tablerBoundaryPath] }],
+      "no-restricted-imports": ["error", { paths: [tablerBoundaryPath], patterns: [richTextareaBoundaryPattern] }],
     },
   },
   {
@@ -219,6 +226,7 @@ export default defineConfig(
             tablerBoundaryPath,
           ],
           patterns: [
+            richTextareaBoundaryPattern,
             {
               regex: "^react(?:/|$)",
               message: "Der Worker darf React nicht importieren.",
