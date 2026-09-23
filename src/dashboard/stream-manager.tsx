@@ -4,7 +4,7 @@ import type { PanelEventEntry } from "../panel-contract";
 import { createClip, fetchEvents, PanelApiError, sendManualShoutout, startCommercial } from "./api";
 import { apiErrorText, dashboardLanguage, dashboardTexts, eventText, formatStreamManagerFeedTime } from "./locale";
 import { eventDetail, eventMetadata } from "./events/model";
-import { Button, Field, Select } from "./ui";
+import { Button, Field, SegmentedControl } from "./ui";
 import { Icon } from "./ui/Icon";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 
@@ -44,10 +44,11 @@ const AdNowAction = ({ channelId }: { channelId: string }): ReactElement => {
     <div className="stream-manager-action">
       <div className="stream-manager-action__controls">
         <div className="stream-manager-action__field stream-manager-action__field--length">
-          <Select
+          <SegmentedControl
             label={texts.streamManager.adLength}
-            value={length}
-            onChange={setLength}
+            hint={texts.streamManager.adLengthHint}
+            value={length ?? ""}
+            onChange={(next) => { setLength(next); }}
             options={AD_LENGTHS.map((value) => ({ value, label: `${value}s` }))}
             disabled={state.pending}
           />
@@ -79,23 +80,27 @@ const ShoutoutAction = ({ channelId }: { channelId: string }): ReactElement => {
     }
   };
 
+  const emptyReasonId = "stream-manager-shoutout-reason";
+
   return (
     <div className="stream-manager-action">
       <div className="stream-manager-action__controls">
         <div className="stream-manager-action__field">
           <Field
             label={texts.streamManager.shoutoutLogin}
+            hint={texts.streamManager.shoutoutLoginHint}
+            prefix="@"
             value={login}
             onChange={setLogin}
             disabled={state.pending}
             onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void run(); } }}
           />
         </div>
-        <Button icon="shoutout" variant="primary" disabled={state.pending || login.trim().length === 0} onClick={() => { void run(); }}>
+        <Button icon="shoutout" variant="primary" disabled={state.pending || login.trim().length === 0} {...(login.trim().length === 0 ? { describedBy: emptyReasonId } : {})} onClick={() => { void run(); }}>
           {texts.streamManager.sendShoutout}
         </Button>
       </div>
-      {login.trim().length === 0 ? <p className="muted stream-manager-action__reason">{texts.streamManager.shoutoutLoginRequired}</p> : null}
+      {login.trim().length === 0 ? <p id={emptyReasonId} className="muted stream-manager-action__reason">{texts.streamManager.shoutoutLoginRequired}</p> : null}
       {state.success === null ? null : <p className="form-success" role="status">{state.success}</p>}
       {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}
     </div>

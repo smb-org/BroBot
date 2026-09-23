@@ -46,7 +46,7 @@ describe("Stream Manager immediate actions", () => {
 
     const adButton = screen.getByRole("button", { name: /Werbung jetzt/ });
     const adControls = adButton.closest(".stream-manager-action__controls");
-    const adLength = within(adControls as HTMLElement).getByRole("combobox");
+    const adLength = within(adControls as HTMLElement).getByRole("radiogroup");
     expect(adControls?.firstElementChild).toContainElement(adLength);
     expect(adControls?.lastElementChild).toBe(adButton);
 
@@ -57,6 +57,50 @@ describe("Stream Manager immediate actions", () => {
     expect(shoutoutControls?.lastElementChild).toBe(shoutoutButton);
     expect(shoutoutButton).toBeDisabled();
     expect(screen.getByText("Bitte gib einen Twitch-Namen ein.")).toBeInTheDocument();
+    expect(shoutoutButton).toHaveAttribute("aria-describedby", expect.stringContaining("stream-manager-shoutout-reason"));
+  });
+
+  it("offers all six ad lengths as a segment and runs the one that's clicked", async () => {
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST") {
+        expect(JSON.parse(typeof init.body === "string" ? init.body : "{}") as unknown).toEqual({ length: 180 });
+        return Promise.resolve(jsonResponse({ length: 180, message: null, retryAfter: 480 }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+
+    const group = screen.getByRole("radiogroup", { name: "Werbedauer" });
+    for (const seconds of ["30", "60", "90", "120", "150", "180"]) {
+      expect(within(group).getByRole("radio", { name: `${seconds}s` })).toBeInTheDocument();
+    }
+    fireEvent.click(within(group).getByRole("radio", { name: "180s" }));
+    fireEvent.click(screen.getByRole("button", { name: "Werbung jetzt (180s)" }));
+
+    expect(await screen.findByText("Werbung gestartet (180s)")).toBeInTheDocument();
+  });
+
+  it("strips a leading @ from the shoutout login and sends the bare name", async () => {
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (path === "/api/channels/kanal-a/shoutout" && init?.method === "POST") {
+        expect(JSON.parse(typeof init.body === "string" ? init.body : "{}") as unknown).toEqual({ login: "streamerin" });
+        return Promise.resolve(jsonResponse({ sent: true }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "@streamerin" } });
+    expect(screen.getByLabelText("Twitch-Name")).toHaveValue("streamerin");
+    fireEvent.click(screen.getByRole("button", { name: "Shoutout senden" }));
+
+    expect(await screen.findByText("Shoutout an streamerin gesendet")).toBeInTheDocument();
   });
 
   it("shows the matching aria-hidden Tabler icon without changing each action's accessible name", () => {
