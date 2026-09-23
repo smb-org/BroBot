@@ -6,9 +6,14 @@ export type {
   TextCommandChange,
   TextCommandClaim,
   TextCommandActor,
+  TextCommandResponseType,
+  TextCommandStreamCondition,
 } from "./contracts";
 export {
+  TEXT_COMMAND_MAX_ALIASES,
   TEXT_COMMAND_MINIMUM_TIERS,
+  TEXT_COMMAND_RESPONSE_TYPES,
+  TEXT_COMMAND_STREAM_CONDITIONS,
   TEXT_COMMAND_TEMPLATE_FIELDS,
   TEXT_COMMAND_VARIABLES,
 } from "./contracts";
@@ -41,5 +46,6 @@ export const textCommandModule: BotModule<typeof settingsSchema> = {
   handleEvent: (event, context) => processTextCommandMessage(
     event,
     createTextCommandRepository(context.DB, context.authorizeMutation),
+    context,
   ),
 };

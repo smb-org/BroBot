@@ -13,6 +13,12 @@ export interface PanelTemplateWarningResponse {
   warnings: readonly PanelTemplateWarning[];
 }
 
+export interface PanelCommandAliasConflict {
+  field: "name" | "aliases";
+  trigger: string;
+  command: string;
+}
+
 export type PanelBroadcasterConnectionStatus = "connected" | "not_connected";
 export type PanelChannelBotConsentStatus = "granted" | "missing";
 export type PanelChatSubscriptionStatus = "enabled" | "missing" | "error" | "revoked";

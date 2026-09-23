@@ -30,7 +30,7 @@ describe("Werbung-EventSub", () => {
     expect(definition?.buildCondition("kanal-a", "bot-user")).toEqual({ broadcaster_user_id: "kanal-a" });
   });
 
-  it("legt ohne channel:read:ads kein Abo an", async () => {
+  it("legt ohne channel:read:ads kein Werbepausen-Abo an", async () => {
     database = new TestD1Database();
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
@@ -39,7 +39,10 @@ describe("Werbung-EventSub", () => {
     ).run();
 
     const targets = await listDesiredEventSubTargets(database as unknown as D1Database);
-    expect(targets.filter((target) => ["stream.online", "channel.ad_break.begin"].includes(target.subscriptionType))).toEqual([]);
+    expect(targets.filter((target) => target.subscriptionType === "stream.online")).toEqual([
+      { channelId: "kanal-a", subscriptionType: "stream.online", variant: "", version: "1" },
+    ]);
+    expect(targets.some((target) => target.subscriptionType === "channel.ad_break.begin")).toBe(false);
     expect(targets.some((target) => target.subscriptionType === "channel.chat.notification")).toBe(true);
   });
 });

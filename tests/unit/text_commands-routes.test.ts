@@ -103,22 +103,22 @@ describe("Text commands panel", () => {
         module_id: "text_commands",
         action: "text_commands.command.created",
         before_json: "null",
-        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, cooldownSeconds: 5 }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.command.updated",
-        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, cooldownSeconds: 5 }),
-        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10 }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: `${"A".repeat(199)}…`, cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
+        after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
       }),
       expect.objectContaining({
         actor_user_id: "user-1",
         channel_id: "kanal-a",
         module_id: "text_commands",
         action: "text_commands.command.removed",
-        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10 }),
+        before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Neue Antwort", cooldownSeconds: 10, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
         after_json: "null",
       }),
     ]));
@@ -193,6 +193,97 @@ describe("Text commands panel", () => {
     });
   });
 
+  it("defaults new command options, and requires a manager to change response type", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+    const created = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "hallo", text: "Antwort", cooldownSeconds: 0,
+      }),
+      environment,
+    );
+
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      command: {
+        aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
+      },
+    });
+    const changed = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/hallo", "PATCH", {
+        responseType: "reply",
+      }),
+      environment,
+    );
+    expect(changed.status).toBe(200);
+    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+    const denied = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/hallo", "PATCH", {
+        responseType: "announcement",
+      }),
+      environment,
+    );
+    expect(denied.status).toBe(403);
+    await expect(database.prepare(
+      "SELECT response_type FROM text_commands WHERE command_name = 'hallo'",
+    ).first()).resolves.toEqual({ response_type: "reply" });
+  });
+
+  it("validates alias shape and reports atomic cross-command alias conflicts", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+    const createPath = "/api/channels/kanal-a/modules/text_commands/commands";
+    const create = async (body: Record<string, unknown>) => panelRouter.fetch(
+      await requestFor("user-1", createPath, "POST", body), environment,
+    );
+    const first = await create({ name: "first", text: "First", cooldownSeconds: 0, aliases: ["friendly"] });
+    const second = await create({ name: "second", text: "Second", cooldownSeconds: 0, aliases: ["second-alias"] });
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+
+    const invalidBodies = [
+      { name: "self", text: "x", cooldownSeconds: 0, aliases: ["self"] },
+      { name: "duplicate", text: "x", cooldownSeconds: 0, aliases: ["same", "same"] },
+      { name: "too-many", text: "x", cooldownSeconds: 0, aliases: Array.from({ length: 11 }, (_value, index) => `a${String(index)}`) },
+      { name: "punctuation", text: "x", cooldownSeconds: 0, aliases: ["!hello"] },
+      { name: "uppercase", text: "x", cooldownSeconds: 0, aliases: ["Hello"] },
+    ];
+    for (const body of invalidBodies) expect((await create(body)).status).toBe(400);
+
+    const aliasOfName = await create({ name: "new-one", text: "x", cooldownSeconds: 0, aliases: ["first"] });
+    expect(aliasOfName.status).toBe(409);
+    await expect(aliasOfName.json()).resolves.toEqual({
+      error: "command_alias_conflict",
+      conflict: { field: "aliases", trigger: "first", command: "first" },
+    });
+    const aliasOfAlias = await create({ name: "new-two", text: "x", cooldownSeconds: 0, aliases: ["second-alias"] });
+    expect(aliasOfAlias.status).toBe(409);
+    await expect(aliasOfAlias.json()).resolves.toEqual({
+      error: "command_alias_conflict",
+      conflict: { field: "aliases", trigger: "second-alias", command: "second" },
+    });
+
+    const renamedToAlias = await panelRouter.fetch(
+      await requestFor("user-1", `${createPath}/first`, "PATCH", { name: "second-alias" }),
+      environment,
+    );
+    expect(renamedToAlias.status).toBe(409);
+    await expect(renamedToAlias.json()).resolves.toEqual({
+      error: "command_alias_conflict",
+      conflict: { field: "name", trigger: "second-alias", command: "second" },
+    });
+    const renamed = await panelRouter.fetch(
+      await requestFor("user-1", `${createPath}/first`, "PATCH", { name: "renamed" }),
+      environment,
+    );
+    expect(renamed.status).toBe(200);
+    await expect(renamed.json()).resolves.toMatchObject({ command: { name: "renamed", aliases: ["friendly"] } });
+  });
+
   it("accepts unknown template variables with warnings and rejects templates above 500 characters", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -256,8 +347,8 @@ describe("Text commands panel", () => {
       "SELECT action, before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
     ).first()).resolves.toEqual({
       action: "text_commands.command.updated",
-      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
-      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: false, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
     });
   });
 
@@ -390,8 +481,8 @@ describe("Text commands panel", () => {
     await expect(database.prepare(
       "SELECT before_json, after_json FROM audit_log WHERE action = 'text_commands.command.updated'",
     ).first()).resolves.toEqual({
-      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5 }),
-      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5 }),
+      before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
+      after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", responseType: "say" }),
     });
   });
 });

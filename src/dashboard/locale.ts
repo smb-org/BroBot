@@ -752,6 +752,19 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.failed": "Aktion fehlgeschlagen",
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
+    "host.announcement.sent": (detail) => `Chat-Ankündigung gesendet: ${detailText(detail, "text", "ohne Text")}`,
+    "host.announcement.failed": (detail) => {
+      const reason = detail.reason === "not_moderator"
+        ? "Bot ist kein Moderator"
+        : detail.reason === "app_token_unavailable"
+          ? "App-Token nicht verfügbar"
+          : detail.reason === "bot_identity_missing"
+            ? "Bot-Identität fehlt"
+            : `Helix: ${detailText(detail, "reason", "unbekannter Grund")}`;
+      return detail.outcome === "sent_as_message"
+        ? `Ankündigung nicht möglich (${reason}) — als Nachricht gesendet`
+        : `Ankündigung nicht möglich (${reason}) — nicht gesendet`;
+    },
     "template_truncated": (detail) => `Chatnachricht auf 500 Zeichen gekürzt (ursprünglich ${detailNumber(detail, "current", "unbekannte Länge")})`,
     "host.module.error": "Modulfehler",
     "host.module.unknown": "Unbekanntes Modul",
@@ -780,6 +793,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "channel_events.suspicious.message": (detail) => `Nachricht von auffälligem Nutzer ${detailText(detail, "person", "unbekannt")} (${detailClassification(detail, "unbekannte Einstufung")}): ${detailText(detail, "text", "ohne Text")}`,
     "channel_events.suspicious.classified": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} verschärft${detailModerator(detail, "")}: ${detailClassification(detail, "unbekannt")}`,
     "channel_events.suspicious.cleared": (detail) => `Einstufung von ${detailText(detail, "person", "unbekannt")} aufgehoben${detailModerator(detail, "")}`,
+    "channel_events.stream.online": (detail) => `Stream gestartet${typeof detail.startedAt === "string" ? `: ${detail.startedAt}` : ""}`,
+    "channel_events.stream.offline": "Stream beendet",
     "raid.outgoing": (detail) => `Ausgehender Raid zu ${detailText(detail, "targetChannelId", "unbekannt")}`,
     "raid.shoutout": (detail) => `Raid über der Schwelle (${detailNumber(detail, "viewers", "unbekannt")} von ${detailNumber(detail, "threshold", "unbekannt")}): Shoutout und Chatzeile`,
     "raid.invalid": (detail) => `Raid verworfen: ${detailText(detail, "reason", "ungültige Daten")}`,
@@ -805,6 +820,17 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
         ? "Textbefehl abgekühlt"
         : `Befehl !${name} abgekühlt, noch ${String(detail.remainingSeconds)} s`;
     },
+    "text_commands.user_cooldown": (detail) => {
+      const name = textCommandName(detail);
+      return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
+        ? "Textbefehl durch Nutzer-Abkühlzeit gesperrt"
+        : `Befehl !${name} für diesen Nutzer noch ${String(detail.remainingSeconds)} s abgekühlt`;
+    },
+    "text_commands.stream_state": (detail) => eventTextWithName(detail, "Befehl durch Stream-Zustand unterdrückt", (name) => {
+      const allowed = detail.allowed === "online" ? "online" : "offline";
+      const current = detail.streamState === "online" ? "online" : "offline";
+      return `Befehl !${name} unterdrückt: nur wenn der Stream ${allowed} ist (gerade ${current})`;
+    }),
     "text_commands.triggered": (detail) => eventTextWithName(detail, "Befehl ausgeführt", (name) => `Befehl !${name} ausgeführt`),
     "text_commands.disabled": (detail) => eventTextWithName(detail, "Textbefehl ausgeschaltet", (name) => `Textbefehl !${name} ausgeschaltet`),
     "text_commands.permission_denied": (detail) => eventTextWithName(detail, "Textbefehl nicht berechtigt", (name) => `Befehl !${name} nicht ausgelöst: Mindeststufe ${textCommandTier(detail, "requiredTier", "unbekannt", "de")}, vorhanden ${textCommandTier(detail, "currentTier", "kein Chat-Status", "de")}`),
@@ -817,6 +843,19 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.failed": "Action failed",
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
+    "host.announcement.sent": (detail) => `Chat announcement sent: ${detailText(detail, "text", "no text")}`,
+    "host.announcement.failed": (detail) => {
+      const reason = detail.reason === "not_moderator"
+        ? "bot is not a moderator"
+        : detail.reason === "app_token_unavailable"
+          ? "app token unavailable"
+          : detail.reason === "bot_identity_missing"
+            ? "bot identity missing"
+            : `Helix: ${detailText(detail, "reason", "unknown reason")}`;
+      return detail.outcome === "sent_as_message"
+        ? `Announcement unavailable (${reason}); sent as a chat message`
+        : `Announcement unavailable (${reason}); not sent`;
+    },
     "template_truncated": (detail) => `Chat message shortened to 500 characters (originally ${detailNumber(detail, "current", "unknown length")})`,
     "host.module.error": "Module error",
     "host.module.unknown": "Unknown module",
@@ -845,6 +884,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "channel_events.suspicious.message": (detail) => `Message from suspicious user ${detailText(detail, "person", "unknown")} (${detailClassification(detail, "unknown classification")}): ${detailText(detail, "text", "no text")}`,
     "channel_events.suspicious.classified": (detail) => `Classification for ${detailText(detail, "person", "unknown")} tightened${detailModeratorEn(detail, "")}: ${detailClassification(detail, "unknown")}`,
     "channel_events.suspicious.cleared": (detail) => `Classification for ${detailText(detail, "person", "unknown")} cleared${detailModeratorEn(detail, "")}`,
+    "channel_events.stream.online": (detail) => `Stream started${typeof detail.startedAt === "string" ? `: ${detail.startedAt}` : ""}`,
+    "channel_events.stream.offline": "Stream ended",
     "raid.outgoing": (detail) => `Outgoing raid to ${detailText(detail, "targetChannelId", "unknown")}`,
     "raid.shoutout": (detail) => `Raid above threshold (${detailNumber(detail, "viewers", "unknown")} of ${detailNumber(detail, "threshold", "unknown")}): shoutout and chat line`,
     "raid.invalid": (detail) => `Raid discarded: ${detailText(detail, "reason", "invalid data")}`,
@@ -870,6 +911,17 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
         ? "Text command on cooldown"
         : `Command !${name} on cooldown, ${String(detail.remainingSeconds)}s left`;
     },
+    "text_commands.user_cooldown": (detail) => {
+      const name = textCommandName(detail);
+      return name === null || typeof detail.remainingSeconds !== "number" || !Number.isFinite(detail.remainingSeconds)
+        ? "Text command is on the per-user cooldown"
+        : `Command !${name} is on this user's cooldown for ${String(detail.remainingSeconds)}s`;
+    },
+    "text_commands.stream_state": (detail) => eventTextWithName(detail, "Command suppressed by stream state", (name) => {
+      const allowed = detail.allowed === "online" ? "online" : "offline";
+      const current = detail.streamState === "online" ? "online" : "offline";
+      return `Command !${name} suppressed: only when the stream is ${allowed} (currently ${current})`;
+    }),
     "text_commands.triggered": (detail) => eventTextWithName(detail, "Command executed", (name) => `Command !${name} executed`),
     "text_commands.disabled": (detail) => eventTextWithName(detail, "Text command disabled", (name) => `Text command !${name} disabled`),
     "text_commands.permission_denied": (detail) => eventTextWithName(detail, "Text command not authorized", (name) => `Command !${name} not executed: minimum level ${textCommandTier(detail, "requiredTier", "unknown", "en")}, present ${textCommandTier(detail, "currentTier", "no chat status", "en")}`),
@@ -895,6 +947,8 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.action.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.chat.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.chat.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "host.announcement.failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "host.announcement.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "template_truncated": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.module.error": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.module.unknown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
@@ -922,6 +976,8 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "channel_events.suspicious.message": { family: "moderation", tier: "full", word: { de: "Verdacht", en: "Suspicious" }, numberKey: null },
   "channel_events.suspicious.classified": { family: "moderation", tier: "full", word: { de: "Einstufung", en: "Classified" }, numberKey: null },
   "channel_events.suspicious.cleared": { family: "moderation", tier: "outlined", word: { de: "Entwarnt", en: "Cleared" }, numberKey: null },
+  "channel_events.stream.offline": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "channel_events.stream.online": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "raid.outgoing": { family: "raid", tier: "outlined", word: { de: "Raid", en: "Raid" }, numberKey: "viewers", tone: "warning" },
   "raid.shoutout": { family: "raid", tier: "full", word: { de: "Raid", en: "Raid" }, numberKey: "viewers" },
   "raid.invalid": { family: "raid", tier: "outlined", word: { de: "Raid", en: "Raid" }, numberKey: null, tone: "warning" },
@@ -939,6 +995,8 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "ads.commercial.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.clip.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "text_commands.cooldown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: "remainingSeconds", tone: "warning" },
+  "text_commands.user_cooldown": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: "remainingSeconds", tone: "info" },
+  "text_commands.stream_state": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.triggered": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.disabled": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "text_commands.permission_denied": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
@@ -1079,6 +1137,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     command_management_denied: "Nur Broadcaster und Verwalter dürfen Befehle anlegen, ändern oder löschen.",
     command_data_invalid: "Befehlsdaten sind ungültig.",
     command_already_exists: "Der Befehl existiert bereits.",
+    command_alias_conflict: "Name oder Alias wird bereits von einem anderen Befehl verwendet.",
     command_creation_denied: "Der Befehl darf nicht angelegt werden.",
     command_not_found: "Der Befehl wurde nicht gefunden.",
     command_update_denied: "Der Befehl darf nicht geändert werden.",
@@ -1148,6 +1207,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     command_management_denied: "Only broadcasters and managers may create, change, or remove commands.",
     command_data_invalid: "Command data is invalid.",
     command_already_exists: "This command already exists.",
+    command_alias_conflict: "The name or alias is already used by another command.",
     command_creation_denied: "This command may not be created.",
     command_not_found: "This command was not found.",
     command_update_denied: "This command may not be changed.",

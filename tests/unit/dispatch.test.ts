@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import type { BotModule, ModuleEvent, ModuleResult } from "../../src/modules/contract";
+import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../../src/modules/contract";
 import { dispatchEventSubNotification, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
@@ -54,6 +54,9 @@ const bodyOf = (fetcher: ReturnType<typeof chatResponse>, index = 0): Record<str
   const body = fetcher.mock.calls[index]?.[1]?.body;
   return typeof body === "string" ? JSON.parse(body) as Record<string, unknown> : {};
 };
+
+const requestedUrl = (input?: RequestInfo | URL): string =>
+  typeof input === "string" ? input : input instanceof URL ? input.href : input?.url ?? "";
 
 const sent = () => chatResponse({ data: [{ is_sent: true, message_id: "nachricht-1" }] });
 
@@ -398,6 +401,195 @@ describe("dispatch and execution", () => {
       expect(publish).toHaveBeenCalledTimes(1);
       const [message] = publish.mock.calls[0] as [{ payload: { entries: unknown[] } }, string];
       expect(message.payload.entries).toHaveLength(2);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("stores stream.offline and ignores an older stream.online delivery", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const environmentValue = environment(database);
+      const dispatch = (subscriptionType: "stream.online" | "stream.offline", receivedAt: string) =>
+        dispatchEventSubNotification(environmentValue, {
+          channelId: "kanal-a",
+          subscriptionType,
+          triggerId: `${subscriptionType}-${receivedAt}`,
+          payload: {},
+          receivedAt,
+        }, sent(), []);
+
+      await dispatch("stream.offline", "2026-09-19T12:01:00.000Z");
+      await dispatch("stream.online", "2026-09-19T12:00:00.000Z");
+
+      await expect(database.prepare(
+        "SELECT state, changed_at, source FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({
+        state: "offline", changed_at: "2026-09-19T12:01:00.000Z", source: "eventsub",
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("memoizes one lazy Helix stream lookup for every module in a dispatch", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const states: string[][] = [];
+      const needsState: BotModule = {
+        id: "stream-a",
+        settingsSchema: z.object({}),
+        defaultSettings: {},
+        eventSubTypes: [CHAT_TYPE],
+        handleEvent: async (_event: ModuleEvent, context: ModuleExecutionContext) => {
+          states.push([await context.streamState(), await context.streamState()]);
+          return { actions: [], diagnostics: [] };
+        },
+      };
+      const needsStateAgain: BotModule = {
+        ...needsState,
+        id: "stream-b",
+        handleEvent: async (_event, context) => {
+          states.push([await context.streamState()]);
+          return { actions: [], diagnostics: [] };
+        },
+      };
+      let streamStateReads = 0;
+      const wrappedDb = {
+        prepare(sql: string) {
+          if (/SELECT state\s+FROM channel_stream_state/u.test(sql)) streamStateReads += 1;
+          return database.prepare(sql);
+        },
+        batch: database.batch.bind(database),
+      } as unknown as D1Database;
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ id: "live-1" }] }), { status: 200 }),
+      );
+      await activate(database, "kanal-a", "stream-a");
+      await activate(database, "kanal-a", "stream-b");
+      await dispatchEventSubNotification(
+        { ...environment(database), DB: wrappedDb },
+        {
+          channelId: "kanal-a", subscriptionType: CHAT_TYPE, triggerId: "stream-trigger", payload: {}, receivedAt: NOW,
+        },
+        fetcher,
+        [needsState, needsStateAgain],
+      );
+
+      expect(states).toEqual([["online", "online"], ["online"]]);
+      expect(streamStateReads).toBe(1);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+      await expect(database.prepare(
+        "SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", source: "helix" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("sends announcements with the app token and Twitch's default color", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+      await runDispatch(database, [fakeModule("modul-a", () => ({
+        actions: [{ kind: "announcement", text: "Wichtige Nachricht" }],
+        diagnostics: [],
+      }))], fetcher);
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("https://api.twitch.tv/helix/chat/announcements?");
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("broadcaster_id=kanal-a");
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("moderator_id=bot-1");
+      expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+        method: "POST",
+        headers: { Authorization: "Bearer app-token", "Client-ID": "client-id" },
+        body: JSON.stringify({ message: "Wichtige Nachricht" }),
+      });
+      await expect(eventLog(database)).resolves.toMatchObject([{ code: "host.announcement.sent" }]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("falls back to a chat message without calling Helix when the bot is not a moderator", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const fetcher = sent();
+      await runDispatch(database, [fakeModule("modul-a", () => ({
+        actions: [{ kind: "announcement", text: "Wichtige Nachricht" }],
+        diagnostics: [],
+      }))], fetcher);
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/chat/messages");
+      const rows = await eventLog(database);
+      expect(rows.map((row) => row.code)).toEqual(["host.announcement.failed", "host.chat.sent"]);
+      expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({
+        reason: "not_moderator", outcome: "sent_as_message",
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([401, 403, 503])("falls back to chat after announcement HTTP %i", async (status) => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ message: "denied" }), { status }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "fallback-1" }] }), { status: 200 }));
+      await runDispatch(database, [fakeModule("modul-a", () => ({
+        actions: [{ kind: "announcement", text: "Wichtige Nachricht" }],
+        diagnostics: [],
+      }))], fetcher);
+
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/chat/announcements?");
+      expect(requestedUrl(fetcher.mock.calls[1]?.[0])).toContain("/helix/chat/messages");
+      const rows = await eventLog(database);
+      expect(rows.map((row) => row.code)).toEqual(["host.announcement.failed", "host.chat.sent"]);
+      expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({
+        reason: `http_${String(status)}`, outcome: "sent_as_message", status,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("truncates a long announcement and records the host diagnostic", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
+         VALUES ('kanal-a', 1, ?, NULL)`,
+      ).bind(NOW).run();
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+      await runDispatch(database, [fakeModule("modul-a", () => ({
+        actions: [{ kind: "announcement", text: "x".repeat(501) }],
+        diagnostics: [],
+      }))], fetcher);
+
+      const requestBody = bodyOf(fetcher);
+      expect((requestBody.message as string).length).toBe(500);
+      expect(requestBody.message).toBe(`${"x".repeat(499)}…`);
+      await expect(eventLog(database)).resolves.toMatchObject([
+        { code: "template_truncated" }, { code: "host.announcement.sent" },
+      ]);
     } finally {
       database.close();
     }

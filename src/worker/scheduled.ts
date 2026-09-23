@@ -5,6 +5,7 @@ import { maintainLoginIdentities } from "./login-maintenance";
 import {
   purgeOldEventSubMessages,
 } from "./db/eventsub-state";
+import { purgeOldTextCommandUserCooldowns } from "./db/text-command-user-cooldowns";
 import { maintainEventSubSubscriptions } from "./eventsub-subscriptions";
 import { eventSubMessageCutoff } from "./eventsub";
 
@@ -15,9 +16,11 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
 ) => {
   const now = new Date().toISOString();
   const eventSubCutoff = eventSubMessageCutoff(now);
+  const userCooldownCutoff = new Date(Date.parse(now) - 24 * 60 * 60 * 1000).toISOString();
   const tasks = [
     purgeOldEventLogEntries(env.DB, now),
     purgeOldEventSubMessages(env.DB, eventSubCutoff),
+    purgeOldTextCommandUserCooldowns(env.DB, userCooldownCutoff),
     maintainLoginIdentities(env, now),
     maintainBotIdentity(env, now),
     maintainAppAccessToken(env, now),

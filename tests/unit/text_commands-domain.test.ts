@@ -11,6 +11,8 @@ import {
 describe("Text commands domain", () => {
   it("recognizes a generic !-word with no special case", () => {
     expect(commandFromMessage("!befehle")).toEqual({ kind: "command", name: "befehle" });
+    expect(commandFromMessage("!Hallo")).toEqual({ kind: "command", name: "hallo" });
+    expect(commandFromMessage("!HÉ")).toEqual({ kind: "unknown" });
   });
 
   it("allows only simple lowercase command names", () => {

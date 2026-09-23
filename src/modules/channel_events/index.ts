@@ -17,6 +17,8 @@ const eventSubTypes = [
   "automod.message.hold",
   "channel.suspicious_user.message",
   "channel.suspicious_user.update",
+  "stream.online",
+  "stream.offline",
 ] as const satisfies readonly EventSubSubscriptionType[];
 
 export const channelEventsModule: BotModule<typeof settingsSchema> = {

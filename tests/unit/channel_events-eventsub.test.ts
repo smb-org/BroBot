@@ -33,6 +33,7 @@ describe("channel events EventSub targets", () => {
         ["channel.suspicious_user.message", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.suspicious_user.update", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["stream.online", { broadcaster_user_id: "kanal-a" }],
+        ["stream.offline", { broadcaster_user_id: "kanal-a" }],
         ["channel.ad_break.begin", { broadcaster_user_id: "kanal-a" }],
       ]);
 
@@ -111,6 +112,8 @@ describe("channel events EventSub targets", () => {
         { channelId: "kanal-a", subscriptionType: "automod.message.hold", variant: "", version: "1", deferredReason: "moderator_required" },
         { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.message", variant: "", version: "1", deferredReason: "moderator_required" },
         { channelId: "kanal-a", subscriptionType: "channel.suspicious_user.update", variant: "", version: "1", deferredReason: "moderator_required" },
+        { channelId: "kanal-a", subscriptionType: "stream.online", variant: "", version: "1" },
+        { channelId: "kanal-a", subscriptionType: "stream.offline", variant: "", version: "1" },
       ]);
     } finally {
       database.close();

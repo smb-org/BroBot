@@ -280,6 +280,16 @@ export const diagnoseChannelEvent = (
   subscriptionVariant?: string,
   eventTime?: string,
 ): readonly ChannelEventDiagnostic[] => {
+  if (subscriptionType === "stream.online") {
+    const startedAt = stringValue(field(payload, "started_at")) ?? eventTime ?? null;
+    return [{
+      code: "channel_events.stream.online",
+      detail: startedAt === null ? {} : { startedAt },
+    }];
+  }
+  if (subscriptionType === "stream.offline") {
+    return [{ code: "channel_events.stream.offline" }];
+  }
   if (subscriptionType === "channel.raid") return [raidDiagnostic(payload, channelId, subscriptionVariant)];
   if (subscriptionType === "channel.shoutout.create" || subscriptionType === "channel.shoutout.receive") {
     return [shoutoutDiagnostic(subscriptionType, payload)];

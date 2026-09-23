@@ -48,6 +48,14 @@ describe("channel events domain", () => {
     }]);
   });
 
+  it("diagnoses stream start and end with a start timestamp", () => {
+    expect(diagnose("stream.online", { started_at: "2026-09-19T12:00:00.000Z" })).toEqual([{
+      code: "channel_events.stream.online",
+      detail: { startedAt: "2026-09-19T12:00:00.000Z" },
+    }]);
+    expect(diagnose("stream.offline", {})).toEqual([{ code: "channel_events.stream.offline" }]);
+  });
+
   it.each([
     ["sub", "channel_events.chat.sub"],
     ["resub", "channel_events.chat.resub"],

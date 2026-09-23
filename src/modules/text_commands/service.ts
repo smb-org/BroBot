@@ -1,6 +1,6 @@
 import type { EventCode } from "../../contracts/values";
 import { truncateTo200Chars } from "../contract";
-import type { ModuleEvent, ModuleResult } from "../contract";
+import type { ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult, ModuleStreamState } from "../contract";
 import {
   commandFromMessage,
   renderCommandText,
@@ -8,8 +8,11 @@ import {
   cooldownRemaining,
 } from "./domain";
 import type { TextCommandInput } from "./domain";
+import type { TextCommand } from "./contracts";
 import type { TextCommandRepository } from "./repository";
 import { NO_COMMANDS_REPLY, commandListReply } from "./contracts/chat-defaults";
+
+const CHAT_MESSAGE_MAXIMUM_LENGTH = 500;
 
 const recordValue = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -25,43 +28,80 @@ const textValue = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
 
 const userFor = (event: ModuleEvent): string =>
-  event.actor?.login ?? textValue(event.payload.chatter_user_login) ?? "unbekannt";
+  event.actor?.login ?? textValue(event.payload.chatter_user_login) ?? "unknown";
+
+const userIdFor = (event: ModuleEvent): string | null =>
+  event.actor?.userId ?? textValue(event.payload.chatter_user_id);
 
 const channelFor = (event: ModuleEvent): string =>
   textValue(event.payload.broadcaster_user_login) ?? event.channelId;
 
+const truncateCommandResponse = (text: string): { text: string; originalLength: number | null } => text.length <= CHAT_MESSAGE_MAXIMUM_LENGTH
+  ? { text, originalLength: null }
+  : { text: `${text.slice(0, CHAT_MESSAGE_MAXIMUM_LENGTH - 1)}…`, originalLength: text.length };
+
 const diagnosticTriggered = (
   input: Exclude<TextCommandInput, { kind: "unknown" }>,
+  command: TextCommand,
   response: string,
+  alias: string | null,
+  streamState: ModuleStreamState | undefined,
 ) => {
-  const argumente = input.arguments;
+  const commandArguments = input.arguments;
   return {
     code: "text_commands.triggered" satisfies EventCode,
     detail: {
-      name: input.name,
-      ...(argumente === undefined || argumente.length === 0
+      name: command.name,
+      ...(alias === null ? {} : { alias }),
+      ...(commandArguments === undefined || commandArguments.length === 0
         ? {}
-        : { arguments: truncateTo200Chars(argumente) }),
+        : { arguments: truncateTo200Chars(commandArguments) }),
       response: truncateTo200Chars(response),
+      ...(streamState === undefined ? {} : { streamState }),
     },
   } as const;
 };
 
-const response = (event: ModuleEvent, input: Exclude<TextCommandInput, { kind: "unknown" }>, text: string): ModuleResult => {
+const response = (
+  event: ModuleEvent,
+  input: Exclude<TextCommandInput, { kind: "unknown" }>,
+  command: TextCommand,
+  text: string,
+  alias: string | null,
+  streamState: ModuleStreamState | undefined,
+): ModuleResult => {
   const replyToMessageId = textValue(event.payload.message_id);
-  return {
-    actions: [{
-      kind: "chat",
+  const action = command.responseType === "announcement"
+    ? { kind: "announcement" as const, text }
+    : {
+      kind: "chat" as const,
       text,
-      ...(replyToMessageId === null ? {} : { replyToMessageId }),
-    }],
-    diagnostics: [diagnosticTriggered(input, text)],
+      ...(command.responseType === "reply" && replyToMessageId !== null
+        ? { replyToMessageId }
+        : {}),
+    };
+  const prepared = truncateCommandResponse(text);
+  const diagnostics = [
+    ...(prepared.originalLength === null
+      ? []
+      : [{ code: "template_truncated" satisfies EventCode, detail: { current: prepared.originalLength } }]),
+    diagnosticTriggered(input, command, prepared.text, alias, streamState),
+  ];
+  return {
+    actions: [{ ...action, text: prepared.text }],
+    diagnostics,
   };
 };
+
+const rejection = (code: EventCode, detail: NonNullable<ModuleDiagnostic["detail"]>): ModuleResult => ({
+  actions: [],
+  diagnostics: [{ code, detail }],
+});
 
 export const processTextCommandMessage = async (
   event: ModuleEvent,
   repository: TextCommandRepository,
+  context: Pick<ModuleExecutionContext, "streamState"> = { streamState: () => Promise.resolve("unknown") },
 ): Promise<ModuleResult> => {
   const text = messageText(event);
   if (text === null) return { actions: [], diagnostics: [] };
@@ -72,64 +112,71 @@ export const processTextCommandMessage = async (
     return { actions: [], diagnostics: [{ code: "text_commands.unknown" satisfies EventCode }] };
   }
 
-  const command = await repository.find(event.channelId, input.name);
+  let command = await repository.find(event.channelId, input.name);
+  let alias: string | null = null;
   if (command === null) {
-    return {
-      actions: [],
-      diagnostics: [{ code: "text_commands.unknown" satisfies EventCode, detail: { name: input.name } }],
-    };
+    command = await repository.findByAlias(event.channelId, input.name);
+    if (command !== null) alias = input.name;
+  }
+  if (command === null) {
+    return rejection("text_commands.unknown", { name: input.name });
   }
   if (!command.enabled) {
-    return {
-      actions: [],
-      diagnostics: [{ code: "text_commands.disabled" satisfies EventCode, detail: { name: input.name } }],
-    };
+    return rejection("text_commands.disabled", { name: command.name });
   }
   if (!chatStatusMeetsTier(event.chatStatus, command.minimumTier)) {
-    return {
-      actions: [],
-      diagnostics: [{
-        code: "text_commands.permission_denied" satisfies EventCode,
-        detail: {
-          name: input.name,
-          requiredTier: command.minimumTier,
-          currentTier: event.chatStatus,
-        },
-      }],
-    };
+    return rejection("text_commands.permission_denied", {
+      name: command.name,
+      requiredTier: command.minimumTier,
+      currentTier: event.chatStatus,
+    });
   }
 
-  const claim = await repository.claim(event.channelId, input.name, event.receivedAt);
+  let streamState: ModuleStreamState | undefined;
+  if (command.streamCondition !== "any") {
+    streamState = await context.streamState();
+    if (streamState !== "unknown" && streamState !== command.streamCondition) {
+      return rejection("text_commands.stream_state", {
+        name: command.name,
+        allowed: command.streamCondition,
+        streamState,
+      });
+    }
+  }
+
+  const claim = await repository.claim(
+    event.channelId,
+    command.name,
+    event.receivedAt,
+    userIdFor(event),
+    command.userCooldownSeconds,
+  );
   if (claim === null) {
-    return {
-      actions: [],
-      diagnostics: [{ code: "text_commands.unknown" satisfies EventCode, detail: { name: input.name } }],
-    };
+    return rejection("text_commands.unknown", { name: command.name });
   }
   if (!claim.claimed) {
-    const remainingSeconds = cooldownRemaining(
+    const remainingSeconds = claim.remainingSeconds ?? cooldownRemaining(
       claim.command.lastUsedAt,
       event.receivedAt,
       claim.command.cooldownSeconds,
     );
-    return {
-      actions: [],
-      diagnostics: [{ code: "text_commands.cooldown" satisfies EventCode, detail: { name: input.name, remainingSeconds } }],
-    };
+    return claim.reason === "user_cooldown"
+      ? rejection("text_commands.user_cooldown", { name: command.name, remainingSeconds })
+      : rejection("text_commands.cooldown", { name: command.name, remainingSeconds });
   }
 
   if (claim.command.kind === "list") {
     const commands = (await repository.list(event.channelId))
-      .filter((command) => command.enabled)
+      .filter((entry) => entry.enabled)
       .sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0
       ? NO_COMMANDS_REPLY
-      : commandListReply(commands.map((command) => command.name));
-    return response(event, input, list);
+      : commandListReply(commands.map((entry) => entry.name));
+    return response(event, input, claim.command, list, alias, streamState);
   }
 
-  return response(event, input, renderCommandText(
+  return response(event, input, claim.command, renderCommandText(
     claim.command.text,
     { user: userFor(event), channel: channelFor(event) },
-  ));
+  ), alias, streamState);
 };

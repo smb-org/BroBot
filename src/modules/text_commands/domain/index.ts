@@ -15,7 +15,7 @@ export const commandFromMessage = (message: string): TextCommandInput | null => 
   const trimmed = message.trim();
   const firstWord = trimmed.split(/\s+/u)[0];
   if (firstWord === undefined || !firstWord.startsWith("!")) return null;
-  const name = firstWord.slice(1);
+  const name = firstWord.slice(1).toLowerCase();
   if (!validCommandName(name)) return { kind: "unknown" };
   // Spelled out rather than shorthand: the key travels into
   // `event_log.detail_json`, so renaming the local would rename the stored key

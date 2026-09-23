@@ -8,7 +8,7 @@ import {
 } from "../../src/worker/db/bot-identity";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken, insertChannel, insertMember } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const NOW = "2026-09-19T12:00:00.000Z";
 const keyRing = JSON.stringify({
@@ -27,6 +27,9 @@ const body = (fetcher: ReturnType<typeof fetcherForChat>, index: number): Record
   const body = fetcher.mock.calls[index]?.[1]?.body;
   return typeof body === "string" ? JSON.parse(body) as Record<string, unknown> : {};
 };
+
+const requestedUrl = (input?: RequestInfo | URL): string =>
+  typeof input === "string" ? input : input instanceof URL ? input.href : input?.url ?? "";
 
 const environment = (database: TestD1Database) => ({
   DB: database as unknown as D1Database,
@@ -171,11 +174,55 @@ describe("Text commands module", () => {
         "SELECT code, detail_json FROM event_log ORDER BY rowid",
       ).all<{ code: string; detail_json: string }>();
       expect(rows.results.map((row) => row.code)).toEqual([
-        "text_commands.triggered",
         "template_truncated",
+        "text_commands.triggered",
         "host.chat.sent",
       ]);
-      expect(JSON.parse(rows.results[1]?.detail_json ?? "{}")).toEqual({ current: 508 });
+      expect(JSON.parse(rows.results[0]?.detail_json ?? "{}")).toEqual({ current: 508 });
+      expect(JSON.parse(rows.results[1]?.detail_json ?? "{}")).toMatchObject({ name: "lang" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps the plain name-hit chat path within its D1 statement budget", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createCommand(database);
+      const preparedSql: string[] = [];
+      const batchSizes: number[] = [];
+      const countedDb = {
+        prepare(sql: string) {
+          preparedSql.push(sql);
+          return database.prepare(sql);
+        },
+        batch(statements: TestPreparedStatement[]) {
+          batchSizes.push(statements.length);
+          return database.batch(statements);
+        },
+      } as unknown as D1Database;
+      const fetcher = fetcherForChat();
+
+      await dispatchEventSubNotification(
+        { ...environment(database), DB: countedDb },
+        eventFor("!hallo"),
+        fetcher,
+        [textCommandModule],
+      );
+
+      expect(preparedSql).toHaveLength(9);
+      expect(preparedSql.filter((sql) => /(?:FROM|UPDATE) text_commands/u.test(sql))).toHaveLength(3);
+      expect(preparedSql.some((sql) => sql.includes("json_each"))).toBe(false);
+      expect(preparedSql.filter((sql) => sql.includes("text_command_user_cooldowns"))).toHaveLength(1);
+      expect(preparedSql.find((sql) => sql.includes("text_command_user_cooldowns"))?.trimStart())
+        .toMatch(/^UPDATE text_commands/u);
+      expect(preparedSql.some((sql) => sql.includes("channel_stream_state"))).toBe(false);
+      expect(batchSizes).toEqual([2]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
     } finally {
       database.close();
     }
@@ -194,6 +241,66 @@ describe("Text commands module", () => {
 
       expect(fetcher).not.toHaveBeenCalled();
       await expect(eventCodes(database)).resolves.toEqual(["text_commands.unknown"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("loads an unknown stream as online from Helix and stores the result", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createCommand(database);
+      await database.prepare("UPDATE text_commands SET stream_condition = 'online' WHERE command_name = 'hallo'").run();
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "stream-1" }] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo"), fetcher, [textCommandModule]);
+
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+      expect(requestedUrl(fetcher.mock.calls[1]?.[0])).toContain("/helix/chat/messages");
+      await expect(database.prepare(
+        "SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", source: "helix" });
+      const diagnostics = await database.prepare("SELECT code, detail_json FROM event_log ORDER BY rowid")
+        .all<{ code: string; detail_json: string }>();
+      expect(diagnostics.results[0]?.code).toBe("text_commands.triggered");
+      expect(JSON.parse(diagnostics.results[0]?.detail_json ?? "{}")).toMatchObject({
+        name: "hallo", streamState: "online",
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("runs a conditioned command when Helix fails and logs unknown stream state", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createCommand(database);
+      await database.prepare("UPDATE text_commands SET stream_condition = 'online' WHERE command_name = 'hallo'").run();
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ message: "temporary failure" }), { status: 503 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!hallo"), fetcher, [textCommandModule]);
+
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(requestedUrl(fetcher.mock.calls[1]?.[0])).toContain("/helix/chat/messages");
+      await expect(database.prepare("SELECT COUNT(*) AS count FROM channel_stream_state").first())
+        .resolves.toEqual({ count: 0 });
+      const diagnostic = await database.prepare(
+        "SELECT detail_json FROM event_log WHERE code = 'text_commands.triggered'",
+      ).first<{ detail_json: string }>();
+      expect(JSON.parse(diagnostic?.detail_json ?? "{}")).toMatchObject({ name: "hallo", streamState: "unknown" });
     } finally {
       database.close();
     }

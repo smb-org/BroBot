@@ -46,10 +46,10 @@ export type ModuleDiagnosticDetailKey =
   | "action" | "allowed" | "arguments" | "cause" | "count" | "current"
   | "currentTier" | "missing"
   | "duration" | "endsAt" | "gifter" | "kind" | "lastAdBreakAt" | "message"
-  | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person"
+  | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person" | "alias"
   | "reason" | "recipient" | "remainingSeconds" | "requiredTier" | "response"
   | "scheduledAt" | "scheduledFor" | "scope" | "seconds" | "source"
-  | "sourceChannelId" | "startedAt" | "status" | "target" | "targetChannelId"
+  | "sourceChannelId" | "startedAt" | "status" | "streamState" | "target" | "targetChannelId"
   | "text" | "threshold" | "tier" | "triggerLogin" | "type" | "viewers";
 
 export interface ModuleDiagnostic {
@@ -63,6 +63,7 @@ export interface ModuleDiagnostic {
 /** A semantically well-named module action for the host to execute. */
 export type ModuleAction =
   | { kind: "chat"; text: string; replyToMessageId?: string }
+  | { kind: "announcement"; text: string }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "overlay"; type: string; payload: Readonly<Record<string, unknown>> };
 
@@ -98,7 +99,7 @@ export interface ModuleMutationAuthorization {
   values: readonly (string | number | null)[];
 }
 
-export type ModuleAuditValue = string | number | boolean | null;
+export type ModuleAuditValue = string | number | boolean | null | readonly string[];
 
 /** Business values a module has explicitly cleared for the audit. */
 export type ModuleAuditSnapshot = Readonly<Record<string, ModuleAuditValue>>;
@@ -138,7 +139,10 @@ export type AuthorizeModuleMutation = (
 export interface ModuleExecutionContext {
   DB: D1Database;
   authorizeMutation: AuthorizeModuleMutation;
+  streamState: () => Promise<ModuleStreamState>;
 }
+
+export type ModuleStreamState = "online" | "offline" | "unknown";
 
 /** Infrastructure for one-time initial data when a module is enabled. */
 export interface ModuleEnableContext {

@@ -51,6 +51,10 @@ const commandFor = (text: string): TextCommand => ({
   enabled: true,
   minimumTier: "everyone",
   cooldownSeconds: 0,
+  aliases: [],
+  userCooldownSeconds: 0,
+  streamCondition: "any",
+  responseType: "reply",
   lastUsedAt: null,
   createdAt: "2026-09-23T00:00:00.000Z",
   updatedAt: "2026-09-23T00:00:00.000Z",
@@ -59,6 +63,7 @@ const commandFor = (text: string): TextCommand => ({
 const repositoryFor = (command: TextCommand): TextCommandRepository => ({
   list: () => Promise.resolve([command]),
   find: () => Promise.resolve(command),
+  findByAlias: () => Promise.resolve(null),
   create: () => Promise.resolve({ ok: true }),
   change: () => Promise.resolve({ ok: true }),
   delete: () => Promise.resolve({ ok: true }),

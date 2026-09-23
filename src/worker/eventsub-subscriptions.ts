@@ -145,6 +145,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS = [
   moderatorSubscriptionDefinition("channel.suspicious_user.message", "1"),
   moderatorSubscriptionDefinition("channel.suspicious_user.update", "1"),
   broadcasterSubscriptionDefinition("stream.online", "1", false),
+  broadcasterSubscriptionDefinition("stream.offline", "1", false),
   broadcasterSubscriptionDefinition("channel.ad_break.begin", "1"),
 ] as const satisfies readonly EventSubSubscriptionDefinitionBase<EventSubSubscriptionType>[];
 

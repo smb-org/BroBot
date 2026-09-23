@@ -35,4 +35,29 @@ describe("mandatory EventSub targets", () => {
       database.close();
     }
   });
+
+  it("subscribes stream types once even when ads and channel events both need stream.online", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+         VALUES ('kanal-a', 'ads', 1, '{}')`,
+      ).run();
+
+      const targets = await listDesiredEventSubTargets(database as unknown as D1Database, "kanal-a");
+
+      expect(targets.filter((target) => target.subscriptionType === "stream.online")).toHaveLength(1);
+      expect(targets.filter((target) => target.subscriptionType === "stream.offline")).toHaveLength(1);
+      expect(targets).toContainEqual({
+        channelId: "kanal-a", subscriptionType: "stream.online", variant: "", version: "1",
+      });
+      expect(targets).toContainEqual({
+        channelId: "kanal-a", subscriptionType: "stream.offline", variant: "", version: "1",
+      });
+    } finally {
+      database.close();
+    }
+  });
 });
