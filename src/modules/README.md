@@ -68,9 +68,9 @@ Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
 
 Das erste Modul ist `src/modules/text_commands/`. Es ist in der Registry als
 `text_commands` eingetragen, abonniert `channel.chat.message` und definiert
-seine Tabelle `text_commands` in der zentralen D1-Kette unter `migrations/`.
-Die Tabelle ist kanalgebunden; der D1-Adapter dieses Moduls liest
-und schreibt ausschließlich diese Tabelle.
+seine Tabellen in der zentralen D1-Kette unter `migrations/`. Der D1-Adapter
+dieses Moduls nutzt kanalgebunden `text_commands`, `text_command_aliases`
+und `text_command_user_cooldowns`.
 
 Der Host mountet registrierte Modulrouten kanalbezogen unter
 `/api/channels/:channelId/modules/<id>`. Textbefehle stellen dort die

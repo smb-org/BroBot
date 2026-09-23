@@ -154,8 +154,8 @@ pnpm exec wrangler d1 create brobot-production
 ```
 
 Put each returned `database_id` into the matching environment in
-`wrangler.jsonc`, then apply migrations (the binding name is `DB`, not the
-database name):
+`wrangler.jsonc`, then apply migrations (the argument accepts either the
+binding name `DB` or the database name; `--env` selects the environment):
 
 ```bash
 pnpm exec wrangler d1 migrations apply DB                                # local
@@ -163,13 +163,16 @@ pnpm exec wrangler d1 migrations apply DB --env staging --remote
 pnpm exec wrangler d1 migrations apply DB --env production --remote
 ```
 
-Staging migrates automatically as part of the deploy workflow. Production
-migrates by hand, on purpose — Wrangler rolls back an individual failing
-migration itself, but migrations that already succeeded in the same run
-stay applied, so an unattended run with several pending migrations could
-still leave the schema between two states with nobody having looked.
-`/healthz` fails deploys that forgot the migration instead of reporting
-green.
+Staging migrates automatically as part of the deploy workflow: if a
+migration fails, the job stops before the code deploy and the previous
+Worker stays up, but migrations that already succeeded in that run stay
+applied — Wrangler only rolls back the failing migration itself. Production
+migrates by hand, on purpose — the same applies there with several pending
+migrations, so an unattended run could still leave the schema between two
+states with nobody having looked. `/healthz` runs after production's code
+deploy and fails the CI job if the latest migration isn't recorded or a
+sentinel table is missing; it doesn't check the whole schema and doesn't
+roll the deploy back.
 
 ### Deploying
 

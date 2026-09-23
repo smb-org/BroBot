@@ -282,21 +282,25 @@ pnpm run check
 Vor dem ersten Rollout dieser Version alle ausstehenden D1-Migrationen aus
 `migrations/` in jeder Zielumgebung anwenden. Der Worker darf erst danach
 ausgerollt werden: Er erwartet bereits das Schema, das diese Migrationen
-anlegen. Welche Datei welche Tabelle betrifft, steht als Kommentar in der
-jeweiligen Migration selbst — eine Liste hier würde bei jeder neuen Migration
-veralten.
+anlegen. Welche Tabellen oder Daten eine Migration betrifft, ergibt sich aus
+den SQL-Anweisungen in der jeweiligen Datei — eine Liste hier würde bei jeder
+neuen Migration veralten.
 
 **Staging migriert automatisch.** Der Deploy-Workflow wendet ausstehende
-Migrationen vor dem Code-Deploy an. Schlägt das fehl, bricht der Job ab und
-der bisherige Worker läuft unverändert gegen das bisherige Schema weiter.
+Migrationen vor dem Code-Deploy an. Schlägt eine Migration fehl, stoppt der
+Job vor dem Code-Deploy und der bisherige Worker bleibt aktiv; bereits
+erfolgreich angewandte Migrationen aus demselben Lauf bleiben jedoch im
+Schema, D1 rollt nur die fehlgeschlagene Migration selbst zurück.
 
-**Production migriert von Hand.** Das ist Absicht: Eine einzelne
-fehlschlagende Migration rollt Wrangler selbst zurück, doch bereits
-erfolgreich angewandte Migrationen aus demselben Lauf bleiben bestehen — bei
-mehreren ausstehenden Migrationen kann das Schema dadurch zwischen zwei
-Ständen landen, ohne dass jemand hingesehen hat. Eine vergessene Migration
-fängt stattdessen der Healthcheck ab — er prüft den Schema-Sentinel und lässt
-den Deploy scheitern, statt ihn grün zu melden.
+**Production migriert von Hand.** Das ist Absicht: Bei mehreren ausstehenden
+Migrationen kann derselbe Effekt eintreten — nur die fehlschlagende Migration
+wird zurückgerollt, bereits erfolgreich angewandte bleiben bestehen —, sodass
+das Schema zwischen zwei Ständen landen kann, ohne dass jemand hingesehen
+hat. Eine vergessene Migration fängt stattdessen der Healthcheck ab:
+`/healthz` lässt den CI-Job nach dem Production-Code-Deploy fehlschlagen, wenn
+die jüngste Migration nicht als letzte verzeichnet ist oder eine
+Sentinel-Tabelle fehlt; es prüft nicht das gesamte Schema und rollt den
+Deploy nicht zurück.
 
 Migration vor dem Deploy, nie danach: Der neue Code erwartet das neue Schema.
 
@@ -306,18 +310,20 @@ pnpm exec wrangler d1 migrations apply DB --env staging --remote
 pnpm exec wrangler d1 migrations apply DB --env production --remote
 ```
 
-Das Argument ist der **Bindungsname** `DB`, nicht der Datenbankname: Wrangler
-löst die Datenbank über die Bindung der jeweiligen Umgebung auf und kennt
-`brobot-staging` als Argument nicht. Die Befehle verändern ausschließlich die
-angegebene D1-Datenbank; die Betreiberdateien mit Secrets werden dabei nicht
-gelesen.
+Als Argument akzeptiert Wrangler sowohl den **Bindungsnamen** `DB` als auch
+den Datenbanknamen selbst (den beim Anlegen vergebenen Namen); `--env
+staging` beziehungsweise `--env production` wählt die Zielumgebung. Die
+Befehle verändern ausschließlich die angegebene D1-Datenbank; die
+Betreiberdateien mit Secrets werden dabei nicht gelesen.
 
-**Wenn ein Schema von Hand eingespielt wurde**, ohne `migrations apply`, bleibt
-die Buchführungstabelle `d1_migrations` leer. Der Healthcheck meldet dann ein
+**Wenn ein Schema von Hand eingespielt wurde**, ohne `migrations apply`,
+fehlen möglicherweise Einträge in der Buchführungstabelle `d1_migrations`,
+oder die Tabelle existiert noch gar nicht. Der Healthcheck meldet dann ein
 fehlendes Schema, obwohl alle Tabellen stehen, und jeder spätere
-`migrations apply` scheitert mit `table … already exists`. In diesem Fall die
-bereits angewandten Dateinamen aus `migrations/`, in der Reihenfolge ihrer
-Nummern, nachtragen:
+`migrations apply` scheitert mit `table … already exists`. In diesem Fall vor
+dem Nachtragen Existenz und Schema von `d1_migrations` prüfen und nur die
+tatsächlich bereits angewandten Dateinamen aus `migrations/`, in der
+Reihenfolge ihrer Nummern, verzeichnen:
 
 ```bash
 pnpm exec wrangler d1 execute DB --env staging --remote \
