@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
@@ -39,6 +39,24 @@ describe("Stream Manager immediate actions", () => {
     expect(await screen.findByText("Werbung gestartet (60s)")).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input, init]) =>
       requestUrl(input).pathname === "/api/channels/kanal-a/modules/ads/commercial" && init?.method === "POST")).toBe(true);
+  });
+
+  it("keeps each action input directly beside its own button", () => {
+    renderWithMantine(<ImmediateActions channelId="kanal-a" />);
+
+    const adButton = screen.getByRole("button", { name: /Werbung jetzt/ });
+    const adControls = adButton.closest(".stream-manager-action__controls");
+    const adLength = within(adControls as HTMLElement).getByRole("combobox");
+    expect(adControls?.firstElementChild).toContainElement(adLength);
+    expect(adControls?.lastElementChild).toBe(adButton);
+
+    const shoutoutButton = screen.getByRole("button", { name: "Shoutout senden" });
+    const shoutoutControls = shoutoutButton.closest(".stream-manager-action__controls");
+    const shoutoutLogin = screen.getByLabelText("Twitch-Name");
+    expect(shoutoutControls).toContainElement(shoutoutLogin.closest(".stream-manager-action__field"));
+    expect(shoutoutControls?.lastElementChild).toBe(shoutoutButton);
+    expect(shoutoutButton).toBeDisabled();
+    expect(screen.getByText("Bitte gib einen Twitch-Namen ein.")).toBeInTheDocument();
   });
 
   it("reports a failed commercial start inline, without touching the shoutout or clip actions", async () => {
@@ -127,7 +145,7 @@ describe("Stream Manager warnings and errors feed", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows only warning and error events, with no interactive row", async () => {
+  it("uses event rows and links each warning or error to the event log", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels/kanal-a/events") {
@@ -143,13 +161,18 @@ describe("Stream Manager warnings and errors feed", () => {
       return Promise.resolve(jsonResponse({}, 404));
     }));
 
-    renderWithMantine(<WarningsAndErrorsFeed channelId="kanal-a" />);
+    const onNavigate = vi.fn();
+    renderWithMantine(<WarningsAndErrorsFeed channelId="kanal-a" onNavigate={onNavigate} />);
 
-    expect(await screen.findByText("Werbeeinblendung nicht gestartet: rate_limited")).toBeInTheDocument();
+    const adText = await screen.findByText("Werbeeinblendung nicht gestartet: rate_limited");
     expect(screen.getByText("Raid verworfen: ungültige Daten")).toBeInTheDocument();
     expect(screen.queryByText("Chat-Nachricht gesendet")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.queryByRole("row")).not.toBeInTheDocument();
+    const link = adText.closest("a");
+    expect(link).toHaveAttribute("href", "/channels/kanal-a/events");
+    expect(link?.querySelector(".event-chip")).toHaveAttribute("data-tone", "error");
+    expect(link?.querySelector("time")).toHaveAttribute("title", "2026-09-22T10:01:00.000Z");
+    fireEvent.click(link as HTMLAnchorElement);
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "channel", channelId: "kanal-a", section: "events" });
   });
 
   it("shows an empty state when there is nothing to warn about", async () => {

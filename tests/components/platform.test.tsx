@@ -82,6 +82,22 @@ describe("Platform level", () => {
     expect(screen.queryAllByRole("option", { name: "Broadcaster" })).toHaveLength(0);
   });
 
+  it("keeps the channel table compact with role counts combined and explained", async () => {
+    setUpPlatform(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const channelRow = await screen.findByRole("row", { name: /alpha_login/ });
+    const table = channelRow.closest("table");
+    if (table === null) throw new Error("Kanalübersicht-Tabelle fehlt");
+    expect(table).toHaveClass("platform-channel-table");
+    const membersHeader = within(table).getByRole("columnheader", { name: "Mitglieder" });
+    const counts = within(channelRow).getByText("1 · 1 · 0");
+    expect(membersHeader).toHaveAttribute("title", expect.stringContaining("·"));
+    expect(counts).toHaveAttribute("title", membersHeader.getAttribute("title"));
+  });
+
   it("asks for confirmation before removing a member and does not act yet", async () => {
     const fetcher = setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");

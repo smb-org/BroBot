@@ -297,11 +297,14 @@ export interface DashboardTexts {
    *  itself, never a global toast (see docs/input/umbau-plan.md Epic 4). */
   streamManager: {
     immediateActions: string;
+    checksHealthy: (count: string) => string;
+    checksNeedAttention: (problems: string, checks: string) => string;
     adLength: string;
     runAd: (length: string) => string;
     adStarted: (length: string) => string;
     adCooldown: (seconds: string) => string;
     shoutoutLogin: string;
+    shoutoutLoginRequired: string;
     sendShoutout: string;
     shoutoutSent: (login: string) => string;
     createClip: string;
@@ -470,11 +473,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Sofortaktionen",
+      checksHealthy: (count) => `Alles in Ordnung · ${count} Prüfungen`,
+      checksNeedAttention: (problems, checks) => `${problems} auffällige ${problems === "1" ? "Prüfung" : "Prüfungen"} · ${checks} Prüfungen`,
       adLength: "Werbedauer",
       runAd: (length) => `Werbung jetzt (${length}s)`,
       adStarted: (length) => `Werbung gestartet (${length}s)`,
       adCooldown: (seconds) => `Wartezeit: ${seconds}s`,
       shoutoutLogin: "Twitch-Name",
+      shoutoutLoginRequired: "Bitte gib einen Twitch-Namen ein.",
       sendShoutout: "Shoutout senden",
       shoutoutSent: (login) => `Shoutout an ${login} gesendet`,
       createClip: "Clip erstellen",
@@ -487,7 +493,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       placeholder: "Suchen oder Aktion ausführen …",
       empty: "Keine Treffer.",
       groupModules: "Module",
-      groupCommands: "Textbefehle",
+      groupCommands: "Befehle",
       groupMembers: "Mitglieder",
       groupActions: "Aktionen",
       adOff: "Werbung aus",
@@ -626,11 +632,14 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     streamManager: {
       immediateActions: "Immediate actions",
+      checksHealthy: (count) => `All clear · ${count} checks`,
+      checksNeedAttention: (problems, checks) => `${problems} ${problems === "1" ? "check needs" : "checks need"} attention · ${checks} checks`,
       adLength: "Ad length",
       runAd: (length) => `Run ad now (${length}s)`,
       adStarted: (length) => `Ad started (${length}s)`,
       adCooldown: (seconds) => `Cooldown: ${seconds}s`,
       shoutoutLogin: "Twitch login",
+      shoutoutLoginRequired: "Enter a Twitch login.",
       sendShoutout: "Send shoutout",
       shoutoutSent: (login) => `Shoutout sent to ${login}`,
       createClip: "Create clip",
@@ -643,7 +652,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       placeholder: "Search or run an action …",
       empty: "No matches.",
       groupModules: "Modules",
-      groupCommands: "Text commands",
+      groupCommands: "Commands",
       groupMembers: "Members",
       groupActions: "Actions",
       adOff: "Ads off",
@@ -1243,6 +1252,9 @@ export const formatDate = (value: string): string =>
 
 export const formatTimestamp = (value: string): string =>
   formatDashboardDate(value, { dateStyle: "medium", timeStyle: "short" });
+
+export const formatClockTime = (value: string): string =>
+  formatDashboardDate(value, { hour: "2-digit", minute: "2-digit" });
 
 export const formatNumber = (value: number): string =>
   new Intl.NumberFormat(dashboardLanguage()).format(value);

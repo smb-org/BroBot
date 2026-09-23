@@ -65,6 +65,16 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
   );
 };
 
+const LockedModuleStatus = ({ status, reason }: { status: string; reason: string }): ReactElement => (
+  <span className="module-locked-status" aria-label={status} aria-description={reason} title={reason}>
+    <svg className="module-locked-status__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="5" y="10" width="14" height="11" rx="1" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" />
+    </svg>
+    <span>{status}</span>
+  </span>
+);
+
 export const ModuleHeading = ({ kind, title, subtitle, actions }: {
   kind: string;
   title: string;
@@ -248,12 +258,14 @@ const ModuleWorkspaceRow = ({
       icon={<ModuleIcon moduleId={moduleId} className="scope-row__icon" />}
       title={details.name}
       description={details.description}
-      status={<Led status={missingScopes.length > 0 ? "amber" : effectiveEnabled ? "green" : "off"} label={state} />}
-      action={<Switch
-        checked={rawEnabled || mandatory}
+      status={mandatory
+        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={labels.mandatoryReason} />
+        : <Led status={missingScopes.length > 0 ? "amber" : effectiveEnabled ? "green" : "off"} label={state} />}
+      action={mandatory ? null : <Switch
+        checked={rawEnabled}
         ariaLabel={details.name}
         pending={busy}
-        disabled={mandatory || !manageable}
+        disabled={!manageable}
         onChange={onToggle}
         {...(lockedReason === undefined ? {} : { lockedReason })}
       />}
@@ -416,18 +428,19 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         <header className="module-detail__header">
           <div className="module-detail__icon" aria-hidden="true">{iconFor(moduleId)}</div>
           <div>
-            <h1>{details.name}</h1>
-            <p className="module-detail__id">{moduleId}</p>
+            <h1 title={moduleId}>{details.name}</h1>
             <p className="module-detail__description">{details.description}</p>
           </div>
         </header>
         <section className="module-detail__switch inspector-section--switch" aria-label={labels.status}>
           <div>
             <strong>{labels.mainSwitch}</strong>
-            <Led status={effectiveEnabled ? "green" : "off"} label={statusWord(effectiveEnabled)} />
+            {mandatory
+              ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={labels.mandatoryReason} />
+              : <Led status={effectiveEnabled ? "green" : "off"} label={statusWord(effectiveEnabled)} />}
           </div>
-          <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />
-          {disabledReason === null ? null : <p className="lock-reason">{disabledReason}</p>}
+          {mandatory ? null : <ModuleSwitch moduleId={moduleId} enabled={effectiveEnabled} disabled={!manageable || switchDisabled} busy={busy} onToggle={onToggle} />}
+          {disabledReason === null || mandatory ? null : <p className="lock-reason">{disabledReason}</p>}
         </section>
         {missingScopes.length === 0 ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>

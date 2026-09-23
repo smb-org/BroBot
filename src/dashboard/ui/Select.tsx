@@ -48,7 +48,7 @@ export function Select({
   return (
     <MantineSelect
       label={label}
-      aria-label={label ? undefined : ariaLabel}
+      aria-label={ariaLabel}
       description={hint}
       error={error ? `× ${error}` : undefined}
       value={value}

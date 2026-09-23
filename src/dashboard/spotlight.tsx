@@ -127,7 +127,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, modules, onNavigate, onOp
     ];
   }, [texts, manageable, adsEnabled, channelId, shoutoutLogin]);
 
-  const items = [...moduleItems, ...commandItems, ...memberItems, ...actionItems];
+  const items = [...actionItems, ...moduleItems, ...commandItems, ...memberItems];
 
   return (
     <Spotlight

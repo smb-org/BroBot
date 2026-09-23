@@ -59,21 +59,26 @@ const stopAndNavigate = (onNavigate: () => void, onEntryNavigate: () => void) =>
  * this needs to look pixel-exact rather than just work.
  */
 export function Sidebar({ groups, modules, platform, collapsed, onToggleCollapsed, onEntryNavigate, collapseLabel, expandLabel }: SidebarProps) {
-  const renderEntry = (entry: SidebarEntry, moduleChild = false): ReactNode => (
-    <NavLink
-      key={entry.id}
-      href={entry.href}
-      label={collapsed ? undefined : entry.label}
-      title={collapsed ? entry.label : undefined}
-      aria-label={collapsed ? entry.label : undefined}
-      leftSection={entry.icon}
-      rightSection={entry.led === undefined || collapsed ? undefined : <Led status={entry.led.status} word={entry.led.word} />}
-      active={entry.active}
-      aria-current={entry.active ? "page" : undefined}
-      className={`sidebar-nav-link${moduleChild ? " sidebar-nav-link--module-child" : ""}`}
-      onClick={stopAndNavigate(entry.onNavigate, onEntryNavigate)}
-    />
-  );
+  const renderEntry = (entry: SidebarEntry, moduleChild = false): ReactNode => {
+    const accessibleName = moduleChild && entry.led !== undefined
+      ? `${entry.label} · ${entry.led.word}`
+      : entry.label;
+    return (
+      <NavLink
+        key={entry.id}
+        href={entry.href}
+        label={collapsed ? undefined : entry.label}
+        title={moduleChild || collapsed ? accessibleName : undefined}
+        aria-label={moduleChild || collapsed ? accessibleName : undefined}
+        leftSection={entry.icon}
+        rightSection={entry.led === undefined || collapsed ? undefined : <Led status={entry.led.status} word={entry.led.word} dotOnly={moduleChild} />}
+        active={entry.active}
+        aria-current={entry.active ? "page" : undefined}
+        className={`sidebar-nav-link${moduleChild ? " sidebar-nav-link--module-child" : ""}`}
+        onClick={stopAndNavigate(entry.onNavigate, onEntryNavigate)}
+      />
+    );
+  };
 
   return (
     <div className="sidebar" data-collapsed={collapsed ? "true" : undefined}>

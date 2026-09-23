@@ -1,4 +1,4 @@
-import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { Fragment, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
 import type {
@@ -46,10 +46,10 @@ import { PlatformPage } from "./platform";
 import { platformTexts, channelPanelTexts, roleLabel, auditActionLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatTimestamp as formatTimestampBase, formatNumber, maintenanceReasonText } from "./locale";
 import { canManage } from "../contracts/values";
-import { eventSubName, moduleName, moduleWorkspaceTexts, statusWord } from "./module-labels";
+import { eventSubName, moduleName, statusWord } from "./module-labels";
 import { dashboardRoutePath, replaceDashboardRoute, useDashboardRoute, type DashboardRoute } from "./router";
 import { truncateTo200Chars } from "../text";
-import { BlockingState, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, Switch as UiSwitch, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
+import { BlockingState, ListDetail, Select as UiSelect, Shell, Sidebar, SubInspector, UiProvider, useInspectorSelection, type SidebarEntry, type SidebarGroup, type SidebarModulesGroup } from "./ui";
 import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
@@ -363,9 +363,6 @@ interface DashboardHeaderProperties {
   channels: PanelChannelState[];
   activeChannel: PanelChannelState | undefined;
   loadedAt: number | undefined;
-  headerModule: { id: string; enabled: boolean; mandatory?: boolean } | undefined;
-  headerModuleBusy: boolean;
-  onToggleHeaderModule: () => void;
   onNavigate: (route: DashboardRoute) => void;
   onLogout: () => void;
   loggingOut: boolean;
@@ -373,9 +370,7 @@ interface DashboardHeaderProperties {
 
 /**
  * "Kopfleiste" (docs/input/DESIGN-neu.md): brand, channel `Select` up to
- * 280px with the Twitch id, connection LED, life-sign, and (on a module
- * page) the module's main switch -- `ui/Switch`, the same component the
- * future module list row uses. Sign-out closes it out.
+ * 280px with the Twitch id, connection LED, life-sign, and sign-out.
  *
  * The channel `Select`'s options carry the Twitch id as plain text next to
  * the name rather than in a monospace secondary line: `ui/Select` only
@@ -385,18 +380,13 @@ interface DashboardHeaderProperties {
  * pixel parity. Upgrade path: a richer `SelectOption` shape in `ui/Select`
  * if the plain label stops being legible enough.
  */
-const DashboardHeader = ({ route, channels, activeChannel, loadedAt, headerModule, headerModuleBusy, onToggleHeaderModule, onNavigate, onLogout, loggingOut }: DashboardHeaderProperties): ReactElement => {
+const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate, onLogout, loggingOut }: DashboardHeaderProperties): ReactElement => {
   const texts = dashboardTexts();
   const tone = activeChannel === undefined ? "neutral" : channelStatus(activeChannel);
   const connectionLabel = activeChannel === undefined
     ? null
     : tone === "healthy" ? texts.header.connectionRunning : statusText(activeChannel);
   const connectionLed = connectionLabel === null ? null : <span className="led" data-status={tone === "healthy" ? "green" : tone === "warning" ? "amber" : "red"}><span className="led__dot" aria-hidden="true" /><span>{connectionLabel}</span></span>;
-  const headerModuleLabel = headerModule === undefined ? null : `${moduleName(headerModule.id)} · ${statusWord(headerModule.enabled)}`;
-  const managementLocked = activeChannel !== undefined && !canManage(activeChannel.role);
-  const mandatoryModule = headerModule?.mandatory === true || headerModule?.id === "channel_events";
-  const switchLockReason = mandatoryModule ? moduleWorkspaceTexts().mandatoryReason
-    : managementLocked ? texts.module.managementLocked : undefined;
   return (
     <div className="dashboard-header">
       <a className="brand-mark dashboard-header__brand" href="/" aria-current={route.kind === "overview" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onNavigate({ kind: "overview" }); }}><span className="brand-mark__dot" /><span className="brand-mark__word">BroBot</span></a>
@@ -415,17 +405,6 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, headerModul
         {connectionLed}
         {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
       </div>
-      {headerModule === undefined || headerModuleLabel === null ? null : (
-        <div className="dashboard-header__switch">
-          <UiSwitch
-            label={headerModuleLabel}
-            checked={headerModule.enabled}
-            onChange={onToggleHeaderModule}
-            pending={headerModuleBusy}
-            {...(switchLockReason === undefined ? {} : { lockedReason: switchLockReason })}
-          />
-        </div>
-      )}
       <button className="button button--quiet dashboard-header__logout" type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? texts.navigation.signingOut : texts.navigation.signOut}</button>
     </div>
   );
@@ -608,7 +587,7 @@ const botPermissionsRow = (permissions: PanelBotPermissions | null | undefined):
   };
 };
 
-const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | null | undefined): StatusEntry | null => {
+const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | null | undefined, login?: string, canRequest = false): StatusEntry | null => {
   const texts = channelPanelTexts();
   if (!broadcasterConsentMissing(permissions)) return null;
   return {
@@ -619,6 +598,7 @@ const broadcasterPermissionsRow = (permissions: PanelBroadcasterPermissions | nu
       tone="warning"
       word={texts.fullConsentMissing}
       detail={texts.fullConsentLocked}
+      action={login === undefined ? undefined : <BroadcasterConsentAction login={login} needed canRequest={canRequest} />}
     />,
   };
 };
@@ -629,20 +609,32 @@ const tokenRow = (tokens: PanelTokenStatus, bot: PanelBotStatus | null): StatusE
   return { key: "token", tone: token.tone, node: <StateRow label={texts.statusCard.tokenStatus} tone={token.tone} word={token.label} detail={maintenanceReasonText(tokens.loginReason) ?? undefined} /> };
 };
 
-const channelBotConsentRow = (status: PanelChannelState["channelBotConsent"]): StatusEntry => {
+const channelBotConsentRow = (status: PanelChannelState["channelBotConsent"], channelId: string, canRequest: boolean): StatusEntry => {
   const texts = dashboardTexts();
   const tone: StateTone = status === "missing" ? "warning" : "healthy";
-  return { key: "channel-bot-consent", tone, node: <StateRow label={texts.statusCard.chatConsent} tone={tone} word={status === "missing" ? texts.statusCard.broadcasterConsentMissing : texts.status.present} detail={status === "missing" ? texts.statusCard.chatBotRequired : undefined} /> };
+  return { key: "channel-bot-consent", tone, node: <StateRow
+    label={texts.statusCard.chatConsent}
+    tone={tone}
+    word={status === "missing" ? texts.statusCard.broadcasterConsentMissing : texts.status.present}
+    detail={status === "missing" ? texts.statusCard.chatBotRequired : undefined}
+    action={status === "missing" ? <ChannelBotConsentAction channelId={channelId} needed canRequest={canRequest} /> : undefined}
+  /> };
 };
 
-const moderatorRow = (moderator: PanelModeratorStatus | null): StatusEntry => {
+const moderatorRow = (moderator: PanelModeratorStatus | null, overview: PanelChannelOverview, check: ModeratorCheckState, onCheck: () => void): StatusEntry => {
   const texts = dashboardTexts();
   const tone: StateTone = moderator === null ? "neutral" : moderator.isModerator ? "healthy" : "error";
   const word = moderator === null ? texts.status.notChecked : moderator.isModerator ? texts.status.moderator : texts.status.moderatorRoleMissing;
   const detail = moderator === null
     ? texts.moderation.noCheckForChannel
     : maintenanceReasonText(moderator.reason) ?? texts.moderation.lastCheck(formatTimestamp(moderator.checkedAt));
-  return { key: "moderator", tone, node: <StateRow label={texts.statusCard.moderatorStatus} tone={tone} word={word} detail={detail} /> };
+  return { key: "moderator", tone, node: <StateRow
+    label={texts.statusCard.moderatorStatus}
+    tone={tone}
+    word={word}
+    detail={detail}
+    action={<ModeratorCheckAction canCheck={canManage(overview.role)} checking={check.status === "loading"} checkError={check.error} nextAllowedAt={check.nextAllowedAt} urgent={moderator === null || !moderator.isModerator} onCheck={onCheck} />}
+  /> };
 };
 
 const lastErrorRow = (error: PanelLastError | null): StatusEntry => {
@@ -754,15 +746,37 @@ interface ChannelOverviewPageProperties {
   onModulesChanged: () => Promise<void>;
 }
 
+const ChannelStateChecks = ({ entries, children }: { entries: StatusEntry[]; children?: ReactNode }): ReactElement => {
+  const texts = dashboardTexts();
+  const allHealthy = entries.length > 0 && entries.every((entry) => entry.tone === "healthy");
+  const problemCount = entries.filter((entry) => entry.tone !== "healthy").length;
+  const summaryTone: LedStatus = allHealthy
+    ? "green"
+    : entries.some((entry) => entry.tone === "error") ? "red" : "amber";
+  const summary = allHealthy
+    ? texts.streamManager.checksHealthy(formatNumber(entries.length))
+    : texts.streamManager.checksNeedAttention(formatNumber(problemCount), formatNumber(entries.length));
+
+  return (
+    <details className="channel-state-checks" open={!allHealthy}>
+      <summary className="channel-state-checks__summary">
+        <Led status={summaryTone} label={summary} />
+      </summary>
+      <div className="state-list">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
+      {children}
+    </details>
+  );
+};
+
 const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus, onNavigate, modules, onModulesChanged }: ChannelOverviewPageProperties): ReactElement => {
   const entries = sortBySeverity([
     broadcasterRow(overview.broadcasterConnection),
-    channelBotConsentRow(overview.channelBotConsent),
+    channelBotConsentRow(overview.channelBotConsent, overview.channelId, overview.role === "broadcaster"),
     chatRow(overview.chatSubscription, overview.chatSubscriptionNeeded === true),
-    moderatorRow(overview.moderator),
+    moderatorRow(overview.moderator, overview, moderatorCheck, onCheckModeratorStatus),
     botRow(overview.bot),
     botPermissionsRow(overview.botPermissions),
-    broadcasterPermissionsRow(overview.broadcasterPermissions),
+    broadcasterPermissionsRow(overview.broadcasterPermissions, overview.login, overview.role === "broadcaster"),
     tokenRow(overview.tokens, overview.bot),
     lastErrorRow(overview.lastError),
   ].filter((entry): entry is StatusEntry => entry !== null));
@@ -773,17 +787,17 @@ const ChannelOverviewPage = ({ overview, moderatorCheck, onCheckModeratorStatus,
         kind="channel"
         title={overview.displayName}
         subtitle={roleLabel(overview.role)}
-        actions={<><ModeratorCheckAction canCheck={canManage(overview.role)} checking={moderatorCheck.status === "loading"} checkError={moderatorCheck.error} nextAllowedAt={moderatorCheck.nextAllowedAt} urgent={overview.moderator === null || !overview.moderator.isModerator} onCheck={onCheckModeratorStatus} /><ChannelBotConsentAction channelId={overview.channelId} needed={overview.channelBotConsent === "missing"} canRequest={overview.role === "broadcaster"} /><BroadcasterConsentAction login={overview.login} needed={broadcasterConsentMissing(overview.broadcasterPermissions)} canRequest={overview.role === "broadcaster"} /></>}
       />
-      <div className="state-list">{entries.map((entry) => <Fragment key={entry.key}>{entry.node}</Fragment>)}</div>
-      <BotPermissionsInspector permissions={overview.botPermissions} />
-      <BroadcasterPermissionsInspector permissions={overview.broadcasterPermissions} />
       <ImmediateActions channelId={overview.channelId} />
+      <WarningsAndErrorsFeed channelId={overview.channelId} onNavigate={onNavigate} />
       <section className="content-section" aria-label={dashboardTexts().navigation.module}>
         <div className="section-heading"><h2>{dashboardTexts().navigation.module}</h2><span className="muted number">{formatNumber(overview.activeModules.length)}</span></div>
         <ModuleToggleList channelId={overview.channelId} ownRole={overview.role} modules={modules} onNavigate={onNavigate} onChanged={onModulesChanged} />
       </section>
-      <WarningsAndErrorsFeed key={overview.channelId} channelId={overview.channelId} />
+      <ChannelStateChecks entries={entries}>
+        <BotPermissionsInspector permissions={overview.botPermissions} />
+        <BroadcasterPermissionsInspector permissions={overview.broadcasterPermissions} />
+      </ChannelStateChecks>
     </>
   );
 };
@@ -1502,7 +1516,7 @@ export const DashboardApp = (): ReactElement => {
   return (
     <UiProvider>
       <Shell
-        header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} headerModule={route.kind === "module" ? modules.data?.modules.find((module) => module.id === route.moduleId) : undefined} headerModuleBusy={headerModuleBusy} onToggleHeaderModule={() => { void toggleHeaderModule(); }} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />}
+        header={<DashboardHeader route={route} channels={channels.data ?? []} activeChannel={selectedChannel ?? undefined} loadedAt={loadedAtForRoute(route, { overview: overview.loadedAt, system: system.loadedAt, members: members.loadedAt, modules: modules.loadedAt, events: events.loadedAt })} onNavigate={navigate} onLogout={() => { void handleLogout(); }} loggingOut={loggingOut} />}
         navbar={(context) => <PanelSidebar route={route} channels={channels.data ?? []} platformAdmin={isPlatform} moduleStates={sidebarModuleStates} collapsed={context.collapsed} onToggleCollapsed={context.onToggleCollapsed} onEntryNavigate={context.closeMobileNav} onNavigate={navigate} />}
         navLabel={dashboardTexts().navigation.mainNavigation}
         openSidebarLabel={dashboardTexts().navigation.openSidebar}

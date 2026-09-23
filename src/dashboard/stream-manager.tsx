@@ -2,10 +2,10 @@ import { useEffect, useState, type ReactElement } from "react";
 
 import type { PanelEventEntry } from "../panel-contract";
 import { createClip, fetchEvents, PanelApiError, sendManualShoutout, startCommercial } from "./api";
-import { apiErrorText, dashboardTexts, eventText, formatTimestamp } from "./locale";
+import { apiErrorText, dashboardLanguage, dashboardTexts, eventText, formatClockTime } from "./locale";
 import { eventDetail, eventMetadata } from "./events/model";
 import { Button, Field, Select } from "./ui";
-import { Led, type LedStatus } from "./module-panels";
+import { dashboardRoutePath, type DashboardRoute } from "./router";
 
 /** Twitch's own accepted Start Commercial lengths (seconds); kept here, not
  *  imported from the ads module's adapter -- the dashboard doesn't reach
@@ -41,16 +41,20 @@ const AdNowAction = ({ channelId }: { channelId: string }): ReactElement => {
 
   return (
     <div className="stream-manager-action">
-      <Select
-        label={texts.streamManager.adLength}
-        value={length}
-        onChange={setLength}
-        options={AD_LENGTHS.map((value) => ({ value, label: `${value}s` }))}
-        disabled={state.pending}
-      />
-      <Button variant="primary" disabled={state.pending || length === null} onClick={() => { void run(); }}>
-        {texts.streamManager.runAd(length ?? "")}
-      </Button>
+      <div className="stream-manager-action__controls">
+        <div className="stream-manager-action__field stream-manager-action__field--length">
+          <Select
+            label={texts.streamManager.adLength}
+            value={length}
+            onChange={setLength}
+            options={AD_LENGTHS.map((value) => ({ value, label: `${value}s` }))}
+            disabled={state.pending}
+          />
+        </div>
+        <Button variant="primary" disabled={state.pending || length === null} onClick={() => { void run(); }}>
+          {texts.streamManager.runAd(length ?? "")}
+        </Button>
+      </div>
       {state.success === null ? null : <p className="form-success" role="status">{state.success}</p>}
       {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}
     </div>
@@ -76,16 +80,21 @@ const ShoutoutAction = ({ channelId }: { channelId: string }): ReactElement => {
 
   return (
     <div className="stream-manager-action">
-      <Field
-        label={texts.streamManager.shoutoutLogin}
-        value={login}
-        onChange={setLogin}
-        disabled={state.pending}
-        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void run(); } }}
-      />
-      <Button variant="primary" disabled={state.pending || login.trim().length === 0} onClick={() => { void run(); }}>
-        {texts.streamManager.sendShoutout}
-      </Button>
+      <div className="stream-manager-action__controls">
+        <div className="stream-manager-action__field">
+          <Field
+            label={texts.streamManager.shoutoutLogin}
+            value={login}
+            onChange={setLogin}
+            disabled={state.pending}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void run(); } }}
+          />
+        </div>
+        <Button variant="primary" disabled={state.pending || login.trim().length === 0} onClick={() => { void run(); }}>
+          {texts.streamManager.sendShoutout}
+        </Button>
+      </div>
+      {login.trim().length === 0 ? <p className="muted stream-manager-action__reason">{texts.streamManager.shoutoutLoginRequired}</p> : null}
       {state.success === null ? null : <p className="form-success" role="status">{state.success}</p>}
       {state.error === null ? null : <p className="form-error" role="alert">{state.error}</p>}
     </div>
@@ -112,9 +121,11 @@ const ClipAction = ({ channelId }: { channelId: string }): ReactElement => {
 
   return (
     <div className="stream-manager-action">
-      <Button variant="primary" disabled={state.pending} onClick={() => { void run(); }}>
-        {texts.streamManager.createClip}
-      </Button>
+      <div className="stream-manager-action__controls">
+        <Button variant="primary" disabled={state.pending} onClick={() => { void run(); }}>
+          {texts.streamManager.createClip}
+        </Button>
+      </div>
       {state.success === null ? null : (
         <p className="form-success" role="status">
           <span>{state.success}</span>{editUrl === null ? null : <> · <a href={editUrl} target="_blank" rel="noreferrer">{texts.streamManager.openClip}</a></>}
@@ -144,16 +155,13 @@ export const ImmediateActions = ({ channelId }: { channelId: string }): ReactEle
   );
 };
 
-const toneToLed = (tone: string | undefined): LedStatus =>
-  tone === "error" ? "red" : tone === "warning" ? "amber" : "off";
-
 /**
  * Warnings and errors only, no interaction (no row selection, no filter
  * bar) -- a glance, not the full event log. Fetches once per channel; the
  * full `EventsPage` (with filtering and an inspector) stays the place to
  * dig in.
  */
-export const WarningsAndErrorsFeed = ({ channelId }: { channelId: string }): ReactElement => {
+export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: string; onNavigate?: (route: DashboardRoute) => void }): ReactElement => {
   const texts = dashboardTexts();
   const [entries, setEntries] = useState<readonly PanelEventEntry[] | null>(null);
 
@@ -172,15 +180,25 @@ export const WarningsAndErrorsFeed = ({ channelId }: { channelId: string }): Rea
     <section className="content-section" aria-label={texts.streamManager.feedTitle}>
       <div className="section-heading"><h2>{texts.streamManager.feedTitle}</h2></div>
       {entries === null ? null : entries.length === 0 ? (
-        <p className="empty-state">{texts.streamManager.feedEmpty}</p>
+        <p className="stream-manager-feed__empty">{texts.streamManager.feedEmpty}</p>
       ) : (
         <ul className="stream-manager-feed">
           {entries.map((entry) => {
             const label = eventText(entry.code, eventDetail(entry.detail));
+            const metadata = eventMetadata(entry.code);
+            const tone = metadata?.tone === "error" ? "error" : metadata?.tone === "warning" ? "warning" : "neutral";
+            const route: DashboardRoute = { kind: "channel", channelId, section: "events" };
             return (
               <li key={entry.eventId}>
-                <Led status={toneToLed(eventMetadata(entry.code)?.tone)} label={label} />
-                <span className="muted mono">{formatTimestamp(entry.createdAt)}</span>
+                <a
+                  className="stream-manager-feed__row"
+                  href={dashboardRoutePath(route)}
+                  onClick={onNavigate === undefined ? undefined : (event) => { event.preventDefault(); onNavigate(route); }}
+                >
+                  <span className="event-chip" data-tone={tone}>{metadata?.word[dashboardLanguage()] ?? texts.events.unknown}</span>
+                  <span className="stream-manager-feed__text">{label}</span>
+                  <time className="stream-manager-feed__time mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
+                </a>
               </li>
             );
           })}

@@ -267,18 +267,22 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("columnheader", { name: "Modul" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Wer" })).toBeInTheDocument();
     expect(screen.getByText("Shoutout unterdrückt")).toBeInTheDocument();
-    expect(screen.getByText("Raid-Shoutout")).toBeInTheDocument();
-    expect(screen.getByText("Automatisch")).toBeInTheDocument();
-    expect(screen.getByText("plugin.anderes")).toHaveClass("mono");
-    expect(screen.getByText("user-2")).toHaveClass("mono");
+    const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
+    const unknownEvent = screen.getByText("plugin.anderes", { selector: ".event-table__text" });
+    const unknownRow = unknownEvent.closest("tr");
+    expect(eventRow?.querySelector("td:nth-child(2)")).toHaveTextContent("Raid-Shoutout");
+    expect(eventRow?.querySelector("td:nth-child(3)")).toHaveTextContent("Automatisch");
+    expect(unknownEvent).toHaveClass("mono");
+    expect(unknownRow?.querySelector("td:nth-child(2)")).toHaveClass("mono");
+    expect(unknownRow?.querySelector("td:nth-child(3)")).toHaveTextContent("user-2");
+    expect(unknownRow?.querySelector("td:nth-child(3) .mono")).toBeInTheDocument();
     const sentRow = screen.getByText("Chat-Nachricht gesendet").closest("tr");
     const failedRow = screen.getByText("Aktion fehlgeschlagen").closest("tr");
     expect(sentRow?.querySelector(".event-chip[data-tone='info']")).toHaveTextContent("Info");
     expect(within(sentRow as HTMLElement).getByText("Info")).toBeInTheDocument();
     expect(failedRow?.querySelector(".event-chip[data-tone='error']")).toHaveTextContent("Fehler");
     expect(within(failedRow as HTMLElement).getByText("Fehler")).toBeInTheDocument();
-    const eventRow = screen.getByText("Shoutout unterdrückt").closest("tr");
-    const unknownEventRow = screen.getByText("plugin.anderes").closest("tr");
+    const unknownEventRow = unknownRow;
     expect(eventRow).not.toBeNull();
     expect(unknownEventRow).not.toBeNull();
     fireEvent.keyDown(unknownEventRow as HTMLElement, { key: " " });
@@ -290,6 +294,9 @@ describe("Dashboard skeleton", () => {
     expect(unknownEventRow).toHaveAttribute("aria-selected", "false");
     expect(screen.getByText("shoutout.suppressed")).toBeInTheDocument();
     expect(screen.getByText(/"grund": "raid_erkannt"/)).toBeInTheDocument();
+    const displayedTime = eventRow?.querySelector("td:last-child time");
+    expect(displayedTime).toHaveTextContent(/^04:00$/);
+    expect(displayedTime).toHaveAttribute("title", "2026-09-18T04:00:00.000Z");
   });
 
   it("groups rows by day, newest day first, each with its own table", async () => {
@@ -445,7 +452,7 @@ describe("Dashboard skeleton", () => {
     Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 1000 });
     fireEvent.scroll(window);
     expect(await screen.findByText("alt")).toBeInTheDocument();
-    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getAllByText("Alice").length).toBeGreaterThan(0);
     expect(screen.getByText(/aktualisiert vor/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ältere Ereignisse laden" })).not.toBeInTheDocument();
   });
@@ -958,7 +965,7 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeInTheDocument();
     expect(screen.queryByText("Raid von unbekannt mit 21 Zuschauern")).not.toBeInTheDocument();
     fireEvent.change(person, { target: { value: "person-a" } });
-    expect(await screen.findByText("Alice")).toBeInTheDocument();
+    expect((await screen.findAllByText("Alice")).length).toBeGreaterThan(0);
 
     fireEvent.click(module);
     fireEvent.click(screen.getByRole("option", { name: "Werbung", hidden: true }));
@@ -1025,12 +1032,14 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
 
     expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
-    expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(2);
+    expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(1);
+    expect(document.querySelector(".member-avatar-placeholder")).toHaveTextContent("E");
 
     // The select field offers no value that would be rejected.
     const rolle = screen.getByRole("combobox", { name: "Rolle für esembe" });
     expect(rolle).toBeDisabled();
-    expect(within(rolle).getAllByRole("option").map((o) => o.textContent)).toEqual(["Broadcaster"]);
+    expect(rolle).toHaveAccessibleDescription("Letzter Broadcaster");
+    expect(screen.getAllByRole("option", { hidden: true }).map((o) => o.textContent)).toContain("Broadcaster");
   });
 
   it("allows revocation once a second broadcaster remains", async () => {
@@ -1220,9 +1229,9 @@ describe("Dashboard skeleton", () => {
     await screen.findByRole("heading", { name: "Textbefehle", level: 1 });
     const reason = "Nur Broadcaster und Verwalter dürfen Module ändern.";
     const schalter = await screen.findAllByRole("switch", { name: /Textbefehle/i });
-    expect(schalter).toHaveLength(2);
+    expect(schalter).toHaveLength(1);
     schalter.forEach((element) => { expect(element).toBeDisabled(); });
-    expect(screen.getAllByText(reason)).toHaveLength(2);
+    expect(screen.getAllByText(reason)).toHaveLength(1);
   });
 
   it("shows system state before the audit log arrives", async () => {
@@ -1572,7 +1581,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByText("Alpha-Mitglied");
     fireEvent.click(screen.getByRole("row", { name: /Alpha-Mitglied/ }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Alpha-Mitglied" }), { target: { value: "manager" } });
+    const roleSelect = screen.getByRole("combobox", { name: "Rolle für Alpha-Mitglied" });
+    fireEvent.click(roleSelect);
+    fireEvent.click(screen.getByRole("option", { name: "Verwalter", hidden: true }));
     await waitFor(() => expect(resolveAlphaReload).toBeTypeOf("function"));
 
     act(() => {
@@ -1659,7 +1670,7 @@ describe("Dashboard skeleton", () => {
       }
       if (url.pathname === "/api/channels/kanal-a/members") {
         memberRequestCount += 1;
-        if (memberRequestCount === 1) return Promise.resolve(jsonResponse({ members: [ersterMember], broadcasterCount: 1, viewerUserId: "first-user", nextCursor: "cursor-1" }));
+        if (memberRequestCount === 1) return Promise.resolve(jsonResponse({ members: [ersterMember], broadcasterCount: 1, viewerUserId: "someone-else", nextCursor: "cursor-1" }));
         return reload;
       }
       return Promise.resolve(jsonResponse({}, 404));
@@ -1670,7 +1681,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByText("Erster Stand");
     fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "manager" } });
+    const roleSelect = screen.getByRole("combobox", { name: "Rolle für Erster Stand" });
+    fireEvent.click(roleSelect);
+    fireEvent.click(screen.getByRole("option", { name: "Verwalter", hidden: true }));
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
     });
@@ -1711,7 +1724,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/channels/kanal-a/members" && url.search === "?cursor=cursor-1") return nextPage;
       if (url.pathname === "/api/channels/kanal-a/members") {
         memberRequestCount += 1;
-        if (memberRequestCount === 1) return Promise.resolve(jsonResponse({ members: [ersterMember], broadcasterCount: 1, viewerUserId: "first-user", nextCursor: "cursor-1" }));
+        if (memberRequestCount === 1) return Promise.resolve(jsonResponse({ members: [ersterMember], broadcasterCount: 1, viewerUserId: "someone-else", nextCursor: "cursor-1" }));
         return reload;
       }
       return Promise.resolve(jsonResponse({}, 404));
@@ -1727,7 +1740,9 @@ describe("Dashboard skeleton", () => {
     });
 
     fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rolle für Erster Stand" }), { target: { value: "manager" } });
+    const roleSelect = screen.getByRole("combobox", { name: "Rolle für Erster Stand" });
+    fireEvent.click(roleSelect);
+    fireEvent.click(screen.getByRole("option", { name: "Verwalter", hidden: true }));
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
     });
@@ -1797,6 +1812,62 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByText("Keine Module aktiv.")).not.toBeInTheDocument();
   });
 
+  it("puts Stream Manager actions and warnings before modules and the compact healthy state", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      chatSubscriptionNeeded: true,
+      botPermissions: { missingScopes: [] },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (path === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const actions = await screen.findByRole("region", { name: "Sofortaktionen" });
+    const warnings = await screen.findByRole("region", { name: "Warnungen und Fehler" });
+    const modules = await screen.findByRole("region", { name: "Module" });
+    const state = document.querySelector("details.channel-state-checks");
+    expect(state).not.toBeNull();
+    expect(actions.compareDocumentPosition(warnings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(warnings.compareDocumentPosition(modules) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(modules.compareDocumentPosition(state as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(state).not.toHaveAttribute("open");
+    expect(within(state as HTMLElement).getByText("Alles in Ordnung · 8 Prüfungen")).toBeInTheDocument();
+  });
+
+  it("lists unhealthy channel checks prominently and keeps the moderator recheck with its row", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      chatSubscriptionNeeded: true,
+      botPermissions: { missingScopes: [] },
+      moderator: { ...moderator, isModerator: false },
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+      if (path === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    const state = await screen.findByText("1 auffällige Prüfung · 8 Prüfungen");
+    const details = state.closest("details");
+    expect(details).toHaveAttribute("open");
+    const moderatorRow = within(details as HTMLElement).getByRole("article", { name: "Moderatorstatus" });
+    expect(within(moderatorRow).getByRole("button", { name: "Moderatorstatus prüfen" })).toBeInTheDocument();
+  });
+
   it("links to active modules in the channel overview instead of embedding their forms", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
@@ -1833,7 +1904,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getAllByRole("link", { name: "Module" }).some((link) => link.getAttribute("href") === "/channels/kanal-a/modules")).toBe(true);
   });
 
-  it("shows the display name, Twitch ID, and the labeled module switch in the header", async () => {
+  it("shows the channel identity in the header and only one module switch on the page", async () => {
     const channel = { ...healthyChannel("26876135", "Esembe"), login: "esembe" };
     const secondChannel = healthyChannel("987654", "ZweiteRinne");
     const activeModule = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
@@ -1856,8 +1927,9 @@ describe("Dashboard skeleton", () => {
     // treats the dropdown's reference as clipped and renders it `display:
     // none` -- present, but invisible to an ordinary role query.
     expect(screen.getByRole("option", { name: "Esembe — 26876135", hidden: true })).toBeInTheDocument();
-    const headerSwitch = await screen.findByRole("switch", { name: "Textbefehle · Läuft" });
-    expect(headerSwitch).toBeChecked();
+    expect(screen.queryByRole("switch", { name: "Textbefehle · Läuft" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("switch", { name: "Textbefehle: Läuft" })).toBeChecked();
+    expect(screen.queryByText("text_commands", { exact: true })).not.toBeInTheDocument();
   });
 
   it("reloads the channel overview after enabling and shows the module view", async () => {
@@ -1889,7 +1961,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const switcher = await screen.findByRole("switch", { name: "Textbefehle · Aus" });
+    const switcher = await screen.findByRole("switch", { name: "Textbefehle: Aus" });
     fireEvent.click(switcher);
 
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
@@ -2042,7 +2114,7 @@ describe("Dashboard skeleton", () => {
       { path: "/channels/kanal-a/members", heading: "Mitglieder", currentLink: "Mitglieder" },
       { path: "/channels/kanal-a/modules", heading: "Module", currentLink: "Module" },
       { path: "/channels/kanal-a/events", heading: "Ereignisse", currentLink: "Ereignisse" },
-      { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", currentLink: "Textbefehle Läuft" },
+      { path: "/channels/kanal-a/modules/text_commands", heading: "Textbefehle", currentLink: "Textbefehle · Läuft" },
     ];
 
     for (const page of pages) {
@@ -2172,7 +2244,7 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("article", { name: "Broadcaster-OAuth" })).toHaveAttribute("data-status", "neutral");
   });
 
-  it("locks the mandatory module switch in the module page header too", async () => {
+  it("shows mandatory module state as always active without a switch", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
@@ -2185,10 +2257,11 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    const headerSwitch = await screen.findByRole("switch", { name: "Kanalereignisse · Läuft" });
-    expect(headerSwitch).toBeChecked();
-    expect(headerSwitch).toBeDisabled();
-    expect(screen.getAllByText("Kanalereignisse sind immer aktiv.").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("switch", { name: "Kanalereignisse · Läuft" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Kanalereignisse: Läuft" })).not.toBeInTheDocument();
+    const status = await screen.findByText("Läuft · immer aktiv");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
+    expect(screen.queryByText("channel_events", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
   });
 

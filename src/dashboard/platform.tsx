@@ -47,7 +47,7 @@ const isAbort = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
 
 const memberName = (member: PanelMember): string =>
-  member.displayName ?? (member.login === null ? "Twitch-ID " + member.userId : "@" + member.login);
+  member.displayName ?? (member.login === null ? platformTexts().member : "@" + member.login);
 
 const userName = (user: PanelTwitchUser): string =>
   user.displayName.length > 0 ? user.displayName : "@" + user.login;
@@ -85,7 +85,7 @@ const MembersTable = ({
   if (members.length === 0) return <p className="muted">{texts.noMembers}</p>;
   return (
     <div className="table-wrap">
-      <table className="table">
+      <table className="table platform-members-table">
         <thead>
           <tr>
             <th scope="col">{texts.login}</th>
@@ -99,9 +99,7 @@ const MembersTable = ({
               <tr>
                 <th scope="row">
                   <span>{memberName(member)}</span>
-                  <span className="login-hint">
-                    {member.login === null ? texts.twitchId(member.userId) : "@" + member.login + " · " + texts.twitchId(member.userId)}
-                  </span>
+                  <span className="login-hint" title={texts.twitchId(member.userId)}>{member.login === null ? texts.member : "@" + member.login}</span>
                 </th>
                 <td>
                   {member.role === "broadcaster" ? <span>{roleLabel(member.role)}</span> : (
@@ -299,7 +297,7 @@ const ChannelInspector = ({
         word={connectionWord(channel)}
         detail={!channel.broadcasterConnected && channel.fullConsent ? texts.consentPendingHint : channel.login}
       />
-      <section className="config-section" aria-label={texts.toggleConsent}>
+      <section className="config-section platform-inspector-section" aria-label={texts.toggleConsent}>
         <div className="section-heading"><h3>{texts.toggleConsent}</h3></div>
         <div className="form-actions">
           <Switch
@@ -312,7 +310,7 @@ const ChannelInspector = ({
         </div>
       </section>
       <InvitationLink channel={channel} />
-      <section className="config-section" aria-label={texts.members}>
+      <section className="config-section platform-inspector-section" aria-label={texts.members}>
         <div className="section-heading"><h3>{texts.members}</h3></div>
         {members.status === "loading" && members.data === null ? <p className="loading-line">{texts.loadMembers}</p> : null}
         {members.error === null ? null : <p className="form-error" role="alert">{members.error}</p>}
@@ -328,7 +326,7 @@ const ChannelInspector = ({
           />
         )}
       </section>
-      <section className="config-section" aria-label={texts.addMember}>
+      <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
         <div className="section-heading"><h3>{texts.addMember}</h3></div>
         <form className="inspector-form" onSubmit={(event) => { void searchUser(event); }}>
           <label className="config-field config-field--medium" htmlFor={"betreiber-mitglied-suche-" + channel.channelId}>{texts.twitchLogin}
@@ -469,7 +467,7 @@ const InvitationLink = ({ channel: channel }: { channel: PanelPlatformChannelOve
   };
 
   return (
-    <section className="config-section" aria-label={texts.invitationLink}>
+    <section className="config-section platform-inspector-section" aria-label={texts.invitationLink}>
       <div className="section-heading"><h2>{texts.invitationLink}</h2></div>
       <p className="muted">{texts.invitationLinkHint}</p>
       <label className="config-field config-field--wide" htmlFor="betreiber-einladungslink">{texts.invitationLink}
@@ -612,9 +610,18 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
               {overview.data?.length === 0 ? <p className="muted">{texts.noChannels}</p> : null}
               {overview.data === null ? null : overview.data.length === 0 ? null : (
                 <div className="table-wrap">
-                  <table className="table table--content">
-                    <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.identifier}</th><th scope="col">{texts.fullConsent}</th><th scope="col">{texts.broadcaster}</th><th scope="col">{texts.manager}</th><th scope="col">{texts.operator}</th><th scope="col">{texts.identity}</th></tr></thead>
-                    <tbody>{overview.data.map((channel) => <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}><th scope="row">{channel.login}</th><td className="mono">{channel.channelId}</td><td>{channel.fullConsent ? texts.yes : texts.no}</td><td className="number">{formatNumber(channel.memberCounts.broadcaster)}</td><td className="number">{formatNumber(channel.memberCounts.manager)}</td><td className="number">{formatNumber(channel.memberCounts.operator)}</td><td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel)}</span></span></td></tr>)}</tbody>
+                  <table className="table table--content platform-channel-table">
+                    <thead><tr><th scope="col">{texts.login}</th><th scope="col">{texts.identifier}</th><th scope="col">{texts.fullConsent}</th><th scope="col" title={`${texts.broadcaster} · ${texts.manager} · ${texts.operator}`}>{texts.members}</th><th scope="col">{texts.identity}</th></tr></thead>
+                    <tbody>{overview.data.map((channel) => {
+                      const roleCountsTitle = `${texts.broadcaster} · ${texts.manager} · ${texts.operator}`;
+                      return <tr key={channel.channelId} ref={channelRowRef(channel.channelId)} tabIndex={0} aria-selected={channel.channelId === selectedChannelId} onClick={() => { setChannelReleaseOpen(false); selectChannel(channel.channelId); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChannelReleaseOpen(false); selectChannel(channel.channelId); } }}>
+                        <th scope="row" title={channel.login}>{channel.login}</th>
+                        <td className="mono" title={channel.channelId}>{channel.channelId}</td>
+                        <td>{channel.fullConsent ? texts.yes : texts.no}</td>
+                        <td className="number" title={roleCountsTitle}>{[channel.memberCounts.broadcaster, channel.memberCounts.manager, channel.memberCounts.operator].map(formatNumber).join(" · ")}</td>
+                        <td><span className="led" data-status={connectionTone(channel) === "healthy" ? "green" : connectionTone(channel) === "warning" ? "amber" : "off"}><span className="led__dot" aria-hidden="true" /><span>{connectionWord(channel)}</span></span></td>
+                      </tr>;
+                    })}</tbody>
                   </table>
                 </div>
               )}

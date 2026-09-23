@@ -169,6 +169,7 @@ export interface ModuleWorkspaceTexts {
   switchedOff: (name: string) => string;
   disabled: string;
   mandatoryReason: string;
+  alwaysActiveStatus: string;
   noDescription: string;
 }
 
@@ -182,6 +183,7 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     switchedOff: (name) => `Das Modul „${name}“ ist ausgeschaltet.`,
     disabled: "Deaktiviert",
     mandatoryReason: "Kanalereignisse sind immer aktiv.",
+    alwaysActiveStatus: "Läuft · immer aktiv",
     noDescription: "Keine Beschreibung für dieses Modul.",
   },
   en: {
@@ -193,6 +195,7 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     switchedOff: (name) => `The module “${name}” is switched off.`,
     disabled: "Disabled",
     mandatoryReason: "Channel events are always active.",
+    alwaysActiveStatus: "Running · always active",
     noDescription: "No description is available for this module.",
   },
 };

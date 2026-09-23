@@ -10,6 +10,7 @@ export interface ChipGroupProps {
   value: string | null;
   onChange: (value: string | null) => void;
   options: readonly ChipGroupOption[];
+  className?: string;
 }
 
 /**
@@ -20,13 +21,13 @@ export interface ChipGroupProps {
  * `value`. Colors and radius come from the shared theme (`ui/theme.ts`),
  * the same as everywhere else Mantine renders in this seam.
  */
-export function ChipGroup({ ariaLabel, value, onChange, options }: ChipGroupProps) {
+export function ChipGroup({ ariaLabel, value, onChange, options, className }: ChipGroupProps) {
   return (
     <MantineChip.Group
       value={value ?? ""}
       onChange={(next) => { onChange(typeof next === "string" && next.length > 0 ? next : null); }}
     >
-      <MantineGroup gap="xs" role="group" aria-label={ariaLabel}>
+      <MantineGroup className={className} gap="xs" wrap="nowrap" role="group" aria-label={ariaLabel}>
         {options.map((option) => (
           <MantineChip key={option.value.length === 0 ? "all" : option.value} value={option.value} variant="outline">
             {option.label}

@@ -5,7 +5,7 @@ import type { PanelMember, PanelTwitchUser } from "../panel-contract";
 import { membersTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatDate } from "./locale";
 import { ModuleCount, ModuleHeading } from "./module-panels";
-import { ListDetail, SubInspector, useInspectorSelection } from "./ui";
+import { ListDetail, Select as UiSelect, SubInspector, useInspectorSelection } from "./ui";
 import {
   addChannelMember,
   PanelApiError,
@@ -90,10 +90,12 @@ const accessConfirmation = (role: ChannelRole): string =>
  * bundle can talk to an older worker that doesn't supply the field yet.
  * A missing image must not take down the page.
  */
-const MemberAvatar = ({ src }: { src: string | null | undefined }): ReactElement => {
+const avatarInitials = (name: string): string => name.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toLocaleUpperCase();
+
+const MemberAvatar = ({ src, name }: { src: string | null | undefined; name: string }): ReactElement => {
   const [failedSource, setFailedSource] = useState<string | null>(null);
   if (src === null || src === undefined || src.length === 0 || failedSource === src) {
-    return <span className="member-avatar-placeholder" aria-hidden="true" />;
+    return <span className="member-avatar-placeholder" aria-hidden="true"><span>{avatarInitials(name)}</span></span>;
   }
   return <img className="member-avatar" src={src} alt="" aria-hidden="true" onError={() => setFailedSource(src)} />;
 };
@@ -131,7 +133,7 @@ const MemberList = ({
               >
                 <th scope="row" role="rowheader">
                   <div className="avatar-row">
-                    <MemberAvatar src={member.profileImageUrl} />
+                    <MemberAvatar src={member.profileImageUrl} name={member.displayName ?? member.login ?? member.userId} />
                     <div>
                       <span>{memberLabel(member)}</span>
                       {member.displayName !== null && member.login !== null ? (
@@ -180,11 +182,12 @@ const MemberEditor = ({
   const name = memberLabel(member);
   const managementLocked = canManageMembers ? null : texts.managementLocked;
   const locked = removalLocked(member, broadcasterCount);
+  const roleLockReason = managementLocked ?? locked;
 
   return (
     <SubInspector ariaLabel={texts.editMember(name)} title={name} identifier={formatJoinDate(member.joinedAt)} closeLabel={dashboardCommonTexts().close} onClose={onClose}>
       <div className="avatar-row">
-        <MemberAvatar src={member.profileImageUrl} />
+        <MemberAvatar src={member.profileImageUrl} name={member.displayName ?? member.login ?? member.userId} />
         <div>
           <span>{name}</span>
           {member.displayName !== null && member.login !== null ? (
@@ -198,19 +201,15 @@ const MemberEditor = ({
           {member.displayName === null && member.login === null ? <span className="login-hint">{texts.twitchId(member.userId)}</span> : null}
         </div>
       </div>
-      <label className="config-field config-field--medium">
-        {texts.role}
-        <select
-          aria-label={texts.roleFor(name)}
-          value={member.role}
-          disabled={!canManageMembers || busy || isLastBroadcaster(member, broadcasterCount)}
-          title={managementLocked ?? locked ?? undefined}
-          onChange={(event) => { onRoleChange(event.target.value as ChannelRole); }}
-        >
-          {roleOptions(selectableRoles(member, ownUserId, broadcasterCount))}
-        </select>
-        {managementLocked !== null ? <span className="lock-reason">{managementLocked}</span> : locked === null ? null : <span className="lock-reason">{texts.lastBroadcaster}</span>}
-      </label>
+      <UiSelect
+        label={texts.role}
+        ariaLabel={texts.roleFor(name)}
+        {...(roleLockReason === null ? {} : { hint: roleLockReason })}
+        value={member.role}
+        disabled={!canManageMembers || busy || isLastBroadcaster(member, broadcasterCount)}
+        options={selectableRoles(member, ownUserId, broadcasterCount).map((role) => ({ value: role, label: roleLabel(role) }))}
+        onChange={(role) => { if (role !== null) onRoleChange(role as ChannelRole); }}
+      />
       <div className="form-actions form-actions--destructive">
         <button
           className="button button--quiet"
@@ -221,7 +220,6 @@ const MemberEditor = ({
           onClick={onRemove}
         >{texts.remove}</button>
       </div>
-      {locked === null ? null : <span className="lock-reason">{texts.lastBroadcaster}</span>}
     </SubInspector>
   );
 };
@@ -353,7 +351,7 @@ export const MembersPage = ({
         {foundUser === null ? null : (
           <div className="inspector-result">
             <div className="avatar-row">
-              <MemberAvatar src={foundUser.profileImageUrl} />
+              <MemberAvatar src={foundUser.profileImageUrl} name={foundUser.displayName || foundUser.login} />
               <div>
                 <strong>{foundUser.displayName}</strong>
                 <span>@{foundUser.login} · Twitch-ID {foundUser.userId}</span>
@@ -382,7 +380,7 @@ export const MembersPage = ({
             onKeyDown={(event) => { if (event.key === "Escape") cancelAdd(); }}
           >
             <div className="avatar-row">
-              <MemberAvatar src={foundUser.profileImageUrl} />
+              <MemberAvatar src={foundUser.profileImageUrl} name={foundUser.displayName || foundUser.login} />
               <div>
                 <h3 id="member-add-confirmation-title">{texts.confirmationTitle(foundUser.displayName)}</h3>
                 <span>@{foundUser.login}</span>

@@ -67,8 +67,12 @@ describe("Module navigation in the sidebar", () => {
     renderModulePage();
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    expect(within(nav).getByRole("link", { name: "Textbefehle Läuft" }).querySelector("svg")).toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "Werbung Läuft" })).toBeInTheDocument();
+    const textCommandsLink = within(nav).getByRole("link", { name: "Textbefehle · Läuft" });
+    expect(textCommandsLink.querySelector("svg")).toBeInTheDocument();
+    expect(textCommandsLink).toHaveAttribute("title", "Textbefehle · Läuft");
+    expect(textCommandsLink.querySelector(".led--dot-only")).toBeInTheDocument();
+    expect(within(textCommandsLink).queryByText("Läuft", { exact: true })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Werbung · Läuft" })).toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: /Kanalereignisse/ })).not.toBeInTheDocument();
   });
 
@@ -76,7 +80,7 @@ describe("Module navigation in the sidebar", () => {
     renderModulePage(moduleStates, [channel, secondChannel]);
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    fireEvent.click(within(nav).getByRole("link", { name: "Werbung Läuft" }));
+    fireEvent.click(within(nav).getByRole("link", { name: "Werbung · Läuft" }));
 
     expect(await screen.findByRole("heading", { name: "Werbung", level: 1 })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/ads");
@@ -100,7 +104,7 @@ describe("Module navigation in the sidebar", () => {
     renderModulePage([moduleStates[0] as typeof moduleStates[number]]);
 
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    expect(within(nav).getByRole("link", { name: "Textbefehle Läuft" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Textbefehle · Läuft" })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Module" })).toBeInTheDocument();
     expect(within(nav).getAllByRole("link", { name: "Module" })).toHaveLength(1);
   });

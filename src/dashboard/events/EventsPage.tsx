@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModuleState } from "../../panel-contract";
-import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, formatTimestamp } from "../locale";
+import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatClockTime, formatNumber, formatTimestamp } from "../locale";
 import { moduleName } from "../module-labels";
 import { Led, ModuleCount, ModuleHeading, type LedStatus } from "../module-panels";
 import { useRealtimeEventFeed, type RealtimeFeedStatus as RealtimeFeedStatusValue } from "../realtime";
@@ -96,6 +96,7 @@ const EventFilterBar = ({
   return <div className="event-filter" aria-label={texts.events.filter}>
     <div className="event-filter__controls">
       <ChipGroup
+        className="event-filter__chips"
         ariaLabel={texts.events.origin}
         value={filters.origin}
         onChange={(value) => { onChange({ ...filters, origin: value === "channel" || value === "module" ? value : null }); }}
@@ -106,6 +107,7 @@ const EventFilterBar = ({
         ]}
       />
       <ChipGroup
+        className="event-filter__chips"
         ariaLabel={texts.events.tone}
         value={filters.tone}
         onChange={(value) => { onChange({ ...filters, tone: eventToneFromValue(value ?? "") }); }}
@@ -296,10 +298,24 @@ export const EventsPage = ({
                           const entry = group.representative;
                           const eventLabel = eventText(entry.code, eventDetail(entry.detail));
                           return <tr key={group.key} ref={groupRowRef(group.key)} tabIndex={0} aria-selected={selectedGroupKey === group.key} onClick={() => { selectGroup(group.key); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectGroup(group.key); } }}>
-                            <td><span className="event-label"><EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} /><span className={eventMetadata(entry.code) === null ? "mono" : undefined}>{eventLabel}</span></span></td>
-                            <td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined}>{moduleLabel(entry)}</td>
-                            <td>{actorCell(entry, texts)}</td>
-                            <td className="mono" title={entry.createdAt}>{formatTimestamp(entry.createdAt)}</td>
+                            <td>
+                              <span className="event-label event-table__primary">
+                                <EventChipPair code={entry.code} detail={eventDetail(entry.detail)} texts={texts} />
+                                <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`}>{eventLabel}</span>
+                              </span>
+                              <span className="event-table__mobile-meta muted">
+                                <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{actorCell(entry, texts)}</span>
+                                <span aria-hidden="true">·</span>
+                                <time className="mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
+                              </span>
+                            </td>
+                            <td className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</td>
+                            <td title={actorLabel(entry, texts)}>{actorCell(entry, texts)}</td>
+                            <td className="mono" title={entry.createdAt}>
+                              <time dateTime={entry.createdAt} title={entry.createdAt}>{formatClockTime(entry.createdAt)}</time>
+                            </td>
                           </tr>;
                         })}</tbody>
                       </table>

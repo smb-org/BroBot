@@ -55,6 +55,22 @@ describe("Channel Spotlight", () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "raid" });
   });
 
+  it("shows registered action and entity groups in order when opened", async () => {
+    stubFetch();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+
+    const dialog = screen.getByRole("dialog");
+    const groupLabels = ["Aktionen", "Module", "Befehle", "Mitglieder"].map((label) => `'${label}'`);
+    await waitFor(() => {
+      expect(Array.from(dialog.querySelectorAll<HTMLElement>(".mantine-Spotlight-actionsGroup"))
+        .map((group) => group.style.getPropertyValue("--spotlight-label"))).toEqual(groupLabels);
+    });
+    expect(screen.getByText("Clip erstellen")).toBeInTheDocument();
+  });
+
   it("explains that mandatory channel events remain active from Spotlight", async () => {
     stubFetch();
     renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} />);

@@ -92,6 +92,7 @@ describe("Module panel loader", () => {
     if (!(row instanceof HTMLElement)) throw new Error("Module row is missing");
     expect(within(row).getAllByText("aktiv", { exact: true })).toHaveLength(1);
     expect(within(row).getAllByText("Läuft", { exact: true })).toHaveLength(1);
+    expect(within(row).queryByRole("checkbox")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "aktiv" }));
     await waitFor(() => { expect(onChanged).toHaveBeenCalledTimes(1); });
@@ -99,16 +100,16 @@ describe("Module panel loader", () => {
     expect(fetcher.mock.calls.some(([, requestInit]) => requestInit?.method === "PATCH")).toBe(true);
   });
 
-  it("keeps mandatory channel events on, disabled, and explains the lock", () => {
+  it("shows mandatory channel events as always active without rendering a switch", () => {
     renderWithMantine(<ModuleWorkspace channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onChanged={vi.fn(() => Promise.resolve())} />);
 
-    const toggle = screen.getByRole("switch", { name: "Kanalereignisse" });
-    expect(toggle).toBeChecked();
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText("Kanalereignisse sind immer aktiv.")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Kanalereignisse" })).not.toBeInTheDocument();
+    const status = screen.getByText("Läuft · immer aktiv");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Kanalereignisse sind immer aktiv.");
   });
 
-  it("keeps the mandatory module detail switch locked when no persisted module row exists", () => {
+  it("shows the mandatory module detail as always active without a switch", () => {
     renderWithMantine(<ModulePage
       channelId="kanal-a"
       moduleId="channel_events"
@@ -119,10 +120,10 @@ describe("Module panel loader", () => {
       onToggle={vi.fn()}
     />);
 
-    const toggle = screen.getByRole("switch", { name: "Kanalereignisse: Läuft" });
-    expect(toggle).toBeChecked();
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText("Kanalereignisse sind immer aktiv.")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Kanalereignisse: Läuft" })).not.toBeInTheDocument();
+    const status = screen.getByText("Läuft · immer aktiv");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Kanalereignisse sind immer aktiv.");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Kanalereignisse sind immer aktiv.");
     expect(screen.queryByText("Module werden geladen …")).not.toBeInTheDocument();
   });
 
