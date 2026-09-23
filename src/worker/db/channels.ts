@@ -8,11 +8,10 @@ export const listChannelIds = async (db: D1Database): Promise<string[]> => {
 };
 
 /**
- * Channels the stream-state cron should (re-)poll this tick: no row yet, or
- * a Helix-sourced row old enough to have expired (#178) -- never an
- * EventSub-sourced row, which stays fresh on its own. `limit` caps how many
- * a single tick takes on, so a large backlog can't turn one run into an
- * unbounded burst of Helix calls.
+ * Channels the stream-state cron should (re-)poll this tick: no row yet,
+ * stale Helix rows, or EventSub rows without both active stream transition
+ * subscriptions. Missing rows come first, followed by the oldest stored
+ * state, so a capped tick does not starve the tail of a backlog.
  */
 export const listChannelIdsNeedingStreamStateRefresh = async (
   db: D1Database,
@@ -28,7 +27,23 @@ export const listChannelIdsNeedingStreamStateRefresh = async (
       WHERE stream_state.channel_id IS NULL
          OR (stream_state.source = 'helix'
              AND strftime('%s', ?) - strftime('%s', stream_state.changed_at) >= ?)
-      ORDER BY channel.channel_id
+         OR (stream_state.source = 'eventsub' AND (
+              NOT EXISTS (
+                SELECT 1 FROM eventsub_subscriptions
+                 WHERE channel_id = channel.channel_id
+                   AND subscription_type = 'stream.online'
+                   AND status = 'enabled' AND subscription_id IS NOT NULL
+              )
+              OR NOT EXISTS (
+                SELECT 1 FROM eventsub_subscriptions
+                 WHERE channel_id = channel.channel_id
+                   AND subscription_type = 'stream.offline'
+                   AND status = 'enabled' AND subscription_id IS NOT NULL
+              )
+         ))
+      ORDER BY CASE WHEN stream_state.channel_id IS NULL THEN 0 ELSE 1 END,
+               stream_state.changed_at ASC,
+               channel.channel_id ASC
       LIMIT ?`,
   ).bind(now, ttlSeconds, limit).all<ChannelIdRow>();
   return result.results.map((row) => row.channel_id);
@@ -43,4 +58,3 @@ export const listChannelIdsForUser = async (db: D1Database, userId: string): Pro
   ).bind(userId).all<ChannelIdRow>();
   return result.results.map((row) => row.channel_id);
 };
-

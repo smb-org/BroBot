@@ -88,6 +88,14 @@ const makeEnvironment = (database: TestD1Database): Env => ({
   PLATFORM_USER_IDS: JSON.stringify(["4711"]),
 } as unknown as Env);
 
+const insertStreamEventSubCoverage = async (database: TestD1Database, channelId: string): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO eventsub_subscriptions
+      (channel_id, subscription_type, subscription_id, status, updated_at)
+     VALUES (?, 'stream.online', ?, 'enabled', ?), (?, 'stream.offline', ?, 'enabled', ?)`,
+  ).bind(channelId, `online-${channelId}`, "2026-09-23T08:00:00.000Z", channelId, `offline-${channelId}`, "2026-09-23T08:00:00.000Z").run();
+};
+
 const makeRequest = async (
   userId: string | null,
   path: string,
@@ -286,6 +294,7 @@ describe("Panel read endpoints", () => {
       `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
        VALUES ('kanal-a', 'offline', '2026-09-23T08:00:00.000Z', 'eventsub')`,
     ).run();
+    await insertStreamEventSubCoverage(database, "kanal-a");
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
 
@@ -296,6 +305,43 @@ describe("Panel read endpoints", () => {
 
     expect(response.status).toBe(200);
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("refreshes a stale Helix row when the overview is requested", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
+       VALUES ('kanal-a', 'online', '2026-09-23T11:49:00.000Z', 'helix', '2026-09-23T09:00:00.000Z')`,
+    ).run();
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+    );
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      { ...environment, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      channelId: "kanal-a",
+      streamState: "offline",
+      streamStartedAt: null,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
   });
 
   it("returns the real Helix stream start, not the check time, when backfilling via Helix (#178)", async () => {
@@ -335,6 +381,7 @@ describe("Panel read endpoints", () => {
       `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
        VALUES ('kanal-a', 'online', '2026-09-23T08:05:00.000Z', 'eventsub', '2026-09-23T08:00:00.000Z')`,
     ).run();
+    await insertStreamEventSubCoverage(database, "kanal-a");
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),

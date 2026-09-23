@@ -2338,6 +2338,43 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv")).toBeInTheDocument();
   });
 
+  it("uses the overview stream state for Spotlight actions", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), streamState: "offline" as const };
+    const freshOverview = { ...overview(channel), streamState: "online" as const, streamStartedAt: "2026-09-23T11:30:00.000Z" };
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(freshOverview));
+      if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
+        return Promise.resolve(jsonResponse({ modules: [{ id: "clips", enabled: true, settings: "{}" }] }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules/text_commands/commands") return Promise.resolve(jsonResponse({ commands: [] }));
+      if (url.pathname === "/api/channels/kanal-a/members") return Promise.resolve(jsonResponse({ members: [], broadcasterCount: 0, viewerUserId: "user-1", nextCursor: null }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/clips" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ clipId: null, editUrl: null }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    const { container } = render(<DashboardApp />);
+
+    await waitFor(() => {
+      expect(container.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+    });
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "clip" } });
+    fireEvent.click(await within(screen.getByRole("dialog")).findByText("Clip erstellen"));
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) =>
+        requestUrl(input).pathname === "/api/channels/kanal-a/clips" && init?.method === "POST")).toBe(true);
+    });
+  });
+
   it("switches channels through the header select and moves the route", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");

@@ -192,13 +192,12 @@ panelRouter.get(
     const channelId = context.req.param("channelId");
     const overview = await getChannelOverviewForUser(context.env.DB, session.userId, channelId);
     if (overview === null) return context.json({ error: "channel_not_found" }, 404);
-    if (overview.streamState !== null && overview.streamState !== undefined) return context.json(overview);
     const checkedAt = nowIso();
     const looked = await lookupAndRefreshStreamState(context.env, channelId, checkedAt);
     return context.json(looked.state === null ? overview : {
       ...overview,
       streamState: looked.state,
-      ...(looked.startedAt === null ? {} : { streamStartedAt: looked.startedAt }),
+      streamStartedAt: looked.startedAt,
     });
   },
 );

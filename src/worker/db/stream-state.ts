@@ -30,6 +30,28 @@ export const readChannelStreamState = async (
   return row === null ? null : { state: row.state, source: row.source, changedAt: row.changed_at, startedAt: row.started_at };
 };
 
+/** A stored EventSub state is authoritative only while both transition subscriptions are active. */
+export const hasActiveStreamEventSubCoverage = async (
+  db: D1Database,
+  channelId: string,
+): Promise<boolean> => {
+  const row = await db.prepare(
+    `SELECT CASE WHEN
+       EXISTS (
+         SELECT 1 FROM eventsub_subscriptions
+          WHERE channel_id = ? AND subscription_type = 'stream.online'
+            AND status = 'enabled' AND subscription_id IS NOT NULL
+       )
+       AND EXISTS (
+         SELECT 1 FROM eventsub_subscriptions
+          WHERE channel_id = ? AND subscription_type = 'stream.offline'
+            AND status = 'enabled' AND subscription_id IS NOT NULL
+       )
+       THEN 1 ELSE 0 END AS covered`,
+  ).bind(channelId, channelId).first<{ covered: number }>();
+  return row?.covered === 1;
+};
+
 export const writeEventSubStreamState = async (
   db: D1Database,
   channelId: string,
@@ -63,11 +85,11 @@ export const writeHelixStreamStateIfUnknown = async (
 };
 
 /**
- * Refreshes a Helix-sourced row after its TTL expired (`stream-state-lookup.ts`).
- * Guarded on `source = 'helix'` *and* timestamp ordering, not just one or the
- * other: a channel that gains `channel:bot` consent mid-refresh gets its row
- * taken over by EventSub, and this must never clobber that -- a stale poll
- * losing the source guard would silently resurrect a dead Helix-only state.
+ * Refreshes a Helix-sourced row after its TTL expired, or takes over an
+ * EventSub row when either stream transition subscription is no longer active.
+ * The SQL coverage guard closes the race where subscriptions return while a
+ * fallback Helix request is in flight. Timestamp ordering also rejects a
+ * newer stream transition.
  */
 export const refreshHelixStreamState = async (
   db: D1Database,
@@ -79,7 +101,23 @@ export const refreshHelixStreamState = async (
   const result = await db.prepare(
     `UPDATE channel_stream_state
         SET state = ?, changed_at = ?, source = 'helix', started_at = ?
-      WHERE channel_id = ? AND source = 'helix' AND julianday(?) >= julianday(changed_at)`,
-  ).bind(state, changedAt, startedAt, channelId, changedAt).run();
+      WHERE channel_id = ?
+        AND (
+          source = 'helix'
+          OR (source = 'eventsub' AND (
+            NOT EXISTS (
+              SELECT 1 FROM eventsub_subscriptions
+               WHERE channel_id = ? AND subscription_type = 'stream.online'
+                 AND status = 'enabled' AND subscription_id IS NOT NULL
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM eventsub_subscriptions
+               WHERE channel_id = ? AND subscription_type = 'stream.offline'
+                 AND status = 'enabled' AND subscription_id IS NOT NULL
+            )
+          ))
+        )
+        AND julianday(?) >= julianday(changed_at)`,
+  ).bind(state, changedAt, startedAt, channelId, channelId, channelId, changedAt).run();
   return result.meta.changes > 0;
 };

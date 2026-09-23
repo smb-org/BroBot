@@ -45,6 +45,14 @@ const insertStreamState = async (
   ).bind(channelId, state, changedAt, source, startedAt).run();
 };
 
+const insertStreamEventSubCoverage = async (database: TestD1Database, channelId: string): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO eventsub_subscriptions
+      (channel_id, subscription_type, subscription_id, status, updated_at)
+     VALUES (?, 'stream.online', ?, 'enabled', ?), (?, 'stream.offline', ?, 'enabled', ?)`,
+  ).bind(channelId, `online-${channelId}`, NOW, channelId, `offline-${channelId}`, NOW).run();
+};
+
 // `mockImplementation`, not `mockResolvedValue` with one shared `Response`:
 // a `Response` body can only be read once, and every test here that calls
 // the fetcher more than once (the cron loop, a refresh) needs a fresh one.
@@ -80,11 +88,12 @@ describe("lookupAndRefreshStreamState", () => {
     }
   });
 
-  it("does not call Helix when a fresh row already exists", async () => {
+  it("does not call Helix when a fresh EventSub row has active stream coverage", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
       await insertStreamState(database, "kanal-a", "offline", NOW, "eventsub");
+      await insertStreamEventSubCoverage(database, "kanal-a");
       const fetcher = vi.fn<typeof fetch>();
 
       const result = await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, fetcher);
@@ -140,6 +149,80 @@ describe("lookupAndRefreshStreamState", () => {
     }
   });
 
+  it("falls back to Helix immediately when a fresh EventSub row has lost stream coverage", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "online", NOW, "eventsub", "2026-09-23T09:00:00.000Z");
+      await withAppToken(database);
+      const fetcher = helixResponse(false);
+
+      const result = await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, fetcher);
+
+      expect(result).toEqual({ state: "offline", startedAt: null, rateLimited: false });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await expect(database.prepare(
+        "SELECT state, source, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "offline", source: "helix", started_at: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not overwrite an EventSub write if coverage returns during Helix fallback", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "offline", FRESH, "eventsub");
+      await withAppToken(database);
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
+        await insertStreamEventSubCoverage(database, "kanal-a");
+        await database.prepare(
+          `UPDATE channel_stream_state
+              SET state = 'online', changed_at = ?, source = 'eventsub', started_at = ?
+            WHERE channel_id = 'kanal-a'`,
+        ).bind(NOW, "2026-09-23T11:59:00.000Z").run();
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      });
+
+      const result = await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, fetcher);
+
+      expect(result).toEqual({ state: "online", startedAt: "2026-09-23T11:59:00.000Z", rateLimited: false });
+      await expect(database.prepare(
+        "SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", source: "eventsub" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("clears until-stream-end controls on a guarded Helix online-to-offline transition", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "online", STALE, "helix", "2026-09-23T09:00:00.000Z");
+      await database.prepare(
+        `INSERT INTO channel_controls
+          (channel_id, muted, muted_until, mute_until_stream_end,
+           paused, paused_until, pause_until_stream_end, updated_at)
+         VALUES ('kanal-a', 1, NULL, 1, 1, NULL, 1, ?)`,
+      ).bind(STALE).run();
+      await withAppToken(database);
+
+      const result = await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, helixResponse(false));
+
+      expect(result.state).toBe("offline");
+      await expect(database.prepare(
+        `SELECT muted, mute_until_stream_end, paused, pause_until_stream_end, updated_at
+           FROM channel_controls WHERE channel_id = 'kanal-a'`,
+      ).first()).resolves.toEqual({
+        muted: 0, mute_until_stream_end: 0, paused: 0, pause_until_stream_end: 0, updated_at: NOW,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not refresh a Helix-sourced row that hasn't gone stale yet", async () => {
     const database = new TestD1Database();
     try {
@@ -161,6 +244,7 @@ describe("lookupAndRefreshStreamState", () => {
     try {
       await insertChannel(database, "kanal-a");
       await insertStreamState(database, "kanal-a", "offline", STALE, "helix");
+      await insertStreamEventSubCoverage(database, "kanal-a");
       await withAppToken(database);
       // The channel gains `channel:bot` consent and its first real EventSub
       // delivery lands while this stale refresh is still in flight.
@@ -204,22 +288,23 @@ describe("lookupAndRefreshStreamState", () => {
 });
 
 describe("listChannelIdsNeedingStreamStateRefresh", () => {
-  it("includes channels missing a row and stale Helix rows, excluding fresh Helix and any EventSub row", async () => {
+  it("includes missing and stale Helix rows, excluding fresh Helix and covered EventSub rows", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-missing");
       await insertChannel(database, "kanal-stale-helix");
       await insertChannel(database, "kanal-fresh-helix");
       await insertChannel(database, "kanal-eventsub");
+      await insertChannel(database, "kanal-uncovered-eventsub");
       await insertStreamState(database, "kanal-stale-helix", "offline", STALE, "helix");
       await insertStreamState(database, "kanal-fresh-helix", "offline", FRESH, "helix");
-      // An EventSub row long past the TTL age must still be excluded --
-      // staleness only ever applies to Helix-sourced rows.
       await insertStreamState(database, "kanal-eventsub", "offline", STALE, "eventsub");
+      await insertStreamEventSubCoverage(database, "kanal-eventsub");
+      await insertStreamState(database, "kanal-uncovered-eventsub", "offline", FRESH, "eventsub");
 
       const channelIds = await listChannelIdsNeedingStreamStateRefresh(database as unknown as D1Database, NOW, 600, 50);
 
-      expect(channelIds).toEqual(["kanal-missing", "kanal-stale-helix"]);
+      expect(channelIds).toEqual(["kanal-missing", "kanal-stale-helix", "kanal-uncovered-eventsub"]);
     } finally {
       database.close();
     }
@@ -233,6 +318,23 @@ describe("listChannelIdsNeedingStreamStateRefresh", () => {
       const channelIds = await listChannelIdsNeedingStreamStateRefresh(database as unknown as D1Database, NOW, 600, 3);
 
       expect(channelIds).toEqual(["kanal-0", "kanal-1", "kanal-2"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("orders missing rows first, then stale rows by oldest changed_at", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-newer");
+      await insertChannel(database, "kanal-older");
+      await insertChannel(database, "kanal-missing");
+      await insertStreamState(database, "kanal-newer", "offline", "2026-09-23T11:48:00.000Z", "helix");
+      await insertStreamState(database, "kanal-older", "offline", "2026-09-23T11:40:00.000Z", "helix");
+
+      const channelIds = await listChannelIdsNeedingStreamStateRefresh(database as unknown as D1Database, NOW, 600, 3);
+
+      expect(channelIds).toEqual(["kanal-missing", "kanal-older", "kanal-newer"]);
     } finally {
       database.close();
     }
@@ -274,11 +376,39 @@ describe("maintainStreamStates", () => {
     try {
       await insertChannel(database, "kanal-a");
       await insertStreamState(database, "kanal-a", "online", NOW, "eventsub");
+      await insertStreamEventSubCoverage(database, "kanal-a");
       const fetcher = vi.fn<typeof fetch>();
 
       await maintainStreamStates(environment(database), NOW, fetcher);
 
       expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("picks up the remaining stale Helix channels on the next tick instead of starving them", async () => {
+    const database = new TestD1Database();
+    try {
+      for (let index = 0; index < 55; index += 1) {
+        const channelId = `kanal-${String(index).padStart(3, "0")}`;
+        await insertChannel(database, channelId);
+        await insertStreamState(database, channelId, "offline", STALE, "helix");
+      }
+      await withAppToken(database);
+      const fetcher = helixResponse(false);
+
+      await maintainStreamStates(environment(database), NOW, fetcher);
+      expect(fetcher).toHaveBeenCalledTimes(50);
+      await expect(database.prepare(
+        "SELECT channel_id FROM channel_stream_state WHERE changed_at = ? ORDER BY channel_id",
+      ).bind(STALE).all()).resolves.toMatchObject({
+        results: Array.from({ length: 5 }, (_, index) => ({ channel_id: `kanal-${String(index + 50).padStart(3, "0")}` })),
+      });
+
+      await maintainStreamStates(environment(database), NOW, fetcher);
+
+      expect(fetcher).toHaveBeenCalledTimes(55);
     } finally {
       database.close();
     }
