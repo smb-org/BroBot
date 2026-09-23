@@ -1036,15 +1036,14 @@ describe("Dashboard skeleton", () => {
     });
     fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
 
-    expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Entziehen" })).toBeDisabled();
     expect(screen.getAllByText("Letzter Broadcaster")).toHaveLength(1);
     expect(document.querySelector(".member-avatar-placeholder")).toHaveTextContent("E");
 
-    // The select field offers no value that would be rejected.
-    const rolle = screen.getByRole("combobox", { name: "Rolle für esembe" });
-    expect(rolle).toBeDisabled();
-    expect(rolle).toHaveAccessibleDescription("Letzter Broadcaster");
-    expect(screen.getAllByRole("option", { hidden: true }).map((o) => o.textContent)).toContain("Broadcaster");
+    // The role choice offers no value that would be rejected.
+    const rollen = screen.getByRole("radiogroup", { name: "Rolle für esembe" });
+    expect(within(rollen).getAllByRole("radio")).toHaveLength(1);
+    expect(within(rollen).getByRole("radio", { name: /Broadcaster/ })).toBeDisabled();
   });
 
   it("allows revocation once a second broadcaster remains", async () => {
@@ -1056,28 +1055,29 @@ describe("Dashboard skeleton", () => {
     });
     fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
 
-    expect(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Entziehen" })).toBeEnabled();
     expect(screen.queryByText("Letzter Broadcaster")).not.toBeInTheDocument();
   });
 
   it("explicitly warns about lockout when revoking one's own access", async () => {
-    const frage = vi.fn((message: string) => { void message; return false; });
     await showMembers({
       members: [broadcaster("100", "esembe", "esembe"), broadcaster("200", "zweit", "Zweit")],
       broadcasterCount: 2,
       viewerUserId: "100",
     });
-    vi.stubGlobal("confirm", frage);
     fireEvent.click(await screen.findByRole("row", { name: /esembe/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Zugriff für esembe entziehen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Entziehen" }));
 
-    expect(frage).toHaveBeenCalledOnce();
-    expect(frage.mock.calls.at(0)?.[0] ?? "").toContain("selbst aus");
+    const ownDialog = await screen.findByRole("dialog");
+    expect(ownDialog).toHaveTextContent("selbst aus");
+    fireEvent.click(within(ownDialog).getByRole("button", { name: "Abbrechen" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     // Someone else's entry: same action, different question.
     fireEvent.click(screen.getByRole("row", { name: /Zweit/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Zugriff für Zweit entziehen" }));
-    expect(frage.mock.calls.at(1)?.[0] ?? "").not.toContain("selbst aus");
+    fireEvent.click(await screen.findByRole("button", { name: "Entziehen" }));
+    const otherDialog = await screen.findByRole("dialog");
+    expect(otherDialog).not.toHaveTextContent("selbst aus");
   });
 
   it("shows memberships and the management action only for managing roles", async () => {
@@ -1118,7 +1118,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("Nicht auflösbar")).toBeInTheDocument();
     expect(screen.getByText("Twitch-ID 200")).toBeInTheDocument();
     expect(screen.getByText(/17\.09\.2026|Sep 17, 2026/), "Beitrittszeitpunkt wird angezeigt").toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Suchen" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zugriff vergeben" })).toBeEnabled();
 
     const operatorChannel = { ...channel, role: "operator" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1132,7 +1132,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
-    expect(screen.getByRole("button", { name: "Zugriff freigeben" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Zugriff vergeben" })).toBeDisabled();
   });
 
   it("keeps the members table's semantics for narrow cards", async () => {
@@ -1173,23 +1173,20 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
 
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
-    const memberSearch = screen.getByRole("textbox", { name: "Twitch-Name" });
-    expect(memberSearch).toHaveAccessibleName("Twitch-Name");
-    expect(memberSearch.closest(".mantine-Input-wrapper")?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     const reason = "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.";
-    const search = screen.getByRole("button", { name: "Suchen" });
-    expect(search).toBeDisabled();
-    expect(search).toHaveAttribute("title", reason);
-    const freigeben = screen.getByRole("button", { name: "Zugriff freigeben" });
-    expect(freigeben).toBeDisabled();
-    expect(freigeben).toHaveAttribute("title", reason);
+    const grantAccess = screen.getByRole("button", { name: "Zugriff vergeben" });
+    expect(grantAccess).toBeDisabled();
+    expect(grantAccess.closest("span")).toHaveAttribute("title", reason);
+    // A locked whole form is read as a properties list (ADR 0006 addendum),
+    // not a form with disabled fields -- there is no role choice and no
+    // remove action to disable, only the one reason line above the values.
     fireEvent.click(await screen.findByRole("row", { name: /Moderation/ }));
-    expect(await screen.findByRole("combobox", { name: "Rolle für Moderation" })).toBeDisabled();
-    const entziehen = screen.getByRole("button", { name: "Zugriff für Moderation entziehen" });
-    expect(entziehen).toHaveAccessibleName("Zugriff für Moderation entziehen");
-    expect(entziehen.querySelector("svg[aria-hidden='true']")).not.toBeNull();
-    expect(entziehen).toBeDisabled();
-    expect(screen.getAllByText(reason).length).toBeGreaterThan(0);
+    const editor = await screen.findByRole("region", { name: "Mitglied bearbeiten: Moderation" });
+    expect(within(editor).getByText(reason)).toBeInTheDocument();
+    expect(within(editor).queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(within(editor).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(within(editor).queryByRole("button", { name: "Entziehen" })).not.toBeInTheDocument();
+    expect(within(editor).getAllByText("Moderation").length).toBeGreaterThan(0);
   });
 
   it("discards search result and access-grant confirmation on channel switch", async () => {
@@ -1208,22 +1205,24 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a/members");
 
     render(<DashboardApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "Zugriff vergeben" }));
     const search = await screen.findByRole("textbox", { name: "Twitch-Name" });
     fireEvent.change(search, { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     expect(await screen.findByText("Neue Person")).toBeInTheDocument();
     const grantAccess = screen.getByRole("button", { name: "Zugriff freigeben" });
     expect(grantAccess).toHaveAccessibleName("Zugriff freigeben");
-    expect(grantAccess.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     fireEvent.click(grantAccess);
-    expect(screen.getByRole("button", { name: "Zugriff endgültig freigeben" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Zugriff endgültig freigeben" })).toBeInTheDocument();
 
     act(() => {
       window.history.pushState({}, "", "/channels/kanal-b/members");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     await waitFor(() => expect(screen.queryByText("Neue Person")).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Suchen" })).toBeDisabled();
+    // The route switched to the operator's channel: even the plus button
+    // that would reopen the grant editor is disabled there.
+    expect(screen.getByRole("button", { name: "Zugriff vergeben" })).toBeDisabled();
   });
 
   it("shows the operator module activation disabled with a reason", async () => {
@@ -1505,20 +1504,22 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neue Person");
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
 
     const profileLink = screen.getByRole("link", { name: "twitch.tv/neue-person" });
     expect(profileLink).toHaveAttribute("target", "_blank");
     expect(profileLink.getAttribute("rel")?.split(/\s+/)).toEqual(expect.arrayContaining(["noopener", "noreferrer"]));
+    expect(document.querySelector("img.member-avatar")).toHaveAttribute("src", "https://cdn.example/neue-person.png");
 
-    const confirmation = screen.getByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+
+    const confirmation = await screen.findByRole("dialog");
     expect(confirmation).toHaveTextContent("Neue Person");
     expect(confirmation).toHaveTextContent("keinerlei Beziehung zum Kanal");
     expect(confirmation).toHaveTextContent("Mitgliederliste");
-    expect(confirmation.querySelector("img.member-avatar")).toHaveAttribute("src", "https://cdn.example/neue-person.png");
     expect(addRequestCount).toBe(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Zugriff endgültig freigeben" }));
@@ -1542,27 +1543,29 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neue Person");
     fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
-    const dialog = screen.getByRole("alertdialog");
-    expect(dialog.querySelector(".member-avatar-placeholder")).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
     // Anyone using only a keyboard or a screen reader must actually notice
-    // the form's most important safety prompt.
-    expect(screen.getByRole("button", { name: "Zugriff endgültig freigeben" })).toHaveFocus();
+    // the form's most important safety prompt -- Cancel starts focused, so
+    // an accidental Enter never grants access by itself.
+    expect(screen.getByRole("button", { name: "Abbrechen" })).toHaveFocus();
 
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(addRequestCount).toBe(0);
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
+    await screen.findByRole("dialog");
     fireEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
 
     expect(addRequestCount).toBe(0);
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
-    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
   it("discards a late member reload after a mutation during a channel switch", async () => {
@@ -1594,9 +1597,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByText("Alpha-Mitglied");
     fireEvent.click(screen.getByRole("row", { name: /Alpha-Mitglied/ }));
-    const roleSelect = screen.getByRole("combobox", { name: "Rolle für Alpha-Mitglied" });
-    fireEvent.click(roleSelect);
-    fireEvent.click(screen.getByRole("option", { name: "Verwalter", hidden: true }));
+    const roleGroup = screen.getByRole("radiogroup", { name: "Rolle für Alpha-Mitglied" });
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: /Verwalter/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => expect(resolveAlphaReload).toBeTypeOf("function"));
 
     act(() => {
@@ -1643,13 +1646,14 @@ describe("Dashboard skeleton", () => {
     window.history.replaceState({}, "", "/channels/kanal-a/members");
 
     render(<DashboardApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "Zugriff vergeben" }));
     await screen.findByLabelText("Twitch-Name");
 
     fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neuer Stand");
     fireEvent.click(screen.getByRole("button", { name: "Zugriff freigeben" }));
-    fireEvent.click(screen.getByRole("button", { name: "Zugriff endgültig freigeben" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Zugriff endgültig freigeben" }));
     await waitFor(() => expect(memberRequestCount).toBe(2));
     expect(within(screen.getByRole("table")).getByText("Neuer Stand")).toBeInTheDocument();
 
@@ -1694,9 +1698,9 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByText("Erster Stand");
     fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
-    const roleSelect = screen.getByRole("combobox", { name: "Rolle für Erster Stand" });
-    fireEvent.click(roleSelect);
-    fireEvent.click(screen.getByRole("option", { name: "Verwalter", hidden: true }));
+    const roleGroup = screen.getByRole("radiogroup", { name: "Rolle für Erster Stand" });
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: /Verwalter/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
     });
@@ -1753,9 +1757,9 @@ describe("Dashboard skeleton", () => {
     });
 
     fireEvent.click(screen.getByRole("row", { name: /Erster Stand/ }));
-    const roleSelect = screen.getByRole("combobox", { name: "Rolle für Erster Stand" });
-    fireEvent.click(roleSelect);
-    fireEvent.click(screen.getByRole("option", { name: "Verwalter", hidden: true }));
+    const roleGroup = screen.getByRole("radiogroup", { name: "Rolle für Erster Stand" });
+    fireEvent.click(within(roleGroup).getByRole("radio", { name: /Verwalter/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
     await waitFor(() => {
       expect(memberRequestCount).toBe(2);
     });

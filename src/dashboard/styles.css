@@ -213,6 +213,8 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 .inspector-result > .avatar-row { flex: 1; }
 .inspector-result span { color: var(--text-3); font-size: 12.5px; }
 .inspector-result label:not([class*="mantine-"]) { display: grid; gap: var(--s1); }
+.member-grant-editor__result { display: grid; gap: var(--s4); margin-top: var(--s4); }
+.member-grant-editor__result span { color: var(--text-3); font-size: 12.5px; }
 .inspector-confirmation {
   display: grid; gap: var(--s3); margin-top: var(--s4);
   border: 1px solid var(--line-strong); border-radius: var(--r-container);

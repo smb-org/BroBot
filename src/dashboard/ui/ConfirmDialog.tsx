@@ -22,6 +22,9 @@ export interface ConfirmDialogProps {
   /** "Deleting actions carry it permanently" -- deleting actions render
    *  the confirm button as `danger` instead of `filled`. */
   danger?: boolean;
+  /** A failed confirmed action (e.g. `useDraftGuard`'s `saveAndSwitch`) --
+   *  keeps the dialog open and shows why. */
+  error?: string;
 }
 
 export function ConfirmDialog({
@@ -34,12 +37,14 @@ export function ConfirmDialog({
   onCancel,
   alternative,
   danger = false,
+  error,
 }: ConfirmDialogProps) {
   return (
     <Modal opened={opened} onClose={onCancel} title={title} size={420} centered closeOnEscape trapFocus returnFocus>
       <Text size="sm" c="dimmed">
         {description}
       </Text>
+      {error === undefined ? null : <p className="form-error" role="alert">{error}</p>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
         <Button variant="subtle" onClick={onCancel} autoFocus>
           {cancelLabel}

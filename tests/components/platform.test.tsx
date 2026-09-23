@@ -135,7 +135,8 @@ describe("Platform level", () => {
     const remove = within(helferZeile).getByRole("button", { name: "Entfernen" });
     fireEvent.click(remove);
 
-    expect(await screen.findByRole("alertdialog", { name: /Zugriff für Helfer wirklich entfernen/ })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: /Zugriff für Helfer entfernen/ });
+    expect(within(dialog).getByText("Zugriff für Helfer wirklich entfernen?")).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input, init]) => requestUrl(input).pathname.endsWith("/members/456") && init?.method === "DELETE")).toBe(false);
   });
 
@@ -166,7 +167,7 @@ describe("Platform level", () => {
     expect(link).toHaveValue("http://localhost:3000/auth/login?channel=alpha_login");
   });
 
-  it("puts hidden Tabler icons in the member-search field and copy action", async () => {
+  it("marks the member-search field with an @ prefix and puts a hidden Tabler icon on the copy action", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -176,7 +177,7 @@ describe("Platform level", () => {
     const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
     const search = within(inspector).getByRole("textbox", { name: "Twitch-Login" });
     expect(search).toHaveAccessibleName("Twitch-Login");
-    expect(search.closest(".mantine-Input-wrapper")?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(search.closest(".mantine-Input-wrapper")?.querySelector(".ui-field__prefix")).toHaveTextContent("@");
 
     const copy = within(inspector).getByRole("button", { name: "Link kopieren" });
     expect(copy).toHaveAccessibleName("Link kopieren");
@@ -344,7 +345,7 @@ describe("Platform level", () => {
     fireEvent.click(within(freigabe).getByRole("button", { name: "Nutzer suchen" }));
     expect(await within(freigabe).findByText(/Beta/)).toBeInTheDocument();
     fireEvent.click(within(freigabe).getByRole("button", { name: "Kanal freigeben" }));
-    fireEvent.click(await within(freigabe).findByRole("button", { name: "Endgültig freigeben" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Endgültig freigeben" }));
 
     await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => requestUrl(input).pathname === "/api/platform/channels" && init?.method === "POST")).toBe(true));
   });
