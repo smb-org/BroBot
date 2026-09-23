@@ -424,6 +424,4 @@ Commit subjects follow `<icon> <type>(<module>): summary`, for example
 
 ## License
 
-This repository does not currently include a `LICENSE` file. Until one is
-added, no license is granted for reuse beyond what applies by default under
-copyright law — check with the repository owner before reusing this code.
+[MIT](LICENSE) © The BroBot contributors.
