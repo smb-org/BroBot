@@ -36,10 +36,14 @@ this rests on.
   optional per-user cooldown, and an "online only"/"offline only" condition.
 - **`raid`** — reacts to `channel.raid`: an automatic shoutout above a
   viewer-count threshold, plus a short or long chat message depending on raid
-  size.
+  size. Also contributes the Stream Manager's manual-shoutout immediate
+  action. The dashboard shows this module as "Shoutout", not "Raid".
 - **`ads`** — reacts to `stream.online` and `channel.ad_break.begin`: an
   optional lead-time pre-warning message and a message for the ad break
-  itself. Also provides a "start commercial now" panel action.
+  itself. Also contributes a "start commercial now" immediate action.
+- **`clips`** — no settings, enabled by default for every channel
+  (`defaultEnabled`). Contributes a "clip now" immediate action that creates
+  a Twitch clip via Helix and links back to it for editing.
 - **`channel_events`** (mandatory, always enabled) — turns raid, shoutout,
   chat-notification, moderation, AutoMod-hold, suspicious-user and
   stream online/offline events into entries in the channel's event log,
@@ -51,9 +55,12 @@ its own panel UI and persisted rows (`text_commands`: full CRUD for commands).
 
 **Host features** (not modules, built into the Worker/dashboard):
 
-- **Stream Manager**: manual shoutout, "clip now" (creates a Twitch clip via
-  Helix), and the module-contributed immediate-action cards (e.g. the ads
-  module's "start commercial").
+- **Stream Manager**: renders each enabled module's immediate-action card
+  (`raid`'s manual shoutout, `clips`'s "clip now", `ads`'s "start
+  commercial") — the host contributes no actions of its own here. A card is
+  only clickable once its module's declared availability requirement holds
+  (today: the stream being live); otherwise it disables itself and shows
+  why.
 - **Mute / pause**: a channel can be muted or paused for a duration or until
   the current stream ends, independent of any module.
 - **Event log**: every module decision — including *why* a module did
@@ -205,8 +212,11 @@ missing item (never a value).
 
 A scheduled handler (`triggers.crons` in `wrangler.jsonc`, hourly in every
 environment) refreshes Twitch tokens, checks the bot's moderator status per
-channel, and prunes the event log after 14 days. Cloudflare Workers, D1 and
-Durable Objects all have free tiers; nothing here requires a paid plan.
+channel, prunes the event log after 14 days, and backfills each channel's
+live/offline state via Helix for channels EventSub hasn't reported one for
+yet (the same Helix lookup also runs on demand when a channel's overview
+page opens). Cloudflare Workers, D1 and Durable Objects all have free tiers;
+nothing here requires a paid plan.
 Watch Twitch's own limits instead — EventSub quota and Helix rate limits
 apply per Client ID, not per channel, which is why maintenance throttles
 itself.
@@ -323,9 +333,22 @@ Fields that exist today (`src/modules/contract.ts`):
   module. If `settingsSchema` has any key, a guard test
   (`tests/unit/module-settings-editor-guard.test.ts`) requires this or a
   hand-written `panel`.
-- `immediateActions?: () => Promise<{ default: ComponentType<ModuleImmediateActionProperties> }>`
-  — a lazily loaded card in the Stream Manager's immediate-action row, shown
-  only while enabled (e.g. `ads`'s "start commercial now").
+- `immediateActions?: { requires: readonly ImmediateActionRequirement[]; load: () =>
+  Promise<{ default: ComponentType<ModuleImmediateActionProperties> }> }` — a
+  lazily loaded card in the Stream Manager's immediate-action row, shown
+  only while the module is enabled. `requires` lists the conditions the host
+  must satisfy before the card is clickable (today only `"streamLive"`, from
+  `IMMEDIATE_ACTION_REQUIREMENTS` in `src/contracts/values.ts`); the host
+  evaluates it against the channel's current stream state and passes a
+  localized `availabilityReason` string to the card when it doesn't hold.
+  For example, `raid`:
+
+  ```ts
+  immediateActions: {
+    requires: ["streamLive"],
+    load: () => import("./panel/immediate-actions"),
+  },
+  ```
 
 ### What `handleEvent` gets and returns
 
