@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { BotModule } from "../../src/modules/contract";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 // This suite supplies small module doubles to keep route activation checks
@@ -60,12 +60,6 @@ vi.mock("../../src/modules/registry", () => ({ MODULES: [testModule, mandatoryTe
 const { createCsrfToken } = await import("../../src/worker/auth/csrf");
 const { createSessionCookie } = await import("../../src/worker/auth/session");
 const { panelRouter } = await import("../../src/worker/panel/routes");
-
-const key = (byte: number): string =>
-  btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
 
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),

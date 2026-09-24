@@ -5,13 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { ImmediateActions, WarningsAndErrorsFeed } from "../../src/dashboard/stream-manager";
+import { jsonResponse } from "../unit/fixtures";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
-
-const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "Content-Type": "application/json" },
-});
 
 const ADS_ENABLED = [{ id: "ads", enabled: true }] as const;
 const RAID_ENABLED = [{ id: "raid", enabled: true }] as const;

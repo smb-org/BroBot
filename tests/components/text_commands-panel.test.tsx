@@ -7,11 +7,8 @@ import { statusForTier, renderCommandText } from "../../src/modules/text_command
 import { TextCommandsPanel } from "../../src/modules/text_commands/panel";
 import { textCommandsTexts } from "../../src/modules/text_commands/panel/locale";
 import { useDashboardRoute } from "../../src/dashboard/router";
+import { jsonResponse } from "../unit/fixtures";
 
-const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "Content-Type": "application/json" },
-});
 const initialLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
 
 const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({

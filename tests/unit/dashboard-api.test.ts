@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { jsonResponse } from "./fixtures";
+
 import {
   addChannelMember,
   fetchAuditLog,
@@ -13,11 +15,6 @@ import {
   PanelApiError,
   requestJson,
 } from "../../src/dashboard/api";
-
-const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "Content-Type": "application/json" },
-});
 
 describe("dashboard API request boundary", () => {
   beforeEach(() => {

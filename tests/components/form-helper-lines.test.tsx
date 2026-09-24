@@ -7,6 +7,7 @@ import { Field, UiProvider } from "../../src/dashboard/ui";
 import { MembersPage } from "../../src/dashboard/members";
 import { PlatformPage } from "../../src/dashboard/platform";
 import { ImmediateActions } from "../../src/dashboard/stream-manager";
+import { jsonResponse } from "../unit/fixtures";
 
 /**
  * Cross-cutting check for the helper-text rule (editor-konzept 3.0/15.1.3):
@@ -17,11 +18,6 @@ import { ImmediateActions } from "../../src/dashboard/stream-manager";
  * separately and are covered by their own suites.
  */
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
-
-const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "Content-Type": "application/json" },
-});
 
 const requestUrl = (input: RequestInfo | URL): URL =>
   input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);

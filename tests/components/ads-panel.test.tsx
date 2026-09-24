@@ -4,11 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModulePage } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
-
-const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "Content-Type": "application/json" },
-});
+import { jsonResponse } from "../unit/fixtures";
 
 const settings = {
   automatic: "Werbepause beginnt",

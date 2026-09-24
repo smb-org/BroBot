@@ -7,13 +7,9 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { Spotlight } from "../../src/dashboard/ui/Spotlight";
 import { ChannelSpotlight } from "../../src/dashboard/spotlight";
 import { ModuleIcon } from "../../src/dashboard/module-panels";
+import { jsonResponse } from "../unit/fixtures";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
-
-const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "Content-Type": "application/json" },
-});
 
 const requestUrl = (input: RequestInfo | URL): URL =>
   input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);

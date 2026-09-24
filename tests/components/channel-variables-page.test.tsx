@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
 import { UiProvider } from "../../src/dashboard/ui";
+import { jsonResponse } from "../unit/fixtures";
+import { TestWebSocket } from "./test-websocket";
 
 const variable = {
   channelId: "kanal-a",
@@ -15,45 +17,16 @@ const variable = {
   usages: [],
 };
 
-const response = (body: unknown): Response => new Response(JSON.stringify(body), {
-  status: 200,
-  headers: { "Content-Type": "application/json" },
-});
-
-class DashboardSocket {
-  public static instances: DashboardSocket[] = [];
-  public readonly listeners = new Map<string, Set<EventListener>>();
-  public protocol = "brobot.v1";
-
-  public constructor(public readonly url: string, public readonly protocols?: string | string[]) {
-    DashboardSocket.instances.push(this);
-  }
-
-  public addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
-    const listeners = this.listeners.get(type) ?? new Set<EventListener>();
-    listeners.add(typeof listener === "function" ? listener : (event) => listener.handleEvent(event));
-    this.listeners.set(type, listeners);
-  }
-
-  public close(code = 1000): void {
-    this.dispatch("close", { code, reason: "closed" } as CloseEvent);
-  }
-
-  public dispatch(type: string, event: Event): void {
-    for (const listener of this.listeners.get(type) ?? []) listener(event);
-  }
-}
-
 describe("Channel variables page", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    DashboardSocket.instances = [];
+    TestWebSocket.instances = [];
   });
 
   it("shows a spaced table, reset indicator, quick controls, and disabled Save for operators", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(response({
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
       variables: [variable], count: 1, maximum: 25,
     })));
     vi.stubGlobal("fetch", fetcher);
@@ -91,12 +64,12 @@ describe("Channel variables page", () => {
     const issuedUrl = `https://brobot.example/overlay#token=${"s".repeat(43)}`;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = input instanceof Request ? input.url : String(input);
-      if (url.endsWith("/api/csrf")) return Promise.resolve(response({ token: "csrf-token" }));
+      if (url.endsWith("/api/csrf")) return Promise.resolve(jsonResponse({ token: "csrf-token" }));
       if (url.endsWith("/api/channels/kanal-a/variables")) {
-        return Promise.resolve(response({ variables: [variable], count: 1, maximum: 25 }));
+        return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
       }
       if (url.endsWith("/api/channels/kanal-a/overlay-tokens") && init?.method === "POST") {
-        return Promise.resolve(response({ tokenId: "token-1", overlayUrl: issuedUrl, expiresAt: null }));
+        return Promise.resolve(jsonResponse({ tokenId: "token-1", overlayUrl: issuedUrl, expiresAt: null }));
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
@@ -126,7 +99,7 @@ describe("Channel variables page", () => {
   });
 
   it("reuses a pasted overlay token in the browser without issuing another token", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ variables: [variable], count: 1, maximum: 25 }));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
     vi.stubGlobal("fetch", fetcher);
 
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
@@ -141,7 +114,7 @@ describe("Channel variables page", () => {
   });
 
   it("keeps variable actions before a separated overlay section and a visible disabled import button", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ variables: [variable], count: 1, maximum: 25 }));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
     vi.stubGlobal("fetch", fetcher);
 
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
@@ -178,15 +151,15 @@ describe("Channel variables page", () => {
     const fetcher = vi.fn<typeof fetch>();
     fetcher.mockImplementation(() => fetcher.mock.calls.length === 3
       ? new Promise((resolve) => { releaseThird = resolve; })
-      : Promise.resolve(response({ variables: [variable], count: 1, maximum: 25 })));
+      : Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 })));
     vi.stubGlobal("fetch", fetcher);
-    vi.stubGlobal("WebSocket", DashboardSocket);
+    vi.stubGlobal("WebSocket", TestWebSocket);
 
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
     await screen.findByRole("table");
-    expect(DashboardSocket.instances).toHaveLength(1);
+    expect(TestWebSocket.instances).toHaveLength(1);
     vi.useFakeTimers();
-    DashboardSocket.instances[0]?.dispatch("open", new Event("open"));
+    TestWebSocket.instances[0]?.dispatch("open", new Event("open"));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -195,7 +168,7 @@ describe("Channel variables page", () => {
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
 
-    const sendHint = (id: number): void => DashboardSocket.instances[0]?.dispatch("message", {
+    const sendHint = (id: number): void => TestWebSocket.instances[0]?.dispatch("message", {
       data: JSON.stringify({
         version: 1,
         id: `variables-changed-${String(id)}`,
@@ -218,7 +191,7 @@ describe("Channel variables page", () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(releaseThird).toBeTypeOf("function");
     await act(async () => {
-      releaseThird?.(response({ variables: [variable], count: 1, maximum: 25 }));
+      releaseThird?.(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();

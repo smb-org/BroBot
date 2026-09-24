@@ -2,36 +2,14 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentType } from "react";
 
+import { TestWebSocket } from "../components/test-websocket";
+
 const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
 
 vi.mock("../../src/overlay/realtime", () => realtimeMocks);
 
 import * as overlayStatus from "../../src/overlay/status";
 import { OverlayStatusView } from "../../src/overlay/status";
-
-class QuietWebSocket {
-  public static instances: QuietWebSocket[] = [];
-  public protocol = "brobot.v1";
-  public readonly listeners = new Map<string, Set<EventListener>>();
-
-  public constructor() {
-    QuietWebSocket.instances.push(this);
-  }
-
-  public addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
-    const listeners = this.listeners.get(type) ?? new Set<EventListener>();
-    listeners.add(typeof listener === "function" ? listener : (event) => listener.handleEvent(event));
-    this.listeners.set(type, listeners);
-  }
-
-  public close(code = 1000): void {
-    this.dispatch("close", { code, reason: "closed" } as CloseEvent);
-  }
-
-  public dispatch(type: string, event: Event): void {
-    for (const listener of this.listeners.get(type) ?? []) listener(event);
-  }
-}
 
 const versionResponse = (version: string): Response => new Response(
   JSON.stringify({ version, language: "de" }),
@@ -52,8 +30,8 @@ const setFragment = (token: string): void => {
 describe("Overlay status view", () => {
   beforeEach(() => {
     setFragment("erstes-token");
-    QuietWebSocket.instances = [];
-    vi.stubGlobal("WebSocket", QuietWebSocket);
+    TestWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", TestWebSocket);
   });
 
   afterEach(() => {
