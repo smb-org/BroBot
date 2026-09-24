@@ -151,6 +151,16 @@ describe("SQL contract", () => {
       expect(objects.filter((object) => object.type === "table")).toHaveLength(26);
       expect(objects.filter((object) => object.type === "index")).toHaveLength(26);
       expect(objects).toHaveLength(52);
+
+      const tableColumns = (table: string): Set<string> => new Set(
+        (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),
+      );
+      expect([...tableColumns("channel_controls")]).toEqual(expect.arrayContaining([
+        "mute_stream_started_at", "pause_stream_started_at",
+      ]));
+      expect([...tableColumns("channel_stream_state")]).toEqual(expect.arrayContaining([
+        "checked_at", "eventsub_changed_at",
+      ]));
     } finally {
       database.close();
     }

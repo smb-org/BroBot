@@ -268,6 +268,100 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.getByText(/Werbeeinblendung nicht gestartet: Twitch hat den Start abgelehnt/)).toBeInTheDocument();
   });
 
+  it("shows the icon for an uncatalogued shoutout cause and quotes Twitch's own message in the popover (issue #201)", async () => {
+    // Producer-shaped: `sendShoutout` (worker/shoutout.ts) never actually
+    // emits a raw `http_<status>` cause -- an unclassified status falls
+    // back to its own catalogued "twitch_error", and the Helix-sourced
+    // message lands under `twitchMessage`, not `message`.
+    renderPage([entry({
+      eventId: "shoutout-twitch-error", moduleId: "host", code: "host.shoutout.failed",
+      detail: "{\"cause\":\"twitch_error\",\"twitchMessage\":\"The broadcaster is not streaming live or does not have one or more viewers.\"}",
+    })]);
+
+    expect(screen.getByText("Shoutout fehlgeschlagen: Twitch hat den Shoutout abgelehnt")).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.mouseEnter(trigger);
+
+    expect(await screen.findByText("Twitch hat den Shoutout abgelehnt")).toBeInTheDocument();
+    expect(await screen.findByText("Twitch: The broadcaster is not streaming live or does not have one or more viewers.")).toBeInTheDocument();
+  });
+
+  it("still shows the icon for a legacy-shaped shoutout row with a raw http_<status> cause (staging has old rows like this)", async () => {
+    // Rows written before `sendShoutout` normalized every status also
+    // predate the `twitchMessage` rename -- the Twitch text they carry is
+    // still under the old `message` key. `detail.cause` here isn't one of
+    // `SHOUTOUT_FAILURE_REASONS` either way, so the row shows nothing but
+    // "Shoutout fehlgeschlagen", full stop.
+    renderPage([entry({
+      eventId: "shoutout-legacy-http-400", moduleId: "host", code: "host.shoutout.failed",
+      detail: "{\"cause\":\"http_400\",\"message\":\"The broadcaster is not streaming live or does not have one or more viewers.\"}",
+    })]);
+
+    expect(screen.getByText("Shoutout fehlgeschlagen")).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.mouseEnter(trigger);
+
+    expect(await screen.findByText("The broadcaster is not streaming live or does not have one or more viewers.")).toBeInTheDocument();
+  });
+
+  it("shows the icon for a catalogued ads.commercial.failed cause when Twitch also supplied its own message (issue #201)", async () => {
+    // Producer-shaped: `commercialReasonFor` (modules/ads/adapters/
+    // commercial.ts) falls back to "twitch_error" for an unclassified
+    // status, and its Helix-sourced message lands under `twitchMessage`.
+    // The row only ever shows the generic catalogued phrase -- Twitch's
+    // own, more specific explanation never appears anywhere else.
+    renderPage([entry({
+      eventId: "commercial-twitch-error", moduleId: "ads", code: "ads.commercial.failed",
+      detail: "{\"reason\":\"twitch_error\",\"twitchMessage\":\"The broadcaster is not streaming live or does not have one or more viewers.\"}",
+    })]);
+
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.mouseEnter(trigger);
+
+    expect(await screen.findByText("Twitch hat den Start abgelehnt")).toBeInTheDocument();
+    expect(await screen.findByText("Twitch: The broadcaster is not streaming live or does not have one or more viewers.")).toBeInTheDocument();
+  });
+
+  it("labels a local error message neutrally instead of as Twitch's, when the producer's own exception put it there (issue #201)", async () => {
+    // `startCommercial`'s own `getAppAccessToken` failure puts the caught
+    // exception's message under the generic `message` key, not `twitchMessage`
+    // -- Twitch never said this, so the popover must not claim it did.
+    renderPage([entry({
+      eventId: "commercial-local-error", moduleId: "ads", code: "ads.commercial.failed",
+      detail: "{\"reason\":\"app_token_unavailable\",\"message\":\"fetch failed: connection refused\"}",
+    })]);
+
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.mouseEnter(trigger);
+
+    expect(await screen.findByText("App-Token nicht verfügbar")).toBeInTheDocument();
+    expect(await screen.findByText("Details: fetch failed: connection refused")).toBeInTheDocument();
+    expect(screen.queryByText(/^Twitch:/)).not.toBeInTheDocument();
+  });
+
+  it("renders a long unbroken diagnostic message inside the wrapping popover container (issue #201)", async () => {
+    // No spaces at all -- exactly the shape a fixed-width popover can't
+    // break on without `overflow-wrap: anywhere` (see `.event-cause` in
+    // styles.css, which carries the actual wrapping and max-height/scroll
+    // rules -- a jsdom component test has no layout engine to assert the
+    // computed style against, so the Playwright visual check covers the
+    // rendered result; this checks the message reaches that container
+    // intact). Under the 300-char ingestion cap, so this exercises the
+    // layout wiring, not the cap itself (see `tests/unit/event-log.test.ts`
+    // for that).
+    const longUnbrokenMessage = "a".repeat(280);
+    renderPage([entry({
+      eventId: "shoutout-long-message", moduleId: "host", code: "host.shoutout.failed",
+      detail: `{"cause":"twitch_error","twitchMessage":"${longUnbrokenMessage}"}`,
+    })]);
+
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.mouseEnter(trigger);
+
+    const messageLine = await screen.findByText(`Twitch: ${longUnbrokenMessage}`);
+    expect(messageLine.closest(".event-cause")).not.toBeNull();
+  });
+
   it("hides the icon for host.announcement.failed and uses the shared shoutout catalog wording in the row", () => {
     renderPage([entry({
       eventId: "announcement-failed", moduleId: "host", code: "host.announcement.failed",
@@ -288,6 +382,21 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.queryByText(/http_500/)).not.toBeInTheDocument();
   });
 
+  it("shows Twitch's own message in the row once dispatch preserves it, instead of the generic http_<status> fallback (issue #201)", () => {
+    // dispatch.ts used to drop sendChatAnnouncement's `twitchMessage` in
+    // both fallback paths, keeping only `status` -- this is that value
+    // reaching the row through `eventCauseText`'s own message fallback.
+    renderPage([entry({
+      eventId: "announcement-twitch-message", moduleId: "host", code: "host.announcement.failed",
+      detail: "{\"reason\":\"http_500\",\"outcome\":\"not_sent\",\"twitchMessage\":\"Malformed announcement request.\"}",
+    })]);
+
+    expect(screen.getByText("Ankündigung nicht möglich (Malformed announcement request.) — nicht gesendet")).toBeInTheDocument();
+    expect(screen.queryByText(/Twitch antwortete mit Fehler 500/)).not.toBeInTheDocument();
+    // Already folded into the row -- no separate icon needed.
+    expect(screen.queryByRole("button", { name: causeButtonName })).not.toBeInTheDocument();
+  });
+
   it("uses the clip catalog's wording, not the shoutout one, for host.clip.failed", async () => {
     renderPage([entry({ eventId: "clip-failed", moduleId: "host", code: "host.clip.failed", detail: "{\"reason\":\"scope_missing\"}" })]);
 
@@ -306,6 +415,32 @@ describe("EventsPage failure cause icon", () => {
     fireEvent.mouseEnter(trigger);
 
     expect(await screen.findByText("Twitch cooldown is active")).toBeInTheDocument();
+  });
+
+  it("shows a localized label for the host module instead of the raw id (issue #201)", () => {
+    renderPage([entry({ eventId: "host-row", moduleId: "host", code: "host.clip.failed", detail: "{}" })]);
+
+    // Once in the module column, once in the mobile meta line -- both read
+    // the same `moduleLabel`.
+    expect(screen.getAllByText("System").length).toBeGreaterThan(0);
+    expect(screen.queryByText("host")).not.toBeInTheDocument();
+  });
+
+  it("renders just the generic label when a chat notification's type is missing, without a doubled placeholder (issue #201)", () => {
+    renderPage([entry({
+      eventId: "chat-unknown", moduleId: "channel_events", code: "channel_events.chat.unknown", detail: "{}",
+    })]);
+
+    expect(screen.getByText("Unbekannte Chat-Benachrichtigung")).toBeInTheDocument();
+    expect(screen.queryByText(/unbekannt$/)).not.toBeInTheDocument();
+  });
+
+  it("still shows the notice type when a chat notification's type is present but unhandled", () => {
+    renderPage([entry({
+      eventId: "chat-unknown-typed", moduleId: "channel_events", code: "channel_events.chat.unknown", detail: "{\"art\":\"charity_donation\"}",
+    })]);
+
+    expect(screen.getByText("Unbekannte Chat-Benachrichtigung: charity_donation")).toBeInTheDocument();
   });
 
   it("still opens the inspector when the row itself is clicked", () => {

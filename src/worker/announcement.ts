@@ -77,7 +77,7 @@ export const sendChatAnnouncement = async (
       sent: false,
       truncated: preparedText.truncated,
       reason: result.reason,
-      detail: { ...detail, status: result.status, message: result.message },
+      detail: { ...detail, status: result.status, twitchMessage: result.message },
     };
   }
   return { sent: true, truncated: preparedText.truncated, reason: null, detail };

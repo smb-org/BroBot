@@ -66,7 +66,13 @@ describe("channel control routes", () => {
     const pause = await post("pause", "until_stream_end");
     expect(pause.status).toBe(200);
     await expect(pause.json()).resolves.toMatchObject({
-      controls: { pause: { active: true, mode: "until_stream_end", until: null } },
+      controls: { pause: { active: false, pending: true, mode: "until_stream_end", until: null } },
+    });
+
+    const unpause = await post("pause", null);
+    expect(unpause.status).toBe(200);
+    await expect(unpause.json()).resolves.toMatchObject({
+      controls: { pause: { active: false, mode: null, until: null } },
     });
 
     const unmute = await post("mute", null);
@@ -80,6 +86,7 @@ describe("channel control routes", () => {
     expect(audit.results).toEqual([
       { actor_user_id: userId, actor_kind: "member", action: "channel.mute.enabled" },
       { actor_user_id: userId, actor_kind: "member", action: "channel.pause.enabled" },
+      { actor_user_id: userId, actor_kind: "member", action: "channel.pause.disabled" },
       { actor_user_id: userId, actor_kind: "member", action: "channel.mute.disabled" },
     ]);
   });

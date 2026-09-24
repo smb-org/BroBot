@@ -363,6 +363,49 @@ describe("Panel read endpoints", () => {
     expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
   });
 
+  it("reads overview controls after Helix binds a pending pause during the lookup", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
+       VALUES ('kanal-a', 'offline', '2026-09-23T11:00:00.000Z', 'helix')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO channel_controls
+        (channel_id, paused, pause_until_stream_end, updated_at)
+       VALUES ('kanal-a', 1, 1, '2026-09-23T11:30:00.000Z')`,
+    ).run();
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+    );
+    const startedAt = "2026-09-23T11:59:00.000Z";
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "live-1", started_at: startedAt }] }), { status: 200 }),
+    ));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      { ...environment, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      streamState: "online",
+      streamStartedAt: startedAt,
+      controls: { pause: { active: true, mode: "until_stream_end" } },
+    });
+    await expect(database.prepare(
+      "SELECT pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ pause_stream_started_at: startedAt });
+  });
+
   it("returns the real Helix stream start, not the check time, when backfilling via Helix (#178)", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
@@ -412,6 +455,54 @@ describe("Panel read endpoints", () => {
       channelId: "kanal-a",
       streamState: "online",
       streamStartedAt: "2026-09-23T08:00:00.000Z",
+    });
+  });
+
+  it("shows an offline control as pending and hides a control bound to an older stream", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T10:00:00.000Z"));
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertStreamEventSubCoverage(database, "kanal-a");
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, checked_at, eventsub_changed_at)
+       VALUES ('kanal-a', 'offline', '2026-09-23T10:00:00.000Z', 'eventsub', '2026-09-23T10:00:00.000Z', '2026-09-23T10:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO channel_controls (channel_id, muted, mute_until_stream_end, updated_at)
+       VALUES ('kanal-a', 1, 1, '2026-09-23T09:00:00.000Z')`,
+    ).run();
+
+    const pendingResponse = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+    await expect(pendingResponse.json()).resolves.toMatchObject({
+      streamState: "offline",
+      controls: { mute: { active: false, pending: true, mode: "until_stream_end" } },
+    });
+
+    await database.prepare(
+      `UPDATE channel_stream_state
+          SET state = 'online', started_at = '2026-09-23T09:59:00.000Z',
+              changed_at = '2026-09-23T10:00:00.000Z', checked_at = '2026-09-23T10:00:00.000Z',
+              eventsub_changed_at = '2026-09-23T10:00:00.000Z'
+        WHERE channel_id = 'kanal-a'`,
+    ).run();
+    await database.prepare(
+      `UPDATE channel_controls SET mute_stream_started_at = '2026-09-23T09:00:00.000Z'
+        WHERE channel_id = 'kanal-a'`,
+    ).run();
+    const restartedResponse = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+    await expect(restartedResponse.json()).resolves.toMatchObject({
+      streamState: "online",
+      streamStartedAt: "2026-09-23T09:59:00.000Z",
+      controls: { mute: { active: false, mode: null } },
     });
   });
 

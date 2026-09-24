@@ -107,7 +107,10 @@ export interface PanelChannelState {
 }
 
 export interface PanelChannelControl {
+  /** False for a stream-end control until its pending session is recorded. */
   active: boolean;
+  /** Set while a stream-end control awaits the next recorded live session. */
+  pending?: boolean;
   /** Null for off, until stream end, and unlimited controls. */
   until: string | null;
   mode: "timed" | "until_stream_end" | "unlimited" | null;

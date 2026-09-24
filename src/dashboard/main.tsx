@@ -8,6 +8,7 @@ import type {
   PanelBotStatus,
   PanelBroadcasterPermissions,
   PanelChannelOverview,
+  PanelChannelControl,
   PanelChannelControls,
   PanelChannelState,
   PanelEventEntry,
@@ -373,7 +374,7 @@ interface DashboardHeaderProperties {
   onRefreshState: () => Promise<void>;
 }
 
-const CONTROL_OFF = { active: false, until: null, mode: null } as const;
+const CONTROL_OFF: PanelChannelControl = { active: false, until: null, mode: null };
 
 const isControlDuration = (value: string): value is ChannelControlDuration =>
   (CHANNEL_CONTROL_DURATIONS as readonly string[]).includes(value);
@@ -402,6 +403,8 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
   useEffect(() => { refreshRef.current = onRefresh; }, [onRefresh]);
   const mute = controls?.mute ?? CONTROL_OFF;
   const pause = controls?.pause ?? CONTROL_OFF;
+  const muteConfigured = mute.active || mute.pending === true;
+  const pauseConfigured = pause.active || pause.pending === true;
   const staleExpiryKey = [mute, pause]
     .filter((control) => control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) <= now)
     .map((control) => control.until)
@@ -436,6 +439,7 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
   };
 
   const activeText = (control: typeof mute, kind: "mute" | "pause"): string | null => {
+    if (control.pending === true) return labels.pendingUntilStreamStart;
     if (!control.active) return null;
     if (control.mode === "timed" && control.until !== null) {
       const remaining = Math.ceil((Date.parse(control.until) - now) / 60_000);
@@ -467,25 +471,25 @@ const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
     <div className="dashboard-header__controls" aria-label={texts.navigation.channel}>
       <div className="dashboard-header__control-buttons">
         <Button
-          icon={mute.active ? "volume-off" : "volume-3"}
+          icon={muteConfigured ? "volume-off" : "volume-3"}
           iconOnly
-          ariaLabel={mute.active ? labels.muteDisable : labels.muteEnable}
-          title={mute.active ? labels.muteDisable : labels.muteEnable}
+          ariaLabel={muteConfigured ? labels.muteDisable : labels.muteEnable}
+          title={muteConfigured ? labels.muteDisable : labels.muteEnable}
           disabled={busy !== null}
-          onClick={() => { if (mute.active) void apply("mute", null); else { setDialogControl("mute"); setError(null); } }}
+          onClick={() => { if (muteConfigured) void apply("mute", null); else { setDialogControl("mute"); setError(null); } }}
         />
         {timedIndicator(mute, "mute")}
-        {!mute.active || mute.mode === "timed" ? null : <span className="dashboard-header__control-state">{activeText(mute, "mute")}</span>}
+        {!muteConfigured || mute.mode === "timed" ? null : <span className="dashboard-header__control-state">{activeText(mute, "mute")}</span>}
         <Button
-          icon={pause.active ? "player-play" : "player-pause"}
+          icon={pauseConfigured ? "player-play" : "player-pause"}
           iconOnly
-          ariaLabel={pause.active ? labels.pauseDisable : labels.pauseEnable}
-          title={pause.active ? labels.pauseDisable : labels.pauseEnable}
+          ariaLabel={pauseConfigured ? labels.pauseDisable : labels.pauseEnable}
+          title={pauseConfigured ? labels.pauseDisable : labels.pauseEnable}
           disabled={busy !== null}
-          onClick={() => { if (pause.active) void apply("pause", null); else { setDialogControl("pause"); setError(null); } }}
+          onClick={() => { if (pauseConfigured) void apply("pause", null); else { setDialogControl("pause"); setError(null); } }}
         />
         {timedIndicator(pause, "pause")}
-        {!pause.active || pause.mode === "timed" ? null : <span className="dashboard-header__control-state">{activeText(pause, "pause")}</span>}
+        {!pauseConfigured || pause.mode === "timed" ? null : <span className="dashboard-header__control-state">{activeText(pause, "pause")}</span>}
       </div>
       {error === null ? null : <span className="dashboard-header__control-error" role="alert">{error}</span>}
       <ControlDurationDialog

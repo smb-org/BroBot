@@ -82,7 +82,7 @@ export const sendChatMessage = async (
   });
 
   if (!result.ok) {
-    return { sent: false, truncated: preparedText.truncated, reason: result.reason, detail: { ...textDetail, status: result.status, message: result.message } };
+    return { sent: false, truncated: preparedText.truncated, reason: result.reason, detail: { ...textDetail, status: result.status, twitchMessage: result.message } };
   }
 
   const body = isRecord(result.data) ? result.data : {};
@@ -96,7 +96,7 @@ export const sendChatMessage = async (
       sent: false,
       truncated: preparedText.truncated,
       reason: readText(dropReason.code) ?? "not_sent",
-      detail: { ...textDetail, message: readText(dropReason.message) },
+      detail: { ...textDetail, twitchMessage: readText(dropReason.message) },
     };
   }
 

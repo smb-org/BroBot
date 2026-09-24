@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { listChannelIdsNeedingStreamStateRefresh } from "../../src/worker/db/channels";
 import { lookupAndRefreshStreamState, maintainStreamStates } from "../../src/worker/stream-state-lookup";
-import { insertAppAccessToken, insertChannel } from "./fixtures";
+import { readDispatchChannelState, readChannelControls, setChannelControl } from "../../src/worker/db/channel-controls";
+import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const NOW = "2026-09-23T12:00:00.000Z";
@@ -73,15 +74,16 @@ const databaseWithStreamTransitionAfterRefresh = (database: TestD1Database): D1D
     const eventAt = "2026-09-23T12:00:01.000Z";
     await database.prepare(
       `UPDATE channel_stream_state
-          SET state = 'online', changed_at = ?, source = 'eventsub', started_at = ?
+          SET state = 'online', changed_at = ?, source = 'eventsub', started_at = ?, checked_at = ?, eventsub_changed_at = ?
         WHERE channel_id = 'kanal-a'`,
-    ).bind(eventAt, eventAt).run();
+    ).bind(eventAt, eventAt, eventAt, eventAt).run();
     await database.prepare(
       `UPDATE channel_controls
           SET muted = 1, mute_until_stream_end = 1,
-              paused = 1, pause_until_stream_end = 1, updated_at = ?
+              mute_stream_started_at = ?, paused = 1, pause_until_stream_end = 1,
+              pause_stream_started_at = ?, updated_at = ?
         WHERE channel_id = 'kanal-a'`,
-    ).bind(eventAt).run();
+    ).bind(eventAt, eventAt, eventAt).run();
   };
   const db = {
     prepare(sql: string): D1PreparedStatement {
@@ -340,16 +342,16 @@ describe("lookupAndRefreshStreamState", () => {
     }
   });
 
-  it("clears controls set before a Helix offline transition", async () => {
+  it("keeps controls stored after a Helix offline transition and derives them inactive", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
       await insertStreamState(database, "kanal-a", "online", STALE, "helix", "2026-09-23T09:00:00.000Z");
       await database.prepare(
         `INSERT INTO channel_controls
-          (channel_id, muted, muted_until, mute_until_stream_end,
-           paused, paused_until, pause_until_stream_end, updated_at)
-         VALUES ('kanal-a', 1, NULL, 1, 1, NULL, 1, ?)`,
+          (channel_id, muted, muted_until, mute_until_stream_end, mute_stream_started_at,
+           paused, paused_until, pause_until_stream_end, pause_stream_started_at, updated_at)
+         VALUES ('kanal-a', 1, NULL, 1, '2026-09-23T09:00:00.000Z', 1, NULL, 1, '2026-09-23T09:00:00.000Z', ?)`,
       ).bind(STALE).run();
       await withAppToken(database);
 
@@ -357,11 +359,113 @@ describe("lookupAndRefreshStreamState", () => {
 
       expect(result.state).toBe("offline");
       await expect(database.prepare(
-        `SELECT muted, mute_until_stream_end, paused, pause_until_stream_end, updated_at
+        `SELECT muted, mute_until_stream_end, mute_stream_started_at,
+                paused, pause_until_stream_end, pause_stream_started_at, updated_at
            FROM channel_controls WHERE channel_id = 'kanal-a'`,
       ).first()).resolves.toEqual({
-        muted: 0, mute_until_stream_end: 0, paused: 0, pause_until_stream_end: 0, updated_at: NOW,
+        muted: 1, mute_until_stream_end: 1, mute_stream_started_at: "2026-09-23T09:00:00.000Z",
+        paused: 1, pause_until_stream_end: 1, pause_stream_started_at: "2026-09-23T09:00:00.000Z", updated_at: STALE,
       });
+      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", NOW)).resolves.toMatchObject({
+        controls: { mute: { active: false }, pause: { active: false } },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("restores a stream control after a brief false Helix offline observation", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const startedAt = "2026-09-23T09:00:00.000Z";
+      await insertStreamState(database, "kanal-a", "online", STALE, "helix", startedAt);
+      await database.prepare(
+        `INSERT INTO channel_controls
+          (channel_id, muted, mute_until_stream_end, mute_stream_started_at, updated_at)
+         VALUES ('kanal-a', 1, 1, ?, ?)`,
+      ).bind(startedAt, STALE).run();
+      await withAppToken(database);
+
+      await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, helixResponse(false));
+      await expect(database.prepare(
+        "SELECT muted, mute_until_stream_end, mute_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ muted: 1, mute_until_stream_end: 1, mute_stream_started_at: startedAt });
+      await expect(readChannelControls(database as unknown as D1Database, "kanal-a", NOW)).resolves.toMatchObject({
+        mute: { active: false },
+      });
+
+      const correctionAt = "2026-09-23T12:11:00.000Z";
+      await lookupAndRefreshStreamState(
+        environment(database),
+        "kanal-a",
+        correctionAt,
+        helixResponse(true, startedAt),
+      );
+      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", correctionAt)).resolves.toMatchObject({
+        controls: { mute: { active: true, mode: "until_stream_end" } },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("deactivates an old session's control when a restart happens between polls", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const oldStartedAt = "2026-09-23T09:00:00.000Z";
+      const newStartedAt = "2026-09-23T11:59:00.000Z";
+      await insertStreamState(database, "kanal-a", "online", STALE, "helix", oldStartedAt);
+      await database.prepare(
+        `INSERT INTO channel_controls
+          (channel_id, paused, pause_until_stream_end, pause_stream_started_at, updated_at)
+         VALUES ('kanal-a', 1, 1, ?, ?)`,
+      ).bind(oldStartedAt, STALE).run();
+      await withAppToken(database);
+
+      const result = await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, helixResponse(true, newStartedAt));
+
+      expect(result).toMatchObject({ state: "online", startedAt: newStartedAt });
+      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", NOW)).resolves.toMatchObject({
+        controls: { pause: { active: false, mode: null } },
+      });
+      await expect(database.prepare(
+        "SELECT paused, pause_until_stream_end, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ paused: 1, pause_until_stream_end: 1, pause_stream_started_at: oldStartedAt });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps a control set while the hourly Helix tick is running", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "operator-1");
+      await insertMember(database, "kanal-a", "operator-1", "operator");
+      const startedAt = "2026-09-23T09:00:00.000Z";
+      await insertStreamState(database, "kanal-a", "online", STALE, "helix", startedAt);
+      await withAppToken(database);
+      const db = database as unknown as D1Database;
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
+        await setChannelControl(
+          db,
+          { userId: "operator-1", sessionId: "session-operator-1" },
+          "kanal-a",
+          "mute",
+          "until_stream_end",
+          NOW,
+        );
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      });
+
+      await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, fetcher);
+
+      await expect(database.prepare(
+        "SELECT muted, mute_until_stream_end, mute_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ muted: 1, mute_until_stream_end: 1, mute_stream_started_at: startedAt });
+      await expect(readChannelControls(db, "kanal-a", NOW)).resolves.toMatchObject({ mute: { active: false } });
     } finally {
       database.close();
     }

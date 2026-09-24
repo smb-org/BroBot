@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, SHOUTOUT_SUPPRESSED_REASONS,
 } from "../../src/contracts/values";
-import { apiErrorText, channelVariablesTexts, dashboardLanguage, eventCauseText, eventText, eventToneEntries, overlayTokensTexts, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
+import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, eventCauseAlreadyShown, eventCauseText, eventText, eventToneEntries, overlayTokensTexts, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -42,6 +42,20 @@ describe("dashboard locale", () => {
     expect(channelVariablesTexts("en").resetHint).toBe("Resets when the next stream starts.");
     expect(channelVariablesTexts("de").resetHint).not.toContain("stream.online");
     expect(channelVariablesTexts("en").resetHint).not.toContain("stream.online");
+  });
+
+  it("explains that stream-end controls carry over to the next stream when set offline", () => {
+    setBrowserLanguage("de-DE");
+    expect(dashboardTexts().channelControls.durationStream).toBe("Bis Streamende");
+    expect(dashboardTexts().channelControls.pendingUntilStreamStart).toBe("Gilt ab dem nächsten Stream");
+    expect(dashboardTexts().channelControls.durationStreamDescription)
+      .toContain("gilt es für den nächsten Stream");
+
+    setBrowserLanguage("en-US");
+    expect(dashboardTexts().channelControls.durationStream).toBe("Until stream ends");
+    expect(dashboardTexts().channelControls.pendingUntilStreamStart).toBe("Applies starting with the next stream");
+    expect(dashboardTexts().channelControls.durationStreamDescription)
+      .toContain("applies to the next stream and ends with it");
   });
 
   it("resolves event texts with detail and keeps fixed texts intact", () => {
@@ -102,6 +116,25 @@ describe("dashboard locale", () => {
     expect(eventText("ads.commercial.failed", { reason: "stream_offline" })).toBe("Commercial not started: The stream is offline");
     expect(apiErrorText("commercial_stream_offline", "Fallback")).toBe("A commercial cannot run while the stream is offline.");
     expect(shoutoutFailureReasonText("twitch_user_not_found")).toBe("Twitch user not found");
+  });
+
+  it("drops the placeholder entirely for an unknown notification with no type at all, instead of doubling up (issue #201)", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventText("channel_events.chat.unknown", {})).toBe("Unbekannte Chat-Benachrichtigung");
+
+    setBrowserLanguage("en-US");
+    expect(eventText("channel_events.chat.unknown", {})).toBe("Unknown chat notification");
+  });
+
+  it("treats a row already stored with the old 'unbekannt' placeholder the same as no type at all (issue #201 follow-up)", () => {
+    // Rows written before the producer fix (`channel_events/domain/index.ts`)
+    // still carry the literal old sentinel in `art` -- the event log's
+    // 14-day retention means the formatter has to keep tolerating it.
+    setBrowserLanguage("de-DE");
+    expect(eventText("channel_events.chat.unknown", { art: "unbekannt" })).toBe("Unbekannte Chat-Benachrichtigung");
+
+    setBrowserLanguage("en-US");
+    expect(eventText("channel_events.chat.unknown", { art: "unbekannt" })).toBe("Unknown chat notification");
   });
 
   it("renders moderation details bilingually with a meaning-carrying tone", () => {
@@ -238,6 +271,22 @@ describe("dashboard locale", () => {
     expect(eventCauseText("host.chat.failed", { reason: "http_500" })).toBe("Twitch responded with error 500");
   });
 
+  it("prefers detail.twitchMessage over detail.message when a producer somehow sets both (issue #201)", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventCauseText("host.chat.failed", {
+      reason: "http_403", twitchMessage: "Twitch's own wording", message: "a local wording",
+    })).toBe("Twitch's own wording");
+  });
+
+  it("still reads a legacy row's plain detail.message the same way, now that producers write twitchMessage (issue #201)", () => {
+    // Rows written before the `twitchMessage` rename (worker/shoutout.ts et
+    // al.) only ever had `message` -- `eventCauseText` still has to resolve
+    // those the same way it always did.
+    setBrowserLanguage("de-DE");
+    expect(eventCauseText("host.chat.failed", { reason: "http_403", message: "You are banned from chatting in this channel" }))
+      .toBe("You are banned from chatting in this channel");
+  });
+
   it("falls back to a localized generic cause for a reason that isn't http_<status> either", () => {
     setBrowserLanguage("de-DE");
     // An arbitrary Twitch chat moderation code, uncatalogued and without a
@@ -246,6 +295,22 @@ describe("dashboard locale", () => {
 
     setBrowserLanguage("en-US");
     expect(eventCauseText("host.chat.failed", { reason: "banned_word" })).toBe("Unknown cause");
+  });
+
+  it("only reports host.shoutout.failed's cause as already shown when it's one of its own catalogued reasons (issue #201)", () => {
+    expect(eventCauseAlreadyShown("host.shoutout.failed", { cause: "twitch_error" })).toBe(true);
+    expect(eventCauseAlreadyShown("host.shoutout.failed", { cause: "twitch_user_not_found" })).toBe(true);
+    // An uncatalogued Helix status the row's own formatter has no wording
+    // for at all -- "Shoutout failed", full stop, no reason folded in.
+    expect(eventCauseAlreadyShown("host.shoutout.failed", { cause: "http_400" })).toBe(false);
+  });
+
+  it("treats ads.commercial.failed's cause as always shown, since its own reason function never returns null", () => {
+    expect(eventCauseAlreadyShown("ads.commercial.failed", { reason: "twitch_error" })).toBe(true);
+    // Even an uncatalogued reason still renders the catalog's own fallback
+    // wording ("Twitch rejected the request") -- the icon then only earns
+    // its place via a Twitch `message`, checked separately in `eventCause`.
+    expect(eventCauseAlreadyShown("ads.commercial.failed", { reason: "something_new" })).toBe(true);
   });
 
   it("never returns a raw snake_case reason for any value a current producer can emit", () => {

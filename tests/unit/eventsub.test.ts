@@ -259,13 +259,23 @@ describe("EventSub inbound", () => {
     const channelId = "channel-stream-order";
     await insertChannel(database, channelId);
     await database.prepare(
-      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
-       VALUES (?, 'online', '2026-09-19T10:00:00.500Z', 'eventsub')`,
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, started_at, checked_at, eventsub_changed_at)
+       VALUES (?, 'online', '2026-09-19T10:00:00.500Z', 'eventsub', '2026-09-19T09:00:00.000Z',
+               '2026-09-19T10:00:00.500Z', '2026-09-19T10:00:00.500Z')`,
+    ).bind(channelId).run();
+    await database.prepare(
+      `UPDATE channel_stream_state
+          SET started_at_seconds = CAST(strftime('%s', started_at) AS INTEGER), started_at_fraction = '',
+              eventsub_changed_at_seconds = CAST(strftime('%s', eventsub_changed_at) AS INTEGER), eventsub_changed_at_fraction = '5'
+        WHERE channel_id = ?`,
     ).bind(channelId).run();
     await database.prepare(
       `INSERT INTO channel_controls
-        (channel_id, muted, muted_until, mute_until_stream_end, paused, paused_until, pause_until_stream_end, updated_at)
-       VALUES (?, 1, NULL, 1, 1, NULL, 1, '2026-09-19T10:00:00.500Z')`,
+        (channel_id, muted, muted_until, mute_until_stream_end, mute_stream_started_at,
+         paused, paused_until, pause_until_stream_end, pause_stream_started_at, updated_at)
+       VALUES (?, 1, NULL, 1, '2026-09-19T09:00:00.000Z', 1, NULL, 1,
+               '2026-09-19T09:00:00.000Z', '2026-09-19T10:00:00.500Z')`,
     ).bind(channelId).run();
     vi.setSystemTime(new Date("2026-09-19T10:00:01.000Z"));
 
@@ -292,6 +302,55 @@ describe("EventSub inbound", () => {
       mute_until_stream_end: 1,
       paused: 1,
       pause_until_stream_end: 1,
+    });
+  });
+
+  it("lets a delayed offline event pass a later Helix refresh when it is newer than the EventSub watermark", async () => {
+    const channelId = "channel-helix-order";
+    await insertChannel(database, channelId);
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, started_at, checked_at, eventsub_changed_at)
+       VALUES (?, 'online', '2026-09-19T10:00:00.500Z', 'helix', '2026-09-19T09:00:00.000Z',
+               '2026-09-19T10:00:00.500Z', '2026-09-19T10:00:00.000Z')`,
+    ).bind(channelId).run();
+    await database.prepare(
+      `UPDATE channel_stream_state
+          SET started_at_seconds = CAST(strftime('%s', started_at) AS INTEGER), started_at_fraction = '',
+              eventsub_changed_at_seconds = CAST(strftime('%s', eventsub_changed_at) AS INTEGER), eventsub_changed_at_fraction = ''
+        WHERE channel_id = ?`,
+    ).bind(channelId).run();
+    await database.prepare(
+      `INSERT INTO channel_controls
+        (channel_id, muted, mute_until_stream_end, mute_stream_started_at, updated_at)
+       VALUES (?, 1, 1, '2026-09-19T09:00:00.000Z', '2026-09-19T10:00:00.000Z')`,
+    ).bind(channelId).run();
+    vi.setSystemTime(new Date("2026-09-19T10:00:01.000Z"));
+
+    const body = JSON.stringify({
+      subscription: { type: "stream.offline", condition: { broadcaster_user_id: channelId } },
+      event: {},
+    });
+    const response = await eventSubRouter.fetch(
+      signedRequest(secret, "notification", body, "offline-after-helix", "2026-09-19T10:00:00.100Z"),
+      environment(),
+    );
+
+    expect(response.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT state, changed_at, checked_at, eventsub_changed_at FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(channelId).first()).resolves.toEqual({
+      state: "offline",
+      changed_at: "2026-09-19T10:00:00.100Z",
+      checked_at: "2026-09-19T10:00:00.100Z",
+      eventsub_changed_at: "2026-09-19T10:00:00.100Z",
+    });
+    await expect(database.prepare(
+      "SELECT muted, mute_until_stream_end, mute_stream_started_at FROM channel_controls WHERE channel_id = ?",
+    ).bind(channelId).first()).resolves.toEqual({
+      muted: 1,
+      mute_until_stream_end: 1,
+      mute_stream_started_at: "2026-09-19T09:00:00.000Z",
     });
   });
 

@@ -158,6 +158,61 @@ describe("event log", () => {
     });
   });
 
+  it("caps an unbounded diagnostic message at 300 characters with an ellipsis, leaving everything else untouched (issue #201)", async () => {
+    await insertChannel(database, "kanal-a");
+    const longTwitchMessage = "x".repeat(400);
+    const longLocalMessage = "y".repeat(350);
+
+    await writeModuleDiagnostics(
+      database as unknown as D1Database,
+      "kanal-a",
+      "ads",
+      "trigger-cap",
+      null,
+      [
+        { code: "ads.commercial.failed", detail: { reason: "twitch_error", status: 400, twitchMessage: longTwitchMessage } },
+        { code: "ads.commercial.failed", detail: { reason: "app_token_unavailable", message: longLocalMessage } },
+        { code: "host.shoutout.sent", detail: { status: 204 } },
+      ],
+      "2026-09-18T04:00:00.000Z",
+    );
+
+    const rows = await database.prepare(
+      "SELECT detail_json FROM event_log WHERE channel_id = ? ORDER BY rowid",
+    ).bind("kanal-a").all<{ detail_json: string }>();
+    const details = rows.results.map((row) => JSON.parse(row.detail_json) as Record<string, unknown>);
+
+    expect((details[0]?.twitchMessage as string).length).toBe(300);
+    expect(details[0]?.twitchMessage).toBe(`${"x".repeat(299)}…`);
+    expect(details[0]?.status).toBe(400);
+    expect(details[0]?.reason).toBe("twitch_error");
+
+    expect((details[1]?.message as string).length).toBe(300);
+    expect(details[1]?.message).toBe(`${"y".repeat(299)}…`);
+
+    expect(details[2]).toEqual({ status: 204 });
+  });
+
+  it("leaves a diagnostic message at or under 300 characters exactly as written", async () => {
+    await insertChannel(database, "kanal-a");
+    const shortMessage = "The broadcaster is not streaming live or does not have one or more viewers.";
+
+    await writeModuleDiagnostics(
+      database as unknown as D1Database,
+      "kanal-a",
+      "host",
+      "trigger-short",
+      null,
+      [{ code: "host.shoutout.failed", detail: { cause: "twitch_error", twitchMessage: shortMessage } }],
+      "2026-09-18T04:00:00.000Z",
+    );
+
+    const row = await database.prepare(
+      "SELECT detail_json FROM event_log WHERE channel_id = ?",
+    ).bind("kanal-a").first<{ detail_json: string }>();
+    expect((JSON.parse(row?.detail_json ?? "{}") as { twitchMessage: string }).twitchMessage).toBe(shortMessage);
+  });
+
   it("creates no row on empty diagnostics and starts no batch", async () => {
     await insertChannel(database, "kanal-a");
     const batch = vi.spyOn(database, "batch");
