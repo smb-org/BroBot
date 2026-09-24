@@ -193,6 +193,7 @@ export const publishVariablesChanged = async (
   channelId: string,
   set: RealtimeEnvelope<"variables.changed">["payload"]["set"],
   removed: RealtimeEnvelope<"variables.changed">["payload"]["removed"],
+  overlayIdsByVariable: NonNullable<RealtimeEnvelope<"variables.changed">["payload"]["overlayIdsByVariable"]>,
   additionalMessages: readonly RealtimeMessage[] = [],
 ): Promise<void> => {
   if (set.length === 0 && removed.length === 0 && additionalMessages.length === 0) return;
@@ -204,7 +205,7 @@ export const publishVariablesChanged = async (
       createdAt: new Date().toISOString(),
       channelId,
       type: "variables.changed",
-      payload: { set, removed },
+      payload: { set, removed, overlayIdsByVariable },
     });
   }
   try {

@@ -61,7 +61,7 @@ const response = (
     prefixActions?: readonly ModuleAction[];
     forceChat?: boolean;
     diagnostics?: readonly ModuleDiagnostic[];
-    changedVariable?: { name: string; value: number };
+    changedVariable?: { name: string; value: number; overlayIds: readonly string[] };
     noChat?: boolean;
   } = {},
 ): ModuleResult => {
@@ -83,6 +83,7 @@ const response = (
       ...(options.diagnostics ?? []),
       diagnosticTriggered(input, command, prepared.text, alias, streamState, options.changedVariable),
     ],
+    ...(options.changedVariable === undefined ? {} : { variableChanges: [options.changedVariable] }),
   };
 };
 
@@ -234,10 +235,15 @@ const processTextCommandMessageAttempt = async (
   }
 
   const claimed = claim.command;
+  const changedVariableForResult = claim.changedVariable === undefined ? undefined : {
+    ...claim.changedVariable,
+    overlayIds: claim.changedVariableOverlayIds ?? [],
+  };
   if (claimed.kind === "list") {
     const commands = (await repository.list(event.channelId)).filter((entry) => entry.enabled).sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0 ? NO_COMMANDS_REPLY : commandListReply(commands.map((entry) => entry.name));
-    return response(event, input, claimed, list, alias, streamState);
+    return response(event, input, claimed, list, alias, streamState,
+      changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult });
   }
 
   if (claimed.kind === "shoutout") {
@@ -253,7 +259,7 @@ const processTextCommandMessageAttempt = async (
       forceChat: true,
       prefixActions: [{ kind: "shoutout", targetLogin: target }],
       diagnostics: rendered.diagnostics,
-      ...(claim.changedVariable === undefined ? {} : { changedVariable: claim.changedVariable }),
+      ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
     });
   }
 
@@ -262,7 +268,7 @@ const processTextCommandMessageAttempt = async (
     diagnostics: [
       ...rendered.diagnostics,
     ],
-    ...(claim.changedVariable === undefined ? {} : { changedVariable: claim.changedVariable }),
+    ...(changedVariableForResult === undefined ? {} : { changedVariable: changedVariableForResult }),
     noChat: rendered.text.length === 0,
   });
 };

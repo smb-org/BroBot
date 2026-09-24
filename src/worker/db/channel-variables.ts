@@ -79,6 +79,42 @@ export interface ChannelVariableChange {
   amount: number | null;
 }
 
+export interface ChannelVariableOverlayReference {
+  variable_name: string;
+  overlay_id: string;
+}
+
+/** Prepares an in-batch read of the overlays referencing the requested names. */
+export const prepareChannelVariableOverlayReferences = (
+  db: D1Database,
+  channelId: string,
+  names: readonly string[],
+): D1PreparedStatement => {
+  const uniqueNames = [...new Set(names)];
+  if (uniqueNames.length === 0) throw new Error("At least one variable name is required.");
+  const placeholders = uniqueNames.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT variable_name, overlay_id
+       FROM overlay_elements
+      WHERE channel_id = ? AND variable_name IN (${placeholders})
+      ORDER BY variable_name, overlay_id`,
+  ).bind(channelId, ...uniqueNames);
+};
+
+export const channelVariableOverlayIdsByName = (
+  names: readonly string[],
+  rows: readonly ChannelVariableOverlayReference[],
+): Record<string, string[]> => {
+  const result: Record<string, string[]> = Object.fromEntries(
+    [...new Set(names)].map((name) => [name, []]),
+  );
+  for (const row of rows) {
+    const overlayIds = result[row.variable_name];
+    if (overlayIds !== undefined && !overlayIds.includes(row.overlay_id)) overlayIds.push(row.overlay_id);
+  }
+  return result;
+};
+
 /** Prepared for a command claim batch. The host binds the tenant key from the verified event. */
 export const prepareChannelVariableChange = (
   db: D1Database,
@@ -130,7 +166,7 @@ export const prepareResetChannelVariablesForStream = (
   startedAt: string,
   now: string,
   streamId: string | null = null,
-): Promise<string[]> => db.batch([
+): Promise<{ names: string[]; overlayIdsByVariable: Record<string, string[]> }> => db.batch([
   db.prepare(
     `INSERT INTO channel_variable_stream_resets (channel_id, started_at, stream_id, started_at_epoch_ms)
      SELECT ?, ?, ?, ?
@@ -162,6 +198,15 @@ export const prepareResetChannelVariablesForStream = (
       RETURNING name`,
   ).bind(now, channelId),
   db.prepare(
+    `SELECT element.variable_name, element.overlay_id
+       FROM overlay_elements AS element
+       JOIN channel_variables AS variable
+         ON variable.channel_id = element.channel_id AND variable.name = element.variable_name
+      WHERE element.channel_id = ? AND variable.reset_on_stream_start = 1
+        AND variable.value = 0 AND variable.updated_at = ?
+      ORDER BY element.variable_name, element.overlay_id`,
+  ).bind(channelId, now),
+  db.prepare(
     `UPDATE channel_variable_stream_resets
         SET stream_id = ?
       WHERE channel_id = ? AND stream_id IS NULL AND ? IS NOT NULL
@@ -178,8 +223,20 @@ export const prepareResetChannelVariablesForStream = (
     Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : null,
     channelId, streamId, streamId, streamId,
     Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : null),
-]).then((results) => (results[1]?.results ?? []).flatMap((row: unknown) => {
+]).then((results) => {
+  const names = (results[1]?.results ?? []).flatMap((row: unknown) => {
   if (typeof row !== "object" || row === null) return [];
   const name = Reflect.get(row, "name") as unknown;
   return typeof name === "string" ? [name] : [];
-}));
+  });
+  const nameSet = new Set(names);
+  const references = (results[2]?.results ?? []).flatMap((row: unknown) => {
+    if (typeof row !== "object" || row === null) return [];
+    const variable_name = Reflect.get(row, "variable_name") as unknown;
+    const overlay_id = Reflect.get(row, "overlay_id") as unknown;
+    return typeof variable_name === "string" && nameSet.has(variable_name) && typeof overlay_id === "string"
+      ? [{ variable_name, overlay_id }]
+      : [];
+  });
+  return { names, overlayIdsByVariable: channelVariableOverlayIdsByName(names, references) };
+});

@@ -118,6 +118,12 @@ export type ModuleAction =
 export interface ModuleResult {
   actions: readonly ModuleAction[];
   diagnostics: readonly ModuleDiagnostic[];
+  /** Variable writes and their overlay recipients, returned by the write's D1 batch. */
+  variableChanges?: readonly {
+    name: string;
+    value: number;
+    overlayIds: readonly string[];
+  }[];
 }
 
 export type ModuleActor = {

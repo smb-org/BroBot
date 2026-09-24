@@ -123,10 +123,10 @@ export const lookupAndRefreshStreamState = async (
       env.DB, channelId, fromHelix.state, now, fromHelix.startedAt, fromHelix.streamId,
     );
     if (refreshed && stored.state === "offline" && fromHelix.state === "online" && fromHelix.startedAt !== null) {
-      const resetNames = await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now, fromHelix.streamId);
-      if (resetNames.length > 0) {
+      const reset = await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now, fromHelix.streamId);
+      if (reset.names.length > 0) {
         await publishVariablesChanged(env.CHANNEL, channelId,
-          resetNames.map((name) => ({ name, value: 0 })), []);
+          reset.names.map((name) => ({ name, value: 0 })), [], reset.overlayIdsByVariable);
       }
     }
     refreshedStored = await readChannelStreamState(env.DB, channelId);

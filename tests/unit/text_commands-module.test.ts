@@ -185,6 +185,14 @@ describe("Text commands module", () => {
         channelId: "kanal-a", name: "increment", text: "", kind: "text", cooldownSeconds: 0,
         variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
       }, { userId: "user-1" });
+      await database.prepare(
+        `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+         VALUES ('overlay-a', 'kanal-a', 'Gameplay', ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name)
+         VALUES ('element-a', 'kanal-a', 'overlay-a', 'variable', 'score')`,
+      ).run();
 
       const batches: number[] = [];
       const databaseWithBatchCount = {
@@ -206,9 +214,11 @@ describe("Text commands module", () => {
       expect(publish).toHaveBeenCalledTimes(1);
       expect(publish.mock.calls[0]?.[0]).toMatchObject([
         { type: "event_log.new" },
-        { type: "variables.changed", payload: { set: [{ name: "score", value: 5 }], removed: [] } },
+        { type: "variables.changed", payload: {
+          set: [{ name: "score", value: 5 }], removed: [], overlayIdsByVariable: { score: ["overlay-a"] },
+        } },
       ]);
-      expect(batches).toEqual([3, 1]);
+      expect(batches).toEqual([4, 1]);
       await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
         .resolves.toEqual({ value: 5 });
     } finally {

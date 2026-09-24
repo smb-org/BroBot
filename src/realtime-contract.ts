@@ -34,6 +34,8 @@ export interface RealtimePayloads {
   "variables.changed": {
     set: readonly { name: string; value: number }[];
     removed: readonly string[];
+    /** Internal routing metadata. The Durable Object strips it before socket delivery. */
+    overlayIdsByVariable?: Readonly<Record<string, readonly string[]>>;
   };
   "overlay.changed": {
     overlayId: string;

@@ -826,6 +826,14 @@ describe("dispatch and execution", () => {
         `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
          VALUES ('kanal-a', 'score', 42, 1, ?, ?), ('kanal-a', 'zero', 0, 1, ?, ?)`,
       ).bind(NOW, NOW, NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+         VALUES ('overlay-a', 'kanal-a', 'Gameplay', ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name)
+         VALUES ('element-a', 'kanal-a', 'overlay-a', 'variable', 'score')`,
+      ).run();
       const publish = vi.fn();
       const env = environment(database, publish);
       const dispatchOnline = (startedAt: string, receivedAt: string, triggerId: string) => dispatchEventSubNotification(env, {
@@ -841,7 +849,9 @@ describe("dispatch and execution", () => {
       expect(publish).toHaveBeenCalledTimes(1);
       expect(publish.mock.calls[0]?.[0]).toMatchObject([
         { type: "stream.state.changed", payload: { state: "online", startedAt: "2026-09-19T11:55:00.000Z" } },
-        { type: "variables.changed", payload: { set: [{ name: "score", value: 0 }], removed: [] } },
+        { type: "variables.changed", payload: {
+          set: [{ name: "score", value: 0 }], removed: [], overlayIdsByVariable: { score: ["overlay-a"] },
+        } },
       ]);
 
       await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())

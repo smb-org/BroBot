@@ -3,7 +3,6 @@ import { DurableObject } from "cloudflare:workers";
 import type {
   RealtimeEnvelope,
   RealtimeMessage,
-  RealtimeOverlayPrincipal,
   RealtimePrincipal,
   RealtimeRecipientKind,
 } from "../../realtime-contract";
@@ -41,7 +40,6 @@ const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 // and the ad prewarning would stop firing.
 const SECURITY_DEADLINE_KEY = "security_round";
 const SECURITY_RETRY_KEY = "security_retry";
-const OVERLAY_MAPPING_PENDING_PREFIX = "overlay_mapping_pending:";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
 const AD_SCHEDULE_CACHE_KEY = "ads:schedule";
 const AD_SCHEDULE_GENERATION_KEY = "ads:schedule_generation";
@@ -86,10 +84,7 @@ type TokenValidityRow = { token_id: string };
 type RevokedTokenMarker = { revokedAt: number };
 
 type OverlayHandshakeWindow = { startedAt: number; count: number };
-type RealtimeSocketAttachment = RealtimePrincipal & {
-  referencedVariableNames?: string[];
-  mappingRefreshPending?: boolean;
-};
+type RealtimeSocketAttachment = RealtimePrincipal;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -114,31 +109,12 @@ const isRealtimePrincipal = (value: unknown): value is RealtimePrincipal => {
 };
 
 const isRealtimeSocketAttachment = (value: unknown): value is RealtimeSocketAttachment => {
-  if (!isRealtimePrincipal(value)) return false;
-  const referencedVariableNames: unknown = Reflect.get(value, "referencedVariableNames");
-  const mappingRefreshPending: unknown = Reflect.get(value, "mappingRefreshPending");
-  return (referencedVariableNames === undefined ||
-    (Array.isArray(referencedVariableNames) && referencedVariableNames.every(isNonEmptyString))) &&
-    (mappingRefreshPending === undefined || typeof mappingRefreshPending === "boolean");
+  return isRealtimePrincipal(value);
 };
 
 const hasActiveRevocationMarker = (marker: unknown, now: number): boolean =>
   marker === true || (isRecord(marker) && typeof marker.revokedAt === "number" &&
     Number.isFinite(marker.revokedAt) && now - marker.revokedAt < OVERLAY_REVOKED_MARKER_TTL_MS);
-
-const attachmentWithPendingMapping = (principal: RealtimeSocketAttachment): RealtimeSocketAttachment => ({
-  ...principal,
-  mappingRefreshPending: true,
-});
-
-const attachmentWithVariableNames = (
-  principal: RealtimeSocketAttachment,
-  referencedVariableNames: string[],
-): RealtimeSocketAttachment => {
-  const attachment = { ...principal, referencedVariableNames };
-  delete attachment.mappingRefreshPending;
-  return attachment;
-};
 
 const readAttachment = (webSocket: WebSocket): RealtimeSocketAttachment | null => {
   try {
@@ -498,103 +474,6 @@ export class ChannelObject extends DurableObject<Env> {
     return row !== null;
   }
 
-  private async referencedVariableNames(channelId: string, overlayId: string): Promise<string[]> {
-    const result = await this.env.DB.prepare(
-      `SELECT DISTINCT variable_name
-         FROM overlay_elements
-        WHERE channel_id = ? AND overlay_id = ? AND variable_name IS NOT NULL
-        ORDER BY variable_name`,
-    ).bind(channelId, overlayId).all<{ variable_name: string }>();
-    return result.results.map((row) => row.variable_name);
-  }
-
-  private async scheduleOverlayMappingRetry(overlayId: string): Promise<void> {
-    const retryAt = Date.now() + SECURITY_RETRY_INTERVAL_MS;
-    await this.ctx.storage.put(`${OVERLAY_MAPPING_PENDING_PREFIX}${overlayId}`, true);
-    const previousRetry = await this.ctx.storage.get<number>(SECURITY_RETRY_KEY);
-    if (typeof previousRetry !== "number" || !Number.isFinite(previousRetry) || previousRetry > retryAt) {
-      await this.ctx.storage.put(SECURITY_RETRY_KEY, retryAt);
-    }
-    await this.scheduleEarliestAlarm();
-  }
-
-  private async refreshBoundOverlayMappings(
-    boundSockets: readonly { webSocket: WebSocket; principal: RealtimeOverlayPrincipal }[],
-  ): Promise<boolean> {
-    const socketsByOverlayId = new Map<string, WebSocket[]>();
-    for (const { webSocket, principal } of boundSockets) {
-      if (principal.overlayId === null) continue;
-      const sockets = socketsByOverlayId.get(principal.overlayId) ?? [];
-      sockets.push(webSocket);
-      socketsByOverlayId.set(principal.overlayId, sockets);
-    }
-    const overlayIds = [...socketsByOverlayId.keys()];
-    let failed = false;
-    const channelId = this.ownChannelId();
-    if (channelId === null) return overlayIds.length > 0;
-
-    for (const batch of chunksOf(overlayIds, D1_IDS_PER_QUERY)) {
-      for (const overlayId of batch) {
-        for (const webSocket of socketsByOverlayId.get(overlayId) ?? []) {
-          const principal = readAttachment(webSocket);
-          if (principal?.kind === "overlay" && principal.overlayId === overlayId) {
-            webSocket.serializeAttachment(attachmentWithPendingMapping(principal));
-          }
-        }
-      }
-      try {
-        const placeholders = batch.map(() => "?").join(", ");
-        const result = await this.env.DB.prepare(
-          `SELECT overlay_id, variable_name
-             FROM overlay_elements
-            WHERE channel_id = ?
-              AND overlay_id IN (${placeholders})
-              AND variable_name IS NOT NULL
-            ORDER BY overlay_id, variable_name`,
-        ).bind(channelId, ...batch).all<{ overlay_id: string; variable_name: string }>();
-        const namesByOverlayId = new Map<string, string[]>();
-        for (const row of result.results) {
-          const names = namesByOverlayId.get(row.overlay_id) ?? [];
-          if (!names.includes(row.variable_name)) names.push(row.variable_name);
-          namesByOverlayId.set(row.overlay_id, names);
-        }
-        for (const overlayId of batch) {
-          for (const webSocket of socketsByOverlayId.get(overlayId) ?? []) {
-            const principal = readAttachment(webSocket);
-            if (principal?.kind === "overlay" && principal.overlayId === overlayId) {
-              webSocket.serializeAttachment(attachmentWithVariableNames(
-                principal,
-                namesByOverlayId.get(overlayId) ?? [],
-              ));
-            }
-          }
-          await this.ctx.storage.delete(`${OVERLAY_MAPPING_PENDING_PREFIX}${overlayId}`);
-        }
-      } catch (error: unknown) {
-        failed = true;
-        console.error("Realtime overlay variable references could not be refreshed in the security round.", error);
-        for (const overlayId of batch) {
-          for (const webSocket of socketsByOverlayId.get(overlayId) ?? []) {
-            const principal = readAttachment(webSocket);
-            if (principal?.kind === "overlay" && principal.overlayId === overlayId) {
-              try {
-                webSocket.serializeAttachment(attachmentWithPendingMapping(principal));
-              } catch {
-                // The next security round remains scheduled below.
-              }
-            }
-          }
-          try {
-            await this.ctx.storage.put(`${OVERLAY_MAPPING_PENDING_PREFIX}${overlayId}`, true);
-          } catch (storageError: unknown) {
-            console.error("Realtime overlay mapping retry could not be recorded.", storageError);
-          }
-        }
-      }
-    }
-    return failed;
-  }
-
   private async allowOverlayHandshake(tokenId: string, now: number): Promise<boolean> {
     const key = `overlay_handshakes:${tokenId}`;
     return this.ctx.storage.transaction(async (transaction) => {
@@ -658,7 +537,6 @@ export class ChannelObject extends DurableObject<Env> {
       return new Response("Realtime protocol is not supported.", { status: 426 });
     }
 
-    let referencedVariableNames: string[] | undefined;
     if (principal.kind === "overlay") {
       let withinHandshakeLimit: boolean;
       try {
@@ -683,9 +561,8 @@ export class ChannelObject extends DurableObject<Env> {
     if (principal.kind === "overlay") {
       try {
         // D1 protects handshakes whose in-memory revocation marker has aged
-        // out. Check the durable marker afterward: it catches a revoke that
-        // lands while the D1 query is in flight, and acceptance below is
-        // synchronous so no revoke can slip between this read and joining.
+        // out. The marker is re-read at the final accept boundary below, so
+        // it also catches a revoke that lands while this query is in flight.
         overlayTokenValidAtHandshake = await this.isOverlayTokenValid(
           principal.tokenId,
           ownChannelId,
@@ -694,13 +571,6 @@ export class ChannelObject extends DurableObject<Env> {
         if (!overlayTokenValidAtHandshake) {
           return new Response("Overlay token revoked.", { status: 403 });
         }
-        const marker: unknown = await this.ctx.storage.get(revokedTokenKey(principal.tokenId));
-        if (hasActiveRevocationMarker(marker, Date.now())) {
-          return new Response("Overlay token revoked.", { status: 403 });
-        }
-        if (principal.overlayId !== null) {
-          referencedVariableNames = await this.referencedVariableNames(ownChannelId, principal.overlayId);
-        }
       } catch (error: unknown) {
         console.error("Realtime overlay revocation could not be checked.", error);
         return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
@@ -708,9 +578,8 @@ export class ChannelObject extends DurableObject<Env> {
     }
     if (principal.kind === "overlay") {
       try {
-        // Variable lookup above can yield while a revocation is recorded. Re-read
-        // the durable marker at the final accept boundary and reuse the D1 result
-        // from this handshake, so this closes the race without another D1 query.
+        // Re-read the durable marker immediately before acceptance and reuse
+        // the D1 authorization result from this handshake.
         const marker: unknown = await this.ctx.storage.get(revokedTokenKey(principal.tokenId));
         if (overlayTokenValidAtHandshake !== true || isExpired(principal, Date.now()) ||
             hasActiveRevocationMarker(marker, Date.now())) {
@@ -722,11 +591,7 @@ export class ChannelObject extends DurableObject<Env> {
       }
     }
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
-    pair[1].serializeAttachment(
-      principal.kind === "overlay" && referencedVariableNames !== undefined
-        ? { ...principal, referencedVariableNames }
-        : principal,
-    );
+    pair[1].serializeAttachment(principal);
     await this.scheduleSecurityAlarm();
     pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
     return new Response(null, {
@@ -737,10 +602,10 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   /** Distributes only within its own channel and only to principals of the requested kind. */
-  public async publish(
+  public publish(
     messages: readonly RealtimeMessage[],
   ): Promise<void> {
-    if (messages.length === 0) return;
+    if (messages.length === 0) return Promise.resolve();
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || messages.some((message) => message.channelId !== ownChannelId)) {
       throw new Error("Realtime message belongs to a foreign channel.");
@@ -750,40 +615,16 @@ export class ChannelObject extends DurableObject<Env> {
       ? this.ctx.getWebSockets()
       : [];
     const overlaySocketsById = new Map<string, WebSocket[]>();
-    const failedOverlayRefreshes = new Set<string>();
     const changedOverlayIds = new Set(messages.flatMap((message) =>
       message.type === "overlay.changed" ? [message.payload.overlayId] : []));
     for (const overlayId of changedOverlayIds) {
-      const sockets = this.ctx.getWebSockets(`overlay:${overlayId}`);
-      overlaySocketsById.set(overlayId, sockets);
-      if (sockets.length === 0) continue;
-      for (const webSocket of sockets) {
-        const principal = readAttachment(webSocket);
-        if (principal?.kind === "overlay" && principal.overlayId === overlayId) {
-          webSocket.serializeAttachment(attachmentWithPendingMapping(principal));
-        }
-      }
-      try {
-        const referencedVariableNames = await this.referencedVariableNames(ownChannelId, overlayId);
-        for (const webSocket of sockets) {
-          const principal = readAttachment(webSocket);
-          if (principal?.kind === "overlay" && principal.overlayId === overlayId) {
-            webSocket.serializeAttachment(attachmentWithVariableNames(principal, referencedVariableNames));
-          }
-        }
-      } catch (error: unknown) {
-        console.error("Realtime overlay variable references could not be refreshed.", error);
-        failedOverlayRefreshes.add(overlayId);
-        try {
-          await this.scheduleOverlayMappingRetry(overlayId);
-        } catch (retryError: unknown) {
-          console.error("Realtime overlay mapping retry could not be scheduled.", retryError);
-        }
-      }
+      overlaySocketsById.set(overlayId, this.ctx.getWebSockets(`overlay:${overlayId}`));
     }
     const serialized = messages.map((envelope) => ({
       envelope,
-      payload: JSON.stringify(envelope),
+      payload: JSON.stringify(envelope.type === "variables.changed"
+        ? { ...envelope, payload: { set: envelope.payload.set, removed: envelope.payload.removed } }
+        : envelope),
       sockets: envelope.type === "overlay.changed"
         ? [
           ...this.ctx.getWebSockets("kind:panel"),
@@ -803,32 +644,28 @@ export class ChannelObject extends DurableObject<Env> {
           closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
           continue;
         }
-        if (principal.kind === "overlay" && principal.overlayId !== null &&
-            failedOverlayRefreshes.has(principal.overlayId)) continue;
-        if (envelope.type === "variables.changed" && principal.kind === "overlay" &&
-            principal.mappingRefreshPending === true) continue;
         if (envelope.type === "overlay.changed" && principal.kind === "overlay" &&
             principal.overlayId !== envelope.payload.overlayId) continue;
-        let payload = envelope.payload;
+        let serializedPayload = message.payload;
         if (envelope.type === "variables.changed" && principal.kind === "overlay" && principal.overlayId !== null) {
-          const referencedVariableNames = new Set(principal.referencedVariableNames ?? []);
-          const set = envelope.payload.set.filter((entry) => referencedVariableNames.has(entry.name));
-          const removed = envelope.payload.removed.filter((name) => referencedVariableNames.has(name));
+          const overlayId = principal.overlayId;
+          const overlayIdsByVariable = envelope.payload.overlayIdsByVariable ?? {};
+          const referencesOverlay = (name: string): boolean =>
+            Array.isArray(overlayIdsByVariable[name]) && overlayIdsByVariable[name].includes(overlayId);
+          const set = envelope.payload.set.filter((entry) => referencesOverlay(entry.name));
+          const removed = envelope.payload.removed.filter(referencesOverlay);
           if (set.length === 0 && removed.length === 0) continue;
-          payload = { set, removed };
+          serializedPayload = JSON.stringify({ ...envelope, payload: { set, removed } });
         }
         try {
           const recipients: readonly RealtimeRecipientKind[] = REALTIME_RECIPIENTS[envelope.type];
-          if (recipients.includes(principal.kind)) {
-            webSocket.send(payload === envelope.payload
-              ? message.payload
-              : JSON.stringify({ ...envelope, payload }));
-          }
+          if (recipients.includes(principal.kind)) webSocket.send(serializedPayload);
         } catch {
           closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
         }
       }
     }
+    return Promise.resolve();
   }
 
   public async revokeSession(sessionId: string): Promise<void> {
@@ -977,11 +814,6 @@ export class ChannelObject extends DurableObject<Env> {
             }
           }
         }
-
-        const boundOverlaySockets = overlayPrincipals.filter(({ webSocket, principal }) =>
-          principal.overlayId !== null && !revoked.has(webSocket))
-          .map(({ webSocket, principal }) => ({ webSocket, principal }));
-        if (await this.refreshBoundOverlayMappings(boundOverlaySockets)) transientFailure = true;
       }
     } catch (error: unknown) {
       // Keep connections open when authorization cannot be checked. D1 errors
