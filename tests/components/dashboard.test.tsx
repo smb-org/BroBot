@@ -68,6 +68,31 @@ const jsonResponse = (body: unknown, status = 200): Response => new Response(JSO
   headers: { "Content-Type": "application/json" },
 });
 
+type DashboardRoute = (url: URL) => Response | Promise<Response> | undefined;
+
+const stubDashboardFetch = (
+  route: DashboardRoute,
+  channels: ReturnType<typeof healthyChannel>[] = [healthyChannel("kanal-a", "Alpha")],
+) => {
+  const fetcher = vi.fn((input: RequestInfo | URL) => {
+    const url = requestUrl(input);
+    if (url.pathname === "/api/channels") {
+      return jsonResponse({ channels, bot: channels[0]?.bot });
+    }
+    return route(url) ?? jsonResponse({}, 404);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  return fetcher;
+};
+
+const stubEventFeedFetch = (
+  eventResponse: (url: URL) => Response | Promise<Response>,
+  channel = healthyChannel("kanal-a", "Alpha"),
+) => stubDashboardFetch((url) => {
+  if (url.pathname === `/api/channels/${channel.channelId}/modules`) return jsonResponse({ modules: [] });
+  if (url.pathname === `/api/channels/${channel.channelId}/events`) return eventResponse(url);
+}, [channel]);
+
 /**
  * Provides channel and member responses and opens the members page. The
  * three access tests differ only in their member data; everything else is
@@ -79,25 +104,19 @@ const showMembers = async (members: {
   viewerUserId: string;
 }): Promise<void> => {
   const channel = healthyChannel("kanal-a", "Alpha");
-  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-    const path = requestUrl(input).pathname;
-    if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-    if (path.endsWith("/members")) return jsonResponse({ ...members, nextCursor: null });
-    return jsonResponse({}, 404);
-  }));
+  stubDashboardFetch((url) => {
+    if (url.pathname.endsWith("/members")) return jsonResponse({ ...members, nextCursor: null });
+  }, [channel]);
   window.history.replaceState({}, "", "/channels/kanal-a/members");
   render(<DashboardApp />);
   await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
 };
 
 const showChannelOverview = async (channel: ReturnType<typeof healthyChannel>): Promise<void> => {
-  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-    const path = requestUrl(input).pathname;
-    if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-    if (path === `/api/channels/${channel.channelId}/overview`) return jsonResponse(overview(channel));
-    if (path === `/api/channels/${channel.channelId}/modules`) return jsonResponse({ modules: [] });
-    return jsonResponse({}, 404);
-  }));
+  stubDashboardFetch((url) => {
+    if (url.pathname === `/api/channels/${channel.channelId}/overview`) return jsonResponse(overview(channel));
+    if (url.pathname === `/api/channels/${channel.channelId}/modules`) return jsonResponse({ modules: [] });
+  }, [channel]);
   window.history.replaceState({}, "", `/channels/${channel.channelId}/overview`);
   render(<DashboardApp />);
   await screen.findByRole("combobox", { name: "Kanal auswählen" });
@@ -250,10 +269,8 @@ describe("Dashboard skeleton", () => {
 
   it("shows events with module, code, detail and actor", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/events")) return jsonResponse({
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [{
           eventId: "event-1",
           createdAt: "2026-09-18T04:00:00.000Z",
@@ -291,8 +308,7 @@ describe("Dashboard skeleton", () => {
         }],
         nextCursor: null,
       });
-      return jsonResponse({}, 404);
-    }));
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -338,18 +354,15 @@ describe("Dashboard skeleton", () => {
 
   it("groups rows by day, newest day first, each with its own table", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/events")) return jsonResponse({
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [
           { eventId: "today", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "raid", code: "raid.shoutout", detail: "{}", actorUserId: null },
           { eventId: "yesterday", createdAt: "2026-09-17T04:00:00.000Z", moduleId: "raid", code: "raid.outgoing", detail: "{}", actorUserId: null },
         ],
         nextCursor: null,
       });
-      return jsonResponse({}, 404);
-    }));
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -361,10 +374,8 @@ describe("Dashboard skeleton", () => {
 
   it("shows the event chip pair with family, tier, number and time tooltip", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/events")) return jsonResponse({
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [
           { eventId: "gift", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.community_gift", detail: '{"count":5}', actorUserId: null },
           { eventId: "raid", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":21}', actorUserId: null },
@@ -374,8 +385,7 @@ describe("Dashboard skeleton", () => {
         ],
         nextCursor: null,
       });
-      return jsonResponse({}, 404);
-    }));
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -405,10 +415,8 @@ describe("Dashboard skeleton", () => {
 
   it("shows subscription tiers in the number chip as T1/T2/T3/Prime instead of raw, unknown values without a chip", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/events")) return jsonResponse({
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [
           { eventId: "t1", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.chat.sub", detail: '{"person":"tier1","tier":"1000"}', actorUserId: null },
           { eventId: "t2", createdAt: "2026-09-18T04:01:00.000Z", moduleId: "channel_events", code: "channel_events.chat.sub", detail: '{"person":"tier2","tier":"2000"}', actorUserId: null },
@@ -418,8 +426,7 @@ describe("Dashboard skeleton", () => {
         ],
         nextCursor: null,
       });
-      return jsonResponse({}, 404);
-    }));
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -500,16 +507,10 @@ describe("Dashboard skeleton", () => {
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":7}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let firstPage = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      if (url.pathname === "/api/channels/kanal-a/events") {
-        firstPage += 1;
-        return jsonResponse({ entries: firstPage === 1 ? [alt] : [neu, alt], nextCursor: null });
-      }
-      return jsonResponse({}, 404);
-    }));
+    stubEventFeedFetch(() => {
+      firstPage += 1;
+      return jsonResponse({ entries: firstPage === 1 ? [alt] : [neu, alt], nextCursor: null });
+    }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -551,17 +552,10 @@ describe("Dashboard skeleton", () => {
     const newRaid = { ...incomingRaid, eventId: "channel-raid-live", createdAt: "2026-09-18T04:01:00.000Z", detail: '{"source":"freshraid","viewers":2}' };
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
-    const fetcher = vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      if (url.pathname === "/api/channels/kanal-a/events") {
-        eventRequests += 1;
-        return jsonResponse({ entries: eventRequests === 1 ? [raidAction, incomingRaid] : [newRaid, raidAction, incomingRaid], nextCursor: null });
-      }
-      return jsonResponse({}, 404);
-    });
-    vi.stubGlobal("fetch", fetcher);
+    const fetcher = stubEventFeedFetch(() => {
+      eventRequests += 1;
+      return jsonResponse({ entries: eventRequests === 1 ? [raidAction, incomingRaid] : [newRaid, raidAction, incomingRaid], nextCursor: null });
+    }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -591,16 +585,10 @@ describe("Dashboard skeleton", () => {
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":8}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      if (url.pathname === "/api/channels/kanal-a/events") {
-        eventRequests += 1;
-        return jsonResponse({ entries: [alt], nextCursor: null });
-      }
-      return jsonResponse({}, 404);
-    }));
+    stubEventFeedFetch(() => {
+      eventRequests += 1;
+      return jsonResponse({ entries: [alt], nextCursor: null });
+    }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -629,16 +617,10 @@ describe("Dashboard skeleton", () => {
     const scrollTo = vi.fn();
     Object.defineProperty(window, "scrollTo", { configurable: true, value: scrollTo });
     vi.stubGlobal("WebSocket", TestWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      if (url.pathname === "/api/channels/kanal-a/events") {
-        eventRequests += 1;
-        return jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null });
-      }
-      return jsonResponse({}, 404);
-    }));
+    stubEventFeedFetch(() => {
+      eventRequests += 1;
+      return jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null });
+    }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -668,16 +650,10 @@ describe("Dashboard skeleton", () => {
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":10}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      if (url.pathname === "/api/channels/kanal-a/events") {
-        eventRequests += 1;
-        return jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null });
-      }
-      return jsonResponse({}, 404);
-    }));
+    stubEventFeedFetch(() => {
+      eventRequests += 1;
+      return jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null });
+    }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -698,16 +674,10 @@ describe("Dashboard skeleton", () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      if (url.pathname === "/api/channels/kanal-a/events") {
-        eventRequests += 1;
-        return jsonResponse({ entries: [], nextCursor: null });
-      }
-      return jsonResponse({}, 404);
-    }));
+    stubEventFeedFetch(() => {
+      eventRequests += 1;
+      return jsonResponse({ entries: [], nextCursor: null });
+    }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -725,13 +695,7 @@ describe("Dashboard skeleton", () => {
   it("closes the connection on a message from a foreign channel", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     vi.stubGlobal("WebSocket", TestWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      if (url.pathname === "/api/channels/kanal-a/events") return jsonResponse({ entries: [], nextCursor: null });
-      return jsonResponse({}, 404);
-    }));
+    stubEventFeedFetch(() => jsonResponse({ entries: [], nextCursor: null }), channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -752,16 +716,10 @@ describe("Dashboard skeleton", () => {
     const neu = { eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "channel_events", code: "channel_events.raid.incoming", detail: '{"viewers":11}', actorUserId: null, actorLogin: null, actorDisplayName: null };
     let eventRequests = 0;
     vi.stubGlobal("WebSocket", TestWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = requestUrl(input);
-      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
-      if (url.pathname === "/api/channels/kanal-a/events") {
-        eventRequests += 1;
-        return Promise.resolve(jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null }));
-      }
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+    stubEventFeedFetch(() => {
+      eventRequests += 1;
+      return Promise.resolve(jsonResponse({ entries: eventRequests === 1 ? [alt] : [neu, alt], nextCursor: null }));
+    }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -822,10 +780,8 @@ describe("Dashboard skeleton", () => {
 
   it("groups the same trigger, shows the strongest tone and the chronological history", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/events")) return jsonResponse({
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/events")) return jsonResponse({
         entries: [{
           eventId: "event-command",
           createdAt: "2026-09-18T04:00:00.000Z",
@@ -879,8 +835,7 @@ describe("Dashboard skeleton", () => {
         }],
         nextCursor: null,
       });
-      return jsonResponse({}, 404);
-    }));
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -913,12 +868,9 @@ describe("Dashboard skeleton", () => {
 
   it("shows the events empty state as a single sentence", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
     render(<DashboardApp />);
@@ -1967,15 +1919,12 @@ describe("Dashboard skeleton", () => {
 
   it("lists every registered module and presents clips as active by default", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/overview")) return jsonResponse(overview(channel));
-      if (path.endsWith("/system")) return jsonResponse(system);
-      if (path.endsWith("/audit-log")) return jsonResponse(audit);
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "clips", enabled: true, settings: "{}" }] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse(overview(channel));
+      if (url.pathname.endsWith("/system")) return jsonResponse(system);
+      if (url.pathname.endsWith("/audit-log")) return jsonResponse(audit);
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "clips", enabled: true, settings: "{}" }] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -2557,13 +2506,10 @@ describe("Dashboard skeleton", () => {
 
   it("reports a disabled module understandably on its subpage", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: false, settings: "{}" }] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "text_commands", enabled: false, settings: "{}" }] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
 
     render(<DashboardApp />);
@@ -2573,12 +2519,9 @@ describe("Dashboard skeleton", () => {
 
   it("reports an unknown module understandably on its subpage", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/modules/unbekannt");
 
     render(<DashboardApp />);
@@ -2618,13 +2561,10 @@ describe("Dashboard skeleton", () => {
 
   it("shows mandatory module state as always active without a switch", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "channel_events", enabled: true, mandatory: true, settings: "{}" }] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [{ id: "channel_events", enabled: true, mandatory: true, settings: "{}" }] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a/modules/channel_events");
 
     render(<DashboardApp />);
@@ -3746,13 +3686,10 @@ describe("Dashboard skeleton", () => {
 
   it("replaces the landing route with the only accessible channel overview", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
-      if (path === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse(overview(channel));
+      if (url.pathname === "/api/channels/kanal-a/modules") return jsonResponse({ modules: [] });
+    }, [channel]);
     const replaceState = vi.spyOn(window.history, "replaceState");
     window.history.replaceState({}, "", "/channels/kanal-a");
 
