@@ -9,6 +9,7 @@ interface JsonRecord {
 
 const USER_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_USER_IDS_PER_REQUEST = 100;
+const MAX_CACHED_USERS = 1_000;
 
 interface CachedUser {
   expiresAt: number;
@@ -28,6 +29,24 @@ const cacheFor = (fetcher: typeof fetch): UserResolutionCache => {
   const created = { users: new Map(), pending: new Map() } satisfies UserResolutionCache;
   caches.set(fetcher, created);
   return created;
+};
+
+const cacheUser = (
+  cache: UserResolutionCache,
+  userId: string,
+  user: TwitchUser | null,
+  now: number,
+): void => {
+  for (const [cachedId, cached] of cache.users) {
+    if (cached.expiresAt <= now) cache.users.delete(cachedId);
+  }
+  cache.users.delete(userId);
+  while (cache.users.size >= MAX_CACHED_USERS) {
+    const oldestId = cache.users.keys().next().value;
+    if (oldestId === undefined) break;
+    cache.users.delete(oldestId);
+  }
+  cache.users.set(userId, { expiresAt: now + USER_CACHE_TTL_MS, user });
 };
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -86,7 +105,7 @@ const fetchUserBatch = async (
   }
 };
 
-/** Resolve at most 100 distinct users, caching by ID and coalescing overlapping lookups. */
+/** Resolve every distinct user in Helix batches of 100, caching by ID and coalescing overlapping lookups. */
 export const fetchTwitchUsersById = async (
   fetcher: typeof fetch,
   environment: Env,
@@ -97,7 +116,7 @@ export const fetchTwitchUsersById = async (
 
   const cache = cacheFor(fetcher);
   const now = Date.now();
-  const requestedIds = [...new Set(userIds)].slice(0, MAX_USER_IDS_PER_REQUEST);
+  const requestedIds = [...new Set(userIds)];
   const missing: string[] = [];
   for (const userId of requestedIds) {
     const cached = cache.users.get(userId);
@@ -115,7 +134,7 @@ export const fetchTwitchUsersById = async (
     for (const userId of batchIds) {
       const pending = batch.then((result) => {
         const user = result.users.get(userId) ?? null;
-        if (result.cacheable) cache.users.set(userId, { expiresAt: Date.now() + USER_CACHE_TTL_MS, user });
+        if (result.cacheable) cacheUser(cache, userId, user, Date.now());
         return user;
       }).finally(() => {
         if (cache.pending.get(userId) === pending) cache.pending.delete(userId);

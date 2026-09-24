@@ -14,6 +14,7 @@ import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protoc
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
 const OVERLAY_HANDSHAKE_WINDOW_MS = 60 * 1000;
+const OVERLAY_REVOKED_MARKER_TTL_MS = 10 * 60 * 1000;
 const MAX_OVERLAY_HANDSHAKES_PER_TOKEN = 30;
 const MAX_OVERLAY_SOCKETS_PER_TOKEN = 10;
 const MAX_PANEL_SOCKETS_PER_USER = 10;
@@ -45,6 +46,7 @@ type SessionValidityRow = {
 };
 
 type TokenValidityRow = { token_id: string };
+type RevokedTokenMarker = { revokedAt: number };
 
 type OverlayHandshakeWindow = { startedAt: number; count: number };
 
@@ -180,6 +182,50 @@ export class ChannelObject extends DurableObject<Env> {
     }
   }
 
+  private async pruneRevokedTokenMarkers(now: number): Promise<void> {
+    try {
+      let startAfter: string | undefined;
+      for (;;) {
+        const markers = await this.ctx.storage.list({
+          prefix: "overlay_revoked:",
+          limit: 1_000,
+          ...(startAfter === undefined ? {} : { startAfter }),
+        });
+        const lastKey = [...markers.keys()].at(-1);
+        const updates: Promise<unknown>[] = [];
+        for (const [key, value] of markers) {
+          if (value === true) {
+            // Migrate markers written by earlier code and give any old in-flight
+            // handshake one final bounded window to observe them.
+            updates.push(this.ctx.storage.put(key, { revokedAt: now } satisfies RevokedTokenMarker));
+          } else if (!isRecord(value) || typeof value.revokedAt !== "number" ||
+              !Number.isFinite(value.revokedAt) || now - value.revokedAt >= OVERLAY_REVOKED_MARKER_TTL_MS) {
+            updates.push(this.ctx.storage.delete(key));
+          }
+        }
+        await Promise.all(updates);
+        if (markers.size < 1_000 || lastKey === undefined) break;
+        startAfter = lastKey;
+      }
+    } catch (error: unknown) {
+      // Marker retention is opportunistic. D1 remains the authorization
+      // source of truth for new handshakes and periodic socket checks.
+      console.error("Realtime overlay revocation markers could not be pruned.", error);
+    }
+  }
+
+  private async isOverlayTokenValid(tokenId: string, channelId: string, nowIso: string): Promise<boolean> {
+    const row = await this.env.DB.prepare(
+      `SELECT token_id
+         FROM overlay_tokens
+        WHERE channel_id = ?
+          AND token_id = ?
+          AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > ?)`,
+    ).bind(channelId, tokenId, nowIso).first<TokenValidityRow>();
+    return row !== null;
+  }
+
   private async allowOverlayHandshake(tokenId: string, now: number): Promise<boolean> {
     const key = `overlay_handshakes:${tokenId}`;
     return this.ctx.storage.transaction(async (transaction) => {
@@ -265,10 +311,16 @@ export class ChannelObject extends DurableObject<Env> {
     const pair = new WebSocketPair();
     if (principal.kind === "overlay") {
       try {
-        // This read follows every awaited handshake check. Acceptance below
-        // is synchronous, so a handshake paused across revoke observes the
-        // hibernation-safe tombstone before it can join the room.
-        if (await this.ctx.storage.get<boolean>(revokedTokenKey(principal.tokenId)) === true) {
+        // D1 protects handshakes whose in-memory revocation marker has aged
+        // out. Check the durable marker afterward: it catches a revoke that
+        // lands while the D1 query is in flight, and acceptance below is
+        // synchronous so no revoke can slip between this read and joining.
+        if (!await this.isOverlayTokenValid(principal.tokenId, ownChannelId, new Date().toISOString())) {
+          return new Response("Overlay token revoked.", { status: 403 });
+        }
+        const marker: unknown = await this.ctx.storage.get(revokedTokenKey(principal.tokenId));
+        if (marker === true || (isRecord(marker) && typeof marker.revokedAt === "number" &&
+            Number.isFinite(marker.revokedAt) && Date.now() - marker.revokedAt < OVERLAY_REVOKED_MARKER_TTL_MS)) {
           return new Response("Overlay token revoked.", { status: 403 });
         }
       } catch (error: unknown) {
@@ -332,9 +384,11 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async revokeToken(tokenId: string): Promise<boolean> {
-    // The marker remains in durable storage after hibernation and also blocks
-    // handshakes that authenticated in the worker before the D1 revoke.
-    await this.ctx.storage.put(revokedTokenKey(tokenId), true);
+    const now = Date.now();
+    await this.pruneRevokedTokenMarkers(now);
+    // A short-lived marker blocks handshakes already in flight while the
+    // route's D1 revocation propagates. D1 validates every accepted handshake.
+    await this.ctx.storage.put(revokedTokenKey(tokenId), { revokedAt: now } satisfies RevokedTokenMarker);
     const sockets = this.ctx.getWebSockets(`token:${tokenId}`);
     await this.ctx.storage.delete(`overlay_handshakes:${tokenId}`);
     if (sockets.length > 0) {
@@ -356,6 +410,7 @@ export class ChannelObject extends DurableObject<Env> {
     const webSockets = this.ctx.getWebSockets();
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
+    await this.pruneRevokedTokenMarkers(now);
     const [securityDeadline, warningDeadline] = await Promise.all([
       this.ctx.storage.get(SECURITY_DEADLINE_KEY),
       this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),

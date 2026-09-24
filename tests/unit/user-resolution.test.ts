@@ -38,7 +38,7 @@ describe("Twitch user lookup cache", () => {
     database.close();
   });
 
-  it("caps each lookup to 100 IDs and uses one Helix request", async () => {
+  it("looks up every requested ID in Helix batches of at most 100", async () => {
     database = new TestD1Database();
     await insertBotIdentity(database);
     const fetcher = vi.fn<typeof fetch>((input) => {
@@ -49,13 +49,61 @@ describe("Twitch user lookup cache", () => {
 
     const resolved = await fetchTwitchUsersById(fetcher, environmentFor(database), Array.from({ length: 150 }, (_, index) => `user-${String(index)}`));
 
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    const firstCall = fetcher.mock.calls[0];
-    if (firstCall === undefined) throw new Error("Helix lookup was not made.");
-    const input = firstCall[0];
-    const requested = new URL(input instanceof Request ? input.url : input.toString()).searchParams.getAll("id");
-    expect(requested).toHaveLength(100);
-    expect(resolved.size).toBe(100);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const requested = fetcher.mock.calls.flatMap(([input]) =>
+      new URL(input instanceof Request ? input.url : input.toString()).searchParams.getAll("id"));
+    expect(fetcher.mock.calls.every(([input]) =>
+      new URL(input instanceof Request ? input.url : input.toString()).searchParams.getAll("id").length <= 100)).toBe(true);
+    expect(requested).toHaveLength(150);
+    expect(new Set(requested).size).toBe(150);
+    expect(resolved.size).toBe(150);
+  });
+
+  it("prunes expired creator entries when a new entry is inserted", async () => {
+    vi.useFakeTimers();
+    database = new TestD1Database();
+    await insertBotIdentity(database);
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      return Promise.resolve(usersResponse(url.searchParams.getAll("id")));
+    });
+    const deleteMapEntry = Object.getOwnPropertyDescriptor(Map.prototype, "delete")?.value as
+      (this: Map<unknown, unknown>, key: unknown) => boolean;
+    const deletedKeys = new Set<string>();
+    const deleteSpy = vi.spyOn(Map.prototype, "delete").mockImplementation(function (this: Map<unknown, unknown>, key: unknown) {
+      if (key === "creator-expired") deletedKeys.add(key);
+      return deleteMapEntry.call(this, key);
+    });
+
+    try {
+      await fetchTwitchUsersById(fetcher, environmentFor(database), ["creator-expired"]);
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
+      await fetchTwitchUsersById(fetcher, environmentFor(database), ["creator-new"]);
+
+      expect(deletedKeys.has("creator-expired")).toBe(true);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      deleteSpy.mockRestore();
+    }
+  });
+
+  it("caps the creator cache at 1,000 entries and evicts the oldest", async () => {
+    database = new TestD1Database();
+    await insertBotIdentity(database);
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      return Promise.resolve(usersResponse(url.searchParams.getAll("id")));
+    });
+    const environment = environmentFor(database);
+
+    for (let offset = 0; offset < 1_000; offset += 100) {
+      await fetchTwitchUsersById(fetcher, environment,
+        Array.from({ length: 100 }, (_, index) => `creator-${String(offset + index)}`));
+    }
+    await fetchTwitchUsersById(fetcher, environment, ["creator-newest"]);
+    await fetchTwitchUsersById(fetcher, environment, ["creator-0"]);
+
+    expect(fetcher).toHaveBeenCalledTimes(12);
   });
 
   it("coalesces concurrent lookups for the same user ID", async () => {

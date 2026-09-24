@@ -49,7 +49,7 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
   .flatMap((entry) => {
     const fileName = path.join(directory, entry.name);
     if (entry.isDirectory()) return sourceFiles(fileName);
-    return /\.(ts|tsx)$/.test(entry.name) ? [fileName] : [];
+    return /\.(ts|tsx)$/.test(entry.name) && !entry.name.startsWith("__eslint_probe_") ? [fileName] : [];
   })
   .sort();
 

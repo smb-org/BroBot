@@ -33,7 +33,10 @@ describe("Overlay tokens page", () => {
     const table = await screen.findByRole("table");
     expect(within(table).getByText("token-123")).toBeInTheDocument();
     expect(table.querySelectorAll("thead th")).toHaveLength(6);
+    expect(table.querySelector("thead th:last-child .sr-only")).toHaveTextContent("Link widerrufen");
     fireEvent.click(table.querySelector("tbody tr") as HTMLTableRowElement);
+    expect(table.closest(".list-detail")).toHaveClass("list-detail--open");
+    expect(table.closest(".overlay-tokens-table-wrap")).toHaveClass("overlay-tokens-table-wrap--inspector-open");
 
     const inspector = document.querySelector(".list-detail__inspector");
     if (!(inspector instanceof HTMLElement)) throw new Error("Overlay token inspector is missing.");

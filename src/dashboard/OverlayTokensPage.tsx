@@ -197,7 +197,7 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
     {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     {!loading && tokens.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-    {!loading && tokens.length > 0 ? <div className="table-wrap overlay-tokens-table-wrap">
+    {!loading && tokens.length > 0 ? <div className={`table-wrap overlay-tokens-table-wrap${selected !== null || oneTimeLink !== null ? " overlay-tokens-table-wrap--inspector-open" : ""}`}>
       <table className="table overlay-tokens-table">
         <thead><tr>
           <th scope="col">{labels.identifier}</th>
@@ -205,7 +205,7 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
           <th scope="col">{labels.createdAt}</th>
           <th scope="col">{labels.lastUsedAt}</th>
           <th scope="col">{labels.expiresAt}</th>
-          <th scope="col"><span className="visually-hidden">{labels.revoke}</span></th>
+          <th scope="col"><span className="sr-only">{labels.revoke}</span></th>
         </tr></thead>
         <tbody>{tokens.map((token) => (
           <tr key={token.id} tabIndex={0} aria-selected={token.id === selectedId} onClick={() => { selectToken(token); }} onKeyDown={(event) => { rowKeyDown(event, () => { selectToken(token); }); }}>
