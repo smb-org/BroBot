@@ -19,6 +19,7 @@ import { requireChannelAuthorization, type ChannelAuthorizationVariables } from 
 import { actorOf } from "./member-routes";
 import { saveOverlayDraft } from "../overlays/service";
 import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
+import { publishOverlayChanged } from "../realtime";
 
 interface OverlayRouteEnvironment {
   Bindings: Env;
@@ -121,6 +122,7 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
   if (created.changes > 0) {
     const overlay = await getOverlayForChannel(context.env.DB, channelId, id);
     if (overlay === null) throw new Error("Created overlay could not be read back.");
+    await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId: id, revision: overlay.revision }]);
     return context.json({ overlay }, 201);
   }
   if (!await isOverlayManagementAllowed(context.env.DB, actorOf(context), channelId, now)) {
@@ -170,6 +172,9 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
       currentRevision: result.current?.revision ?? null,
     }, 409);
   }
+  if (result.outcome === "saved") {
+    await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId, revision: result.overlay.revision }]);
+  }
   return context.json({ overlay: result.overlay });
 });
 
@@ -187,6 +192,7 @@ overlayRouter.delete("/api/channels/:channelId/overlays/:overlayId", async (cont
   const now = nowIso();
   const deleted = await deleteOverlayWithAudit(context.env.DB, actorOf(context), before, parsed.data.baseRevision, now);
   if (deleted.changes > 0) {
+    await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId, revision: before.revision }]);
     const closures = await Promise.all(deleted.revokedAccessTokenIds.map((tokenId) =>
       closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, tokenId)));
     if (closures.some((closed) => !closed)) return context.json({ closingPending: true }, 202);

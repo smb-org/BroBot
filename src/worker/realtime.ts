@@ -12,6 +12,7 @@ import { authenticateOverlayToken } from "./auth/overlay-token-service";
 import {
   listChannelIdsForUser,
 } from "./db/channels";
+import { getOverlayBindingForToken } from "./auth/overlay-token-repository";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "./realtime-protocol";
 import type { ApiErrorCode } from "../contracts/values";
 
@@ -56,11 +57,13 @@ const principalForPanel = (
 
 const principalForOverlay = (
   record: NonNullable<Awaited<ReturnType<typeof authenticateOverlayToken>>>,
+  overlayId: string | null,
 ): RealtimeOverlayPrincipal => ({
   v: 1,
   kind: "overlay",
   channelId: record.channelId,
   tokenId: record.tokenId,
+  overlayId,
   expiresAt: record.expiresAt,
 });
 
@@ -125,7 +128,8 @@ realtimeRouter.get("/ws/overlay", async (context) => {
   });
   if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
 
-  const principal = principalForOverlay(record);
+  const overlayId = await getOverlayBindingForToken(context.env.DB, record.channelId, record.tokenId);
+  const principal = principalForOverlay(record, overlayId);
   const objectId = context.env.CHANNEL.idFromName(principal.channelId);
   const object = context.env.CHANNEL.get(objectId);
   return object.fetch(internalChannelRequest(principal));
@@ -148,6 +152,33 @@ export const publishRealtimeMessages = async (
   const object = channelObject(namespace, channelId);
   if (object === null) return;
   await object.publish(messages);
+};
+
+export const overlayChangedMessage = (
+  channelId: string,
+  overlayId: string,
+  revision: number,
+): RealtimeEnvelope<"overlay.changed"> => ({
+  version: 1,
+  id: crypto.randomUUID(),
+  createdAt: new Date().toISOString(),
+  channelId,
+  type: "overlay.changed",
+  payload: { overlayId, revision },
+});
+
+export const publishOverlayChanged = async (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+  updates: readonly { overlayId: string; revision: number }[],
+): Promise<void> => {
+  if (updates.length === 0) return;
+  try {
+    await publishRealtimeMessages(namespace, updates.map((update) =>
+      overlayChangedMessage(channelId, update.overlayId, update.revision)));
+  } catch (error: unknown) {
+    console.warn("Realtime overlay hint could not be sent.", error);
+  }
 };
 
 /** Sends a channel-variable hint best-effort; D1 remains the authoritative state. */

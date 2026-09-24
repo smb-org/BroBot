@@ -171,6 +171,41 @@ export const hasChannelVariableForOverlay = async (
   return row !== null;
 };
 
+export const overlayUsesVariable = async (
+  db: D1Database,
+  channelId: string,
+  overlayId: string,
+  variableName: string,
+): Promise<boolean> => {
+  const row = await db.prepare(
+    `SELECT 1 AS present
+       FROM overlay_elements
+      WHERE channel_id = ? AND overlay_id = ? AND variable_name = ?
+      LIMIT 1`,
+  ).bind(channelId, overlayId, variableName).first<{ present: number }>();
+  return row !== null;
+};
+
+export const getOverlayVariableValues = async (
+  db: D1Database,
+  channelId: string,
+  overlayId: string,
+): Promise<Record<string, number>> => {
+  const rows = await db.prepare(
+    `SELECT variable.name, variable.value
+       FROM channel_variables AS variable
+      WHERE variable.channel_id = ?
+        AND variable.name IN (
+          SELECT DISTINCT element.variable_name
+            FROM overlay_elements AS element
+           WHERE element.channel_id = ? AND element.overlay_id = ?
+             AND element.variable_name IS NOT NULL
+        )
+      ORDER BY variable.name`,
+  ).bind(channelId, channelId, overlayId).all<{ name: string; value: number }>();
+  return Object.fromEntries(rows.results.map(({ name, value }) => [name, value]));
+};
+
 const auditSnapshot = (overlay: Pick<OverlayRecord, "id" | "name" | "width" | "height" | "revision" | "elements">) => ({
   overlayId: overlay.id,
   name: overlay.name,

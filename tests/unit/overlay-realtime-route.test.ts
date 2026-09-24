@@ -82,6 +82,11 @@ describe("overlay realtime route", () => {
     const state = await setup();
     database = state.database;
     await insertToken(state.database, "kanal-b");
+    await state.database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-b', 'kanal-b', 'Bound', '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')`,
+    ).run();
+    await state.database.prepare("UPDATE overlay_tokens SET overlay_id = 'overlay-b' WHERE token_id = 'token-kanal-b'").run();
 
     const response = await realtimeRouter.fetch(overlayRequest(token), state.env);
 
@@ -96,6 +101,7 @@ describe("overlay realtime route", () => {
       kind: "overlay",
       channelId: "kanal-b",
       tokenId: "token-kanal-b",
+      overlayId: "overlay-b",
       expiresAt: null,
     });
   });

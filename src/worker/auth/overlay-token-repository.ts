@@ -214,6 +214,23 @@ export const getUsableOverlayToken = async (
   return row === null ? null : mapOverlayToken(row);
 };
 
+/** Reads the immutable overlay assignment stored on the token row. */
+export const getOverlayBindingForToken = async (
+  db: D1Database,
+  channelId: string,
+  tokenId: string,
+): Promise<string | null> => {
+  const row = await db.prepare(
+    `SELECT overlay_id
+       FROM overlay_tokens
+      WHERE channel_id = ? AND token_id = ?`,
+  ).bind(channelId, tokenId).first<{ overlay_id: string | null }>();
+  // A missing row is an authentication consistency failure. Treating it as a
+  // legacy token would grant channel-wide access after a failed binding read.
+  if (row === null) throw new Error("Authenticated overlay token binding could not be read.");
+  return row.overlay_id;
+};
+
 export const touchOverlayToken = async (
   db: D1Database,
   channelId: string,

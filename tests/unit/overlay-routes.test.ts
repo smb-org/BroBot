@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { authRouter } from "../../src/worker/auth/routes";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { getOverlayBindingForToken } from "../../src/worker/auth/overlay-token-repository";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
   issueOverlayToken,
@@ -110,6 +111,7 @@ const issuePath = "https://brobot.example/api/channels/kanal-a/overlay-tokens";
 const statusPath = "https://brobot.example/api/overlay/status";
 const variablePath = (name: string): string =>
   `https://brobot.example/api/overlay/variables/${encodeURIComponent(name)}`;
+const bootstrapPath = "https://brobot.example/api/overlay/bootstrap";
 const revokePath = (channelId: string, tokenId: string): string =>
   `https://brobot.example/api/channels/${channelId}/overlay-tokens/${tokenId}/revoke`;
 
@@ -775,6 +777,103 @@ describe("Overlay routes", () => {
     expect(channelLanguage.status).toBe(200);
     expect(await channelLanguage.json()).toEqual({ name: "lives", value: 7 });
     expect(channelLanguage.headers.get("Content-Language")).toBe("en");
+  });
+
+  it("returns the bound overlay and only its referenced variables from bootstrap", async () => {
+    await insertMember(database, "kanal-a");
+    await database.prepare("UPDATE channels SET language = 'en' WHERE channel_id = 'kanal-a'").run();
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('kanal-a', 'lives', 7, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z'),
+              ('kanal-a', 'score', 99, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, width, height, css, revision, created_at, updated_at)
+       VALUES ('overlay-a', 'kanal-a', 'Gameplay', 1920, 1080, '.score { color: gold; }', 3, ?, ?),
+              ('overlay-b', 'kanal-a', 'Private', 1280, 720, '.private { display: none; }', 4, ?, ?)`,
+    ).bind("2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+    await database.prepare(
+      `INSERT INTO overlay_elements
+        (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json, x, y, scale_percent, z, in_composition)
+       VALUES ('element-a', 'kanal-a', 'overlay-a', 'variable', 'Lives', 'lives', '{value}', '{}', 8, 9, 100, 0, 1),
+              ('element-b', 'kanal-a', 'overlay-b', 'variable', 'Score', 'score', '{value}', '{}', 10, 11, 125, 0, 1)`,
+    ).run();
+    const tokenA = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    const tokenB = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    await database.prepare("UPDATE overlay_tokens SET overlay_id = 'overlay-a' WHERE token_id = ?")
+      .bind(tokenA.tokenId).run();
+    await database.prepare("UPDATE overlay_tokens SET overlay_id = 'overlay-b' WHERE token_id = ?")
+      .bind(tokenB.tokenId).run();
+    const bearer = (overlayUrl: string): HeadersInit => ({
+      Authorization: `Bearer ${tokenFromIssuedUrl(overlayUrl)}`,
+    });
+
+    const bootstrapA = await authRouter.fetch(new Request(bootstrapPath, { headers: bearer(tokenA.overlayUrl) }), environment);
+    const bootstrapB = await authRouter.fetch(new Request(bootstrapPath, { headers: bearer(tokenB.overlayUrl) }), environment);
+    const unreferenced = await authRouter.fetch(new Request(variablePath("score"), {
+      headers: bearer(tokenA.overlayUrl),
+    }), environment);
+
+    expect(bootstrapA.status).toBe(200);
+    expect(bootstrapA.headers.get("Cache-Control")).toBe("no-store");
+    await expect(bootstrapA.json()).resolves.toEqual({
+      language: "en",
+      overlay: {
+        id: "overlay-a",
+        revision: 3,
+        width: 1920,
+        height: 1080,
+        css: ".score { color: gold; }",
+        elements: [{
+          id: "element-a", kind: "variable", label: "Lives", variableName: "lives", text: "{value}",
+          config: {}, x: 8, y: 9, scalePercent: 100, z: 0, inComposition: true,
+        }],
+      },
+      variables: { lives: 7 },
+    });
+    await expect(bootstrapB.json()).resolves.toMatchObject({ overlay: { id: "overlay-b", revision: 4 }, variables: { score: 99 } });
+    expect(unreferenced.status).toBe(404);
+  });
+
+  it("keeps channel-wide legacy tokens on the existing variable path", async () => {
+    await insertMember(database, "kanal-a");
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('kanal-a', 'score', 99, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')`,
+    ).run();
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt: "2026-09-18T00:00:00.000Z",
+    });
+
+    const bootstrap = await authRouter.fetch(new Request(bootstrapPath, {
+      headers: { Authorization: `Bearer ${tokenFromIssuedUrl(issued.overlayUrl)}` },
+    }), environment);
+    const variable = await authRouter.fetch(new Request(variablePath("score"), {
+      headers: { Authorization: `Bearer ${tokenFromIssuedUrl(issued.overlayUrl)}` },
+    }), environment);
+
+    await expect(bootstrap.json()).resolves.toEqual({ language: "de", overlay: null, variables: {} });
+    expect(variable.status).toBe(200);
+    await expect(variable.json()).resolves.toEqual({ name: "score", value: 99 });
+  });
+
+  it("does not treat a token missing from the requested channel as a legacy token", async () => {
+    await insertMember(database, "kanal-a");
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt: "2026-09-18T00:00:00.000Z",
+    });
+
+    await expect(getOverlayBindingForToken(database as unknown as D1Database, "kanal-b", issued.tokenId))
+      .rejects.toThrow("Authenticated overlay token binding could not be read.");
   });
 
   it("rejects an invalid overlay variable name", async () => {

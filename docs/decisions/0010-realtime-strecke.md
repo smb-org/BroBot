@@ -369,3 +369,49 @@ fünfzehn Minuten erneut. Für Variablenwerte bleibt das in §7 beschriebene
 Restfenster vertretbar, weil es sich um dieselben öffentlich im Chat
 abrufbaren Kanalwerte handelt. Über diese Grenze hinausgehende Daten erfordern
 vor dem Versand eine neue Bewertung.
+
+## Nachtrag: Overlay-Bootstrap und Revisionshinweise (#214)
+
+**Stand:** 24. September 2026
+
+### Bootstrap und Variablenzugriff
+
+`GET /api/overlay/bootstrap` authentifiziert wie die vorhandenen Overlay-Routen
+mit `Authorization: Bearer` und antwortet mit `Cache-Control: no-store`. Ein
+gebundener Zugang erhält genau sein Overlay samt Elementen und Revision sowie
+die aktuellen Ganzzahlwerte der dort referenzierten Variablen. Gelöschte oder
+nicht mehr vorhandene Variablen fehlen in der Wertemenge. Der Kanal und das
+Overlay werden in jeder Abfrage gemeinsam gebunden.
+
+Zugänge ohne `overlay_id` bleiben kanalweit: Der Bootstrap liefert
+`overlay: null`, und `GET /api/overlay/variables/:name` behält für sie das
+bisherige Verhalten. Die kleine Funktion `getOverlayBindingForToken` ist die
+Nahtstelle zu #213, das `overlay_id` an `overlay_tokens` ergänzt. Auf dem
+Ausgangspunkt dieses Changesets fehlt die Spalte; bis #213 sie bereitstellt,
+liefert die Funktion absichtlich `null`. #214 ergänzt weder die Spalte noch
+eine Ersatzmigration.
+
+Für einen gebundenen Zugang liefert die Variablenroute nur Werte, die in einem
+Element genau dieses Overlays verwendet werden. Eine andere Variable desselben
+Kanals antwortet mit 404. Overlay-CSS und Elementkonfiguration gehen nur im
+Bootstrap an den jeweiligen Zugang; Realtime-Nachrichten enthalten keine
+Konfiguration.
+
+### Revisionshinweise und Hibernation
+
+`overlay.changed` trägt ausschließlich `{ overlayId, revision }` und ist in
+`src/realtime-contract.ts` für `panel` und `overlay` klassifiziert. Der Hinweis
+wird nach einem gespeicherten Entwurf, nach dem Löschen und nach einer
+erfolgreichen Umbenennung oder Löschung einer referenzierten Kanalvariablen
+gesendet. Variablenmutationen veröffentlichen Wertänderung und betroffene
+Overlay-Revisionen in demselben Objektaufruf. Beim Löschen bezeichnet die
+Revision den zuletzt gespeicherten Stand des gelöschten Overlays.
+
+Das Panel kann alle Hinweise des Kanals empfangen und lädt den verbindlichen
+Stand per API nach. Ein Overlay-Socket erhält den Hinweis nur, wenn seine
+zugewiesene `overlayId` übereinstimmt. Die ID liegt im serialisierten
+Socket-Prinzipal und zusätzlich im WebSocket-Tag `overlay:<id>`; die Zustellung
+fragt dieses Tag ab und braucht kein Klassenfeld. Beides bleibt beim
+Hibernieren erhalten. Kanalweite Alt-Zugänge tragen `overlayId: null` und
+erhalten keine `overlay.changed`-Nachricht. Die Nutzlast enthält keine neuen
+Streamdaten, daher ändert sich das Restfenster aus Abschnitt 7 nicht.

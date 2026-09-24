@@ -14,6 +14,7 @@ const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 export interface OverlayRealtimeCallbacks {
   onOpen?: (reconnected: boolean) => void;
   onMessage?: (message: RealtimeEnvelope<"variables.changed">) => void;
+  onOverlayChanged?: (message: RealtimeEnvelope<"overlay.changed">) => void;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -25,6 +26,10 @@ const isVariablesChangedPayload = (value: unknown): boolean => isRecord(value) &
     typeof entry.value === "number" && Number.isSafeInteger(entry.value)) &&
   Array.isArray(value.removed) && value.removed.every((name) =>
     typeof name === "string" && VARIABLE_NAME_PATTERN.test(name));
+
+const isOverlayChangedPayload = (value: unknown): boolean => isRecord(value) &&
+  typeof value.overlayId === "string" && value.overlayId.length > 0 &&
+  typeof value.revision === "number" && Number.isSafeInteger(value.revision) && value.revision >= 1;
 
 const realtimeUrl = (): string => {
   const url = new URL("/ws/overlay", window.location.href);
@@ -127,9 +132,12 @@ export const connectOverlayRealtime = (
         channelId ??= parsed.channelId;
         return;
       }
-      if (channelId === null || parsed.type !== "variables.changed" ||
-          !isVariablesChangedPayload(parsed.payload)) return;
-      callbacks.onMessage?.(parsed as RealtimeEnvelope<"variables.changed">);
+      if (channelId === null) return;
+      if (parsed.type === "variables.changed" && isVariablesChangedPayload(parsed.payload)) {
+        callbacks.onMessage?.(parsed as RealtimeEnvelope<"variables.changed">);
+      } else if (parsed.type === "overlay.changed" && isOverlayChangedPayload(parsed.payload)) {
+        callbacks.onOverlayChanged?.(parsed as RealtimeEnvelope<"overlay.changed">);
+      }
     });
 
     activeSocket.addEventListener("close", (event: CloseEvent) => {

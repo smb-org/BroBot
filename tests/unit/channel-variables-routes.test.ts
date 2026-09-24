@@ -323,6 +323,14 @@ describe("Channel variable routes", () => {
     const changed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score/value", "POST", {
       operation: "add", amount: 3,
     });
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Gameplay', ?, ?)`,
+    ).bind("2026-09-24T00:00:00.000Z", "2026-09-24T00:00:00.000Z").run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name)
+       VALUES ('element-a', 'channel-a', 'overlay-a', 'variable', 'score')`,
+    ).run();
     const renamed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", {
       newName: "points",
     });
@@ -334,8 +342,14 @@ describe("Channel variable routes", () => {
       [{ type: "variables.changed", payload: { set: [{ name: "score", value: 4 }], removed: [] } }],
       [{ type: "variables.changed", payload: { set: [{ name: "score", value: 4 }], removed: [] } }],
       [{ type: "variables.changed", payload: { set: [{ name: "score", value: 7 }], removed: [] } }],
-      [{ type: "variables.changed", payload: { set: [{ name: "points", value: 7 }], removed: ["score"] } }],
-      [{ type: "variables.changed", payload: { set: [], removed: ["points"] } }],
+      [
+        { type: "overlay.changed", payload: { overlayId: "overlay-a", revision: 2 } },
+        { type: "variables.changed", payload: { set: [{ name: "points", value: 7 }], removed: ["score"] } },
+      ],
+      [
+        { type: "overlay.changed", payload: { overlayId: "overlay-a", revision: 3 } },
+        { type: "variables.changed", payload: { set: [], removed: ["points"] } },
+      ],
     ]);
   });
 });

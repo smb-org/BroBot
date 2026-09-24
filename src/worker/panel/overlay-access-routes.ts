@@ -32,6 +32,20 @@ const issueAccessSchema = z.object({
   label: z.string().trim().min(1).max(40),
   expiresAt: z.iso.datetime({ offset: true }).nullable().optional().default(null),
 }).strict();
+const replaceAccessSchema = z.object({
+  expiresAt: z.iso.datetime({ offset: true }).nullable().optional().default(null),
+}).strict();
+
+const truncateLabel = (label: string, maximumLength: number): string => {
+  let result = "";
+  for (const character of label) {
+    if (result.length + character.length > maximumLength) break;
+    result += character;
+  }
+  return result.trimEnd();
+};
+
+const replacementLabel = (label: string): string => `${truncateLabel(label, 38)} 2`;
 
 const denied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "overlay_access_manage_denied" }, 403);
@@ -139,6 +153,12 @@ overlayAccessRouter.post(`${accessPath}/:tokenId/reveal`, async (context) => {
 overlayAccessRouter.post(`${accessPath}/:tokenId/replace`, async (context) => {
   if (!canManage(context.get("channelRole"))) return denied(context);
   const now = nowIso();
+  const body: unknown = await context.req.json<unknown>().catch((): unknown => ({}));
+  const parsed = replaceAccessSchema.safeParse(body);
+  if (!parsed.success) return context.json({ error: "overlay_access_data_invalid" }, 400);
+  if (parsed.data.expiresAt !== null && Date.parse(parsed.data.expiresAt) <= Date.parse(now)) {
+    return context.json({ error: "overlay_expiry_invalid" }, 400);
+  }
   const channelId = context.req.param("channelId");
   const overlayId = context.req.param("overlayId");
   const tokenId = context.req.param("tokenId");
@@ -150,7 +170,7 @@ overlayAccessRouter.post(`${accessPath}/:tokenId/replace`, async (context) => {
     return context.json({ error: "overlay_access_not_found" }, 404);
   }
   if (existing.revokedAt !== null) return context.json({ error: "overlay_access_revoked" }, 409);
-  const result = await issue(context, existing.label, existing.expiresAt, now);
+  const result = await issue(context, replacementLabel(existing.label), parsed.data.expiresAt, now);
   if (result.outcome === "rejected") return issueFailure(context, now);
   return context.json({ ...result.access, replacesTokenId: existing.tokenId }, 201);
 });

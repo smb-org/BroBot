@@ -80,6 +80,11 @@ URL einschließlich Fragment jedoch in der Szenensammlung im Klartext; diese
 Szenensammlung ist deshalb wie ein Secret zu schützen. Twitch- oder
 OAuth-Tokens gehören niemals in diese URL.
 
+Neu ausgegebene, an ein gespeichertes Overlay gebundene Links liefern dessen
+Daten bereits über die Overlay-API aus. Die gemeinsame Browser-Renderstrecke
+für gespeicherte Overlays folgt mit #215; bis dahin sind diese Links API-only
+und werden noch nicht im Dashboard angeboten (#216).
+
 ### Browserquelle einrichten
 
 1. In OBS eine **Browserquelle** anlegen und die ausgegebene `overlayUrl`

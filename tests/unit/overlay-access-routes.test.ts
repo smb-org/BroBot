@@ -198,16 +198,35 @@ describe("overlay access routes", () => {
       tokenId: string;
       label: string;
       overlayUrl: string;
+      expiresAt: string | null;
       replacesTokenId: string;
     }>();
 
     expect(replacement.status).toBe(201);
     expect(newAccess.tokenId).not.toBe(oldAccess.tokenId);
-    expect(newAccess.label).toBe("OBS main");
+    expect(newAccess.label).toBe("OBS main 2");
+    expect(newAccess.expiresAt).toBeNull();
     expect(newAccess.replacesTokenId).toBe(oldAccess.tokenId);
     expect(await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
       .bind(oldAccess.tokenId).first()).toEqual({ revoked_at: null });
     expect(tokenFromUrl(newAccess.overlayUrl)).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  });
+
+  it("replaces an expired access with a requested fresh expiry and a distinct label within 40 characters", async () => {
+    const oldAccess = await issueAccess(environment, "X".repeat(40));
+    await database.prepare("UPDATE overlay_tokens SET expires_at = '2020-01-01T00:00:00.000Z' WHERE token_id = ?")
+      .bind(oldAccess.tokenId).run();
+
+    const replacement = await post(overlayAccessRouter, accessPath(oldAccess.tokenId, "replace"), environment, {
+      expiresAt: "2099-09-18T12:00:00.000Z",
+    });
+    const newAccess = await replacement.json<{ label: string; expiresAt: string | null }>();
+
+    expect(replacement.status).toBe(201);
+    expect(newAccess.label).toBe(`${"X".repeat(38)} 2`);
+    expect(newAccess.label).not.toBe("X".repeat(40));
+    expect(newAccess.label).toHaveLength(40);
+    expect(newAccess.expiresAt).toBe("2099-09-18T12:00:00.000Z");
   });
 
   it("returns 403 to operators for issuing, revealing, replacing, and revoking accesses", async () => {
