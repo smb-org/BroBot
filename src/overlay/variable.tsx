@@ -1,14 +1,13 @@
 import { useEffect, useState, type ReactElement } from "react";
 
-import { formatCount } from "../text";
-import type { ModuleLanguage } from "../modules/contract";
 import type { RealtimeEnvelope } from "../realtime-contract";
 import { connectOverlayRealtime } from "./realtime";
-import "./variable.css";
+import { VariableValueView } from "./variable-view";
+import type { OverlayLanguage } from "./model";
 
 interface OverlayVariableValue {
   value: number;
-  language: ModuleLanguage | null;
+  language: OverlayLanguage | null;
 }
 
 interface OverlayVariableProperties {
@@ -186,16 +185,5 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
   }, [name, token]);
 
   if (token === null || !VARIABLE_NAME_PATTERN.test(name) || current === null || current.language === null) return null;
-  const formatted = formatCount(current.value, current.language);
-  const placeholderIndex = text.indexOf("{value}");
-  const before = placeholderIndex === -1
-    ? text.length === 0 ? "" : `${text} `
-    : text.slice(0, placeholderIndex);
-  const after = placeholderIndex === -1 ? "" : text.slice(placeholderIndex + "{value}".length);
-
-  return <div className="brobot-variable" data-variable={name}>
-    <span className="brobot-variable__text">{before}</span>
-    <span className="brobot-variable__value">{formatted}</span>
-    {after.length === 0 ? null : <span className="brobot-variable__text">{after}</span>}
-  </div>;
+  return <VariableValueView name={name} text={text} value={current.value} language={current.language} />;
 };
