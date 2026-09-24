@@ -119,7 +119,7 @@ export const sendShoutout = async (
             : result.status === 403 ? "scope_missing"
               : result.status === 404 ? "twitch_user_not_found"
                 : "twitch_error";
-    return { sent: false, reason, detail: { ...detail, status: result.status, message: result.message } };
+    return { sent: false, reason, detail: { ...detail, status: result.status, twitchMessage: result.message } };
   }
 
   return { sent: true, reason: null, detail: { ...detail, status: result.status } };

@@ -314,3 +314,53 @@ Wissen weitergetragen zu werden.
 - Wird je etwas über die Strecke geschickt, das nicht unter 0004 Abschnitt 7
   fällt, ist das Restfenster aus Abschnitt 7 neu zu entscheiden — nicht
   stillschweigend hinzunehmen.
+
+## Nachtrag: Overlay-Einstieg und zulässige Daten (#197)
+
+**Stand:** 24. September 2026
+
+**Betrifft:** `GET /ws/overlay`, Overlay-Browserclient und Empfängertabelle
+
+### Anmeldung über den Protokoll-Header
+
+Das Overlay eröffnet `GET /ws/overlay` mit den WebSocket-Protokollen
+`brobot.v1` und `brobot.token.<token>`. Die Chromium-basierte OBS-Browserquelle
+kann wie der Browser die Protokollliste beim WebSocket-Aufbau setzen. Der
+Worker liest den Token ausschließlich aus `Sec-WebSocket-Protocol`, prüft ihn
+mit `authenticateOverlayToken()` und wählt den Kanal aus dem Token-Datensatz.
+Er reicht den Token nicht an das Durable Object weiter: Dessen interner Request
+enthält nur `brobot.v1` und den Prinzipal `{ v: 1, kind: "overlay", channelId,
+tokenId, expiresAt }`. Die Antwort verhandelt nur `brobot.v1`.
+
+Ein Einmal-Ticket ist für diesen Einstieg nicht erforderlich. Es bleibt der in
+§9 beschriebene Rückfallweg, falls eine künftige Browserquelle keine
+Subprotokolle setzen kann. Der Token steht weder im Socket-URL-Pfad noch in der
+Query. Die Route schreibt keine D1-Zeile je Nachricht; beim Handshake gilt nur
+der bereits vorhandene, auf höchstens einen `last_used_at`-Touch je fünf
+Minuten begrenzte Token-Nachweis.
+
+### Daten an Overlay-Gegenstellen
+
+Die Empfängertabelle in `src/realtime-contract.ts` ordnet jeden Nachrichtentyp
+explizit `panel`, `overlay` oder beiden zu. Aktuell darf ein Overlay nur
+`system.hello` empfangen. Diese leere Begrüßung enthält Protokollversion,
+Nachrichtenkennung, Serverzeit und `channelId`; sie enthält weder Token noch
+sonstige Kanalinhalte. `event_log.new` ist ausschließlich für das Panel
+klassifiziert und wird vom Durable Object nicht an Overlay-Sockets gesendet.
+
+Als nächster fachlicher Overlay-Datensatz sind für #186 die Namen und aktuellen
+Ganzzahlwerte **aller** Kanalvariablen vorgesehen, wie im unversionierten
+Konzeptdokument `docs/input/overlay-variablen-konzept.md` am Ende entschieden.
+Diese Werte sind bereits über Chatbefehle abrufbar. Namen und Werte dürfen daher
+an Inhaber eines Overlay-Tokens gehen; Beschreibungen, Chattexte,
+Ereignisprotokoll, Auslöser, Akteur-IDs, Sitzungen und Twitch-Zugangsdaten
+gehören nicht in Overlay-Nachrichten. #197 sendet diese Variablen noch nicht;
+neue Typen müssen vor ihrer Einführung ebenfalls in der Empfängertabelle
+klassifiziert werden.
+
+Ein Widerruf schließt bestehende Overlay-Sockets über `revokeToken()` nach der
+erfolgreichen Mutation. Das Alarmnetz prüft den Token spätestens nach
+fünfzehn Minuten erneut. Für Variablenwerte bleibt das in §7 beschriebene
+Restfenster vertretbar, weil es sich um dieselben öffentlich im Chat
+abrufbaren Kanalwerte handelt. Über diese Grenze hinausgehende Daten erfordern
+vor dem Versand eine neue Bewertung.

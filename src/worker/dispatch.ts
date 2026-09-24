@@ -354,6 +354,7 @@ const runActions = async (
               reason: result.reason ?? "unknown_error",
               outcome: fallback.sent ? "sent_as_message" : "not_sent",
               ...(typeof result.detail.status === "number" ? { status: result.detail.status } : {}),
+              ...(typeof result.detail.twitchMessage === "string" ? { twitchMessage: result.detail.twitchMessage } : {}),
             },
           });
           diagnostics.push(fallback.sent
@@ -366,6 +367,7 @@ const runActions = async (
               reason: result.reason ?? "unknown_error",
               outcome: "not_sent",
               ...(typeof result.detail.status === "number" ? { status: result.detail.status } : {}),
+              ...(typeof result.detail.twitchMessage === "string" ? { twitchMessage: result.detail.twitchMessage } : {}),
             },
           });
           diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });

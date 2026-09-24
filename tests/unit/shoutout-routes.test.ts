@@ -127,7 +127,14 @@ describe("manual shoutout", () => {
     const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { login: "streamerin" }), environment);
 
     expect(response.status).toBe(429);
-    await expect(response.json()).resolves.toMatchObject({ error: "shoutout_send_failed", reason: "rate_limited" });
+    // Issue #201 follow-up: the event-log diagnostic carries this same
+    // message under `twitchMessage` (provenance for the dashboard popover),
+    // but the API error response has always used `message` -- a client
+    // reading it must not lose Twitch's own explanation.
+    const body = await response.json<{ error: string; reason: string; detail: Record<string, unknown> }>();
+    expect(body).toMatchObject({ error: "shoutout_send_failed", reason: "rate_limited" });
+    expect(body.detail.message).toBe("slow down");
+    expect(body.detail.twitchMessage).toBeUndefined();
   });
 
   it("rejects a request from someone who isn't a channel member", async () => {

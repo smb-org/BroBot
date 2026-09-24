@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 
 import type { EventCode } from "../../contracts/values";
-import type { ModuleRouteEnvironment } from "../contract";
+import { apiErrorDetail, type ModuleRouteEnvironment } from "../contract";
 import { getAdSchedule, type AdScheduleResult, snoozeNextAd, type SnoozeNextAdResult } from "./adapters/ad-schedule";
 import { COMMERCIAL_LENGTHS, startCommercial, type CommercialLength, type CommercialResult } from "./adapters/commercial";
 import { refreshAdPrewarningAlarm } from "./adapters/prewarning-alarm";
@@ -105,7 +105,7 @@ adsRoutes.get("/schedule", async (context) => {
     return context.json({
       error: "ad_schedule_read_failed",
       reason: result.reason,
-      detail: result.detail,
+      detail: apiErrorDetail(result.detail),
     }, statusFor(result.reason));
   }
 
@@ -145,7 +145,7 @@ adsRoutes.post("/snooze", async (context) => {
     return context.json({
       error: "ad_snooze_failed",
       reason: result.reason,
-      detail: result.detail,
+      detail: apiErrorDetail(result.detail),
     }, statusFor(result.reason));
   }
 
@@ -196,7 +196,7 @@ adsRoutes.post("/commercial", async (context) => {
     return context.json({
       error: result.reason === "stream_offline" ? "commercial_stream_offline" : "commercial_start_failed",
       reason: result.reason,
-      detail: result.detail,
+      detail: apiErrorDetail(result.detail),
     }, commercialStatusFor(result.reason));
   }
 

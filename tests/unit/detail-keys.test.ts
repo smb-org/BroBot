@@ -72,7 +72,7 @@ describe("diagnostic detail keys", () => {
       "message", "moderator", "name", "person", "reason", "recipient",
       "remainingSeconds", "requiredTier", "response", "scope", "source",
       "sourceChannelId", "startedAt", "status", "streamState", "target", "targetChannelId", "text",
-      "threshold", "tier", "variable", "viewers",
+      "threshold", "tier", "twitchMessage", "variable", "viewers",
     ]);
   });
 
