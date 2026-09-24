@@ -87,6 +87,31 @@ const requestOptions = (signal: AbortSignal | undefined): RequestInit | undefine
 const channelPath = (channelId: string, suffix: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/${suffix}`;
 
+export interface PanelOverlayToken {
+  id: string;
+  name: string | null;
+  createdAt: string;
+  createdBy: string | null;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+}
+
+export interface PanelOverlayTokensResponse {
+  tokens: readonly PanelOverlayToken[];
+}
+
+const overlayTokensPath = (channelId: string, tokenId?: string): string =>
+  `${channelPath(channelId, "overlay-tokens")}${tokenId === undefined ? "" : `/${encodeURIComponent(tokenId)}/revoke`}`;
+
+export const fetchOverlayTokens = (channelId: string): Promise<PanelOverlayTokensResponse> =>
+  requestJson<PanelOverlayTokensResponse>(overlayTokensPath(channelId));
+
+export const issueOverlayToken = (channelId: string): Promise<{ tokenId: string; overlayUrl: string; expiresAt: string | null }> =>
+  requestMutation(overlayTokensPath(channelId), "POST", {});
+
+export const revokeOverlayToken = (channelId: string, tokenId: string, reason: string): Promise<undefined> =>
+  requestMutation(overlayTokensPath(channelId, tokenId), "POST", { reason });
+
 const memberPath = (channelId: string, userId?: string): string =>
   `${channelPath(channelId, "members")}${userId === undefined ? "" : `/${encodeURIComponent(userId)}`}`;
 

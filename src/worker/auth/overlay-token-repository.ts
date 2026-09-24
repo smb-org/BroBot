@@ -46,6 +46,23 @@ export interface OverlayTokenRecord extends NewOverlayTokenRecord {
   language: ModuleLanguage;
 }
 
+export interface ActiveOverlayTokenRecord {
+  tokenId: string;
+  name: null;
+  createdAt: string;
+  createdByUserId: string | null;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+}
+
+interface ActiveOverlayTokenRow {
+  token_id: string;
+  created_at: string;
+  created_by_user_id: string | null;
+  last_used_at: string | null;
+  expires_at: string | null;
+}
+
 interface OverlayTokenRow {
   token_id: string;
   channel_id: string;
@@ -84,6 +101,46 @@ export const overlayTokenSelectColumns = `
 export const overlayTokenReturningColumns = `
   token_id, channel_id, token_hash, expires_at, created_at,
   revoked_at, revocation_reason, last_used_at`;
+
+/**
+ * The issuance audit row is the durable creator reference. The token table
+ * deliberately stores no secret-adjacent display metadata such as a label or
+ * actor identity; the API resolves this user ID for presentation separately.
+ */
+export const listActiveOverlayTokens = async (
+  db: D1Database,
+  channelId: string,
+  now: string,
+): Promise<ActiveOverlayTokenRecord[]> => {
+  const rows = await db.prepare(
+    `SELECT token.token_id, token.created_at,
+            issued.actor_user_id AS created_by_user_id,
+            token.last_used_at, token.expires_at
+       FROM overlay_tokens AS token
+       LEFT JOIN audit_log AS issued
+         ON issued.channel_id = token.channel_id
+        AND issued.action = 'overlay.token.issued'
+        AND json_extract(issued.after_json, '$.tokenId') = token.token_id
+      WHERE token.channel_id = ?
+        AND token.revoked_at IS NULL
+        AND (
+          token.expires_at IS NULL
+          OR (
+            julianday(token.expires_at) IS NOT NULL
+            AND julianday(token.expires_at) > julianday(?)
+          )
+        )
+      ORDER BY token.created_at DESC, token.token_id DESC`,
+  ).bind(channelId, now).all<ActiveOverlayTokenRow>();
+  return rows.results.map((row) => ({
+    tokenId: row.token_id,
+    name: null,
+    createdAt: row.created_at,
+    createdByUserId: row.created_by_user_id,
+    lastUsedAt: row.last_used_at,
+    expiresAt: row.expires_at,
+  }));
+};
 
 /**
  * `request.text()` sits between the guard and this mutation. A client can

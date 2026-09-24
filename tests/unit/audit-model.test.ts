@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PanelAuditEntry } from "../../src/panel-contract";
 import { textFingerprintIfTruncated, truncateTo200Chars } from "../../src/text";
+import { auditFieldLabel } from "../../src/dashboard/locale";
 import {
   auditActorLabel,
   auditAreaForAction,
@@ -45,6 +46,19 @@ describe("audit areas", () => {
   it("gives every area a distinct icon", () => {
     const icons = new Set((["module", "command", "member", "channel", "overlay"] as const).map(auditAreaIcon));
     expect(icons.size).toBe(5);
+  });
+});
+
+describe("overlay-token audit labels", () => {
+  it("renders lifecycle fields in both dashboard languages", () => {
+    expect(auditFieldLabel("tokenId", "de")).toBe("Token-ID");
+    expect(auditFieldLabel("createdAt", "de")).toBe("Erstellt am");
+    expect(auditFieldLabel("expiresAt", "de")).toBe("Gültig bis");
+    expect(auditFieldLabel("revocationReason", "de")).toBe("Widerrufsgrund");
+    expect(auditFieldLabel("tokenId", "en")).toBe("Token ID");
+    expect(auditFieldLabel("createdAt", "en")).toBe("Created at");
+    expect(auditFieldLabel("expiresAt", "en")).toBe("Valid until");
+    expect(auditFieldLabel("revocationReason", "en")).toBe("Revocation reason");
   });
 });
 

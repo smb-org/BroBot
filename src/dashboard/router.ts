@@ -11,7 +11,7 @@ export type DashboardRoute =
   | {
     kind: "channel";
     channelId: string;
-    section: "overview" | "system" | "members" | "variables" | "events" | "modules" | "audit";
+    section: "overview" | "system" | "members" | "variables" | "overlay-links" | "events" | "modules" | "audit";
     filters?: PanelEventFilters;
     auditFilters?: PanelAuditFilters;
   }
@@ -87,7 +87,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     if (channelId === null || moduleId === null) return { kind: "overview" };
     return { kind: "module", channelId, moduleId };
   }
-  const channelSections = ["system", "members", "variables", "events", "modules", "audit"];
+  const channelSections = ["system", "members", "variables", "overlay-links", "events", "modules", "audit"];
   if (segments[0] !== "channels" || (segments.length !== 2 && segments.length !== 3) ||
       (segments.length === 3 && !channelSections.includes(segments[2] ?? ""))) return { kind: "overview" };
   const channelId = decodeSegment(segments[1] ?? "");
@@ -96,7 +96,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
   const route: DashboardRoute = {
     kind: "channel",
     channelId,
-    section: section === "system" || section === "members" || section === "variables" || section === "events" || section === "modules" || section === "audit"
+    section: section === "system" || section === "members" || section === "variables" || section === "overlay-links" || section === "events" || section === "modules" || section === "audit"
       ? section
       : "overview",
   };

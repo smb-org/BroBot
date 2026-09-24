@@ -240,6 +240,69 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
 
 export const channelVariablesTexts = (language: DashboardLanguage = dashboardLanguage()): ChannelVariablesTexts => channelVariablesCatalog[language];
 
+export interface OverlayTokensTexts {
+  title: string;
+  list: string;
+  create: string;
+  issueBlocked: string;
+  empty: string;
+  loading: string;
+  loadError: string;
+  actionError: string;
+  managementLocked: string;
+  identifier: string;
+  createdAt: string;
+  createdBy: string;
+  lastUsedAt: string;
+  expiresAt: string;
+  never: string;
+  unknownCreator: string;
+  linkLabel: string;
+  linkNote: string;
+  copy: string;
+  copied: string;
+  copyError: string;
+  revoke: string;
+  revocationReason: string;
+  revokeTitle: (name: string) => string;
+  revokeDescription: (name: string) => string;
+  revokeConfirm: (name: string) => string;
+  revokeCancel: string;
+  revoked: string;
+  close: string;
+}
+
+const overlayTokensCatalog: LocaleCatalog<OverlayTokensTexts> = {
+  de: {
+    title: "Overlay-Links", list: "Overlay-Links", create: "Overlay-Link ausstellen", issueBlocked: "Schließe zuerst den angezeigten Link, bevor du einen weiteren ausstellst.",
+    empty: "Noch keine Overlay-Links ausgestellt.", loading: "Overlay-Links werden geladen …",
+    loadError: "Overlay-Links konnten nicht geladen werden.", actionError: "Die Änderung konnte nicht durchgeführt werden.",
+    managementLocked: "Nur Broadcaster und Verwalter dürfen Overlay-Links ausstellen oder widerrufen.",
+    identifier: "Kennung", createdAt: "Ausgestellt am", createdBy: "Ausgestellt von", lastUsedAt: "Zuletzt verwendet",
+    expiresAt: "Läuft ab", never: "Nie", unknownCreator: "Nicht verfügbar", linkLabel: "Vollständiger Overlay-Link",
+    linkNote: "Dieser Link wird nur jetzt angezeigt. Kopiere ihn, bevor du schließt; danach kann er nicht erneut angezeigt werden.",
+    copy: "Link kopieren", copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.",
+    revoke: "Link widerrufen", revocationReason: "Widerruf über das Dashboard", revokeTitle: (name) => `Overlay-Link ${name} widerrufen?`,
+    revokeDescription: (name) => `Der Link ${name} wird sofort ungültig und verbundene Overlay-Fenster werden geschlossen.`,
+    revokeConfirm: (name) => `${name} widerrufen`, revokeCancel: "Abbrechen", revoked: "Overlay-Link widerrufen.", close: "Schließen",
+  },
+  en: {
+    title: "Overlay links", list: "Overlay links", create: "Issue overlay link", issueBlocked: "Close the displayed link before issuing another one.",
+    empty: "No overlay links have been issued yet.", loading: "Loading overlay links …",
+    loadError: "Overlay links could not be loaded.", actionError: "The change could not be completed.",
+    managementLocked: "Only broadcasters and managers may issue or revoke overlay links.",
+    identifier: "ID", createdAt: "Created", createdBy: "Created by", lastUsedAt: "Last used",
+    expiresAt: "Expires", never: "Never", unknownCreator: "Unavailable", linkLabel: "Full overlay link",
+    linkNote: "This link is shown only now. Copy it before closing; it cannot be shown again afterward.",
+    copy: "Copy link", copied: "Copied", copyError: "The link could not be copied.",
+    revoke: "Revoke link", revocationReason: "Revoked from the dashboard", revokeTitle: (name) => `Revoke overlay link ${name}?`,
+    revokeDescription: (name) => `The link ${name} will stop working immediately, and connected overlay windows will close.`,
+    revokeConfirm: (name) => `Revoke ${name}`, revokeCancel: "Cancel", revoked: "Overlay link revoked.", close: "Close",
+  },
+};
+
+export const overlayTokensTexts = (language: DashboardLanguage = dashboardLanguage()): OverlayTokensTexts => overlayTokensCatalog[language];
+
 export interface DashboardTexts {
   header: {
     connectionRunning: string;
@@ -291,6 +354,7 @@ export interface DashboardTexts {
     system: string;
     members: string;
     variables: string;
+    overlayTokens: string;
     module: string;
     events: string;
     audit: string;
@@ -626,6 +690,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     navigation: {
       mainNavigation: "Hauptnavigation", overview: "Übersicht", channel: "Kanal", system: "System",
       members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Audit-Log", selectChannel: "Kanal auswählen",
+      overlayTokens: "Overlay-Links",
       selectModule: "Modul auswählen",
       signInWithTwitch: "Mit Twitch anmelden", twitchAccount: "Twitch-Konto",
       signingOut: "Abmeldung …", signOut: "Abmelden",
@@ -838,6 +903,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     navigation: {
       mainNavigation: "Main navigation", overview: "Overview", channel: "Channel", system: "System",
       members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Audit log", selectChannel: "Select channel",
+      overlayTokens: "Overlay links",
       selectModule: "Select module",
       signInWithTwitch: "Sign in with Twitch", twitchAccount: "Twitch account",
       signingOut: "Signing out …", signOut: "Sign out",
@@ -1735,13 +1801,13 @@ export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()):
 const auditFieldLabels: LocaleCatalog<Record<string, string>> = {
   de: {
     role: "Rolle", enabled: "Aktiv", fullConsent: "Vollzustimmung", revocationReason: "Widerrufsgrund",
-    expiresAt: "Gültig bis", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
+    expiresAt: "Gültig bis", createdAt: "Erstellt am", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
     clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename",
     name: "Name", value: "Wert", description: "Beschreibung",
   },
   en: {
     role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
-    expiresAt: "Valid until", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
+    expiresAt: "Valid until", createdAt: "Created at", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
     clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name",
     name: "Name", value: "Value", description: "Description",
   },

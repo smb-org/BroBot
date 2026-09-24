@@ -155,6 +155,56 @@ describe("Overlay routes", () => {
     expect(response.status).toBe(401);
   });
 
+  it("requires channel membership to list overlay tokens", async () => {
+    const response = await authRouter.fetch(new Request(issuePath, {
+      headers: await sessionHeaders(environment, false),
+    }), environment);
+
+    expect(response.status).toBe(403);
+  });
+
+  it("lists only active tokens for the authorized channel without returning secrets or hashes", async () => {
+    await insertMember(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await database.prepare(
+      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
+       VALUES ('kanal-b', 'user-1', 'manager', ?, ?)`,
+    ).bind("2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+    const createdAt = new Date().toISOString();
+    const tokenA = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt,
+    });
+    const tokenB = await issueTestToken(database, {
+      channelId: "kanal-b", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt,
+    });
+    const secret = tokenFromIssuedUrl(tokenA.overlayUrl);
+
+    const response = await authRouter.fetch(new Request(issuePath, {
+      headers: await sessionHeaders(environment, false),
+    }), environment);
+    const responseText = await response.text();
+    const body: unknown = JSON.parse(responseText);
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      tokens: [{
+        id: tokenA.tokenId,
+        name: null,
+        createdAt,
+        createdBy: null,
+        lastUsedAt: null,
+        expiresAt: null,
+      }],
+    });
+    expect(responseText).not.toContain(secret);
+    expect(responseText).not.toContain("tokenHash");
+    expect(responseText).not.toContain("token_hash");
+    expect(responseText).not.toContain(tokenB.tokenId);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
   it.each([
     ["issue", issuePath, "{}"],
     ["revoke", revokePath("kanal-a", "token-1"), JSON.stringify({ reason: "Test" })],

@@ -53,9 +53,11 @@ import {
 import { getSessionFromRequest } from "./session-access";
 import {
   authenticateOverlayToken,
+  getActiveOverlayTokens,
   issueOverlayToken,
   revokeOverlayToken,
 } from "./overlay-token-service";
+import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { revokeRealtimeSessionForUser, revokeRealtimeToken } from "../realtime";
@@ -274,6 +276,33 @@ authRouter.post(
     if (issued === null) return context.json({ error: "channel_access_denied" }, 403);
     context.header("Cache-Control", "no-store");
     return context.json(issued, 201);
+  },
+);
+
+authRouter.get(
+  "/api/channels/:channelId/overlay-tokens",
+  requireChannelAuthorization(),
+  async (context) => {
+    const tokens = await getActiveOverlayTokens(context.env.DB, {
+      channelId: context.req.param("channelId"),
+      now: nowIso(),
+    });
+    const creators = await fetchTwitchUsersById(
+      fetch,
+      context.env,
+      [...new Set(tokens.flatMap((token) => token.createdByUserId === null ? [] : [token.createdByUserId]))],
+    );
+    context.header("Cache-Control", "no-store");
+    return context.json({
+      tokens: tokens.map((token) => ({
+        id: token.tokenId,
+        name: token.name,
+        createdAt: token.createdAt,
+        createdBy: token.createdByUserId === null ? null : creators.get(token.createdByUserId)?.displayName ?? null,
+        lastUsedAt: token.lastUsedAt,
+        expiresAt: token.expiresAt,
+      })),
+    });
   },
 );
 

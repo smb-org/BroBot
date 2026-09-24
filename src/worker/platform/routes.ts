@@ -11,9 +11,7 @@ import {
   listChannelMembers,
   type ChannelMemberRecord,
 } from "../db/channel-members";
-import {
-  fetchTwitchUsersById,
-} from "../panel/member-routes";
+import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { fetchTwitchUserByLogin, type TwitchUser } from "../shoutout";
 import {
   changePlatformMember,

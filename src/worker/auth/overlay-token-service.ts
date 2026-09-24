@@ -1,9 +1,11 @@
 import { hashOverlayToken } from "./crypto";
 import {
   createOverlayToken,
+  listActiveOverlayTokens,
   getUsableOverlayToken,
   revokeOverlayToken as revokeStoredOverlayToken,
   touchOverlayToken,
+  type ActiveOverlayTokenRecord,
   type OverlayTokenRecord,
 } from "./overlay-token-repository";
 import type {
@@ -37,6 +39,11 @@ export interface RevokeOverlayTokenInput {
   tokenId: string;
   reason: string;
   revokedAt: string;
+}
+
+export interface ListActiveOverlayTokensInput {
+  channelId: string;
+  now: string;
 }
 
 const TOKEN_BYTE_LENGTH = 32;
@@ -97,6 +104,11 @@ export const issueOverlayToken = async (
   overlayUrl.hash = new URLSearchParams({ token }).toString();
   return { tokenId, overlayUrl: overlayUrl.toString(), expiresAt };
 };
+
+export const getActiveOverlayTokens = async (
+  db: D1Database,
+  input: ListActiveOverlayTokensInput,
+): Promise<ActiveOverlayTokenRecord[]> => listActiveOverlayTokens(db, input.channelId, input.now);
 
 export const authenticateOverlayToken = async (
   db: D1Database,
