@@ -114,8 +114,10 @@ oder nach mindestens fünf Minuten aktualisiert, damit regelmäßige
 HTTP-Statusabrufe keine fortlaufenden D1-Schreibvorgänge erzeugen.
 
 Der Status-Endpunkt liefert `CF_VERSION_METADATA.id`. Damit stammt die
-angezeigte Version aus dem laufenden Deployment und nicht aus einem statischen
-Bild oder einer im Overlay-Bundle fest eingetragenen Versionszeichenkette.
+Diagnoseversion aus dem laufenden Deployment und nicht aus einer im
+Overlay-Bundle fest eingetragenen Versionszeichenkette. Sichtbar wird sie nur,
+wenn die URL im Fragment `debug=1` enthält; ohne Widget bleibt das Overlay
+standardmäßig leer.
 
 Die Variablenanzeige ist ebenfalls eine OBS-Browserquelle und wird lazy aus
 `src/overlay/` geladen. Ihre Konfiguration steht ausschließlich im Fragment:

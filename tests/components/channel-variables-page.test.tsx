@@ -17,12 +17,42 @@ const variable = {
   usages: [],
 };
 
+const setBrowserLanguage = (language: string): void => {
+  Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
+};
+
 describe("Channel variables page", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
     TestWebSocket.instances = [];
+    setBrowserLanguage("de-DE");
+  });
+
+  it.each([
+    ["de-DE", "In OBS einrichten", "Füge in OBS eine Browserquelle hinzu", "Geheimnis", "jederzeit auf der Seite Overlay-Links widerrufen", "Diagnoseinformationen", "Benutzerdefiniertes CSS"],
+    ["en-US", "Set up in OBS", "Add a Browser Source in OBS", "contains a secret", "revoke it at any time on the Overlay links page", "show diagnostics", "Custom CSS"],
+  ])("shows the localized OBS guide in the variable overlay section (%s)", async (language, summary, sourceStep, secret, revoke, diagnostics, customCss) => {
+    setBrowserLanguage(language);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+
+    const disclosure = await screen.findByText(summary);
+    fireEvent.click(disclosure);
+    const guide = disclosure.closest("details");
+    expect(guide).not.toBeNull();
+    expect(guide).toHaveTextContent(sourceStep);
+    expect(guide).toHaveTextContent("800 × 120 px");
+    expect(guide).toHaveTextContent(secret);
+    expect(guide).toHaveTextContent(revoke);
+    expect(guide).toHaveTextContent(diagnostics);
+    expect(guide).toHaveTextContent("&debug=1");
+    expect(guide).toHaveTextContent(customCss);
+    expect(guide).toHaveTextContent("font: 700 48px system-ui, sans-serif");
   });
 
   it("shows a spaced table, reset indicator, quick controls, and disabled Save for operators", async () => {
@@ -95,7 +125,7 @@ describe("Channel variables page", () => {
   color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
 }`);
-    expect(screen.getByText(/Geheim/i)).toBeInTheDocument();
+    expect(screen.getByText(/Geheim: Wer den Link hat/i)).toBeInTheDocument();
   });
 
   it("reuses a pasted overlay token in the browser without issuing another token", async () => {

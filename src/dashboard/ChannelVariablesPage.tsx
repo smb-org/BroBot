@@ -11,6 +11,7 @@ import {
   type PanelChannelVariable,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage } from "./locale";
+import { OBS_OVERLAY_CSS_EXAMPLE, OverlayObsInstructions } from "./OverlayObsInstructions";
 import { useRealtimeVariableUpdates } from "./realtime";
 import { Button, ConfirmDialog, Field, Icon, ListDetail, NumberField, ReadOnlyTextArea, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
@@ -26,12 +27,6 @@ interface ChannelVariablesPageProperties {
 const normalizedVariableName = (value: string): string => value.trim().toLowerCase();
 const variableNamePattern = /^[a-z][a-z0-9_]{0,31}$/u;
 const overlayTokenPattern = /^[A-Za-z0-9_-]{43}$/u;
-const obsCssExample = `.brobot-variable {
-  font: 700 48px system-ui, sans-serif;
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
-}`;
-
 const tokenFromOverlayUrl = (value: string): string | null => {
   try {
     const url = new URL(value, window.location.href);
@@ -339,6 +334,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         {selected !== null && canManageContent ? <section className="config-section channel-variable-overlay-link" aria-label={labels.overlayLink}>
           <hr className="channel-variable-overlay-link__divider" />
           <h3>{labels.overlayLink}</h3>
+          <OverlayObsInstructions />
           <Field
             id="channel-variable-overlay-text"
             label={labels.overlayText}
@@ -369,8 +365,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-url" label={labels.widgetUrl} value={overlayUrl} minRows={3} />
             <Button variant="neutral" onClick={() => { void copyText(overlayUrl); }}>{labels.copyLink}</Button>
             <p className="muted" role="note">{labels.secretNotice}</p>
-            <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-css" label={labels.obsCss} value={obsCssExample} minRows={6} />
-            <Button variant="neutral" onClick={() => { void copyText(obsCssExample); }}>{labels.copyCss}</Button>
+            <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-css" label={labels.obsCss} value={OBS_OVERLAY_CSS_EXAMPLE} minRows={6} />
+            <Button variant="neutral" onClick={() => { void copyText(OBS_OVERLAY_CSS_EXAMPLE); }}>{labels.copyCss}</Button>
             {copyNotice === null ? null : <p className="muted" role="status">{copyNotice}</p>}
           </>}
         </section> : null}

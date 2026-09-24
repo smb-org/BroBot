@@ -18,10 +18,38 @@ const response = (body: unknown): Response => new Response(JSON.stringify(body),
   headers: { "Content-Type": "application/json" },
 });
 
+const setBrowserLanguage = (language: string): void => {
+  Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
+};
+
 describe("Overlay tokens page", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    setBrowserLanguage("de-DE");
+  });
+
+  it.each([
+    ["de-DE", "In OBS einrichten", "Füge in OBS eine Browserquelle hinzu", "Geheimnis", "jederzeit auf der Seite Overlay-Links widerrufen", "Diagnoseinformationen", "Benutzerdefiniertes CSS"],
+    ["en-US", "Set up in OBS", "Add a Browser Source in OBS", "contains a secret", "revoke it at any time on the Overlay links page", "show diagnostics", "Custom CSS"],
+  ])("shows the localized OBS guide on the overlay links page (%s)", async (language, summary, sourceStep, secret, revoke, diagnostics, customCss) => {
+    setBrowserLanguage(language);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(response({ tokens: [] })));
+
+    render(<UiProvider><OverlayTokensPage channelId="kanal-a" canManage /></UiProvider>);
+
+    const disclosure = await screen.findByText(summary);
+    fireEvent.click(disclosure);
+    const guide = disclosure.closest("details");
+    expect(guide).not.toBeNull();
+    expect(guide).toHaveTextContent(sourceStep);
+    expect(guide).toHaveTextContent("800 × 120 px");
+    expect(guide).toHaveTextContent(secret);
+    expect(guide).toHaveTextContent(revoke);
+    expect(guide).toHaveTextContent(diagnostics);
+    expect(guide).toHaveTextContent("&debug=1");
+    expect(guide).toHaveTextContent(customCss);
+    expect(guide).toHaveTextContent("font: 700 48px system-ui, sans-serif");
   });
 
   it("lists tokens, shows metadata, and leaves disabled management controls visible for operators", async () => {
