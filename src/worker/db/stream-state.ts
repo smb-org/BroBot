@@ -126,7 +126,10 @@ export const writeEventSubStreamState = async (
     if (incomingSessionMs !== null && currentSessionMs !== null) {
       const idsKnown = streamId !== null && current.streamId !== null;
       const sameSessionId = idsKnown && streamId === current.streamId;
-      if (!sameSessionId && (idsKnown ? incomingSessionMs <= currentSessionMs : incomingSessionMs < currentSessionMs)) {
+      // A different, known stream id is a new session even at an equal
+      // started_at (e.g. a restart within the same second); only a
+      // strictly older start is superseded.
+      if (!sameSessionId && incomingSessionMs < currentSessionMs) {
         return "superseded";
       }
     }
@@ -221,7 +224,7 @@ export const writeEventSubStreamState = async (
                CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER)))
          OR (excluded.stream_id IS NOT NULL AND channel_stream_state.stream_id IS NOT NULL
           AND excluded.stream_id <> channel_stream_state.stream_id
-          AND excluded.started_at_epoch_ms > COALESCE(channel_stream_state.started_at_epoch_ms,
+          AND excluded.started_at_epoch_ms >= COALESCE(channel_stream_state.started_at_epoch_ms,
                CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER))))`,
   ).bind(
     channelId, state, changedAt, startedAt, changedAt, changedAt,

@@ -871,6 +871,51 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("switches to a different stream id at an equal started_at instead of treating it as the current session (#192)", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "operator-1");
+      await insertMember(database, "kanal-a", "operator-1", "operator");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      const db = database as unknown as D1Database;
+      const environmentValue = environment(database);
+      const startedAt = "2026-09-19T11:55:00.000Z";
+      const dispatchOnline = (streamId: string, receivedAt: string, triggerId: string) =>
+        dispatchEventSubNotification(environmentValue, {
+          channelId: "kanal-a", subscriptionType: "stream.online", triggerId,
+          payload: { started_at: startedAt, id: streamId }, receivedAt,
+        }, sent(), []);
+
+      await dispatchOnline("stream-a", NOW, "online-a");
+      await setChannelControl(
+        db, { userId: "operator-1", sessionId: "session-operator-1" }, "kanal-a", "pause", "until_stream_end",
+        "2026-09-19T11:56:00.000Z",
+      );
+      await database.prepare("UPDATE channel_variables SET value = 9 WHERE channel_id = 'kanal-a' AND name = 'score'").run();
+
+      // Same started_at, a different Twitch stream id: a genuinely new
+      // session (e.g. a quick restart), not a duplicate of the current one.
+      await dispatchOnline("stream-b", "2026-09-19T12:00:02.000Z", "online-b");
+
+      await expect(database.prepare(
+        "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", stream_id: "stream-b" });
+      await expect(readDispatchChannelState(db, "kanal-a", "2026-09-19T12:00:03.000Z")).resolves.toMatchObject({
+        controls: { pause: { active: false, mode: null } },
+      });
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 0 });
+      await expect(database.prepare("SELECT stream_id FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
+        .resolves.toEqual({ stream_id: "stream-b" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("memoizes one lazy Helix stream lookup for every module in a dispatch", async () => {
     const database = new TestD1Database();
     try {
