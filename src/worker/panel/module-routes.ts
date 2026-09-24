@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import {
   createChannelModuleWithAudit,
   getChannelModuleForChannel,
-  listChannelModulesForChannel,
   updateChannelModuleWithAudit,
 } from "../db/channel-modules";
 import {
@@ -16,8 +15,9 @@ import { MODULES } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState } from "../module-scopes";
+import { getPanelModuleStates } from "./module-repository";
 import { actorOf, readJsonBody } from "./member-routes";
-import { broadcasterHasScope } from "../broadcaster-scope";
+import { broadcasterHasScope, broadcasterScopesForChannel } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
@@ -25,12 +25,14 @@ import { effectiveTemplateVariables, templateWarnings, type TemplateVariable } f
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
+import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
   Variables: ChannelAuthorizationVariables & Pick<
     ModuleRouteVariables,
-    "writeModuleDiagnostics" | "broadcasterHasScope" | "getAppAccessToken" | "helixRequest"
+    "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
+    | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable"
   >;
 }
@@ -79,6 +81,10 @@ moduleRouter.use("/api/channels/:channelId/modules/*", requireChannelAuthorizati
 moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);
+  context.set("broadcasterScopesForChannel", broadcasterScopesForChannel);
+  context.set("measureServerTiming", (phase, run) => measureServerTiming(context, phase, run));
+  context.set("recordServerTiming", (phase, durationMs) => { recordServerTiming(context, phase, durationMs); });
+  context.set("scheduleBackgroundWork", (work) => { scheduleBackgroundWork(context, work); });
   context.set("getAppAccessToken", getAppAccessToken);
   context.set("helixRequest", helixRequest);
   context.set("listChannelVariables", async (channelId): Promise<readonly ModuleChannelVariable[]> =>
@@ -93,19 +99,7 @@ moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
 
 moduleRouter.get("/api/channels/:channelId/modules", async (context) => {
   const channelId = context.req.param("channelId");
-  const stored = await listChannelModulesForChannel(context.env.DB, channelId);
-  const storedById = new Map(stored.map((entry) => [entry.moduleId, entry]));
-  const modules: PanelModuleState[] = await Promise.all(MODULES.map(async (module) => {
-    const existing = storedById.get(module.id);
-    return moduleStateFor(
-      context.env.DB,
-      channelId,
-      module,
-      existing?.enabled ?? false,
-      existing?.settings ?? JSON.stringify(module.defaultSettings),
-    );
-  }));
-  return context.json({ modules });
+  return context.json({ modules: await measureServerTiming(context, "d1", () => getPanelModuleStates(context.env.DB, channelId)) });
 });
 
 moduleRouter.get("/api/channels/:channelId/modules/:moduleId/settings", async (context) => {

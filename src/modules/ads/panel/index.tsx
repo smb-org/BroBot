@@ -1,10 +1,13 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import { Button, Icon } from "../../../dashboard/ui";
 import type { AdsScheduleResponse } from "../contracts";
 import { loadAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
+
+const pickNewestSchedule = (left: AdsScheduleResponse, right: AdsScheduleResponse): AdsScheduleResponse =>
+  Date.parse(left.asOf ?? "") >= Date.parse(right.asOf ?? "") ? left : right;
 
 const formatTimestamp = (value: string | null, language: DashboardLanguage): string => {
   if (value === null) return "—";
@@ -19,18 +22,52 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
 export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; language?: DashboardLanguage }): ReactElement => {
   const labels = adsPanelTexts(language);
   const [schedule, setSchedule] = useState<AdsScheduleResponse | null>(null);
+  const latestRealtimeRef = useRef<{ schedule: AdsScheduleResponse["schedule"]; asOf: string } | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [snoozeBusy, setSnoozeBusy] = useState(false);
   const [snoozeOutcome, setSnoozeOutcome] = useState<"success" | "error" | null>(null);
 
   useEffect(() => {
     let active = true;
+    latestRealtimeRef.current = null;
     void loadAdsSchedule(channelId).then((loaded) => {
       if (!active) return;
-      setSchedule(loaded);
+      setSchedule((current) => {
+        const updates = [loaded, ...(current === null ? [] : [current])];
+        const buffered = latestRealtimeRef.current;
+        if (buffered !== null) {
+          const newest = updates.reduce((newestSoFar, candidate) => pickNewestSchedule(newestSoFar, candidate), loaded);
+          if (Date.parse(buffered.asOf) > Date.parse(newest.asOf ?? "")) {
+            return { ...loaded, schedule: buffered.schedule, asOf: buffered.asOf };
+          }
+        }
+        return updates.reduce((newestSoFar, candidate) => pickNewestSchedule(newestSoFar, candidate), loaded);
+      });
       setLoadError(false);
     }).catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
+  }, [channelId]);
+
+  useEffect(() => {
+    const handleRealtimeMessage = (event: Event): void => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
+      const message = detail as Record<string, unknown>;
+      if (message.type !== "ads.schedule.updated" || message.channelId !== channelId ||
+          typeof message.payload !== "object" || message.payload === null || Array.isArray(message.payload)) return;
+      const payload = message.payload as Record<string, unknown>;
+      if (typeof payload.asOf !== "string" || typeof payload.schedule !== "object" || payload.schedule === null || Array.isArray(payload.schedule)) return;
+      const update = { schedule: payload.schedule as AdsScheduleResponse["schedule"], asOf: payload.asOf };
+      const buffered = latestRealtimeRef.current;
+      if (buffered === null || Date.parse(update.asOf) > Date.parse(buffered.asOf)) latestRealtimeRef.current = update;
+      setSchedule((current) => current === null || Date.parse(update.asOf) <= Date.parse(current.asOf ?? "") ? current : {
+        ...current,
+        schedule: update.schedule,
+        asOf: update.asOf,
+      });
+    };
+    window.addEventListener("brobot:realtime", handleRealtimeMessage);
+    return () => window.removeEventListener("brobot:realtime", handleRealtimeMessage);
   }, [channelId]);
 
   if (schedule === null) return <p className={loadError ? "form-error" : "loading-line"} role={loadError ? "alert" : undefined}>{loadError ? labels.loadError : labels.loading}</p>;
@@ -63,6 +100,7 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
     <section className="module-stack" aria-label={labels.title}>
       <section className="config-section" aria-label={labels.scheduleSection}>
         <div className="section-heading"><h2>{labels.scheduleSection}</h2></div>
+        {schedule.asOf === undefined ? null : <p className="muted mono">{labels.asOf(formatTimestamp(schedule.asOf, language))}</p>}
         {schedule.schedule.nextAdAt === null ? <p className="empty-state">{labels.noAdBreak}</p> : (
           <div className="table-wrap">
             <table className="table" aria-label={labels.scheduleSection}>

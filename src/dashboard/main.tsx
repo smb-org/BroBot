@@ -60,6 +60,7 @@ import { AuditPage } from "./audit/AuditPage";
 import { ChannelVariablesPage } from "./ChannelVariablesPage";
 import { OverlayTokensPage } from "./OverlayTokensPage";
 import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
+import { useRealtimePanelMessages } from "./realtime";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
 
@@ -371,6 +372,54 @@ const streamDuration = (startedAt: string | null | undefined, now: number): stri
   return `${String(Math.floor(minutes / 60))}:${String(minutes % 60).padStart(2, "0")}`;
 };
 
+type ChannelStreamVersion = Pick<PanelChannelState, "channelId" | "streamState" | "streamStartedAt" | "streamStateChangedAt" | "streamStateCheckedAt" | "controls">;
+
+const streamVersionOf = (channel: ChannelStreamVersion): ChannelStreamVersion => ({
+  channelId: channel.channelId,
+  ...(channel.streamState === undefined ? {} : { streamState: channel.streamState }),
+  ...(channel.streamStartedAt === undefined ? {} : { streamStartedAt: channel.streamStartedAt }),
+  ...(channel.streamStateChangedAt === undefined ? {} : { streamStateChangedAt: channel.streamStateChangedAt }),
+  ...(channel.streamStateCheckedAt === undefined ? {} : { streamStateCheckedAt: channel.streamStateCheckedAt }),
+  ...(channel.controls === undefined ? {} : { controls: channel.controls }),
+});
+
+const mergeChannelStreamVersion = <T extends ChannelStreamVersion>(incoming: T, current: ChannelStreamVersion | undefined): T => {
+  if (current === undefined) return incoming;
+  const incomingChangedAt = incoming.streamStateChangedAt == null ? Number.NaN : Date.parse(incoming.streamStateChangedAt);
+  const currentChangedAt = current.streamStateChangedAt == null ? Number.NaN : Date.parse(current.streamStateChangedAt);
+  const incomingCheckedAt = incoming.streamStateCheckedAt == null ? Number.NaN : Date.parse(incoming.streamStateCheckedAt);
+  const currentCheckedAt = current.streamStateCheckedAt == null ? Number.NaN : Date.parse(current.streamStateCheckedAt);
+  const checkedAt = Number.isFinite(currentCheckedAt) &&
+      (!Number.isFinite(incomingCheckedAt) || currentCheckedAt > incomingCheckedAt)
+    ? current.streamStateCheckedAt
+    : incoming.streamStateCheckedAt;
+  const currentIsNewer = Number.isFinite(currentChangedAt) &&
+      (!Number.isFinite(incomingChangedAt) || currentChangedAt > incomingChangedAt);
+  const merged: ChannelStreamVersion = {
+    ...incoming,
+    ...(currentIsNewer ? {
+      ...(current.streamState === undefined ? {} : { streamState: current.streamState }),
+      ...(current.streamStartedAt === undefined ? {} : { streamStartedAt: current.streamStartedAt }),
+      ...(current.streamStateChangedAt === undefined ? {} : { streamStateChangedAt: current.streamStateChangedAt }),
+      ...(current.controls === undefined ? {} : { controls: current.controls }),
+    } : {}),
+    ...(incoming.controls === undefined && current.controls !== undefined ? { controls: current.controls } : {}),
+    ...(checkedAt === undefined ? {} : { streamStateCheckedAt: checkedAt }),
+  };
+  return merged as T;
+};
+
+const mergeAndRememberChannelStreamVersion = <T extends ChannelStreamVersion>(
+  incoming: T,
+  latestByChannel: Map<string, ChannelStreamVersion>,
+  current?: ChannelStreamVersion,
+): T => {
+  const withCurrent = mergeChannelStreamVersion(incoming, current);
+  const merged = mergeChannelStreamVersion(withCurrent, latestByChannel.get(incoming.channelId));
+  latestByChannel.set(incoming.channelId, streamVersionOf(merged));
+  return merged;
+};
+
 const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
   channelId: string;
   controls: PanelChannelControls | undefined;
@@ -541,6 +590,10 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate,
         {activeChannel === undefined ? null : <span className="dashboard-header__stream" data-state={streamState === "online" ? "live" : streamState === "offline" ? "offline" : "unknown"}>
           <Icon name={streamState === "online" ? "broadcast" : "broadcast-off"} size={20} />
           <span>{streamLabel}</span>
+          {activeChannel.streamStateCheckedAt === undefined || activeChannel.streamStateCheckedAt === null ||
+              !Number.isFinite(Date.parse(activeChannel.streamStateCheckedAt)) ? null : (
+            <DataAge since={Date.parse(activeChannel.streamStateCheckedAt)} format={texts.header.streamChecked} className="dashboard-header__stream-age" />
+          )}
         </span>}
         {connectionLed}
         {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
@@ -598,13 +651,18 @@ const relativeTime = (since: number, now: number): string => {
  * Proves liveness without asserting a status. Deliberately neutral and
  * never in status color.
  */
-const DataAge = ({ since }: { since: number }): ReactElement => {
+const DataAge = ({ since, format, className }: {
+  since: number;
+  format?: (relativeTime: string) => string;
+  className?: string;
+}): ReactElement => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => { setNow(Date.now()); }, 1000);
     return () => { clearInterval(id); };
   }, []);
-  return <span className="data-age">{dashboardTexts().time.updated(relativeTime(since, now))}</span>;
+  const age = relativeTime(since, now);
+  return <span className={`data-age${className === undefined ? "" : ` ${className}`}`}>{format === undefined ? dashboardTexts().time.updated(age) : format(age)}</span>;
 };
 
 const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, urgent, onCheck }: {
@@ -1005,7 +1063,14 @@ export const DashboardApp = (): ReactElement => {
   }, []);
 
   const [route, navigate] = useDashboardRoute();
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
+  const routeHasOwnRealtimeFeed = route.kind === "channel" &&
+    (route.section === "overview" || route.section === "events" || route.section === "variables");
+  useRealtimePanelMessages(realtimeChannelId, realtimeChannelId !== null && !routeHasOwnRealtimeFeed);
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
+  const latestStreamByChannel = useRef(new Map<string, ChannelStreamVersion>());
   const [, setFreshnessTick] = useState(0);
   const [isPlatform, setIsPlatform] = useState(false);
   const [viewerIsBot, setViewerIsBot] = useState(false);
@@ -1038,6 +1103,12 @@ export const DashboardApp = (): ReactElement => {
   // poll), and without this an older response can overwrite a newer one.
   const modulesRequestGeneration = useRef(0);
   const channelsRequestGeneration = useRef(0);
+  // Same guard for `reloadOverview`: a control edit's own refresh can resolve
+  // before a reload that started earlier (e.g. on reconnect). Controls don't
+  // touch streamStateChangedAt, so the changedAt-based merge alone can't tell
+  // the two apart -- only the later-started request may ever apply its
+  // response (latest-started wins).
+  const overviewRequestGeneration = useRef(0);
   // Spotlight (#164): set right before navigating to a module so its panel
   // can pre-select something on mount (e.g. a text command by name). Not
   // part of the route/URL -- see the deep-link discussion in that commit.
@@ -1047,6 +1118,46 @@ export const DashboardApp = (): ReactElement => {
   const [pendingVariableSelection, setPendingVariableSelection] = useState<{ channelId: string; name: string } | null>(null);
   const requestLogin = useCallback((): void => { setAuthenticationRequired(true); }, []);
 
+  useEffect(() => {
+    const handleRealtimeMessage = (event: Event): void => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
+      const message = detail as Record<string, unknown>;
+      if (message.type !== "stream.state.changed" || typeof message.channelId !== "string" ||
+          typeof message.payload !== "object" || message.payload === null || Array.isArray(message.payload)) return;
+      const payload = message.payload as Record<string, unknown>;
+      if ((payload.state !== "online" && payload.state !== "offline") ||
+          (payload.startedAt !== null && typeof payload.startedAt !== "string") ||
+          typeof payload.changedAt !== "string" || !Number.isFinite(Date.parse(payload.changedAt)) ||
+          (payload.checkedAt !== undefined && (typeof payload.checkedAt !== "string" || !Number.isFinite(Date.parse(payload.checkedAt))))) return;
+      const { channelId } = message;
+      const streamVersion = mergeAndRememberChannelStreamVersion({
+        channelId,
+        streamState: payload.state,
+        streamStartedAt: payload.startedAt,
+        streamStateChangedAt: payload.changedAt,
+        streamStateCheckedAt: typeof payload.checkedAt === "string" ? payload.checkedAt : payload.changedAt,
+        ...(payload.controls === undefined ? {} : { controls: payload.controls as PanelChannelControls }),
+      }, latestStreamByChannel.current);
+      setChannels((current) => current.data === null || !current.data.some((channel) => channel.channelId === channelId) ? current : {
+        ...current,
+        data: current.data.map((channel) => channel.channelId !== channelId ? channel : {
+          ...channel,
+          ...mergeChannelStreamVersion({ ...channel, ...streamVersion }, channel),
+        }),
+      });
+      setOverview((current) => current.data?.channelId !== channelId ? current : {
+        ...current,
+        data: {
+          ...current.data,
+          ...mergeChannelStreamVersion({ ...current.data, ...streamVersion }, current.data),
+        },
+      });
+    };
+    window.addEventListener("brobot:realtime", handleRealtimeMessage);
+    return () => window.removeEventListener("brobot:realtime", handleRealtimeMessage);
+  }, []);
+
   const reloadChannels = useCallback(async (): Promise<void> => {
     const generation = channelsRequestGeneration.current + 1;
     channelsRequestGeneration.current = generation;
@@ -1054,7 +1165,10 @@ export const DashboardApp = (): ReactElement => {
     try {
       const response = await fetchChannels();
       if (channelsRequestGeneration.current !== generation) return;
-      setChannels(loadedState(response.channels));
+      const orderedChannels = response.channels.map((channel) =>
+        mergeAndRememberChannelStreamVersion(channel, latestStreamByChannel.current),
+      );
+      setChannels(loadedState(orderedChannels));
       setIsPlatform(response.platformAdmin);
       setViewerIsBot(response.viewerIsBot);
       setBotLogin(response.botLogin ?? null);
@@ -1215,37 +1329,28 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "channel" && route.kind !== "module") return cleanup;
     const expectedOverviewPath = dashboardRoutePath(route);
 
-    // The sidebar's Modules group lists the active modules on every
-    // channel/module route, not only the ones that already fetch this for
-    // their own page (the module detail page, the module list, the event
-    // filters) -- one fetch here covers all of them; those keep their own
-    // fetch removed below instead of doing it twice.
-    const loadSidebarModules = async (): Promise<void> => {
-      setModules(loadingState());
-      try {
-        const response = await fetchModules(route.channelId, controller.signal);
-        if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
-      } catch (error) {
-        if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-          setModules({ status: "error", data: null, error: errorMessage(error) });
-          if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-        }
-      }
-    };
-    void loadSidebarModules();
-
     const load = async (): Promise<void> => {
+      if (route.kind === "channel" && route.section === "modules") return;
       // The module page shows the same channel header as the overview and
       // therefore needs the same data.
       if (route.kind === "module" || route.section === "overview") {
+        // Same generation guard `reloadOverview` uses: a control edit's own
+        // reload can resolve before this initial fetch does, and without
+        // this the initial response would overwrite the edit on arrival.
+        const overviewGeneration = overviewRequestGeneration.current + 1;
+        overviewRequestGeneration.current = overviewGeneration;
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
-          if (!cancelled) {
-            setOverview(loadedState(response));
+          if (!cancelled && overviewRequestGeneration.current === overviewGeneration) {
+            const orderedResponse = mergeAndRememberChannelStreamVersion(response, latestStreamByChannel.current);
+            setOverview((current) => loadedState(mergeChannelStreamVersion(
+              orderedResponse,
+              current.data?.channelId === route.channelId ? current.data : undefined,
+            )));
             setOverviewRoutePath(expectedOverviewPath);
           }
         } catch (error) {
-          if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
+          if (!cancelled && overviewRequestGeneration.current === overviewGeneration && !(error instanceof DOMException && error.name === "AbortError")) {
             setOverview({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
           }
@@ -1314,6 +1419,7 @@ export const DashboardApp = (): ReactElement => {
         return;
       }
 
+      if (route.section !== "system") return;
       setSystem(loadingState());
       setSystemChannelId(route.channelId);
       try {
@@ -1392,12 +1498,13 @@ export const DashboardApp = (): ReactElement => {
     afterLoad?: () => void,
     /** Lets a superseded call discard its own response instead of overwriting a newer one. */
     isCurrent: () => boolean = () => true,
+    mergeResponse?: (response: T, current: T | null) => T,
   ): Promise<void> => {
     setState((current) => loadingState(current));
     try {
       const response = await fetchData();
       if (!isCurrent() || window.location.pathname !== routePath) return;
-      setState(loadedState(response));
+      setState((current) => loadedState(mergeResponse?.(response, current.data) ?? response));
       afterLoad?.();
     } catch (error) {
       if (!isCurrent() || window.location.pathname !== routePath) return;
@@ -1409,7 +1516,11 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const reloadModules = async (): Promise<void> => {
-    if (route.kind !== "module" && (route.kind !== "channel" || (route.section !== "modules" && route.section !== "overview"))) return;
+    if (route.kind !== "channel" && route.kind !== "module") return;
+    if (selectedChannel?.modules !== undefined) {
+      await reloadChannels();
+      return;
+    }
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
     const generation = modulesRequestGeneration.current + 1;
@@ -1428,8 +1539,37 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
-    await reloadData(routePath, setOverview, () => fetchChannelOverview(channelId), true, () => setOverviewRoutePath(routePath));
+    const generation = overviewRequestGeneration.current + 1;
+    overviewRequestGeneration.current = generation;
+    await reloadData(
+      routePath,
+      setOverview,
+      () => fetchChannelOverview(channelId),
+      true,
+      () => setOverviewRoutePath(routePath),
+      () => overviewRequestGeneration.current === generation,
+      (response, current) => mergeAndRememberChannelStreamVersion(
+        response,
+        latestStreamByChannel.current,
+        current?.channelId === channelId ? current : undefined,
+      ),
+    );
   };
+  const reloadOverviewRef = useRef(reloadOverview);
+  reloadOverviewRef.current = reloadOverview;
+  useEffect(() => {
+    const reconcileOnSocketConnect = (event: Event): void => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
+      const channelId = Reflect.get(detail, "channelId") as unknown;
+      const currentRoute = routeRef.current;
+      if (typeof channelId === "string" &&
+          (currentRoute.kind === "channel" || currentRoute.kind === "module") &&
+          currentRoute.channelId === channelId) void reloadOverviewRef.current();
+    };
+    window.addEventListener("brobot:realtime-connected", reconcileOnSocketConnect);
+    return () => window.removeEventListener("brobot:realtime-connected", reconcileOnSocketConnect);
+  }, []);
 
   const reloadSystem = async (): Promise<void> => {
     if (route.kind !== "channel" || route.section !== "system") return;
@@ -1439,7 +1579,11 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const refreshChannelState = async (): Promise<void> => {
-    await Promise.all([reloadChannels(), reloadModules(), reloadOverview(), reloadSystem()]);
+    await Promise.all([
+      reloadChannels(),
+      reloadOverview(),
+      reloadSystem(),
+    ]);
   };
   const refreshChannelStateRef = useRef(refreshChannelState);
   refreshChannelStateRef.current = refreshChannelState;
@@ -1505,9 +1649,9 @@ export const DashboardApp = (): ReactElement => {
   }, [expiryAt, expiryRefreshKey]);
 
   const toggleHeaderModule = async (): Promise<void> => {
-    if (route.kind !== "module" || modules.data === null) return;
+    if (route.kind !== "module") return;
     const targetModuleId = route.moduleId;
-    const state = modules.data.modules.find((module) => module.id === targetModuleId);
+    const state = (selectedChannel?.modules ?? modules.data?.modules ?? []).find((module) => module.id === targetModuleId);
     if (state === undefined || state.mandatory === true || targetModuleId === "channel_events" ||
         (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusy) return;
     setHeaderModuleBusy(true);
@@ -1562,6 +1706,34 @@ export const DashboardApp = (): ReactElement => {
     if ((route.kind !== "channel" && route.kind !== "module") || channels.data === null) return null;
     return channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
   }, [channels.data, route]);
+
+  // Current workers include module state in GET /api/channels. Keep a
+  // compatibility fallback for an older worker response that omits it.
+  // Current page loads therefore need one request, including the sidebar.
+  useEffect(() => {
+    if ((route.kind !== "channel" && route.kind !== "module") || selectedChannel === null) {
+      setModules(idleState());
+      return;
+    }
+    if (selectedChannel.modules !== undefined) {
+      setModules(loadedState({ modules: selectedChannel.modules }));
+      return;
+    }
+    const controller = new AbortController();
+    const routePath = dashboardRoutePath(route);
+    setModules(loadingState());
+    void fetchModules(route.channelId, controller.signal).then((response) => {
+      if (!controller.signal.aborted && window.location.pathname + window.location.search === routePath) {
+        setModules(loadedState(response));
+      }
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      setModules({ status: "error", data: null, error: errorMessage(error) });
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    });
+    return () => controller.abort();
+  }, [route, selectedChannel]);
+
   const overviewForHeader = overview.data !== null && selectedChannel !== null &&
     overview.data.channelId === selectedChannel.channelId &&
     overviewRoutePath === dashboardRoutePath(route)
@@ -1701,7 +1873,9 @@ export const DashboardApp = (): ReactElement => {
     return <UiProvider><main className="auth-screen"><div className="auth-card"><h1>{texts.signIn.required}</h1><p>{texts.signIn.explanation}</p><a className="button" href="/auth/login">{texts.signIn.signInWithTwitch}</a></div></main></UiProvider>;
   }
 
-  const sidebarModuleStates = route.kind === "channel" || route.kind === "module" ? modules.data?.modules ?? null : null;
+  const sidebarModuleStates = route.kind === "channel" || route.kind === "module"
+    ? selectedChannel?.modules ?? modules.data?.modules ?? null
+    : null;
 
   const botSignedIn = installationBot?.status === "connected";
   const isChannelOrModuleRoute = route.kind === "channel" || route.kind === "module";
@@ -1757,18 +1931,18 @@ export const DashboardApp = (): ReactElement => {
         /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel?.modules ?? overview.data.modules ?? modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection(name); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlay-links" && selectedChannel !== null ? <OverlayTokensPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && system.status !== "idle" ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && audit.status !== "idle" ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} filters={auditFilters} onFiltersChange={updateAuditFilters} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
-        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} isPlatformAdmin={isPlatform} {...(channels.status === "success" ? { botSignedIn } : {})} streamState={overviewForHeader === null ? selectedChannel.streamState : overviewForHeader.streamState} modules={modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={selectedChannel?.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
+        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} isPlatformAdmin={isPlatform} {...(channels.status === "success" ? { botSignedIn } : {})} streamState={overviewForHeader === null ? selectedChannel.streamState : overviewForHeader.streamState} modules={selectedChannel.modules ?? modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} onOpenVariable={(channelId, name) => { setPendingVariableSelection({ channelId, name }); }} /> : null}
         </div>
       </Shell>
     </UiProvider>

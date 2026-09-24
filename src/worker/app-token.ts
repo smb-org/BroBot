@@ -11,6 +11,8 @@ import {
 import { logMaintenanceError, TwitchApiError } from "./bot-maintenance";
 import { APP_TOKEN_REFRESH_THRESHOLD_MS } from "../maintenance-policy";
 
+const APP_TOKEN_REQUEST_TIMEOUT_MS = 5_000;
+
 export interface AppTokenEnvironment {
   TWITCH_CLIENT_ID: string;
   TWITCH_CLIENT_SECRET: string;
@@ -48,25 +50,41 @@ export const requestAppAccessToken = async (
   fetcher: typeof fetch,
   environment: AppTokenEnvironment,
 ): Promise<AppAccessToken> => {
-  const response = await fetcher("https://id.twitch.tv/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: environment.TWITCH_CLIENT_ID,
-      client_secret: environment.TWITCH_CLIENT_SECRET,
-      grant_type: "client_credentials",
-    }),
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(Object.assign(new Error("The Twitch app-token request timed out."), { name: "TimeoutError" }));
+    }, APP_TOKEN_REQUEST_TIMEOUT_MS);
   });
-  const body = await responseJson(response);
-  if (!response.ok || typeof body.access_token !== "string" || body.access_token.length === 0 ||
-      !isFinitePositiveNumber(body.expires_in)) {
-    throw new TwitchApiError(
-      "Twitch app token was rejected.",
-      response.status,
-      typeof body.error === "string" ? body.error : null,
-    );
+  const request = async (): Promise<AppAccessToken> => {
+    const response = await fetcher("https://id.twitch.tv/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: environment.TWITCH_CLIENT_ID,
+        client_secret: environment.TWITCH_CLIENT_SECRET,
+        grant_type: "client_credentials",
+      }),
+      signal: controller.signal,
+    });
+    const body = await responseJson(response);
+    if (!response.ok || typeof body.access_token !== "string" || body.access_token.length === 0 ||
+        !isFinitePositiveNumber(body.expires_in)) {
+      throw new TwitchApiError(
+        "Twitch app token was rejected.",
+        response.status,
+        typeof body.error === "string" ? body.error : null,
+      );
+    }
+    return { accessToken: body.access_token, expiresIn: body.expires_in };
+  };
+  try {
+    return await Promise.race([request(), timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
-  return { accessToken: body.access_token, expiresIn: body.expires_in };
 };
 
 const decryptAppAccessToken = async (

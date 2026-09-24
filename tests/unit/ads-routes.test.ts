@@ -6,6 +6,10 @@ import { panelRouter } from "../../src/worker/panel/routes";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
+import { getAdSchedule } from "../../src/modules/ads/adapters/ad-schedule";
+import { getAppAccessToken } from "../../src/worker/app-token";
+import { helixRequest } from "../../src/worker/twitch/helix";
+import type { AdsSchedule } from "../../src/modules/ads/contracts";
 
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
@@ -21,20 +25,75 @@ const environmentFor = (
   database: TestD1Database,
   schedule: () => void,
   clear: () => void,
-): Env => ({
-  DB: database as unknown as D1Database,
-  TWITCH_CLIENT_ID: "client-id",
-  TWITCH_CLIENT_SECRET: "client-secret",
-  TOKEN_ENCRYPTION_KEYS: tokenKeys,
-  ...environmentKeys,
-  CHANNEL: {
-    idFromName: (channelId: string) => channelId,
-    get: () => ({
-      scheduleAdPrewarning: () => { schedule(); return Promise.resolve(); },
-      clearAdPrewarning: () => { clear(); return Promise.resolve(); },
-    }),
-  } as unknown as Env["CHANNEL"],
-} as unknown as Env);
+  initialCache: { schedule: AdsSchedule; asOf: string } | null = null,
+): Env => {
+  let cache = initialCache;
+  let retryAfter: number | null = null;
+  type RefreshResult = {
+    cache: typeof cache;
+    reason: string | null;
+    detail: Readonly<Record<string, string | number | boolean | null>>;
+    d1Ms: number;
+    helixMs: number;
+    changed: boolean;
+  };
+  let refresh: Promise<RefreshResult> | null = null;
+  const save = (next: AdsSchedule, asOf: string): boolean => {
+    const changed = cache === null || JSON.stringify(cache.schedule) !== JSON.stringify(next);
+    cache = { schedule: next, asOf };
+    if (changed) schedule();
+    return changed;
+  };
+  const object = {
+    getCachedAdSchedule: () => Promise.resolve(cache),
+    reconcileCachedAdPrewarning: vi.fn(() => Promise.resolve()),
+    getTwitchRateLimitRetryAfter: () => Promise.resolve(retryAfter !== null && retryAfter > Date.now() ? retryAfter : null),
+    setTwitchRateLimitRetryAfter: (deadline: number) => {
+      retryAfter = deadline;
+      return Promise.resolve();
+    },
+    refreshAdSchedule: () => {
+      if (refresh !== null) return refresh;
+      refresh = (async () => {
+        const startedAt = performance.now();
+        const result = await getAdSchedule(
+          { DB: database as unknown as D1Database, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret", TOKEN_ENCRYPTION_KEYS: tokenKeys, ...environmentKeys } as Env,
+          "kanal-a",
+          new Date().toISOString(),
+          getAppAccessToken,
+          helixRequest,
+          fetch,
+        );
+        const helixMs = performance.now() - startedAt;
+        if (!result.fetched || result.schedule === null) {
+          if (result.reason === "rate_limited") retryAfter = Date.now() + 60_000;
+          return { cache, reason: result.reason, detail: result.detail, d1Ms: 0, helixMs, changed: false };
+        }
+        const asOf = new Date().toISOString();
+        const changed = save(result.schedule, asOf);
+        return { cache, reason: null, detail: result.detail, d1Ms: 0, helixMs, changed };
+      })().finally(() => { refresh = null; });
+      return refresh;
+    },
+    storeAdSchedule: (next: AdsSchedule, asOf: string) => {
+      save(next, asOf);
+      return Promise.resolve({ schedule: next, asOf });
+    },
+    scheduleAdPrewarning: () => { schedule(); return Promise.resolve(); },
+    clearAdPrewarning: () => { clear(); return Promise.resolve(); },
+  };
+  return {
+    DB: database as unknown as D1Database,
+    TWITCH_CLIENT_ID: "client-id",
+    TWITCH_CLIENT_SECRET: "client-secret",
+    TOKEN_ENCRYPTION_KEYS: tokenKeys,
+    ...environmentKeys,
+    CHANNEL: {
+      idFromName: (channelId: string) => channelId,
+      get: () => object,
+    } as unknown as Env["CHANNEL"],
+  } as unknown as Env;
+};
 
 const requestFor = async (
   userId: string,
@@ -96,7 +155,11 @@ describe("ad routes", () => {
     vi.unstubAllGlobals();
   });
 
-  const setup = async (role: "broadcaster" | "manager" | "operator", scopes: string[] = ["channel:read:ads", "channel:manage:ads"]): Promise<Env> => {
+  const setup = async (
+    role: "broadcaster" | "manager" | "operator",
+    scopes: string[] = ["channel:read:ads", "channel:manage:ads"],
+    initialCache: { schedule: AdsSchedule; asOf: string } | null = null,
+  ): Promise<Env> => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", scopes);
     await insertLoginIdentityAndSession(database, "user-1");
@@ -105,7 +168,7 @@ describe("ad routes", () => {
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('kanal-a', 'ads', 1, '{"automatic":"auto","manual":"manuell","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
     ).run();
-    return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void);
+    return environmentFor(database, schedule as unknown as () => void, clear as unknown as () => void, initialCache);
   };
 
   it("lets an operator snooze and writes the outcome to the event log", async () => {
@@ -206,7 +269,119 @@ describe("ad routes", () => {
     await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log").first()).resolves.toEqual({ count: 0 });
   });
 
-  it("logs a failed schedule fetch", async () => {
+  it("serves a fresh cached schedule without calling Helix", async () => {
+    const cached = {
+      schedule: { nextAdAt: "2026-09-24T18:00:00.000Z", duration: 60, lastAdAt: null, prerollFreeTime: 120, snoozeCount: 1, snoozeRefreshAt: null },
+      asOf: new Date().toISOString(),
+    } satisfies { schedule: AdsSchedule; asOf: string };
+    const environment = await setup("operator", ["channel:read:ads", "channel:manage:ads"], cached);
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ...cached, snoozeScopeAvailable: true });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it("coalesces stale schedule refreshes and serves the last good value while they run", async () => {
+    const cached = {
+      schedule: { nextAdAt: "2026-09-24T18:00:00.000Z", duration: 60, lastAdAt: null, prerollFreeTime: 120, snoozeCount: 1, snoozeRefreshAt: null },
+      asOf: new Date(Date.now() - 61_000).toISOString(),
+    } satisfies { schedule: AdsSchedule; asOf: string };
+    const environment = await setup("operator", ["channel:read:ads", "channel:manage:ads"], cached);
+    let resolveHelix: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => new Promise<Response>((resolve) => { resolveHelix = resolve; }));
+    vi.stubGlobal("fetch", fetcher);
+    const tasks: Promise<unknown>[] = [];
+    const executionContext = {
+      waitUntil: (promise: Promise<unknown>) => { tasks.push(promise); },
+      passThroughOnException: () => undefined,
+    } as unknown as ExecutionContext;
+    const request = () => requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule");
+
+    const [left, right] = await Promise.all([
+      request().then((input) => panelRouter.fetch(input, environment, executionContext)),
+      request().then((input) => panelRouter.fetch(input, environment, executionContext)),
+    ]);
+    expect(left.status).toBe(200);
+    expect(right.status).toBe(200);
+    await expect(left.json()).resolves.toMatchObject(cached);
+    await expect(right.json()).resolves.toMatchObject(cached);
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
+    expect(tasks).toHaveLength(2);
+    resolveHelix?.(new Response(scheduleBody("2026-09-24T18:30:00.000Z"), { status: 200 }));
+    await Promise.all(tasks);
+    expect(schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the cached schedule and as-of time when a stale refresh is rate-limited", async () => {
+    const cached = {
+      schedule: { nextAdAt: "2026-09-24T18:00:00.000Z", duration: 60, lastAdAt: null, prerollFreeTime: 120, snoozeCount: 1, snoozeRefreshAt: null },
+      asOf: new Date(Date.now() - 61_000).toISOString(),
+    } satisfies { schedule: AdsSchedule; asOf: string };
+    const environment = await setup("operator", ["channel:read:ads", "channel:manage:ads"], cached);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
+    vi.stubGlobal("fetch", fetcher);
+    const tasks: Promise<unknown>[] = [];
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const executionContext = {
+      waitUntil: (promise: Promise<unknown>) => { tasks.push(promise); },
+      passThroughOnException: () => undefined,
+    } as unknown as ExecutionContext;
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      environment,
+      executionContext,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject(cached);
+    await Promise.all(tasks);
+    expect(schedule).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith("Background ad schedule refresh did not complete.", "rate_limited");
+
+    const nextViewTasks: Promise<unknown>[] = [];
+    const nextExecutionContext = {
+      waitUntil: (promise: Promise<unknown>) => { nextViewTasks.push(promise); },
+      passThroughOnException: () => undefined,
+    } as unknown as ExecutionContext;
+    const nextResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      environment,
+      nextExecutionContext,
+    );
+
+    expect(nextResponse.status).toBe(200);
+    await expect(nextResponse.json()).resolves.toMatchObject(cached);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(nextViewTasks).toHaveLength(0);
+    warning.mockRestore();
+  });
+
+  it("keeps a cold unauthorized schedule read mapped to 403", async () => {
+    const environment = await setup("operator");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "unauthorized" }),
+      { status: 401 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "ad_schedule_read_failed", reason: "unauthorized" });
+  });
+
+  it("keeps schedule-read failures out of D1 diagnostics", async () => {
     const environment = await setup("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
       JSON.stringify({ message: "Twitch nicht erreichbar" }),
@@ -219,12 +394,8 @@ describe("ad routes", () => {
     );
 
     expect(response.status).toBe(429);
-    await expect(database.prepare(
-      "SELECT code FROM event_log WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ code: "ads.prewarning.schedule_error" });
-    // Issue #201 follow-up: the event-log diagnostic carries this same
-    // message under `twitchMessage`, but the API error response has always
-    // used `message`.
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM event_log WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
     const body = await response.json<{ detail: Record<string, unknown> }>();
     expect(body.detail.message).toBe("Twitch nicht erreichbar");
     expect(body.detail.twitchMessage).toBeUndefined();

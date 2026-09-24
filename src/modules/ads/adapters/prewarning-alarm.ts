@@ -4,7 +4,7 @@ import { adsSettingsSchema } from "../contracts";
 
 const WARNING_SCOPE = "channel:read:ads";
 
-interface AdPrewarningScheduler {
+export interface AdPrewarningScheduler {
   schedule: (dueAtMs: number) => Promise<void>;
   clear: () => Promise<void>;
 }
@@ -40,8 +40,10 @@ export const refreshAdPrewarningAlarm = async (
   channelId: string,
   schedule: AdsScheduleResponse["schedule"],
   broadcasterHasScope: ModuleRouteVariables["broadcasterHasScope"],
+  schedulerOverride?: AdPrewarningScheduler | null,
+  grantedScopes?: readonly string[],
 ): Promise<void> => {
-  const scheduler = schedulerFor(environment, channelId);
+  const scheduler = schedulerOverride === undefined ? schedulerFor(environment, channelId) : schedulerOverride;
   const row = await environment.DB.prepare(
     `SELECT enabled, settings
        FROM channel_modules
@@ -60,11 +62,10 @@ export const refreshAdPrewarningAlarm = async (
     return;
   }
   const settings = adsSettingsSchema.safeParse(rawSettings);
-  if (!settings.success || !settings.data.prewarning || !await broadcasterHasScope(
-    environment.DB,
-    channelId,
-    WARNING_SCOPE,
-  )) {
+  const warningScopeAvailable = grantedScopes === undefined
+    ? await broadcasterHasScope(environment.DB, channelId, WARNING_SCOPE)
+    : grantedScopes.includes(WARNING_SCOPE);
+  if (!settings.success || !settings.data.prewarning || !warningScopeAvailable) {
     await clearPrewarning(scheduler);
     return;
   }

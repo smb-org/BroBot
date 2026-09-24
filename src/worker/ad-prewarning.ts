@@ -10,7 +10,7 @@ import { moduleBroadcasterScopeState } from "./module-scopes";
 import { sendChatMessage } from "./chat";
 import { writeModuleDiagnostics } from "./event-log";
 import { getAppAccessToken } from "./app-token";
-import { getAdSchedule, type AdScheduleResult } from "../modules/ads/adapters/ad-schedule";
+import { getAdSchedule, type AdSchedule, type AdScheduleResult } from "../modules/ads/adapters/ad-schedule";
 import { helixRequest } from "./twitch/helix";
 
 const MODULE_ID = "ads";
@@ -37,6 +37,14 @@ export interface AdPrewarningEnvironment {
 export interface AdScheduler {
   schedule: (dueAtMs: number) => Promise<void>;
   clear: () => Promise<void>;
+  /** Store a freshly fetched schedule through the channel object's generation guard. */
+  storeSchedule?: (
+    schedule: AdSchedule,
+    asOf: string,
+    options?: { expectedGeneration?: number; reconcileAlarm?: boolean },
+  ) => Promise<unknown>;
+  readScheduleGeneration?: () => Promise<number>;
+  readSchedule?: () => Promise<AdSchedule | null>;
 }
 
 const nowMsFrom = (now: string): number => {
@@ -59,7 +67,19 @@ const moduleSettings = (record: ChannelModuleRecord | null) => {
 const channelObject = (
   environment: AdPrewarningEnvironment,
   channelId: string,
-): { scheduleAdPrewarning: (dueAtMs: number) => Promise<void>; clearAdPrewarning: () => Promise<void> } | null => {
+): {
+  scheduleAdPrewarning: (dueAtMs: number) => Promise<void>;
+  clearAdPrewarning: () => Promise<void>;
+  storeAdSchedule: (
+    schedule: AdSchedule,
+    asOf: string,
+    grantedScopes?: readonly string[],
+    expectedGeneration?: number,
+    reconcileAlarm?: boolean,
+  ) => Promise<unknown>;
+  getAdScheduleGeneration: () => Promise<number>;
+  getCachedAdSchedule: () => Promise<{ schedule: AdSchedule } | null>;
+} | null => {
   if (environment.CHANNEL === undefined) return null;
   return environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId));
 };
@@ -75,6 +95,18 @@ const schedulerFor = (
   return {
     schedule: async (dueAtMs) => { await stub.scheduleAdPrewarning(dueAtMs); },
     clear: async () => { await stub.clearAdPrewarning(); },
+    readScheduleGeneration: () => stub.getAdScheduleGeneration(),
+    readSchedule: async () => (await stub.getCachedAdSchedule())?.schedule ?? null,
+    storeSchedule: async (schedule, asOf, options) => {
+      if (options === undefined) return await stub.storeAdSchedule(schedule, asOf);
+      return await stub.storeAdSchedule(
+        schedule,
+        asOf,
+        undefined,
+        options.expectedGeneration,
+        options.reconcileAlarm,
+      );
+    },
   };
 };
 
@@ -85,6 +117,24 @@ const schedule = async (scheduler: AdScheduler | null, dueAtMs: number): Promise
 
 const clear = async (scheduler: AdScheduler | null): Promise<void> => {
   await scheduler?.clear();
+};
+
+/**
+ * A rejected generation means this fetch lost to a newer schedule save. Some
+ * adapters historically returned void after awaiting the guarded save, so
+ * treat an ambiguous result the same way: only use the fetched value when a
+ * successful save is explicit. Otherwise use the object cache or skip.
+ */
+const storeScheduleAndResolveCurrent = async (
+  scheduler: AdScheduler | null,
+  schedule: AdSchedule,
+  asOf: string,
+  options?: { expectedGeneration?: number; reconcileAlarm?: boolean },
+): Promise<AdSchedule | null> => {
+  if (scheduler?.storeSchedule === undefined) return schedule;
+  const stored = await scheduler.storeSchedule(schedule, asOf, options);
+  if (stored !== null && stored !== undefined) return schedule;
+  return await scheduler.readSchedule?.() ?? null;
 };
 
 const writeDiagnostics = async (
@@ -191,6 +241,7 @@ export const refreshAdPrewarning = async (
     return;
   }
 
+  const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
   const result = alreadyFetchedSchedule ?? await getAdSchedule(
     environment as unknown as Env,
     channelId,
@@ -209,15 +260,25 @@ export const refreshAdPrewarning = async (
     }
     return;
   }
-  if (result.schedule.nextAdAt === null) {
-    await clear(scheduler);
+  // EventSub fetches happen outside the ChannelObject's schedule refresh path.
+  // Persist the fetched value there before touching its alarm so a subsequent
+  // panel read cannot reconcile an older cached schedule over this one.
+  const storedByChannelObject = scheduler?.storeSchedule !== undefined;
+  const currentSchedule = storedByChannelObject
+    ? await storeScheduleAndResolveCurrent(scheduler, result.schedule, now, {
+      ...(scheduleGeneration === undefined ? {} : { expectedGeneration: scheduleGeneration }),
+    })
+    : result.schedule;
+  if (currentSchedule === null) return;
+  if (currentSchedule.nextAdAt === null) {
+    if (!storedByChannelObject) await clear(scheduler);
     if (shouldWriteDiagnostics) {
       await writeOne(environment, channelId, triggerId, now, "ads.prewarning.no_schedule");
     }
     return;
   }
 
-  await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
+  if (!storedByChannelObject) await replanFromSchedule(scheduler, configured.settings, currentSchedule.nextAdAt);
 };
 
 /** Runs the due prewarning after a fresh schedule fetch. */
@@ -234,6 +295,7 @@ export const processAdPrewarning = async (
   const configured = await settingRecord(environment, channelId, triggerId, now, scheduler);
   if (configured === null || !configured.settings.prewarning) return;
 
+  const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
   const result = await getAdSchedule(
     environment as unknown as Env,
     channelId,
@@ -251,34 +313,70 @@ export const processAdPrewarning = async (
     return;
   }
 
+  // The alarm run has already claimed its deadline, so refresh the cached
+  // schedule without rearming from the cache before its decision is applied.
+  const currentSchedule = await storeScheduleAndResolveCurrent(scheduler, result.schedule, now, {
+    ...(scheduleGeneration === undefined ? {} : { expectedGeneration: scheduleGeneration }),
+    reconcileAlarm: false,
+  });
+  if (currentSchedule === null) return;
+
   const decision = decideAdPrewarning({
     settings: configured.settings,
     scopeAvailable: true,
     nowAtMs: nowMsFrom(now),
     plannedAtMs: scheduledDueAtMs + configured.settings.leadSeconds * 1000,
     schedule: {
-      nextAdAt: result.schedule.nextAdAt,
-      lastAdAt: result.schedule.lastAdAt,
+      nextAdAt: currentSchedule.nextAdAt,
+      lastAdAt: currentSchedule.lastAdAt,
     },
   });
 
+  // A snooze can land after the decision above but before the chat message
+  // actually goes out (sendChatMessage awaits a network call). Re-read the
+  // same guarded cache immediately before sending and recompute the decision
+  // from it, so a schedule change in that window skips/reschedules instead
+  // of announcing the now-stale ad time.
+  const freshSchedule = decision.kind === "announce" ? await scheduler?.readSchedule?.() ?? null : null;
+  const finalDecision = freshSchedule === null || freshSchedule.nextAdAt === currentSchedule.nextAdAt
+    ? decision
+    : decideAdPrewarning({
+      settings: configured.settings,
+      scopeAvailable: true,
+      nowAtMs: nowMsFrom(now),
+      plannedAtMs: scheduledDueAtMs + configured.settings.leadSeconds * 1000,
+      schedule: { nextAdAt: freshSchedule.nextAdAt, lastAdAt: freshSchedule.lastAdAt },
+    });
+
   const diagnostics: ModuleDiagnostic[] = [{
-    code: decisionCode(decision),
-    detail: decisionDetail(decision),
+    code: decisionCode(finalDecision),
+    detail: decisionDetail(finalDecision),
   }];
-  if (decision.kind === "announce") {
-    const sent = await sendChatMessage(environment, channelId, decision.text, undefined, fetcher);
+  if (finalDecision.kind === "announce") {
+    // sendChatMessage still awaits bot identity and an access token before
+    // its own POST, so a snooze can land after the recheck above but before
+    // that call goes out. stillValid re-reads the cache one more time right
+    // before the POST -- the smallest remaining window (see the `ponytail:`
+    // note on sendChatMessage's `stillValid` parameter).
+    const validatedNextAdAt = (freshSchedule ?? currentSchedule).nextAdAt;
+    const stillValid = async (): Promise<boolean> => {
+      const latestSchedule = await scheduler?.readSchedule?.() ?? null;
+      return latestSchedule === null || latestSchedule.nextAdAt === validatedNextAdAt;
+    };
+    const sent = await sendChatMessage(environment, channelId, finalDecision.text, undefined, fetcher, stillValid);
     if (sent.truncated) {
-      diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: decision.text.length } });
+      diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: finalDecision.text.length } });
     }
     diagnostics.push(sent.sent
       ? { code: "host.chat.sent" satisfies EventCode, detail: sent.detail }
-      : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
+      : sent.reason === "stale_before_send"
+        ? { code: "host.chat.skipped" satisfies EventCode, detail: sent.detail }
+        : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 
-  if (shouldReplan(decision)) {
-    await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
+  if (shouldReplan(finalDecision)) {
+    await replanFromSchedule(scheduler, configured.settings, (freshSchedule ?? currentSchedule).nextAdAt);
   }
 };
 

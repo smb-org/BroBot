@@ -157,6 +157,7 @@ export const EVENT_CODES = [
   "host.action.suppressed",
   "host.chat.failed",
   "host.chat.sent",
+  "host.chat.skipped",
   "host.announcement.failed",
   "host.announcement.sent",
   "template_truncated",

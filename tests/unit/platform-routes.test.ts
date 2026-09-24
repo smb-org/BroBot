@@ -11,7 +11,7 @@ import {
 import { platformRouter } from "../../src/worker/platform/routes";
 import { MODULES } from "../../src/modules/registry";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createReadBarrierDatabase, TestD1Database } from "./test-d1";
 
 const environmentKey = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
@@ -439,6 +439,28 @@ describe("Platform admin level", () => {
       { userId: "kanal-a", login: "alpha", displayName: "Alpha", profileImageUrl: null, role: "broadcaster", joinedAt: "2026-09-18T00:00:00.000Z" },
       { userId: "user-2", login: "helfer", displayName: "Helfer", profileImageUrl: "https://cdn.example/helfer.png", role: "operator", joinedAt: "2026-09-18T00:00:00.000Z" },
     ]);
+  });
+
+  it("starts the platform member page and broadcaster count reads together", async () => {
+    await setPlatform(database);
+    await insertChannel(database, "kanal-a");
+    await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+    const traced = createReadBarrierDatabase(database, (sql, operation) => {
+      if (operation === "all" && sql.includes("ORDER BY created_at, user_id")) return "member-page";
+      if (operation === "first" && sql.includes("COUNT(*) AS count")) return "broadcaster-count";
+      return null;
+    }, 2);
+    environment = { ...environment, DB: traced.database };
+
+    const responsePending = platformRouter.fetch(
+      await requestFor(platformId, "/api/platform/channels/kanal-a/members"),
+      environment,
+    );
+    await vi.waitFor(() => { expect(traced.started).toHaveLength(2); });
+    expect(traced.started).toEqual(["member-page", "broadcaster-count"]);
+    const response = await responsePending;
+
+    expect(response.status).toBe(200);
   });
 
   it("lists only platform-admin audit entries across channels, paginated", async () => {

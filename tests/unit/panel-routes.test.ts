@@ -100,6 +100,30 @@ const makeEnvironment = (database: TestD1Database): Env => ({
   PLATFORM_USER_IDS: JSON.stringify(["4711"]),
 } as unknown as Env);
 
+const makeStreamRefreshRuntime = (lease: string | null = "stream-refresh") => {
+  const tasks: Promise<unknown>[] = [];
+  let retryAfter: number | null = null;
+  const channelObject = {
+    beginStreamStateRefresh: vi.fn(() => Promise.resolve(lease)),
+    endStreamStateRefresh: vi.fn(() => Promise.resolve()),
+    getTwitchRateLimitRetryAfter: vi.fn(() => Promise.resolve(retryAfter !== null && retryAfter > Date.now() ? retryAfter : null)),
+    setTwitchRateLimitRetryAfter: vi.fn((deadline: number) => {
+      retryAfter = deadline;
+      return Promise.resolve();
+    }),
+    publish: vi.fn(() => Promise.resolve()),
+  };
+  const CHANNEL = {
+    idFromName: (channelId: string) => channelId,
+    get: () => channelObject,
+  } as unknown as DurableObjectNamespace;
+  const executionContext = {
+    waitUntil: (promise: Promise<unknown>) => { tasks.push(promise); },
+    passThroughOnException: () => undefined,
+  } as unknown as ExecutionContext;
+  return { CHANNEL, executionContext, channelObject, tasks };
+};
+
 const insertStreamEventSubCoverage = async (database: TestD1Database, channelId: string): Promise<void> => {
   await database.prepare(
     `INSERT INTO eventsub_subscriptions
@@ -268,7 +292,7 @@ describe("Panel read endpoints", () => {
     });
   });
 
-  it("looks up and stores the stream state via Helix when the overview has no row yet (#178)", async () => {
+  it("serves the overview before its background Helix lookup finishes (#178)", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -279,20 +303,24 @@ describe("Panel read endpoints", () => {
       "2026-09-18T00:00:00.000Z",
       "2026-09-18T00:00:00.000Z",
     );
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ id: "live-1" }] }), { status: 200 }),
-    );
+    let resolveHelix: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => new Promise<Response>((resolve) => { resolveHelix = resolve; }));
     vi.stubGlobal("fetch", fetcher);
+    const runtime = makeStreamRefreshRuntime();
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
-      { ...environment, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+      { ...environment, ...runtime, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+      runtime.executionContext,
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ channelId: "kanal-a", streamState: "online" });
+    await expect(response.json()).resolves.toMatchObject({ channelId: "kanal-a", streamState: null });
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+    resolveHelix?.(new Response(JSON.stringify({ data: [{ id: "live-1" }] }), { status: 200 }));
+    await Promise.all(runtime.tasks);
     await expect(database.prepare(
       "SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ state: "online", source: "helix" });
@@ -304,23 +332,64 @@ describe("Panel read endpoints", () => {
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
     await database.prepare(
-      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
-       VALUES ('kanal-a', 'offline', ?, 'eventsub')`,
-    ).bind(changedAt).run();
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, checked_at)
+       VALUES ('kanal-a', 'offline', ?, 'eventsub', ?)`,
+    ).bind(changedAt, changedAt).run();
     await insertStreamEventSubCoverage(database, "kanal-a");
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
+    const runtime = makeStreamRefreshRuntime();
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
-      environment,
+      { ...environment, ...runtime },
+      runtime.executionContext,
     );
 
     expect(response.status).toBe(200);
     expect(fetcher).not.toHaveBeenCalled();
+    await expect(response.clone().json()).resolves.toMatchObject({
+      streamStateChangedAt: changedAt,
+      streamStateCheckedAt: changedAt,
+    });
+    expect(runtime.channelObject.beginStreamStateRefresh).not.toHaveBeenCalled();
+    expect(runtime.channelObject.endStreamStateRefresh).not.toHaveBeenCalled();
   });
 
-  it("refreshes a stale Helix row when the overview is requested", async () => {
+  it("records a per-channel Twitch cooldown after a stream refresh is rate-limited", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+    );
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
+    vi.stubGlobal("fetch", fetcher);
+    const runtime = makeStreamRefreshRuntime();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    for (let view = 0; view < 2; view++) {
+      const response = await panelRouter.fetch(
+        await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+        { ...environment, ...runtime, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+        runtime.executionContext,
+      );
+      expect(response.status).toBe(200);
+      if (view === 0) await Promise.all(runtime.tasks);
+    }
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(runtime.channelObject.setTwitchRateLimitRetryAfter).toHaveBeenCalledTimes(1);
+    expect(runtime.channelObject.beginStreamStateRefresh).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith("Background stream-state refresh was rate-limited.", "kanal-a");
+    warning.mockRestore();
+  });
+
+  it("serves stale stream state and refreshes it in the background", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
     await insertChannel(database, "kanal-a", "Alpha");
@@ -341,23 +410,26 @@ describe("Panel read endpoints", () => {
       new Response(JSON.stringify({ data: [] }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetcher);
+    const runtime = makeStreamRefreshRuntime();
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
-      { ...environment, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+      { ...environment, ...runtime, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+      runtime.executionContext,
     );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       channelId: "kanal-a",
-      streamState: "offline",
-      streamStartedAt: null,
+      streamState: "online",
+      streamStartedAt: "2026-09-23T09:00:00.000Z",
     });
+    await Promise.all(runtime.tasks);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
   });
 
-  it("reads overview controls after Helix binds a pending pause during the lookup", async () => {
+  it("serves stored overview controls while Helix binds a pending pause in the background", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
     await insertChannel(database, "kanal-a", "Alpha");
@@ -383,24 +455,27 @@ describe("Panel read endpoints", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ data: [{ id: "live-1", started_at: startedAt }] }), { status: 200 }),
     ));
+    const runtime = makeStreamRefreshRuntime();
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
-      { ...environment, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+      { ...environment, ...runtime, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+      runtime.executionContext,
     );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      streamState: "online",
-      streamStartedAt: startedAt,
-      controls: { pause: { active: true, mode: "until_stream_end" } },
+      streamState: "offline",
+      streamStartedAt: null,
+      controls: { pause: { active: false, pending: true, mode: "until_stream_end" } },
     });
+    await Promise.all(runtime.tasks);
     await expect(database.prepare(
       "SELECT pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ pause_stream_started_at: startedAt });
   });
 
-  it("returns the real Helix stream start, not the check time, when backfilling via Helix (#178)", async () => {
+  it("stores the real Helix stream start, not the check time, after the overview response (#178)", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
@@ -415,18 +490,20 @@ describe("Panel read endpoints", () => {
       new Response(JSON.stringify({ data: [{ id: "live-1", started_at: "2026-09-20T10:00:00.000Z" }] }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetcher);
+    const runtime = makeStreamRefreshRuntime();
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
-      { ...environment, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+      { ...environment, ...runtime, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+      runtime.executionContext,
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      channelId: "kanal-a",
-      streamState: "online",
-      streamStartedAt: "2026-09-20T10:00:00.000Z",
-    });
+    await expect(response.json()).resolves.toMatchObject({ channelId: "kanal-a", streamState: null });
+    await Promise.all(runtime.tasks);
+    await expect(database.prepare(
+      "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ state: "online", started_at: "2026-09-20T10:00:00.000Z" });
   });
 
   it("returns the stored stream start for an EventSub-sourced online row, not its changed_at (#178)", async () => {

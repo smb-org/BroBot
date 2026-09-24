@@ -9,6 +9,7 @@ import type {
 import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX } from "../realtime-contract";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "./auth/guards";
 import { authenticateOverlayToken } from "./auth/overlay-token-service";
+import { readChannelControls } from "./db/channel-controls";
 import {
   listChannelIdsForUser,
 } from "./db/channels";
@@ -174,6 +175,31 @@ export const publishVariablesChanged = async (
     await publishRealtimeMessages(namespace, messages);
   } catch (error: unknown) {
     console.warn("Realtime channel-variable hint could not be sent.", error);
+  }
+};
+
+/** Panel-only hint for a refreshed Twitch stream state; D1 remains authoritative. */
+export const publishStreamStateChanged = async (
+  namespace: Env["CHANNEL"] | undefined,
+  database: D1Database,
+  channelId: string,
+  state: "online" | "offline",
+  startedAt: string | null,
+  changedAt: string,
+  checkedAt: string,
+): Promise<void> => {
+  try {
+    const controls = await readChannelControls(database, channelId, checkedAt);
+    await publishRealtimeMessages(namespace, [{
+      version: 1,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      channelId,
+      type: "stream.state.changed",
+      payload: { state, startedAt, changedAt, checkedAt, controls },
+    }]);
+  } catch (error: unknown) {
+    console.warn("Realtime stream state hint could not be sent.", error);
   }
 };
 

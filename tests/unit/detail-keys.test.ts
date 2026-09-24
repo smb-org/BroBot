@@ -70,7 +70,7 @@ describe("diagnostic detail keys", () => {
     expect(detailKeys()).toEqual([
       "action", "alias", "allowed", "arguments", "art", "count", "current", "currentTier", "duration", "endsAt", "gifter",
       "message", "moderator", "name", "person", "reason", "recipient",
-      "remainingSeconds", "requiredTier", "response", "scope", "source",
+      "remainingSeconds", "requiredTier", "response", "retryAfter", "scope", "source",
       "sourceChannelId", "startedAt", "status", "streamState", "target", "targetChannelId", "text",
       "threshold", "tier", "twitchMessage", "variable", "viewers",
     ]);

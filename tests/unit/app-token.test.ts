@@ -34,6 +34,7 @@ describe("app access token", () => {
 
   afterEach(() => {
     database.close();
+    vi.useRealTimers();
   });
 
   it("passes through a client credentials rejection as a TwitchApiError", async () => {
@@ -108,6 +109,19 @@ describe("app access token", () => {
     await expect(database.prepare(
       "SELECT id FROM twitch_app_access_token WHERE id = 1",
     ).first()).resolves.toBeNull();
+  });
+
+  it("bounds a client-credentials fetch that ignores its abort signal", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn<typeof fetch>(() => new Promise(() => undefined));
+    const request = requestAppAccessToken(fetcher, environment());
+    const rejected = expect(request).rejects.toMatchObject({ name: "TimeoutError" });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await rejected;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
   });
 
   it("fetches the app token via client credentials and stores it encrypted", async () => {

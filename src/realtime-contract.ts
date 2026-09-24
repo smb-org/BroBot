@@ -1,4 +1,7 @@
 import type { ChannelRole } from "./contracts/values";
+import type { ChannelStreamState } from "./contracts/values";
+import type { AdsSchedule } from "./modules/ads/contracts";
+import type { PanelChannelControls } from "./panel-contract";
 
 /** The only protocol version used on the wire. */
 export type RealtimeProtocolVersion = 1;
@@ -6,7 +9,13 @@ export type RealtimeProtocolVersion = 1;
 export const REALTIME_PROTOCOL = "brobot.v1";
 export const OVERLAY_TOKEN_SUBPROTOCOL_PREFIX = "brobot.token.";
 
-export const REALTIME_MESSAGE_TYPES = ["system.hello", "event_log.new", "variables.changed"] as const;
+export const REALTIME_MESSAGE_TYPES = [
+  "system.hello",
+  "event_log.new",
+  "variables.changed",
+  "ads.schedule.updated",
+  "stream.state.changed",
+] as const;
 export type RealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
 
 export interface RealtimeEventLogHint {
@@ -25,6 +34,14 @@ export interface RealtimePayloads {
   "variables.changed": {
     set: readonly { name: string; value: number }[];
     removed: readonly string[];
+  };
+  "ads.schedule.updated": { schedule: AdsSchedule; asOf: string };
+  "stream.state.changed": {
+    state: ChannelStreamState;
+    startedAt: string | null;
+    changedAt: string;
+    checkedAt?: string;
+    controls?: PanelChannelControls;
   };
 }
 
@@ -48,6 +65,8 @@ export const REALTIME_RECIPIENTS = {
   "system.hello": ["panel", "overlay"],
   "event_log.new": ["panel"],
   "variables.changed": ["panel", "overlay"],
+  "ads.schedule.updated": ["panel"],
+  "stream.state.changed": ["panel"],
 } as const satisfies Record<RealtimeMessageType, readonly RealtimeRecipientKind[]>;
 
 export type RealtimePanelPrincipal = {

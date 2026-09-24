@@ -53,4 +53,6 @@ export interface AdsScheduleResponse {
   schedule: AdsSchedule;
   recentAdBreaks: LastAdBreak[];
   snoozeScopeAvailable: boolean;
+  /** Time the cached Twitch schedule was last fetched successfully. */
+  asOf?: string;
 }

@@ -17,6 +17,7 @@ import type {
 import type {
   SessionRecord,
 } from "../db/sessions";
+import { recordServerTiming } from "../server-timing";
 
 export interface ChannelAuthorizationVariables {
   session: SessionRecord;
@@ -64,8 +65,11 @@ const loginRedirectForRequest = (request: Request): string => {
 
 const requireChannelAuthorizationFor = (browserEntry: boolean) => createMiddleware<ChannelAuthorizationEnvironment>(
   async (context, next) => {
+    const authStartedAt = performance.now();
+    const finishAuthTiming = (): void => { recordServerTiming(context, "auth", performance.now() - authStartedAt); };
     const session = await getSessionFromRequest(context.req.raw, context.env);
     if (session === null) {
+      finishAuthTiming();
       return browserEntry
         ? context.redirect(loginRedirectForRequest(context.req.raw), 302)
         : context.json({ error: "session_missing" }, 401);
@@ -77,15 +81,18 @@ const requireChannelAuthorizationFor = (browserEntry: boolean) => createMiddlewa
       context.env.SESSION_COOKIE_KEYS,
       nowIso(),
     )) {
+      finishAuthTiming();
       return context.json({ error: "csrf_invalid" }, 403);
     }
 
     const channelId = context.req.param("channelId");
     if (channelId === undefined || channelId.length === 0) {
+      finishAuthTiming();
       return context.json({ error: "channel_missing" }, 400);
     }
     const role = await authorizeChannelAccess(context.env.DB, session, channelId);
     if (role === null) {
+      finishAuthTiming();
       return browserEntry
         ? oauthError(context, "channel_access_denied", 403)
         : context.json({ error: "channel_access_denied" }, 403);
@@ -100,14 +107,18 @@ const requireChannelAuthorizationFor = (browserEntry: boolean) => createMiddlewa
       prepareModuleAudit(context.env.DB, session.userId, changedAt, entry));
     context.set("writeModuleAudit", (entry, changedAt) =>
       writeModuleAudit(context.env.DB, session.userId, changedAt, entry));
+    finishAuthTiming();
     await next();
   },
 );
 
 const requirePlatformAuthorizationFor = (browserEntry: boolean) => createMiddleware<PlatformAuthorizationEnvironment>(
   async (context, next) => {
+    const authStartedAt = performance.now();
+    const finishAuthTiming = (): void => { recordServerTiming(context, "auth", performance.now() - authStartedAt); };
     const session = await getSessionFromRequest(context.req.raw, context.env);
     if (session === null) {
+      finishAuthTiming();
       return browserEntry
         ? context.redirect(loginRedirectForRequest(context.req.raw), 302)
         : context.json({ error: "session_missing" }, 401);
@@ -119,10 +130,12 @@ const requirePlatformAuthorizationFor = (browserEntry: boolean) => createMiddlew
       context.env.SESSION_COOKIE_KEYS,
       nowIso(),
     )) {
+      finishAuthTiming();
       return context.json({ error: "csrf_invalid" }, 403);
     }
 
     if (!getPlatformUserIds(context.env).has(session.userId)) {
+      finishAuthTiming();
       return browserEntry
         ? oauthError(context, "platform_access_denied", 403)
         : context.json({ error: "platform_access_denied" }, 403);
@@ -130,6 +143,7 @@ const requirePlatformAuthorizationFor = (browserEntry: boolean) => createMiddlew
 
     context.set("session", session);
     context.set("actor", { userId: session.userId, sessionId: session.sessionId });
+    finishAuthTiming();
     await next();
   },
 );
@@ -142,24 +156,31 @@ export const requireBrowserPlatformAuthorization = () => requirePlatformAuthoriz
 
 export const requireBrowserBotAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
   async (context, next) => {
+    const authStartedAt = performance.now();
+    const finishAuthTiming = (): void => { recordServerTiming(context, "auth", performance.now() - authStartedAt); };
     const session = await getSessionFromRequest(context.req.raw, context.env);
     if (session === null) {
+      finishAuthTiming();
       return context.redirect(loginRedirectForRequest(context.req.raw), 302);
     }
 
     const botIdentity = await getBotIdentity(context.env.DB);
     if (!canConnectBot(session, context.env, botIdentity)) {
+      finishAuthTiming();
       return oauthError(context, "bot_account_only_connects_itself", 403);
     }
 
     context.set("session", session);
+    finishAuthTiming();
     await next();
   },
 );
 
 export const requireSessionAuthorization = () => createMiddleware<SessionAuthorizationEnvironment>(
   async (context, next) => {
+    const authStartedAt = performance.now();
     const session = await getSessionFromRequest(context.req.raw, context.env);
+    recordServerTiming(context, "auth", performance.now() - authStartedAt);
     if (session === null) return context.json({ error: "session_missing" }, 401);
     context.set("session", session);
     await next();

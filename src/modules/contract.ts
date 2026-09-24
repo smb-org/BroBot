@@ -384,6 +384,10 @@ export interface ModuleRouteVariables {
     now: string,
   ) => Promise<unknown>;
   broadcasterHasScope: (db: D1Database, channelId: string, scope: string) => Promise<boolean>;
+  broadcasterScopesForChannel: (db: D1Database, channelId: string) => Promise<readonly string[]>;
+  measureServerTiming: <T>(phase: "auth" | "d1" | "do" | "helix", run: () => Promise<T>) => Promise<T>;
+  recordServerTiming: (phase: "auth" | "d1" | "do" | "helix", durationMs: number) => void;
+  scheduleBackgroundWork: (work: Promise<unknown>) => void;
   getAppAccessToken: (environment: Env, now: string, fetcher?: typeof fetch) => Promise<string>;
   /** Thin Helix HTTP transport (issue #163); modules never talk to `api.twitch.tv` directly. */
   helixRequest: HelixRequest;
