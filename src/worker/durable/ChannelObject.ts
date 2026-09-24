@@ -341,14 +341,18 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Distributes only within its own channel and only to principals of the requested kind. */
   public publish(
-    message: RealtimeMessage,
+    messages: readonly RealtimeMessage[],
   ): void {
+    if (messages.length === 0) return;
     const ownChannelId = this.ownChannelId();
-    if (ownChannelId === null || message.channelId !== ownChannelId) {
+    if (ownChannelId === null || messages.some((message) => message.channelId !== ownChannelId)) {
       throw new Error("Realtime message belongs to a foreign channel.");
     }
     const now = Date.now();
-    const serialized = JSON.stringify(message);
+    const serialized = messages.map((message) => ({
+      recipients: REALTIME_RECIPIENTS[message.type],
+      payload: JSON.stringify(message),
+    }));
     for (const webSocket of this.ctx.getWebSockets()) {
       const principal = readAttachment(webSocket);
       if (principal === null || principal.channelId !== ownChannelId) {
@@ -359,10 +363,11 @@ export class ChannelObject extends DurableObject<Env> {
         closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
         continue;
       }
-      const recipients: readonly RealtimeRecipientKind[] = REALTIME_RECIPIENTS[message.type];
-      if (!recipients.includes(principal.kind)) continue;
       try {
-        webSocket.send(serialized);
+        for (const message of serialized) {
+          const recipients: readonly RealtimeRecipientKind[] = message.recipients;
+          if (recipients.includes(principal.kind)) webSocket.send(message.payload);
+        }
       } catch {
         closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
       }

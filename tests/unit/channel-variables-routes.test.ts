@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
+import type { RealtimeMessage } from "../../src/realtime-contract";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -15,10 +16,15 @@ const environmentKeys = {
 };
 
 let database: TestD1Database;
+let realtimePublish: ReturnType<typeof vi.fn<(messages: readonly RealtimeMessage[]) => void>>;
 
 const environmentFor = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
+  CHANNEL: {
+    idFromName: (channelId: string) => channelId,
+    get: () => ({ publish: realtimePublish }),
+  },
   ...environmentKeys,
 } as unknown as Env);
 
@@ -56,7 +62,7 @@ const fetchPanel = async (
 );
 
 describe("Channel variable routes", () => {
-  beforeEach(() => { database = new TestD1Database(); });
+  beforeEach(() => { database = new TestD1Database(); realtimePublish = vi.fn<(messages: readonly RealtimeMessage[]) => void>(); });
   afterEach(() => { vi.useRealTimers(); database.close(); });
 
   it("lets operators change values while keeping variable management for managers", async () => {
@@ -183,5 +189,35 @@ describe("Channel variable routes", () => {
     await expect(database.prepare("SELECT description FROM channel_variables WHERE name = 'score'").first())
       .resolves.toEqual({ description: "Concurrent" });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual(auditBefore);
+  });
+
+  it("publishes created, metadata-updated, value-changed, renamed, and removed variables", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+
+    const created = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 4, description: "Score", resetOnStreamStart: false,
+    });
+    const metadataUpdated = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", {
+      description: "Current score", resetOnStreamStart: true,
+    });
+    const changed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score/value", "POST", {
+      operation: "add", amount: 3,
+    });
+    const renamed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", {
+      newName: "points",
+    });
+    const deleted = await fetchPanel("manager-a", "/api/channels/channel-a/variables/points", "DELETE");
+
+    expect([created.status, metadataUpdated.status, changed.status, renamed.status, deleted.status]).toEqual([201, 200, 200, 200, 204]);
+    expect(realtimePublish).toHaveBeenCalledTimes(5);
+    expect(realtimePublish.mock.calls.map(([messages]) => messages)).toMatchObject([
+      [{ type: "variables.changed", payload: { set: [{ name: "score", value: 4 }], removed: [] } }],
+      [{ type: "variables.changed", payload: { set: [{ name: "score", value: 4 }], removed: [] } }],
+      [{ type: "variables.changed", payload: { set: [{ name: "score", value: 7 }], removed: [] } }],
+      [{ type: "variables.changed", payload: { set: [{ name: "points", value: 7 }], removed: ["score"] } }],
+      [{ type: "variables.changed", payload: { set: [], removed: ["points"] } }],
+    ]);
   });
 });

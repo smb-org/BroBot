@@ -8,6 +8,7 @@ import {
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
 import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState } from "../modules/contract";
+import { formatCount } from "../text";
 
 export type TemplateChannelDetails = Pick<ModuleChannelInfo, "title" | "gameName">;
 export type TemplateStreamDetails = Pick<ModuleChannelInfo, "startedAt" | "viewerCount">;
@@ -31,9 +32,6 @@ const recordFrom = (value: unknown): Readonly<Record<string, unknown>> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null;
 
 const payloadString = (event: ModuleEvent, key: string): string | null => valueFrom(event.payload[key]);
-
-const formatCount = (value: number, language: ModuleLanguage): string =>
-  new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 }).format(value);
 
 const formatDuration = (start: string, now: number, language: ModuleLanguage): string => {
   const startTime = Date.parse(start);

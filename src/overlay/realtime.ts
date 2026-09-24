@@ -2,15 +2,29 @@ import {
   OVERLAY_TOKEN_SUBPROTOCOL_PREFIX,
   REALTIME_PROTOCOL,
 } from "../realtime-contract";
+import type { RealtimeEnvelope } from "../realtime-contract";
 
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
 const SOCKET_POLICY_VIOLATION_CODE = 1008;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
+
+export interface OverlayRealtimeCallbacks {
+  onOpen?: (reconnected: boolean) => void;
+  onMessage?: (message: RealtimeEnvelope<"variables.changed">) => void;
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isVariablesChangedPayload = (value: unknown): boolean => isRecord(value) &&
+  Array.isArray(value.set) && value.set.every((entry) => isRecord(entry) &&
+    typeof entry.name === "string" && VARIABLE_NAME_PATTERN.test(entry.name) &&
+    typeof entry.value === "number" && Number.isSafeInteger(entry.value)) &&
+  Array.isArray(value.removed) && value.removed.every((name) =>
+    typeof name === "string" && VARIABLE_NAME_PATTERN.test(name));
 
 const realtimeUrl = (): string => {
   const url = new URL("/ws/overlay", window.location.href);
@@ -27,6 +41,7 @@ const reconnectDelay = (attempt: number): number => Math.min(
 export const connectOverlayRealtime = (
   token: string,
   onTerminalClose?: () => void,
+  callbacks: OverlayRealtimeCallbacks = {},
 ): (() => void) => {
   let disposed = false;
   let fatalProtocolError = false;
@@ -34,6 +49,7 @@ export const connectOverlayRealtime = (
   let reconnectTimer: number | null = null;
   let reconnectAttempt = 0;
   let channelId: string | null = null;
+  let hasConnected = false;
 
   const stopReconnectTimer = (): void => {
     if (reconnectTimer === null) return;
@@ -87,7 +103,10 @@ export const connectOverlayRealtime = (
         failProtocol(activeSocket);
         return;
       }
+      const reconnected = hasConnected;
+      hasConnected = true;
       reconnectAttempt = 0;
+      callbacks.onOpen?.(reconnected);
     });
 
     activeSocket.addEventListener("message", (event: MessageEvent<unknown>) => {
@@ -106,7 +125,11 @@ export const connectOverlayRealtime = (
       if (parsed.type === "system.hello" && isRecord(parsed.payload) &&
           Object.keys(parsed.payload).length === 0) {
         channelId ??= parsed.channelId;
+        return;
       }
+      if (channelId === null || parsed.type !== "variables.changed" ||
+          !isVariablesChangedPayload(parsed.payload)) return;
+      callbacks.onMessage?.(parsed as RealtimeEnvelope<"variables.changed">);
     });
 
     activeSocket.addEventListener("close", (event: CloseEvent) => {

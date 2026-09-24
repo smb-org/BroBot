@@ -10,6 +10,7 @@ import {
 import { listChannelIdsNeedingStreamStateRefresh } from "./db/channels";
 import { prepareResetChannelVariablesForStream } from "./db/channel-variables";
 import { logMaintenanceError } from "./bot-maintenance";
+import { publishVariablesChanged } from "./realtime";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -114,7 +115,11 @@ export const lookupAndRefreshStreamState = async (
     env.DB, channelId, fromHelix.state, now, fromHelix.startedAt, fromHelix.streamId,
   );
   if (refreshed && stored.state === "offline" && fromHelix.state === "online" && fromHelix.startedAt !== null) {
-    await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now, fromHelix.streamId);
+    const resetNames = await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now, fromHelix.streamId);
+    if (resetNames.length > 0) {
+      await publishVariablesChanged(env.CHANNEL, channelId,
+        resetNames.map((name) => ({ name, value: 0 })), []);
+    }
   }
   return asResult(await readChannelStreamState(env.DB, channelId));
 };

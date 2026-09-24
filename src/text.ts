@@ -1,5 +1,9 @@
 const EVENT_TEXT_MAXIMUM_LENGTH = 200;
 
+/** Formats a whole-number count with the channel's display language. */
+export const formatCount = (value: number, language: "de" | "en"): string =>
+  new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 }).format(value);
+
 /** Truncates logged text visibly to at most 200 characters. */
 export const truncateTo200Chars = (text: string): string =>
   text.length <= EVENT_TEXT_MAXIMUM_LENGTH

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import type {
   RealtimeEnvelope,
+  RealtimeMessage,
   RealtimeOverlayPrincipal,
   RealtimePrincipal,
 } from "../realtime-contract";
@@ -135,13 +136,45 @@ const channelObject = (namespace: Env["CHANNEL"] | undefined, channelId: string)
   return namespace.get(namespace.idFromName(channelId));
 };
 
-export const publishRealtimeMessage = async (
+export const publishRealtimeMessages = async (
   namespace: Env["CHANNEL"] | undefined,
-  message: RealtimeEnvelope<"event_log.new">,
+  messages: readonly RealtimeMessage[],
 ): Promise<void> => {
-  const object = channelObject(namespace, message.channelId);
+  if (messages.length === 0) return;
+  const channelId = messages[0]?.channelId;
+  if (channelId === undefined || messages.some((message) => message.channelId !== channelId)) {
+    throw new Error("Realtime messages must belong to one channel.");
+  }
+  const object = channelObject(namespace, channelId);
   if (object === null) return;
-  await object.publish(message);
+  await object.publish(messages);
+};
+
+/** Sends a channel-variable hint best-effort; D1 remains the authoritative state. */
+export const publishVariablesChanged = async (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+  set: RealtimeEnvelope<"variables.changed">["payload"]["set"],
+  removed: RealtimeEnvelope<"variables.changed">["payload"]["removed"],
+  additionalMessages: readonly RealtimeMessage[] = [],
+): Promise<void> => {
+  if (set.length === 0 && removed.length === 0 && additionalMessages.length === 0) return;
+  const messages: RealtimeMessage[] = [...additionalMessages];
+  if (set.length > 0 || removed.length > 0) {
+    messages.push({
+      version: 1,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      channelId,
+      type: "variables.changed",
+      payload: { set, removed },
+    });
+  }
+  try {
+    await publishRealtimeMessages(namespace, messages);
+  } catch (error: unknown) {
+    console.warn("Realtime channel-variable hint could not be sent.", error);
+  }
 };
 
 export const revokeRealtimeUser = async (

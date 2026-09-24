@@ -8,7 +8,7 @@ import {
 import { sendChatMessage } from "./chat";
 import { sendChatAnnouncement } from "./announcement";
 import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
-import { publishRealtimeMessage } from "./realtime";
+import { publishRealtimeMessages, publishVariablesChanged } from "./realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
@@ -441,6 +441,7 @@ export const dispatchEventSubNotification = async (
 ): Promise<void> => {
   // The ending stream remains current while its offline event is dispatched.
   // Capture that session's controls before the stored state moves to offline.
+  const changedVariables = new Map<string, number>();
   const endingStreamDispatchState = event.subscriptionType === "stream.offline"
     ? await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt)
     : null;
@@ -485,13 +486,14 @@ export const dispatchEventSubNotification = async (
       );
     }
     if (isOnline && stateWrite === "written" && startedAt !== null) {
-      await prepareResetChannelVariablesForStream(
+      const resetNames = await prepareResetChannelVariablesForStream(
         environment.DB,
         event.channelId,
         startedAt,
         event.eventSubTimestamp ?? event.receivedAt,
         streamId,
       );
+      for (const name of resetNames) changedVariables.set(name, 0);
     }
   }
   const dispatchState = endingStreamDispatchState ??
@@ -640,6 +642,13 @@ export const dispatchEventSubNotification = async (
       }
     }
 
+    for (const diagnostic of diagnostics) {
+      if (diagnostic.code !== "text_commands.triggered") continue;
+      const name = diagnostic.detail?.variable;
+      const value = diagnostic.detail?.current;
+      if (typeof name === "string" && Number.isSafeInteger(value)) changedVariables.set(name, value as number);
+    }
+
     newEntries.push(...await writeModuleDiagnostics(
       environment.DB,
       event.channelId,
@@ -651,8 +660,8 @@ export const dispatchEventSubNotification = async (
     ));
   }
 
-  if (newEntries.length === 0) return;
-  const realtimeMessage: RealtimeEnvelope<"event_log.new"> = {
+  if (newEntries.length === 0 && changedVariables.size === 0) return;
+  const realtimeMessages: RealtimeEnvelope<"event_log.new">[] = newEntries.length === 0 ? [] : [{
     version: 1,
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
@@ -667,12 +676,22 @@ export const dispatchEventSubNotification = async (
         actorUserId,
       })),
     },
-  };
-  try {
-    await publishRealtimeMessage(environment.CHANNEL, realtimeMessage);
-  } catch (error: unknown) {
-    // The feed is a hint; D1 stays the authoritative state, and event
-    // processing must not fail because a socket happens to be closed.
-    console.warn("Realtime hint could not be sent.", error);
+  }];
+  if (changedVariables.size > 0) {
+    await publishVariablesChanged(
+      environment.CHANNEL,
+      event.channelId,
+      [...changedVariables].map(([name, value]) => ({ name, value })),
+      [],
+      realtimeMessages,
+    );
+  } else {
+    try {
+      await publishRealtimeMessages(environment.CHANNEL, realtimeMessages);
+    } catch (error: unknown) {
+      // The feed is a hint; D1 stays the authoritative state, and event
+      // processing must not fail because a socket happens to be closed.
+      console.warn("Realtime hint could not be sent.", error);
+    }
   }
 };

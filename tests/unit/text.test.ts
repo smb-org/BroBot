@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { textFingerprint, textFingerprintIfTruncated, truncateTo200Chars } from "../../src/text";
+import { formatCount, textFingerprint, textFingerprintIfTruncated, truncateTo200Chars } from "../../src/text";
 
 describe("truncateTo200Chars", () => {
   it("leaves text at or under 200 characters untouched", () => {
@@ -21,8 +21,6 @@ describe("textFingerprint", () => {
   });
 
   it("differs for different input -- the case a truncated preview alone can't tell apart", async () => {
-    // Two values that are identical for the first 200 characters (so they'd
-    // truncate to the same preview) but differ after that.
     const a = `${"A".repeat(200)}tail-one`;
     const b = `${"A".repeat(200)}tail-two`;
     expect(truncateTo200Chars(a)).toBe(truncateTo200Chars(b));
@@ -46,5 +44,12 @@ describe("textFingerprintIfTruncated", () => {
   it("is the fingerprint once the value is long enough to be truncated", async () => {
     const text = "A".repeat(205);
     await expect(textFingerprintIfTruncated(text)).resolves.toBe(await textFingerprint(text));
+  });
+});
+
+describe("formatCount", () => {
+  it("formats channel counts using German and English separators", () => {
+    expect(formatCount(12_345, "de")).toBe("12.345");
+    expect(formatCount(12_345, "en")).toBe("12,345");
   });
 });

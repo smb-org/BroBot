@@ -422,7 +422,7 @@ const requestForRealtime = async (userId: string): Promise<Request> => {
 // exactly once. If one is missing, extra, or renamed, the
 // typecheck breaks -- long before a client sees the changed value on the wire.
 const allRoles: Record<ChannelRole, true> = { broadcaster: true, manager: true, operator: true };
-const allMessageTypes: Record<RealtimeMessageType, true> = { "system.hello": true, "event_log.new": true };
+const allMessageTypes: Record<RealtimeMessageType, true> = { "system.hello": true, "event_log.new": true, "variables.changed": true };
 const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
 const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, chat: true, shoutout: true, overlay: true };
@@ -467,8 +467,9 @@ describe("serialized contract shapes", () => {
           CHANNEL: {
             idFromName: () => "channel-object-id",
             get: () => ({
-              publish: (message: RealtimeEnvelope) => {
-                eventEnvelope = message as RealtimeEnvelope<"event_log.new">;
+              publish: (messages: readonly RealtimeEnvelope[]) => {
+                const message = messages.find((entry) => entry.type === "event_log.new");
+                if (message?.type === "event_log.new") eventEnvelope = message as RealtimeEnvelope<"event_log.new">;
                 return Promise.resolve();
               },
             }),
@@ -696,10 +697,11 @@ describe("serialized contract shapes", () => {
       // a new, removed, or renamed member breaks `pnpm run typecheck`,
       // and the assertion below freezes the spelling.
       expect(Object.keys(allRoles).sort()).toEqual(["broadcaster", "manager", "operator"]);
-      expect(Object.keys(allMessageTypes).sort()).toEqual(["event_log.new", "system.hello"]);
+      expect(Object.keys(allMessageTypes).sort()).toEqual(["event_log.new", "system.hello", "variables.changed"]);
       expect(Object.keys(allRecipientKinds).sort()).toEqual(["overlay", "panel"]);
       expect(Object.keys(REALTIME_RECIPIENTS).sort()).toEqual([...REALTIME_MESSAGE_TYPES].sort());
       expect(REALTIME_RECIPIENTS["event_log.new"]).toEqual(["panel"]);
+      expect(REALTIME_RECIPIENTS["variables.changed"]).toEqual(["panel", "overlay"]);
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
       expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "chat", "overlay", "shoutout"]);
       expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);

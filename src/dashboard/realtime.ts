@@ -123,6 +123,95 @@ const realtimeUrl = (channelId: string): string => {
   return url.toString();
 };
 
+const isVariablesChangedPayload = (value: unknown): boolean => isRecord(value) &&
+  Array.isArray(value.set) && value.set.every((entry) => isRecord(entry) &&
+    typeof entry.name === "string" && entry.name.length > 0 &&
+    typeof entry.value === "number" && Number.isSafeInteger(entry.value)) &&
+  Array.isArray(value.removed) && value.removed.every((name) => typeof name === "string" && name.length > 0);
+
+/** Keeps variable definitions and values current while their channel page is open. */
+export const useRealtimeVariableUpdates = ({
+  channelId,
+  refresh,
+}: {
+  channelId: string;
+  refresh: () => Promise<void>;
+}): void => {
+  const refreshRef = useRef(refresh);
+
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
+  useEffect(() => {
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+    let fatalProtocolError = false;
+
+    const scheduleReconnect = (): void => {
+      if (disposed || fatalProtocolError || reconnectTimer !== null) return;
+      const delay = reconnectDelay(reconnectAttempt);
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
+    };
+
+    const handleMessage = (event: MessageEvent<unknown>): void => {
+      if (typeof event.data !== "string") return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(event.data) as unknown;
+      } catch {
+        return;
+      }
+      if (!isRecord(parsed) || parsed.version !== 1 || typeof parsed.channelId !== "string") return;
+      if (parsed.channelId !== channelId) {
+        fatalProtocolError = true;
+        try { socket?.close(1008, "Foreign channel"); } catch { /* socket may already be closed */ }
+        return;
+      }
+      if (parsed.type !== "variables.changed" || !isVariablesChangedPayload(parsed.payload)) return;
+      void refreshRef.current().catch(() => undefined);
+    };
+
+    const handleOpen = (): void => {
+      reconnectAttempt = 0;
+      void refreshRef.current().catch(() => undefined);
+    };
+
+    const handleClose = (event: CloseEvent): void => {
+      if (event.code === SOCKET_EXPIRED_CODE || event.code === SOCKET_REVOKED_CODE || event.code === 1008) {
+        fatalProtocolError = true;
+        return;
+      }
+      scheduleReconnect();
+    };
+
+    function connect(): void {
+      if (disposed || fatalProtocolError) return;
+      const WebSocketConstructor = window.WebSocket;
+      if (typeof WebSocketConstructor !== "function") return;
+      try {
+        socket = new WebSocketConstructor(realtimeUrl(channelId), REALTIME_PROTOCOL);
+        socket.addEventListener("open", handleOpen);
+        socket.addEventListener("message", handleMessage);
+        socket.addEventListener("close", handleClose);
+      } catch {
+        scheduleReconnect();
+      }
+    }
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      try { socket?.close(1000, "Leaving channel variables"); } catch { /* socket may already be closed */ }
+    };
+  }, [channelId]);
+};
+
 export const useRealtimeEventFeed = ({
   channelId,
   filters,
