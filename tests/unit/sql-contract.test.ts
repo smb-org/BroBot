@@ -18,7 +18,7 @@ import {
   overlayTokenRoles,
   overlayTokenSelectColumns,
 } from "../../src/worker/auth/overlay-token-repository";
-import { overlayElementIdCollisionGuard } from "../../src/worker/db/overlays";
+import { overlayElementIdCollisionGuard, referencedVariablesGuard } from "../../src/worker/db/overlays";
 import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
 import { textCommandSelectColumns } from "../../src/modules/text_commands/adapters/d1";
@@ -75,6 +75,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["actorGuard(MANAGING_ROLES)", actorGuard(MANAGING_ROLES)],
   ["actorGuard(ANY_MEMBER_ROLES)", actorGuard(ANY_MEMBER_ROLES)],
   ["addedIdGuard", overlayElementIdCollisionGuard(1)],
+  ["referencedVariablesGuard", referencedVariablesGuard],
   ["sqlRole(\"broadcaster\")", sqlRole("broadcaster")],
   ["sqlRole(\"manager\")", sqlRole("manager")],
   ["sqlRole(\"operator\")", sqlRole("operator")],

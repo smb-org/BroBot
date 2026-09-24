@@ -77,6 +77,9 @@ export const saveOverlayDraft = async (
   if (mutation.changes === 0) {
     const current = await getOverlayForChannel(db, channelId, overlayId);
     if (current === null) return { outcome: "not_found" };
+    for (const variableName of variableNames) {
+      if (!await hasChannelVariableForOverlay(db, channelId, variableName)) return { outcome: "invalid_reference" };
+    }
     if (!await isOverlayManagementAllowed(db, actor, channelId, changedAt)) return { outcome: "forbidden" };
     for (const element of added) {
       const collision = await db.prepare(

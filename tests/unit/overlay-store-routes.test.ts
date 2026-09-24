@@ -276,6 +276,51 @@ describe("stored overlay routes", () => {
     ).bind(secondOverlayId).first()).resolves.toEqual({ count: 0 });
   });
 
+  it("returns a conflict instead of a 500 when a referenced variable is deleted mid-save", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, created_at, updated_at)
+       VALUES ('channel-a', 'score', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    const overlayId = await createOverlay("manager-a", "channel-a", "Gameplay");
+    startD1WriteCapture();
+
+    let raced = false;
+    database.prepare = (sql) => {
+      if (!raced && sql.includes("UPDATE overlays") && sql.includes("revision = revision + 1")) {
+        raced = true;
+        database.sqlite.prepare(
+          "DELETE FROM channel_variables WHERE channel_id = 'channel-a' AND name = 'score'",
+        ).run();
+      }
+      return originalPrepare(sql);
+    };
+
+    const response = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
+      baseRevision: 1,
+      name: "Gameplay",
+      width: 1920,
+      height: 1080,
+      css: "",
+      elements: [{ ...element("element-a"), variableName: "score" }],
+    });
+
+    expect(raced).toBe(true);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "overlay_data_invalid" });
+    expect(sqliteChanges).toBe(0);
+    await expect(database.prepare(
+      "SELECT revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",
+    ).bind(overlayId).first()).resolves.toEqual({ revision: 1 });
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a' AND overlay_id = ?",
+    ).bind(overlayId).first()).resolves.toEqual({ count: 0 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'overlay.updated'").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
   it("requires a base revision and preserves an overlay changed before DELETE", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");

@@ -229,6 +229,25 @@ export const isOverlayManagementAllowed = async (
   return row !== null;
 };
 
+/**
+ * A manager can delete a channel variable between the pre-check in the
+ * service and this batch. Folding the check into the CAS guard -- instead
+ * of only checking before the batch -- means a variable removed in that
+ * window fails the UPDATE the same way a stale revision does, so the
+ * dependent element INSERT (which would otherwise violate its foreign key
+ * and roll back the whole batch) is skipped via `changes() > 0` like the
+ * other guard failures.
+ */
+export const referencedVariablesGuard = `
+        AND NOT EXISTS (
+          SELECT 1
+            FROM json_each(?) AS referenced_variable
+           WHERE NOT EXISTS (
+             SELECT 1 FROM channel_variables
+              WHERE channel_id = ? AND name = referenced_variable.value
+           )
+        )`;
+
 export const updateOverlayDraftWithAudit = async (
   db: D1Database,
   actor: ActorContext,
@@ -242,13 +261,17 @@ export const updateOverlayDraftWithAudit = async (
   },
 ): Promise<{ changes: number; rowsWritten: number }> => {
   const addedIdGuard = overlayElementIdCollisionGuard(diff.added.length);
+  const referencedVariableNames = [...new Set(draft.elements.flatMap((element) =>
+    element.variableName === null ? [] : [element.variableName]))];
   const mutation = db.prepare(
     `UPDATE overlays
         SET name = ?, width = ?, height = ?, css = ?, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND overlay_id = ? AND revision = ?
+        ${referencedVariablesGuard}
         ${addedIdGuard}
         ${actorGuard(MANAGING_ROLES)}`,
   ).bind(draft.name, draft.width, draft.height, draft.css, changedAt, before.channelId, before.id, before.revision,
+    JSON.stringify(referencedVariableNames), before.channelId,
     ...diff.added.map((element) => element.id),
     ...(diff.added.length === 0 ? [] : [before.channelId, before.id]),
     ...bindActorGuard(actor, before.channelId, changedAt));
