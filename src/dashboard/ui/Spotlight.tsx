@@ -1,7 +1,7 @@
 import "@mantine/spotlight/styles.css";
 
 import { Spotlight as MantineSpotlight, type SpotlightActionData, type SpotlightFilterFunction } from "@mantine/spotlight";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { Icon, type IconName } from "./Icon";
 
@@ -37,6 +37,8 @@ export interface SpotlightProps {
   /** Fires when the modal opens -- the hook for a caller that loads its
    *  result data lazily instead of prefetching on every mount. */
   onOpen?: () => void;
+  /** Closes Mantine's shared palette store when its owning channel unmounts. */
+  closeOnUnmount?: boolean;
 }
 
 /** Lowercased and diacritic-stripped (drops combining marks after NFD, e.g. "o" from an umlauted "o") so an accent-free query still matches an accented label or keyword (#208). */
@@ -106,7 +108,12 @@ const filterItems: SpotlightFilterFunction = (query, actions) => {
  * parts). `items` stays in project vocabulary; only this file touches the
  * package's own types.
  */
-export function Spotlight({ items, emptyMessage, placeholder, forceOpened, query, onQueryChange, onOpen }: SpotlightProps) {
+export function Spotlight({ items, emptyMessage, placeholder, forceOpened, query, onQueryChange, onOpen, closeOnUnmount = false }: SpotlightProps) {
+  useEffect(() => {
+    if (!closeOnUnmount) return;
+    return () => { MantineSpotlight.close(); };
+  }, [closeOnUnmount]);
+
   const actionItems: SpotlightActionData[] = items.map((item) => {
     const description = item.disabled ? item.disabledReason ?? item.description : item.description;
     const leftSection = typeof item.icon === "string"
@@ -115,6 +122,7 @@ export function Spotlight({ items, emptyMessage, placeholder, forceOpened, query
     return {
       id: item.id,
       label: item.label,
+      "data-spotlight-item-id": item.id,
       ...(leftSection === undefined ? {} : { leftSection }),
       ...(item.group === undefined ? {} : { group: item.group }),
       ...(item.keywords === undefined ? {} : { keywords: item.keywords }),

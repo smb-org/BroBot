@@ -17,6 +17,11 @@ export type DashboardRoute =
   }
   | { kind: "module"; channelId: string; moduleId: string };
 
+/** Routes whose page content cannot work until the installation bot is signed in. */
+export const dashboardRouteRequiresBot = (route: DashboardRoute): boolean =>
+  route.kind === "overview" || route.kind === "module" || (route.kind === "channel" &&
+    route.section !== "system" && route.section !== "audit" && route.section !== "variables" && route.section !== "overlay-links");
+
 let suppressNextPopState = false;
 let historyIndex = 0;
 

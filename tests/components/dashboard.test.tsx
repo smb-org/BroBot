@@ -2358,6 +2358,56 @@ describe("Dashboard skeleton", () => {
     });
   });
 
+  it("closes an open Spotlight when the route changes channels, then loads the new channel's results", async () => {
+    const alpha = healthyChannel("kanal-a", "Alpha");
+    const beta = healthyChannel("kanal-b", "Beta");
+    const command = (channelId: string, name: string) => ({
+      channelId,
+      name,
+      text: "Test",
+      kind: "text",
+      enabled: true,
+      minimumTier: "everyone",
+      cooldownSeconds: 5,
+      lastUsedAt: null,
+      createdAt: "2026-09-19T00:00:00.000Z",
+      updatedAt: "2026-09-19T00:00:00.000Z",
+    });
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta], bot: alpha.bot });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
+      if (path.endsWith("/modules/text_commands/commands")) {
+        const channelId = path.includes("kanal-b") ? "kanal-b" : "kanal-a";
+        return jsonResponse({ commands: [command(channelId, channelId === "kanal-a" ? "alphaonly" : "betaonly")] });
+      }
+      if (path.endsWith("/variables")) return jsonResponse({ variables: [], count: 0, maximum: 20 });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "System", level: 1 });
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    expect(await screen.findByText("!alphaonly")).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState({}, "", "/channels/kanal-b/system");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname === "/api/channels/kanal-b/system")).toBe(true);
+    });
+    await waitFor(() => { expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); });
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    expect(await screen.findByText("!betaonly")).toBeInTheDocument();
+  });
+
   it("switches channels through the header select and moves the route", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
@@ -2432,6 +2482,32 @@ describe("Dashboard skeleton", () => {
         }
       }
     }
+  });
+
+  it.each([false, true])("keeps rendered sidebar and Spotlight page ids in sync (platform admin: %s)", async (platformAdmin) => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot, platformAdmin });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "System", level: 1 });
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    const dialog = await screen.findByRole("dialog");
+
+    const sidebar = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    const sidebarPageIds = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-nav-page-id]"), (entry) => entry.dataset.navPageId)
+      .filter((id): id is string => id !== undefined);
+    const spotlightPageIds = Array.from(dialog.querySelectorAll<HTMLElement>("[data-spotlight-item-id^='page:']"), (action) => action.dataset.spotlightItemId?.slice("page:".length))
+      .filter((id): id is string => id !== undefined);
+    expect(spotlightPageIds).toEqual(sidebarPageIds);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
   });
 
   it("the brand acts as a focusable link to the channel list", async () => {

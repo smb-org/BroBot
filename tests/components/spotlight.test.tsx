@@ -7,8 +7,6 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { Spotlight } from "../../src/dashboard/ui/Spotlight";
 import { ChannelSpotlight } from "../../src/dashboard/spotlight";
 import { ModuleIcon } from "../../src/dashboard/module-panels";
-import { dashboardTexts } from "../../src/dashboard/locale";
-import { visibleNavPages } from "../../src/dashboard/nav-pages";
 import { jsonResponse } from "../unit/fixtures";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
@@ -190,16 +188,22 @@ describe("Channel Spotlight", () => {
   it('finds the audit log page by typing "audit" (#208)', async () => { await findsPageByQuery("audit", "Audit-Log"); });
   it('finds the variables page by typing "variab" (#208)', async () => { await findsPageByQuery("variab", "Variablen"); });
 
-  it("lists every sidebar page from the shared NAV_PAGES definition (#208)", async () => {
+  it("disables pages the router blocks while the installation bot is signed out", async () => {
     stubFetch();
-    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" isPlatformAdmin modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()} />);
+    const onNavigate = vi.fn();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" botSignedIn={false} modules={[]} onNavigate={onNavigate} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()} />);
 
     fireEvent.keyDown(document.body, { key: "k", metaKey: true });
     await screen.findByRole("dialog");
-    const texts = dashboardTexts();
-    for (const page of visibleNavPages({ isPlatformAdmin: true })) {
-      await waitFor(() => { expect(screen.getAllByText(page.label(texts)).length).toBeGreaterThan(0); });
+
+    for (const label of ["Ereignisse", "Mitglieder"]) {
+      const action = (await screen.findByText(label)).closest(".mantine-Spotlight-action");
+      expect(action).toBeDisabled();
+      expect(action).toHaveTextContent("Der Bot ist nicht angemeldet");
     }
+    const variables = (await screen.findByText("Variablen")).closest(".mantine-Spotlight-action");
+    expect(variables).not.toBeDisabled();
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it("hides the operator-only platform page for a non-operator (#208)", async () => {

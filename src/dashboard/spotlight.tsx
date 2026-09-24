@@ -11,7 +11,7 @@ import { channelVariablesTexts, dashboardTexts, immediateActionUnavailableReason
 import { moduleDescription, moduleName, moduleWorkspaceTexts } from "./module-labels";
 import { ModuleIcon, NavigationIcon } from "./module-panels";
 import { navPageGroupHeading, visibleNavPages } from "./nav-pages";
-import type { DashboardRoute } from "./router";
+import { dashboardRouteRequiresBot, type DashboardRoute } from "./router";
 import { Spotlight, type SpotlightItem } from "./ui";
 
 const SHOUTOUT_KEYWORD = "shoutout";
@@ -45,6 +45,8 @@ interface ChannelSpotlightProperties {
   ownRole: ChannelRole;
   /** Account-wide platform admin flag (#208) -- same gate `PanelSidebar` uses to show the platform page, never the per-channel "operator" role. */
   isPlatformAdmin?: boolean;
+  /** Whether the installation bot is signed in; undefined while its status is unknown. */
+  botSignedIn?: boolean;
   streamState?: "online" | "offline" | null | undefined;
   modules: PanelModuleState[];
   onNavigate: (route: DashboardRoute) => void;
@@ -66,7 +68,7 @@ const variableDescription = (variable: PanelChannelVariable): string =>
  * useful here, and the sidebar's "Mitglieder" page (still indexed below)
  * covers it.
  */
-export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, streamState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelSpotlightProperties): ReactElement => {
+export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, botSignedIn, streamState, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelSpotlightProperties): ReactElement => {
   const texts = dashboardTexts();
   const manageable = canManage(ownRole);
   const [commands, setCommands] = useState<TextCommand[]>([]);
@@ -113,14 +115,19 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
   // Every sidebar page, indexed from the same `NAV_PAGES` list `PanelSidebar`
   // renders from (#208) -- a page added there appears here too, and the
   // platform page is gated by the same account-wide flag the sidebar uses.
-  const pageItems = useMemo<SpotlightItem[]>(() => visibleNavPages({ isPlatformAdmin }).map((page) => ({
-    id: `page:${page.id}`,
-    label: page.label(texts),
-    icon: <NavigationIcon kind={page.iconKind} className="spotlight-module-icon" />,
-    group: navPageGroupHeading(page.group, texts),
-    keywords: [...page.keywords],
-    onTrigger: () => { onNavigate(page.route(channelId)); },
-  })), [channelId, isPlatformAdmin, onNavigate, texts]);
+  const pageItems = useMemo<SpotlightItem[]>(() => visibleNavPages({ isPlatformAdmin }).map((page) => {
+    const pageRoute = page.route(channelId);
+    const blockedByBot = botSignedIn === false && dashboardRouteRequiresBot(pageRoute);
+    return {
+      id: `page:${page.id}`,
+      label: page.label(texts),
+      icon: <NavigationIcon kind={page.iconKind} className="spotlight-module-icon" />,
+      group: navPageGroupHeading(page.group, texts),
+      keywords: [...page.keywords],
+      ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
+      onTrigger: () => { onNavigate(pageRoute); },
+    };
+  }), [botSignedIn, channelId, isPlatformAdmin, onNavigate, texts]);
 
   const variableItems = useMemo<SpotlightItem[]>(() => variables.map((variable) => ({
     id: `variable:${variable.name}`,
@@ -224,6 +231,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
       query={query}
       onQueryChange={setQuery}
       onOpen={loadResultData}
+      closeOnUnmount
     />
   );
 };

@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
@@ -232,16 +233,40 @@ describe("Channel variables page", () => {
     expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
-  it("opens the inspector for the variable named by initialSelection (#208, Spotlight deep link)", async () => {
+  it("consumes each Spotlight selection, applies later requests on the mounted page, and does not replay one after returning", async () => {
     const other = { ...variable, name: "other", description: "" };
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
       variables: [other, variable], count: 2, maximum: 25,
     }))));
 
-    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage={false} onOpenCommand={() => {}} initialSelection="score" /></UiProvider>);
+    const Harness = (): ReactElement => {
+      const [selection, setSelection] = useState<string | null>("score");
+      const [visible, setVisible] = useState(true);
+      return <>
+        <button type="button" onClick={() => setSelection("other")}>Request other variable</button>
+        <button type="button" onClick={() => setVisible(false)}>Leave variables</button>
+        <button type="button" onClick={() => setVisible(true)}>Return to variables</button>
+        {visible ? <ChannelVariablesPage
+          channelId="kanal-a"
+          canManage={false}
+          onOpenCommand={() => {}}
+          {...(selection === null ? {} : { initialSelection: selection })}
+          onInitialSelectionConsumed={(name) => { setSelection((pending) => pending === name ? null : pending); }}
+        /> : null}
+      </>;
+    };
+    render(<UiProvider><Harness /></UiProvider>);
 
     await screen.findByText("{var.score}");
     const nameField = await screen.findByLabelText("Name");
     expect(nameField).toHaveValue("score");
+
+    fireEvent.click(screen.getByRole("button", { name: "Request other variable" }));
+    expect(await screen.findByLabelText("Name")).toHaveValue("other");
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave variables" }));
+    fireEvent.click(screen.getByRole("button", { name: "Return to variables" }));
+    await screen.findByRole("table");
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
   });
 });

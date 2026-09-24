@@ -20,8 +20,10 @@ interface ChannelVariablesPageProperties {
   channelId: string;
   canManage: boolean;
   onOpenCommand: (name: string) => void;
-  /** Deep-link target from Spotlight (#208), a variable name -- applied once the variable list has loaded. */
+  /** Deep-link request from Spotlight (#208), applied after variables load and then consumed by the parent. */
   initialSelection?: string;
+  /** Clears the parent-owned request after this page has applied it. */
+  onInitialSelectionConsumed?: (name: string) => void;
 }
 
 const normalizedVariableName = (value: string): string => value.trim().toLowerCase();
@@ -50,7 +52,7 @@ const variableWidgetUrl = (token: string, name: string, text: string): string =>
   return url.toString();
 };
 
-export function ChannelVariablesPage({ channelId, canManage: canManageContent, onOpenCommand, initialSelection }: ChannelVariablesPageProperties): ReactElement {
+export function ChannelVariablesPage({ channelId, canManage: canManageContent, onOpenCommand, initialSelection, onInitialSelectionConsumed }: ChannelVariablesPageProperties): ReactElement {
   const language = dashboardLanguage();
   const labels = channelVariablesTexts(language);
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
@@ -72,7 +74,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const refreshRequest = useRef(0);
   const invalidateRefresh = useCallback((): void => { refreshRequest.current++; }, []);
-  const initialSelectionApplied = useRef(false);
+  const lastInitialSelection = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async (): Promise<void> => {
     const requestId = ++refreshRequest.current;
@@ -140,12 +142,16 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const selectVariableRef = useRef(selectVariable);
   useEffect(() => { selectVariableRef.current = selectVariable; });
   useEffect(() => {
-    if (loading || initialSelectionApplied.current || initialSelection === undefined) return;
+    if (initialSelection === undefined) {
+      lastInitialSelection.current = undefined;
+      return;
+    }
+    if (loading || lastInitialSelection.current === initialSelection) return;
     const match = variables.find((variable) => variable.name === initialSelection);
-    if (match === undefined) return;
-    initialSelectionApplied.current = true;
-    selectVariableRef.current(match);
-  }, [initialSelection, loading, variables]);
+    lastInitialSelection.current = initialSelection;
+    if (match !== undefined) selectVariableRef.current(match);
+    onInitialSelectionConsumed?.(initialSelection);
+  }, [initialSelection, loading, onInitialSelectionConsumed, variables]);
   const closeInspector = (): void => {
     setCreating(false);
     setSelectedName(null);

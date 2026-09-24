@@ -143,7 +143,7 @@ Cloudflare resource bindings (also from `wrangler.jsonc`, not secrets):
 | `DB` | the environment's D1 database |
 | `CHANNEL` | the `ChannelObject` Durable Object namespace |
 | `ASSETS` | static dashboard/overlay files from `dist/client` |
-| `CF_VERSION_METADATA` | deployment version metadata, shown in the overlay |
+| `CF_VERSION_METADATA` | deployment version metadata, shown by overlay diagnostics with `debug=1` |
 
 ### D1 setup
 
