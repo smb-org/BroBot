@@ -74,6 +74,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [overlayError, setOverlayError] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const refreshRequest = useRef(0);
+  const invalidateRefresh = useCallback((): void => { refreshRequest.current++; }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
     const requestId = ++refreshRequest.current;
@@ -94,8 +95,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
 
   useEffect(() => {
     void Promise.resolve().then(refresh);
-    return () => { refreshRequest.current++; };
-  }, [refresh]);
+    return () => { invalidateRefresh(); };
+  }, [invalidateRefresh, refresh]);
 
   useRealtimeVariableUpdates({ channelId, refresh });
 
@@ -312,50 +313,51 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             ))}</ul>}
           </div>
           {selectedUsages.some((usage) => usage.kind === "action") ? <p className="muted" role="note">{labels.inUseReason(usageNames.filter((_, index) => selectedUsages[index]?.kind === "action").join(", "))}</p> : null}
-          <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} {...(!canManageContent ? { title: labels.managementLocked } : selectedUsages.some((usage) => usage.kind === "action") ? { title: labels.inUseReason(usageNames.join(", ")) } : {})} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>
-          {canManageContent ? <section className="config-section channel-variable-overlay-link" aria-label={labels.overlayLink}>
-            <h3>{labels.overlayLink}</h3>
-            <Field
-              id="channel-variable-overlay-text"
-              label={labels.overlayText}
-              hint={overlayTemplateValid ? labels.overlayTextHint : labels.overlayTemplateInvalid}
-              value={overlayText}
-              maxLength={100}
-              countLabel={(count, max) => `${String(count)} / ${String(max)}`}
-              disabled={pending}
-              onChange={(value) => { setOverlayText(value); setOverlayUrl(null); setCopyNotice(null); }}
-              {...(!overlayTemplateValid ? { error: labels.overlayTemplateInvalid } : {})}
-            />
-            <Button disabled={pending || !overlayTemplateValid} onClick={() => { void generateOverlayLink(); }}>
-              {labels.generateOverlayLink}
-            </Button>
-            <Field
-              id="channel-variable-overlay-existing"
-              label={labels.existingOverlayLink}
-              value={existingOverlayLink}
-              maxLength={2_000}
-              countLabel={(count, max) => `${String(count)} / ${String(max)}`}
-              disabled={pending}
-              onChange={(value) => { setExistingOverlayLink(value); setOverlayUrl(null); setOverlayError(null); setCopyNotice(null); }}
-            />
-            <Button variant="neutral" disabled={pending || !overlayTemplateValid || existingOverlayLink.trim().length === 0}
-              onClick={useExistingOverlayLink}>{labels.useExistingOverlayLink}</Button>
-            {overlayError === null ? null : <p className="form-error" role="alert">{overlayError}</p>}
-            {overlayUrl === null ? null : <>
-              <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-url" label={labels.widgetUrl} value={overlayUrl} minRows={3} />
-              <Button variant="neutral" onClick={() => { void copyText(overlayUrl); }}>{labels.copyLink}</Button>
-              <p className="muted" role="note">{labels.secretNotice}</p>
-              <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-css" label={labels.obsCss} value={obsCssExample} minRows={6} />
-              <Button variant="neutral" onClick={() => { void copyText(obsCssExample); }}>{labels.copyCss}</Button>
-              {copyNotice === null ? null : <p className="muted" role="status">{copyNotice}</p>}
-            </>}
-          </section> : null}
         </>}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         <div className="channel-variable-editor__actions">
           <Button variant="primary" disabled={!canManageContent || pending || nameInvalid || draftSetValue === ""} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { void save(); }}>{labels.save}</Button>
           <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.discard}</Button>
         </div>
+        {selected !== null && canManageContent ? <section className="config-section channel-variable-overlay-link" aria-label={labels.overlayLink}>
+          <hr className="channel-variable-overlay-link__divider" />
+          <h3>{labels.overlayLink}</h3>
+          <Field
+            id="channel-variable-overlay-text"
+            label={labels.overlayText}
+            hint={overlayTemplateValid ? labels.overlayTextHint : labels.overlayTemplateInvalid}
+            value={overlayText}
+            maxLength={100}
+            countLabel={(count, max) => `${String(count)} / ${String(max)}`}
+            disabled={pending}
+            onChange={(value) => { setOverlayText(value); setOverlayUrl(null); setCopyNotice(null); }}
+            {...(!overlayTemplateValid ? { error: labels.overlayTemplateInvalid } : {})}
+          />
+          <Button disabled={pending || !overlayTemplateValid} onClick={() => { void generateOverlayLink(); }}>
+            {labels.generateOverlayLink}
+          </Button>
+          <Field
+            id="channel-variable-overlay-existing"
+            label={labels.existingOverlayLink}
+            value={existingOverlayLink}
+            maxLength={2_000}
+            countLabel={(count, max) => `${String(count)} / ${String(max)}`}
+            disabled={pending}
+            onChange={(value) => { setExistingOverlayLink(value); setOverlayUrl(null); setOverlayError(null); setCopyNotice(null); }}
+          />
+          <Button variant="neutral" disabled={pending || !overlayTemplateValid || existingOverlayLink.trim().length === 0}
+            onClick={useExistingOverlayLink}>{labels.useExistingOverlayLink}</Button>
+          {overlayError === null ? null : <p className="form-error" role="alert">{overlayError}</p>}
+          {overlayUrl === null ? null : <>
+            <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-url" label={labels.widgetUrl} value={overlayUrl} minRows={3} />
+            <Button variant="neutral" onClick={() => { void copyText(overlayUrl); }}>{labels.copyLink}</Button>
+            <p className="muted" role="note">{labels.secretNotice}</p>
+            <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-css" label={labels.obsCss} value={obsCssExample} minRows={6} />
+            <Button variant="neutral" onClick={() => { void copyText(obsCssExample); }}>{labels.copyCss}</Button>
+            {copyNotice === null ? null : <p className="muted" role="status">{copyNotice}</p>}
+          </>}
+        </section> : null}
+        {selected !== null ? <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} {...(!canManageContent ? { title: labels.managementLocked } : selectedUsages.some((usage) => usage.kind === "action") ? { title: labels.inUseReason(usageNames.join(", ")) } : {})} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button> : null}
         {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
       </div>
     </SubInspector>

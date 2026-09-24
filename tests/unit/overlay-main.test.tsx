@@ -280,14 +280,10 @@ describe("Overlay status view", () => {
     expect(container.querySelector(".brobot-variable")).toBeNull();
   });
 
-  it("reloads on reconnect and debounces variable changes for 1.5 seconds", async () => {
+  it("reconciles set and removal hints from authoritative state with a bounded debounce", async () => {
     setFragment("erstes-token&var=score&text=Score%3A+%7Bvalue%7D");
-    let loadCount = 0;
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => {
-      loadCount += 1;
-      if (loadCount === 3) return Promise.resolve(new Response("", { status: 503 }));
-      return Promise.resolve(variableResponse("score", loadCount));
-    });
+    let authoritativeValue = 10;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(variableResponse("score", authoritativeValue)));
     vi.stubGlobal("fetch", fetcher);
     let callbacks: {
       onOpen: (reconnected: boolean) => void;
@@ -301,36 +297,50 @@ describe("Overlay status view", () => {
     expect(typeof entry).toBe("function");
     if (typeof entry !== "function") return;
 
+    vi.useFakeTimers();
     const View = entry as ComponentType;
     const { container } = render(<View />);
-    await waitFor(() => expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("1"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("10");
 
-    act(() => callbacks?.onOpen(true));
-    await waitFor(() => expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("2"));
-    expect(fetcher).toHaveBeenCalledTimes(2);
-
-    vi.useFakeTimers();
-    const message = (value: number) => ({
+    const message = (value: number | null) => ({
       version: 1,
-      id: `update-${String(value)}`,
+      id: `update-${String(value)}-${String(Math.random())}`,
       createdAt: "2026-09-24T12:00:00.000Z",
       channelId: "channel-a",
       type: "variables.changed",
-      payload: { set: [{ name: "score", value }], removed: [] },
+      payload: value === null
+        ? { set: [], removed: ["score"] }
+        : { set: [{ name: "score", value }], removed: [] },
     });
-    act(() => callbacks?.onMessage(message(3)));
-    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("3");
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    act(() => callbacks?.onMessage(message(4)));
-    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("4");
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_499); });
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    act(() => callbacks?.onMessage(message(99)));
+    act(() => callbacks?.onMessage(message(null)));
+    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("10");
+    authoritativeValue = 12;
+    await act(async () => { await vi.advanceTimersByTimeAsync(249); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("12");
 
+    authoritativeValue = 15;
+    for (let index = 0; index < 7; index++) {
+      act(() => callbacks?.onMessage(message(200 + index)));
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("12");
+    act(() => callbacks?.onMessage(message(207)));
+    await act(async () => { await vi.advanceTimersByTimeAsync(99); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("12");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetcher).toHaveBeenCalledTimes(3);
-    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("4");
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    expect(fetcher).toHaveBeenCalledTimes(4);
-    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("4");
+    expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("15");
   });
 });

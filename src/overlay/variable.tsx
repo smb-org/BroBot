@@ -17,7 +17,8 @@ interface OverlayVariableProperties {
 }
 
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
-const RELOAD_DELAY_MS = 1_500;
+const RELOAD_DEBOUNCE_MS = 250;
+const RELOAD_MAX_WAIT_MS = 1_500;
 const MAX_LOAD_RETRIES = 3;
 const INITIAL_LOAD_RETRY_DELAY_MS = 1_000;
 
@@ -64,10 +65,10 @@ const requestOverlayVariable = async (
   };
 };
 
-const hasVariableValue = (
+const hasVariableHint = (
   message: RealtimeEnvelope<"variables.changed">,
   name: string,
-): number | null => message.payload.set.find((variable) => variable.name === name)?.value ?? null;
+): boolean => message.payload.set.some((variable) => variable.name === name) || message.payload.removed.includes(name);
 
 export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties): ReactElement | null => {
   const [current, setCurrent] = useState<OverlayVariableValue | null>(null);
@@ -81,6 +82,7 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
     let requestNumber = 0;
     let activeController: AbortController | null = null;
     let reloadTimer: number | null = null;
+    let maximumReloadTimer: number | null = null;
     let retryTimer: number | null = null;
     let retryAttempt = 0;
 
@@ -118,12 +120,22 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
       reloadTimer = null;
     };
 
+    const stopMaximumReloadTimer = (): void => {
+      if (maximumReloadTimer === null) return;
+      window.clearTimeout(maximumReloadTimer);
+      maximumReloadTimer = null;
+    };
+
+    const reloadFromAuthority = (): void => {
+      stopReloadTimer();
+      stopMaximumReloadTimer();
+      void load();
+    };
+
     const scheduleReload = (): void => {
       stopReloadTimer();
-      reloadTimer = window.setTimeout(() => {
-        reloadTimer = null;
-        void load();
-      }, RELOAD_DELAY_MS);
+      reloadTimer = window.setTimeout(reloadFromAuthority, RELOAD_DEBOUNCE_MS);
+      maximumReloadTimer ??= window.setTimeout(reloadFromAuthority, RELOAD_MAX_WAIT_MS);
     };
 
     const invalidatePendingLoad = (): void => {
@@ -135,6 +147,7 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
     const stopRealtime = connectOverlayRealtime(token, () => {
       invalidatePendingLoad();
       stopReloadTimer();
+      stopMaximumReloadTimer();
       stopRetryTimer();
       setCurrent(null);
     }, {
@@ -144,22 +157,10 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
         void load();
       },
       onMessage: (message) => {
-        if (message.payload.removed.includes(name)) {
-          invalidatePendingLoad();
-          stopReloadTimer();
-          stopRetryTimer();
-          retryAttempt = 0;
-          setCurrent(null);
-          return;
-        }
-        const nextValue = hasVariableValue(message, name);
-        if (nextValue === null) return;
+        if (!hasVariableHint(message, name)) return;
         invalidatePendingLoad();
         stopRetryTimer();
         retryAttempt = 0;
-        setCurrent((previous) => previous === null
-          ? { value: nextValue, language: null }
-          : { ...previous, value: nextValue });
         scheduleReload();
       },
     });
@@ -170,6 +171,7 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
       requestNumber++;
       activeController?.abort();
       stopReloadTimer();
+      stopMaximumReloadTimer();
       stopRetryTimer();
       stopRealtime();
     };

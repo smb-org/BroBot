@@ -98,7 +98,12 @@ export const prepareChannelVariableChange = (
               WHEN 'add' THEN max(${minimumValue}, min(${maximumValue}, value + ?))
               ELSE max(${minimumValue}, min(${maximumValue}, value - ?))
             END,
-            updated_at = ?
+            updated_at = CASE WHEN value <> CASE ?
+              WHEN 'set' THEN ?
+              WHEN 'set_argument' THEN ?
+              WHEN 'add' THEN max(${minimumValue}, min(${maximumValue}, value + ?))
+              ELSE max(${minimumValue}, min(${maximumValue}, value - ?))
+            END THEN ? ELSE updated_at END
       WHERE channel_id = ? AND name = ?
         AND EXISTS (
           SELECT 1 FROM text_commands AS command
@@ -114,7 +119,8 @@ export const prepareChannelVariableChange = (
              ))
         )
       RETURNING name, value`,
-  ).bind(change.operation, amount, amount, amount, amount, now, channelId, change.name,
+  ).bind(change.operation, amount, amount, amount, amount,
+    change.operation, amount, amount, amount, amount, now, channelId, change.name,
     channelId, claim.commandName, now, claim.revision, claim.userId, claim.userId, now);
 };
 
@@ -152,7 +158,7 @@ export const prepareResetChannelVariablesForStream = (
     Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : null),
   db.prepare(
     `UPDATE channel_variables SET value = 0, updated_at = ?
-      WHERE channel_id = ? AND reset_on_stream_start = 1 AND changes() > 0
+      WHERE channel_id = ? AND reset_on_stream_start = 1 AND value <> 0 AND changes() > 0
       RETURNING name`,
   ).bind(now, channelId),
   db.prepare(

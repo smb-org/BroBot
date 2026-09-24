@@ -152,8 +152,8 @@ describe("lookupAndRefreshStreamState", () => {
       await insertStreamState(database, "kanal-a", "offline", STALE, "helix");
       await database.prepare(
         `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
-         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
-      ).bind(NOW, NOW).run();
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?), ('kanal-a', 'zero', 0, 1, ?, ?)`,
+      ).bind(NOW, NOW, NOW, NOW).run();
       await withAppToken(database);
 
       const startedAt = "2026-09-23T11:59:00.000Z";
@@ -166,6 +166,8 @@ describe("lookupAndRefreshStreamState", () => {
         { type: "variables.changed", payload: { set: [{ name: "score", value: 0 }], removed: [] } },
       ]);
       await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 0 });
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'zero'").first())
         .resolves.toEqual({ value: 0 });
       await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
         .resolves.toEqual({ started_at: startedAt });

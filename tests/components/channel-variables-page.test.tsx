@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
@@ -47,6 +47,7 @@ class DashboardSocket {
 describe("Channel variables page", () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     DashboardSocket.instances = [];
   });
@@ -139,29 +140,92 @@ describe("Channel variables page", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes from variables.changed and no longer reloads on window focus", async () => {
+  it("keeps variable actions before a separated overlay section and a visible disabled import button", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ variables: [variable], count: 1, maximum: 25 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+
+    const inspector = document.querySelector(".list-detail__inspector");
+    if (!(inspector instanceof HTMLElement)) throw new Error("Variable inspector is missing.");
+    const controls = within(inspector);
+    const precedes = (first: Node, second: Node): boolean =>
+      (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    const variableName = controls.getByLabelText("Name");
+    const valueControls = inspector.querySelector(".channel-variable-value-controls");
+    const usages = controls.getByRole("heading", { name: "Verwendet in" });
+    const actions = inspector.querySelector(".channel-variable-editor__actions");
+    const overlaySection = controls.getByRole("region", { name: "Overlay-Link" });
+    const divider = within(overlaySection).getByRole("separator");
+    const deleteButton = controls.getByRole("button", { name: "Variable löschen" });
+    const useExistingButton = controls.getByRole("button", { name: "Link übernehmen" });
+
+    if (valueControls === null || actions === null) throw new Error("Variable controls are missing.");
+    expect(precedes(variableName, valueControls)).toBe(true);
+    expect(precedes(valueControls, usages)).toBe(true);
+    expect(precedes(usages, actions)).toBe(true);
+    expect(precedes(actions, overlaySection)).toBe(true);
+    expect(precedes(divider, within(overlaySection).getByRole("heading", { name: "Overlay-Link" }))).toBe(true);
+    expect(precedes(overlaySection, deleteButton)).toBe(true);
+    expect(inspector.querySelector(".channel-variable-editor")?.lastElementChild).toBe(deleteButton);
+    expect(useExistingButton).toBeDisabled();
+    expect(useExistingButton.style.opacity).toBe("0.7");
+  });
+
+  it("coalesces variable hints, bounds continuous refreshes, and keeps one request in flight", async () => {
+    let releaseThird: ((result: Response) => void) | null = null;
+    const fetcher = vi.fn<typeof fetch>();
+    fetcher.mockImplementation(() => fetcher.mock.calls.length === 3
+      ? new Promise((resolve) => { releaseThird = resolve; })
+      : Promise.resolve(response({ variables: [variable], count: 1, maximum: 25 })));
     vi.stubGlobal("fetch", fetcher);
     vi.stubGlobal("WebSocket", DashboardSocket);
 
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
     await screen.findByRole("table");
     expect(DashboardSocket.instances).toHaveLength(1);
+    vi.useFakeTimers();
     DashboardSocket.instances[0]?.dispatch("open", new Event("open"));
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
-    DashboardSocket.instances[0]?.dispatch("message", {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    const sendHint = (id: number): void => DashboardSocket.instances[0]?.dispatch("message", {
       data: JSON.stringify({
         version: 1,
-        id: "variables-changed-1",
+        id: `variables-changed-${String(id)}`,
         createdAt: "2026-09-24T12:00:00.000Z",
         channelId: "kanal-a",
         type: "variables.changed",
         payload: { set: [{ name: "score", value: 1235 }], removed: [] },
       }),
     } as MessageEvent<string>);
-
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
-    fireEvent.focus(window);
+    for (let index = 0; index < 10; index++) sendHint(index);
+    await act(async () => { await vi.advanceTimersByTimeAsync(119); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetcher).toHaveBeenCalledTimes(3);
+
+    for (let index = 10; index < 25; index++) {
+      sendHint(index);
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(releaseThird).toBeTypeOf("function");
+    await act(async () => {
+      releaseThird?.(response({ variables: [variable], count: 1, maximum: 25 }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    fireEvent.focus(window);
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 });

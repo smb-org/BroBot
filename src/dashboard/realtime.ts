@@ -17,6 +17,8 @@ const RECONNECT_GRACE_MS = 400;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const BATCH_DELAY_MS = 120;
+const VARIABLE_REFRESH_DELAY_MS = 120;
+const VARIABLE_REFRESH_MAX_WAIT_MS = 1_500;
 
 export type RealtimeFeedStatus = "connecting" | "connected" | "reconnecting" | "offline" | "renew";
 
@@ -145,8 +147,45 @@ export const useRealtimeVariableUpdates = ({
     let disposed = false;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let variableRefreshTimer: number | null = null;
+    let maximumVariableRefreshTimer: number | null = null;
+    let variableRefreshInFlight = false;
+    let variableRefreshQueued = false;
     let reconnectAttempt = 0;
     let fatalProtocolError = false;
+    const hasPendingVariableRefresh = (): boolean => !disposed && variableRefreshQueued;
+
+    const stopVariableRefreshTimers = (): void => {
+      if (variableRefreshTimer !== null) window.clearTimeout(variableRefreshTimer);
+      if (maximumVariableRefreshTimer !== null) window.clearTimeout(maximumVariableRefreshTimer);
+      variableRefreshTimer = null;
+      maximumVariableRefreshTimer = null;
+    };
+
+    const refreshVariables = async (): Promise<void> => {
+      stopVariableRefreshTimers();
+      if (disposed) return;
+      if (variableRefreshInFlight) {
+        variableRefreshQueued = true;
+        return;
+      }
+      variableRefreshQueued = false;
+      variableRefreshInFlight = true;
+      try {
+        await refreshRef.current();
+      } catch {
+        // A later socket hint or reconnect will retry the refresh.
+      } finally {
+        variableRefreshInFlight = false;
+        if (hasPendingVariableRefresh()) void refreshVariables();
+      }
+    };
+
+    const scheduleVariableRefresh = (): void => {
+      if (variableRefreshTimer !== null) window.clearTimeout(variableRefreshTimer);
+      variableRefreshTimer = window.setTimeout(() => { void refreshVariables(); }, VARIABLE_REFRESH_DELAY_MS);
+      maximumVariableRefreshTimer ??= window.setTimeout(() => { void refreshVariables(); }, VARIABLE_REFRESH_MAX_WAIT_MS);
+    };
 
     const scheduleReconnect = (): void => {
       if (disposed || fatalProtocolError || reconnectTimer !== null) return;
@@ -173,12 +212,12 @@ export const useRealtimeVariableUpdates = ({
         return;
       }
       if (parsed.type !== "variables.changed" || !isVariablesChangedPayload(parsed.payload)) return;
-      void refreshRef.current().catch(() => undefined);
+      scheduleVariableRefresh();
     };
 
     const handleOpen = (): void => {
       reconnectAttempt = 0;
-      void refreshRef.current().catch(() => undefined);
+      void refreshVariables();
     };
 
     const handleClose = (event: CloseEvent): void => {
@@ -207,6 +246,7 @@ export const useRealtimeVariableUpdates = ({
     return () => {
       disposed = true;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      stopVariableRefreshTimers();
       try { socket?.close(1000, "Leaving channel variables"); } catch { /* socket may already be closed */ }
     };
   }, [channelId]);

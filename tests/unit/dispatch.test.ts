@@ -824,8 +824,8 @@ describe("dispatch and execution", () => {
       await insertChannel(database, "kanal-a");
       await database.prepare(
         `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
-         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
-      ).bind(NOW, NOW).run();
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?), ('kanal-a', 'zero', 0, 1, ?, ?)`,
+      ).bind(NOW, NOW, NOW, NOW).run();
       const publish = vi.fn();
       const env = environment(database, publish);
       const dispatchOnline = (startedAt: string, receivedAt: string, triggerId: string) => dispatchEventSubNotification(env, {
@@ -845,6 +845,8 @@ describe("dispatch and execution", () => {
 
       await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
         .resolves.toEqual({ value: 9 });
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'zero'").first())
+        .resolves.toEqual({ value: 0 });
       await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
         .resolves.toEqual({ started_at: "2026-09-19T11:55:00.000Z" });
     } finally {
