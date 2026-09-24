@@ -16,6 +16,7 @@ const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
 const OVERLAY_HANDSHAKE_WINDOW_MS = 60 * 1000;
 const MAX_OVERLAY_HANDSHAKES_PER_TOKEN = 30;
 const MAX_OVERLAY_SOCKETS_PER_TOKEN = 10;
+const MAX_PANEL_SOCKETS_PER_USER = 10;
 const MAX_CHANNEL_SOCKETS = 512;
 // Keep a quarter of the room available to panel connections even when overlay
 // tokens are being used at their limit.
@@ -194,7 +195,9 @@ export class ChannelObject extends DurableObject<Env> {
   private hasConnectionCapacity(principal: RealtimePrincipal): boolean {
     const sockets = this.ctx.getWebSockets();
     if (sockets.length >= MAX_CHANNEL_SOCKETS) return false;
-    if (principal.kind === "panel") return true;
+    if (principal.kind === "panel") {
+      return this.ctx.getWebSockets(`user:${principal.userId}`).length < MAX_PANEL_SOCKETS_PER_USER;
+    }
     return this.ctx.getWebSockets("kind:overlay").length < MAX_OVERLAY_SOCKETS_PER_CHANNEL &&
       this.ctx.getWebSockets(`token:${principal.tokenId}`).length < MAX_OVERLAY_SOCKETS_PER_TOKEN;
   }
@@ -333,6 +336,11 @@ export class ChannelObject extends DurableObject<Env> {
     const warningDue = typeof warningDeadline === "number" && Number.isFinite(warningDeadline) && warningDeadline <= now;
     const expired = new Set<WebSocket>();
     const revoked = new Set<WebSocket>();
+    // Sockets whose authorization batch could not be checked this round. They
+    // are closed with the transient code so clients reconnect and are
+    // re-authorized on handshake, instead of staying subscribed past the
+    // backstop while D1 keeps failing.
+    const transientAuth = new Set<WebSocket>();
     let transientFailure = false;
 
     if (warningDue) await this.ctx.storage.delete(AD_PREWARNING_DEADLINE_KEY);
@@ -383,6 +391,9 @@ export class ChannelObject extends DurableObject<Env> {
           } catch (error: unknown) {
             transientFailure = true;
             console.error("Realtime session authorization check failed.", error);
+            for (const { webSocket, principal } of panelPrincipals) {
+              if (batch.includes(principal.sessionId)) transientAuth.add(webSocket);
+            }
           }
         }
 
@@ -405,6 +416,9 @@ export class ChannelObject extends DurableObject<Env> {
           } catch (error: unknown) {
             transientFailure = true;
             console.error("Realtime overlay token authorization check failed.", error);
+            for (const { webSocket, principal } of overlayPrincipals) {
+              if (batch.includes(principal.tokenId)) transientAuth.add(webSocket);
+            }
           }
         }
       }
@@ -420,6 +434,10 @@ export class ChannelObject extends DurableObject<Env> {
     }
     for (const webSocket of revoked) {
       closeSocket(webSocket, SOCKET_REVOKED_CODE, "Authorization revoked");
+    }
+    for (const webSocket of transientAuth) {
+      if (expired.has(webSocket) || revoked.has(webSocket)) continue;
+      closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "authorization check unavailable");
     }
 
     if (securityDue || securityRetryDue) {

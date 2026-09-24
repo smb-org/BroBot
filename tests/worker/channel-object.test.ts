@@ -264,7 +264,7 @@ describe("ChannelObject realtime path", () => {
     expect(storage.setAlarm).toHaveBeenLastCalledWith(now + 2_000);
   });
 
-  it("keeps sockets open and retries after a transient authorization query error", async () => {
+  it("closes sockets in a failed authorization batch with the transient code and retries", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-09-21T12:00:00.000Z");
     vi.setSystemTime(now);
@@ -299,7 +299,10 @@ describe("ChannelObject realtime path", () => {
 
     try {
       await object.alarm();
-      expect(panel.close.mock.calls).toHaveLength(0);
+      // The panel's session batch failed to query D1: its socket is closed
+      // with the transient code so the client reconnects and is
+      // re-authorized on handshake, instead of staying subscribed.
+      expect(panel.close.mock.calls).toEqual([[4008, "authorization check unavailable"]]);
       expect(socket.close.mock.calls).toEqual([[4003, "Authorization revoked"]]);
       expect(storage.values.get("security_round")).toBe(now - 1);
       expect(storage.values.get("security_retry")).toBe(now + 60_000);
@@ -307,9 +310,52 @@ describe("ChannelObject realtime path", () => {
 
       vi.setSystemTime(now + 60_000);
       await object.alarm();
-      expect(panel.close.mock.calls).toHaveLength(0);
+      // The retry's session batch succeeds, so no further close.
+      expect(panel.close.mock.calls).toHaveLength(1);
       expect(storage.values.get("security_round")).toBe(now + 16 * 60_000);
       expect(storage.values.has("security_retry")).toBe(false);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("closes only the sockets in a failed batch, leaving other batches untouched", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const failingBatch = Array.from({ length: 98 }, (_, index) => socketFor(validPrincipal({
+      userId: `user-${String(index)}`,
+      sessionId: `session-${String(index)}`,
+    })));
+    const okSocket = socketFor(validPrincipal({ userId: "user-ok", sessionId: "session-ok" }));
+    const sockets = [...failingBatch, okSocket];
+    let sessionCallCount = 0;
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          all: vi.fn(() => {
+            sessionCallCount += 1;
+            return sessionCallCount === 1
+              ? Promise.reject(new Error("D1 unavailable"))
+              : Promise.resolve({ results: [{ session_id: "session-ok", user_id: "user-ok", role: "operator" }] });
+          }),
+        })),
+      })),
+    } as unknown as D1Database;
+    const object = objectFor(sockets, database);
+    storageOf(object).values.set("security_round", now - 1);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await object.alarm();
+      // Batch 1 (98 sessions, the D1 parameter chunk size) failed to query;
+      // its sockets are closed with the transient code so their clients
+      // reconnect and are re-authorized on handshake.
+      for (const socket of failingBatch) {
+        expect(socket.close.mock.calls).toEqual([[4008, "authorization check unavailable"]]);
+      }
+      // Batch 2's query succeeded and found the session still valid.
+      expect(okSocket.close.mock.calls).toHaveLength(0);
     } finally {
       errorLog.mockRestore();
     }
@@ -390,6 +436,25 @@ describe("ChannelObject realtime path", () => {
       sessionId: `full-session-${String(index)}`,
     }))));
     expect(hasCapacity(full, validPrincipal({ userId: "late-panel", sessionId: "late-session" }))).toBe(false);
+  });
+
+  it("caps panel sockets per user without locking out other panels or overlays", async () => {
+    const sameUserSockets = Array.from({ length: 10 }, (_, index) => socketFor(validPrincipal({
+      sessionId: `session-${String(index)}`,
+    })));
+    const object = objectFor(sameUserSockets);
+    const state = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx;
+
+    const response = await object.fetch(upgradeRequest(validPrincipal({ sessionId: "session-11" })));
+
+    expect(response.status).toBe(503);
+    expect(state.acceptWebSocket).not.toHaveBeenCalled();
+
+    const hasCapacity = (principal: RealtimePrincipal): boolean =>
+      (object as unknown as { hasConnectionCapacity: (value: RealtimePrincipal) => boolean })
+        .hasConnectionCapacity(principal);
+    expect(hasCapacity(validPrincipal({ userId: "user-2", sessionId: "user-2-session" }))).toBe(true);
+    expect(hasCapacity({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", expiresAt: null })).toBe(true);
   });
 
   it("rate-limits repeated overlay handshakes per token", async () => {
