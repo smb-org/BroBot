@@ -123,15 +123,52 @@ export const prepareResetChannelVariablesForStream = (
   channelId: string,
   startedAt: string,
   now: string,
+  streamId: string | null = null,
 ): Promise<boolean> => db.batch([
   db.prepare(
-    `INSERT INTO channel_variable_stream_resets (channel_id, started_at)
-     VALUES (?, ?)
-     ON CONFLICT (channel_id) DO UPDATE SET started_at = excluded.started_at
-       WHERE julianday(excluded.started_at) > julianday(channel_variable_stream_resets.started_at)`,
-  ).bind(channelId, startedAt),
+    `INSERT INTO channel_variable_stream_resets (channel_id, started_at, stream_id, started_at_epoch_ms)
+     SELECT ?, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1 FROM channel_stream_state
+         WHERE channel_id = ? AND state = 'online'
+           AND ((? IS NOT NULL AND stream_id IS NOT NULL AND stream_id = ?)
+             OR ((? IS NULL OR stream_id IS NULL)
+              AND COALESCE(started_at_epoch_ms,
+                   CAST(round((julianday(started_at) - 2440587.5) * 86400000.0) AS INTEGER)) = ?))
+      )
+     ON CONFLICT (channel_id) DO UPDATE
+       SET started_at = excluded.started_at,
+           stream_id = COALESCE(excluded.stream_id, channel_variable_stream_resets.stream_id),
+           started_at_epoch_ms = excluded.started_at_epoch_ms
+       WHERE (
+         (excluded.stream_id IS NOT NULL AND channel_variable_stream_resets.stream_id IS NOT NULL
+          AND excluded.stream_id <> channel_variable_stream_resets.stream_id
+          AND excluded.started_at_epoch_ms >= channel_variable_stream_resets.started_at_epoch_ms)
+         OR ((excluded.stream_id IS NULL OR channel_variable_stream_resets.stream_id IS NULL)
+          AND excluded.started_at_epoch_ms > channel_variable_stream_resets.started_at_epoch_ms)
+       )`,
+  ).bind(channelId, startedAt, streamId, Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : null,
+    channelId, streamId, streamId, streamId,
+    Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : null),
   db.prepare(
     `UPDATE channel_variables SET value = 0, updated_at = ?
       WHERE channel_id = ? AND reset_on_stream_start = 1 AND changes() > 0`,
   ).bind(now, channelId),
-]).then((results) => (results[0]?.meta.changes ?? 0) > 0);
+  db.prepare(
+    `UPDATE channel_variable_stream_resets
+        SET stream_id = ?
+      WHERE channel_id = ? AND stream_id IS NULL AND ? IS NOT NULL
+        AND started_at_epoch_ms = ?
+        AND EXISTS (
+          SELECT 1 FROM channel_stream_state
+           WHERE channel_id = ? AND state = 'online'
+             AND ((? IS NOT NULL AND stream_id IS NOT NULL AND stream_id = ?)
+               OR ((? IS NULL OR stream_id IS NULL)
+                AND COALESCE(started_at_epoch_ms,
+                     CAST(round((julianday(started_at) - 2440587.5) * 86400000.0) AS INTEGER)) = ?))
+        )`,
+  ).bind(streamId, channelId, streamId,
+    Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : null,
+    channelId, streamId, streamId, streamId,
+    Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : null),
+]).then((results) => (results[0]?.meta.changes ?? 0) > 0 || (results[2]?.meta.changes ?? 0) > 0);

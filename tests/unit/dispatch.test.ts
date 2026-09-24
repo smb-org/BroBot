@@ -8,8 +8,9 @@ import {
   upsertBotIdentity,
 } from "../../src/worker/db/bot-identity";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { insertAppAccessToken, insertChannel, insertMember } from "./fixtures";
+import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
+import { readChannelControls, readDispatchChannelState, setChannelControl } from "../../src/worker/db/channel-controls";
 
 const CHAT_TYPE = "channel.chat.message";
 const NOW = "2026-09-19T12:00:00.000Z";
@@ -241,18 +242,26 @@ describe("dispatch and execution", () => {
     }
   });
 
-  it("keeps channel_events logging on stream.offline while pause skips regular modules and stream brakes clear", async () => {
+  it("keeps channel_events logging on stream.offline while the ending session's pause remains stored", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
       await database.prepare(
-        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
-         VALUES ('kanal-a', 'online', ?, 'eventsub')`
-      ).bind("2026-09-19T11:00:00.000Z").run();
+        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, checked_at, eventsub_changed_at)
+         VALUES ('kanal-a', 'online', ?, 'eventsub', ?, ?, ?)`
+      ).bind("2026-09-19T11:00:00.000Z", "2026-09-19T10:00:00.000Z", "2026-09-19T11:00:00.000Z", "2026-09-19T11:00:00.000Z").run();
+      await database.prepare(
+        `UPDATE channel_stream_state
+            SET started_at_seconds = CAST(strftime('%s', started_at) AS INTEGER),
+                started_at_fraction = '',
+                eventsub_changed_at_seconds = CAST(strftime('%s', eventsub_changed_at) AS INTEGER),
+                eventsub_changed_at_fraction = ''
+          WHERE channel_id = 'kanal-a'`,
+      ).run();
       await database.prepare(
         `INSERT INTO channel_controls (channel_id, muted, muted_until, mute_until_stream_end,
-          paused, paused_until, pause_until_stream_end, updated_at)
-         VALUES ('kanal-a', 1, NULL, 1, 1, NULL, 1, ?)`
+          mute_stream_started_at, paused, paused_until, pause_until_stream_end, pause_stream_started_at, updated_at)
+         VALUES ('kanal-a', 1, NULL, 1, '2026-09-19T10:00:00.000Z', 1, NULL, 1, '2026-09-19T10:00:00.000Z', ?)`
       ).bind(NOW).run();
       await database.prepare(
         "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'channel_events', 1, '{}')",
@@ -277,8 +286,76 @@ describe("dispatch and execution", () => {
         { module_id: "channel_events", code: "channel_events.stream.offline" },
       ]);
       await expect(database.prepare(
-        "SELECT muted, mute_until_stream_end, paused, pause_until_stream_end FROM channel_controls WHERE channel_id = 'kanal-a'",
-      ).first()).resolves.toEqual({ muted: 0, mute_until_stream_end: 0, paused: 0, pause_until_stream_end: 0 });
+        "SELECT muted, mute_until_stream_end, mute_stream_started_at, paused, pause_until_stream_end, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({
+        muted: 1, mute_until_stream_end: 1, mute_stream_started_at: "2026-09-19T10:00:00.000Z",
+        paused: 1, pause_until_stream_end: 1, pause_stream_started_at: "2026-09-19T10:00:00.000Z",
+      });
+      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", NOW)).resolves.toMatchObject({
+        controls: { mute: { active: false }, pause: { active: false } },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not let an older offline handler overwrite a newer stream control", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "operator-1");
+      await insertMember(database, "kanal-a", "operator-1", "operator");
+      const db = database as unknown as D1Database;
+      const environmentValue = environment(database);
+      const dispatchStream = (subscriptionType: "stream.online" | "stream.offline", receivedAt: string, startedAt?: string) =>
+        dispatchEventSubNotification(environmentValue, {
+          channelId: "kanal-a",
+          subscriptionType,
+          triggerId: `${subscriptionType}-${receivedAt}`,
+          payload: startedAt === undefined ? {} : { started_at: startedAt },
+          receivedAt,
+        }, sent(), [channelEventsModule]);
+
+      const firstStartedAt = "2026-09-19T10:00:00.000Z";
+      await dispatchStream("stream.online", "2026-09-19T10:00:01.000Z", firstStartedAt);
+      await setChannelControl(db, { userId: "operator-1", sessionId: "session-operator-1" }, "kanal-a", "pause", "until_stream_end", "2026-09-19T10:01:00.000Z");
+
+      let signalEntered: () => void = () => {};
+      let releaseHandler: () => void = () => {};
+      const enteredHandler = new Promise<void>((resolve) => { signalEntered = resolve; });
+      const handlerGate = new Promise<void>((resolve) => { releaseHandler = resolve; });
+      const delayedOfflineModule: BotModule = {
+        ...fakeModule("delayed-offline", async () => {
+          signalEntered();
+          await handlerGate;
+          return { actions: [], diagnostics: [] };
+        }, ["stream.offline"]),
+        mandatory: true,
+      };
+      const olderOffline = dispatchEventSubNotification(environmentValue, {
+        channelId: "kanal-a",
+        subscriptionType: "stream.offline",
+        triggerId: "offline-old-session",
+        payload: {},
+        receivedAt: "2026-09-19T10:05:00.000Z",
+      }, sent(), [delayedOfflineModule, channelEventsModule]);
+      await enteredHandler;
+
+      const secondStartedAt = "2026-09-19T10:10:00.000Z";
+      await dispatchStream("stream.online", "2026-09-19T10:10:01.000Z", secondStartedAt);
+      await setChannelControl(db, { userId: "operator-1", sessionId: "session-operator-1" }, "kanal-a", "pause", "until_stream_end", "2026-09-19T10:10:02.000Z");
+      releaseHandler();
+      await olderOffline;
+
+      await expect(database.prepare(
+        "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", started_at: secondStartedAt });
+      await expect(database.prepare(
+        "SELECT paused, pause_until_stream_end, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ paused: 1, pause_until_stream_end: 1, pause_stream_started_at: secondStartedAt });
+      await expect(readDispatchChannelState(db, "kanal-a", "2026-09-19T10:10:03.000Z")).resolves.toMatchObject({
+        controls: { pause: { active: true, mode: "until_stream_end" } },
+      });
     } finally {
       database.close();
     }
@@ -601,6 +678,114 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("reconciles a delayed online event after Helix offline and binds the pending pause to the next stream", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, checked_at)
+         VALUES ('kanal-a', 'offline', '2026-09-19T10:00:00.000Z', 'helix', NULL,
+                 '2026-09-19T10:00:00.000Z')`,
+      ).run();
+      await database.prepare(
+        `INSERT INTO channel_controls
+          (channel_id, paused, pause_until_stream_end, updated_at)
+         VALUES ('kanal-a', 1, 1, '2026-09-19T10:01:00.000Z')`,
+      ).run();
+      const helixOffline = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      );
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.online",
+        triggerId: "delayed-online",
+        payload: { id: "ended-stream", started_at: "2026-09-19T09:55:00.000Z" },
+        eventSubTimestamp: "2026-09-19T09:55:00.000Z",
+        receivedAt: "2026-09-19T10:02:00.000Z",
+      }, helixOffline, []);
+
+      expect(helixOffline).toHaveBeenCalledTimes(1);
+      await expect(database.prepare(
+        `SELECT state, source, changed_at, stream_id
+           FROM channel_stream_state WHERE channel_id = 'kanal-a'`,
+      ).first()).resolves.toEqual({
+        state: "offline", source: "helix", changed_at: "2026-09-19T10:02:00.000Z", stream_id: null,
+      });
+      await expect(readChannelControls(database as unknown as D1Database, "kanal-a", "2026-09-19T10:02:01.000Z"))
+        .resolves.toMatchObject({ pause: { active: false, pending: true } });
+      await expect(database.prepare(
+        "SELECT pause_stream_id, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ pause_stream_id: null, pause_stream_started_at: null });
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.online",
+        triggerId: "next-online",
+        payload: { id: "real-next-stream", started_at: "2026-09-19T10:03:00.000Z" },
+        eventSubTimestamp: "2026-09-19T10:03:01.000Z",
+        receivedAt: "2026-09-19T10:03:01.000Z",
+      }, helixOffline, []);
+
+      await expect(database.prepare(
+        `SELECT state, stream_id, started_at
+           FROM channel_stream_state WHERE channel_id = 'kanal-a'`,
+      ).first()).resolves.toEqual({
+        state: "online", stream_id: "real-next-stream", started_at: "2026-09-19T10:03:00.000Z",
+      });
+      await expect(database.prepare(
+        "SELECT pause_stream_id, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({
+        pause_stream_id: "real-next-stream", pause_stream_started_at: "2026-09-19T10:03:00.000Z",
+      });
+      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", "2026-09-19T10:03:02.000Z"))
+        .resolves.toMatchObject({ controls: { pause: { active: true, mode: "until_stream_end" } } });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses Helix to reconcile an offline event when the current live start is unknown", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertAppAccessToken(
+        database,
+        await encryptJson({ token: "app-token" }, parseKeyRing(keyRing)),
+        "2099-09-21T00:00:00.000Z",
+        NOW,
+        NOW,
+      );
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, checked_at)
+         VALUES ('kanal-a', 'online', ?, 'helix', NULL, ?)`,
+      ).bind(NOW, NOW).run();
+      const startedAt = "2026-09-19T11:55:00.000Z";
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ id: "live-1", started_at: startedAt }] }), { status: 200 }),
+      );
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.offline",
+        triggerId: "offline-ambiguous",
+        payload: {},
+        eventSubTimestamp: NOW,
+        receivedAt: "2026-09-19T12:00:02.000Z",
+      }, fetcher, []);
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+      await expect(database.prepare(
+        "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", started_at: startedAt });
+    } finally {
+      database.close();
+    }
+  });
+
   it("resets variables when EventSub arrives after a Helix online refresh", async () => {
     const database = new TestD1Database();
     try {
@@ -623,7 +808,7 @@ describe("dispatch and execution", () => {
       await expect(database.prepare("SELECT name, value FROM channel_variables ORDER BY name").all())
         .resolves.toMatchObject({ results: [{ name: "kept", value: 7 }, { name: "score", value: 0 }] });
       await expect(database.prepare("SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'").first())
-        .resolves.toEqual({ state: "online", source: "helix" });
+        .resolves.toEqual({ state: "online", source: "eventsub" });
       await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
         .resolves.toEqual({ started_at: "2026-09-19T11:55:00.000Z" });
     } finally {
@@ -681,6 +866,51 @@ describe("dispatch and execution", () => {
         .resolves.toEqual({ value: 0 });
       await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
         .resolves.toEqual({ started_at: "2026-09-19T12:09:00.000Z" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("switches to a different stream id at an equal started_at instead of treating it as the current session (#192)", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "operator-1");
+      await insertMember(database, "kanal-a", "operator-1", "operator");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      const db = database as unknown as D1Database;
+      const environmentValue = environment(database);
+      const startedAt = "2026-09-19T11:55:00.000Z";
+      const dispatchOnline = (streamId: string, receivedAt: string, triggerId: string) =>
+        dispatchEventSubNotification(environmentValue, {
+          channelId: "kanal-a", subscriptionType: "stream.online", triggerId,
+          payload: { started_at: startedAt, id: streamId }, receivedAt,
+        }, sent(), []);
+
+      await dispatchOnline("stream-a", NOW, "online-a");
+      await setChannelControl(
+        db, { userId: "operator-1", sessionId: "session-operator-1" }, "kanal-a", "pause", "until_stream_end",
+        "2026-09-19T11:56:00.000Z",
+      );
+      await database.prepare("UPDATE channel_variables SET value = 9 WHERE channel_id = 'kanal-a' AND name = 'score'").run();
+
+      // Same started_at, a different Twitch stream id: a genuinely new
+      // session (e.g. a quick restart), not a duplicate of the current one.
+      await dispatchOnline("stream-b", "2026-09-19T12:00:02.000Z", "online-b");
+
+      await expect(database.prepare(
+        "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", stream_id: "stream-b" });
+      await expect(readDispatchChannelState(db, "kanal-a", "2026-09-19T12:00:03.000Z")).resolves.toMatchObject({
+        controls: { pause: { active: false, mode: null } },
+      });
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 0 });
+      await expect(database.prepare("SELECT stream_id FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
+        .resolves.toEqual({ stream_id: "stream-b" });
     } finally {
       database.close();
     }

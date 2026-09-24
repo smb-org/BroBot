@@ -13,9 +13,13 @@ import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-lo
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
-import { writeEventSubStreamState } from "./db/stream-state";
+import {
+  isOlderOnlineEventThanHelixOfflineObservation,
+  readChannelStreamState,
+  writeEventSubStreamState,
+} from "./db/stream-state";
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
-import { clearStreamEndChannelControls, readDispatchChannelState } from "./db/channel-controls";
+import { readDispatchChannelState } from "./db/channel-controls";
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariablesForStream } from "./db/channel-variables";
@@ -435,23 +439,63 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
-  let streamStateUpdated = false;
+  // The ending stream remains current while its offline event is dispatched.
+  // Capture that session's controls before the stored state moves to offline.
+  const endingStreamDispatchState = event.subscriptionType === "stream.offline"
+    ? await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt)
+    : null;
   if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
     // The `started_at` Twitch sends on `stream.online` is the actual stream
     // start, distinct from `event.receivedAt` (used only for write ordering).
-    const startedAt = event.subscriptionType === "stream.online" ? textValue(event.payload.started_at) : null;
-    streamStateUpdated = await writeEventSubStreamState(
+    const isOnline = event.subscriptionType === "stream.online";
+    const startedAt = isOnline ? textValue(event.payload.started_at) : null;
+    const streamId = isOnline ? textValue(event.payload.id) : null;
+    if (isOnline && isOlderOnlineEventThanHelixOfflineObservation(
+      await readChannelStreamState(environment.DB, event.channelId), startedAt,
+    )) {
+      // A stream's start can predate a more recent offline poll even though
+      // its notification arrived later. Reconcile Twitch's current state
+      // before considering that old online event for the state write.
+      await lookupAndRefreshStreamState(
+        environment as unknown as Env,
+        event.channelId,
+        event.receivedAt,
+        fetcher,
+        { forceRefresh: true },
+      );
+    }
+    const stateWrite = await writeEventSubStreamState(
       environment.DB,
       event.channelId,
       event.subscriptionType === "stream.online" ? "online" : "offline",
       event.eventSubTimestamp ?? event.receivedAt,
       startedAt,
+      streamId,
     );
-    if (event.subscriptionType === "stream.online" && startedAt !== null) {
-      await prepareResetChannelVariablesForStream(environment.DB, event.channelId, startedAt, event.eventSubTimestamp ?? event.receivedAt);
+    if (event.subscriptionType === "stream.offline" && stateWrite === "ambiguous_offline") {
+      // A start-less live row or an event exactly on the session boundary
+      // cannot safely determine whether this session ended. Ask Helix even
+      // when the cached state is otherwise fresh.
+      await lookupAndRefreshStreamState(
+        environment as unknown as Env,
+        event.channelId,
+        event.receivedAt,
+        fetcher,
+        { forceRefresh: true },
+      );
+    }
+    if (isOnline && stateWrite === "written" && startedAt !== null) {
+      await prepareResetChannelVariablesForStream(
+        environment.DB,
+        event.channelId,
+        startedAt,
+        event.eventSubTimestamp ?? event.receivedAt,
+        streamId,
+      );
     }
   }
-  const dispatchState = await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt);
+  const dispatchState = endingStreamDispatchState ??
+    await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt);
   const { matches, unknownModules } = selectModulesForEvent(dispatchState.activations, event.subscriptionType, registry, dispatchState.controls.pause.active);
   const actor = await actorForEvent(environment.DB, event.channelId, event.payload);
   const newEntries: WrittenModuleDiagnostic[] = [];
@@ -607,12 +651,6 @@ export const dispatchEventSubNotification = async (
     ));
   }
 
-  // Keep a stream-scoped pause active through this offline notification, so
-  // only the mandatory channel_events module observes the ending. The next
-  // dispatch and panel reload see it cleared.
-  if (event.subscriptionType === "stream.offline" && streamStateUpdated) {
-    await clearStreamEndChannelControls(environment.DB, event.channelId, event.receivedAt);
-  }
   if (newEntries.length === 0) return;
   const realtimeMessage: RealtimeEnvelope<"event_log.new"> = {
     version: 1,

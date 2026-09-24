@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, SHOUTOUT_SUPPRESSED_REASONS,
 } from "../../src/contracts/values";
-import { apiErrorText, channelVariablesTexts, dashboardLanguage, eventCauseAlreadyShown, eventCauseText, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
+import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, eventCauseAlreadyShown, eventCauseText, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -35,6 +35,20 @@ describe("dashboard locale", () => {
     expect(channelVariablesTexts("en").resetHint).toBe("Resets when the next stream starts.");
     expect(channelVariablesTexts("de").resetHint).not.toContain("stream.online");
     expect(channelVariablesTexts("en").resetHint).not.toContain("stream.online");
+  });
+
+  it("explains that stream-end controls carry over to the next stream when set offline", () => {
+    setBrowserLanguage("de-DE");
+    expect(dashboardTexts().channelControls.durationStream).toBe("Bis Streamende");
+    expect(dashboardTexts().channelControls.pendingUntilStreamStart).toBe("Gilt ab dem nächsten Stream");
+    expect(dashboardTexts().channelControls.durationStreamDescription)
+      .toContain("gilt es für den nächsten Stream");
+
+    setBrowserLanguage("en-US");
+    expect(dashboardTexts().channelControls.durationStream).toBe("Until stream ends");
+    expect(dashboardTexts().channelControls.pendingUntilStreamStart).toBe("Applies starting with the next stream");
+    expect(dashboardTexts().channelControls.durationStreamDescription)
+      .toContain("applies to the next stream and ends with it");
   });
 
   it("resolves event texts with detail and keeps fixed texts intact", () => {

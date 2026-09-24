@@ -276,7 +276,7 @@ describe("Text commands module", () => {
       expect(preparedSql.filter((sql) => sql.includes("text_command_user_cooldowns"))).toHaveLength(1);
       expect(preparedSql.find((sql) => sql.includes("text_command_user_cooldowns"))?.trimStart())
         .toMatch(/^UPDATE text_commands/u);
-      expect(preparedSql.some((sql) => sql.includes("channel_stream_state"))).toBe(false);
+      expect(preparedSql.filter((sql) => sql.includes("channel_stream_state"))).toHaveLength(1);
       expect(preparedSql.some((sql) => sql.includes("channel_variables"))).toBe(false);
       expect(batchSizes).toEqual([2]);
       expect(fetcher).toHaveBeenCalledTimes(1);
