@@ -1,5 +1,10 @@
 import type { TestD1Database } from "./test-d1";
 
+export const jsonResponse = (body: unknown, status = 200): Response => new Response(
+  JSON.stringify(body),
+  { status, headers: { "Content-Type": "application/json" } },
+);
+
 export const insertChannel = async (
   database: TestD1Database,
   channelId: string,

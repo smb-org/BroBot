@@ -6,7 +6,7 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { LOGIN_SCOPES } from "../../src/worker/auth/oauth";
 import { maintainBotIdentity } from "../../src/worker/bot-maintenance";
 import { maintainEventSubSubscriptions } from "../../src/worker/eventsub-subscriptions";
-import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 
@@ -140,6 +140,23 @@ const fetchWith = (...responses: Response[]) => {
   return fetcher;
 };
 
+const startBotLogin = async (userId = "bot-user", loginName = "brobot") => {
+  const transaction = {
+    transaction_id: "transaction-1",
+    purpose: "bot",
+    expires_at: "2099-09-18T00:05:00.000Z",
+    created_at: "2099-09-18T00:00:00.000Z",
+  };
+  const { environment, statement } = makeEnvironment(transaction, sessionRowFor(userId, loginName));
+  const login = await authRouter.fetch(
+    new Request("https://brobot.example/auth/bot/login", {
+      headers: { Cookie: await sessionCookieHeaderFor(userId) },
+    }),
+    environment,
+  );
+  return { environment, statement, login };
+};
+
 const environmentForDatabase = (database: TestD1Database) => {
   const { environment } = makeEnvironment();
   environment.DB = database as unknown as D1Database;
@@ -152,20 +169,14 @@ const setFullConsent = async (database: TestD1Database, channelId: string): Prom
   ).bind(channelId).run();
 };
 
-const tokenResponse = (scopes: readonly string[]): Response => new Response(
-  JSON.stringify({
-    access_token: "access",
-    refresh_token: "refresh",
-    expires_in: 3600,
-    scope: scopes,
-  }),
-  { status: 200 },
-);
+const tokenResponse = (scopes: readonly string[]): Response => jsonResponse({
+  access_token: "access",
+  refresh_token: "refresh",
+  expires_in: 3600,
+  scope: scopes,
+});
 
-const identityResponse = (userId: string, login: string): Response => new Response(
-  JSON.stringify({ data: [{ id: userId, login }] }),
-  { status: 200 },
-);
+const identityResponse = (userId: string, login: string): Response => jsonResponse({ data: [{ id: userId, login }] });
 
 const countRows = async (database: TestD1Database, tabelle: string): Promise<number> => {
   const zeile = await database.prepare(`SELECT COUNT(*) AS count FROM ${tabelle}`).first<{ count: number }>();
@@ -441,19 +452,7 @@ describe("auth routes", () => {
   });
 
   it("creates only the global bot identity during bot account authorization", async () => {
-    const transaction = {
-      transaction_id: "transaction-1",
-      purpose: "bot",
-      expires_at: "2099-09-18T00:05:00.000Z",
-      created_at: "2099-09-18T00:00:00.000Z",
-    };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("bot-user", "brobot"));
-    const login = await authRouter.fetch(
-      new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
-      }),
-      environment,
-    );
+    const { environment, statement, login } = await startBotLogin();
     fetchWith(
       new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
       new Response(JSON.stringify({ data: [{ id: "foreign-user", login: "someone-else" }] }), { status: 200 }),
@@ -474,19 +473,7 @@ describe("auth routes", () => {
   });
 
   it("accepts the configured bot login case-insensitively", async () => {
-    const transaction = {
-      transaction_id: "transaction-1",
-      purpose: "bot",
-      expires_at: "2099-09-18T00:05:00.000Z",
-      created_at: "2099-09-18T00:00:00.000Z",
-    };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("bot-user", "BROBOT"));
-    const login = await authRouter.fetch(
-      new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
-      }),
-      environment,
-    );
+    const { environment, statement, login } = await startBotLogin("bot-user", "BROBOT");
     fetchWith(
       new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
       new Response(JSON.stringify({ data: [{ id: "bot-user", login: "BROBOT" }] }), { status: 200 }),
@@ -504,19 +491,7 @@ describe("auth routes", () => {
   });
 
   it("kicks off both global maintenance runs sequentially after successful bot authorization", async () => {
-    const transaction = {
-      transaction_id: "transaction-1",
-      purpose: "bot",
-      expires_at: "2099-09-18T00:05:00.000Z",
-      created_at: "2099-09-18T00:00:00.000Z",
-    };
-    const { environment, statement } = makeEnvironment(transaction, sessionRowFor("bot-user", "brobot"));
-    const login = await authRouter.fetch(
-      new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
-      }),
-      environment,
-    );
+    const { environment, statement, login } = await startBotLogin();
     fetchWith(
       new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
       new Response(JSON.stringify({ data: [{ id: "bot-user", login: "brobot" }] }), { status: 200 }),
@@ -550,19 +525,7 @@ describe("auth routes", () => {
   });
 
   it("doesn't wait for maintenance during the redirect", async () => {
-    const transaction = {
-      transaction_id: "transaction-1",
-      purpose: "bot",
-      expires_at: "2099-09-18T00:05:00.000Z",
-      created_at: "2099-09-18T00:00:00.000Z",
-    };
-    const { environment } = makeEnvironment(transaction, sessionRowFor("bot-user", "brobot"));
-    const login = await authRouter.fetch(
-      new Request("https://brobot.example/auth/bot/login", {
-        headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
-      }),
-      environment,
-    );
+    const { environment, login } = await startBotLogin();
     fetchWith(
       new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
       new Response(JSON.stringify({ data: [{ id: "bot-user", login: "brobot" }] }), { status: 200 }),
@@ -594,19 +557,7 @@ describe("auth routes", () => {
   it.each(["Bot-Identität", "EventSub-Abos"])(
     "keeps the redirect and the stored identity valid when the %s run fails",
     async (failedRun) => {
-      const transaction = {
-        transaction_id: "transaction-1",
-        purpose: "bot",
-        expires_at: "2099-09-18T00:05:00.000Z",
-        created_at: "2099-09-18T00:00:00.000Z",
-      };
-      const { environment, statement } = makeEnvironment(transaction, sessionRowFor("bot-user", "brobot"));
-      const login = await authRouter.fetch(
-        new Request("https://brobot.example/auth/bot/login", {
-          headers: { Cookie: await sessionCookieHeaderFor("bot-user") },
-        }),
-        environment,
-      );
+      const { environment, statement, login } = await startBotLogin();
       fetchWith(
         new Response(JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: ["user:bot"] }), { status: 200 }),
         new Response(JSON.stringify({ data: [{ id: "bot-user", login: "brobot" }] }), { status: 200 }),
