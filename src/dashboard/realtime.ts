@@ -8,6 +8,7 @@ import type {
   RealtimeEventLogHint,
   RealtimeMessage,
 } from "../realtime-contract";
+import type { AdsSchedule } from "../modules/ads/contracts";
 import { REALTIME_PROTOCOL } from "../realtime-contract";
 import { eventToneEntries, type EventCode } from "./locale";
 
@@ -45,6 +46,14 @@ const isHint = (value: unknown): value is RealtimeEventLogHint => {
     (value.actorUserId === null || typeof value.actorUserId === "string");
 };
 
+const isAdSchedule = (value: unknown): value is AdsSchedule => isRecord(value) &&
+  (value.nextAdAt === null || typeof value.nextAdAt === "string") &&
+  (value.duration === null || typeof value.duration === "number") &&
+  (value.lastAdAt === null || typeof value.lastAdAt === "string") &&
+  (value.prerollFreeTime === null || typeof value.prerollFreeTime === "number") &&
+  (value.snoozeCount === null || typeof value.snoozeCount === "number") &&
+  (value.snoozeRefreshAt === null || typeof value.snoozeRefreshAt === "string");
+
 const isKnownEnvelope = (value: Record<string, unknown>): value is Record<string, unknown> & {
   version: 1;
   id: string;
@@ -56,7 +65,9 @@ const isKnownEnvelope = (value: Record<string, unknown>): value is Record<string
   typeof value.id === "string" && value.id.length > 0 &&
   typeof value.createdAt === "string" && value.createdAt.length > 0 &&
   typeof value.channelId === "string" && value.channelId.length > 0 &&
-  (value.type === "system.hello" || value.type === "event_log.new");
+  (value.type === "system.hello" || value.type === "event_log.new" ||
+    value.type === "variables.changed" || value.type === "ads.schedule.updated" ||
+    value.type === "stream.state.changed");
 
 export const parseRealtimeMessage = (raw: string, channelId: string): RealtimeParseResult => {
   let parsed: unknown;
@@ -73,6 +84,25 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
   if (parsed.type === "system.hello") {
     return parsed.payload !== null && isRecord(parsed.payload) && Object.keys(parsed.payload).length === 0
       ? { kind: "message", message: parsed as RealtimeEnvelope<"system.hello"> }
+      : { kind: "ignored" };
+  }
+  if (parsed.type === "variables.changed") {
+    return isVariablesChangedPayload(parsed.payload)
+      ? { kind: "message", message: parsed as RealtimeEnvelope<"variables.changed"> }
+      : { kind: "ignored" };
+  }
+  if (parsed.type === "ads.schedule.updated") {
+    return isRecord(parsed.payload) && isAdSchedule(parsed.payload.schedule) &&
+      typeof parsed.payload.asOf === "string" && parsed.payload.asOf.length > 0
+      ? { kind: "message", message: parsed as RealtimeEnvelope<"ads.schedule.updated"> }
+      : { kind: "ignored" };
+  }
+  if (parsed.type === "stream.state.changed") {
+    return isRecord(parsed.payload) &&
+      (parsed.payload.state === "online" || parsed.payload.state === "offline") &&
+      (parsed.payload.startedAt === null || typeof parsed.payload.startedAt === "string") &&
+      typeof parsed.payload.changedAt === "string" && parsed.payload.changedAt.length > 0
+      ? { kind: "message", message: parsed as RealtimeEnvelope<"stream.state.changed"> }
       : { kind: "ignored" };
   }
   if (!isRecord(parsed.payload) || !Array.isArray(parsed.payload.entries) ||
@@ -123,6 +153,62 @@ const realtimeUrl = (channelId: string): string => {
   const url = new URL(`/ws/channels/${encodeURIComponent(channelId)}`, window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
+};
+
+const relayRealtimeMessage = (message: RealtimeMessage): void => {
+  window.dispatchEvent(new CustomEvent("brobot:realtime", { detail: message }));
+};
+
+/** The shell keeps one panel socket open on pages without their own feed. */
+export const useRealtimePanelMessages = (channelId: string | null, enabled: boolean): void => {
+  useEffect(() => {
+    if (!enabled || channelId === null) return;
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+    const seenMessageIds = new Set<string>();
+
+    const connect = (): void => {
+      if (disposed || typeof window.WebSocket !== "function") return;
+      try {
+        socket = new window.WebSocket(realtimeUrl(channelId), REALTIME_PROTOCOL);
+        socket.addEventListener("open", () => { reconnectAttempt = 0; });
+        socket.addEventListener("message", (event: MessageEvent<unknown>) => {
+          if (typeof event.data !== "string") return;
+          const parsed = parseRealtimeMessage(event.data, channelId);
+          if (parsed.kind === "foreign-channel") {
+            socket?.close(1008, "Foreign channel");
+            return;
+          }
+          if (parsed.kind !== "message" || seenMessageIds.has(parsed.message.id)) return;
+          seenMessageIds.add(parsed.message.id);
+          relayRealtimeMessage(parsed.message);
+        });
+        socket.addEventListener("close", (event: CloseEvent) => {
+          if (disposed || socketNeedsRenewal(event) || reconnectTimer !== null) return;
+          const delay = reconnectDelay(reconnectAttempt);
+          reconnectAttempt += 1;
+          reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, delay);
+        });
+      } catch {
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = null;
+          connect();
+        }, reconnectDelay(reconnectAttempt++));
+      }
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      try { socket?.close(1000, "Panel route changed"); } catch { /* socket may already be closed */ }
+    };
+  }, [channelId, enabled]);
 };
 
 const isVariablesChangedPayload = (value: unknown): boolean => isRecord(value) &&
@@ -199,19 +285,15 @@ export const useRealtimeVariableUpdates = ({
 
     const handleMessage = (event: MessageEvent<unknown>): void => {
       if (typeof event.data !== "string") return;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(event.data) as unknown;
-      } catch {
-        return;
-      }
-      if (!isRecord(parsed) || parsed.version !== 1 || typeof parsed.channelId !== "string") return;
-      if (parsed.channelId !== channelId) {
+      const envelope = parseRealtimeMessage(event.data, channelId);
+      if (envelope.kind === "foreign-channel") {
         fatalProtocolError = true;
         try { socket?.close(1008, "Foreign channel"); } catch { /* socket may already be closed */ }
         return;
       }
-      if (parsed.type !== "variables.changed" || !isVariablesChangedPayload(parsed.payload)) return;
+      if (envelope.kind !== "message") return;
+      relayRealtimeMessage(envelope.message);
+      if (envelope.message.type !== "variables.changed") return;
       scheduleVariableRefresh();
     };
 
@@ -258,12 +340,14 @@ export const useRealtimeEventFeed = ({
   atBeginning,
   refreshFirstPage,
   scrollToBeginning,
+  onRealtimeMessage,
 }: {
   channelId: string;
   filters: PanelEventFilters;
   atBeginning: () => boolean;
   refreshFirstPage: () => Promise<void>;
   scrollToBeginning: () => void;
+  onRealtimeMessage?: (message: RealtimeMessage) => void;
 }): RealtimeFeedState => {
   const [status, setStatus] = useState<RealtimeFeedStatus>("connecting");
   const [pendingCount, setPendingCount] = useState(0);
@@ -279,6 +363,7 @@ export const useRealtimeEventFeed = ({
   const refreshFirstPageRef = useRef(refreshFirstPage);
   const atBeginningRef = useRef(atBeginning);
   const scrollToBeginningRef = useRef(scrollToBeginning);
+  const onRealtimeMessageRef = useRef(onRealtimeMessage);
   const filtersRef = useRef(filters);
   const refreshPendingRef = useRef<(ids: ReadonlySet<string>) => void>(() => undefined);
 
@@ -286,8 +371,9 @@ export const useRealtimeEventFeed = ({
     refreshFirstPageRef.current = refreshFirstPage;
     atBeginningRef.current = atBeginning;
     scrollToBeginningRef.current = scrollToBeginning;
+    onRealtimeMessageRef.current = onRealtimeMessage;
     filtersRef.current = filters;
-  }, [atBeginning, filters, refreshFirstPage, scrollToBeginning]);
+  }, [atBeginning, filters, onRealtimeMessage, refreshFirstPage, scrollToBeginning]);
 
   const updatePendingCount = useCallback((): void => {
     setPendingCount(pendingEventIdsRef.current.size);
@@ -404,6 +490,8 @@ export const useRealtimeEventFeed = ({
       }
       if (parsed.kind !== "message" || seenMessageIdsRef.current.has(parsed.message.id)) return;
       seenMessageIdsRef.current.add(parsed.message.id);
+      onRealtimeMessageRef.current?.(parsed.message);
+      relayRealtimeMessage(parsed.message);
       if (parsed.message.type !== "event_log.new") return;
       const hints = parsed.message.payload.entries.filter((hint) => realtimeHintMatchesFilters(hint, filtersRef.current));
       for (const hint of hints) pendingEventIdsRef.current.add(hint.eventId);

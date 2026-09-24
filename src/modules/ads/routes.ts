@@ -2,11 +2,10 @@ import { Hono, type Context } from "hono";
 
 import type { EventCode } from "../../contracts/values";
 import { apiErrorDetail, type ModuleRouteEnvironment } from "../contract";
-import { getAdSchedule, type AdScheduleResult, snoozeNextAd, type SnoozeNextAdResult } from "./adapters/ad-schedule";
+import { snoozeNextAd, type SnoozeNextAdResult } from "./adapters/ad-schedule";
+import type { AdsSchedule } from "./contracts";
 import { COMMERCIAL_LENGTHS, startCommercial, type CommercialLength, type CommercialResult } from "./adapters/commercial";
-import { refreshAdPrewarningAlarm } from "./adapters/prewarning-alarm";
 import { ADS_OPTIONAL_BROADCASTER_SCOPES } from "./contracts";
-import type { AdsScheduleResponse } from "./contracts";
 import { listLastAdBreaks } from "./repository";
 
 const MANAGE_ADS_SCOPE = ADS_OPTIONAL_BROADCASTER_SCOPES[0];
@@ -16,14 +15,6 @@ type AdDetail = Readonly<Record<string, string | number | boolean | null>>;
 
 const nowIso = (): string => new Date().toISOString();
 
-const scheduleFailureDiagnostic = (result: AdScheduleResult): {
-  code: EventCode;
-  detail: Readonly<Record<string, string | number | boolean | null>>;
-} => ({
-  code: result.reason === "unauthorized" ? "ads.prewarning.scope_missing" : "ads.prewarning.schedule_error",
-  detail: { reason: result.reason, ...result.detail },
-});
-
 const statusFor = (reason: string | null): 403 | 429 | 502 | 503 => {
   if (reason === "scope_missing" || reason === "unauthorized") return 403;
   if (reason === "rate_limited") return 429;
@@ -31,16 +22,11 @@ const statusFor = (reason: string | null): 403 | 429 | 502 | 503 => {
   return 502;
 };
 
-const responseFor = async (
-  db: D1Database,
-  channelId: string,
-  schedule: NonNullable<AdScheduleResult["schedule"]>,
-  snoozeScopeAvailable: boolean,
-): Promise<AdsScheduleResponse> => ({
-  schedule,
-  snoozeScopeAvailable,
-  recentAdBreaks: await listLastAdBreaks(db, channelId),
-});
+const SCHEDULE_CACHE_TTL_MS = 60_000;
+interface ScheduleCacheValue { schedule: AdsSchedule; asOf: string }
+
+const scheduleStatusFor = (reason: string | null): 429 | 502 | 503 =>
+  reason === "rate_limited" ? 429 : reason === "network_error" || reason === "timeout" || reason === "app_token_unavailable" ? 503 : 502;
 
 const log = async (
   context: Context<ModuleRouteEnvironment>,
@@ -90,33 +76,39 @@ export const adsRoutes = new Hono<ModuleRouteEnvironment>();
 
 adsRoutes.get("/schedule", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
-  const now = nowIso();
-  const result = await getAdSchedule(
-    context.env,
-    channelId,
-    now,
-    context.get("getAppAccessToken"),
-    context.get("helixRequest"),
-    fetch,
-  );
-  if (!result.fetched || result.schedule === null) {
-    const diagnostic = scheduleFailureDiagnostic(result);
-    await log(context, channelId, `werbung-zeitplan:${crypto.randomUUID()}`, diagnostic.code, diagnostic.detail);
-    return context.json({
-      error: "ad_schedule_read_failed",
-      reason: result.reason,
-      detail: apiErrorDetail(result.detail),
-    }, statusFor(result.reason));
+  const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+  const [cached, details] = await Promise.all([
+    context.get("measureServerTiming")("do", () => object.getCachedAdSchedule()),
+    context.get("measureServerTiming")("d1", () => Promise.all([
+      listLastAdBreaks(context.env.DB, channelId),
+      context.get("broadcasterScopesForChannel")(context.env.DB, channelId),
+    ])),
+  ]);
+  const fresh = cached !== null && Date.now() - Date.parse(cached.asOf) < SCHEDULE_CACHE_TTL_MS;
+  let current: ScheduleCacheValue | null = cached === null ? null : { schedule: cached.schedule, asOf: cached.asOf };
+  if (!fresh && cached !== null) {
+    context.get("scheduleBackgroundWork")(object.refreshAdSchedule(details[1]).then(() => undefined).catch((error: unknown) => {
+      console.warn("Background ad schedule refresh failed.", error);
+    }));
+  } else if (!fresh) {
+    const refresh = await context.get("measureServerTiming")("do", () => object.refreshAdSchedule(details[1]));
+    context.get("recordServerTiming")("d1", refresh.d1Ms);
+    context.get("recordServerTiming")("helix", refresh.helixMs);
+    current = refresh.cache === null ? null : { schedule: refresh.cache.schedule, asOf: refresh.cache.asOf };
+    if (current === null) {
+      return context.json({
+        error: "ad_schedule_read_failed",
+        reason: refresh.reason,
+        detail: apiErrorDetail(refresh.detail),
+      }, scheduleStatusFor(refresh.reason));
+    }
   }
 
-  await refreshAdPrewarningAlarm(
-    context.env,
-    channelId,
-    result.schedule,
-    context.get("broadcasterHasScope"),
-  );
-  const snoozeScopeAvailable = await context.get("broadcasterHasScope")(context.env.DB, channelId, MANAGE_ADS_SCOPE);
-  return context.json(await responseFor(context.env.DB, channelId, result.schedule, snoozeScopeAvailable));
+  const schedule = current?.schedule;
+  if (schedule === undefined || current === null) return context.json({ error: "ad_schedule_read_failed" }, 503);
+  const [recentAdBreaks, grantedScopes] = details;
+  const snoozeScopeAvailable = grantedScopes.includes(MANAGE_ADS_SCOPE);
+  return context.json({ schedule, asOf: current.asOf, snoozeScopeAvailable, recentAdBreaks });
 });
 
 adsRoutes.post("/snooze", async (context) => {
@@ -141,7 +133,8 @@ adsRoutes.post("/snooze", async (context) => {
     };
   await log(context, channelId, triggerId, "ads.snooze", snoozeOutcome(result));
 
-  if (!result.snoozed || result.schedule === null) {
+  const schedule = result.schedule;
+  if (!result.snoozed || schedule === null) {
     return context.json({
       error: "ad_snooze_failed",
       reason: result.reason,
@@ -149,13 +142,11 @@ adsRoutes.post("/snooze", async (context) => {
     }, statusFor(result.reason));
   }
 
-  await refreshAdPrewarningAlarm(
-    context.env,
-    channelId,
-    result.schedule,
-    context.get("broadcasterHasScope"),
-  );
-  return context.json(await responseFor(context.env.DB, channelId, result.schedule, scopeAvailable));
+  const asOf = nowIso();
+  const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+  await context.get("measureServerTiming")("do", () => object.storeAdSchedule(schedule, asOf));
+  const recentAdBreaks = await context.get("measureServerTiming")("d1", () => listLastAdBreaks(context.env.DB, channelId));
+  return context.json({ schedule, asOf, snoozeScopeAvailable: scopeAvailable, recentAdBreaks });
 });
 
 /**

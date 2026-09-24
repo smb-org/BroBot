@@ -1912,6 +1912,48 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByText("Keine Module aktiv.")).not.toBeInTheDocument();
   });
 
+  it("uses module state folded into the channel payload without a second module request", async () => {
+    const modules = [{ id: "text_commands", enabled: true, settings: "{}" }];
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules };
+    const channelOverview = { ...overview(channel), modules, activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
+    const requested: string[] = [];
+    stubDashboardFetch((url) => {
+      requested.push(url.pathname);
+      if (url.pathname.endsWith("/overview")) return jsonResponse(channelOverview);
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    expect(await within(screen.getByRole("main")).findByRole("link", { name: /Textbefehle/ })).toBeInTheDocument();
+    expect(requested).not.toContain("/api/channels/kanal-a/modules");
+  });
+
+  it("does not request system data on Variables or Overlay links pages", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      requested.push(url.pathname);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/channels/kanal-a/variables") return jsonResponse({ variables: [], maximum: 25 });
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return jsonResponse({ tokens: [], nextOffset: null });
+      return jsonResponse({}, 404);
+    }));
+
+    window.history.replaceState({}, "", "/channels/kanal-a/variables");
+    render(<DashboardApp />);
+    expect(await screen.findByRole("heading", { name: "Kanalvariablen", level: 1 })).toBeInTheDocument();
+    expect(requested).not.toContain("/api/channels/kanal-a/system");
+
+    cleanup();
+    requested.length = 0;
+    window.history.replaceState({}, "", "/channels/kanal-a/overlay-links");
+    render(<DashboardApp />);
+    expect(await screen.findByRole("heading", { name: "Overlay-Links", level: 1 })).toBeInTheDocument();
+    expect(requested).not.toContain("/api/channels/kanal-a/system");
+  });
+
   it("puts Stream Manager actions and warnings before modules and the compact healthy state", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
@@ -2356,6 +2398,34 @@ describe("Dashboard skeleton", () => {
       expect(fetcher.mock.calls.some(([input, init]) =>
         requestUrl(input).pathname === "/api/channels/kanal-a/clips" && init?.method === "POST")).toBe(true);
     });
+  });
+
+  it("updates stored stream status from the panel realtime socket", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/system") return jsonResponse(system);
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "System", level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "stream-state-panel-1",
+      createdAt: new Date().toISOString(),
+      channelId: "kanal-a",
+      type: "stream.state.changed",
+      payload: { state: "online", startedAt: relativeIso(-60 * 60 * 1000), changedAt: new Date().toISOString() },
+    }));
+
+    expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
   });
 
   it("switches channels through the header select and moves the route", async () => {

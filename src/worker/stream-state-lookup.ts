@@ -10,7 +10,7 @@ import {
 import { listChannelIdsNeedingStreamStateRefresh } from "./db/channels";
 import { prepareResetChannelVariablesForStream } from "./db/channel-variables";
 import { logMaintenanceError } from "./bot-maintenance";
-import { publishVariablesChanged } from "./realtime";
+import { publishStreamStateChanged, publishVariablesChanged } from "./realtime";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -96,32 +96,41 @@ export const lookupAndRefreshStreamState = async (
   if (fromHelix === "rate_limited") return asResult(stored, true);
   if (fromHelix === null) return asResult(stored);
 
+  let refreshedStored: StoredStreamStateRecord | null;
   if (stored === null) {
     const storedByHelix = await writeHelixStreamStateIfUnknown(
       env.DB, channelId, fromHelix.state, now, fromHelix.startedAt, fromHelix.streamId,
     );
-    if (storedByHelix) return asResult({
-      state: fromHelix.state,
-      source: "helix",
-      changedAt: now,
-      startedAt: fromHelix.startedAt,
-      streamId: fromHelix.streamId,
-      checkedAt: now,
-    });
-    return asResult(await readChannelStreamState(env.DB, channelId));
-  }
-
-  const refreshed = await refreshHelixStreamState(
-    env.DB, channelId, fromHelix.state, now, fromHelix.startedAt, fromHelix.streamId,
-  );
-  if (refreshed && stored.state === "offline" && fromHelix.state === "online" && fromHelix.startedAt !== null) {
-    const resetNames = await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now, fromHelix.streamId);
-    if (resetNames.length > 0) {
-      await publishVariablesChanged(env.CHANNEL, channelId,
-        resetNames.map((name) => ({ name, value: 0 })), []);
+    if (storedByHelix) {
+      refreshedStored = {
+        state: fromHelix.state,
+        source: "helix",
+        changedAt: now,
+        startedAt: fromHelix.startedAt,
+        streamId: fromHelix.streamId,
+        checkedAt: now,
+      };
+    } else {
+      refreshedStored = await readChannelStreamState(env.DB, channelId);
     }
+  } else {
+    const refreshed = await refreshHelixStreamState(
+      env.DB, channelId, fromHelix.state, now, fromHelix.startedAt, fromHelix.streamId,
+    );
+    if (refreshed && stored.state === "offline" && fromHelix.state === "online" && fromHelix.startedAt !== null) {
+      const resetNames = await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now, fromHelix.streamId);
+      if (resetNames.length > 0) {
+        await publishVariablesChanged(env.CHANNEL, channelId,
+          resetNames.map((name) => ({ name, value: 0 })), []);
+      }
+    }
+    refreshedStored = await readChannelStreamState(env.DB, channelId);
   }
-  return asResult(await readChannelStreamState(env.DB, channelId));
+  if (refreshedStored !== null &&
+      (stored?.state !== refreshedStored.state || stored.startedAt !== refreshedStored.startedAt)) {
+    await publishStreamStateChanged(env.CHANNEL, channelId, refreshedStored.state, refreshedStored.startedAt, refreshedStored.changedAt);
+  }
+  return asResult(refreshedStored);
 };
 
 /** Hourly cron task: backfills missing states and refreshes any stale row. */

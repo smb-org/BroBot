@@ -59,6 +59,7 @@ import { AuditPage } from "./audit/AuditPage";
 import { ChannelVariablesPage } from "./ChannelVariablesPage";
 import { OverlayTokensPage } from "./OverlayTokensPage";
 import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
+import { useRealtimePanelMessages } from "./realtime";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
 
@@ -1021,6 +1022,10 @@ export const DashboardApp = (): ReactElement => {
   }, []);
 
   const [route, navigate] = useDashboardRoute();
+  const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
+  const routeHasOwnRealtimeFeed = route.kind === "channel" &&
+    (route.section === "overview" || route.section === "events" || route.section === "variables");
+  useRealtimePanelMessages(realtimeChannelId, realtimeChannelId !== null && !routeHasOwnRealtimeFeed);
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
   const [, setFreshnessTick] = useState(0);
   const [isPlatform, setIsPlatform] = useState(false);
@@ -1059,6 +1064,31 @@ export const DashboardApp = (): ReactElement => {
   // part of the route/URL -- see the deep-link discussion in that commit.
   const [pendingModuleSelection, setPendingModuleSelection] = useState<string | null>(null);
   const requestLogin = useCallback((): void => { setAuthenticationRequired(true); }, []);
+
+  useEffect(() => {
+    const handleRealtimeMessage = (event: Event): void => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
+      const message = detail as Record<string, unknown>;
+      if (message.type !== "stream.state.changed" || typeof message.channelId !== "string" ||
+          typeof message.payload !== "object" || message.payload === null || Array.isArray(message.payload)) return;
+      const payload = message.payload as Record<string, unknown>;
+      if ((payload.state !== "online" && payload.state !== "offline") ||
+          (payload.startedAt !== null && typeof payload.startedAt !== "string")) return;
+      const { channelId } = message;
+      const streamState = payload.state;
+      const streamStartedAt = payload.startedAt;
+      setChannels((current) => current.data === null ? current : loadedState(current.data.map((channel) =>
+        channel.channelId === channelId ? { ...channel, streamState, streamStartedAt } : channel,
+      )));
+      setOverview((current) => current.data?.channelId !== channelId ? current : {
+        ...current,
+        data: { ...current.data, streamState, streamStartedAt },
+      });
+    };
+    window.addEventListener("brobot:realtime", handleRealtimeMessage);
+    return () => window.removeEventListener("brobot:realtime", handleRealtimeMessage);
+  }, []);
 
   const reloadChannels = useCallback(async (): Promise<void> => {
     const generation = channelsRequestGeneration.current + 1;
@@ -1228,26 +1258,8 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "channel" && route.kind !== "module") return cleanup;
     const expectedOverviewPath = dashboardRoutePath(route);
 
-    // The sidebar's Modules group lists the active modules on every
-    // channel/module route, not only the ones that already fetch this for
-    // their own page (the module detail page, the module list, the event
-    // filters) -- one fetch here covers all of them; those keep their own
-    // fetch removed below instead of doing it twice.
-    const loadSidebarModules = async (): Promise<void> => {
-      setModules(loadingState());
-      try {
-        const response = await fetchModules(route.channelId, controller.signal);
-        if (!cancelled && !controller.signal.aborted) setModules(loadedState(response));
-      } catch (error) {
-        if (!cancelled && !controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-          setModules({ status: "error", data: null, error: errorMessage(error) });
-          if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
-        }
-      }
-    };
-    void loadSidebarModules();
-
     const load = async (): Promise<void> => {
+      if (route.kind === "channel" && route.section === "modules") return;
       // The module page shows the same channel header as the overview and
       // therefore needs the same data.
       if (route.kind === "module" || route.section === "overview") {
@@ -1327,6 +1339,7 @@ export const DashboardApp = (): ReactElement => {
         return;
       }
 
+      if (route.section !== "system") return;
       setSystem(loadingState());
       setSystemChannelId(route.channelId);
       try {
@@ -1422,7 +1435,11 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const reloadModules = async (): Promise<void> => {
-    if (route.kind !== "module" && (route.kind !== "channel" || (route.section !== "modules" && route.section !== "overview"))) return;
+    if (route.kind !== "channel" && route.kind !== "module") return;
+    if (selectedChannel?.modules !== undefined) {
+      await reloadChannels();
+      return;
+    }
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
     const generation = modulesRequestGeneration.current + 1;
@@ -1452,7 +1469,11 @@ export const DashboardApp = (): ReactElement => {
   };
 
   const refreshChannelState = async (): Promise<void> => {
-    await Promise.all([reloadChannels(), reloadModules(), reloadOverview(), reloadSystem()]);
+    await Promise.all([
+      reloadChannels(),
+      reloadOverview(),
+      reloadSystem(),
+    ]);
   };
   const refreshChannelStateRef = useRef(refreshChannelState);
   refreshChannelStateRef.current = refreshChannelState;
@@ -1518,9 +1539,9 @@ export const DashboardApp = (): ReactElement => {
   }, [expiryAt, expiryRefreshKey]);
 
   const toggleHeaderModule = async (): Promise<void> => {
-    if (route.kind !== "module" || modules.data === null) return;
+    if (route.kind !== "module") return;
     const targetModuleId = route.moduleId;
-    const state = modules.data.modules.find((module) => module.id === targetModuleId);
+    const state = (selectedChannel?.modules ?? modules.data?.modules ?? []).find((module) => module.id === targetModuleId);
     if (state === undefined || state.mandatory === true || targetModuleId === "channel_events" ||
         (selectedChannel !== null && !canManage(selectedChannel.role)) || headerModuleBusy) return;
     setHeaderModuleBusy(true);
@@ -1575,6 +1596,34 @@ export const DashboardApp = (): ReactElement => {
     if ((route.kind !== "channel" && route.kind !== "module") || channels.data === null) return null;
     return channels.data.find((channel) => channel.channelId === route.channelId) ?? null;
   }, [channels.data, route]);
+
+  // Current workers include module state in GET /api/channels. Keep a
+  // compatibility fallback for an older worker response that omits it.
+  // Current page loads therefore need one request, including the sidebar.
+  useEffect(() => {
+    if ((route.kind !== "channel" && route.kind !== "module") || selectedChannel === null) {
+      setModules(idleState());
+      return;
+    }
+    if (selectedChannel.modules !== undefined) {
+      setModules(loadedState({ modules: selectedChannel.modules }));
+      return;
+    }
+    const controller = new AbortController();
+    const routePath = dashboardRoutePath(route);
+    setModules(loadingState());
+    void fetchModules(route.channelId, controller.signal).then((response) => {
+      if (!controller.signal.aborted && window.location.pathname + window.location.search === routePath) {
+        setModules(loadedState(response));
+      }
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      setModules({ status: "error", data: null, error: errorMessage(error) });
+      if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
+    });
+    return () => controller.abort();
+  }, [route, selectedChannel]);
+
   const overviewForHeader = overview.data !== null && selectedChannel !== null &&
     overview.data.channelId === selectedChannel.channelId &&
     overviewRoutePath === dashboardRoutePath(route)
@@ -1714,7 +1763,9 @@ export const DashboardApp = (): ReactElement => {
     return <UiProvider><main className="auth-screen"><div className="auth-card"><h1>{texts.signIn.required}</h1><p>{texts.signIn.explanation}</p><a className="button" href="/auth/login">{texts.signIn.signInWithTwitch}</a></div></main></UiProvider>;
   }
 
-  const sidebarModuleStates = route.kind === "channel" || route.kind === "module" ? modules.data?.modules ?? null : null;
+  const sidebarModuleStates = route.kind === "channel" || route.kind === "module"
+    ? selectedChannel?.modules ?? modules.data?.modules ?? null
+    : null;
 
   const botSignedIn = installationBot?.status === "connected";
   const isChannelOrModuleRoute = route.kind === "channel" || route.kind === "module";
@@ -1770,18 +1821,18 @@ export const DashboardApp = (): ReactElement => {
         /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel?.modules ?? overview.data.modules ?? modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection(name); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "overlay-links" && selectedChannel !== null ? <OverlayTokensPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} activeModules={overview.data.activeModules} loading={modules.status === "loading" || overview.status === "loading"} error={modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId && selectedChannel !== null ? <ModulePage key={dashboardRoutePath(route)} channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} {...(pendingModuleSelection === null ? {} : { initialSelection: pendingModuleSelection })} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && system.status !== "idle" ? <SystemPage key={route.channelId} system={systemChannelId === route.channelId ? system.data : null} systemState={system} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && audit.status !== "idle" ? <AuditPage key={route.channelId} auditState={auditChannelId === route.channelId ? audit : idleState<PanelAuditResponse>()} filters={auditFilters} onFiltersChange={updateAuditFilters} onNextPage={() => { void loadNextAuditPage(); }} loadingNextPage={loadingNextAuditPage} /> : null}
-        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
-        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} streamState={overviewForHeader === null ? selectedChannel.streamState : overviewForHeader.streamState} modules={modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} /> : null}
+        {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && eventsChannelId === route.channelId && events.status !== "idle" ? <EventsPage key={route.channelId} channelId={route.channelId} eventsState={events} filters={eventFilters} moduleOptions={selectedChannel?.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} onRefreshFirstPage={reloadFirstEventsPage} onNextPage={() => { void loadNextEventsPage(); }} loadingNextPage={loadingNextEventsPage} /> : null}
+        {(route.kind === "channel" || route.kind === "module") && selectedChannel !== null ? <ChannelSpotlight key={`spotlight-${route.channelId}`} channelId={route.channelId} ownRole={selectedChannel.role} streamState={overviewForHeader === null ? selectedChannel.streamState : overviewForHeader.streamState} modules={selectedChannel.modules ?? modules.data?.modules ?? []} onNavigate={navigate} onOpenCommand={setPendingModuleSelection} /> : null}
         </div>
       </Shell>
     </UiProvider>

@@ -7,11 +7,13 @@ import { eventSubRouter } from "./eventsub";
 import { panelRouter } from "./panel/routes";
 import { realtimeRouter } from "./realtime";
 import { scheduled } from "./scheduled";
+import { serverTimingMiddleware } from "./server-timing";
 
 export { ChannelObject } from "./durable/ChannelObject";
 
 const app = new Hono<{ Bindings: Env }>();
 
+app.use("/api/*", serverTimingMiddleware);
 app.route("/", authRouter);
 app.route("/", platformRouter);
 app.route("/", panelRouter);

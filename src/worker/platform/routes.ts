@@ -13,6 +13,7 @@ import {
 } from "../db/channel-members";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { fetchTwitchUserByLogin, type TwitchUser } from "../shoutout";
+import { measureServerTiming } from "../server-timing";
 import {
   changePlatformMember,
   changeFullConsent,
@@ -201,12 +202,15 @@ platformRouter.get("/api/platform/channels/:channelId/members", async (context) 
   }
 
   const channelId = context.req.param("channelId");
-  const page = await listChannelMembers(context.env.DB, channelId, limit, cursor);
-  const names = await fetchTwitchUsersById(fetch, context.env, page.members.map((member) => member.userId));
+  const [page, broadcasterCount] = await measureServerTiming(context, "d1", () => Promise.all([
+    listChannelMembers(context.env.DB, channelId, limit, cursor),
+    countBroadcasterMembers(context.env.DB, channelId),
+  ]));
+  const names = await measureServerTiming(context, "helix", () => fetchTwitchUsersById(fetch, context.env, page.members.map((member) => member.userId)));
   return context.json({
     members: page.members.map((member) => memberResponse(member, names.get(member.userId))),
     nextCursor: page.nextCursor,
-    broadcasterCount: await countBroadcasterMembers(context.env.DB, channelId),
+    broadcasterCount,
     viewerUserId: context.get("session").userId,
   });
 });

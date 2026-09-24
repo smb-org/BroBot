@@ -6,6 +6,7 @@ export interface AdsPanelTexts {
   scheduleSection: string;
   noAdBreak: string;
   scheduledTime: string;
+  asOf: (timestamp: string) => string;
   duration: string;
   snoozeSection: string;
   snoozeButton: (count: string, refresh: string) => string;
@@ -35,6 +36,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     scheduleSection: "Nächste Werbung",
     noAdBreak: "Derzeit ist keine Werbung geplant.",
     scheduledTime: "Zeitpunkt",
+    asOf: (timestamp) => `Stand ${timestamp}`,
     duration: "Dauer",
     snoozeSection: "Werbung verschieben",
     snoozeButton: (count, refresh) => `Snooze · ${count} verfügbar · Aufladung ${refresh}`,
@@ -62,6 +64,7 @@ const panelCatalog: LocaleCatalog<AdsPanelTexts> = {
     scheduleSection: "Next ad break",
     noAdBreak: "No ad break is currently scheduled.",
     scheduledTime: "Time",
+    asOf: (timestamp) => `As of ${timestamp}`,
     duration: "Duration",
     snoozeSection: "Postpone an ad break",
     snoozeButton: (count, refresh) => `Snooze · ${count} available · refresh ${refresh}`,

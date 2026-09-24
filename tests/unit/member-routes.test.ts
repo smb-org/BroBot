@@ -5,7 +5,7 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
-import { TestD1Database, type TestPreparedStatement } from "./test-d1";
+import { createReadBarrierDatabase, TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 type MemberRole = "broadcaster" | "manager" | "operator";
 
@@ -803,6 +803,26 @@ describe("Member management", () => {
 
     expect(body.members).toHaveLength(1);
     expect(body.broadcasterCount).toBe(2);
+  });
+
+  it("starts the member page and broadcaster count reads together", async () => {
+    await setupChannel(database, "broadcaster");
+    const traced = createReadBarrierDatabase(database, (sql, operation) => {
+      if (operation === "all" && sql.includes("ORDER BY created_at, user_id")) return "member-page";
+      if (operation === "first" && sql.includes("COUNT(*) AS count")) return "broadcaster-count";
+      return null;
+    }, 2);
+    environment = { ...environment, DB: traced.database };
+
+    const responsePending = panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/members"),
+      environment,
+    );
+    await vi.waitFor(() => { expect(traced.started).toHaveLength(2); });
+    expect(traced.started).toEqual(["member-page", "broadcaster-count"]);
+    const response = await responsePending;
+
+    expect(response.status).toBe(200);
   });
 
   it("rejects a write member route without a CSRF token", async () => {

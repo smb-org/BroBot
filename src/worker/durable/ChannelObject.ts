@@ -10,6 +10,14 @@ import { REALTIME_RECIPIENTS } from "../../realtime-contract";
 import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
+import type { AdsSchedule } from "../../modules/ads/contracts";
+import type { HelixRequest, HelixRequestOptions } from "../../modules/contract";
+import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
+import { refreshAdPrewarningAlarm } from "../../modules/ads/adapters/prewarning-alarm";
+import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarning-alarm";
+import { getAppAccessToken } from "../app-token";
+import { broadcasterHasScope } from "../broadcaster-scope";
+import { helixRequest } from "../twitch/helix";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -32,10 +40,32 @@ const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const SECURITY_DEADLINE_KEY = "security_round";
 const SECURITY_RETRY_KEY = "security_retry";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
+const AD_SCHEDULE_CACHE_KEY = "ads:schedule";
+const STREAM_REFRESH_LEASE_KEY = "stream_state_refresh_lease";
+const STREAM_REFRESH_LEASE_MS = 30_000;
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
 const SOCKET_TRANSIENT_CODE = 4008;
 const SOCKET_POLICY_VIOLATION_CODE = 1008;
+
+export interface CachedAdSchedule {
+  schedule: AdsSchedule;
+  asOf: string;
+}
+
+export interface AdScheduleRefreshResult {
+  cache: CachedAdSchedule | null;
+  reason: string | null;
+  detail: Readonly<Record<string, string | number | boolean | null>>;
+  d1Ms: number;
+  helixMs: number;
+  changed: boolean;
+}
+
+interface StreamRefreshLease {
+  token: string;
+  expiresAt: number;
+}
 
 const revokedTokenKey = (tokenId: string): string => `overlay_revoked:${tokenId}`;
 
@@ -127,6 +157,8 @@ const envelopeFor = (
  * alarm, and the authorization data lives in D1.
  */
 export class ChannelObject extends DurableObject<Env> {
+  private adScheduleRefresh: Promise<AdScheduleRefreshResult> | null = null;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
@@ -135,6 +167,108 @@ export class ChannelObject extends DurableObject<Env> {
   private ownChannelId(): string | null {
     const name = this.ctx.id.name;
     return typeof name === "string" && name.length > 0 ? name : null;
+  }
+
+  private async saveAdSchedule(
+    schedule: AdsSchedule,
+    asOf: string,
+    grantedScopes?: readonly string[],
+  ): Promise<boolean> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Channel-bound data requires a named Durable Object.");
+    const previous = await this.ctx.storage.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
+    const changed = previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule);
+    const cache = { schedule, asOf } satisfies CachedAdSchedule;
+    await this.ctx.storage.put(AD_SCHEDULE_CACHE_KEY, cache);
+    if (changed) {
+      const scheduler: AdPrewarningScheduler = {
+        schedule: (dueAtMs) => this.scheduleAdPrewarning(dueAtMs),
+        clear: () => this.clearAdPrewarning(),
+      };
+      await refreshAdPrewarningAlarm(this.env, channelId, schedule, broadcasterHasScope, scheduler, grantedScopes);
+    }
+    this.publish([{
+      version: 1,
+      id: crypto.randomUUID(),
+      createdAt: asOf,
+      channelId,
+      type: "ads.schedule.updated",
+      payload: { schedule, asOf },
+    }]);
+    return changed;
+  }
+
+  public async getCachedAdSchedule(): Promise<CachedAdSchedule | null> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return null;
+    const cache = await this.ctx.storage.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
+    return cache ?? null;
+  }
+
+  public async refreshAdSchedule(grantedScopes?: readonly string[]): Promise<AdScheduleRefreshResult> {
+    if (this.adScheduleRefresh !== null) return this.adScheduleRefresh;
+    this.adScheduleRefresh = (async (): Promise<AdScheduleRefreshResult> => {
+      const channelId = this.ownChannelId();
+      if (channelId === null) return { cache: null, reason: "channel_missing", detail: {}, d1Ms: 0, helixMs: 0, changed: false };
+      const previous = await this.getCachedAdSchedule();
+      let d1Ms = 0;
+      let helixMs = 0;
+      const timedGetAppAccessToken: typeof getAppAccessToken = async (...args) => {
+        const startedAt = performance.now();
+        try {
+          return await getAppAccessToken(...args);
+        } finally {
+          d1Ms += performance.now() - startedAt;
+        }
+      };
+      const timedHelixRequest: HelixRequest = async <Data>(options: HelixRequestOptions<Data>) => {
+        const startedAt = performance.now();
+        try {
+          return await helixRequest<Data>(options);
+        } finally {
+          helixMs += performance.now() - startedAt;
+        }
+      };
+      const result = await getAdSchedule(this.env, channelId, new Date().toISOString(), timedGetAppAccessToken, timedHelixRequest, fetch);
+      if (!result.fetched || result.schedule === null) {
+        return { cache: previous, reason: result.reason, detail: result.detail, d1Ms, helixMs, changed: false };
+      }
+      const asOf = new Date().toISOString();
+      const changed = await this.saveAdSchedule(result.schedule, asOf, grantedScopes);
+      return { cache: { schedule: result.schedule, asOf }, reason: null, detail: result.detail, d1Ms, helixMs, changed };
+    })();
+    try {
+      return await this.adScheduleRefresh;
+    } finally {
+      this.adScheduleRefresh = null;
+    }
+  }
+
+  public async storeAdSchedule(
+    schedule: AdsSchedule,
+    asOf: string,
+    grantedScopes?: readonly string[],
+  ): Promise<CachedAdSchedule> {
+    await this.saveAdSchedule(schedule, asOf, grantedScopes);
+    return { schedule, asOf };
+  }
+
+  /** A durable short lease coalesces overview-triggered refreshes across Worker isolates. */
+  public async beginStreamStateRefresh(now = Date.now()): Promise<string | null> {
+    const token = crypto.randomUUID();
+    return this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<StreamRefreshLease>(STREAM_REFRESH_LEASE_KEY);
+      if (current !== undefined && current.expiresAt > now) return null;
+      await transaction.put(STREAM_REFRESH_LEASE_KEY, { token, expiresAt: now + STREAM_REFRESH_LEASE_MS } satisfies StreamRefreshLease);
+      return token;
+    });
+  }
+
+  public async endStreamStateRefresh(token: string): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<StreamRefreshLease>(STREAM_REFRESH_LEASE_KEY);
+      if (current?.token === token) await transaction.delete(STREAM_REFRESH_LEASE_KEY);
+    });
   }
 
   private async scheduleEarliestAlarm(): Promise<void> {

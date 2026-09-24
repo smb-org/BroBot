@@ -3,7 +3,7 @@ interface IdentityScopeRow {
   status: string;
 }
 
-const broadcasterIdentityScopes = async (
+export const broadcasterScopesForChannel = async (
   db: D1Database,
   channelId: string,
 ): Promise<string[]> => {
@@ -25,4 +25,4 @@ export const broadcasterHasScope = async (
   db: D1Database,
   channelId: string,
   scope: string,
-): Promise<boolean> => (await broadcasterIdentityScopes(db, channelId)).includes(scope);
+): Promise<boolean> => (await broadcasterScopesForChannel(db, channelId)).includes(scope);

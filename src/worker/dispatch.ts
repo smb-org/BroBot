@@ -1,6 +1,6 @@
 import type { EventCode } from "../contracts/values";
 import type { BotModule, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState } from "../modules/contract";
-import type { RealtimeEnvelope } from "../realtime-contract";
+import type { RealtimeMessage } from "../realtime-contract";
 import { MODULES } from "../modules/registry";
 import {
   getChannelMemberForChannel,
@@ -442,6 +442,7 @@ export const dispatchEventSubNotification = async (
   // The ending stream remains current while its offline event is dispatched.
   // Capture that session's controls before the stored state moves to offline.
   const changedVariables = new Map<string, number>();
+  let streamStateChanged: RealtimeMessage | null = null;
   const endingStreamDispatchState = event.subscriptionType === "stream.offline"
     ? await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt)
     : null;
@@ -451,9 +452,13 @@ export const dispatchEventSubNotification = async (
     const isOnline = event.subscriptionType === "stream.online";
     const startedAt = isOnline ? textValue(event.payload.started_at) : null;
     const streamId = isOnline ? textValue(event.payload.id) : null;
-    if (isOnline && isOlderOnlineEventThanHelixOfflineObservation(
-      await readChannelStreamState(environment.DB, event.channelId), startedAt,
-    )) {
+    const currentStream = isOnline ? await readChannelStreamState(environment.DB, event.channelId) : null;
+    const streamBefore = currentStream ?? (endingStreamDispatchState === null ? null : {
+      state: endingStreamDispatchState.streamState,
+      startedAt: endingStreamDispatchState.streamStartedAt,
+      streamId: endingStreamDispatchState.streamId,
+    });
+    if (isOnline && isOlderOnlineEventThanHelixOfflineObservation(currentStream, startedAt)) {
       // A stream's start can predate a more recent offline poll even though
       // its notification arrived later. Reconcile Twitch's current state
       // before considering that old online event for the state write.
@@ -473,6 +478,22 @@ export const dispatchEventSubNotification = async (
       startedAt,
       streamId,
     );
+    if (stateWrite === "written" &&
+        (streamBefore?.state !== (isOnline ? "online" : "offline") ||
+          streamBefore.startedAt !== startedAt || streamBefore.streamId !== streamId)) {
+      streamStateChanged = {
+        version: 1,
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        channelId: event.channelId,
+        type: "stream.state.changed",
+        payload: {
+          state: isOnline ? "online" : "offline",
+          startedAt,
+          changedAt: event.eventSubTimestamp ?? event.receivedAt,
+        },
+      };
+    }
     if (event.subscriptionType === "stream.offline" && stateWrite === "ambiguous_offline") {
       // A start-less live row or an event exactly on the session boundary
       // cannot safely determine whether this session ended. Ask Helix even
@@ -660,8 +681,8 @@ export const dispatchEventSubNotification = async (
     ));
   }
 
-  if (newEntries.length === 0 && changedVariables.size === 0) return;
-  const realtimeMessages: RealtimeEnvelope<"event_log.new">[] = newEntries.length === 0 ? [] : [{
+  if (newEntries.length === 0 && changedVariables.size === 0 && streamStateChanged === null) return;
+  const realtimeMessages: RealtimeMessage[] = newEntries.length === 0 ? [] : [{
     version: 1,
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
@@ -677,6 +698,7 @@ export const dispatchEventSubNotification = async (
       })),
     },
   }];
+  if (streamStateChanged !== null) realtimeMessages.push(streamStateChanged);
   if (changedVariables.size > 0) {
     await publishVariablesChanged(
       environment.CHANNEL,

@@ -144,6 +144,32 @@ describe("Ad settings editor declaration", () => {
     expect(screen.getByText(/11:00/)).toBeInTheDocument();
   });
 
+  it("updates the cached schedule and its as-of label from panel realtime", async () => {
+    const original = {
+      ...schedule,
+      schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T17:00:00.000Z", duration: 60 },
+      asOf: "2026-09-24T12:00:00.000Z",
+    };
+    const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
+    const fetcher = adsFetch(undefined, original);
+    renderAds(fetcher);
+
+    expect(await screen.findByText(`Stand ${formatter.format(new Date(original.asOf))}`)).toBeInTheDocument();
+    window.dispatchEvent(new CustomEvent("brobot:realtime", { detail: {
+      version: 1,
+      id: "ads-schedule-2",
+      createdAt: "2026-09-24T13:00:00.000Z",
+      channelId: "kanal-a",
+      type: "ads.schedule.updated",
+      payload: {
+        schedule: { ...original.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 1 },
+        asOf: "2026-09-24T13:00:00.000Z",
+      },
+    } }));
+
+    expect(await screen.findByText(`Stand ${formatter.format(new Date("2026-09-24T13:00:00.000Z"))}`)).toBeInTheDocument();
+  });
+
   it("keeps a cleared prewarning lead time empty and blocks the save", async () => {
     const fetcher = adsFetch();
     renderAds(fetcher);

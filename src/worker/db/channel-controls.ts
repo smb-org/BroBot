@@ -40,6 +40,9 @@ interface CurrentStreamFields {
 export interface DispatchChannelState {
   controls: PanelChannelControls;
   activations: { moduleId: string; enabled: boolean; settings: string }[];
+  streamState: string | null;
+  streamStartedAt: string | null;
+  streamId: string | null;
 }
 
 const offControl = (): PanelChannelControl => ({ active: false, until: null, mode: null });
@@ -151,6 +154,9 @@ export const readDispatchChannelState = async (
     activations: rows.results.flatMap((row) => row.module_id === null || row.enabled === null || row.settings === null
       ? []
       : [{ moduleId: row.module_id, enabled: row.enabled === 1, settings: row.settings }]),
+    streamState: first?.stream_state ?? null,
+    streamStartedAt: first?.stream_started_at ?? null,
+    streamId: first?.stream_id ?? null,
   };
 };
 

@@ -17,6 +17,7 @@ import {
   listChannelVariables,
   type ChannelVariableRecord,
 } from "../db/channel-variables";
+import { measureServerTiming } from "../server-timing";
 
 interface VariableRouteEnvironment {
   Bindings: Env;
@@ -49,18 +50,17 @@ const recordSnapshot = (variable: ChannelVariableRecord) => ({
   description: variable.description,
 });
 
-const referencesFor = async (
+export const referencesFor = async (
   db: D1Database,
   channelId: string,
   name: string,
 ): Promise<ModuleVariableReferenceUsage[]> => {
-  const result: ModuleVariableReferenceUsage[] = [];
-  for (const module of MODULES) {
-    if (module.variableReferences !== undefined) {
-      result.push(...await module.variableReferences.usages(db, channelId, name));
-    }
-  }
-  return result;
+  const references = await Promise.all(MODULES.flatMap((module) =>
+    module.variableReferences === undefined
+      ? []
+      : [module.variableReferences.usages(db, channelId, name)],
+  ));
+  return references.flat();
 };
 
 export const variableRouter = new Hono<VariableRouteEnvironment>();
@@ -69,11 +69,14 @@ variableRouter.use("/api/channels/:channelId/variables/*", requireChannelAuthori
 
 variableRouter.get("/api/channels/:channelId/variables", async (context) => {
   const channelId = context.req.param("channelId");
-  const variables = await listChannelVariables(context.env.DB, channelId);
-  const withUsages = await Promise.all(variables.map(async (variable) => ({
-    ...variable,
-    usages: await referencesFor(context.env.DB, channelId, variable.name),
-  })));
+  const { variables, withUsages } = await measureServerTiming(context, "d1", async () => {
+    const variables = await listChannelVariables(context.env.DB, channelId);
+    const withUsages = await Promise.all(variables.map(async (variable) => ({
+      ...variable,
+      usages: await referencesFor(context.env.DB, channelId, variable.name),
+    })));
+    return { variables, withUsages };
+  });
   return context.json({ variables: withUsages, count: variables.length, maximum: CHANNEL_VARIABLE_MAXIMUM_COUNT });
 });
 

@@ -112,3 +112,43 @@ export class TestD1Database {
     this.sqlite.close();
   }
 }
+
+/** Holds selected D1 reads until all expected independent reads have started. */
+export const createReadBarrierDatabase = (
+  database: TestD1Database,
+  identify: (sql: string, operation: "first" | "all") => string | null,
+  expectedReads: number,
+): { database: D1Database; started: string[] } => {
+  const started: string[] = [];
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  const hold = async <T>(label: string, read: () => Promise<T>): Promise<T> => {
+    started.push(label);
+    if (started.length >= expectedReads) release();
+    await barrier;
+    return read();
+  };
+  const databaseBinding = {
+    prepare: (sql: string) => {
+      const statement = database.prepare(sql);
+      const wrapped = {
+        bind: (...values: Parameters<TestPreparedStatement["bind"]>) => {
+          statement.bind(...values);
+          return wrapped;
+        },
+        first: <T>() => {
+          const label = identify(sql, "first");
+          return label === null ? statement.first<T>() : hold(label, () => statement.first<T>());
+        },
+        all: <T>(...typeHint: readonly T[]) => {
+          const label = identify(sql, "all");
+          return label === null ? statement.all<T>(...typeHint) : hold(label, () => statement.all<T>(...typeHint));
+        },
+        run: () => statement.run(),
+      };
+      return wrapped;
+    },
+    batch: database.batch.bind(database),
+  } as unknown as D1Database;
+  return { database: databaseBinding, started };
+};

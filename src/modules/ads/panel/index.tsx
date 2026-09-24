@@ -27,10 +27,29 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
     let active = true;
     void loadAdsSchedule(channelId).then((loaded) => {
       if (!active) return;
-      setSchedule(loaded);
+      setSchedule((current) => current !== null && Date.parse(current.asOf ?? "") > Date.parse(loaded.asOf ?? "") ? current : loaded);
       setLoadError(false);
     }).catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
+  }, [channelId]);
+
+  useEffect(() => {
+    const handleRealtimeMessage = (event: Event): void => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
+      const message = detail as Record<string, unknown>;
+      if (message.type !== "ads.schedule.updated" || message.channelId !== channelId ||
+          typeof message.payload !== "object" || message.payload === null || Array.isArray(message.payload)) return;
+      const payload = message.payload as Record<string, unknown>;
+      if (typeof payload.asOf !== "string" || typeof payload.schedule !== "object" || payload.schedule === null || Array.isArray(payload.schedule)) return;
+      setSchedule((current) => current === null ? current : {
+        ...current,
+        schedule: payload.schedule as AdsScheduleResponse["schedule"],
+        asOf: payload.asOf as string,
+      });
+    };
+    window.addEventListener("brobot:realtime", handleRealtimeMessage);
+    return () => window.removeEventListener("brobot:realtime", handleRealtimeMessage);
   }, [channelId]);
 
   if (schedule === null) return <p className={loadError ? "form-error" : "loading-line"} role={loadError ? "alert" : undefined}>{loadError ? labels.loadError : labels.loading}</p>;
@@ -63,6 +82,7 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
     <section className="module-stack" aria-label={labels.title}>
       <section className="config-section" aria-label={labels.scheduleSection}>
         <div className="section-heading"><h2>{labels.scheduleSection}</h2></div>
+        {schedule.asOf === undefined ? null : <p className="muted mono">{labels.asOf(formatTimestamp(schedule.asOf, language))}</p>}
         {schedule.schedule.nextAdAt === null ? <p className="empty-state">{labels.noAdBreak}</p> : (
           <div className="table-wrap">
             <table className="table" aria-label={labels.scheduleSection}>

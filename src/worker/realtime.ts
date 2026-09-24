@@ -177,6 +177,28 @@ export const publishVariablesChanged = async (
   }
 };
 
+/** Panel-only hint for a refreshed Twitch stream state; D1 remains authoritative. */
+export const publishStreamStateChanged = async (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+  state: "online" | "offline",
+  startedAt: string | null,
+  changedAt: string,
+): Promise<void> => {
+  try {
+    await publishRealtimeMessages(namespace, [{
+      version: 1,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      channelId,
+      type: "stream.state.changed",
+      payload: { state, startedAt, changedAt },
+    }]);
+  } catch (error: unknown) {
+    console.warn("Realtime stream state hint could not be sent.", error);
+  }
+};
+
 export const revokeRealtimeUser = async (
   namespace: Env["CHANNEL"] | undefined,
   channelId: string,
