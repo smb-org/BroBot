@@ -351,7 +351,7 @@ export interface PanelChannelVariableRecord {
 export interface PanelChannelVariableUsage {
   moduleId: string;
   itemName: string;
-  kind: "template" | "action";
+  kind: "template" | "action" | "display";
 }
 
 export interface PanelChannelVariable extends PanelChannelVariableRecord {

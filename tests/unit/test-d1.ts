@@ -2,6 +2,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// rows_written is synthetic here: DML mirrors SQLite changes and does not measure D1 write amplification.
 export interface TestD1Result {
   results: unknown[];
   success: true;

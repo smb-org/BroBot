@@ -60,6 +60,19 @@ const referencesFor = async (
       result.push(...await module.variableReferences.usages(db, channelId, name));
     }
   }
+  const overlays = await db.prepare(
+    `SELECT overlay.name AS overlay_name, element.label AS element_label, element.element_id
+       FROM overlay_elements AS element
+       JOIN overlays AS overlay
+         ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
+      WHERE element.channel_id = ? AND element.variable_name = ?
+      ORDER BY overlay.name, element.z, element.element_id`,
+  ).bind(channelId, name).all<{ overlay_name: string; element_label: string; element_id: string }>();
+  result.push(...overlays.results.map((row) => ({
+    moduleId: "overlays",
+    itemName: `${row.overlay_name} → ${row.element_label || row.element_id}`,
+    kind: "display" as const,
+  })));
   return result;
 };
 
@@ -142,9 +155,27 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
     name, channelId, newName, ...authorization.values);
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null, "channel.variable.renamed",
     recordSnapshot(before), { name: newName, value: before.value, description });
+  const overlayRevisionUpdates = newName === name ? [] : [context.env.DB.prepare(
+    `UPDATE overlays
+        SET revision = revision + 1, updated_at = ?
+      WHERE channel_id = ?
+        AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)
+        AND EXISTS (
+          SELECT 1 FROM channel_variables
+           WHERE channel_id = ? AND name = ? AND value = ? AND created_at = ? AND updated_at = ?
+        )
+        AND EXISTS (
+          SELECT 1 FROM overlay_elements AS element
+           WHERE element.channel_id = overlays.channel_id
+             AND element.overlay_id = overlays.overlay_id
+             AND element.variable_name = ?
+        )
+        ${authorization.sql}`,
+  ).bind(now, channelId, channelId, name, channelId, newName, before.value, before.createdAt, now, newName,
+    ...authorization.values)];
   const referenceUpdates = newName === name ? [] : MODULES.flatMap((module) =>
     module.variableReferences?.rename(context.env.DB, channelId, name, newName) ?? []);
-  const results = await context.env.DB.batch([mutation, audit, ...referenceUpdates]);
+  const results = await context.env.DB.batch([mutation, audit, ...overlayRevisionUpdates, ...referenceUpdates]);
   if ((results[0]?.meta.changes ?? 0) === 0) {
     if (await findChannelVariable(context.env.DB, channelId, newName) !== null) {
       return context.json({ error: "variable_already_exists" }, 409);
@@ -239,6 +270,36 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
   if (actionUsages.length > 0) return context.json({ error: "variable_in_use", usages }, 409);
   const now = nowIso();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+  const bumpOverlayRevisions = context.env.DB.prepare(
+    `UPDATE overlays
+        SET revision = revision + 1, updated_at = ?
+      WHERE channel_id = ?
+        AND EXISTS (
+          SELECT 1 FROM overlay_elements AS element
+           WHERE element.channel_id = overlays.channel_id
+             AND element.overlay_id = overlays.overlay_id
+             AND element.variable_name = ?
+        )
+        AND EXISTS (
+          SELECT 1 FROM channel_variables
+           WHERE channel_id = ? AND name = ? AND value = ? AND description = ?
+             AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
+        )
+        ${authorization.sql}`,
+  ).bind(now, channelId, name, channelId, name, before.value, before.description,
+    before.resetOnStreamStart ? 1 : 0, before.createdAt, before.updatedAt, ...authorization.values);
+  const detachOverlayElements = context.env.DB.prepare(
+    `UPDATE overlay_elements
+        SET variable_name = NULL
+      WHERE channel_id = ? AND variable_name = ?
+        AND EXISTS (
+          SELECT 1 FROM channel_variables
+           WHERE channel_id = ? AND name = ? AND value = ? AND description = ?
+             AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
+        )
+        ${authorization.sql}`,
+  ).bind(channelId, name, channelId, name, before.value, before.description, before.resetOnStreamStart ? 1 : 0,
+    before.createdAt, before.updatedAt, ...authorization.values);
   const mutation = context.env.DB.prepare(
     `DELETE FROM channel_variables
       WHERE channel_id = ? AND name = ? AND value = ? AND description = ? AND reset_on_stream_start = ?
@@ -248,8 +309,8 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null,
     "channel.variable.removed", recordSnapshot(before), null);
   try {
-    const results = await context.env.DB.batch([mutation, audit]);
-    if ((results[0]?.meta.changes ?? 0) > 0) {
+    const results = await context.env.DB.batch([bumpOverlayRevisions, detachOverlayElements, mutation, audit]);
+    if ((results[2]?.meta.changes ?? 0) > 0) {
       await publishVariablesChanged(context.env.CHANNEL, channelId, [], [name]);
       return new Response(null, { status: 204 });
     }

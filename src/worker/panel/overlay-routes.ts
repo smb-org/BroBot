@@ -26,6 +26,7 @@ interface OverlayRouteEnvironment {
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
 const VARIABLE_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
+const OVERLAY_ELEMENT_CONFIG_MAXIMUM_BYTES = 4_096;
 const nowIso = (): string => new Date().toISOString();
 
 const nameSchema = z.string().trim().min(1).max(40);
@@ -35,13 +36,17 @@ const createOverlaySchema = z.object({
   height: z.number().int().min(64).max(2160).default(1080),
 }).strict();
 
+const elementConfigSchemas = {
+  variable: z.record(z.string(), z.json()),
+} as const;
+
 const elementSchema = z.object({
   id: z.string().regex(ID_PATTERN),
   kind: z.enum(OVERLAY_ELEMENT_KINDS),
   label: z.string().max(40).default(""),
   variableName: z.string().regex(VARIABLE_PATTERN).nullable().default(null),
   text: z.string().max(100).refine((value) => value.match(/\{value\}/gu)?.length === 1).default("{value}"),
-  config: z.object({}).catchall(z.unknown()).default({}),
+  config: z.record(z.string(), z.json()).default({}),
   x: z.number().int().default(0),
   y: z.number().int().default(0),
   scalePercent: z.number().int().min(25).max(400).default(100),
@@ -69,8 +74,17 @@ const updateOverlaySchema = z.object({
     if (element.y < 0 || element.y > draft.height) {
       context.addIssue({ code: "custom", path: ["elements", index, "y"], message: "y is outside the overlay" });
     }
+    if (!elementConfigSchemas[element.kind].safeParse(element.config).success) {
+      context.addIssue({ code: "custom", path: ["elements", index, "config"], message: "config is invalid for this element kind" });
+    }
+    const serializedConfig = JSON.stringify(element.config);
+    if (new TextEncoder().encode(serializedConfig).byteLength > OVERLAY_ELEMENT_CONFIG_MAXIMUM_BYTES) {
+      context.addIssue({ code: "custom", path: ["elements", index, "config"], message: "config is too large" });
+    }
   });
 });
+
+const deleteOverlaySchema = z.object({ baseRevision: z.number().int().min(1) }).strict();
 
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "overlay_management_denied" }, 403);
@@ -148,6 +162,7 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
   if (result.outcome === "forbidden") return managementDenied(context);
   if (result.outcome === "element_limit") return context.json({ error: "overlay_element_limit_reached" }, 409);
   if (result.outcome === "invalid_reference") return context.json({ error: "overlay_data_invalid" }, 400);
+  if (result.outcome === "element_id_conflict") return context.json({ error: "overlay_element_id_conflict" }, 409);
   if (result.outcome === "conflict") {
     return context.json({
       error: "overlay_changed_concurrently",
@@ -159,15 +174,23 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
 
 overlayRouter.delete("/api/channels/:channelId/overlays/:overlayId", async (context) => {
   if (!canManage(context.get("channelRole"))) return managementDenied(context);
+  const parsed = deleteOverlaySchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: "overlay_data_invalid" }, 400);
   const channelId = context.req.param("channelId");
   const overlayId = context.req.param("overlayId");
   const before = await getOverlayForChannel(context.env.DB, channelId, overlayId);
   if (before === null) return context.json({ error: "overlay_not_found" }, 404);
+  if (parsed.data.baseRevision !== before.revision) {
+    return context.json({ error: "overlay_changed_concurrently", currentRevision: before.revision }, 409);
+  }
   const now = nowIso();
-  const deleted = await deleteOverlayWithAudit(context.env.DB, actorOf(context), before, now);
+  const deleted = await deleteOverlayWithAudit(context.env.DB, actorOf(context), before, parsed.data.baseRevision, now);
   if (deleted.changes > 0) return new Response(null, { status: 204 });
   if (!await isOverlayManagementAllowed(context.env.DB, actorOf(context), channelId, now)) {
     return managementDenied(context);
   }
-  return context.json({ error: "overlay_not_found" }, 404);
+  const current = await getOverlayForChannel(context.env.DB, channelId, overlayId);
+  return current === null
+    ? context.json({ error: "overlay_not_found" }, 404)
+    : context.json({ error: "overlay_changed_concurrently", currentRevision: current.revision }, 409);
 });

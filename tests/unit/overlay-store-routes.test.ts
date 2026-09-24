@@ -13,7 +13,7 @@ const environmentKeys = {
 
 let database: TestD1Database;
 let batchCalls = 0;
-let rowsWritten = 0;
+let sqliteChanges = 0;
 let originalBatch: (statements: TestPreparedStatement[]) => Promise<TestD1Result[]>;
 let originalPrepare: (sql: string) => TestPreparedStatement;
 
@@ -70,11 +70,11 @@ const createOverlay = async (userId: string, channelId: string, name: string): P
 
 const startD1WriteCapture = (): void => {
   batchCalls = 0;
-  rowsWritten = 0;
+  sqliteChanges = 0;
   database.batch = async (statements) => {
     batchCalls += 1;
     const results = await originalBatch(statements);
-    rowsWritten += results.reduce((total, result) => total + result.meta.rows_written, 0);
+    sqliteChanges += results.reduce((total, result) => total + result.meta.changes, 0);
     return results;
   };
 };
@@ -126,7 +126,7 @@ describe("stored overlay routes", () => {
       .resolves.toEqual({ count: 0 });
   });
 
-  it("uses revision CAS, diffs element rows, records rows_written, and skips unchanged drafts", async () => {
+  it("uses revision CAS, diffs element rows, checks SQLite changes, and skips unchanged drafts", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");
     await insertMember(database, "channel-a", "manager-a", "manager");
@@ -143,29 +143,53 @@ describe("stored overlay routes", () => {
     expect(invalidReference.status).toBe(400);
     await expect(invalidReference.json()).resolves.toEqual({ error: "overlay_data_invalid" });
 
-    const draft = {
+    const oversizedConfig = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
       baseRevision: 1,
       name: "Gameplay",
       width: 1920,
       height: 1080,
       css: "",
-      elements: [element("element-a"), element("element-b", 8)],
+      elements: [{ ...element("oversized-config"), config: { payload: "€".repeat(1_400) } }],
+    });
+    expect(oversizedConfig.status).toBe(400);
+    await expect(oversizedConfig.json()).resolves.toEqual({ error: "overlay_data_invalid" });
+
+    const draft = {
+      baseRevision: 1,
+      name: "Gameplay",
+      width: 1920,
+      height: 1080,
+      css: "css-secret",
+      elements: [{ ...element("element-a"), config: { token: "config-secret" } }, element("element-b", 8)],
     };
     startD1WriteCapture();
     const saved = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", draft);
     expect(saved.status).toBe(200);
-    expect(rowsWritten).toBe(4); // Overlay row + two element rows + audit row.
+    expect(sqliteChanges).toBe(4); // SQLite changes: overlay row + two element rows + audit row.
     await expect(saved.json()).resolves.toMatchObject({ overlay: { revision: 2, elements: draft.elements } });
+    const firstAudit = await database.prepare(
+      "SELECT after_json FROM audit_log WHERE action = 'overlay.updated'",
+    ).first<{ after_json: string }>();
+    const firstAuditAfter = JSON.parse(firstAudit?.after_json ?? "{}") as Record<string, unknown>;
+    expect(firstAuditAfter).toMatchObject({ elementChanges: {
+      added: [{ id: "element-a", label: "Score" }, { id: "element-b", label: "Score" }],
+      changed: [],
+      removed: [],
+    } });
+    expect(firstAudit?.after_json).not.toContain("config-secret");
+    expect(firstAudit?.after_json).not.toContain("css-secret");
+    expect(firstAudit?.after_json).not.toContain("token");
+    expect(firstAuditAfter).not.toHaveProperty("css");
 
     startD1WriteCapture();
     const unchanged = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
       ...draft,
       baseRevision: 2,
-      elements: [element("element-b", 8), element("element-a")],
+      elements: [element("element-b", 8), { ...element("element-a"), config: { token: "config-secret" } }],
     });
     expect(unchanged.status).toBe(200);
     expect(batchCalls).toBe(0);
-    expect(rowsWritten).toBe(0);
+    expect(sqliteChanges).toBe(0);
 
     const auditBefore = await database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'overlay.updated'")
       .first<{ count: number }>();
@@ -180,24 +204,36 @@ describe("stored overlay routes", () => {
     const changed = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
       ...draft,
       baseRevision: 2,
-      elements: [element("element-a", 1), element("element-b", 8)],
+      elements: [{ ...element("element-a", 1), label: "Deaths", config: { token: "config-secret" } }, element("element-b", 8)],
     });
     expect(changed.status).toBe(200);
-    expect(rowsWritten).toBe(3); // Overlay row + one changed element + audit row.
+    expect(sqliteChanges).toBe(3); // SQLite changes: overlay row + one changed element + audit row.
+    const changedAudit = await database.prepare(
+      "SELECT after_json FROM audit_log WHERE action = 'overlay.updated' ORDER BY rowid DESC LIMIT 1",
+    ).first<{ after_json: string }>();
+    expect(JSON.parse(changedAudit?.after_json ?? "{}") as Record<string, unknown>).toMatchObject({
+      elementChanges: { added: [], changed: [{ id: "element-a", beforeLabel: "Score", afterLabel: "Deaths" }], removed: [] },
+    });
 
     startD1WriteCapture();
     const removedElement = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
       ...draft,
       baseRevision: 3,
-      elements: [element("element-a", 1)],
+      elements: [{ ...element("element-a", 1), label: "Deaths", config: { token: "config-secret" } }],
     });
     expect(removedElement.status).toBe(200);
-    expect(rowsWritten).toBe(3); // Overlay row + deleted element row + audit row.
+    expect(sqliteChanges).toBe(3); // SQLite changes: overlay row + deleted element row + audit row.
+    const finalAudit = await database.prepare(
+      "SELECT after_json FROM audit_log WHERE action = 'overlay.updated' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+    ).first<{ after_json: string }>();
+    expect(JSON.parse(finalAudit?.after_json ?? "{}") as Record<string, unknown>).toMatchObject({
+      elementChanges: { added: [], changed: [], removed: [{ id: "element-b", label: "Score" }] },
+    });
     await expect(database.prepare(
       "SELECT element_id FROM overlay_elements WHERE channel_id = 'channel-a' AND overlay_id = ?",
     ).bind(overlayId).all()).resolves.toMatchObject({ results: [{ element_id: "element-a" }] });
 
-    const deleted = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "DELETE");
+    const deleted = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "DELETE", { baseRevision: 4 });
     expect(deleted.status).toBe(204);
     await expect(database.prepare(
       "SELECT COUNT(*) AS count FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",
@@ -205,6 +241,72 @@ describe("stored overlay routes", () => {
     await expect(database.prepare(
       "SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a' AND overlay_id = ?",
     ).bind(overlayId).first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("returns a conflict instead of colliding element ids across overlays", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const firstOverlayId = await createOverlay("manager-a", "channel-a", "First");
+    const secondOverlayId = await createOverlay("manager-a", "channel-a", "Second");
+    const draft = {
+      baseRevision: 1,
+      name: "First",
+      width: 1920,
+      height: 1080,
+      css: "",
+      elements: [element("shared-element-id")],
+    };
+    const firstSave = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${firstOverlayId}`, "PUT", draft);
+    expect(firstSave.status).toBe(200);
+
+    startD1WriteCapture();
+    const collision = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${secondOverlayId}`, "PUT", {
+      ...draft,
+      name: "Second",
+    });
+    expect(collision.status).toBe(409);
+    await expect(collision.json()).resolves.toEqual({ error: "overlay_element_id_conflict" });
+    expect(sqliteChanges).toBe(0);
+    await expect(database.prepare(
+      "SELECT revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",
+    ).bind(secondOverlayId).first()).resolves.toEqual({ revision: 1 });
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a' AND overlay_id = ?",
+    ).bind(secondOverlayId).first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("requires a base revision and preserves an overlay changed before DELETE", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const overlayId = await createOverlay("manager-a", "channel-a", "Gameplay");
+
+    const missingRevision = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "DELETE");
+    expect(missingRevision.status).toBe(400);
+
+    let raced = false;
+    database.prepare = (sql) => {
+      if (!raced && sql.includes("DELETE FROM overlays")) {
+        raced = true;
+        database.sqlite.prepare(
+          "UPDATE overlays SET revision = 2 WHERE channel_id = 'channel-a' AND overlay_id = ?",
+        ).run(overlayId);
+      }
+      return originalPrepare(sql);
+    };
+    const response = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "DELETE", {
+      baseRevision: 1,
+    });
+
+    expect(raced).toBe(true);
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "overlay_changed_concurrently", currentRevision: 2 });
+    await expect(database.prepare(
+      "SELECT revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",
+    ).bind(overlayId).first()).resolves.toEqual({ revision: 2 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'overlay.deleted'").first())
+      .resolves.toEqual({ count: 0 });
   });
 
   it("rechecks the managing role in SQL after the request was authorized", async () => {
@@ -236,7 +338,7 @@ describe("stored overlay routes", () => {
 
     expect(roleChanged).toBe(true);
     expect(response.status).toBe(403);
-    expect(rowsWritten).toBe(0);
+    expect(sqliteChanges).toBe(0);
     await expect(database.prepare(
       "SELECT name, revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",
     ).bind(overlayId).first()).resolves.toEqual({ name: "Gameplay", revision: 1 });
@@ -273,7 +375,7 @@ describe("stored overlay routes", () => {
 
     expect(raced).toBe(true);
     expect(response.status).toBe(409);
-    expect(rowsWritten).toBe(0);
+    expect(sqliteChanges).toBe(0);
     await expect(database.prepare(
       "SELECT name, revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",
     ).bind(overlayId).first()).resolves.toEqual({ name: "Concurrent", revision: 2 });

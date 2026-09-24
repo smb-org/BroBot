@@ -173,7 +173,7 @@ export interface ChannelVariablesTexts {
   renameHint: string;
   usages: string;
   noUsages: string;
-  usageLine: (moduleId: string, itemName: string, kind: "template" | "action") => string;
+  usageLine: (moduleId: string, itemName: string, kind: "template" | "action" | "display") => string;
   set: string;
   increase: string;
   decrease: string;
@@ -224,7 +224,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.",
     limitNote: (maximum) => `Bis zu ${String(maximum)} Variablen pro Kanal.`,
     renameHint: "Vorlagen werden angepasst. Overlay-Links mit diesem Namen müssen neu erzeugt werden.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
-    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "zählt eine Aktion" : "Vorlage"}`,
+    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "zählt eine Aktion" : kind === "display" ? "Overlay-Anzeige" : "Vorlage"}`,
     set: "Setzen", increase: "+1", decrease: "−1", increaseDraftValue: "Setzwert um eins erhöhen", decreaseDraftValue: "Setzwert um eins verringern", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
     deleteDescription: (name, usages) => usages.length === 0 ? `„${name}“ wird dauerhaft gelöscht.` : `„${name}“ wird dauerhaft gelöscht. Verwendungen: ${usages}`,
     deleteConfirm: (name) => `${name} endgültig löschen`, deleteCancel: "Abbrechen",
@@ -250,7 +250,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.",
     limitNote: (maximum) => `Up to ${String(maximum)} variables per channel.`,
     renameHint: "Templates are updated. Overlay links using this name must be regenerated.", usages: "Used in", noUsages: "Not used yet.",
-    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "changes a variable" : "template"}`,
+    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "changes a variable" : kind === "display" ? "overlay display" : "template"}`,
     set: "Set", increase: "+1", decrease: "−1", increaseDraftValue: "Increase the value to set by one", decreaseDraftValue: "Decrease the value to set by one", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
     deleteDescription: (name, usages) => usages.length === 0 ? `“${name}” will be deleted permanently.` : `“${name}” will be deleted permanently. Used in: ${usages}`,
     deleteConfirm: (name) => `Delete ${name} permanently`, deleteCancel: "Cancel",

@@ -37,6 +37,7 @@ export type SaveOverlayDraftResult =
   | { outcome: "conflict"; current: OverlayRecord | null }
   | { outcome: "element_limit" }
   | { outcome: "invalid_reference" }
+  | { outcome: "element_id_conflict" }
   | { outcome: "unchanged"; overlay: OverlayRecord; rowsWritten: 0 }
   | { outcome: "saved"; overlay: OverlayRecord; rowsWritten: number };
 
@@ -77,6 +78,15 @@ export const saveOverlayDraft = async (
     const current = await getOverlayForChannel(db, channelId, overlayId);
     if (current === null) return { outcome: "not_found" };
     if (!await isOverlayManagementAllowed(db, actor, channelId, changedAt)) return { outcome: "forbidden" };
+    for (const element of added) {
+      const collision = await db.prepare(
+        `SELECT 1 AS present
+           FROM overlay_elements
+          WHERE element_id = ? AND NOT (channel_id = ? AND overlay_id = ?)
+          LIMIT 1`,
+      ).bind(element.id, channelId, overlayId).first<{ present: number }>();
+      if (collision !== null) return { outcome: "element_id_conflict" };
+    }
     return { outcome: "conflict", current };
   }
   const overlay = await getOverlayForChannel(db, channelId, overlayId);

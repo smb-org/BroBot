@@ -179,8 +179,19 @@ const auditSnapshot = (overlay: Pick<OverlayRecord, "id" | "name" | "width" | "h
   elementCount: overlay.elements.length,
 });
 
+const auditElement = (element: OverlayDraftElement) => ({ id: element.id, label: element.label });
+
 const rowsWritten = (results: readonly D1Result[]): number =>
   results.reduce((total, result) => total + result.meta.rows_written, 0);
+
+export const overlayElementIdCollisionGuard = (elementCount: number): string => elementCount === 0
+  ? ""
+  : `AND NOT EXISTS (
+         SELECT 1
+           FROM overlay_elements AS conflicting_element
+          WHERE conflicting_element.element_id IN (${Array.from({ length: elementCount }, () => "?").join(", ")})
+            AND NOT (conflicting_element.channel_id = ? AND conflicting_element.overlay_id = ?)
+       )`;
 
 export const createOverlayWithAudit = async (
   db: D1Database,
@@ -230,12 +241,16 @@ export const updateOverlayDraftWithAudit = async (
     removed: readonly OverlayDraftElement[];
   },
 ): Promise<{ changes: number; rowsWritten: number }> => {
+  const addedIdGuard = overlayElementIdCollisionGuard(diff.added.length);
   const mutation = db.prepare(
     `UPDATE overlays
         SET name = ?, width = ?, height = ?, css = ?, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND overlay_id = ? AND revision = ?
+        ${addedIdGuard}
         ${actorGuard(MANAGING_ROLES)}`,
   ).bind(draft.name, draft.width, draft.height, draft.css, changedAt, before.channelId, before.id, before.revision,
+    ...diff.added.map((element) => element.id),
+    ...(diff.added.length === 0 ? [] : [before.channelId, before.id]),
     ...bindActorGuard(actor, before.channelId, changedAt));
 
   const elementWrites: D1PreparedStatement[] = [
@@ -268,8 +283,18 @@ export const updateOverlayDraftWithAudit = async (
     createdAt: before.createdAt,
     updatedAt: changedAt,
   };
+  const beforeById = new Map(before.elements.map((element) => [element.id, element]));
+  const elementChanges = {
+    added: diff.added.map(auditElement),
+    changed: diff.changed.map((element) => ({
+      id: element.id,
+      beforeLabel: beforeById.get(element.id)?.label ?? "",
+      afterLabel: element.label,
+    })),
+    removed: diff.removed.map(auditElement),
+  };
   const audit = prepareAudit(db, actor.userId, changedAt, before.channelId, null, "overlay.updated",
-    auditSnapshot(before), auditSnapshot(after));
+    auditSnapshot(before), { ...auditSnapshot(after), elementChanges });
   const results = await db.batch([mutation, ...elementWrites, audit]);
   return { changes: results[0]?.meta.changes ?? 0, rowsWritten: rowsWritten(results) };
 };
@@ -278,11 +303,13 @@ export const deleteOverlayWithAudit = async (
   db: D1Database,
   actor: ActorContext,
   before: OverlayRecord,
+  baseRevision: number,
   changedAt: string,
 ): Promise<{ changes: number; rowsWritten: number }> => {
   const mutation = db.prepare(
-    `DELETE FROM overlays WHERE channel_id = ? AND overlay_id = ? ${actorGuard(MANAGING_ROLES)}`,
-  ).bind(before.channelId, before.id, ...bindActorGuard(actor, before.channelId, changedAt));
+    `DELETE FROM overlays
+      WHERE channel_id = ? AND overlay_id = ? AND revision = ? ${actorGuard(MANAGING_ROLES)}`,
+  ).bind(before.channelId, before.id, baseRevision, ...bindActorGuard(actor, before.channelId, changedAt));
   const audit = prepareAudit(db, actor.userId, changedAt, before.channelId, null, "overlay.deleted",
     auditSnapshot(before), null);
   const results = await db.batch([mutation, audit]);
