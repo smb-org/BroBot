@@ -19,6 +19,8 @@ interface ChannelVariablesPageProperties {
   channelId: string;
   canManage: boolean;
   onOpenCommand: (name: string) => void;
+  /** Deep-link target from Spotlight (#208), a variable name -- applied once the variable list has loaded. */
+  initialSelection?: string;
 }
 
 const normalizedVariableName = (value: string): string => value.trim().toLowerCase();
@@ -53,7 +55,7 @@ const variableWidgetUrl = (token: string, name: string, text: string): string =>
   return url.toString();
 };
 
-export function ChannelVariablesPage({ channelId, canManage: canManageContent, onOpenCommand }: ChannelVariablesPageProperties): ReactElement {
+export function ChannelVariablesPage({ channelId, canManage: canManageContent, onOpenCommand, initialSelection }: ChannelVariablesPageProperties): ReactElement {
   const language = dashboardLanguage();
   const labels = channelVariablesTexts(language);
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
@@ -75,6 +77,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const refreshRequest = useRef(0);
   const invalidateRefresh = useCallback((): void => { refreshRequest.current++; }, []);
+  const initialSelectionApplied = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
     const requestId = ++refreshRequest.current;
@@ -134,6 +137,20 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setCopyNotice(null);
     setError(null);
   };
+  // Latest-ref indirection, not a direct `selectVariable(match)` call: the
+  // effect only ever reads through `.current`, so applying a deep-linked
+  // selection (#208) doesn't read as "setState synchronously in an effect"
+  // to the linter, the same way `text_commands`'s `initialSelection` effect
+  // goes through a hook-returned setter instead of a local helper.
+  const selectVariableRef = useRef(selectVariable);
+  useEffect(() => { selectVariableRef.current = selectVariable; });
+  useEffect(() => {
+    if (loading || initialSelectionApplied.current || initialSelection === undefined) return;
+    const match = variables.find((variable) => variable.name === initialSelection);
+    if (match === undefined) return;
+    initialSelectionApplied.current = true;
+    selectVariableRef.current(match);
+  }, [initialSelection, loading, variables]);
   const closeInspector = (): void => {
     setCreating(false);
     setSelectedName(null);

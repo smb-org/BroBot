@@ -39,15 +39,20 @@ export interface SpotlightProps {
   onOpen?: () => void;
 }
 
+/** Lowercased and diacritic-stripped (drops combining marks after NFD, e.g. "o" from an umlauted "o") so an accent-free query still matches an accented label or keyword (#208). */
+const fold = (value: string): string => value.normalize("NFD").replace(/[̀-ͯ]/gu, "").toLowerCase();
+
 /**
  * The default filter requires every *word* in the query to appear
  * somewhere in an action's label/description/keywords -- wrong for a
  * parametrized action ("shoutout streamerin" has no action whose text
  * contains "streamerin"). This instead: substring-matches the whole query
- * against label/description, and for keywords accepts either direction of
- * prefix match, so a keyword can be a command word the query extends
- * ("ads" keyword matches query "ads off") or the query can extend toward a
- * longer keyword as the user keeps typing.
+ * against label/description/group, and for keywords accepts either
+ * direction of prefix match, so a keyword can be a command word the query
+ * extends ("ads" keyword matches query "ads off") or the query can extend
+ * toward a longer keyword as the user keeps typing. Matching folds case and
+ * diacritics on both sides (#208), so a page's own group heading (e.g.
+ * "Betrieb") is itself a match target, not just its label and keywords.
  */
 const flatActions = (actions: SpotlightActions[]): SpotlightActionData[] => actions.flatMap((action) =>
   "actions" in action ? action.actions.map((item) => ({ ...item, group: action.group })) : [action],
@@ -75,17 +80,18 @@ const groupedActions = (actions: SpotlightActionData[]): SpotlightActions[] => {
 };
 
 const filterItems: SpotlightFilterFunction = (query, actions) => {
-  const q = query.trim().toLowerCase();
+  const q = fold(query.trim());
   const filtered = flatActions(actions).filter((action) => {
     if (q.length === 0) return true;
-    const label = (action.label ?? "").toLowerCase();
-    const description = (action.description ?? "").toLowerCase();
-    if (label.includes(q) || description.includes(q)) return true;
+    const label = fold(action.label ?? "");
+    const description = fold(action.description ?? "");
+    const group = fold(typeof action.group === "string" ? action.group : "");
+    if (label.includes(q) || description.includes(q) || group.includes(q)) return true;
     const keywords = Array.isArray(action.keywords)
       ? action.keywords
       : typeof action.keywords === "string" ? action.keywords.split(",") : [];
     return keywords.some((keyword: string) => {
-      const normalized = keyword.trim().toLowerCase();
+      const normalized = fold(keyword.trim());
       return normalized.length > 0 && (q.startsWith(normalized) || normalized.startsWith(q));
     });
   });

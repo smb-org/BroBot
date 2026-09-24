@@ -201,4 +201,17 @@ describe("Channel variables page", () => {
     fireEvent.focus(window);
     expect(fetcher).toHaveBeenCalledTimes(4);
   });
+
+  it("opens the inspector for the variable named by initialSelection (#208, Spotlight deep link)", async () => {
+    const other = { ...variable, name: "other", description: "" };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
+      variables: [other, variable], count: 2, maximum: 25,
+    }))));
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage={false} onOpenCommand={() => {}} initialSelection="score" /></UiProvider>);
+
+    await screen.findByText("{var.score}");
+    const nameField = await screen.findByLabelText("Name");
+    expect(nameField).toHaveValue("score");
+  });
 });

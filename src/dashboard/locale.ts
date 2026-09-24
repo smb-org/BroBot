@@ -684,14 +684,13 @@ export interface DashboardTexts {
     empty: string;
     groupModules: string;
     groupCommands: string;
-    groupMembers: string;
+    groupVariables: string;
     groupActions: string;
     adOff: string;
     adOn: string;
     shoutoutHint: string;
     shoutoutMissingLogin: string;
     openCommand: (name: string) => string;
-    openMember: string;
   };
   /** Full-page states from #159: they replace page content (navigation
    *  stays usable) instead of stacking another red box on a normal page. */
@@ -904,14 +903,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       empty: "Keine Treffer.",
       groupModules: "Module",
       groupCommands: "Befehle",
-      groupMembers: "Mitglieder",
+      groupVariables: "Variablen",
       groupActions: "Aktionen",
       adOff: "Werbung aus",
       adOn: "Werbung an",
       shoutoutHint: "shoutout <Twitch-Name>",
       shoutoutMissingLogin: "Twitch-Name nach „shoutout“ eingeben.",
       openCommand: (name) => `Befehl !${name} öffnen`,
-      openMember: "Mitglied öffnen",
     },
     blocking: {
       botTitle: "Der Bot ist nicht angemeldet",
@@ -1111,14 +1109,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       empty: "No matches.",
       groupModules: "Modules",
       groupCommands: "Commands",
-      groupMembers: "Members",
+      groupVariables: "Variables",
       groupActions: "Actions",
       adOff: "Ads off",
       adOn: "Ads on",
       shoutoutHint: "shoutout <Twitch login>",
       shoutoutMissingLogin: "Type a Twitch login after “shoutout”.",
       openCommand: (name) => `Open command !${name}`,
-      openMember: "Open member",
     },
     blocking: {
       botTitle: "The bot is not signed in",
