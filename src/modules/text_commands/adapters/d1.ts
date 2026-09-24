@@ -53,6 +53,7 @@ const auditValues = async (command: TextCommand) => ({
   ...(command.unavailableText === undefined ? {} : await previewField("unavailableText", command.unavailableText)),
   ...(command.usageText === undefined ? {} : await previewField("usageText", command.usageText)),
   ...(command.legacyFallback === true ? { legacyFallback: true } : {}),
+  ...(command.legacyKind === undefined ? {} : { legacyKind: command.legacyKind }),
 });
 
 const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
@@ -69,19 +70,21 @@ const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
   left.responseType === right.responseType &&
   JSON.stringify(left.variableAction) === JSON.stringify(right.variableAction) &&
   left.legacyFallback === right.legacyFallback &&
+  left.legacyKind === right.legacyKind &&
   extraTemplateKeys.every((key) => left[key] === right[key]);
 
-const extraTemplatesOf = (value: Pick<TextCommand, typeof extraTemplateKeys[number] | "legacyFallback">): Record<string, string | boolean> => {
+const extraTemplatesOf = (value: Pick<TextCommand, typeof extraTemplateKeys[number] | "legacyFallback" | "legacyKind">): Record<string, string | boolean> => {
   const entries: [string, string | boolean][] = [];
   for (const key of extraTemplateKeys) {
     const template = value[key];
     if (template !== undefined) entries.push([key, template]);
   }
   if (value.legacyFallback === true) entries.push(["legacyFallback", true]);
+  if (value.legacyKind !== undefined) entries.push(["legacyKind", value.legacyKind]);
   return Object.fromEntries(entries);
 };
 
-const storedExtraTemplates = (value: unknown): Pick<TextCommand, typeof extraTemplateKeys[number] | "legacyFallback"> => {
+const storedExtraTemplates = (value: unknown): Pick<TextCommand, typeof extraTemplateKeys[number] | "legacyFallback" | "legacyKind"> => {
   let parsed: unknown;
   try {
     parsed = typeof value === "string" ? JSON.parse(value) as unknown : null;
@@ -89,12 +92,14 @@ const storedExtraTemplates = (value: unknown): Pick<TextCommand, typeof extraTem
     parsed = null;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-  const templates: Partial<Record<(typeof extraTemplateKeys)[number], string>> & { legacyFallback?: true } = {};
+  const templates: Partial<Record<(typeof extraTemplateKeys)[number], string>> & { legacyFallback?: true; legacyKind?: "uptime" | "followage" } = {};
   for (const key of extraTemplateKeys) {
     const template: unknown = Reflect.get(parsed, key);
     if (typeof template === "string") templates[key] = template;
   }
   if (Reflect.get(parsed, "legacyFallback") === true) templates.legacyFallback = true;
+  const legacyKind: unknown = Reflect.get(parsed, "legacyKind");
+  if (legacyKind === "uptime" || legacyKind === "followage") templates.legacyKind = legacyKind;
   return templates;
 };
 
@@ -605,13 +610,6 @@ export const createTextCommandRepository = (
       userId ?? null, channelId, name, userId ?? null, now);
 
     const statements: D1PreparedStatement[] = [claim];
-    if (userCooldownSeconds > 0 && userId !== undefined && userId !== null) {
-      statements.push(db.prepare(
-        `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
-         SELECT ?, ?, ?, ? WHERE changes() > 0
-         ON CONFLICT (channel_id, command_name, user_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
-      ).bind(channelId, name, userId, now));
-    }
     const commandBeforeClaim = knownCommand ?? null;
     const action = commandBeforeClaim?.variableAction ?? null;
     const variableChange = action !== null && prepareVariableChange !== undefined &&
@@ -622,7 +620,36 @@ export const createTextCommandRepository = (
         amount: action.operation === "set_argument" ? variableAmount ?? 0 : action.amount,
       }, now)
       : null;
-    if (variableChange !== null) statements.push(variableChange);
+    if (variableChange !== null) {
+      statements.push(variableChange);
+      if (commandBeforeClaim !== null) {
+        statements.push(db.prepare(
+          `UPDATE text_commands
+              SET last_used_at = ?, updated_at = ?, use_count = use_count - 1
+            WHERE channel_id = ? AND command_name = ? AND revision = ?
+              AND last_used_at = ? AND use_count = ? AND changes() = 0`,
+        ).bind(commandBeforeClaim.lastUsedAt, commandBeforeClaim.updatedAt, channelId, name,
+          commandBeforeClaim.revision, now, commandBeforeClaim.useCount + 1));
+      }
+    }
+    if (userCooldownSeconds > 0 && userId !== undefined && userId !== null) {
+      statements.push(commandBeforeClaim !== null && variableChange !== null
+        ? db.prepare(
+          `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
+           SELECT ?, ?, ?, ?
+            WHERE EXISTS (
+              SELECT 1 FROM text_commands
+               WHERE channel_id = ? AND command_name = ? AND revision = ?
+                 AND last_used_at = ? AND use_count = ?
+            )
+           ON CONFLICT (channel_id, command_name, user_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
+        ).bind(channelId, name, userId, now, channelId, name, commandBeforeClaim.revision, now, commandBeforeClaim.useCount + 1)
+        : db.prepare(
+          `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
+           SELECT ?, ?, ?, ? WHERE changes() > 0
+           ON CONFLICT (channel_id, command_name, user_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
+        ).bind(channelId, name, userId, now));
+    }
     const results = statements.length === 1 ? [await claim.run()] : await db.batch(statements);
     const claimResult = results[0];
     if (claimResult === undefined) throw new Error("Command claim returned no result.");
@@ -637,11 +664,19 @@ export const createTextCommandRepository = (
           : await this.find(channelId, name);
     if (current === null) return null;
     if (globalChanges > 0) {
-      const actionResult = variableChange === null ? undefined : results.at(-1)?.results[0];
-      const changed = typeof actionResult === "object" && actionResult !== null &&
-          "name" in actionResult && typeof actionResult.name === "string" &&
-          "value" in actionResult && typeof actionResult.value === "number"
-        ? { name: actionResult.name, value: actionResult.value }
+      const actionResult = variableChange === null ? undefined : results[1];
+      if (variableChange !== null && (actionResult?.meta.changes ?? 0) === 0) {
+        return {
+          command: await this.find(channelId, name) ?? current,
+          claimed: false,
+          reason: "variable_update_failed",
+        };
+      }
+      const changedResult = actionResult?.results[0];
+      const changed = typeof changedResult === "object" && changedResult !== null &&
+          "name" in changedResult && typeof changedResult.name === "string" &&
+          "value" in changedResult && typeof changedResult.value === "number"
+        ? { name: changedResult.name, value: changedResult.value }
         : undefined;
       return { command: current, claimed: true, ...(changed === undefined ? {} : { changedVariable: changed }) };
     }

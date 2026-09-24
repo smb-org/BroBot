@@ -101,6 +101,11 @@ describe("Channel variable routes", () => {
        VALUES ('channel-a', 'points', 'Score: {var.score}', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z', 'score', 'add', 1)`,
     ).run();
     await database.prepare(
+      `INSERT INTO text_commands
+        (channel_id, command_name, response_text, created_at, updated_at, variable_name, variable_operation, variable_amount)
+       VALUES ('channel-a', 'increment', '', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z', 'score', 'add', 1)`,
+    ).run();
+    await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('channel-a', 'ads', 1, '{"prewarningText":"Score {var.score}"}')`,
     ).run();
@@ -113,6 +118,9 @@ describe("Channel variable routes", () => {
     await expect(database.prepare(
       "SELECT settings, revision FROM channel_modules WHERE channel_id = 'channel-a' AND module_id = 'ads'",
     ).first()).resolves.toEqual({ settings: '{"prewarningText":"Score {var.points}"}', revision: 2 });
+    await expect(database.prepare(
+      "SELECT variable_name, revision FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'increment'",
+    ).first()).resolves.toEqual({ variable_name: "points", revision: 2 });
 
     const deletion = await fetchPanel("manager-a", "/api/channels/channel-a/variables/points", "DELETE");
     expect(deletion.status).toBe(409);

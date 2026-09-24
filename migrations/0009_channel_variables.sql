@@ -72,7 +72,9 @@ SELECT channel_id, command_name, response_text, cooldown_seconds, last_used_at, 
        CASE WHEN kind IN ('uptime', 'followage', 'game') THEN 'text' ELSE kind END,
        enabled, minimum_level, aliases_json, user_cooldown_seconds, stream_condition, response_type,
        CASE WHEN kind IN ('uptime', 'followage')
-            THEN json_set(template_fields_json, '$.legacyFallback', json('true'))
+            THEN json_set(template_fields_json,
+                          '$.legacyFallback', json('true'),
+                          '$.legacyKind', json_quote(kind))
             ELSE template_fields_json END,
        revision, 0, NULL, NULL, NULL
   FROM text_commands_migration_old;

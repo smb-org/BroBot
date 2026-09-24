@@ -136,6 +136,12 @@ describe("Text command editor", () => {
     expect(within(picker).getByRole("group", { name: "Stream", hidden: true })).toBeInTheDocument();
     expect(picker.querySelector(".ui-variable-picker__option-copy .ui-variable-picker__description")).not.toBeNull();
     expect(picker.querySelector(".ui-variable-picker__sample")).not.toBeNull();
+    const liveLookups = within(picker).getAllByRole("img", { name: "Fragt Twitch live ab, wenn der Befehl ausgeführt wird", hidden: true });
+    expect(liveLookups.length).toBeGreaterThan(0);
+    for (const liveLookup of liveLookups) {
+      expect(liveLookup.querySelector("svg")).toHaveClass("tabler-icon-info-circle");
+      expect(liveLookup).toHaveAttribute("title", "Fragt Twitch live ab, wenn der Befehl ausgeführt wird");
+    }
     fireEvent.click(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true }));
     expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("{uptime}");
   });
@@ -151,6 +157,31 @@ describe("Text command editor", () => {
     fireEvent.click(toggle);
     expect(toggle.closest(".ui-switch-card")?.querySelector(".ui-switch-card__children")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Variable" }).closest(".ui-switch-card__children")).not.toBeNull();
+  });
+
+  it("defaults set_argument to moderators unless the draft already chose a tier", async () => {
+    renderPanel(panelFetch({ commands: () => [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Kanalvariable ändern" })).getByRole("radio", { name: "Argument" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
+    expect(within(screen.getByRole("radiogroup", { name: "Wer darf auslösen" })).getByRole("radio", { checked: true }))
+      .toHaveAccessibleName("Moderatoren. Moderatoren und Broadcaster.");
+  });
+
+  it("keeps an explicit everyone tier when set_argument is selected later", async () => {
+    renderPanel(panelFetch({ commands: () => [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
+    const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
+    fireEvent.click(within(tierGroup).getByRole("radio", { name: "VIPs. VIPs, Moderatoren und Broadcaster. Abonnenten nicht." }));
+    fireEvent.click(within(tierGroup).getByRole("radio", { name: "Alle. Zuschauer, Abonnenten, VIPs, Moderatoren und Broadcaster." }));
+    fireEvent.click(screen.getByRole("tab", { name: "Einstellungen, Fehler" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Kanalvariable ändern" }));
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Kanalvariable ändern" })).getByRole("radio", { name: "Argument" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
+    const currentTierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
+    expect(within(currentTierGroup).getByRole("radio", { checked: true })).toHaveAccessibleName("Alle. Zuschauer, Abonnenten, VIPs, Moderatoren und Broadcaster.");
   });
 
   it("describes a silent action in the response column", async () => {

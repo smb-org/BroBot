@@ -45,11 +45,22 @@ const formatDuration = (start: string, now: number, language: ModuleLanguage): s
   return text.duration(days > 0 ? text.day(days) : "", text.hour(hours), text.minute(remainder));
 };
 
+const daysInUtcMonth = (year: number, month: number): number => new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+const utcTimeOfDay = (date: Date): number => (((date.getUTCHours() * 60 + date.getUTCMinutes()) * 60 + date.getUTCSeconds()) * 1000) + date.getUTCMilliseconds();
+
 const durationSince = (value: string, now: number, language: ModuleLanguage): string => {
   const createdAt = Date.parse(value);
   if (!Number.isFinite(createdAt)) return "?";
-  const years = Math.max(0, Math.floor((now - createdAt) / (365.2425 * 24 * 60 * 60 * 1000)));
-  const remainingMonths = Math.max(0, Math.floor((now - createdAt) / (30.436875 * 24 * 60 * 60 * 1000)) - years * 12);
+  const created = new Date(createdAt);
+  const current = new Date(now);
+  let completedMonths = (current.getUTCFullYear() - created.getUTCFullYear()) * 12 + current.getUTCMonth() - created.getUTCMonth();
+  const anniversaryDay = Math.min(created.getUTCDate(), daysInUtcMonth(current.getUTCFullYear(), current.getUTCMonth()));
+  const beforeAnniversary = current.getUTCDate() < anniversaryDay ||
+    current.getUTCDate() === anniversaryDay && utcTimeOfDay(current) < utcTimeOfDay(created);
+  if (beforeAnniversary) completedMonths -= 1;
+  completedMonths = Math.max(0, completedMonths);
+  const years = Math.floor(completedMonths / 12);
+  const remainingMonths = completedMonths - years * 12;
   const text = templateLanguageText[language];
   const yearsText = years > 0 ? text.year(years) : "";
   const monthsText = years === 0 || remainingMonths > 0 ? text.month(remainingMonths) : "";
@@ -97,6 +108,10 @@ export const createTemplateRenderer = (
     : text;
   const names = templateVariableNames(templateSource);
   const requested = new Set(names);
+  const legacyKind = moduleValues.legacyKind;
+  if (moduleValues.legacyFallback === "true" && (legacyKind === "uptime" || legacyKind === "followage")) {
+    requested.add(legacyKind);
+  }
   const channelNames = [...requested]
     .flatMap((name) => name.startsWith("var.") ? [name.slice(4)] : []);
   const changedName = changed?.name;

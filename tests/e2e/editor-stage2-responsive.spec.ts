@@ -160,6 +160,24 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
   await page.setViewportSize({ width: 1280, height: 900 });
   await commandRow.click();
   await expect(page.getByRole("region", { name: "Eigenschaften von !hallo" })).toBeVisible();
+  const commandTableLayout = await page.evaluate(() => {
+    const wrapper = document.querySelector(".command-panel .table-wrap");
+    const table = wrapper?.querySelector("table");
+    const activeCell = table?.querySelector("tbody tr td:last-child");
+    const switchTrack = activeCell?.querySelector(".switch__track");
+    if (!wrapper || !table || !activeCell || !switchTrack) {
+      throw new Error("The active command column is missing from the table.");
+    }
+    return {
+      wrapperRight: wrapper.getBoundingClientRect().right,
+      tableRight: table.getBoundingClientRect().right,
+      activeCellRight: activeCell.getBoundingClientRect().right,
+      switchRight: switchTrack.getBoundingClientRect().right,
+    };
+  });
+  expect(commandTableLayout.tableRight).toBeLessThanOrEqual(commandTableLayout.wrapperRight + 1);
+  expect(commandTableLayout.activeCellRight).toBeLessThanOrEqual(commandTableLayout.wrapperRight + 1);
+  expect(commandTableLayout.switchRight).toBeLessThanOrEqual(commandTableLayout.activeCellRight + 1);
   await capture(page, testInfo, "08-command-inspector");
 
   await page.goto(`/channels/${channel.channelId}/events`);

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 
 describe("text command options migration", () => {
-  it("marks migrated uptime and followage commands to replace the whole reply with their legacy fallback", () => {
+  it("preserves migrated uptime and followage kinds for token-independent whole-reply fallbacks", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec(readFileSync(resolve(migrationsDirectory, "0000_baseline.sql"), "utf8"));
@@ -27,8 +27,8 @@ describe("text command options migration", () => {
       expect(database.prepare(
         "SELECT command_name, kind, template_fields_json FROM text_commands ORDER BY command_name",
       ).all()).toEqual([
-        { command_name: "followage", kind: "text", template_fields_json: '{"notFollowingText":"Not following","unavailableText":"Unavailable","legacyFallback":true}' },
-        { command_name: "uptime", kind: "text", template_fields_json: '{"offlineText":"{channel} is offline","legacyFallback":true}' },
+        { command_name: "followage", kind: "text", template_fields_json: '{"notFollowingText":"Not following","unavailableText":"Unavailable","legacyFallback":true,"legacyKind":"followage"}' },
+        { command_name: "uptime", kind: "text", template_fields_json: '{"offlineText":"{channel} is offline","legacyFallback":true,"legacyKind":"uptime"}' },
       ]);
     } finally {
       database.close();

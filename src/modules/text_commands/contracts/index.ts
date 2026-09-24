@@ -22,6 +22,8 @@ export interface TextCommand {
   usageText?: string;
   /** Preserves the whole-reply fallbacks of commands migrated from legacy kinds. */
   legacyFallback?: boolean;
+  /** Original kind for migrated commands whose legacy lookup does not need a template token. */
+  legacyKind?: "uptime" | "followage";
   enabled: boolean;
   minimumTier: TextCommandMinimumTier;
   cooldownSeconds: number;
@@ -59,6 +61,7 @@ export interface NewTextCommand {
   unavailableText?: string;
   usageText?: string;
   legacyFallback?: boolean;
+  legacyKind?: "uptime" | "followage";
   minimumTier?: TextCommandMinimumTier;
   cooldownSeconds: number;
   aliases?: readonly string[];
@@ -80,6 +83,7 @@ export interface TextCommandChange {
   unavailableText?: string;
   usageText?: string;
   legacyFallback?: boolean;
+  legacyKind?: "uptime" | "followage";
   enabled: boolean;
   onlyToggle?: boolean;
   minimumTier?: TextCommandMinimumTier;
@@ -98,7 +102,7 @@ export interface TextCommandClaim {
   claimed: boolean;
   stale?: boolean;
   changedVariable?: { name: string; value: number };
-  reason?: "cooldown" | "user_cooldown";
+  reason?: "cooldown" | "user_cooldown" | "variable_update_failed";
   remainingSeconds?: number;
 }
 

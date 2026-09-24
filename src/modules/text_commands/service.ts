@@ -121,6 +121,7 @@ const moduleValuesFor = (
     ...(command.notFollowingText === undefined ? {} : { notFollowingText: command.notFollowingText }),
     ...(command.unavailableText === undefined ? {} : { unavailableText: command.unavailableText }),
     ...(command.legacyFallback === true ? { legacyFallback: "true" } : {}),
+    ...(command.legacyKind === undefined ? {} : { legacyKind: command.legacyKind }),
   };
 };
 
@@ -223,6 +224,9 @@ const processTextCommandMessageAttempt = async (
       : rejection("text_commands.changed_concurrently", { name: command.name });
   }
   if (!claim.claimed) {
+    if (claim.reason === "variable_update_failed") {
+      return rejection("text_commands.variable_update_failed", { name: command.name });
+    }
     const remainingSeconds = claim.remainingSeconds ?? cooldownRemaining(claim.command.lastUsedAt, event.receivedAt, claim.command.cooldownSeconds);
     return claim.reason === "user_cooldown"
       ? rejection("text_commands.user_cooldown", { name: command.name, remainingSeconds })

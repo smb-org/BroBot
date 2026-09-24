@@ -7,6 +7,7 @@ import {
 } from "../../../dashboard/ui";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { TEXT_COMMAND_KINDS, TEXT_COMMAND_MAX_ALIASES, TEXT_COMMAND_MINIMUM_TIERS, TEXT_COMMAND_TEMPLATE_FIELDS, type TextCommand, type TextCommandKind, type TextCommandMinimumTier, type TextCommandResponseType, type TextCommandStreamCondition } from "../contracts";
+import { minimumTierAfterVariableOperation } from "./editor-state";
 import { commandListReply, TEXT_COMMAND_DEFAULT_USAGE_TEXT, textCommandDefaultsFor } from "../contracts/chat-defaults";
 import { statusForTier, validCommandName } from "../domain";
 import { invalidTemplateParameters, renderTemplate, templateVariableNames, unknownTemplateVariables, worstCaseTemplateLength, type PanelTemplateWarning, type TemplateVariable } from "../contract";
@@ -173,6 +174,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const [deleting, setDeleting] = useState(false);
   const [attemptedSave, setAttemptedSave] = useState(false);
   const [serverWarnings, setServerWarnings] = useState<readonly PanelTemplateWarning[]>([]);
+  const [minimumTierExplicit, setMinimumTierExplicit] = useState(false);
   const isCreate = command === null;
   const templateFields = templateFieldsForKind(draft.kind, channelVariables);
   const variableAction = draft.variableAction;
@@ -301,6 +303,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   }, [guard.guardSwitch, onGuardChange]);
 
   const setDraftField = <Key extends keyof CommandDraft>(key: Key, value: CommandDraft[Key]): void => {
+    if (key === "minimumTier") setMinimumTierExplicit(true);
     setValue((current) => ({ ...current, [key]: value }));
     setSaved(false); setError(undefined); setConcurrentConflict(false);
     if (key === "name" || key === "aliases") setFieldError(null);
@@ -461,11 +464,19 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
                 value={variableAction.operation}
                 options={(["add", "subtract", "set", "set_argument"] as const).map((operation) => ({ value: operation, label: labels.variableOperations[operation] }))}
                 disabled={!canManageContent || pending}
-                onChange={(operation) => setDraftField("variableAction", {
-                  ...variableAction,
-                  operation: operation as typeof variableAction.operation,
-                  amount: operation === "set_argument" ? 0 : operation === "add" || operation === "subtract" ? (variableAction.amount && variableAction.amount > 0 ? variableAction.amount : 1) : variableAction.amount ?? 0,
-                })}
+                onChange={(operation) => {
+                  const nextOperation = operation as typeof variableAction.operation;
+                  setValue((current) => ({
+                    ...current,
+                    variableAction: {
+                      ...variableAction,
+                      operation: nextOperation,
+                      amount: nextOperation === "set_argument" ? 0 : nextOperation === "add" || nextOperation === "subtract" ? (variableAction.amount && variableAction.amount > 0 ? variableAction.amount : 1) : variableAction.amount ?? 0,
+                    },
+                    minimumTier: minimumTierAfterVariableOperation(current.minimumTier, nextOperation, minimumTierExplicit),
+                  }));
+                  setSaved(false); setError(undefined); setConcurrentConflict(false);
+                }}
               />
               {variableAction.operation === "set_argument" ? null : <NumberField
                 id="command-variable-amount"

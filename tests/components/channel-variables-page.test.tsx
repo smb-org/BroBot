@@ -49,6 +49,10 @@ describe("Channel variables page", () => {
     const inspector = document.querySelector(".list-detail__inspector");
     if (!(inspector instanceof HTMLElement)) throw new Error("Variable inspector is missing.");
     const controls = within(inspector);
+    const resetSwitch = controls.getByRole("switch", { name: "Bei Streamstart auf null setzen" });
+    expect(resetSwitch.closest(".ui-switch-card")).toBeInTheDocument();
+    expect(resetSwitch.closest(".ui-switch")).toBeNull();
+    expect(within(resetSwitch.closest(".ui-switch-card") as HTMLElement).getByText("Wird zurückgesetzt, wenn der nächste Stream startet.")).toBeInTheDocument();
     expect(await controls.findByRole("button", { name: "+1" })).toBeInTheDocument();
     expect(controls.getByRole("button", { name: "−1" })).toBeInTheDocument();
     expect(controls.getByRole("spinbutton", { name: "Setzen auf" })).toBeInTheDocument();

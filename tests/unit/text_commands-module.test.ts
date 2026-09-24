@@ -85,7 +85,7 @@ const createBuiltinCommand = async (
   name: string,
   kind: TextCommandKind,
   text: string,
-  templates: { offlineText?: string; notFollowingText?: string; unavailableText?: string; usageText?: string; legacyFallback?: boolean } = {},
+  templates: { offlineText?: string; notFollowingText?: string; unavailableText?: string; usageText?: string; legacyFallback?: boolean; legacyKind?: "uptime" | "followage" } = {},
 ): Promise<void> => {
   const repository = createTextCommandRepository(
     database as unknown as D1Database,
@@ -275,6 +275,48 @@ describe("Text commands module", () => {
     }
   });
 
+  it("does not consume command or user cooldown when the variable action updates no row", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 0, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await repository.create({
+        channelId: "kanal-a", name: "increment", text: "", kind: "text", cooldownSeconds: 0,
+        userCooldownSeconds: 60, variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
+      }, { userId: "user-1" });
+
+      const prepare = database.prepare.bind(database);
+      database.prepare = (sql) => prepare(sql.includes("UPDATE channel_variables") && sql.includes("RETURNING name, value")
+        ? sql.replace("AND changes() > 0", "AND changes() > 0 AND 1 = 0")
+        : sql);
+      const fetcher = fetcherForChat();
+
+      await dispatchEventSubNotification(environment(database), eventFor("!increment"), fetcher, [textCommandModule]);
+
+      expect(fetcher).not.toHaveBeenCalled();
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 0 });
+      await expect(database.prepare("SELECT use_count, last_used_at FROM text_commands WHERE command_name = 'increment'").first())
+        .resolves.toEqual({ use_count: 0, last_used_at: null });
+      await expect(database.prepare("SELECT COUNT(*) AS count FROM text_command_user_cooldowns WHERE command_name = 'increment'").first())
+        .resolves.toEqual({ count: 0 });
+      expect(await eventCodes(database)).toContain("text_commands.variable_update_failed");
+      expect(await eventCodes(database)).not.toContain("text_commands.triggered");
+    } finally {
+      database.close();
+    }
+  });
+
   it("reloads and rechecks a command after its action is edited before claim", async () => {
     const database = new TestD1Database();
     try {
@@ -455,6 +497,53 @@ describe("Text commands module", () => {
       await dispatchEventSubNotification(environment(database), eventFor("!followage"), fetcher, [textCommandModule]);
 
       expect(body(fetcher, 1).message).toBe("alice does not follow this channel");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps migrated uptime fallback behavior when the saved reply has no uptime token", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "uptime", "text", "Welcome to chat", {
+        offlineText: "Actually offline", legacyFallback: true, legacyKind: "uptime",
+      });
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!uptime"), fetcher, [textCommandModule]);
+
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+      expect(body(fetcher, 1).message).toBe("Actually offline");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps migrated followage fallback behavior when the saved reply has no followage token", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "followage", "text", "Welcome to the channel", {
+        notFollowingText: "Please follow first", unavailableText: "Could not check follow status",
+        legacyFallback: true, legacyKind: "followage",
+      });
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!followage"), fetcher, [textCommandModule]);
+
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/channels/followers?");
+      expect(body(fetcher, 1).message).toBe("Please follow first");
     } finally {
       database.close();
     }

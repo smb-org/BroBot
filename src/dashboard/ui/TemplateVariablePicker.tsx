@@ -270,7 +270,7 @@ export function TemplateVariablePicker({
                 <span className="ui-variable-picker__sample">→ {option.sample}</span>
                 {option.external === true ? (
                   <span className="ui-variable-picker__external" role="img" title={messages.externalHelp} aria-label={messages.externalHelp}>
-                    <Icon name="external" size={16} />
+                    <Icon name="cause" size={16} />
                   </span>
                 ) : null}
               </button>

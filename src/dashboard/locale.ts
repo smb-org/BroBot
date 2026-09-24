@@ -205,7 +205,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
     description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
     value: "Wert", setValue: "Setzen auf", valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.",
-    resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird beim nächsten stream.online-Ereignis zurückgesetzt.",
+    resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.",
     limitNote: (maximum) => `Bis zu ${String(maximum)} Variablen pro Kanal.`,
     renameHint: "Vorlagen mit dieser Variable werden beim Umbenennen angepasst.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "zählt eine Aktion" : "Vorlage"}`,
@@ -224,7 +224,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
     description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",
     value: "Value", setValue: "Set to", valueHint: "Integer from −999,999,999 to 999,999,999.",
-    resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets on the next stream.online event.",
+    resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.",
     limitNote: (maximum) => `Up to ${String(maximum)} variables per channel.`,
     renameHint: "Templates that use this variable will be updated when it is renamed.", usages: "Used in", noUsages: "Not used yet.",
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "changes a variable" : "template"}`,
@@ -1448,6 +1448,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.argument_missing": (detail) => eventTextWithName(detail, "Shoutout-Ziel fehlt", (name) => `Befehl !${name}: Twitch-Name fehlt`),
     "text_commands.argument_invalid": (detail) => eventTextWithName(detail, "Ungültiges Argument", (name) => `Befehl !${name}: Argument muss eine Ganzzahl im erlaubten Bereich sein`),
     "text_commands.changed_concurrently": (detail) => eventTextWithName(detail, "Befehl während Ausführung geändert", (name) => `Befehl !${name} wurde während der Ausführung mehrfach geändert`),
+    "text_commands.variable_update_failed": (detail) => eventTextWithName(detail, "Kanalvariable nicht geändert", (name) => `Befehl !${name} konnte die Kanalvariable nicht ändern`),
   },
   en: {
     "host.action.failed": "Action failed",
@@ -1544,6 +1545,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.argument_missing": (detail) => eventTextWithName(detail, "Shoutout target missing", (name) => `Command !${name}: Twitch login missing`),
     "text_commands.argument_invalid": (detail) => eventTextWithName(detail, "Invalid argument", (name) => `Command !${name}: argument must be an integer in the allowed range`),
     "text_commands.changed_concurrently": (detail) => eventTextWithName(detail, "Command changed during execution", (name) => `Command !${name} changed repeatedly during execution`),
+    "text_commands.variable_update_failed": (detail) => eventTextWithName(detail, "Channel variable not changed", (name) => `Command !${name} could not change the channel variable`),
   },
 };
 
@@ -1626,6 +1628,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "text_commands.argument_missing": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "text_commands.argument_invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "text_commands.changed_concurrently": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "text_commands.variable_update_failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
 };
 
 export function eventText(code: string, language?: DashboardLanguage): string;
