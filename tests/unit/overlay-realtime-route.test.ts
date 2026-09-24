@@ -1,4 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type * as OverlayTokenRepository from "../../src/worker/auth/overlay-token-repository";
+
+const overlayBinding = vi.hoisted(() => vi.fn().mockResolvedValue(null));
+vi.mock("../../src/worker/auth/overlay-token-repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof OverlayTokenRepository>();
+  return { ...actual, getOverlayBindingForToken: overlayBinding };
+});
 
 import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX, REALTIME_PROTOCOL } from "../../src/realtime-contract";
 import { hashOverlayToken } from "../../src/worker/auth/crypto";
@@ -74,6 +81,7 @@ describe("overlay realtime route", () => {
   let database: TestD1Database | null = null;
 
   afterEach(() => {
+    overlayBinding.mockReset().mockResolvedValue(null);
     database?.close();
     database = null;
   });
@@ -82,6 +90,7 @@ describe("overlay realtime route", () => {
     const state = await setup();
     database = state.database;
     await insertToken(state.database, "kanal-b");
+    overlayBinding.mockResolvedValue("overlay-b");
 
     const response = await realtimeRouter.fetch(overlayRequest(token), state.env);
 
@@ -96,6 +105,7 @@ describe("overlay realtime route", () => {
       kind: "overlay",
       channelId: "kanal-b",
       tokenId: "token-kanal-b",
+      overlayId: "overlay-b",
       expiresAt: null,
     });
   });

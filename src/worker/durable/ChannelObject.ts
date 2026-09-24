@@ -66,6 +66,7 @@ const isRealtimePrincipal = (value: unknown): value is RealtimePrincipal => {
   }
   if (value.kind === "overlay") {
     return isNonEmptyString(value.tokenId) &&
+      (value.overlayId === null || isNonEmptyString(value.overlayId)) &&
       (value.expiresAt === null || isNonEmptyString(value.expiresAt));
   }
   return false;
@@ -98,7 +99,8 @@ const closeSocket = (webSocket: WebSocket, code: number, reason: string): boolea
 
 const tagsFor = (principal: RealtimePrincipal): string[] => principal.kind === "panel"
   ? [`kind:${principal.kind}`, `user:${principal.userId}`, `session:${principal.sessionId}`]
-  : [`kind:${principal.kind}`, `token:${principal.tokenId}`];
+  : [`kind:${principal.kind}`, `token:${principal.tokenId}`,
+    ...(principal.overlayId === null ? [] : [`overlay:${principal.overlayId}`])];
 
 const chunksOf = <T>(values: readonly T[], size: number): T[][] => {
   const chunks: T[][] = [];
@@ -350,26 +352,36 @@ export class ChannelObject extends DurableObject<Env> {
     }
     const now = Date.now();
     const serialized = messages.map((message) => ({
+      type: message.type,
+      overlayId: message.type === "overlay.changed" ? message.payload.overlayId : null,
       recipients: REALTIME_RECIPIENTS[message.type],
       payload: JSON.stringify(message),
+      sockets: message.type === "overlay.changed"
+        ? [
+          ...this.ctx.getWebSockets("kind:panel"),
+          ...this.ctx.getWebSockets(`overlay:${message.payload.overlayId}`),
+        ]
+        : this.ctx.getWebSockets(),
     }));
-    for (const webSocket of this.ctx.getWebSockets()) {
-      const principal = readAttachment(webSocket);
-      if (principal === null || principal.channelId !== ownChannelId) {
-        closeSocket(webSocket, SOCKET_REVOKED_CODE, "invalid principal");
-        continue;
-      }
-      if (isExpired(principal, now)) {
-        closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
-        continue;
-      }
-      try {
-        for (const message of serialized) {
+    for (const message of serialized) {
+      for (const webSocket of message.sockets) {
+        const principal = readAttachment(webSocket);
+        if (principal === null || principal.channelId !== ownChannelId) {
+          closeSocket(webSocket, SOCKET_REVOKED_CODE, "invalid principal");
+          continue;
+        }
+        if (isExpired(principal, now)) {
+          closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
+          continue;
+        }
+        if (message.type === "overlay.changed" && principal.kind === "overlay" &&
+            principal.overlayId !== message.overlayId) continue;
+        try {
           const recipients: readonly RealtimeRecipientKind[] = message.recipients;
           if (recipients.includes(principal.kind)) webSocket.send(message.payload);
+        } catch {
+          closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
         }
-      } catch {
-        closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
       }
     }
   }

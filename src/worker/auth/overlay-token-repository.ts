@@ -213,6 +213,24 @@ export const getUsableOverlayToken = async (
   return row === null ? null : mapOverlayToken(row);
 };
 
+/**
+ * Reads the immutable overlay assignment for a token. Migration #213 adds the
+ * `overlay_id` column; until that migration lands, all tokens are legacy
+ * channel-wide tokens and this compatibility seam intentionally returns null.
+ */
+export const getOverlayBindingForToken = async (
+  db: D1Database,
+  channelId: string,
+  tokenId: string,
+): Promise<string | null> => {
+  void db;
+  void channelId;
+  void tokenId;
+  // Keep the seam asynchronous because the post-#213 implementation reads D1.
+  const overlayId: string | null = await Promise.resolve(null);
+  return overlayId;
+};
+
 export const touchOverlayToken = async (
   db: D1Database,
   channelId: string,

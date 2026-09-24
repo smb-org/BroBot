@@ -18,6 +18,7 @@ import {
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
 import { actorOf } from "./member-routes";
 import { saveOverlayDraft } from "../overlays/service";
+import { publishOverlayChanged } from "../realtime";
 
 interface OverlayRouteEnvironment {
   Bindings: Env;
@@ -169,6 +170,9 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
       currentRevision: result.current?.revision ?? null,
     }, 409);
   }
+  if (result.outcome === "saved") {
+    await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId, revision: result.overlay.revision }]);
+  }
   return context.json({ overlay: result.overlay });
 });
 
@@ -185,7 +189,10 @@ overlayRouter.delete("/api/channels/:channelId/overlays/:overlayId", async (cont
   }
   const now = nowIso();
   const deleted = await deleteOverlayWithAudit(context.env.DB, actorOf(context), before, parsed.data.baseRevision, now);
-  if (deleted.changes > 0) return new Response(null, { status: 204 });
+  if (deleted.changes > 0) {
+    await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId, revision: before.revision }]);
+    return new Response(null, { status: 204 });
+  }
   if (!await isOverlayManagementAllowed(context.env.DB, actorOf(context), channelId, now)) {
     return managementDenied(context);
   }

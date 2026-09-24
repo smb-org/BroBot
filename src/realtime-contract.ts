@@ -6,7 +6,7 @@ export type RealtimeProtocolVersion = 1;
 export const REALTIME_PROTOCOL = "brobot.v1";
 export const OVERLAY_TOKEN_SUBPROTOCOL_PREFIX = "brobot.token.";
 
-export const REALTIME_MESSAGE_TYPES = ["system.hello", "event_log.new", "variables.changed"] as const;
+export const REALTIME_MESSAGE_TYPES = ["system.hello", "event_log.new", "variables.changed", "overlay.changed"] as const;
 export type RealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
 
 export interface RealtimeEventLogHint {
@@ -25,6 +25,10 @@ export interface RealtimePayloads {
   "variables.changed": {
     set: readonly { name: string; value: number }[];
     removed: readonly string[];
+  };
+  "overlay.changed": {
+    overlayId: string;
+    revision: number;
   };
 }
 
@@ -48,6 +52,7 @@ export const REALTIME_RECIPIENTS = {
   "system.hello": ["panel", "overlay"],
   "event_log.new": ["panel"],
   "variables.changed": ["panel", "overlay"],
+  "overlay.changed": ["panel", "overlay"],
 } as const satisfies Record<RealtimeMessageType, readonly RealtimeRecipientKind[]>;
 
 export type RealtimePanelPrincipal = {
@@ -65,6 +70,7 @@ export type RealtimeOverlayPrincipal = {
   kind: "overlay";
   channelId: string;
   tokenId: string;
+  overlayId: string | null;
   expiresAt: string | null;
 };
 

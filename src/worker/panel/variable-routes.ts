@@ -11,7 +11,7 @@ import type { ModuleVariableReferenceUsage } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import { prepareAudit } from "../db/audit";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
-import { publishVariablesChanged } from "../realtime";
+import { overlayChangedMessage, publishVariablesChanged } from "../realtime";
 import {
   findChannelVariable,
   listChannelVariables,
@@ -170,7 +170,8 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
              AND element.overlay_id = overlays.overlay_id
              AND element.variable_name = ?
         )
-        ${authorization.sql}`,
+        ${authorization.sql}
+      RETURNING overlay_id, revision`,
   ).bind(now, channelId, channelId, name, channelId, newName, before.value, before.createdAt, now, newName,
     ...authorization.values)];
   const referenceUpdates = newName === name ? [] : MODULES.flatMap((module) =>
@@ -183,8 +184,10 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
     return context.json({ error: "variable_changed_concurrently" }, 409);
   }
   const variable = await findChannelVariable(context.env.DB, channelId, newName);
+  const overlayRows = newName === name ? [] : (results[2]?.results ?? []) as Array<{ overlay_id: string; revision: number }>;
+  const overlayMessages = overlayRows.map((row) => overlayChangedMessage(channelId, row.overlay_id, row.revision));
   await publishVariablesChanged(context.env.CHANNEL, channelId,
-    [{ name: newName, value: before.value }], newName === name ? [] : [name]);
+    [{ name: newName, value: before.value }], newName === name ? [] : [name], overlayMessages);
   return context.json({ variable, usages: await referencesFor(context.env.DB, channelId, newName) });
 });
 
@@ -285,7 +288,8 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
            WHERE channel_id = ? AND name = ? AND value = ? AND description = ?
              AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
         )
-        ${authorization.sql}`,
+        ${authorization.sql}
+      RETURNING overlay_id, revision`,
   ).bind(now, channelId, name, channelId, name, before.value, before.description,
     before.resetOnStreamStart ? 1 : 0, before.createdAt, before.updatedAt, ...authorization.values);
   const detachOverlayElements = context.env.DB.prepare(
@@ -311,7 +315,9 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
   try {
     const results = await context.env.DB.batch([bumpOverlayRevisions, detachOverlayElements, mutation, audit]);
     if ((results[2]?.meta.changes ?? 0) > 0) {
-      await publishVariablesChanged(context.env.CHANNEL, channelId, [], [name]);
+      const overlayRows = (results[0]?.results ?? []) as Array<{ overlay_id: string; revision: number }>;
+      const overlayMessages = overlayRows.map((row) => overlayChangedMessage(channelId, row.overlay_id, row.revision));
+      await publishVariablesChanged(context.env.CHANNEL, channelId, [], [name], overlayMessages);
       return new Response(null, { status: 204 });
     }
   } catch {
