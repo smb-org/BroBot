@@ -155,4 +155,79 @@ describe("channel controls", () => {
       database.close();
     }
   });
+
+  it("rejects an offline event that predates the live session start", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, checked_at)
+         VALUES ('kanal-a', 'online', '2026-09-23T10:04:00.000Z', 'helix', '2026-09-23T10:03:00.000Z', '2026-09-23T10:04:00.000Z')`,
+      ).run();
+
+      await expect(writeEventSubStreamState(
+        database as unknown as D1Database,
+        "kanal-a",
+        "offline",
+        "2026-09-23T10:00:00.000Z",
+        null,
+      )).resolves.toBe("stale_offline");
+      await expect(database.prepare(
+        "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", started_at: "2026-09-23T10:03:00.000Z" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("orders EventSub timestamps at full sub-millisecond precision and keeps the first exact tie", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      const db = database as unknown as D1Database;
+      const later = "2026-09-23T10:00:00.1234Z";
+      await expect(writeEventSubStreamState(db, "kanal-a", "offline", later, null)).resolves.toBe("written");
+      await expect(writeEventSubStreamState(db, "kanal-a", "online", "2026-09-23T10:00:00.1231Z", "2026-09-23T10:00:00.1000Z"))
+        .resolves.toBe("superseded");
+      await expect(writeEventSubStreamState(db, "kanal-a", "online", later, "2026-09-23T10:00:00.1000Z"))
+        .resolves.toBe("superseded");
+
+      await expect(database.prepare(
+        "SELECT state, eventsub_changed_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "offline", eventsub_changed_at: later });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps migration-preserved controls active on the unresolved legacy live session", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      await database.prepare(
+        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
+         VALUES ('kanal-a', 'online', ?, 'eventsub', '__legacy_current_live_session__')`,
+      ).bind(NOW).run();
+      await database.prepare(
+        `INSERT INTO channel_controls
+          (channel_id, muted, mute_until_stream_end, mute_stream_started_at,
+           paused, pause_until_stream_end, pause_stream_started_at, updated_at)
+         VALUES ('kanal-a', 1, 1, '__legacy_current_live_session__',
+                 1, 1, '__legacy_current_live_session__', ?)
+         ON CONFLICT (channel_id) DO UPDATE SET
+           muted = 1, mute_until_stream_end = 1, mute_stream_started_at = '__legacy_current_live_session__',
+           paused = 1, pause_until_stream_end = 1, pause_stream_started_at = '__legacy_current_live_session__'`,
+      ).bind(NOW).run();
+
+      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", NOW)).resolves.toMatchObject({
+        controls: {
+          mute: { active: true, mode: "until_stream_end" },
+          pause: { active: true, mode: "until_stream_end" },
+        },
+      });
+    } finally {
+      database.close();
+    }
+  });
 });

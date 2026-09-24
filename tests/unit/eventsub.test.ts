@@ -265,6 +265,12 @@ describe("EventSub inbound", () => {
                '2026-09-19T10:00:00.500Z', '2026-09-19T10:00:00.500Z')`,
     ).bind(channelId).run();
     await database.prepare(
+      `UPDATE channel_stream_state
+          SET started_at_seconds = CAST(strftime('%s', started_at) AS INTEGER), started_at_fraction = '',
+              eventsub_changed_at_seconds = CAST(strftime('%s', eventsub_changed_at) AS INTEGER), eventsub_changed_at_fraction = '5'
+        WHERE channel_id = ?`,
+    ).bind(channelId).run();
+    await database.prepare(
       `INSERT INTO channel_controls
         (channel_id, muted, muted_until, mute_until_stream_end, mute_stream_started_at,
          paused, paused_until, pause_until_stream_end, pause_stream_started_at, updated_at)
@@ -307,6 +313,12 @@ describe("EventSub inbound", () => {
         (channel_id, state, changed_at, source, started_at, checked_at, eventsub_changed_at)
        VALUES (?, 'online', '2026-09-19T10:00:00.500Z', 'helix', '2026-09-19T09:00:00.000Z',
                '2026-09-19T10:00:00.500Z', '2026-09-19T10:00:00.000Z')`,
+    ).bind(channelId).run();
+    await database.prepare(
+      `UPDATE channel_stream_state
+          SET started_at_seconds = CAST(strftime('%s', started_at) AS INTEGER), started_at_fraction = '',
+              eventsub_changed_at_seconds = CAST(strftime('%s', eventsub_changed_at) AS INTEGER), eventsub_changed_at_fraction = ''
+        WHERE channel_id = ?`,
     ).bind(channelId).run();
     await database.prepare(
       `INSERT INTO channel_controls

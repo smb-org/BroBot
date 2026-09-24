@@ -86,9 +86,10 @@ export const lookupAndRefreshStreamState = async (
   channelId: string,
   now: string,
   fetcher: typeof fetch = fetch,
+  options: { forceRefresh?: boolean } = {},
 ): Promise<StreamStateLookupResult> => {
   const stored = await readChannelStreamState(env.DB, channelId);
-  if (stored !== null && !isStaleRow(stored, now)) return asResult(stored);
+  if (stored !== null && !options.forceRefresh && !isStaleRow(stored, now)) return asResult(stored);
 
   const fromHelix = await fetchLiveStreamState(env, channelId, now, fetcher);
   if (fromHelix === "rate_limited") return asResult(stored, true);

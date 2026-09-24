@@ -251,6 +251,14 @@ describe("dispatch and execution", () => {
          VALUES ('kanal-a', 'online', ?, 'eventsub', ?, ?, ?)`
       ).bind("2026-09-19T11:00:00.000Z", "2026-09-19T10:00:00.000Z", "2026-09-19T11:00:00.000Z", "2026-09-19T11:00:00.000Z").run();
       await database.prepare(
+        `UPDATE channel_stream_state
+            SET started_at_seconds = CAST(strftime('%s', started_at) AS INTEGER),
+                started_at_fraction = '',
+                eventsub_changed_at_seconds = CAST(strftime('%s', eventsub_changed_at) AS INTEGER),
+                eventsub_changed_at_fraction = ''
+          WHERE channel_id = 'kanal-a'`,
+      ).run();
+      await database.prepare(
         `INSERT INTO channel_controls (channel_id, muted, muted_until, mute_until_stream_end,
           mute_stream_started_at, paused, paused_until, pause_until_stream_end, pause_stream_started_at, updated_at)
          VALUES ('kanal-a', 1, NULL, 1, '2026-09-19T10:00:00.000Z', 1, NULL, 1, '2026-09-19T10:00:00.000Z', ?)`
@@ -665,6 +673,46 @@ describe("dispatch and execution", () => {
       await expect(database.prepare(
         "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ state: "offline", started_at: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses Helix to reconcile an offline event when the current live start is unknown", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertAppAccessToken(
+        database,
+        await encryptJson({ token: "app-token" }, parseKeyRing(keyRing)),
+        "2099-09-21T00:00:00.000Z",
+        NOW,
+        NOW,
+      );
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, checked_at)
+         VALUES ('kanal-a', 'online', ?, 'helix', NULL, ?)`,
+      ).bind(NOW, NOW).run();
+      const startedAt = "2026-09-19T11:55:00.000Z";
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ id: "live-1", started_at: startedAt }] }), { status: 200 }),
+      );
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.offline",
+        triggerId: "offline-ambiguous",
+        payload: {},
+        eventSubTimestamp: "2026-09-19T12:00:01.000Z",
+        receivedAt: "2026-09-19T12:00:02.000Z",
+      }, fetcher, []);
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+      await expect(database.prepare(
+        "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", started_at: startedAt });
     } finally {
       database.close();
     }

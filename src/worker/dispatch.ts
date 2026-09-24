@@ -442,13 +442,25 @@ export const dispatchEventSubNotification = async (
     // The `started_at` Twitch sends on `stream.online` is the actual stream
     // start, distinct from `event.receivedAt` (used only for write ordering).
     const startedAt = event.subscriptionType === "stream.online" ? textValue(event.payload.started_at) : null;
-    await writeEventSubStreamState(
+    const stateWrite = await writeEventSubStreamState(
       environment.DB,
       event.channelId,
       event.subscriptionType === "stream.online" ? "online" : "offline",
       event.eventSubTimestamp ?? event.receivedAt,
       startedAt,
     );
+    if (event.subscriptionType === "stream.offline" && stateWrite === "ambiguous_offline") {
+      // A start-less live row or an event exactly on the session boundary
+      // cannot safely determine whether this session ended. Ask Helix even
+      // when the cached state is otherwise fresh.
+      await lookupAndRefreshStreamState(
+        environment as unknown as Env,
+        event.channelId,
+        event.receivedAt,
+        fetcher,
+        { forceRefresh: true },
+      );
+    }
     if (event.subscriptionType === "stream.online" && startedAt !== null) {
       await prepareResetChannelVariablesForStream(environment.DB, event.channelId, startedAt, event.eventSubTimestamp ?? event.receivedAt);
     }

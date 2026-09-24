@@ -8,6 +8,7 @@ import { ANY_MEMBER_ROLES, actorGuard, bindActorGuard, type ActorContext } from 
 import { prepareAudit } from "./audit";
 
 export type ChannelControlKind = "mute" | "pause";
+export const LEGACY_CURRENT_LIVE_SESSION = "__legacy_current_live_session__";
 
 export interface ChannelControlFields {
   muted: number | null;
@@ -54,7 +55,9 @@ const mapControl = (
     const pending = streamStartedAt === null;
     const belongsToCurrentStream = currentStream.stream_state === "online" &&
       currentStream.stream_started_at !== null && streamStartedAt === currentStream.stream_started_at;
-    if (belongsToCurrentStream) return { active: true, until: null, mode: "until_stream_end" };
+    const belongsToLegacyCurrentStream = streamStartedAt === LEGACY_CURRENT_LIVE_SESSION &&
+      currentStream.stream_state === "online" && currentStream.stream_started_at === null;
+    if (belongsToCurrentStream || belongsToLegacyCurrentStream) return { active: true, until: null, mode: "until_stream_end" };
     if (pending && showPending) return { active: false, pending: true, until: null, mode: "until_stream_end" };
     return offControl();
   }
@@ -307,3 +310,38 @@ export const prepareBindPendingStreamControls = (
          WHERE channel_id = ? AND state = 'online' AND started_at = ?
       )`,
 ).bind(startedAt, startedAt, channelId, channelId, startedAt);
+
+/**
+ * Rebinds controls preserved by migration 0010 from its legacy live-session
+ * marker to the real start returned by Helix. The caller runs this before its
+ * Helix state update, while the marker still identifies the same current row.
+ */
+export const prepareAdoptLegacyLiveSessionControls = (
+  db: D1Database,
+  channelId: string,
+  startedAt: string,
+  checkedAt: string,
+): D1PreparedStatement => db.prepare(
+  `UPDATE channel_controls
+      SET mute_stream_started_at = CASE
+            WHEN mute_until_stream_end = 1 AND mute_stream_started_at = ? THEN ?
+            ELSE mute_stream_started_at
+          END,
+          pause_stream_started_at = CASE
+            WHEN pause_until_stream_end = 1 AND pause_stream_started_at = ? THEN ?
+            ELSE pause_stream_started_at
+          END
+    WHERE channel_id = ?
+      AND ((mute_until_stream_end = 1 AND mute_stream_started_at = ?)
+        OR (pause_until_stream_end = 1 AND pause_stream_started_at = ?))
+      AND EXISTS (
+        SELECT 1 FROM channel_stream_state
+         WHERE channel_id = ? AND state = 'online' AND started_at = ?
+           AND julianday(?) >= julianday(changed_at)
+      )`,
+).bind(
+  LEGACY_CURRENT_LIVE_SESSION, startedAt,
+  LEGACY_CURRENT_LIVE_SESSION, startedAt,
+  channelId, LEGACY_CURRENT_LIVE_SESSION, LEGACY_CURRENT_LIVE_SESSION,
+  channelId, LEGACY_CURRENT_LIVE_SESSION, checkedAt,
+);
