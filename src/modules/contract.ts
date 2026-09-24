@@ -214,7 +214,7 @@ export interface ModuleChannelInfo {
 export interface ModuleVariableReferenceUsage {
   moduleId: string;
   itemName: string;
-  kind: "action" | "template";
+  kind: "action" | "template" | "display";
 }
 
 export interface ModuleVariableReferences {

@@ -2,10 +2,11 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// rows_written is synthetic here: DML mirrors SQLite changes and does not measure D1 write amplification.
 export interface TestD1Result {
   results: unknown[];
   success: true;
-  meta: { changes: number; last_row_id?: number; size?: number };
+  meta: { changes: number; rows_written: number; last_row_id?: number; size?: number };
 }
 
 export class TestPreparedStatement {
@@ -32,7 +33,7 @@ export class TestPreparedStatement {
       return {
         results,
         success: true,
-        meta: { changes: metadata.changes, last_row_id: metadata.last_row_id, size: 0 },
+        meta: { changes: metadata.changes, rows_written: 0, last_row_id: metadata.last_row_id, size: 0 },
       };
     }
     if (/\bRETURNING\b/iu.test(this.sql)) {
@@ -44,7 +45,7 @@ export class TestPreparedStatement {
       return {
         results,
         success: true,
-        meta: { changes: metadata.changes, last_row_id: metadata.last_row_id, size: 0 },
+        meta: { changes: metadata.changes, rows_written: metadata.changes, last_row_id: metadata.last_row_id, size: 0 },
       };
     }
     const result = this.statement.run(...this.values);
@@ -53,6 +54,7 @@ export class TestPreparedStatement {
       success: true,
       meta: {
         changes: Number(result.changes),
+        rows_written: Number(result.changes),
         last_row_id: Number(result.lastInsertRowid),
         size: 0,
       },

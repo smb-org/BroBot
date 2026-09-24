@@ -59,6 +59,12 @@ export const CHANNEL_VARIABLE_MAXIMUM_COUNT = 50;
 export const CHANNEL_VARIABLE_MINIMUM_VALUE = -999_999_999;
 export const CHANNEL_VARIABLE_MAXIMUM_VALUE = 999_999_999;
 
+/** Limits for the first stored-overlay editor iteration. */
+export const OVERLAY_MAXIMUM_COUNT = 20;
+export const OVERLAY_ELEMENT_MAXIMUM_COUNT = 20;
+export const OVERLAY_ELEMENT_KINDS = ["variable"] as const;
+export type OverlayElementKind = (typeof OVERLAY_ELEMENT_KINDS)[number];
+
 /** Stable reasons for a rejected manual or automatic shoutout. */
 export const SHOUTOUT_FAILURE_REASONS = [
   "app_token_unavailable",
@@ -253,6 +259,9 @@ export const AUDIT_ACTIONS = [
   "channel.pause.disabled",
   "overlay.token.issued",
   "overlay.token.revoked",
+  "overlay.created",
+  "overlay.updated",
+  "overlay.deleted",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type ModuleSettingsChangedAction = `${string}.settings_changed`;
@@ -363,6 +372,12 @@ export const API_ERROR_CODES = [
   "overlay_token_not_found",
   "overlay_token_invalid",
   "overlay_variable_not_found",
+  "overlay_management_denied",
+  "overlay_data_invalid",
+  "overlay_not_found",
+  "overlay_limit_reached",
+  "overlay_element_limit_reached",
+  "overlay_changed_concurrently",
   "unknown_api_route",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
