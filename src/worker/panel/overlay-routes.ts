@@ -6,7 +6,9 @@ import {
   OVERLAY_ELEMENT_MAXIMUM_COUNT,
   OVERLAY_MAXIMUM_COUNT,
   canManage,
+  type ApiErrorCode,
 } from "../../contracts/values";
+import { isOverlayCssSafe } from "../../contracts/overlay-css";
 import {
   countOverlaysForChannel,
   createOverlayWithAudit,
@@ -148,6 +150,12 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
   const submittedElements: unknown = body !== null && typeof body === "object" && !Array.isArray(body)
     ? Reflect.get(body, "elements")
     : null;
+  const submittedCss: unknown = body !== null && typeof body === "object" && !Array.isArray(body)
+    ? Reflect.get(body, "css")
+    : null;
+  if (typeof submittedCss === "string" && !isOverlayCssSafe(submittedCss)) {
+    return context.json({ error: "overlay_css_invalid" satisfies ApiErrorCode }, 400);
+  }
   if (Array.isArray(submittedElements) && submittedElements.length > OVERLAY_ELEMENT_MAXIMUM_COUNT) {
     return context.json({ error: "overlay_element_limit_reached" }, 409);
   }

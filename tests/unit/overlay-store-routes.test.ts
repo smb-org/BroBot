@@ -4,6 +4,7 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import type { RealtimeMessage } from "../../src/realtime-contract";
+import { apiErrorTexts } from "../../src/dashboard/locale";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement, type TestD1Result } from "./test-d1";
 
@@ -152,6 +153,31 @@ describe("stored overlay routes", () => {
       [{ type: "overlay.changed", payload: { overlayId, revision: 2 } }],
       [{ type: "overlay.changed", payload: { overlayId, revision: 2 } }],
     ]);
+  });
+
+  it("rejects imported or remote custom CSS when saving and reports localized errors", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const overlayId = await createOverlay("manager-a", "channel-a", "Gameplay");
+    const draft = (css: string) => ({
+      baseRevision: 1, name: "Gameplay", width: 1920, height: 1080, css, elements: [],
+    });
+
+    const imported = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT",
+      draft('@import "./theme.css"; .brobot-overlay { color: white; }'));
+    const remote = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT",
+      draft('.brobot-overlay { background: url("https://assets.example/image.png"); }'));
+    const relative = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT",
+      draft('.brobot-overlay { background: url("../assets/image.png"); }'));
+
+    expect(imported.status).toBe(400);
+    await expect(imported.json()).resolves.toEqual({ error: "overlay_css_invalid" });
+    expect(remote.status).toBe(400);
+    await expect(remote.json()).resolves.toEqual({ error: "overlay_css_invalid" });
+    expect(relative.status).toBe(200);
+    expect(apiErrorTexts.de.overlay_css_invalid).toContain("Overlay-CSS");
+    expect(apiErrorTexts.en.overlay_css_invalid).toContain("Overlay CSS");
   });
 
   it("uses revision CAS, diffs element rows, checks SQLite changes, and skips unchanged drafts", async () => {

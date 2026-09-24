@@ -11,6 +11,14 @@
   "placement": { "mode": "smart" },
   "triggers": { "crons": ["0 * * * *"] },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  // Dieser Top-Level-Block dient ausschließlich `wrangler dev`/dem Vite-Plugin
+  // lokal; es gibt kein `wrangler deploy` ohne --env (siehe package.json). Anders
+  // als staging/production bleiben /overlay und /overlay.html hier bewusst aus
+  // `run_worker_first`: Routet man sie hier auch über den Worker, blockiert die
+  // strikte Overlay-CSP das von @vitejs/plugin-react inline injizierte
+  // Fast-Refresh-Preamble-Script, und der Dev-Server bricht (e2e-Testfall
+  // tests/e2e/smoke.spec.ts). Da dieser Block nie deploybar ist, besteht dort
+  // kein CSP-Bypass-Risiko wie bei staging/production.
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist/client",
@@ -66,7 +74,7 @@
         "binding": "ASSETS",
         "directory": "./dist/client",
         "not_found_handling": "single-page-application",
-        "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz"]
+        "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz", "/overlay", "/overlay.html"]
       },
       "durable_objects": {
         "bindings": [{ "name": "CHANNEL", "class_name": "ChannelObject" }]
@@ -116,7 +124,7 @@
         "binding": "ASSETS",
         "directory": "./dist/client",
         "not_found_handling": "single-page-application",
-        "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz"]
+        "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz", "/overlay", "/overlay.html"]
       },
       "durable_objects": {
         "bindings": [{ "name": "CHANNEL", "class_name": "ChannelObject" }]
