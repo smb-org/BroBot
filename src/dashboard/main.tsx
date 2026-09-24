@@ -57,6 +57,7 @@ import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
 import { ChannelVariablesPage } from "./ChannelVariablesPage";
+import { OverlayTokensPage } from "./OverlayTokensPage";
 import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
 import "./styles.css";
@@ -274,7 +275,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
     ? route.channelId
     : channels[0]?.channelId ?? "";
 
-  const sectionEntry = (section: "overview" | "system" | "members" | "variables" | "events" | "audit", label: string, iconKind: string): SidebarEntry => {
+  const sectionEntry = (section: "overview" | "system" | "members" | "variables" | "overlay-links" | "events" | "audit", label: string, iconKind: string): SidebarEntry => {
     const entryRoute: DashboardRoute = { kind: "channel", channelId: navigationChannelId, section };
     return {
       id: section,
@@ -299,6 +300,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       sectionEntry("system", texts.navigation.system, "system"),
       sectionEntry("members", texts.navigation.members, "members"),
       sectionEntry("variables", texts.navigation.variables, "variable"),
+      sectionEntry("overlay-links", texts.navigation.overlayTokens, "token"),
       sectionEntry("audit", texts.navigation.audit, "audit"),
     ],
   };
@@ -1721,8 +1723,9 @@ export const DashboardApp = (): ReactElement => {
   // fresh installation with zero released channels has nowhere else to
   // say it). The system page (bot status + sign-in live there) and the
   // platform page (releases channels) must stay reachable, or the block
-  // would also lock the only places that fix it.
-  const botBlockingApplies = route.kind === "overview" || route.kind === "module" || (route.kind === "channel" && route.section !== "system" && route.section !== "audit" && route.section !== "variables");
+  // would also lock the only places that fix it. Overlay links and channel
+  // variables also remain reachable because their APIs do not depend on the bot.
+  const botBlockingApplies = route.kind === "overview" || route.kind === "module" || (route.kind === "channel" && route.section !== "system" && route.section !== "audit" && route.section !== "variables" && route.section !== "overlay-links");
   const showBotBlocking = botBlockingApplies && channels.status === "success" && !botSignedIn;
   // Per-user/channel authorization, not an outage -- loses to the bot state
   // above: installation-wide beats per-viewer, and without the bot nothing
@@ -1770,6 +1773,7 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection(name); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "overlay-links" && selectedChannel !== null ? <OverlayTokensPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}

@@ -141,6 +141,8 @@ describe("Overlay token service", () => {
       createdAt: "2026-09-18T00:00:00.000Z",
     });
     const token = tokenFromUrl(issued.overlayUrl);
+    await expect(database.prepare("SELECT created_by_user_id FROM overlay_tokens WHERE token_id = ?")
+      .bind(issued.tokenId).first()).resolves.toEqual({ created_by_user_id: TEST_ACTOR.userId });
 
     expect(token).toHaveLength(43);
     expect(new URL(issued.overlayUrl).search).toBe("");
@@ -260,7 +262,7 @@ describe("Overlay token service", () => {
       tokenId: issued.tokenId,
       reason: "Noch einmal",
       revokedAt: "2026-09-18T00:02:00.000Z",
-    })).resolves.toBe(false);
+    })).resolves.toBe(true);
     await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
       .bind("kanal-a", TEST_ACTOR.userId).run();
     await expect(issueOverlayToken(database as unknown as D1Database, {

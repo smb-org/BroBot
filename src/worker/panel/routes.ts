@@ -33,7 +33,8 @@ import {
   listChannelsForUser,
   type LogCursor,
 } from "./repository";
-import { fetchTwitchUsersById, memberRouter } from "./member-routes";
+import { memberRouter } from "./member-routes";
+import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { moduleRouter } from "./module-routes";
 import { variableRouter } from "./variable-routes";
 import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";

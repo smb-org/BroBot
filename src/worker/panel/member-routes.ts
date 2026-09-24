@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 
-import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "../auth/crypto";
 import {
   countBroadcasterMembers,
   createChannelMemberWithAudit,
@@ -16,16 +15,13 @@ import {
   requiredActorRoles,
 } from "../db/guards";
 import {
-  getBotIdentity,
-} from "../db/bot-identity";
-import {
   requireChannelAuthorization,
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { CHANNEL_ROLES, canManage, type AuditAction, type ChannelRole } from "../../contracts/values";
 import { revokeRealtimeUser } from "../realtime";
-import { helixRequest } from "../twitch/helix";
 import { fetchTwitchUserByLogin, type TwitchUser } from "../shoutout";
+import { fetchTwitchUsersById } from "../twitch/user-resolution";
 
 interface MemberRouteEnvironment {
   Bindings: Env;
@@ -101,61 +97,6 @@ export const actorOf = (context: { get: (key: "session") => { userId: string; se
   userId: context.get("session").userId,
   sessionId: context.get("session").sessionId,
 });
-
-const readStoredBotAccessToken = async (environment: Env): Promise<string | null> => {
-  const identity = await getBotIdentity(environment.DB);
-  if (identity === null) return null;
-  const value = await decryptJson<{ token?: unknown }>(
-    identity.accessTokenCiphertext,
-    parseKeyRing(getTokenEncryptionKeys(environment)),
-  );
-  return value !== null && typeof value.token === "string" && value.token.length > 0
-    ? value.token
-    : null;
-};
-
-const readProfileImageUrl = (user: JsonRecord): string | null =>
-  typeof user.profile_image_url === "string" && user.profile_image_url.length > 0
-    ? user.profile_image_url
-    : null;
-
-export const fetchTwitchUsersById = async (
-  fetcher: typeof fetch,
-  environment: Env,
-  userIds: string[],
-): Promise<Map<string, TwitchUser>> => {
-  const resolved = new Map<string, TwitchUser>();
-  if (userIds.length === 0) return resolved;
-
-  try {
-    const accessToken = await readStoredBotAccessToken(environment);
-    if (accessToken === null) return resolved;
-    for (let offset = 0; offset < userIds.length; offset += 100) {
-      const url = new URL("https://api.twitch.tv/helix/users");
-      for (const userId of userIds.slice(offset, offset + 100)) url.searchParams.append("id", userId);
-      const result = await helixRequest<JsonRecord>({
-        url: url.toString(),
-        accessToken,
-        clientId: environment.TWITCH_CLIENT_ID,
-        fetcher,
-      });
-      if (!result.ok || !Array.isArray(result.data.data)) break;
-      for (const entry of result.data.data as unknown[]) {
-        if (!isJsonRecord(entry) || typeof entry.id !== "string" || typeof entry.login !== "string" ||
-            typeof entry.display_name !== "string") continue;
-        resolved.set(entry.id, {
-          userId: entry.id,
-          login: entry.login,
-          displayName: entry.display_name,
-          profileImageUrl: readProfileImageUrl(entry),
-        });
-      }
-    }
-  } catch {
-    return resolved;
-  }
-  return resolved;
-};
 
 const memberResponseWithNames = (
   member: ChannelMemberRecord,

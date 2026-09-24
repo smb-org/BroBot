@@ -14,6 +14,7 @@ import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protoc
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
 const OVERLAY_HANDSHAKE_WINDOW_MS = 60 * 1000;
+const OVERLAY_REVOKED_MARKER_TTL_MS = 10 * 60 * 1000;
 const MAX_OVERLAY_HANDSHAKES_PER_TOKEN = 30;
 const MAX_OVERLAY_SOCKETS_PER_TOKEN = 10;
 const MAX_PANEL_SOCKETS_PER_USER = 10;
@@ -36,6 +37,8 @@ const SOCKET_REVOKED_CODE = 4003;
 const SOCKET_TRANSIENT_CODE = 4008;
 const SOCKET_POLICY_VIOLATION_CODE = 1008;
 
+const revokedTokenKey = (tokenId: string): string => `overlay_revoked:${tokenId}`;
+
 type SessionValidityRow = {
   session_id: string;
   user_id: string;
@@ -43,6 +46,7 @@ type SessionValidityRow = {
 };
 
 type TokenValidityRow = { token_id: string };
+type RevokedTokenMarker = { revokedAt: number };
 
 type OverlayHandshakeWindow = { startedAt: number; count: number };
 
@@ -82,11 +86,13 @@ const isExpired = (principal: RealtimePrincipal, now: number): boolean => {
   return !Number.isFinite(expiresAt) || expiresAt <= now;
 };
 
-const closeSocket = (webSocket: WebSocket, code: number, reason: string): void => {
+const closeSocket = (webSocket: WebSocket, code: number, reason: string): boolean => {
   try {
     webSocket.close(code, reason);
+    return true;
   } catch {
     // The socket may already have closed between selection and close.
+    return false;
   }
 };
 
@@ -176,6 +182,50 @@ export class ChannelObject extends DurableObject<Env> {
     }
   }
 
+  private async pruneRevokedTokenMarkers(now: number): Promise<void> {
+    try {
+      let startAfter: string | undefined;
+      for (;;) {
+        const markers = await this.ctx.storage.list({
+          prefix: "overlay_revoked:",
+          limit: 1_000,
+          ...(startAfter === undefined ? {} : { startAfter }),
+        });
+        const lastKey = [...markers.keys()].at(-1);
+        const updates: Promise<unknown>[] = [];
+        for (const [key, value] of markers) {
+          if (value === true) {
+            // Migrate markers written by earlier code and give any old in-flight
+            // handshake one final bounded window to observe them.
+            updates.push(this.ctx.storage.put(key, { revokedAt: now } satisfies RevokedTokenMarker));
+          } else if (!isRecord(value) || typeof value.revokedAt !== "number" ||
+              !Number.isFinite(value.revokedAt) || now - value.revokedAt >= OVERLAY_REVOKED_MARKER_TTL_MS) {
+            updates.push(this.ctx.storage.delete(key));
+          }
+        }
+        await Promise.all(updates);
+        if (markers.size < 1_000 || lastKey === undefined) break;
+        startAfter = lastKey;
+      }
+    } catch (error: unknown) {
+      // Marker retention is opportunistic. D1 remains the authorization
+      // source of truth for new handshakes and periodic socket checks.
+      console.error("Realtime overlay revocation markers could not be pruned.", error);
+    }
+  }
+
+  private async isOverlayTokenValid(tokenId: string, channelId: string, nowIso: string): Promise<boolean> {
+    const row = await this.env.DB.prepare(
+      `SELECT token_id
+         FROM overlay_tokens
+        WHERE channel_id = ?
+          AND token_id = ?
+          AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > ?)`,
+    ).bind(channelId, tokenId, nowIso).first<TokenValidityRow>();
+    return row !== null;
+  }
+
   private async allowOverlayHandshake(tokenId: string, now: number): Promise<boolean> {
     const key = `overlay_handshakes:${tokenId}`;
     return this.ctx.storage.transaction(async (transaction) => {
@@ -259,6 +309,25 @@ export class ChannelObject extends DurableObject<Env> {
     }
 
     const pair = new WebSocketPair();
+    if (principal.kind === "overlay") {
+      try {
+        // D1 protects handshakes whose in-memory revocation marker has aged
+        // out. Check the durable marker afterward: it catches a revoke that
+        // lands while the D1 query is in flight, and acceptance below is
+        // synchronous so no revoke can slip between this read and joining.
+        if (!await this.isOverlayTokenValid(principal.tokenId, ownChannelId, new Date().toISOString())) {
+          return new Response("Overlay token revoked.", { status: 403 });
+        }
+        const marker: unknown = await this.ctx.storage.get(revokedTokenKey(principal.tokenId));
+        if (marker === true || (isRecord(marker) && typeof marker.revokedAt === "number" &&
+            Number.isFinite(marker.revokedAt) && Date.now() - marker.revokedAt < OVERLAY_REVOKED_MARKER_TTL_MS)) {
+          return new Response("Overlay token revoked.", { status: 403 });
+        }
+      } catch (error: unknown) {
+        console.error("Realtime overlay revocation could not be checked.", error);
+        return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
+      }
+    }
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
     await this.scheduleSecurityAlarm();
@@ -314,18 +383,34 @@ export class ChannelObject extends DurableObject<Env> {
     await this.stopSecurityAlarmIfIdle();
   }
 
-  public async revokeToken(tokenId: string): Promise<void> {
-    for (const webSocket of this.ctx.getWebSockets(`token:${tokenId}`)) {
-      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Overlay token revoked");
-    }
+  public async revokeToken(tokenId: string): Promise<boolean> {
+    const now = Date.now();
+    await this.pruneRevokedTokenMarkers(now);
+    // A short-lived marker blocks handshakes already in flight while the
+    // route's D1 revocation propagates. D1 validates every accepted handshake.
+    await this.ctx.storage.put(revokedTokenKey(tokenId), { revokedAt: now } satisfies RevokedTokenMarker);
+    const sockets = this.ctx.getWebSockets(`token:${tokenId}`);
     await this.ctx.storage.delete(`overlay_handshakes:${tokenId}`);
+    if (sockets.length > 0) {
+      // Schedule the marker check before attempting close. This also covers a
+      // DO call that times out after the durable revoke has been recorded.
+      await this.ctx.storage.put(SECURITY_RETRY_KEY, Date.now() + SECURITY_RETRY_INTERVAL_MS);
+      await this.scheduleEarliestAlarm();
+    }
+    let closed = true;
+    for (const webSocket of sockets) {
+      if (!closeSocket(webSocket, SOCKET_REVOKED_CODE, "Overlay token revoked")) closed = false;
+    }
     await this.stopSecurityAlarmIfIdle();
+    if (!closed) await this.scheduleEarliestAlarm();
+    return closed;
   }
 
   override async alarm(): Promise<void> {
     const webSockets = this.ctx.getWebSockets();
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
+    await this.pruneRevokedTokenMarkers(now);
     const [securityDeadline, warningDeadline] = await Promise.all([
       this.ctx.storage.get(SECURITY_DEADLINE_KEY),
       this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
@@ -351,6 +436,15 @@ export class ChannelObject extends DurableObject<Env> {
       for (const { webSocket, principal } of principals) {
         if (principal === null) revoked.add(webSocket);
         else if (isExpired(principal, now)) expired.add(webSocket);
+        else if (principal.kind === "overlay") {
+          try {
+            if (await this.ctx.storage.get<boolean>(revokedTokenKey(principal.tokenId)) === true) {
+              revoked.add(webSocket);
+            }
+          } catch (error: unknown) {
+            console.error("Realtime overlay revocation marker could not be checked.", error);
+          }
+        }
       }
     }
 
@@ -429,16 +523,18 @@ export class ChannelObject extends DurableObject<Env> {
       console.error("Realtime authorization round failed.", error);
     }
 
+    let closeFailure = false;
     for (const webSocket of expired) {
-      closeSocket(webSocket, SOCKET_EXPIRED_CODE, "Authorization expired");
+      if (!closeSocket(webSocket, SOCKET_EXPIRED_CODE, "Authorization expired")) closeFailure = true;
     }
     for (const webSocket of revoked) {
-      closeSocket(webSocket, SOCKET_REVOKED_CODE, "Authorization revoked");
+      if (!closeSocket(webSocket, SOCKET_REVOKED_CODE, "Authorization revoked")) closeFailure = true;
     }
     for (const webSocket of transientAuth) {
       if (expired.has(webSocket) || revoked.has(webSocket)) continue;
-      closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "authorization check unavailable");
+      if (!closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "authorization check unavailable")) closeFailure = true;
     }
+    if (closeFailure) transientFailure = true;
 
     if (securityDue || securityRetryDue) {
       if (this.ctx.getWebSockets().length === 0) {

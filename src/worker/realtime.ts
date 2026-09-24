@@ -161,12 +161,14 @@ export const revokeRealtimeToken = async (
   namespace: Env["CHANNEL"] | undefined,
   channelId: string,
   tokenId: string,
-): Promise<void> => {
+): Promise<boolean> => {
   try {
     const object = channelObject(namespace, channelId);
-    if (object !== null) await object.revokeToken(tokenId);
+    if (object === null) return false;
+    return await object.revokeToken(tokenId);
   } catch (error: unknown) {
     console.warn("Realtime revocation for token failed.", error);
+    return false;
   }
 };
 
