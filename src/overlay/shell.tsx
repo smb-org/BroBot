@@ -128,7 +128,8 @@ const installOverlayCss = (css: string): (() => void) => {
     document.head.appendChild(style);
   }
   const installedStyle = style;
-  // TODO(#210): replace the URL filter with the overlay document's restrictive CSP.
+  // Keep this sanitizer for older saved CSS; the overlay document CSP enforces
+  // the actual resource policy, including CSS syntaxes this parser may not see.
   installedStyle.textContent = sanitizeOverlayCss(css);
   return () => installedStyle.remove();
 };
@@ -230,7 +231,9 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
         stopRetryTimer();
       } catch {
         if (!isCurrentRequest(lifecycle, currentRequest) || controller.signal.aborted) return;
-        install(null, "error");
+        // Once a source has rendered successfully, transient bootstrap failures
+        // must not blank the stream. Keep the last frame while retrying.
+        if (bootstrapRef.current === null) install(null, "error");
         setDiagnostic("Overlay data could not be loaded.");
         scheduleRetry();
       } finally {

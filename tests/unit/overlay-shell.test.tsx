@@ -207,6 +207,44 @@ describe("OverlayShell and OverlayCanvas", () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
   });
 
+  it("keeps the last rendered content through a transient bootstrap reload failure and retries", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(overlayPayload(1200))
+      .mockRejectedValueOnce(new Error("network unavailable"))
+      .mockResolvedValueOnce(overlayPayload(3400));
+    vi.stubGlobal("fetch", fetcher);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+
+    await waitFor(() => expect(container.querySelector("[data-element]")).not.toBeNull());
+    vi.useFakeTimers();
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector("[data-element]")).not.toBeNull();
+    expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')).toHaveTextContent("1,200");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')).toHaveTextContent("3,400");
+  });
+
+  it("clears rendered content after revocation while the source is disconnected", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload()));
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    await waitFor(() => expect(container.querySelector("[data-element]")).not.toBeNull());
+    const terminalClose = realtimeMocks.connectOverlayRealtime.mock.calls[0]?.[1] as (() => void) | undefined;
+
+    act(() => terminalClose?.());
+
+    expect(container.querySelector("[data-element]")).toBeNull();
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    expect(container.querySelector("[data-element]")).toBeNull();
+  });
+
   it("keeps revoked sources transparent when an active bootstrap finishes", async () => {
     let finishBootstrap: ((response: Response) => void) | undefined;
     const fetcher = vi.fn<typeof fetch>()

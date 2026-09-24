@@ -9,6 +9,7 @@ const SOCKET_REVOKED_CODE = 4003;
 const SOCKET_POLICY_VIOLATION_CODE = 1008;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const ABNORMAL_CLOSE_REVALIDATION_THRESHOLD = 3;
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 
 export interface OverlayRealtimeCallbacks {
@@ -55,6 +56,8 @@ export const connectOverlayRealtime = (
   let reconnectAttempt = 0;
   let channelId: string | null = null;
   let hasConnected = false;
+  let consecutiveAbnormalCloses = 0;
+  let authorizationCheck: Promise<boolean> | null = null;
 
   const stopReconnectTimer = (): void => {
     if (reconnectTimer === null) return;
@@ -68,9 +71,37 @@ export const connectOverlayRealtime = (
     reconnectAttempt += 1;
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
-      connect();
+      void connect(true);
     }, delay);
   };
+
+  const checkAuthorization = (): Promise<boolean> => {
+    if (authorizationCheck !== null) return authorizationCheck;
+    authorizationCheck = fetch("/api/overlay/bootstrap", {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    }).then((response) => response.status !== 401 && response.status !== 403)
+      // A failed check caused by a network/server problem is transient. Keep
+      // the current frame and allow the socket retry to run.
+      .catch(() => true)
+      .finally(() => { authorizationCheck = null; });
+    return authorizationCheck;
+  };
+
+  const terminalAuthorizationFailure = (): void => {
+    if (disposed || fatalProtocolError) return;
+    fatalProtocolError = true;
+    stopReconnectTimer();
+    onTerminalClose?.();
+  };
+
+  const revalidateAuthorization = async (): Promise<boolean> => {
+    const authorized = await checkAuthorization();
+    if (!authorized) terminalAuthorizationFailure();
+    return authorized;
+  };
+
+  const canConnect = (): boolean => !disposed && !fatalProtocolError;
 
   const failProtocol = (activeSocket: WebSocket): void => {
     fatalProtocolError = true;
@@ -82,8 +113,10 @@ export const connectOverlayRealtime = (
     }
   };
 
-  function connect(): void {
-    if (disposed || fatalProtocolError) return;
+  async function connect(revalidate = false): Promise<void> {
+    if (!canConnect()) return;
+    if (revalidate && !await revalidateAuthorization()) return;
+    if (!canConnect()) return;
     const WebSocketConstructor = window.WebSocket;
     if (typeof WebSocketConstructor !== "function") {
       scheduleReconnect();
@@ -111,6 +144,7 @@ export const connectOverlayRealtime = (
       const reconnected = hasConnected;
       hasConnected = true;
       reconnectAttempt = 0;
+      consecutiveAbnormalCloses = 0;
       callbacks.onOpen?.(reconnected);
     });
 
@@ -149,11 +183,19 @@ export const connectOverlayRealtime = (
         onTerminalClose?.();
         return;
       }
+      if (event.code === 1006) {
+        consecutiveAbnormalCloses += 1;
+        if (consecutiveAbnormalCloses === ABNORMAL_CLOSE_REVALIDATION_THRESHOLD) {
+          void revalidateAuthorization();
+        }
+      } else {
+        consecutiveAbnormalCloses = 0;
+      }
       scheduleReconnect();
     });
   }
 
-  connect();
+  void connect();
   return () => {
     disposed = true;
     stopReconnectTimer();

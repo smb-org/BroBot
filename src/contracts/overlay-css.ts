@@ -201,7 +201,7 @@ const isRelativeAssetTarget = (target: string): boolean => target.length > 0 &&
   !/^[a-z][a-z\d+.-]*:/iu.test(target) &&
   !/[\\\s"'(){}]/u.test(target);
 
-/** Custom overlay CSS can reference same-origin relative assets but cannot import stylesheets or fetch remote URLs. */
+/** Best-effort save-time filter; the overlay document CSP enforces the resource origin policy. */
 export const isOverlayCssSafe = (css: string): boolean => resourcesIn(normalizeCss(css)).every((resource) =>
   resource.kind === "url" && resource.valid && resource.target !== null && isRelativeAssetTarget(resource.target));
 

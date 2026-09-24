@@ -97,6 +97,24 @@ die Variablenanzeige lädt ihren eigenen WebSocket-Client nur bei einer
 entsprechend konfigurierten Quelle. Beide verbinden mit exponentiellem Backoff
 neu.
 
+Für `/overlay` und `/overlay.html` erzeugt der Worker eine CSP aus
+`PUBLIC_ORIGIN`. Skripte, Styles, Bilder, Schriften und Verbindungen nennen
+diese Origin ausdrücklich, damit sie auch aus dem opaken Sandbox-Origin eines
+Widgets funktionieren. Inline-Styles sind für das eingefügte Overlay-CSS
+erlaubt. `default-src 'none'`, `base-uri 'none'` und `form-action 'none'`
+schließen die übrigen Ressourcenkategorien. Overlay-Antworten lassen
+`frame-ancestors` und `X-Frame-Options` aus, damit StreamElements- und
+OBS-Sandbox-Einbettungen funktionieren; Dashboard- und API-Antworten bleiben
+unverändert. Der CSS-Speichertest ist Defense-in-Depth. Die CSP erzwingt die
+Ressourcenrichtlinie auch für CSS-URL-Formen, die der Parser nicht erkennt.
+
+Nach einem abnormalen Socket-Schluss prüft der Client
+`/api/overlay/bootstrap`, bevor er erneut verbindet, und zusätzlich nach drei
+aufeinanderfolgenden abnormalen Schlüssen. Bei 401 oder 403 wird die Ausgabe
+geleert und die Wiederverbindung beendet. Vorübergehende Prüf- oder
+Bootstrap-Fehler lassen den zuletzt erfolgreichen Frame sichtbar, während die
+Wiederholungen weiterlaufen.
+
 Diese Wahl schützt nicht vor Zugriff auf die OBS-Konfiguration: OBS speichert
 die vollständige Browserquellen-URL einschließlich Fragment im Klartext in
 der Szenensammlung. Wer Zugriff auf die Szenensammlung hat, hat damit Zugriff
