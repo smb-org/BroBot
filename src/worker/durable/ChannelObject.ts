@@ -2,9 +2,11 @@ import { DurableObject } from "cloudflare:workers";
 
 import type {
   RealtimeEnvelope,
+  RealtimeMessage,
   RealtimePrincipal,
   RealtimeRecipientKind,
 } from "../../realtime-contract";
+import { REALTIME_RECIPIENTS } from "../../realtime-contract";
 import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
@@ -185,8 +187,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Distributes only within its own channel and only to principals of the requested kind. */
   public publish(
-    message: RealtimeEnvelope,
-    recipient: RealtimeRecipientKind = "panel",
+    message: RealtimeMessage,
   ): void {
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || message.channelId !== ownChannelId) {
@@ -204,7 +205,8 @@ export class ChannelObject extends DurableObject<Env> {
         closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
         continue;
       }
-      if (principal.kind !== recipient) continue;
+      const recipients: readonly RealtimeRecipientKind[] = REALTIME_RECIPIENTS[message.type];
+      if (!recipients.includes(principal.kind)) continue;
       try {
         webSocket.send(serialized);
       } catch {

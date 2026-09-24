@@ -151,6 +151,7 @@ export const getUsableOverlayToken = async (
 
 export const touchOverlayToken = async (
   db: D1Database,
+  channelId: string,
   tokenId: string,
   lastUsedAt: string,
   cutoff: string,
@@ -159,6 +160,7 @@ export const touchOverlayToken = async (
     `UPDATE overlay_tokens
         SET last_used_at = ?
       WHERE token_id = ?
+        AND channel_id = ?
         AND revoked_at IS NULL
         AND (
           last_used_at IS NULL
@@ -166,7 +168,7 @@ export const touchOverlayToken = async (
           OR julianday(last_used_at) <= julianday(?)
         )
       RETURNING ${overlayTokenReturningColumns}`,
-  ).bind(lastUsedAt, tokenId, cutoff).first<NewOverlayTokenRecord>();
+  ).bind(lastUsedAt, tokenId, channelId, cutoff).first<NewOverlayTokenRecord>();
   return result !== null;
 };
 

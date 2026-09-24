@@ -2,9 +2,12 @@ import { Hono } from "hono";
 
 import type {
   RealtimeEnvelope,
+  RealtimeOverlayPrincipal,
   RealtimePrincipal,
 } from "../realtime-contract";
+import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX } from "../realtime-contract";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "./auth/guards";
+import { authenticateOverlayToken } from "./auth/overlay-token-service";
 import {
   listChannelIdsForUser,
 } from "./db/channels";
@@ -18,6 +21,14 @@ interface RealtimeRouteEnvironment {
 
 const protocolOffered = (header: string | null): boolean =>
   header?.split(",").some((value) => value.trim() === REALTIME_PROTOCOL) ?? false;
+
+const overlayTokenFromProtocols = (header: string | null): string | null => {
+  const offered = header?.split(",").map((value) => value.trim()) ?? [];
+  const tokenProtocols = offered.filter((value) => value.startsWith(OVERLAY_TOKEN_SUBPROTOCOL_PREFIX));
+  if (tokenProtocols.length !== 1) return null;
+  const token = tokenProtocols[0]?.slice(OVERLAY_TOKEN_SUBPROTOCOL_PREFIX.length) ?? "";
+  return /^[A-Za-z0-9_-]{43}$/.test(token) ? token : null;
+};
 
 const hasExpectedOrigin = (request: Request, publicOrigin: string): boolean => {
   const origin = request.headers.get("Origin");
@@ -40,6 +51,16 @@ const principalForPanel = (
   sessionId: variables.session.sessionId,
   role: variables.channelRole,
   expiresAt: variables.session.expiresAt,
+});
+
+const principalForOverlay = (
+  record: NonNullable<Awaited<ReturnType<typeof authenticateOverlayToken>>>,
+): RealtimeOverlayPrincipal => ({
+  v: 1,
+  kind: "overlay",
+  channelId: record.channelId,
+  tokenId: record.tokenId,
+  expiresAt: record.expiresAt,
 });
 
 /**
@@ -85,6 +106,30 @@ realtimeRouter.get(
   },
 );
 
+realtimeRouter.get("/ws/overlay", async (context) => {
+  if (context.req.raw.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+    return new Response("WebSocket upgrade required.", { status: 426 });
+  }
+  const protocols = context.req.raw.headers.get("Sec-WebSocket-Protocol");
+  if (!protocolOffered(protocols)) {
+    return context.json({ error: "realtime_protocol_unsupported" satisfies ApiErrorCode }, 426);
+  }
+  const token = overlayTokenFromProtocols(protocols);
+  if (token === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
+
+  const record = await authenticateOverlayToken(context.env.DB, {
+    token,
+    pepper: context.env.OVERLAY_TOKEN_PEPPER,
+    now: new Date().toISOString(),
+  });
+  if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
+
+  const principal = principalForOverlay(record);
+  const objectId = context.env.CHANNEL.idFromName(principal.channelId);
+  const object = context.env.CHANNEL.get(objectId);
+  return object.fetch(internalChannelRequest(principal));
+});
+
 const channelObject = (namespace: Env["CHANNEL"] | undefined, channelId: string) => {
   if (namespace === undefined) return null;
   return namespace.get(namespace.idFromName(channelId));
@@ -96,7 +141,7 @@ export const publishRealtimeMessage = async (
 ): Promise<void> => {
   const object = channelObject(namespace, message.channelId);
   if (object === null) return;
-  await object.publish(message, "panel");
+  await object.publish(message);
 };
 
 export const revokeRealtimeUser = async (

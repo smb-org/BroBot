@@ -71,6 +71,31 @@ export const OverlayStatusView = (): ReactElement | null => {
     let requestNumber = 0;
     let activeController: AbortController | null = null;
     let failureCount = 0;
+    let realtimeToken: string | null = null;
+    let stopRealtime: (() => void) | null = null;
+    let realtimeGeneration = 0;
+
+    const disconnectRealtime = (): void => {
+      realtimeGeneration += 1;
+      stopRealtime?.();
+      stopRealtime = null;
+      realtimeToken = null;
+    };
+
+    const connectRealtime = (token: string): void => {
+      if (realtimeToken === token) return;
+      disconnectRealtime();
+      realtimeToken = token;
+      const generation = realtimeGeneration;
+      void import("./realtime").then(({ connectOverlayRealtime }) => {
+        if (disposed || generation !== realtimeGeneration) return;
+        const stop = connectOverlayRealtime(token);
+        stopRealtime = stop;
+      }).catch(() => {
+        // The HTTP status remains available if the optional realtime chunk fails to load.
+        if (generation === realtimeGeneration) realtimeToken = null;
+      });
+    };
 
     const schedule = (delay: number): void => {
       if (disposed) return;
@@ -86,7 +111,11 @@ export const OverlayStatusView = (): ReactElement | null => {
       activeController?.abort();
       const token = readTokenFromFragment();
       setStatus(null);
-      if (token === null) return;
+      if (token === null) {
+        disconnectRealtime();
+        return;
+      }
+      if (realtimeToken !== null && realtimeToken !== token) disconnectRealtime();
 
       const controller = new AbortController();
       activeController = controller;
@@ -96,10 +125,12 @@ export const OverlayStatusView = (): ReactElement | null => {
         if (nextStatus !== null) document.documentElement.lang = nextStatus.language;
         setStatus(nextStatus);
         if (nextStatus === null) {
+          disconnectRealtime();
           failureCount = Math.min(failureCount + 1, MAX_FAILURE_COUNT);
           schedule(delayFor(failureCount));
           return;
         }
+        connectRealtime(token);
         failureCount = 0;
         schedule(POLL_INTERVAL_MS);
       } catch {
@@ -125,6 +156,7 @@ export const OverlayStatusView = (): ReactElement | null => {
       requestNumber++;
       if (timer !== undefined) window.clearTimeout(timer);
       activeController?.abort();
+      disconnectRealtime();
       window.removeEventListener("hashchange", handleHashChange);
     };
   }, []);

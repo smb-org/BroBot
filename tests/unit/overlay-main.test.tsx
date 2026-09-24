@@ -3,6 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OverlayStatusView } from "../../src/overlay/status";
 
+class QuietWebSocket {
+  public protocol = "brobot.v1";
+
+  public addEventListener(): void {}
+
+  public close(): void {}
+}
+
 const versionResponse = (version: string): Response => new Response(
   JSON.stringify({ version, language: "de" }),
   { status: 200, headers: { "Content-Type": "application/json" } },
@@ -17,6 +25,7 @@ const setFragment = (token: string): void => {
 describe("Overlay status view", () => {
   beforeEach(() => {
     setFragment("erstes-token");
+    vi.stubGlobal("WebSocket", QuietWebSocket);
   });
 
   afterEach(() => {

@@ -8,7 +8,9 @@ vi.mock("../../src/worker/ad-prewarning", () => mocks);
 
 import type {
   RealtimeEnvelope,
+  RealtimeOverlayPrincipal,
   RealtimePanelPrincipal,
+  RealtimePrincipal,
 } from "../../src/realtime-contract";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
@@ -26,7 +28,7 @@ const validPrincipal = (
   ...overrides,
 });
 
-const upgradeRequest = (principal?: RealtimePanelPrincipal): Request => new Request(
+const upgradeRequest = (principal?: RealtimePrincipal): Request => new Request(
   "https://channel-object.internal/ws",
   {
     headers: {
@@ -50,6 +52,13 @@ const socketFor = (principal: RealtimePanelPrincipal): SocketDouble => ({
     `user:${principal.userId}`,
     `session:${principal.sessionId}`,
   ],
+  send: vi.fn(),
+  close: vi.fn(),
+  deserializeAttachment: vi.fn(() => principal),
+} as unknown as SocketDouble);
+
+const overlaySocketFor = (principal: RealtimeOverlayPrincipal): SocketDouble => ({
+  tags: ["kind:overlay", `token:${principal.tokenId}`],
   send: vi.fn(),
   close: vi.fn(),
   deserializeAttachment: vi.fn(() => principal),
@@ -126,6 +135,18 @@ describe("ChannelObject realtime path", () => {
     expect(object.fetch(upgradeRequest(validPrincipal({ channelId: "kanal-b" }))).status).toBe(403);
   });
 
+  it("rejects an overlay principal for a foreign channel with 403", () => {
+    const object = objectFor([]);
+
+    expect(object.fetch(upgradeRequest({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-b",
+      tokenId: "token-1",
+      expiresAt: null,
+    })).status).toBe(403);
+  });
+
   it("rejects a publish for a foreign channel", () => {
     const object = objectFor([]);
 
@@ -144,6 +165,64 @@ describe("ChannelObject realtime path", () => {
     expect(expired.send.mock.calls).toHaveLength(0);
     expect(expired.close.mock.calls).toEqual([[4001, "authorization expired"]]);
     expect(valid.send.mock.calls).toHaveLength(1);
+  });
+
+  it("keeps panel-only event-log hints away from overlay sockets", () => {
+    const panel = socketFor(validPrincipal());
+    const overlay = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-1",
+      expiresAt: null,
+    });
+    const object = objectFor([panel, overlay]);
+
+    object.publish(eventMessage);
+
+    expect(panel.send.mock.calls).toHaveLength(1);
+    expect(overlay.send.mock.calls).toHaveLength(0);
+  });
+
+  it("closes an expired overlay socket before considering its recipient type", () => {
+    const overlay = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-1",
+      expiresAt: "2000-01-01T00:00:00.000Z",
+    });
+    const object = objectFor([overlay]);
+
+    object.publish(eventMessage);
+
+    expect(overlay.send.mock.calls).toHaveLength(0);
+    expect(overlay.close.mock.calls).toEqual([[4001, "authorization expired"]]);
+  });
+
+  it("closes every open socket for a revoked overlay token", async () => {
+    const affected = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-1",
+      expiresAt: null,
+    });
+    const other = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-2",
+      expiresAt: null,
+    });
+    const sockets = [affected, other];
+    const object = objectFor(sockets);
+    affected.close.mockImplementation(() => { sockets.splice(sockets.indexOf(affected), 1); });
+
+    await object.revokeToken("token-1");
+
+    expect(affected.close.mock.calls).toEqual([[4003, "Overlay token revoked"]]);
+    expect(other.close.mock.calls).toHaveLength(0);
   });
 
   it("revokes only the connection of the affected user", async () => {
