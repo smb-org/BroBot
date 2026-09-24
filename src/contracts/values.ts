@@ -65,6 +65,10 @@ export const OVERLAY_ELEMENT_MAXIMUM_COUNT = 20;
 export const OVERLAY_ELEMENT_KINDS = ["variable"] as const;
 export type OverlayElementKind = (typeof OVERLAY_ELEMENT_KINDS)[number];
 
+/** Closed reasons persisted when an overlay access is revoked. */
+export const OVERLAY_ACCESS_REVOCATION_REASONS = ["manual", "overlay_deleted"] as const;
+export type OverlayAccessRevocationReason = (typeof OVERLAY_ACCESS_REVOCATION_REASONS)[number];
+
 /** Stable reasons for a rejected manual or automatic shoutout. */
 export const SHOUTOUT_FAILURE_REASONS = [
   "app_token_unavailable",
@@ -259,6 +263,9 @@ export const AUDIT_ACTIONS = [
   "channel.pause.disabled",
   "overlay.token.issued",
   "overlay.token.revoked",
+  "overlay.access.issued",
+  "overlay.access.revealed",
+  "overlay.access.revoked",
   "overlay.created",
   "overlay.updated",
   "overlay.deleted",

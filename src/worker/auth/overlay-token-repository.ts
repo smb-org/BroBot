@@ -123,6 +123,7 @@ export const listActiveOverlayTokens = async (
             token.last_used_at, token.expires_at
        FROM overlay_tokens AS token
       WHERE token.channel_id = ?
+        AND token.overlay_id IS NULL
         AND token.revoked_at IS NULL
         AND (
           token.expires_at IS NULL
@@ -247,7 +248,7 @@ export const revokeOverlayToken = async (
   const beforeRow = await db.prepare(
     `SELECT token_id, created_at, expires_at, revoked_at, revocation_reason
        FROM overlay_tokens
-      WHERE token_id = ? AND channel_id = ?`,
+      WHERE token_id = ? AND channel_id = ? AND overlay_id IS NULL`,
   ).bind(tokenId, channelId).first<OverlayTokenAuditRow>();
   if (beforeRow === null) return false;
   // A repeated revoke is a useful retry for the realtime close. The row is
@@ -271,6 +272,7 @@ export const revokeOverlayToken = async (
         SET revoked_at = ?, revocation_reason = ?
       WHERE token_id = ?
         AND channel_id = ?
+        AND overlay_id IS NULL
         AND revoked_at IS NULL
         AND created_at = ?
         AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL))

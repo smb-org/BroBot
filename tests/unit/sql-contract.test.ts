@@ -18,6 +18,10 @@ import {
   overlayTokenRoles,
   overlayTokenSelectColumns,
 } from "../../src/worker/auth/overlay-token-repository";
+import {
+  overlayAccessColumns,
+  overlayAccessMetadataColumns,
+} from "../../src/worker/auth/overlay-access-repository";
 import { overlayElementIdCollisionGuard, referencedVariablesGuard } from "../../src/worker/db/overlays";
 import { platformRolesSql } from "../../src/worker/platform/repository";
 import { channelStateQuery } from "../../src/worker/panel/repository";
@@ -69,6 +73,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["actorGuard(overlayTokenRoles)", actorGuard(overlayTokenRoles)],
   ["overlayTokenSelectColumns", overlayTokenSelectColumns],
   ["overlayTokenReturningColumns", overlayTokenReturningColumns],
+  ["overlayAccessColumns", overlayAccessColumns],
+  ["overlayAccessMetadataColumns", overlayAccessMetadataColumns],
   ["guardParts.sql", platformSessionGuard(actor, now).sql],
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],
   ["lastBroadcasterGuard", lastBroadcasterGuard],
@@ -152,8 +158,8 @@ describe("SQL contract", () => {
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
       expect(objects.filter((object) => object.type === "table")).toHaveLength(28);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(29);
-      expect(objects).toHaveLength(57);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(30);
+      expect(objects).toHaveLength(58);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

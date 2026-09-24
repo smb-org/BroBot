@@ -18,6 +18,7 @@ import {
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
 import { actorOf } from "./member-routes";
 import { saveOverlayDraft } from "../overlays/service";
+import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
 
 interface OverlayRouteEnvironment {
   Bindings: Env;
@@ -185,7 +186,12 @@ overlayRouter.delete("/api/channels/:channelId/overlays/:overlayId", async (cont
   }
   const now = nowIso();
   const deleted = await deleteOverlayWithAudit(context.env.DB, actorOf(context), before, parsed.data.baseRevision, now);
-  if (deleted.changes > 0) return new Response(null, { status: 204 });
+  if (deleted.changes > 0) {
+    const closures = await Promise.all(deleted.revokedAccessTokenIds.map((tokenId) =>
+      closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, tokenId)));
+    if (closures.some((closed) => !closed)) return context.json({ closingPending: true }, 202);
+    return new Response(null, { status: 204 });
+  }
   if (!await isOverlayManagementAllowed(context.env.DB, actorOf(context), channelId, now)) {
     return managementDenied(context);
   }

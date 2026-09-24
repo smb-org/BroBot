@@ -60,7 +60,9 @@ import {
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
-import { revokeRealtimeSessionForUser, revokeRealtimeToken } from "../realtime";
+import { revokeRealtimeSessionForUser } from "../realtime";
+import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
+import { authorizeOverlayAccessManager, getOverlayTokenForLegacyReveal } from "./overlay-access-repository";
 import { MODULES } from "../../modules/registry";
 import {
   listAllBroadcasterScopes,
@@ -70,34 +72,7 @@ import { canManage, type ApiErrorCode } from "../../contracts/values";
 import { findChannelVariable } from "../db/channel-variables";
 
 const nowIso = (): string => new Date().toISOString();
-const REALTIME_TOKEN_CLOSE_TIMEOUT_MS = 2_000;
 const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
-
-const closeRealtimeTokenBeforeResponse = async (
-  namespace: Env["CHANNEL"] | undefined,
-  channelId: string,
-  tokenId: string,
-): Promise<boolean> => {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const outcome = await Promise.race([
-      revokeRealtimeToken(namespace, channelId, tokenId),
-      new Promise<"timeout">((resolve) => {
-        timeout = setTimeout(() => { resolve("timeout"); }, REALTIME_TOKEN_CLOSE_TIMEOUT_MS);
-      }),
-    ]);
-    if (outcome === "timeout" || !outcome) {
-      console.warn("Realtime token revocation is pending; the Durable Object will retry.");
-      return false;
-    }
-    return true;
-  } catch (error: unknown) {
-    console.warn("Realtime token revocation could not close the connection.", error);
-    return false;
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-  }
-};
 
 const canManageOverlayTokens = canManage;
 
@@ -341,6 +316,30 @@ authRouter.post(
     context.header("Cache-Control", "no-store");
     if (!closed) return context.json({ closingPending: true }, 202);
     return context.body(null, 204);
+  },
+);
+
+authRouter.post(
+  "/api/channels/:channelId/overlay-tokens/:tokenId/reveal",
+  requireChannelAuthorization(),
+  async (context) => {
+    if (!canManageOverlayTokens(context.get("channelRole"))) return overlayTokenManageDenied(context);
+    const now = nowIso();
+    const access = await getOverlayTokenForLegacyReveal(
+      context.env.DB,
+      context.req.param("channelId"),
+      context.req.param("tokenId"),
+      { userId: context.get("session").userId, sessionId: context.get("session").sessionId },
+      now,
+    );
+    context.header("Cache-Control", "no-store");
+    if (!access) {
+      if (!await authorizeOverlayAccessManager(context.env.DB, context.get("actor"), context.req.param("channelId"), now)) {
+        return overlayTokenManageDenied(context);
+      }
+      return context.json({ error: "overlay_token_not_found" }, 404);
+    }
+    return context.json({ error: "overlay_access_unrecoverable" }, 409);
   },
 );
 
