@@ -122,13 +122,8 @@ export const unknownTemplateVariables = (
   const variables = new Map(declared.map((variable) => [variable.name, variable]));
   return [...new Set(matches(text, TEMPLATE_TOKEN_CANDIDATE_PATTERN).flatMap((match) => {
     const name = match[1];
-    const parameter = match[2];
     if (name === undefined) return [];
-    const variable = variables.get(name);
-    if (variable === undefined) return parameter === undefined ? [name] : [name];
-    // A parameter on a known variable without a parameter contract is plain text by design.
-    if (parameter !== undefined && variable.parameters === undefined) return [];
-    return [];
+    return variables.has(name) ? [] : [name];
   }))];
 };
 
