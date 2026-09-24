@@ -622,22 +622,14 @@ export const createTextCommandRepository = (
 
     const statements: D1PreparedStatement[] = variableChange === null ? [claim] : [variableChange, claim];
     if (userCooldownSeconds > 0 && userId !== undefined && userId !== null) {
-      statements.push(commandBeforeClaim !== null && variableChange !== null
-        ? db.prepare(
-          `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
-           SELECT ?, ?, ?, ?
-            WHERE EXISTS (
-              SELECT 1 FROM text_commands
-               WHERE channel_id = ? AND command_name = ? AND revision = ?
-                 AND last_used_at = ? AND use_count = ?
-            )
-           ON CONFLICT (channel_id, command_name, user_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
-        ).bind(channelId, name, userId, now, channelId, name, commandBeforeClaim.revision, now, commandBeforeClaim.useCount + 1)
-        : db.prepare(
-          `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
-           SELECT ?, ?, ?, ? WHERE changes() > 0
-           ON CONFLICT (channel_id, command_name, user_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
-        ).bind(channelId, name, userId, now));
+      // Gated on changes() of the immediately preceding statement, which is
+      // always `claim` here: the previously read use_count is stale once a
+      // concurrent claim on the same row has already landed (#185).
+      statements.push(db.prepare(
+        `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
+         SELECT ?, ?, ?, ? WHERE changes() > 0
+         ON CONFLICT (channel_id, command_name, user_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
+      ).bind(channelId, name, userId, now));
     }
     const results = statements.length === 1 ? [await claim.run()] : await db.batch(statements);
     const claimResult = results[variableChange === null ? 0 : 1];
