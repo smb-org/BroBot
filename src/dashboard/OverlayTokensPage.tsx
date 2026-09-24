@@ -8,6 +8,7 @@ import {
   type PanelOverlayToken,
 } from "./api";
 import { apiErrorText, formatTimestamp, overlayTokensTexts, dashboardLanguage } from "./locale";
+import { OverlayObsInstructions } from "./OverlayObsInstructions";
 import { Button, ConfirmDialog, Icon, ListDetail, SubInspector } from "./ui";
 
 interface OverlayTokensPageProperties {
@@ -193,6 +194,7 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
         <Button icon="add" iconOnly ariaLabel={labels.create} disabled={!canManageTokens || pending || oneTimeLink !== null} {...(manageReason !== undefined ? { title: manageReason } : oneTimeLink !== null ? { title: labels.issueBlocked } : {})} onClick={() => { void issue(); }} />
       </span>
     </div>
+    <OverlayObsInstructions />
     {oneTimeLink === null ? null : <p className="muted" role="note">{labels.issueBlocked}</p>}
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
     {error === null ? null : <p className="form-error" role="alert">{error}</p>}

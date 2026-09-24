@@ -38,9 +38,9 @@
 
 ## Overlay-Nachweis in OBS
 
-Das Overlay ist eine technische Deployment-Anzeige, kein fachliches Modul. Es
-zeigt nach einem erfolgreichen HTTP-Statusabruf die Version aus
-`CF_VERSION_METADATA`.
+Das transparente Overlay ist standardmäßig leer, wenn kein Widget konfiguriert
+ist. Für eine technische Diagnose zeigt es mit `&debug=1` im URL-Fragment nach
+einem erfolgreichen HTTP-Statusabruf die Version aus `CF_VERSION_METADATA`.
 
 ### Migration und Token ausgeben
 
@@ -84,15 +84,17 @@ OAuth-Tokens gehören niemals in diese URL.
 
 1. In OBS eine **Browserquelle** anlegen und die ausgegebene `overlayUrl`
    eintragen.
-2. Als Startgröße sind ungefähr **420 × 72 Pixel** sinnvoll. Die Quelle kann
-   später kleiner oder größer gezogen werden; der Inhalt bleibt ohne eigene
-   Hintergrundfläche.
-3. In den Browserquellen-Einstellungen den Haken für **transparenten
-   Hintergrund** setzen beziehungsweise die Hintergrundfarbe auf **transparent**
-   stellen, falls die OBS-Version diese Option so bezeichnet. Kein eigenes CSS
-   mit einer Hintergrundfarbe ergänzen.
-4. Die Quelle bei Bedarf aktualisieren oder die Szene neu laden. Eine
-   erfolgreiche Quelle zeigt klein `Version <Deployment-ID>`.
+2. Als Startgröße sind ungefähr **800 × 120 Pixel** sinnvoll. Der Widgettext
+   folgt dem aktuellen Variablenwert; die Breite sollte für den längsten
+   erwarteten Text reichen.
+3. **Browser aktualisieren, wenn Szene aktiv wird** und **Quelle schließen,
+   wenn nicht sichtbar** ausgeschaltet lassen. Die Browserquelle aktualisiert
+   sich selbst.
+4. Die Seite bleibt transparent. Eigenes CSS mit einer Hintergrundfarbe ist
+   nicht nötig.
+5. Für die Versionsdiagnose `&debug=1` an das URL-Fragment anhängen, zum
+   Beispiel `#token=…&debug=1`. Dies zeigt `Version <Deployment-ID>`; das Flag
+   für eine leere Overlay-Seite wieder entfernen.
 
 ### Token widerrufen
 
@@ -118,20 +120,21 @@ ohne jeden Statusabruf als D1-Schreibvorgang zu speichern.
 - Prüfen, ob die Browserquelle exakt die ausgegebene URL inklusive `#token=...`
   verwendet. Den Token nicht in eine Query verschieben und nicht durch einen
   Twitch- oder OAuth-Token ersetzen.
-- Die Quelle aktualisieren beziehungsweise die Option zum Neuladen beim
-  Szenenwechsel einmal aktivieren. Bei einem widerrufenen, optional
-  abgelaufenen oder anderweitig ungültigen Token bleibt die Fläche vollständig
-  leer; das Fehlen der Versionsanzeige ist das Signal.
+- Für eine Versionsdiagnose `&debug=1` an das URL-Fragment anhängen und die
+  Browserquelle manuell aktualisieren. Ohne dieses Flag ist eine leere Fläche
+  ohne Widget das erwartete Verhalten. Bei einem widerrufenen, optional
+  abgelaufenen oder anderweitig ungültigen Token bleibt sie ebenfalls leer.
 - Prüfen, ob der Worker erreichbar ist und `/api/overlay/status` mit dem
   gültigen Token den Status `200` liefert. Für diesen Test den Token nicht in
   Logs, Tickets oder Screenshots kopieren.
 - Eine eigene OBS-CSS-Regel mit schwarzem `body`-Hintergrund entfernen. Die
   Seite setzt `html`, `body`, `#root` und die gerenderte Fläche selbst auf
   transparent.
-- Wenn die Version fehlt, zuerst Deployment und D1-Migration prüfen. Ohne die
-  `overlay_tokens`-Tabelle aus `migrations/` kann der Worker keine
-  Overlay-Zugänge validieren; ohne gültige `CF_VERSION_METADATA`-Bindung kann
-  keine aktuelle Deployment-ID angezeigt werden.
+- Wenn mit gesetztem `debug=1` keine Version erscheint, zuerst Deployment und
+  D1-Migration prüfen. Ohne die `overlay_tokens`-Tabelle aus `migrations/` kann
+  der Worker keine Overlay-Zugänge validieren; ohne gültige
+  `CF_VERSION_METADATA`-Bindung kann keine aktuelle Deployment-ID angezeigt
+  werden.
 
 Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` dokumentiert. Die aktuelle Wrangler-Konfiguration akzeptiert dieses Feld und nutzt es auch für die Typgenerierung; Secret-Werte werden ausschließlich über Secret-Bindings beziehungsweise lokale Env-Dateien bereitgestellt.
 

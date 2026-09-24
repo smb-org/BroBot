@@ -6,6 +6,8 @@ import { Icon } from "./Icon";
 
 export interface SidebarEntry {
   id: string;
+  /** Page id for rendered navigation entries; module entries leave this unset. */
+  pageId?: string;
   label: string;
   icon: ReactNode;
   href: string;
@@ -67,6 +69,7 @@ export function Sidebar({ groups, modules, platform, collapsed, onToggleCollapse
     return (
       <NavLink
         key={entry.id}
+        data-nav-page-id={entry.pageId}
         href={entry.href}
         label={collapsed ? undefined : entry.label}
         title={moduleChild || collapsed ? accessibleName : undefined}

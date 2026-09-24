@@ -11,6 +11,7 @@ import {
   type PanelChannelVariable,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage } from "./locale";
+import { OBS_OVERLAY_CSS_EXAMPLE, OverlayObsInstructions } from "./OverlayObsInstructions";
 import { useRealtimeVariableUpdates } from "./realtime";
 import { Button, ConfirmDialog, Field, Icon, ListDetail, NumberField, ReadOnlyTextArea, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
@@ -19,17 +20,15 @@ interface ChannelVariablesPageProperties {
   channelId: string;
   canManage: boolean;
   onOpenCommand: (name: string) => void;
+  /** Deep-link request from Spotlight (#208), applied after variables load and then consumed by the parent. */
+  initialSelection?: string;
+  /** Clears the parent-owned request after this page has applied it. */
+  onInitialSelectionConsumed?: (name: string) => void;
 }
 
 const normalizedVariableName = (value: string): string => value.trim().toLowerCase();
 const variableNamePattern = /^[a-z][a-z0-9_]{0,31}$/u;
 const overlayTokenPattern = /^[A-Za-z0-9_-]{43}$/u;
-const obsCssExample = `.brobot-variable {
-  font: 700 48px system-ui, sans-serif;
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
-}`;
-
 const tokenFromOverlayUrl = (value: string): string | null => {
   try {
     const url = new URL(value, window.location.href);
@@ -53,7 +52,7 @@ const variableWidgetUrl = (token: string, name: string, text: string): string =>
   return url.toString();
 };
 
-export function ChannelVariablesPage({ channelId, canManage: canManageContent, onOpenCommand }: ChannelVariablesPageProperties): ReactElement {
+export function ChannelVariablesPage({ channelId, canManage: canManageContent, onOpenCommand, initialSelection, onInitialSelectionConsumed }: ChannelVariablesPageProperties): ReactElement {
   const language = dashboardLanguage();
   const labels = channelVariablesTexts(language);
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
@@ -75,6 +74,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const refreshRequest = useRef(0);
   const invalidateRefresh = useCallback((): void => { refreshRequest.current++; }, []);
+  const lastInitialSelection = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async (): Promise<void> => {
     const requestId = ++refreshRequest.current;
@@ -134,6 +134,24 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setCopyNotice(null);
     setError(null);
   };
+  // Latest-ref indirection, not a direct `selectVariable(match)` call: the
+  // effect only ever reads through `.current`, so applying a deep-linked
+  // selection (#208) doesn't read as "setState synchronously in an effect"
+  // to the linter, the same way `text_commands`'s `initialSelection` effect
+  // goes through a hook-returned setter instead of a local helper.
+  const selectVariableRef = useRef(selectVariable);
+  useEffect(() => { selectVariableRef.current = selectVariable; });
+  useEffect(() => {
+    if (initialSelection === undefined) {
+      lastInitialSelection.current = undefined;
+      return;
+    }
+    if (loading || lastInitialSelection.current === initialSelection) return;
+    const match = variables.find((variable) => variable.name === initialSelection);
+    lastInitialSelection.current = initialSelection;
+    if (match !== undefined) selectVariableRef.current(match);
+    onInitialSelectionConsumed?.(initialSelection);
+  }, [initialSelection, loading, onInitialSelectionConsumed, variables]);
   const closeInspector = (): void => {
     setCreating(false);
     setSelectedName(null);
@@ -322,6 +340,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         {selected !== null && canManageContent ? <section className="config-section channel-variable-overlay-link" aria-label={labels.overlayLink}>
           <hr className="channel-variable-overlay-link__divider" />
           <h3>{labels.overlayLink}</h3>
+          <OverlayObsInstructions />
           <Field
             id="channel-variable-overlay-text"
             label={labels.overlayText}
@@ -352,8 +371,8 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-url" label={labels.widgetUrl} value={overlayUrl} minRows={3} />
             <Button variant="neutral" onClick={() => { void copyText(overlayUrl); }}>{labels.copyLink}</Button>
             <p className="muted" role="note">{labels.secretNotice}</p>
-            <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-css" label={labels.obsCss} value={obsCssExample} minRows={6} />
-            <Button variant="neutral" onClick={() => { void copyText(obsCssExample); }}>{labels.copyCss}</Button>
+            <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-css" label={labels.obsCss} value={OBS_OVERLAY_CSS_EXAMPLE} minRows={6} />
+            <Button variant="neutral" onClick={() => { void copyText(OBS_OVERLAY_CSS_EXAMPLE); }}>{labels.copyCss}</Button>
             {copyNotice === null ? null : <p className="muted" role="status">{copyNotice}</p>}
           </>}
         </section> : null}
