@@ -32,7 +32,7 @@ export interface StreamStateLookupResult {
   rateLimited: boolean;
 }
 
-type HelixStreamLookup = { state: StoredStreamState; startedAt: string | null };
+type HelixStreamLookup = { state: StoredStreamState; startedAt: string | null; streamId: string | null };
 
 const fetchLiveStreamState = async (
   env: Env,
@@ -51,11 +51,11 @@ const fetchLiveStreamState = async (
     });
     if (!result.ok) return result.reason === "rate_limited" ? "rate_limited" : null;
     if (!isRecord(result.data) || !arrayValue(result.data.data)) return null;
-    if (result.data.data.length === 0) return { state: "offline", startedAt: null };
+    if (result.data.data.length === 0) return { state: "offline", startedAt: null, streamId: null };
     const firstStream = result.data.data[0];
     if (!isRecord(firstStream) || typeof firstStream.id !== "string") return null;
     const startedAt = typeof firstStream.started_at === "string" ? firstStream.started_at : null;
-    return { state: "online", startedAt };
+    return { state: "online", startedAt, streamId: firstStream.id };
   } catch {
     return null;
   }
@@ -96,20 +96,25 @@ export const lookupAndRefreshStreamState = async (
   if (fromHelix === null) return asResult(stored);
 
   if (stored === null) {
-    const storedByHelix = await writeHelixStreamStateIfUnknown(env.DB, channelId, fromHelix.state, now, fromHelix.startedAt);
+    const storedByHelix = await writeHelixStreamStateIfUnknown(
+      env.DB, channelId, fromHelix.state, now, fromHelix.startedAt, fromHelix.streamId,
+    );
     if (storedByHelix) return asResult({
       state: fromHelix.state,
       source: "helix",
       changedAt: now,
       startedAt: fromHelix.startedAt,
+      streamId: fromHelix.streamId,
       checkedAt: now,
     });
     return asResult(await readChannelStreamState(env.DB, channelId));
   }
 
-  await refreshHelixStreamState(env.DB, channelId, fromHelix.state, now, fromHelix.startedAt);
-  if (stored.state === "offline" && fromHelix.state === "online" && fromHelix.startedAt !== null) {
-    await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now);
+  const refreshed = await refreshHelixStreamState(
+    env.DB, channelId, fromHelix.state, now, fromHelix.startedAt, fromHelix.streamId,
+  );
+  if (refreshed && stored.state === "offline" && fromHelix.state === "online" && fromHelix.startedAt !== null) {
+    await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now, fromHelix.streamId);
   }
   return asResult(await readChannelStreamState(env.DB, channelId));
 };

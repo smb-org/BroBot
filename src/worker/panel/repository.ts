@@ -76,14 +76,17 @@ interface ChannelStateRow {
   eventsub_error_updated_at: string | null;
   stream_state: ChannelStreamState | null;
   stream_started_at: string | null;
+  stream_id: string | null;
   muted: ChannelControlFields["muted"];
   muted_until: string | null;
   mute_until_stream_end: ChannelControlFields["mute_until_stream_end"];
   mute_stream_started_at: string | null;
+  mute_stream_id: string | null;
   paused: ChannelControlFields["paused"];
   paused_until: string | null;
   pause_until_stream_end: ChannelControlFields["pause_until_stream_end"];
   pause_stream_started_at: string | null;
+  pause_stream_id: string | null;
 }
 
 interface ActiveModuleRow {
@@ -169,14 +172,21 @@ export const channelStateQuery = `
              WHERE stream_state.channel_id = channel.channel_id
                AND stream_state.state = 'online'
              LIMIT 1) AS stream_started_at,
+           (SELECT stream_state.stream_id
+              FROM channel_stream_state AS stream_state
+             WHERE stream_state.channel_id = channel.channel_id
+               AND stream_state.state = 'online'
+             LIMIT 1) AS stream_id,
            channel_controls.muted AS muted,
            channel_controls.muted_until AS muted_until,
            channel_controls.mute_until_stream_end AS mute_until_stream_end,
            channel_controls.mute_stream_started_at AS mute_stream_started_at,
+           channel_controls.mute_stream_id AS mute_stream_id,
            channel_controls.paused AS paused,
            channel_controls.paused_until AS paused_until,
            channel_controls.pause_until_stream_end AS pause_until_stream_end,
            channel_controls.pause_stream_started_at AS pause_stream_started_at,
+           channel_controls.pause_stream_id AS pause_stream_id,
            moderator.is_moderator AS moderator_is_moderator,
            moderator.checked_at AS moderator_checked_at,
            moderator.reason AS moderator_reason,

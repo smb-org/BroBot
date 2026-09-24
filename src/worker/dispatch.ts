@@ -13,7 +13,11 @@ import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-lo
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
 import { helixRequest } from "./twitch/helix";
-import { writeEventSubStreamState } from "./db/stream-state";
+import {
+  isOlderOnlineEventThanHelixOfflineObservation,
+  readChannelStreamState,
+  writeEventSubStreamState,
+} from "./db/stream-state";
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
 import { readDispatchChannelState } from "./db/channel-controls";
 import { getBotIdentity } from "./db/bot-identity";
@@ -441,13 +445,30 @@ export const dispatchEventSubNotification = async (
   if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
     // The `started_at` Twitch sends on `stream.online` is the actual stream
     // start, distinct from `event.receivedAt` (used only for write ordering).
-    const startedAt = event.subscriptionType === "stream.online" ? textValue(event.payload.started_at) : null;
+    const isOnline = event.subscriptionType === "stream.online";
+    const startedAt = isOnline ? textValue(event.payload.started_at) : null;
+    const streamId = isOnline ? textValue(event.payload.id) : null;
+    if (isOnline && isOlderOnlineEventThanHelixOfflineObservation(
+      await readChannelStreamState(environment.DB, event.channelId), startedAt,
+    )) {
+      // A stream's start can predate a more recent offline poll even though
+      // its notification arrived later. Reconcile Twitch's current state
+      // before considering that old online event for the state write.
+      await lookupAndRefreshStreamState(
+        environment as unknown as Env,
+        event.channelId,
+        event.receivedAt,
+        fetcher,
+        { forceRefresh: true },
+      );
+    }
     const stateWrite = await writeEventSubStreamState(
       environment.DB,
       event.channelId,
       event.subscriptionType === "stream.online" ? "online" : "offline",
       event.eventSubTimestamp ?? event.receivedAt,
       startedAt,
+      streamId,
     );
     if (event.subscriptionType === "stream.offline" && stateWrite === "ambiguous_offline") {
       // A start-less live row or an event exactly on the session boundary
@@ -461,8 +482,14 @@ export const dispatchEventSubNotification = async (
         { forceRefresh: true },
       );
     }
-    if (event.subscriptionType === "stream.online" && startedAt !== null) {
-      await prepareResetChannelVariablesForStream(environment.DB, event.channelId, startedAt, event.eventSubTimestamp ?? event.receivedAt);
+    if (isOnline && stateWrite === "written" && startedAt !== null) {
+      await prepareResetChannelVariablesForStream(
+        environment.DB,
+        event.channelId,
+        startedAt,
+        event.eventSubTimestamp ?? event.receivedAt,
+        streamId,
+      );
     }
   }
   const dispatchState = endingStreamDispatchState ??

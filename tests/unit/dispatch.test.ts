@@ -10,7 +10,7 @@ import {
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
-import { readDispatchChannelState, setChannelControl } from "../../src/worker/db/channel-controls";
+import { readChannelControls, readDispatchChannelState, setChannelControl } from "../../src/worker/db/channel-controls";
 
 const CHAT_TYPE = "channel.chat.message";
 const NOW = "2026-09-19T12:00:00.000Z";
@@ -673,6 +673,74 @@ describe("dispatch and execution", () => {
       await expect(database.prepare(
         "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ state: "offline", started_at: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reconciles a delayed online event after Helix offline and binds the pending pause to the next stream", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, checked_at)
+         VALUES ('kanal-a', 'offline', '2026-09-19T10:00:00.000Z', 'helix', NULL,
+                 '2026-09-19T10:00:00.000Z')`,
+      ).run();
+      await database.prepare(
+        `INSERT INTO channel_controls
+          (channel_id, paused, pause_until_stream_end, updated_at)
+         VALUES ('kanal-a', 1, 1, '2026-09-19T10:01:00.000Z')`,
+      ).run();
+      const helixOffline = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      );
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.online",
+        triggerId: "delayed-online",
+        payload: { id: "ended-stream", started_at: "2026-09-19T09:55:00.000Z" },
+        eventSubTimestamp: "2026-09-19T09:55:00.000Z",
+        receivedAt: "2026-09-19T10:02:00.000Z",
+      }, helixOffline, []);
+
+      expect(helixOffline).toHaveBeenCalledTimes(1);
+      await expect(database.prepare(
+        `SELECT state, source, changed_at, stream_id
+           FROM channel_stream_state WHERE channel_id = 'kanal-a'`,
+      ).first()).resolves.toEqual({
+        state: "offline", source: "helix", changed_at: "2026-09-19T10:02:00.000Z", stream_id: null,
+      });
+      await expect(readChannelControls(database as unknown as D1Database, "kanal-a", "2026-09-19T10:02:01.000Z"))
+        .resolves.toMatchObject({ pause: { active: false, pending: true } });
+      await expect(database.prepare(
+        "SELECT pause_stream_id, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ pause_stream_id: null, pause_stream_started_at: null });
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "stream.online",
+        triggerId: "next-online",
+        payload: { id: "real-next-stream", started_at: "2026-09-19T10:03:00.000Z" },
+        eventSubTimestamp: "2026-09-19T10:03:01.000Z",
+        receivedAt: "2026-09-19T10:03:01.000Z",
+      }, helixOffline, []);
+
+      await expect(database.prepare(
+        `SELECT state, stream_id, started_at
+           FROM channel_stream_state WHERE channel_id = 'kanal-a'`,
+      ).first()).resolves.toEqual({
+        state: "online", stream_id: "real-next-stream", started_at: "2026-09-19T10:03:00.000Z",
+      });
+      await expect(database.prepare(
+        "SELECT pause_stream_id, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({
+        pause_stream_id: "real-next-stream", pause_stream_started_at: "2026-09-19T10:03:00.000Z",
+      });
+      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", "2026-09-19T10:03:02.000Z"))
+        .resolves.toMatchObject({ controls: { pause: { active: true, mode: "until_stream_end" } } });
     } finally {
       database.close();
     }

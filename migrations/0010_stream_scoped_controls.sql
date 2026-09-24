@@ -2,10 +2,28 @@
 -- remains pending until the next online session is recorded.
 ALTER TABLE channel_controls ADD COLUMN mute_stream_started_at TEXT;
 ALTER TABLE channel_controls ADD COLUMN pause_stream_started_at TEXT;
+ALTER TABLE channel_controls ADD COLUMN mute_stream_id TEXT;
+ALTER TABLE channel_controls ADD COLUMN pause_stream_id TEXT;
 ALTER TABLE channel_stream_state ADD COLUMN started_at_seconds INTEGER;
 ALTER TABLE channel_stream_state ADD COLUMN started_at_fraction TEXT;
 ALTER TABLE channel_stream_state ADD COLUMN eventsub_changed_at_seconds INTEGER;
 ALTER TABLE channel_stream_state ADD COLUMN eventsub_changed_at_fraction TEXT;
+ALTER TABLE channel_stream_state ADD COLUMN stream_id TEXT;
+ALTER TABLE channel_stream_state ADD COLUMN started_at_epoch_ms INTEGER;
+ALTER TABLE channel_stream_state ADD COLUMN changed_at_epoch_ms INTEGER;
+ALTER TABLE channel_variable_stream_resets ADD COLUMN stream_id TEXT;
+ALTER TABLE channel_variable_stream_resets ADD COLUMN started_at_epoch_ms INTEGER;
+
+-- Existing 0009-era rows have timestamps but no Twitch stream identity. Keep
+-- those timestamps usable for session matching until Helix/EventSub supplies
+-- an id, and compare in epoch milliseconds so equivalent RFC3339 spellings
+-- such as `...00Z` and `...00.000Z` remain equal.
+UPDATE channel_stream_state
+   SET started_at_epoch_ms = CASE WHEN started_at IS NULL THEN NULL
+         ELSE CAST(round((julianday(started_at) - 2440587.5) * 86400000.0) AS INTEGER) END,
+       changed_at_epoch_ms = CAST(round((julianday(changed_at) - 2440587.5) * 86400000.0) AS INTEGER);
+UPDATE channel_variable_stream_resets
+   SET started_at_epoch_ms = CAST(round((julianday(started_at) - 2440587.5) * 86400000.0) AS INTEGER);
 
 -- Preserve existing stream-end controls for a recorded live session. Rows
 -- without a known live start remain pending for the next recorded session.
@@ -26,6 +44,24 @@ UPDATE channel_controls
           WHERE stream_state.channel_id = channel_controls.channel_id
             AND stream_state.state = 'online'
             AND stream_state.started_at IS NOT NULL
+       )
+ WHERE pause_until_stream_end = 1;
+
+UPDATE channel_controls
+   SET mute_stream_id = (
+         SELECT stream_state.stream_id
+           FROM channel_stream_state AS stream_state
+          WHERE stream_state.channel_id = channel_controls.channel_id
+            AND stream_state.state = 'online'
+       )
+ WHERE mute_until_stream_end = 1;
+
+UPDATE channel_controls
+   SET pause_stream_id = (
+         SELECT stream_state.stream_id
+           FROM channel_stream_state AS stream_state
+          WHERE stream_state.channel_id = channel_controls.channel_id
+            AND stream_state.state = 'online'
        )
  WHERE pause_until_stream_end = 1;
 

@@ -10,6 +10,8 @@ export interface StoredStreamStateRecord {
   changedAt: string;
   /** The real stream start, independent of `changedAt` (see migration 0006). Null when unknown or offline. */
   startedAt: string | null;
+  /** Twitch's stable id for this live session. Older rows can be null until refreshed. */
+  streamId: string | null;
   /** Most recent successful state observation, used for freshness independently of EventSub ordering. */
   checkedAt: string | null;
 }
@@ -19,6 +21,7 @@ interface StreamStateRow {
   source: StreamStateSource;
   changed_at: string;
   started_at: string | null;
+  stream_id: string | null;
   checked_at: string | null;
 }
 
@@ -61,9 +64,26 @@ const compareTimestampOrders = (left: TimestampOrder, right: TimestampOrder): nu
     : left.seconds > right.seconds ? 1
       : compareFractions(left.fraction, right.fraction);
 
+/** Timestamp identity fallback for rows written before Twitch stream ids were stored. */
+export const timestampEpochMilliseconds = (value: string | null): number | null => {
+  if (value === null) return null;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) ? milliseconds : null;
+};
+
 const timestampOrderBindings = (value: string | null): [number | null, string | null] => {
   const order = timestampOrder(value);
   return order === null ? [null, null] : [order.seconds, order.fraction];
+};
+
+export const isOlderOnlineEventThanHelixOfflineObservation = (
+  current: StoredStreamStateRecord | null,
+  startedAt: string | null,
+): boolean => {
+  if (current?.state !== "offline" || current.source !== "helix") return false;
+  const onlineStartMs = timestampEpochMilliseconds(startedAt);
+  const offlineObservedMs = timestampEpochMilliseconds(current.changedAt);
+  return onlineStartMs !== null && offlineObservedMs !== null && onlineStartMs < offlineObservedMs;
 };
 
 export const readChannelStreamState = async (
@@ -71,7 +91,7 @@ export const readChannelStreamState = async (
   channelId: string,
 ): Promise<StoredStreamStateRecord | null> => {
   const row = await db.prepare(
-    `SELECT state, source, changed_at, started_at, checked_at
+    `SELECT state, source, changed_at, started_at, stream_id, checked_at
        FROM channel_stream_state
       WHERE channel_id = ?`,
   ).bind(channelId).first<StreamStateRow>();
@@ -80,6 +100,7 @@ export const readChannelStreamState = async (
     source: row.source,
     changedAt: row.changed_at,
     startedAt: row.started_at,
+    streamId: row.stream_id,
     checkedAt: row.checked_at,
   };
 };
@@ -90,17 +111,27 @@ export const writeEventSubStreamState = async (
   state: StoredStreamState,
   changedAt: string,
   startedAt: string | null,
+  streamId: string | null = null,
 ): Promise<EventSubStreamWriteResult> => {
   const eventOrder = timestampOrder(changedAt);
   if (eventOrder === null) return "invalid_timestamp";
   const [startedAtSeconds, startedAtFraction] = timestampOrderBindings(startedAt);
+  const startedAtEpochMs = timestampEpochMilliseconds(startedAt);
+  const changedAtEpochMs = timestampEpochMilliseconds(changedAt);
   const current = await readChannelStreamState(db, channelId);
-  if (state === "online" && current?.state === "online" && startedAt !== null && current.startedAt !== null) {
-    const incomingSessionOrder = timestampOrder(startedAt);
-    const currentSessionOrder = timestampOrder(current.startedAt);
-    if (incomingSessionOrder !== null && currentSessionOrder !== null &&
-      compareTimestampOrders(incomingSessionOrder, currentSessionOrder) < 0) return "superseded";
+
+  if (state === "online" && current?.state === "online" && current.startedAt !== null && startedAt !== null) {
+    const incomingSessionMs = timestampEpochMilliseconds(startedAt);
+    const currentSessionMs = timestampEpochMilliseconds(current.startedAt);
+    if (incomingSessionMs !== null && currentSessionMs !== null) {
+      const idsKnown = streamId !== null && current.streamId !== null;
+      const sameSessionId = idsKnown && streamId === current.streamId;
+      if (!sameSessionId && (idsKnown ? incomingSessionMs <= currentSessionMs : incomingSessionMs < currentSessionMs)) {
+        return "superseded";
+      }
+    }
   }
+
   if (state === "offline" && current?.state === "online") {
     const sessionOrder = timestampOrder(current.startedAt);
     const boundaryOrder = sessionOrder ?? timestampOrder(current.changedAt);
@@ -111,23 +142,56 @@ export const writeEventSubStreamState = async (
     // forced Helix observation settle it.
     if (order === 0) return "ambiguous_offline";
   }
+
   const [eventSeconds, eventFraction] = timestampOrderBindings(changedAt);
-  const statements = [db.prepare(
+  const statement = db.prepare(
     `INSERT INTO channel_stream_state
        (channel_id, state, changed_at, source, started_at, checked_at, eventsub_changed_at,
-        started_at_seconds, started_at_fraction, eventsub_changed_at_seconds, eventsub_changed_at_fraction)
-     VALUES (?, ?, ?, 'eventsub', ?, ?, ?, ?, ?, ?, ?)
+        started_at_seconds, started_at_fraction, eventsub_changed_at_seconds, eventsub_changed_at_fraction,
+        stream_id, started_at_epoch_ms, changed_at_epoch_ms)
+     VALUES (?, ?, ?, 'eventsub', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (channel_id) DO UPDATE
        SET state = excluded.state,
            changed_at = excluded.changed_at,
            source = 'eventsub',
-           started_at = excluded.started_at,
+           started_at = CASE WHEN excluded.state = 'online'
+                                  AND excluded.started_at IS NULL
+                                  AND channel_stream_state.state = 'online'
+                                  AND excluded.stream_id IS NOT NULL
+                                  AND excluded.stream_id = channel_stream_state.stream_id
+                             THEN channel_stream_state.started_at ELSE excluded.started_at END,
            checked_at = excluded.checked_at,
            eventsub_changed_at = excluded.eventsub_changed_at,
-           started_at_seconds = excluded.started_at_seconds,
-           started_at_fraction = excluded.started_at_fraction,
+           started_at_seconds = CASE WHEN excluded.state = 'online'
+                                          AND excluded.started_at IS NULL
+                                          AND channel_stream_state.state = 'online'
+                                          AND excluded.stream_id IS NOT NULL
+                                          AND excluded.stream_id = channel_stream_state.stream_id
+                                     THEN channel_stream_state.started_at_seconds ELSE excluded.started_at_seconds END,
+           started_at_fraction = CASE WHEN excluded.state = 'online'
+                                           AND excluded.started_at IS NULL
+                                           AND channel_stream_state.state = 'online'
+                                           AND excluded.stream_id IS NOT NULL
+                                           AND excluded.stream_id = channel_stream_state.stream_id
+                                      THEN channel_stream_state.started_at_fraction ELSE excluded.started_at_fraction END,
            eventsub_changed_at_seconds = excluded.eventsub_changed_at_seconds,
-           eventsub_changed_at_fraction = excluded.eventsub_changed_at_fraction
+           eventsub_changed_at_fraction = excluded.eventsub_changed_at_fraction,
+           stream_id = CASE
+             WHEN excluded.state <> 'online' THEN NULL
+             WHEN excluded.stream_id IS NOT NULL THEN excluded.stream_id
+             WHEN channel_stream_state.state = 'online'
+              AND COALESCE(excluded.started_at_epoch_ms,
+                   CAST(round((julianday(excluded.started_at) - 2440587.5) * 86400000.0) AS INTEGER))
+                  = COALESCE(channel_stream_state.started_at_epoch_ms,
+                   CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER))
+             THEN channel_stream_state.stream_id ELSE NULL END,
+           started_at_epoch_ms = CASE WHEN excluded.state = 'online'
+                                           AND excluded.started_at IS NULL
+                                           AND channel_stream_state.state = 'online'
+                                           AND excluded.stream_id IS NOT NULL
+                                           AND excluded.stream_id = channel_stream_state.stream_id
+                                      THEN channel_stream_state.started_at_epoch_ms ELSE excluded.started_at_epoch_ms END,
+           changed_at_epoch_ms = excluded.changed_at_epoch_ms
      WHERE (channel_stream_state.eventsub_changed_at_seconds IS NULL
          OR excluded.eventsub_changed_at_seconds > channel_stream_state.eventsub_changed_at_seconds
          OR (excluded.eventsub_changed_at_seconds = channel_stream_state.eventsub_changed_at_seconds
@@ -140,17 +204,33 @@ export const writeEventSubStreamState = async (
           AND (excluded.eventsub_changed_at_seconds > channel_stream_state.started_at_seconds
             OR (excluded.eventsub_changed_at_seconds = channel_stream_state.started_at_seconds
              AND excluded.eventsub_changed_at_fraction > channel_stream_state.started_at_fraction))))
+       AND (excluded.state <> 'online' OR channel_stream_state.state <> 'offline'
+         OR channel_stream_state.source <> 'helix'
+         OR (excluded.started_at_epoch_ms IS NOT NULL
+          AND excluded.started_at_epoch_ms >= COALESCE(channel_stream_state.changed_at_epoch_ms,
+               CAST(round((julianday(channel_stream_state.changed_at) - 2440587.5) * 86400000.0) AS INTEGER)))
+         OR (excluded.started_at_epoch_ms IS NULL
+          AND julianday(excluded.changed_at) >= julianday(channel_stream_state.changed_at)))
        AND (excluded.state <> 'online' OR channel_stream_state.state <> 'online'
-         OR channel_stream_state.started_at_seconds IS NULL OR excluded.started_at_seconds IS NULL
-         OR excluded.started_at_seconds > channel_stream_state.started_at_seconds
-            OR (excluded.started_at_seconds = channel_stream_state.started_at_seconds
-          AND COALESCE(excluded.started_at_fraction, '') >= COALESCE(channel_stream_state.started_at_fraction, '')))`,
+         OR (excluded.stream_id IS NOT NULL AND channel_stream_state.stream_id IS NOT NULL
+          AND excluded.stream_id = channel_stream_state.stream_id)
+         OR ((excluded.stream_id IS NULL OR channel_stream_state.stream_id IS NULL)
+          AND COALESCE(excluded.started_at_epoch_ms,
+               CAST(round((julianday(excluded.started_at) - 2440587.5) * 86400000.0) AS INTEGER))
+             >= COALESCE(channel_stream_state.started_at_epoch_ms,
+               CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER)))
+         OR (excluded.stream_id IS NOT NULL AND channel_stream_state.stream_id IS NOT NULL
+          AND excluded.stream_id <> channel_stream_state.stream_id
+          AND excluded.started_at_epoch_ms > COALESCE(channel_stream_state.started_at_epoch_ms,
+               CAST(round((julianday(channel_stream_state.started_at) - 2440587.5) * 86400000.0) AS INTEGER))))`,
   ).bind(
     channelId, state, changedAt, startedAt, changedAt, changedAt,
-    startedAtSeconds, startedAtFraction, eventSeconds, eventFraction, current?.changedAt ?? null,
-  )];
+    startedAtSeconds, startedAtFraction, eventSeconds, eventFraction,
+    streamId, startedAtEpochMs, changedAtEpochMs, current?.changedAt ?? null,
+  );
+  const statements = [statement];
   if (state === "online" && startedAt !== null) {
-    statements.push(prepareBindPendingStreamControls(db, channelId, startedAt));
+    statements.push(prepareBindPendingStreamControls(db, channelId, startedAt, streamId));
   }
   const results = await db.batch(statements);
   return (results[0]?.meta.changes ?? 0) > 0 ? "written" : "superseded";
@@ -162,17 +242,20 @@ export const writeHelixStreamStateIfUnknown = async (
   state: StoredStreamState,
   changedAt: string,
   startedAt: string | null,
+  streamId: string | null = null,
 ): Promise<boolean> => {
   const [startedAtSeconds, startedAtFraction] = timestampOrderBindings(startedAt);
-  const statements = [db.prepare(
+  const statement = db.prepare(
     `INSERT INTO channel_stream_state
        (channel_id, state, changed_at, source, started_at, checked_at, eventsub_changed_at,
-        started_at_seconds, started_at_fraction)
-     VALUES (?, ?, ?, 'helix', ?, ?, NULL, ?, ?)
+        started_at_seconds, started_at_fraction, stream_id, started_at_epoch_ms, changed_at_epoch_ms)
+     VALUES (?, ?, ?, 'helix', ?, ?, NULL, ?, ?, ?, ?, ?)
      ON CONFLICT (channel_id) DO NOTHING`,
-  ).bind(channelId, state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction)];
+  ).bind(channelId, state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction,
+    streamId, timestampEpochMilliseconds(startedAt), timestampEpochMilliseconds(changedAt));
+  const statements = [statement];
   if (state === "online" && startedAt !== null) {
-    statements.push(prepareBindPendingStreamControls(db, channelId, startedAt));
+    statements.push(prepareBindPendingStreamControls(db, channelId, startedAt, streamId));
   }
   const results = await db.batch(statements);
   return (results[0]?.meta.changes ?? 0) > 0;
@@ -190,15 +273,19 @@ export const prepareRefreshHelixStreamState = (
   state: StoredStreamState,
   changedAt: string,
   startedAt: string | null,
+  streamId: string | null = null,
 ): D1PreparedStatement => {
   const [startedAtSeconds, startedAtFraction] = timestampOrderBindings(startedAt);
   return db.prepare(
-  `UPDATE channel_stream_state
+    `UPDATE channel_stream_state
         SET state = ?, changed_at = ?, source = 'helix', started_at = ?, checked_at = ?,
-            started_at_seconds = ?, started_at_fraction = ?
+            started_at_seconds = ?, started_at_fraction = ?, stream_id = ?,
+            started_at_epoch_ms = ?, changed_at_epoch_ms = ?
       WHERE channel_id = ?
         AND julianday(?) >= julianday(changed_at)`,
-  ).bind(state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction, channelId, changedAt);
+  ).bind(state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction,
+    state === "online" ? streamId : null, timestampEpochMilliseconds(startedAt),
+    timestampEpochMilliseconds(changedAt), channelId, changedAt);
 };
 
 export const refreshHelixStreamState = async (
@@ -207,10 +294,11 @@ export const refreshHelixStreamState = async (
   state: StoredStreamState,
   changedAt: string,
   startedAt: string | null,
+  streamId: string | null = null,
 ): Promise<boolean> => {
-  const statements: D1PreparedStatement[] = [prepareRefreshHelixStreamState(db, channelId, state, changedAt, startedAt)];
+  const statements: D1PreparedStatement[] = [prepareRefreshHelixStreamState(db, channelId, state, changedAt, startedAt, streamId)];
   if (state === "online" && startedAt !== null) {
-    statements.push(prepareBindPendingStreamControls(db, channelId, startedAt));
+    statements.push(prepareBindPendingStreamControls(db, channelId, startedAt, streamId));
   }
   const results = await db.batch(statements);
   return (results[0]?.meta.changes ?? 0) > 0;

@@ -113,6 +113,59 @@ describe("channel controls", () => {
     }
   });
 
+  it("keeps a Helix-bound control active for the same EventSub stream id despite timestamp formatting", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      const db = database as unknown as D1Database;
+      const streamId = "twitch-stream-123";
+      await writeHelixStreamStateIfUnknown(
+        db, "kanal-a", "online", "2026-09-23T09:00:05.000Z", "2026-09-23T09:00:00Z", streamId,
+      );
+      await setChannelControl(db, actor, "kanal-a", "mute", "until_stream_end", NOW);
+
+      await expect(writeEventSubStreamState(
+        db, "kanal-a", "online", "2026-09-23T09:01:00.000Z", "2026-09-23T09:00:00.000Z", streamId,
+      )).resolves.toBe("written");
+
+      await expect(database.prepare(
+        `SELECT muted, mute_stream_started_at, mute_stream_id
+           FROM channel_controls WHERE channel_id = 'kanal-a'`,
+      ).first()).resolves.toEqual({
+        muted: 1, mute_stream_started_at: "2026-09-23T09:00:00Z", mute_stream_id: streamId,
+      });
+      await expect(readDispatchChannelState(db, "kanal-a", "2026-09-23T09:01:01.000Z")).resolves.toMatchObject({
+        controls: { mute: { active: true, mode: "until_stream_end" } },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("normalizes timestamp-only session identity for rows that predate stream ids", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      const helixStart = "2026-09-23T08:00:00Z";
+      const eventSubSpelling = "2026-09-23T08:00:00.000Z";
+      await database.prepare(
+        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
+         VALUES ('kanal-a', 'online', ?, 'helix', ?)`,
+      ).bind(NOW, helixStart).run();
+      await database.prepare(
+        `INSERT INTO channel_controls
+          (channel_id, muted, mute_until_stream_end, mute_stream_started_at, updated_at)
+         VALUES ('kanal-a', 1, 1, ?, ?)`,
+      ).bind(eventSubSpelling, NOW).run();
+
+      await expect(readChannelControls(database as unknown as D1Database, "kanal-a", NOW)).resolves.toMatchObject({
+        mute: { active: true, mode: "until_stream_end" },
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it("keeps an offline control pending for the next stream and ends it with that session", async () => {
     const database = new TestD1Database();
     try {
