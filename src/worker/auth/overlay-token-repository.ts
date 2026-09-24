@@ -123,6 +123,7 @@ export const listActiveOverlayTokens = async (
             token.last_used_at, token.expires_at
        FROM overlay_tokens AS token
       WHERE token.channel_id = ?
+        AND token.overlay_id IS NULL
         AND token.revoked_at IS NULL
         AND (
           token.expires_at IS NULL
@@ -213,6 +214,27 @@ export const getUsableOverlayToken = async (
   return row === null ? null : mapOverlayToken(row);
 };
 
+/** Reads the immutable overlay assignment stored on the token row. */
+export const getOverlayBindingForToken = async (
+  db: D1Database,
+  channelId: string,
+  tokenId: string,
+): Promise<string | null> => {
+  const row = await db.prepare(
+    `SELECT overlay_id, revoked_at
+       FROM overlay_tokens
+      WHERE channel_id = ? AND token_id = ?`,
+  ).bind(channelId, tokenId).first<{
+    overlay_id: string | null;
+    revoked_at: string | null;
+  }>();
+  // A missing row is an authentication consistency failure. Treating it as a
+  // legacy token would grant channel-wide access after a failed binding read.
+  if (row === null) throw new Error("Authenticated overlay token binding could not be read.");
+  if (row.revoked_at !== null) throw new Error("Authenticated overlay token has been revoked.");
+  return row.overlay_id;
+};
+
 export const touchOverlayToken = async (
   db: D1Database,
   channelId: string,
@@ -247,7 +269,7 @@ export const revokeOverlayToken = async (
   const beforeRow = await db.prepare(
     `SELECT token_id, created_at, expires_at, revoked_at, revocation_reason
        FROM overlay_tokens
-      WHERE token_id = ? AND channel_id = ?`,
+      WHERE token_id = ? AND channel_id = ? AND overlay_id IS NULL`,
   ).bind(tokenId, channelId).first<OverlayTokenAuditRow>();
   if (beforeRow === null) return false;
   // A repeated revoke is a useful retry for the realtime close. The row is
@@ -271,6 +293,7 @@ export const revokeOverlayToken = async (
         SET revoked_at = ?, revocation_reason = ?
       WHERE token_id = ?
         AND channel_id = ?
+        AND overlay_id IS NULL
         AND revoked_at IS NULL
         AND created_at = ?
         AND (expires_at = ? OR (expires_at IS NULL AND ? IS NULL))

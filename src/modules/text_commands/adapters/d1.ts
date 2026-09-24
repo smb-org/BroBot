@@ -623,6 +623,12 @@ export const createTextCommandRepository = (
     const variableBefore = variableChange === null ? null : db.prepare(
       "SELECT value FROM channel_variables WHERE channel_id = ? AND name = ?",
     ).bind(channelId, action?.name ?? "");
+    const variableOverlayReferences = variableChange === null ? null : db.prepare(
+      `SELECT DISTINCT overlay_id
+         FROM overlay_elements
+        WHERE channel_id = ? AND variable_name = ?
+        ORDER BY overlay_id`,
+    ).bind(channelId, action?.name ?? "");
     const statements: D1PreparedStatement[] = variableChange === null
       ? [claim]
       : [variableBefore as D1PreparedStatement, variableChange, claim];
@@ -636,6 +642,8 @@ export const createTextCommandRepository = (
          ON CONFLICT (channel_id, command_name, user_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
       ).bind(channelId, name, userId, now));
     }
+    const overlayReferencesIndex = variableOverlayReferences === null ? -1 : statements.length;
+    if (variableOverlayReferences !== null) statements.push(variableOverlayReferences);
     const results = statements.length === 1 ? [await claim.run()] : await db.batch(statements);
     const claimResult = results[variableChange === null ? 0 : 2];
     if (claimResult === undefined) throw new Error("Command claim returned no result.");
@@ -670,7 +678,17 @@ export const createTextCommandRepository = (
         ? previousResult.value
         : undefined;
       const changedVariable = changed === undefined || changed.value === previousValue ? undefined : changed;
-      return { command: current, claimed: true, ...(changedVariable === undefined ? {} : { changedVariable }) };
+      const overlayRows = overlayReferencesIndex < 0 ? [] : results[overlayReferencesIndex]?.results ?? [];
+      const changedVariableOverlayIds = [...new Set(overlayRows.flatMap((row: unknown) => {
+        if (typeof row !== "object" || row === null) return [];
+        const overlayId = Reflect.get(row, "overlay_id") as unknown;
+        return typeof overlayId === "string" ? [overlayId] : [];
+      }))];
+      return {
+        command: current,
+        claimed: true,
+        ...(changedVariable === undefined ? {} : { changedVariable, changedVariableOverlayIds }),
+      };
     }
 
     if (commandBeforeClaim !== null && current.revision !== commandBeforeClaim.revision) {

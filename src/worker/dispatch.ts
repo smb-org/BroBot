@@ -442,6 +442,7 @@ export const dispatchEventSubNotification = async (
   // The ending stream remains current while its offline event is dispatched.
   // Capture that session's controls before the stored state moves to offline.
   const changedVariables = new Map<string, number>();
+  const overlayIdsByVariable = new Map<string, readonly string[]>();
   let streamStateChanged: RealtimeMessage | null = null;
   const endingStreamDispatchState = event.subscriptionType === "stream.offline"
     ? await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt)
@@ -509,14 +510,17 @@ export const dispatchEventSubNotification = async (
       );
     }
     if (isOnline && stateWrite === "written" && startedAt !== null) {
-      const resetNames = await prepareResetChannelVariablesForStream(
+      const reset = await prepareResetChannelVariablesForStream(
         environment.DB,
         event.channelId,
         startedAt,
         event.eventSubTimestamp ?? event.receivedAt,
         streamId,
       );
-      for (const name of resetNames) changedVariables.set(name, 0);
+      for (const name of reset.names) {
+        changedVariables.set(name, 0);
+        overlayIdsByVariable.set(name, reset.overlayIdsByVariable[name] ?? []);
+      }
     }
   }
   const dispatchState = endingStreamDispatchState ??
@@ -658,18 +662,15 @@ export const dispatchEventSubNotification = async (
 
     if (result !== null) {
       diagnostics.push(...result.diagnostics);
+      for (const change of result.variableChanges ?? []) {
+        changedVariables.set(change.name, change.value);
+        overlayIdsByVariable.set(change.name, change.overlayIds);
+      }
       try {
         diagnostics.push(...await runActions(environment, event.channelId, result.actions, dispatchState.controls.mute.active, fetcher));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }
-    }
-
-    for (const diagnostic of diagnostics) {
-      if (diagnostic.code !== "text_commands.triggered") continue;
-      const name = diagnostic.detail?.variable;
-      const value = diagnostic.detail?.current;
-      if (typeof name === "string" && Number.isSafeInteger(value)) changedVariables.set(name, value as number);
     }
 
     newEntries.push(...await writeModuleDiagnostics(
@@ -707,6 +708,7 @@ export const dispatchEventSubNotification = async (
       event.channelId,
       [...changedVariables].map(([name, value]) => ({ name, value })),
       [],
+      Object.fromEntries(overlayIdsByVariable),
       realtimeMessages,
     );
   } else {

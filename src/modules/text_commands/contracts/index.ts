@@ -103,6 +103,7 @@ export interface TextCommandClaim {
   claimed: boolean;
   stale?: boolean;
   changedVariable?: { name: string; value: number };
+  changedVariableOverlayIds?: readonly string[];
   reason?: "cooldown" | "user_cooldown" | "variable_update_failed";
   remainingSeconds?: number;
 }

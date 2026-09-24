@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
+import { publishOverlayChanged } from "../../src/worker/realtime";
 import type { RealtimeMessage } from "../../src/realtime-contract";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -13,7 +14,7 @@ const environmentKeys = {
 };
 
 let database: TestD1Database;
-let realtimePublish: ReturnType<typeof vi.fn<(messages: readonly RealtimeMessage[]) => void>>;
+let realtimePublish: ReturnType<typeof vi.fn<(messages: readonly RealtimeMessage[]) => Promise<void>>>;
 
 const environmentFor = (database: TestD1Database): Env => ({
   DB: database as unknown as D1Database,
@@ -59,7 +60,7 @@ const fetchPanel = async (
 );
 
 describe("Channel variable routes", () => {
-  beforeEach(() => { database = new TestD1Database(); realtimePublish = vi.fn<(messages: readonly RealtimeMessage[]) => void>(); });
+  beforeEach(() => { database = new TestD1Database(); realtimePublish = vi.fn<(messages: readonly RealtimeMessage[]) => Promise<void>>().mockResolvedValue(undefined); });
   afterEach(() => { vi.useRealTimers(); database.close(); });
 
   it("lets operators change values while keeping variable management for managers", async () => {
@@ -317,6 +318,14 @@ describe("Channel variable routes", () => {
     const created = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
       name: "score", value: 4, description: "Score", resetOnStreamStart: false,
     });
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Gameplay', ?, ?)`,
+    ).bind("2026-09-24T00:00:00.000Z", "2026-09-24T00:00:00.000Z").run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name)
+       VALUES ('element-a', 'channel-a', 'overlay-a', 'variable', 'score')`,
+    ).run();
     const metadataUpdated = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", {
       description: "Current score", resetOnStreamStart: true,
     });
@@ -334,8 +343,72 @@ describe("Channel variable routes", () => {
       [{ type: "variables.changed", payload: { set: [{ name: "score", value: 4 }], removed: [] } }],
       [{ type: "variables.changed", payload: { set: [{ name: "score", value: 4 }], removed: [] } }],
       [{ type: "variables.changed", payload: { set: [{ name: "score", value: 7 }], removed: [] } }],
-      [{ type: "variables.changed", payload: { set: [{ name: "points", value: 7 }], removed: ["score"] } }],
-      [{ type: "variables.changed", payload: { set: [], removed: ["points"] } }],
+      [
+        { type: "overlay.changed", payload: { overlayId: "overlay-a", revision: 2 } },
+        { type: "variables.changed", payload: { set: [{ name: "points", value: 7 }], removed: ["score"] } },
+      ],
+      [
+        { type: "overlay.changed", payload: { overlayId: "overlay-a", revision: 3 } },
+        { type: "variables.changed", payload: { set: [], removed: ["points"] } },
+      ],
+    ]);
+    expect(realtimePublish.mock.calls.map(([messages]) => messages)).toMatchObject([
+      [{ type: "variables.changed", payload: { overlayIdsByVariable: { score: [] } } }],
+      [{ type: "variables.changed", payload: { overlayIdsByVariable: { score: ["overlay-a"] } } }],
+      [{ type: "variables.changed", payload: { overlayIdsByVariable: { score: ["overlay-a"] } } }],
+      [
+        { type: "overlay.changed" },
+        { type: "variables.changed", payload: { overlayIdsByVariable: { score: ["overlay-a"], points: ["overlay-a"] } } },
+      ],
+      [
+        { type: "overlay.changed" },
+        { type: "variables.changed", payload: { overlayIdsByVariable: { points: ["overlay-a"] } } },
+      ],
+    ]);
+  });
+
+  it("routes a value change from the overlay references that remain after an edit", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 0, description: "Score", resetOnStreamStart: false,
+    });
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Gameplay', ?, ?)`,
+    ).bind("2026-09-24T00:00:00.000Z", "2026-09-24T00:00:00.000Z").run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name)
+       VALUES ('element-a', 'channel-a', 'overlay-a', 'variable', 'score')`,
+    ).run();
+
+    // The overlay edit commits immediately before the value mutation. Its
+    // failed realtime hint is immaterial: the later write captures D1 state.
+    await database.batch([
+      database.prepare("UPDATE overlay_elements SET variable_name = NULL WHERE element_id = 'element-a'"),
+      database.prepare("UPDATE overlays SET revision = revision + 1 WHERE overlay_id = 'overlay-a'"),
+    ]);
+    realtimePublish.mockClear();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    realtimePublish.mockRejectedValueOnce(new Error("DO publish unavailable"))
+      .mockRejectedValueOnce(new Error("DO publish unavailable"));
+    try {
+      await publishOverlayChanged(environmentFor(database).CHANNEL, "channel-a", [
+        { overlayId: "overlay-a", revision: 2 },
+      ]);
+    } finally {
+      warning.mockRestore();
+    }
+    expect(realtimePublish).toHaveBeenCalledTimes(2);
+    realtimePublish.mockClear();
+    const changed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score/value", "POST", {
+      operation: "add", amount: 1,
+    });
+
+    expect(changed.status).toBe(200);
+    expect(realtimePublish.mock.calls.at(-1)?.[0]).toMatchObject([
+      { type: "variables.changed", payload: { overlayIdsByVariable: { score: [] } } },
     ]);
   });
 });

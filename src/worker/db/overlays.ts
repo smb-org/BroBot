@@ -3,6 +3,7 @@ import { prepareAudit } from "./audit";
 import {
   MANAGING_ROLES,
   OVERLAY_MAXIMUM_COUNT,
+  type OverlayAccessRevocationReason,
   type OverlayElementKind,
 } from "../../contracts/values";
 
@@ -170,6 +171,41 @@ export const hasChannelVariableForOverlay = async (
   return row !== null;
 };
 
+export const overlayUsesVariable = async (
+  db: D1Database,
+  channelId: string,
+  overlayId: string,
+  variableName: string,
+): Promise<boolean> => {
+  const row = await db.prepare(
+    `SELECT 1 AS present
+       FROM overlay_elements
+      WHERE channel_id = ? AND overlay_id = ? AND variable_name = ?
+      LIMIT 1`,
+  ).bind(channelId, overlayId, variableName).first<{ present: number }>();
+  return row !== null;
+};
+
+export const getOverlayVariableValues = async (
+  db: D1Database,
+  channelId: string,
+  overlayId: string,
+): Promise<Record<string, number>> => {
+  const rows = await db.prepare(
+    `SELECT variable.name, variable.value
+       FROM channel_variables AS variable
+      WHERE variable.channel_id = ?
+        AND variable.name IN (
+          SELECT DISTINCT element.variable_name
+            FROM overlay_elements AS element
+           WHERE element.channel_id = ? AND element.overlay_id = ?
+             AND element.variable_name IS NOT NULL
+        )
+      ORDER BY variable.name`,
+  ).bind(channelId, channelId, overlayId).all<{ name: string; value: number }>();
+  return Object.fromEntries(rows.results.map(({ name, value }) => [name, value]));
+};
+
 const auditSnapshot = (overlay: Pick<OverlayRecord, "id" | "name" | "width" | "height" | "revision" | "elements">) => ({
   overlayId: overlay.id,
   name: overlay.name,
@@ -328,13 +364,50 @@ export const deleteOverlayWithAudit = async (
   before: OverlayRecord,
   baseRevision: number,
   changedAt: string,
-): Promise<{ changes: number; rowsWritten: number }> => {
+): Promise<{ changes: number; rowsWritten: number; revokedAccessTokenIds: string[] }> => {
+  const revokeReason: OverlayAccessRevocationReason = "overlay_deleted";
+  const revokeAccesses = db.prepare(
+    `UPDATE overlay_tokens
+        SET revoked_at = ?, revocation_reason = ?
+      WHERE channel_id = ? AND overlay_id = ? AND revoked_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM overlays
+           WHERE channel_id = ? AND overlay_id = ? AND revision = ?
+        )
+        ${actorGuard(MANAGING_ROLES)}`,
+  ).bind(changedAt, revokeReason, before.channelId, before.id, before.channelId, before.id, baseRevision,
+    ...bindActorGuard(actor, before.channelId, changedAt));
+  const auditRevokedAccesses = db.prepare(
+    `INSERT INTO audit_log
+      (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
+     SELECT lower(hex(randomblob(16))), ?, ?, channel_id, NULL, ?,
+            json_object('tokenId', token_id, 'overlayId', overlay_id, 'label', label,
+                        'expiresAt', expires_at, 'createdAt', created_at,
+                        'revokedAt', NULL, 'revocationReason', NULL),
+            json_object('tokenId', token_id, 'overlayId', overlay_id, 'label', label,
+                        'expiresAt', expires_at, 'createdAt', created_at,
+                        'revokedAt', revoked_at, 'revocationReason', revocation_reason),
+            'member'
+       FROM overlay_tokens
+      WHERE channel_id = ? AND overlay_id = ? AND revoked_at = ? AND revocation_reason = ?`,
+  ).bind(actor.userId, changedAt, "overlay.access.revoked", before.channelId, before.id, changedAt, revokeReason);
   const mutation = db.prepare(
     `DELETE FROM overlays
       WHERE channel_id = ? AND overlay_id = ? AND revision = ? ${actorGuard(MANAGING_ROLES)}`,
   ).bind(before.channelId, before.id, baseRevision, ...bindActorGuard(actor, before.channelId, changedAt));
   const audit = prepareAudit(db, actor.userId, changedAt, before.channelId, null, "overlay.deleted",
     auditSnapshot(before), null);
-  const results = await db.batch([mutation, audit]);
-  return { changes: results[0]?.meta.changes ?? 0, rowsWritten: rowsWritten(results) };
+  const results = await db.batch([revokeAccesses, auditRevokedAccesses, mutation, audit]);
+  const changes = results[2]?.meta.changes ?? 0;
+  if (changes === 0) return { changes, rowsWritten: rowsWritten(results), revokedAccessTokenIds: [] };
+  const revokedAccesses = await db.prepare(
+    `SELECT token_id
+       FROM overlay_tokens
+      WHERE channel_id = ? AND revoked_at = ? AND revocation_reason = 'overlay_deleted'`,
+  ).bind(before.channelId, changedAt).all<{ token_id: string }>();
+  return {
+    changes,
+    rowsWritten: rowsWritten(results),
+    revokedAccessTokenIds: revokedAccesses.results.map((row) => row.token_id),
+  };
 };

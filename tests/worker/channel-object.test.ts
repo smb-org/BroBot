@@ -49,6 +49,7 @@ type SocketDouble = WebSocket & {
   send: ReturnType<typeof vi.fn<(message: string) => void>>;
   close: ReturnType<typeof vi.fn>;
   deserializeAttachment: ReturnType<typeof vi.fn>;
+  serializeAttachment: ReturnType<typeof vi.fn>;
 };
 
 const socketFor = (principal: RealtimePanelPrincipal): SocketDouble => ({
@@ -60,14 +61,23 @@ const socketFor = (principal: RealtimePanelPrincipal): SocketDouble => ({
   send: vi.fn(),
   close: vi.fn(),
   deserializeAttachment: vi.fn(() => principal),
+  serializeAttachment: vi.fn(),
 } as unknown as SocketDouble);
 
-const overlaySocketFor = (principal: RealtimeOverlayPrincipal): SocketDouble => ({
-  tags: ["kind:overlay", `token:${principal.tokenId}`],
-  send: vi.fn(),
-  close: vi.fn(),
-  deserializeAttachment: vi.fn(() => principal),
-} as unknown as SocketDouble);
+const overlaySocketFor = (
+  input: Omit<RealtimeOverlayPrincipal, "overlayId"> & { overlayId?: string | null },
+): SocketDouble => {
+  const principal: RealtimeOverlayPrincipal = { ...input, overlayId: input.overlayId ?? null };
+  let attachment: unknown = { ...principal };
+  return {
+    tags: ["kind:overlay", `token:${principal.tokenId}`,
+      ...(principal.overlayId === null ? [] : [`overlay:${principal.overlayId}`])],
+    send: vi.fn(),
+    close: vi.fn(),
+    deserializeAttachment: vi.fn(() => attachment),
+    serializeAttachment: vi.fn((next: unknown) => { attachment = next; }),
+  } as unknown as SocketDouble;
+};
 
 type StorageDouble = {
   values: Map<string, unknown>;
@@ -100,12 +110,18 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
     all: vi.fn().mockResolvedValue({ results: [] }),
     first: vi.fn().mockResolvedValue({ token_id: "token-1" }),
   };
+  const getWebSockets = vi.fn((tag?: string) => tag === undefined
+    ? sockets
+    : sockets.filter((socket) => socket.tags.includes(tag)));
   const state = {
     id: { name: "kanal-a" },
-    getWebSockets: (tag?: string) => tag === undefined
-      ? sockets
-      : sockets.filter((socket) => socket.tags.includes(tag)),
-    acceptWebSocket: vi.fn((socket: WebSocket) => { sockets.push(socket as SocketDouble); }),
+    setWebSocketAutoResponse: vi.fn(),
+    getWebSockets,
+    acceptWebSocket: vi.fn((socket: WebSocket) => {
+      sockets.push(socket as SocketDouble);
+      const endpoint = socket as WebSocket & { accept: () => void };
+      endpoint.accept();
+    }),
     storage: {
       ...storage,
       get: vi.fn((key: string) => Promise.resolve(values.get(key))),
@@ -211,31 +227,31 @@ describe("ChannelObject realtime path", () => {
       kind: "overlay",
       channelId: "kanal-b",
       tokenId: "token-1",
+      overlayId: null,
       expiresAt: null,
     })).then((response) => response.status)).resolves.toBe(403);
   });
 
-  it("rejects a publish for a foreign channel", () => {
+  it("rejects a publish for a foreign channel", async () => {
     const object = objectFor([]);
 
-    expect(() => {
-      object.publish([{ ...eventMessage, channelId: "kanal-b" }]);
-    }).toThrow(/foreign channel/);
+    await expect(Promise.resolve().then(() => object.publish([{ ...eventMessage, channelId: "kanal-b" }])))
+      .rejects.toThrow(/foreign channel/);
   });
 
-  it("sends nothing more to an expired connection", () => {
+  it("sends nothing more to an expired connection", async () => {
     const expired = socketFor(validPrincipal({ expiresAt: "2000-01-01T00:00:00.000Z" }));
     const valid = socketFor(validPrincipal({ userId: "user-2", sessionId: "session-2" }));
     const object = objectFor([expired, valid]);
 
-    object.publish([eventMessage]);
+    await object.publish([eventMessage]);
 
     expect(expired.send.mock.calls).toHaveLength(0);
     expect(expired.close.mock.calls).toEqual([[4001, "authorization expired"]]);
     expect(valid.send.mock.calls).toHaveLength(1);
   });
 
-  it("keeps panel-only event-log hints away from overlay sockets", () => {
+  it("keeps panel-only event-log hints away from overlay sockets", async () => {
     const panel = socketFor(validPrincipal());
     const overlay = overlaySocketFor({
       v: 1,
@@ -246,13 +262,78 @@ describe("ChannelObject realtime path", () => {
     });
     const object = objectFor([panel, overlay]);
 
-    object.publish([eventMessage]);
+    await object.publish([eventMessage]);
 
     expect(panel.send.mock.calls).toHaveLength(1);
     expect(overlay.send.mock.calls).toHaveLength(0);
   });
 
-  it("keeps stream-state refreshes away from overlay sockets", () => {
+  it("accepts a bound overlay without reading its variable references", async () => {
+    const token: RealtimeOverlayPrincipal = {
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-a",
+      overlayId: "overlay-a",
+      expiresAt: null,
+    };
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn().mockResolvedValue({ token_id: token.tokenId }),
+      })),
+    }));
+    const object = objectFor([], { prepare } as unknown as D1Database);
+
+    const response = await object.fetch(upgradeRequest(token));
+    const state = (object as unknown as { ctx: { getWebSockets: () => WebSocket[] } }).ctx;
+    const accepted = state.getWebSockets()[0];
+
+    expect(response.status).toBe(101);
+    expect(accepted?.deserializeAttachment()).toEqual(token);
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("FROM overlay_tokens"));
+  });
+
+  it("rechecks revocation immediately before accept when token validation awaits", async () => {
+    const token: RealtimeOverlayPrincipal = {
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-during-lookup",
+      overlayId: "overlay-a",
+      expiresAt: null,
+    };
+    let releaseLookup!: () => void;
+    let signalLookupStarted!: () => void;
+    const lookupGate = new Promise<void>((resolve) => { releaseLookup = resolve; });
+    const lookupStarted = new Promise<void>((resolve) => { signalLookupStarted = resolve; });
+    const prepare = vi.fn((query: string) => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(async () => {
+          if (query.includes("overlay_tokens")) {
+            signalLookupStarted();
+            await lookupGate;
+            return { token_id: token.tokenId };
+          }
+          return null;
+        }),
+      })),
+    }));
+    const object = objectFor([], { prepare } as unknown as D1Database);
+    const accept = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx.acceptWebSocket;
+
+    const handshake = object.fetch(upgradeRequest(token));
+    await lookupStarted;
+    await object.revokeToken(token.tokenId);
+    releaseLookup();
+    const response = await handshake;
+
+    expect(response.status).toBe(403);
+    expect(accept).not.toHaveBeenCalled();
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps stream-state refreshes away from overlay sockets", async () => {
     const panel = socketFor(validPrincipal());
     const overlay = overlaySocketFor({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", expiresAt: null });
     const object = objectFor([panel, overlay]);
@@ -265,14 +346,14 @@ describe("ChannelObject realtime path", () => {
       payload: { state: "online", startedAt: "2026-09-24T11:00:00.000Z", changedAt: "2026-09-24T12:00:00.000Z" },
     };
 
-    object.publish([message]);
+    await object.publish([message]);
 
     expect(panel.send.mock.calls).toHaveLength(1);
     expect(overlay.send.mock.calls).toHaveLength(0);
     expect(typeOfSerializedMessage(panel.send.mock.calls[0]?.[0] ?? "")).toBe("stream.state.changed");
   });
 
-  it("publishes a list once and routes variable changes to both client kinds", () => {
+  it("publishes a list once and routes variable changes to both client kinds", async () => {
     const panel = socketFor(validPrincipal());
     const overlay = overlaySocketFor({
       v: 1,
@@ -291,7 +372,11 @@ describe("ChannelObject realtime path", () => {
       payload: { set: [{ name: "score", value: 12 }], removed: [] },
     };
 
-    object.publish([eventMessage, variablesMessage]);
+    await object.publish([eventMessage, variablesMessage]);
+
+    const getWebSockets = (object as unknown as { ctx: { getWebSockets: ReturnType<typeof vi.fn> } }).ctx.getWebSockets;
+    expect(getWebSockets).toHaveBeenCalledTimes(1);
+    expect(getWebSockets).toHaveBeenCalledWith();
 
     expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual([
       "event_log.new",
@@ -300,6 +385,199 @@ describe("ChannelObject realtime path", () => {
     expect(overlay.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual([
       "variables.changed",
     ]);
+  });
+
+  it("filters each variable change to the variables referenced by that overlay", async () => {
+    const panel = socketFor(validPrincipal());
+    const overlayA = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a",
+      expiresAt: null,
+    });
+    const overlayB = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-b", overlayId: "overlay-b",
+      expiresAt: null,
+    });
+    const overlayWithoutChanges = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-c", overlayId: "overlay-c",
+      expiresAt: null,
+    });
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null,
+      expiresAt: null,
+    });
+    const object = objectFor([panel, overlayA, overlayB, overlayWithoutChanges, legacy]);
+    const variablesMessage: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "variables-filtered-1",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: {
+        set: [{ name: "score", value: 12 }, { name: "wins", value: 8 }],
+        removed: ["streak", "rank"],
+        overlayIdsByVariable: {
+          score: ["overlay-a"],
+          wins: ["overlay-b"],
+          streak: ["overlay-a"],
+          rank: ["overlay-unconnected"],
+        },
+      },
+    };
+
+    await object.publish([variablesMessage]);
+
+    expect(JSON.parse(overlayA.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      payload: { set: [{ name: "score", value: 12 }], removed: ["streak"] },
+    });
+    expect(JSON.parse(overlayB.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      payload: { set: [{ name: "wins", value: 8 }], removed: [] },
+    });
+    expect(overlayWithoutChanges.send.mock.calls).toHaveLength(0);
+    expect(JSON.parse(legacy.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      payload: {
+        set: [{ name: "score", value: 12 }, { name: "wins", value: 8 }],
+        removed: ["streak", "rank"],
+      },
+    });
+    expect(JSON.parse(panel.send.mock.calls[0]?.[0] ?? "null")).toEqual({
+      ...variablesMessage,
+      payload: { set: variablesMessage.payload.set, removed: variablesMessage.payload.removed },
+    });
+  });
+
+  it("filters using write-time recipients when an overlay hint failed before reaching the DO", async () => {
+    const overlay = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,
+    });
+    const object = objectFor([overlay]);
+    const variableChange: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "variables-after-unpublished-overlay-edit",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: {
+        set: [{ name: "score", value: 12 }],
+        removed: [],
+        overlayIdsByVariable: { score: ["overlay-b"] },
+      },
+    };
+
+    await object.publish([variableChange]);
+
+    expect(overlay.send.mock.calls).toHaveLength(0);
+    expect(overlay.deserializeAttachment()).toEqual(expect.objectContaining({ overlayId: "overlay-a" }));
+  });
+
+  it("uses the socket's immutable overlay id after hibernation and leaves legacy delivery unfiltered", async () => {
+    const bound = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-bound", overlayId: "overlay-a", expiresAt: null,
+    });
+    const other = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-other", overlayId: "overlay-b", expiresAt: null,
+    });
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", expiresAt: null,
+    });
+    const previousInstance = objectFor([bound, other, legacy]);
+    const internals = previousInstance as unknown as { ctx: DurableObjectState; env: Env };
+    const afterWake = Object.create(ChannelObject.prototype) as ChannelObject;
+    (afterWake as unknown as { ctx: DurableObjectState }).ctx = internals.ctx;
+    (afterWake as unknown as { env: Env }).env = internals.env;
+    const variableChange: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "variables-after-wake",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: {
+        set: [{ name: "score", value: 12 }, { name: "wins", value: 8 }],
+        removed: ["streak"],
+        overlayIdsByVariable: {
+          score: ["overlay-a"],
+          wins: ["overlay-b"],
+          streak: ["overlay-a"],
+        },
+      },
+    };
+
+    await afterWake.publish([variableChange]);
+
+    expect(JSON.parse(bound.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      payload: { set: [{ name: "score", value: 12 }], removed: ["streak"] },
+    });
+    expect(JSON.parse(other.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      payload: { set: [{ name: "wins", value: 8 }], removed: [] },
+    });
+    expect(JSON.parse(legacy.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      payload: { set: [{ name: "score", value: 12 }, { name: "wins", value: 8 }], removed: ["streak"] },
+    });
+    expect(bound.serializeAttachment.mock.calls).toEqual([]);
+  });
+
+  it("does not read D1 while filtering write-routed variable changes", async () => {
+    const overlay = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,
+    });
+    const prepare = vi.fn();
+    const object = objectFor([overlay], { prepare } as unknown as D1Database);
+    const variablesMessage: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "variables-chat-path",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: {
+        set: [{ name: "score", value: 12 }],
+        removed: [],
+        overlayIdsByVariable: { score: ["overlay-a"] },
+      },
+    };
+
+    await object.publish([variablesMessage]);
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(overlay.send.mock.calls).toHaveLength(1);
+    const delivered: unknown = JSON.parse(overlay.send.mock.calls[0]?.[0] ?? "null");
+    expect(delivered).not.toHaveProperty("payload.overlayIdsByVariable");
+  });
+
+  it("routes overlay changes by the durable overlay tag after a fresh object instance", async () => {
+    const firstOverlay = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,
+    });
+    const secondOverlay = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-b", overlayId: "overlay-b", expiresAt: null,
+    });
+    const legacyOverlay = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null, expiresAt: null,
+    });
+    const panel = socketFor(validPrincipal());
+    // A new ChannelObject is constructed for each wake from hibernation. Only
+    // socket tags and attachments are shared with the fresh instance.
+    const previousInstance = objectFor([firstOverlay, secondOverlay, legacyOverlay, panel]);
+    const internals = previousInstance as unknown as { ctx: DurableObjectState; env: Env };
+    // Miniflare's DurableObject base constructor requires a branded state, so
+    // model its newly allocated subclass instance while reusing hibernated
+    // state exactly as the runtime does.
+    const objectAfterWake = Object.create(ChannelObject.prototype) as ChannelObject;
+    (objectAfterWake as unknown as { ctx: DurableObjectState }).ctx = internals.ctx;
+    (objectAfterWake as unknown as { env: Env }).env = internals.env;
+    const changed: RealtimeEnvelope<"overlay.changed"> = {
+      version: 1,
+      id: "overlay-change-1",
+      createdAt: "2026-09-24T12:00:00.000Z",
+      channelId: "kanal-a",
+      type: "overlay.changed",
+      payload: { overlayId: "overlay-a", revision: 2 },
+    };
+
+    await objectAfterWake.publish([changed]);
+
+    expect(firstOverlay.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual(["overlay.changed"]);
+    expect(secondOverlay.send.mock.calls).toHaveLength(0);
+    expect(legacyOverlay.send.mock.calls).toHaveLength(0);
+    expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual(["overlay.changed"]);
   });
 
   it("coalesces ad-schedule refreshes and pushes panel-only updates while reconciling alarms", async () => {
@@ -440,7 +718,7 @@ describe("ChannelObject realtime path", () => {
     await object.endStreamStateRefresh(next ?? "");
   });
 
-  it("closes an expired overlay socket before considering its recipient type", () => {
+  it("closes an expired overlay socket before considering its recipient type", async () => {
     const overlay = overlaySocketFor({
       v: 1,
       kind: "overlay",
@@ -450,7 +728,7 @@ describe("ChannelObject realtime path", () => {
     });
     const object = objectFor([overlay]);
 
-    object.publish([eventMessage]);
+    await object.publish([eventMessage]);
 
     expect(overlay.send.mock.calls).toHaveLength(0);
     expect(overlay.close.mock.calls).toEqual([[4001, "authorization expired"]]);
@@ -487,6 +765,7 @@ describe("ChannelObject realtime path", () => {
       kind: "overlay" as const,
       channelId: "kanal-a",
       tokenId: "token-in-flight",
+      overlayId: null,
       expiresAt: null,
     };
     const object = objectFor([]);
@@ -523,6 +802,7 @@ describe("ChannelObject realtime path", () => {
       kind: "overlay" as const,
       channelId: "kanal-a",
       tokenId: "token-old-revoked",
+      overlayId: null,
       expiresAt: null,
     };
     const prepare = vi.fn(() => ({
@@ -568,6 +848,7 @@ describe("ChannelObject realtime path", () => {
       kind: "overlay" as const,
       channelId: "kanal-a",
       tokenId: "token-retry",
+      overlayId: null,
       expiresAt: null,
     };
     const socket = overlaySocketFor(token);
@@ -749,7 +1030,7 @@ describe("ChannelObject realtime path", () => {
   });
 
   it("enforces socket capacity before accepting and reserves room for panels", async () => {
-    const token = { v: 1 as const, kind: "overlay" as const, channelId: "kanal-a", tokenId: "token-1", expiresAt: null };
+    const token = { v: 1 as const, kind: "overlay" as const, channelId: "kanal-a", tokenId: "token-1", overlayId: null, expiresAt: null };
     const sameTokenSockets = Array.from({ length: 10 }, () => overlaySocketFor(token));
     const object = objectFor(sameTokenSockets);
     const response = await object.fetch(upgradeRequest(token));
@@ -794,7 +1075,7 @@ describe("ChannelObject realtime path", () => {
       (object as unknown as { hasConnectionCapacity: (value: RealtimePrincipal) => boolean })
         .hasConnectionCapacity(principal);
     expect(hasCapacity(validPrincipal({ userId: "user-2", sessionId: "user-2-session" }))).toBe(true);
-    expect(hasCapacity({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", expiresAt: null })).toBe(true);
+    expect(hasCapacity({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", overlayId: null, expiresAt: null })).toBe(true);
   });
 
   it("rate-limits repeated overlay handshakes per token", async () => {

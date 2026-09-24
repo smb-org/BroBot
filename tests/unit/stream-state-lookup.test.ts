@@ -154,6 +154,14 @@ describe("lookupAndRefreshStreamState", () => {
         `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
          VALUES ('kanal-a', 'score', 42, 1, ?, ?), ('kanal-a', 'zero', 0, 1, ?, ?)`,
       ).bind(NOW, NOW, NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+         VALUES ('overlay-a', 'kanal-a', 'Gameplay', ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name)
+         VALUES ('element-a', 'kanal-a', 'overlay-a', 'variable', 'score')`,
+      ).run();
       await withAppToken(database);
 
       const startedAt = "2026-09-23T11:59:00.000Z";
@@ -163,7 +171,9 @@ describe("lookupAndRefreshStreamState", () => {
       expect(result).toMatchObject({ state: "online", startedAt });
       expect(publish).toHaveBeenCalledTimes(2);
       expect(publish.mock.calls[0]?.[0]).toMatchObject([
-        { type: "variables.changed", payload: { set: [{ name: "score", value: 0 }], removed: [] } },
+        { type: "variables.changed", payload: {
+          set: [{ name: "score", value: 0 }], removed: [], overlayIdsByVariable: { score: ["overlay-a"] },
+        } },
       ]);
       expect(publish.mock.calls[1]?.[0]).toMatchObject([
         { type: "stream.state.changed", payload: { state: "online", startedAt } },

@@ -60,7 +60,9 @@ import {
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
-import { revokeRealtimeSessionForUser, revokeRealtimeToken } from "../realtime";
+import { revokeRealtimeSessionForUser } from "../realtime";
+import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
+import { authorizeOverlayAccessManager, getOverlayTokenForLegacyReveal } from "./overlay-access-repository";
 import { MODULES } from "../../modules/registry";
 import {
   listAllBroadcasterScopes,
@@ -68,36 +70,11 @@ import {
 } from "../module-scopes";
 import { canManage, type ApiErrorCode } from "../../contracts/values";
 import { findChannelVariable } from "../db/channel-variables";
+import { getOverlayBindingForToken } from "./overlay-token-repository";
+import { getOverlayForChannel, getOverlayVariableValues } from "../db/overlays";
 
 const nowIso = (): string => new Date().toISOString();
-const REALTIME_TOKEN_CLOSE_TIMEOUT_MS = 2_000;
 const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
-
-const closeRealtimeTokenBeforeResponse = async (
-  namespace: Env["CHANNEL"] | undefined,
-  channelId: string,
-  tokenId: string,
-): Promise<boolean> => {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const outcome = await Promise.race([
-      revokeRealtimeToken(namespace, channelId, tokenId),
-      new Promise<"timeout">((resolve) => {
-        timeout = setTimeout(() => { resolve("timeout"); }, REALTIME_TOKEN_CLOSE_TIMEOUT_MS);
-      }),
-    ]);
-    if (outcome === "timeout" || !outcome) {
-      console.warn("Realtime token revocation is pending; the Durable Object will retry.");
-      return false;
-    }
-    return true;
-  } catch (error: unknown) {
-    console.warn("Realtime token revocation could not close the connection.", error);
-    return false;
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-  }
-};
 
 const canManageOverlayTokens = canManage;
 
@@ -344,6 +321,30 @@ authRouter.post(
   },
 );
 
+authRouter.post(
+  "/api/channels/:channelId/overlay-tokens/:tokenId/reveal",
+  requireChannelAuthorization(),
+  async (context) => {
+    if (!canManageOverlayTokens(context.get("channelRole"))) return overlayTokenManageDenied(context);
+    const now = nowIso();
+    const access = await getOverlayTokenForLegacyReveal(
+      context.env.DB,
+      context.req.param("channelId"),
+      context.req.param("tokenId"),
+      { userId: context.get("session").userId, sessionId: context.get("session").sessionId },
+      now,
+    );
+    context.header("Cache-Control", "no-store");
+    if (!access) {
+      if (!await authorizeOverlayAccessManager(context.env.DB, context.get("actor"), context.req.param("channelId"), now)) {
+        return overlayTokenManageDenied(context);
+      }
+      return context.json({ error: "overlay_token_not_found" }, 404);
+    }
+    return context.json({ error: "overlay_access_unrecoverable" }, 409);
+  },
+);
+
 authRouter.get("/api/overlay/status", async (context) => {
   const token = readBearerToken(context.req.header("Authorization"));
   if (token === null) return context.json({ error: "overlay_token_invalid" }, 401);
@@ -357,6 +358,41 @@ authRouter.get("/api/overlay/status", async (context) => {
 
   context.header("Cache-Control", "no-store");
   return context.json({ version: context.env.CF_VERSION_METADATA.id, language: record.language });
+});
+
+authRouter.get("/api/overlay/bootstrap", async (context) => {
+  context.header("Cache-Control", "no-store");
+  const token = readBearerToken(context.req.header("Authorization"));
+  if (token === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
+
+  const record = await authenticateOverlayToken(context.env.DB, {
+    token,
+    pepper: context.env.OVERLAY_TOKEN_PEPPER,
+    now: nowIso(),
+  });
+  if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
+
+  const overlayId = await getOverlayBindingForToken(context.env.DB, record.channelId, record.tokenId);
+  if (overlayId === null) {
+    return context.json({ language: record.language, overlay: null, variables: {} });
+  }
+  const overlay = await getOverlayForChannel(context.env.DB, record.channelId, overlayId);
+  if (overlay === null) {
+    return context.json({ language: record.language, overlay: null, variables: {} });
+  }
+  const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
+  return context.json({
+    language: record.language,
+    overlay: {
+      id: overlay.id,
+      revision: overlay.revision,
+      width: overlay.width,
+      height: overlay.height,
+      css: overlay.css,
+      elements: overlay.elements,
+    },
+    variables,
+  });
 });
 
 authRouter.get("/api/overlay/variables/:name", async (context) => {
@@ -375,7 +411,20 @@ authRouter.get("/api/overlay/variables/:name", async (context) => {
   if (!OVERLAY_VARIABLE_NAME_PATTERN.test(name)) {
     return context.json({ error: "variable_data_invalid" satisfies ApiErrorCode }, 400);
   }
-  const variable = await findChannelVariable(context.env.DB, record.channelId, name);
+  const overlayId = await getOverlayBindingForToken(context.env.DB, record.channelId, record.tokenId);
+  const variable = overlayId === null
+    ? await findChannelVariable(context.env.DB, record.channelId, name)
+    : await context.env.DB.prepare(
+      `SELECT variable.name, variable.value
+         FROM channel_variables AS variable
+         JOIN overlay_elements AS element
+           ON element.channel_id = variable.channel_id
+          AND element.variable_name = variable.name
+        WHERE variable.channel_id = ?
+          AND element.overlay_id = ?
+          AND variable.name = ?
+        LIMIT 1`,
+    ).bind(record.channelId, overlayId, name).first<{ name: string; value: number }>();
   if (variable === null) {
     return context.json({ error: "overlay_variable_not_found" satisfies ApiErrorCode }, 404);
   }

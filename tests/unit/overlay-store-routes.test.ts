@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
+import type { RealtimeMessage } from "../../src/realtime-contract";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement, type TestD1Result } from "./test-d1";
 
@@ -16,6 +17,7 @@ let batchCalls = 0;
 let sqliteChanges = 0;
 let originalBatch: (statements: TestPreparedStatement[]) => Promise<TestD1Result[]>;
 let originalPrepare: (sql: string) => TestPreparedStatement;
+let realtimePublish: ReturnType<typeof vi.fn<(messages: readonly RealtimeMessage[]) => void>>;
 
 const requestFor = async (userId: string, path: string, method = "GET", body?: unknown, includeCsrf = true): Promise<Request> => {
   const sessionId = `session-${userId}`;
@@ -36,7 +38,11 @@ const requestFor = async (userId: string, path: string, method = "GET", body?: u
 
 const fetchPanel = async (userId: string, path: string, method = "GET", body?: unknown, includeCsrf = true): Promise<Response> =>
   panelRouter.fetch(await requestFor(userId, path, method, body, includeCsrf), {
-    DB: database as unknown as D1Database,
+  DB: database as unknown as D1Database,
+  CHANNEL: {
+    idFromName: (channelId: string) => channelId,
+    get: () => ({ publish: realtimePublish }),
+  },
     TWITCH_CLIENT_ID: "test-client-id",
     SESSION_COOKIE_KEYS: environmentKeys.SESSION_COOKIE_KEYS,
     SESSION_ENCRYPTION_KEYS: environmentKeys.SESSION_ENCRYPTION_KEYS,
@@ -82,6 +88,7 @@ const startD1WriteCapture = (): void => {
 describe("stored overlay routes", () => {
   beforeEach(() => {
     database = new TestD1Database();
+    realtimePublish = vi.fn<(messages: readonly RealtimeMessage[]) => void>();
     originalBatch = database.batch.bind(database);
     originalPrepare = database.prepare.bind(database);
     startD1WriteCapture();
@@ -124,6 +131,27 @@ describe("stored overlay routes", () => {
     await expect(response.json()).resolves.toEqual({ error: "csrf_invalid" });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM overlays WHERE channel_id = 'channel-a'").first())
       .resolves.toEqual({ count: 0 });
+  });
+
+  it("publishes the created, saved, and deleted overlay revisions", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const overlayId = await createOverlay("manager-a", "channel-a", "Gameplay");
+
+    const saved = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
+      baseRevision: 1, name: "Gameplay", width: 1920, height: 1080, css: ".brobot-overlay {}", elements: [],
+    });
+    const deleted = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "DELETE", {
+      baseRevision: 2,
+    });
+
+    expect([saved.status, deleted.status]).toEqual([200, 204]);
+    expect(realtimePublish.mock.calls.map(([messages]) => messages)).toMatchObject([
+      [{ type: "overlay.changed", payload: { overlayId, revision: 1 } }],
+      [{ type: "overlay.changed", payload: { overlayId, revision: 2 } }],
+      [{ type: "overlay.changed", payload: { overlayId, revision: 2 } }],
+    ]);
   });
 
   it("uses revision CAS, diffs element rows, checks SQLite changes, and skips unchanged drafts", async () => {

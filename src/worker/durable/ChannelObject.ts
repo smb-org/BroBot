@@ -84,6 +84,7 @@ type TokenValidityRow = { token_id: string };
 type RevokedTokenMarker = { revokedAt: number };
 
 type OverlayHandshakeWindow = { startedAt: number; count: number };
+type RealtimeSocketAttachment = RealtimePrincipal;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -101,15 +102,24 @@ const isRealtimePrincipal = (value: unknown): value is RealtimePrincipal => {
   }
   if (value.kind === "overlay") {
     return isNonEmptyString(value.tokenId) &&
+      (value.overlayId === null || isNonEmptyString(value.overlayId)) &&
       (value.expiresAt === null || isNonEmptyString(value.expiresAt));
   }
   return false;
 };
 
-const readAttachment = (webSocket: WebSocket): RealtimePrincipal | null => {
+const isRealtimeSocketAttachment = (value: unknown): value is RealtimeSocketAttachment => {
+  return isRealtimePrincipal(value);
+};
+
+const hasActiveRevocationMarker = (marker: unknown, now: number): boolean =>
+  marker === true || (isRecord(marker) && typeof marker.revokedAt === "number" &&
+    Number.isFinite(marker.revokedAt) && now - marker.revokedAt < OVERLAY_REVOKED_MARKER_TTL_MS);
+
+const readAttachment = (webSocket: WebSocket): RealtimeSocketAttachment | null => {
   try {
     const attachment: unknown = webSocket.deserializeAttachment();
-    return isRealtimePrincipal(attachment) ? attachment : null;
+    return isRealtimeSocketAttachment(attachment) ? attachment : null;
   } catch {
     return null;
   }
@@ -133,7 +143,8 @@ const closeSocket = (webSocket: WebSocket, code: number, reason: string): boolea
 
 const tagsFor = (principal: RealtimePrincipal): string[] => principal.kind === "panel"
   ? [`kind:${principal.kind}`, `user:${principal.userId}`, `session:${principal.sessionId}`]
-  : [`kind:${principal.kind}`, `token:${principal.tokenId}`];
+  : [`kind:${principal.kind}`, `token:${principal.tokenId}`,
+    ...(principal.overlayId === null ? [] : [`overlay:${principal.overlayId}`])];
 
 const chunksOf = <T>(values: readonly T[], size: number): T[][] => {
   const chunks: T[][] = [];
@@ -211,7 +222,7 @@ export class ChannelObject extends DurableObject<Env> {
       });
       if (changed === null) return null;
       if (reconcileAlarm) await this.reconcileAdPrewarning(schedule, grantedScopes);
-      this.publish([{
+      await this.publish([{
         version: 1,
         id: crypto.randomUUID(),
         createdAt: asOf,
@@ -546,22 +557,36 @@ export class ChannelObject extends DurableObject<Env> {
     }
 
     const pair = new WebSocketPair();
+    let overlayTokenValidAtHandshake: boolean | undefined;
     if (principal.kind === "overlay") {
       try {
         // D1 protects handshakes whose in-memory revocation marker has aged
-        // out. Check the durable marker afterward: it catches a revoke that
-        // lands while the D1 query is in flight, and acceptance below is
-        // synchronous so no revoke can slip between this read and joining.
-        if (!await this.isOverlayTokenValid(principal.tokenId, ownChannelId, new Date().toISOString())) {
-          return new Response("Overlay token revoked.", { status: 403 });
-        }
-        const marker: unknown = await this.ctx.storage.get(revokedTokenKey(principal.tokenId));
-        if (marker === true || (isRecord(marker) && typeof marker.revokedAt === "number" &&
-            Number.isFinite(marker.revokedAt) && Date.now() - marker.revokedAt < OVERLAY_REVOKED_MARKER_TTL_MS)) {
+        // out. The marker is re-read at the final accept boundary below, so
+        // it also catches a revoke that lands while this query is in flight.
+        overlayTokenValidAtHandshake = await this.isOverlayTokenValid(
+          principal.tokenId,
+          ownChannelId,
+          new Date().toISOString(),
+        );
+        if (!overlayTokenValidAtHandshake) {
           return new Response("Overlay token revoked.", { status: 403 });
         }
       } catch (error: unknown) {
         console.error("Realtime overlay revocation could not be checked.", error);
+        return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
+      }
+    }
+    if (principal.kind === "overlay") {
+      try {
+        // Re-read the durable marker immediately before acceptance and reuse
+        // the D1 authorization result from this handshake.
+        const marker: unknown = await this.ctx.storage.get(revokedTokenKey(principal.tokenId));
+        if (overlayTokenValidAtHandshake !== true || isExpired(principal, Date.now()) ||
+            hasActiveRevocationMarker(marker, Date.now())) {
+          return new Response("Overlay token revoked.", { status: 403 });
+        }
+      } catch (error: unknown) {
+        console.error("Realtime overlay revocation could not be rechecked.", error);
         return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
       }
     }
@@ -579,36 +604,68 @@ export class ChannelObject extends DurableObject<Env> {
   /** Distributes only within its own channel and only to principals of the requested kind. */
   public publish(
     messages: readonly RealtimeMessage[],
-  ): void {
-    if (messages.length === 0) return;
+  ): Promise<void> {
+    if (messages.length === 0) return Promise.resolve();
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || messages.some((message) => message.channelId !== ownChannelId)) {
       throw new Error("Realtime message belongs to a foreign channel.");
     }
     const now = Date.now();
-    const serialized = messages.map((message) => ({
-      recipients: REALTIME_RECIPIENTS[message.type],
-      payload: JSON.stringify(message),
+    const ordinarySockets = messages.some((message) => message.type !== "overlay.changed")
+      ? this.ctx.getWebSockets()
+      : [];
+    const overlaySocketsById = new Map<string, WebSocket[]>();
+    const changedOverlayIds = new Set(messages.flatMap((message) =>
+      message.type === "overlay.changed" ? [message.payload.overlayId] : []));
+    for (const overlayId of changedOverlayIds) {
+      overlaySocketsById.set(overlayId, this.ctx.getWebSockets(`overlay:${overlayId}`));
+    }
+    const serialized = messages.map((envelope) => ({
+      envelope,
+      payload: JSON.stringify(envelope.type === "variables.changed"
+        ? { ...envelope, payload: { set: envelope.payload.set, removed: envelope.payload.removed } }
+        : envelope),
+      sockets: envelope.type === "overlay.changed"
+        ? [
+          ...this.ctx.getWebSockets("kind:panel"),
+          ...(overlaySocketsById.get(envelope.payload.overlayId) ?? []),
+        ]
+        : ordinarySockets,
     }));
-    for (const webSocket of this.ctx.getWebSockets()) {
-      const principal = readAttachment(webSocket);
-      if (principal === null || principal.channelId !== ownChannelId) {
-        closeSocket(webSocket, SOCKET_REVOKED_CODE, "invalid principal");
-        continue;
-      }
-      if (isExpired(principal, now)) {
-        closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
-        continue;
-      }
-      try {
-        for (const message of serialized) {
-          const recipients: readonly RealtimeRecipientKind[] = message.recipients;
-          if (recipients.includes(principal.kind)) webSocket.send(message.payload);
+    for (const message of serialized) {
+      const envelope = message.envelope;
+      for (const webSocket of message.sockets) {
+        const principal = readAttachment(webSocket);
+        if (principal === null || principal.channelId !== ownChannelId) {
+          closeSocket(webSocket, SOCKET_REVOKED_CODE, "invalid principal");
+          continue;
         }
-      } catch {
-        closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
+        if (isExpired(principal, now)) {
+          closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
+          continue;
+        }
+        if (envelope.type === "overlay.changed" && principal.kind === "overlay" &&
+            principal.overlayId !== envelope.payload.overlayId) continue;
+        let serializedPayload = message.payload;
+        if (envelope.type === "variables.changed" && principal.kind === "overlay" && principal.overlayId !== null) {
+          const overlayId = principal.overlayId;
+          const overlayIdsByVariable = envelope.payload.overlayIdsByVariable ?? {};
+          const referencesOverlay = (name: string): boolean =>
+            Array.isArray(overlayIdsByVariable[name]) && overlayIdsByVariable[name].includes(overlayId);
+          const set = envelope.payload.set.filter((entry) => referencesOverlay(entry.name));
+          const removed = envelope.payload.removed.filter(referencesOverlay);
+          if (set.length === 0 && removed.length === 0) continue;
+          serializedPayload = JSON.stringify({ ...envelope, payload: { set, removed } });
+        }
+        try {
+          const recipients: readonly RealtimeRecipientKind[] = REALTIME_RECIPIENTS[envelope.type];
+          if (recipients.includes(principal.kind)) webSocket.send(serializedPayload);
+        } catch {
+          closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
+        }
       }
     }
+    return Promise.resolve();
   }
 
   public async revokeSession(sessionId: string): Promise<void> {

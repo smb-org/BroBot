@@ -1,5 +1,4 @@
-import type { ChannelRole } from "./contracts/values";
-import type { ChannelStreamState } from "./contracts/values";
+import type { ChannelRole, ChannelStreamState } from "./contracts/values";
 import type { AdsSchedule } from "./modules/ads/contracts";
 import type { PanelChannelControls } from "./panel-contract";
 
@@ -13,6 +12,7 @@ export const REALTIME_MESSAGE_TYPES = [
   "system.hello",
   "event_log.new",
   "variables.changed",
+  "overlay.changed",
   "ads.schedule.updated",
   "stream.state.changed",
 ] as const;
@@ -34,6 +34,12 @@ export interface RealtimePayloads {
   "variables.changed": {
     set: readonly { name: string; value: number }[];
     removed: readonly string[];
+    /** Internal routing metadata. The Durable Object strips it before socket delivery. */
+    overlayIdsByVariable?: Readonly<Record<string, readonly string[]>>;
+  };
+  "overlay.changed": {
+    overlayId: string;
+    revision: number;
   };
   "ads.schedule.updated": { schedule: AdsSchedule; asOf: string };
   "stream.state.changed": {
@@ -65,6 +71,7 @@ export const REALTIME_RECIPIENTS = {
   "system.hello": ["panel", "overlay"],
   "event_log.new": ["panel"],
   "variables.changed": ["panel", "overlay"],
+  "overlay.changed": ["panel", "overlay"],
   "ads.schedule.updated": ["panel"],
   "stream.state.changed": ["panel"],
 } as const satisfies Record<RealtimeMessageType, readonly RealtimeRecipientKind[]>;
@@ -84,6 +91,7 @@ export type RealtimeOverlayPrincipal = {
   kind: "overlay";
   channelId: string;
   tokenId: string;
+  overlayId: string | null;
   expiresAt: string | null;
 };
 

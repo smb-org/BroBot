@@ -114,9 +114,11 @@ describe("overlay realtime client", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const opened: boolean[] = [];
     const messages: unknown[] = [];
+    const overlayChanges: unknown[] = [];
     const stop = connectOverlayRealtime("z".repeat(43), undefined, {
       onOpen: (reconnected: boolean) => opened.push(reconnected),
       onMessage: (message: unknown) => messages.push(message),
+      onOverlayChanged: (message: unknown) => overlayChanges.push(message),
     });
 
     FakeWebSocket.instances[0]?.dispatch("open", new Event("open"));
@@ -128,6 +130,16 @@ describe("overlay realtime client", () => {
         channelId: "channel-a",
         type: "system.hello",
         payload: {},
+      }),
+    } as MessageEvent<string>);
+    FakeWebSocket.instances[0]?.dispatch("message", {
+      data: JSON.stringify({
+        version: 1,
+        id: "message-3",
+        createdAt: "2026-09-24T12:00:02.000Z",
+        channelId: "channel-a",
+        type: "overlay.changed",
+        payload: { overlayId: "overlay-a", revision: 3 },
       }),
     } as MessageEvent<string>);
     FakeWebSocket.instances[0]?.dispatch("message", {
@@ -146,6 +158,7 @@ describe("overlay realtime client", () => {
 
     expect(opened).toEqual([false, true]);
     expect(messages).toMatchObject([{ type: "variables.changed", payload: { set: [{ name: "score", value: 8 }] } }]);
+    expect(overlayChanges).toMatchObject([{ type: "overlay.changed", payload: { overlayId: "overlay-a", revision: 3 } }]);
     stop();
   });
 });

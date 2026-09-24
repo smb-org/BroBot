@@ -363,6 +363,7 @@ const realtimeForms = {
     kind: "overlay",
     channelId: "kanal-a",
     tokenId: "token-1",
+    overlayId: null,
     expiresAt: null,
   } satisfies RealtimeOverlayPrincipal,
 };
@@ -426,6 +427,7 @@ const allMessageTypes: Record<RealtimeMessageType, true> = {
   "system.hello": true,
   "event_log.new": true,
   "variables.changed": true,
+  "overlay.changed": true,
   "ads.schedule.updated": true,
   "stream.state.changed": true,
 };
@@ -680,7 +682,7 @@ describe("serialized contract shapes", () => {
         "$.realtime.eventLogFromWorker: channelId,createdAt,id,payload,type,version",
         "$.realtime.eventLogFromWorker.payload: entries",
         "$.realtime.eventLogFromWorker.payload.entries[]: actorUserId,code,createdAt,eventId,moduleId",
-        "$.realtime.overlayPrincipal: channelId,expiresAt,kind,tokenId,v",
+        "$.realtime.overlayPrincipal: channelId,expiresAt,kind,overlayId,tokenId,v",
         "$.realtime.panelPrincipal: channelId,expiresAt,kind,role,sessionId,userId,v",
         "$.realtime.systemHello: channelId,createdAt,id,payload,type,version",
         "$.realtime.systemHello.payload: ",
@@ -704,12 +706,13 @@ describe("serialized contract shapes", () => {
       // and the assertion below freezes the spelling.
       expect(Object.keys(allRoles).sort()).toEqual(["broadcaster", "manager", "operator"]);
       expect(Object.keys(allMessageTypes).sort()).toEqual([
-        "ads.schedule.updated", "event_log.new", "stream.state.changed", "system.hello", "variables.changed",
+        "ads.schedule.updated", "event_log.new", "overlay.changed", "stream.state.changed", "system.hello", "variables.changed",
       ]);
       expect(Object.keys(allRecipientKinds).sort()).toEqual(["overlay", "panel"]);
       expect(Object.keys(REALTIME_RECIPIENTS).sort()).toEqual([...REALTIME_MESSAGE_TYPES].sort());
       expect(REALTIME_RECIPIENTS["event_log.new"]).toEqual(["panel"]);
       expect(REALTIME_RECIPIENTS["variables.changed"]).toEqual(["panel", "overlay"]);
+      expect(REALTIME_RECIPIENTS["overlay.changed"]).toEqual(["panel", "overlay"]);
       expect(REALTIME_RECIPIENTS["ads.schedule.updated"]).toEqual(["panel"]);
       expect(REALTIME_RECIPIENTS["stream.state.changed"]).toEqual(["panel"]);
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);

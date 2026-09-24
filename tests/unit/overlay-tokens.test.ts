@@ -8,6 +8,7 @@ import {
   type IssuedOverlayToken,
 } from "../../src/worker/auth/overlay-token-service";
 import { hashOverlayToken } from "../../src/worker/auth/crypto";
+import { getOverlayBindingForToken } from "../../src/worker/auth/overlay-token-repository";
 import { TestD1Database } from "./test-d1";
 
 const pepper = (byte: number): string =>
@@ -334,6 +335,45 @@ describe("Overlay token service", () => {
       pepper: pepper(4),
       now: "2026-09-18T00:01:00.000Z",
     })).resolves.toBeNull();
+  });
+
+  it("does not turn an in-flight bound request into a legacy request after overlay deletion", async () => {
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a",
+      pepper: pepper(4),
+      publicOrigin: "https://brobot.example",
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    const token = tokenFromUrl(issued.overlayUrl);
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'kanal-a', 'Gameplay', '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')`,
+    ).run();
+    await database.prepare("UPDATE overlay_tokens SET overlay_id = 'overlay-a' WHERE token_id = ?")
+      .bind(issued.tokenId).run();
+
+    const inFlight = await authenticateOverlayToken(database as unknown as D1Database, {
+      token,
+      pepper: pepper(4),
+      now: "2026-09-18T00:00:30.000Z",
+    });
+    expect(inFlight).not.toBeNull();
+
+    await database.prepare(
+      `UPDATE overlay_tokens
+          SET revoked_at = '2026-09-18T00:01:00.000Z', revocation_reason = 'overlay_deleted'
+        WHERE token_id = ?`,
+    ).bind(issued.tokenId).run();
+    await database.prepare("DELETE FROM overlays WHERE channel_id = 'kanal-a' AND overlay_id = 'overlay-a'").run();
+
+    await expect(database.prepare("SELECT overlay_id, revoked_at FROM overlay_tokens WHERE token_id = ?")
+      .bind(issued.tokenId).first()).resolves.toEqual({
+      overlay_id: "overlay-a",
+      revoked_at: "2026-09-18T00:01:00.000Z",
+    });
+    await expect(getOverlayBindingForToken(database as unknown as D1Database, "kanal-a", issued.tokenId))
+      .rejects.toThrow("Authenticated overlay token has been revoked.");
   });
 
   it("writes last_used_at at most every five minutes", async () => {
