@@ -67,6 +67,32 @@ import {
 import { canManage } from "../../contracts/values";
 
 const nowIso = (): string => new Date().toISOString();
+const REALTIME_TOKEN_CLOSE_TIMEOUT_MS = 2_000;
+
+const closeRealtimeTokenBeforeResponse = async (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+  tokenId: string,
+): Promise<void> => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const outcome = await Promise.race([
+      revokeRealtimeToken(namespace, channelId, tokenId).then(() => "closed" as const),
+      new Promise<"timeout">((resolve) => {
+        timeout = setTimeout(() => { resolve("timeout"); }, REALTIME_TOKEN_CLOSE_TIMEOUT_MS);
+      }),
+    ]);
+    if (outcome === "timeout") {
+      console.warn("Realtime token revocation timed out; the security round remains the backstop.");
+    }
+  } catch (error: unknown) {
+    // The D1 revocation is authoritative. A failed immediate close is logged,
+    // and the Durable Object security round will recheck the token.
+    console.warn("Realtime token revocation could not close the connection.", error);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+};
 
 const canManageOverlayTokens = canManage;
 
@@ -272,7 +298,7 @@ authRouter.post(
       revokedAt: nowIso(),
     });
     if (!revoked) return context.json({ error: "overlay_token_not_found" }, 404);
-    void revokeRealtimeToken(context.env.CHANNEL, channelId, tokenId);
+    await closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, tokenId);
     context.header("Cache-Control", "no-store");
     return context.body(null, 204);
   },

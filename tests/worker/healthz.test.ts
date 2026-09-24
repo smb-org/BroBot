@@ -1,6 +1,9 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX, REALTIME_PROTOCOL } from "../../src/realtime-contract";
+import { hashOverlayToken } from "../../src/worker/auth/crypto";
+
 /**
  * The worker test environment starts with an empty database. Since #43, the
  * healthcheck also checks the schema, so the migrations must be applied here
@@ -81,6 +84,41 @@ describe("worker skeleton", () => {
       expect(response.status).toBe(200);
       expect(body.status).toBe("ok");
       expect(body.missingBindings).toEqual([]);
+    });
+
+    it("performs the public overlay WebSocket handshake with only brobot.v1 selected", async () => {
+      const bindings = env as unknown as Env;
+      const database = bindings.DB;
+      const channelId = `realtime-handshake-${crypto.randomUUID()}`;
+      const tokenId = `realtime-token-${crypto.randomUUID()}`;
+      const token = "A".repeat(43);
+      const now = new Date().toISOString();
+      const tokenHash = await hashOverlayToken(token, bindings.OVERLAY_TOKEN_PEPPER);
+      await database.prepare(
+        `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind(channelId, channelId, channelId, now, now).run();
+      await database.prepare(
+        `INSERT INTO overlay_tokens
+          (token_id, channel_id, token_hash, expires_at, created_at, revoked_at, revocation_reason, last_used_at)
+         VALUES (?, ?, ?, NULL, ?, NULL, NULL, NULL)`,
+      ).bind(tokenId, channelId, tokenHash, now).run();
+
+      const response = await exports.default.fetch(new Request("http://localhost/ws/overlay", {
+        headers: {
+          Upgrade: "websocket",
+          "Sec-WebSocket-Protocol": `${REALTIME_PROTOCOL}, ${OVERLAY_TOKEN_SUBPROTOCOL_PREFIX}${token}`,
+        },
+      }));
+      const selectedProtocol = response.headers.get("Sec-WebSocket-Protocol");
+
+      expect(response.status).toBe(101);
+      expect(selectedProtocol).toBe(REALTIME_PROTOCOL);
+      expect(selectedProtocol).not.toContain(OVERLAY_TOKEN_SUBPROTOCOL_PREFIX);
+      expect(selectedProtocol).not.toContain(token);
+      const clientSocket = (response as Response & { webSocket?: WebSocket }).webSocket;
+      clientSocket.accept();
+      clientSocket.close(1000, "test complete");
     });
   });
 });

@@ -3,7 +3,11 @@ import type { ChannelRole } from "./contracts/values";
 /** The only protocol version used on the wire. */
 export type RealtimeProtocolVersion = 1;
 
-export type RealtimeMessageType = "system.hello" | "event_log.new";
+export const REALTIME_PROTOCOL = "brobot.v1";
+export const OVERLAY_TOKEN_SUBPROTOCOL_PREFIX = "brobot.token.";
+
+export const REALTIME_MESSAGE_TYPES = ["system.hello", "event_log.new"] as const;
+export type RealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
 
 export interface RealtimeEventLogHint {
   eventId: string;
@@ -34,6 +38,12 @@ export type RealtimeMessage = {
 }[RealtimeMessageType];
 
 export type RealtimeRecipientKind = "panel" | "overlay";
+
+/** Every wire type is explicitly limited to the clients allowed to receive it. */
+export const REALTIME_RECIPIENTS = {
+  "system.hello": ["panel", "overlay"],
+  "event_log.new": ["panel"],
+} as const satisfies Record<RealtimeMessageType, readonly RealtimeRecipientKind[]>;
 
 export type RealtimePanelPrincipal = {
   v: RealtimeProtocolVersion;
