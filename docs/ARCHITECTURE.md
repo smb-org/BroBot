@@ -33,8 +33,8 @@ Ein Modul ist ein Feature-Slice unter `src/modules/<id>` mit `contracts/`,
 `panel/`. Das erste konkrete Modul ist `src/modules/text_commands/`. Es
 ergänzt den Contract um den vom Host aufgelösten `ModuleEvent.actor`, den
 `ModuleExecutionContext` für den eigenen D1-Adapter und typisierte Props für
-seine lazy Panel-Ansicht. Die Migration liegt als
-`migrations/0010_modul_textbefehle.sql` in der zentralen D1-Kette.
+seine lazy Panel-Ansicht. Sein Schema liegt, wie bei jedem Modul mit eigenen
+Tabellen, in der zentralen D1-Kette unter `migrations/`.
 
 `src/modules/registry.ts` ist die einzige Stelle, die alle Module kennt. Der
 Worker mountet registrierte Router kanalbezogen unter
