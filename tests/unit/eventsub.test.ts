@@ -583,7 +583,7 @@ describe("EventSub inbound", () => {
       ...environment(),
       CHANNEL: {
         idFromName: (channelId: string) => channelId,
-        get: () => ({ publish: (message: unknown) => { realtimeMessages.push(message); } }),
+        get: () => ({ publish: (messages: readonly unknown[]) => { realtimeMessages.push(...messages); } }),
       },
     } as unknown as Env;
 

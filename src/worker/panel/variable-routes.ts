@@ -11,6 +11,7 @@ import type { ModuleVariableReferenceUsage } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import { prepareAudit } from "../db/audit";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
+import { publishVariablesChanged } from "../realtime";
 import {
   findChannelVariable,
   listChannelVariables,
@@ -98,6 +99,10 @@ variableRouter.post("/api/channels/:channelId/variables", async (context) => {
   const results = await context.env.DB.batch([mutation, audit]);
   if ((results[0]?.meta.changes ?? 0) > 0) {
     const variable = await findChannelVariable(context.env.DB, channelId, parsed.data.name);
+    if (variable !== null) {
+      await publishVariablesChanged(context.env.CHANNEL, channelId,
+        [{ name: variable.name, value: variable.value }], []);
+    }
     return context.json({ variable, usages: [] }, 201);
   }
   if (await findChannelVariable(context.env.DB, channelId, parsed.data.name) !== null) {
@@ -147,6 +152,8 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
     return context.json({ error: "variable_changed_concurrently" }, 409);
   }
   const variable = await findChannelVariable(context.env.DB, channelId, newName);
+  await publishVariablesChanged(context.env.CHANNEL, channelId,
+    [{ name: newName, value: before.value }], newName === name ? [] : [name]);
   return context.json({ variable, usages: await referencesFor(context.env.DB, channelId, newName) });
 });
 
@@ -205,7 +212,7 @@ variableRouter.post("/api/channels/:channelId/variables/:name/value", async (con
     return context.json({ variable: current });
   }
   const row = mutationResult.results[0] as Record<string, unknown> | undefined;
-  return context.json({ variable: row === undefined ? await findChannelVariable(context.env.DB, channelId, name) : {
+  const variable = row === undefined ? await findChannelVariable(context.env.DB, channelId, name) : {
     channelId: row.channel_id as string,
     name: row.name as string,
     value: row.value as number,
@@ -213,7 +220,12 @@ variableRouter.post("/api/channels/:channelId/variables/:name/value", async (con
     resetOnStreamStart: row.reset_on_stream_start === 1,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
-  } });
+  };
+  if (variable !== null) {
+    await publishVariablesChanged(context.env.CHANNEL, channelId,
+      [{ name: variable.name, value: variable.value }], []);
+  }
+  return context.json({ variable });
 });
 
 variableRouter.delete("/api/channels/:channelId/variables/:name", async (context) => {
@@ -237,7 +249,10 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
     "channel.variable.removed", recordSnapshot(before), null);
   try {
     const results = await context.env.DB.batch([mutation, audit]);
-    if ((results[0]?.meta.changes ?? 0) > 0) return new Response(null, { status: 204 });
+    if ((results[0]?.meta.changes ?? 0) > 0) {
+      await publishVariablesChanged(context.env.CHANNEL, channelId, [], [name]);
+      return new Response(null, { status: 204 });
+    }
   } catch {
     const latestUsages = await referencesFor(context.env.DB, channelId, name);
     if (latestUsages.some((usage) => usage.kind === "action")) {

@@ -41,7 +41,7 @@ const upgradeRequest = (principal?: RealtimePrincipal): Request => new Request(
 
 type SocketDouble = WebSocket & {
   tags: string[];
-  send: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn<(message: string) => void>>;
   close: ReturnType<typeof vi.fn>;
   deserializeAttachment: ReturnType<typeof vi.fn>;
 };
@@ -143,6 +143,18 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   return object;
 };
 
+const typeOfSerializedMessage = (serialized: string): string | null => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const type = Reflect.get(parsed, "type") as unknown;
+  return typeof type === "string" ? type : null;
+};
+
 const eventMessage: RealtimeEnvelope<"event_log.new"> = {
   version: 1,
   id: "nachricht-1",
@@ -187,7 +199,7 @@ describe("ChannelObject realtime path", () => {
     const object = objectFor([]);
 
     expect(() => {
-      object.publish({ ...eventMessage, channelId: "kanal-b" });
+      object.publish([{ ...eventMessage, channelId: "kanal-b" }]);
     }).toThrow(/foreign channel/);
   });
 
@@ -196,7 +208,7 @@ describe("ChannelObject realtime path", () => {
     const valid = socketFor(validPrincipal({ userId: "user-2", sessionId: "session-2" }));
     const object = objectFor([expired, valid]);
 
-    object.publish(eventMessage);
+    object.publish([eventMessage]);
 
     expect(expired.send.mock.calls).toHaveLength(0);
     expect(expired.close.mock.calls).toEqual([[4001, "authorization expired"]]);
@@ -214,10 +226,40 @@ describe("ChannelObject realtime path", () => {
     });
     const object = objectFor([panel, overlay]);
 
-    object.publish(eventMessage);
+    object.publish([eventMessage]);
 
     expect(panel.send.mock.calls).toHaveLength(1);
     expect(overlay.send.mock.calls).toHaveLength(0);
+  });
+
+  it("publishes a list once and routes variable changes to both client kinds", () => {
+    const panel = socketFor(validPrincipal());
+    const overlay = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-1",
+      expiresAt: null,
+    });
+    const object = objectFor([panel, overlay]);
+    const variablesMessage: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "nachricht-2",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: { set: [{ name: "score", value: 12 }], removed: [] },
+    };
+
+    object.publish([eventMessage, variablesMessage]);
+
+    expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual([
+      "event_log.new",
+      "variables.changed",
+    ]);
+    expect(overlay.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual([
+      "variables.changed",
+    ]);
   });
 
   it("closes an expired overlay socket before considering its recipient type", () => {
@@ -230,7 +272,7 @@ describe("ChannelObject realtime path", () => {
     });
     const object = objectFor([overlay]);
 
-    object.publish(eventMessage);
+    object.publish([eventMessage]);
 
     expect(overlay.send.mock.calls).toHaveLength(0);
     expect(overlay.close.mock.calls).toEqual([[4001, "authorization expired"]]);

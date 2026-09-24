@@ -15,11 +15,12 @@ const keyRing = JSON.stringify({
   retired: [],
 });
 
-const environment = (database: TestD1Database): Env => ({
+const environment = (database: TestD1Database, publish = vi.fn()): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: keyRing,
+  CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish }) },
 } as unknown as Env);
 
 const withAppToken = async (database: TestD1Database): Promise<void> => {
@@ -151,15 +152,22 @@ describe("lookupAndRefreshStreamState", () => {
       await insertStreamState(database, "kanal-a", "offline", STALE, "helix");
       await database.prepare(
         `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
-         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
-      ).bind(NOW, NOW).run();
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?), ('kanal-a', 'zero', 0, 1, ?, ?)`,
+      ).bind(NOW, NOW, NOW, NOW).run();
       await withAppToken(database);
 
       const startedAt = "2026-09-23T11:59:00.000Z";
-      const result = await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, helixResponse(true, startedAt));
+      const publish = vi.fn();
+      const result = await lookupAndRefreshStreamState(environment(database, publish), "kanal-a", NOW, helixResponse(true, startedAt));
 
       expect(result).toMatchObject({ state: "online", startedAt });
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([
+        { type: "variables.changed", payload: { set: [{ name: "score", value: 0 }], removed: [] } },
+      ]);
       await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 0 });
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'zero'").first())
         .resolves.toEqual({ value: 0 });
       await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
         .resolves.toEqual({ started_at: startedAt });

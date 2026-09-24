@@ -108,4 +108,44 @@ describe("overlay realtime client", () => {
     expect(terminalClose).toHaveBeenCalledTimes(1);
     stop();
   });
+
+  it("reports typed messages and whether an open follows a reconnect", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const opened: boolean[] = [];
+    const messages: unknown[] = [];
+    const stop = connectOverlayRealtime("z".repeat(43), undefined, {
+      onOpen: (reconnected: boolean) => opened.push(reconnected),
+      onMessage: (message: unknown) => messages.push(message),
+    });
+
+    FakeWebSocket.instances[0]?.dispatch("open", new Event("open"));
+    FakeWebSocket.instances[0]?.dispatch("message", {
+      data: JSON.stringify({
+        version: 1,
+        id: "message-1",
+        createdAt: "2026-09-24T12:00:00.000Z",
+        channelId: "channel-a",
+        type: "system.hello",
+        payload: {},
+      }),
+    } as MessageEvent<string>);
+    FakeWebSocket.instances[0]?.dispatch("message", {
+      data: JSON.stringify({
+        version: 1,
+        id: "message-2",
+        createdAt: "2026-09-24T12:00:01.000Z",
+        channelId: "channel-a",
+        type: "variables.changed",
+        payload: { set: [{ name: "score", value: 8 }], removed: [] },
+      }),
+    } as MessageEvent<string>);
+    FakeWebSocket.instances[0]?.dispatch("close", { code: 1006, reason: "network" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(250);
+    FakeWebSocket.instances[1]?.dispatch("open", new Event("open"));
+
+    expect(opened).toEqual([false, true]);
+    expect(messages).toMatchObject([{ type: "variables.changed", payload: { set: [{ name: "score", value: 8 }] } }]);
+    stop();
+  });
 });

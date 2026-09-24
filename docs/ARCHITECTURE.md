@@ -84,17 +84,18 @@ Cloudflare Assets nicht den weiterleitenden Alias `/overlay.html` verwenden. Das
 Fragment wird vom Browser weder beim HTTP-Request an den Worker gesendet noch
 in den `Referer`-Header übernommen. Deshalb gelangt der Token nicht über den
 initialen Seitenrequest oder an verlinkte Ziele. Die Overlay-Seite liest ihn
-lokal und verwendet ihn nur als `Authorization: Bearer`-Header für
-`GET /api/overlay/status`; ein OAuth- oder Twitch-Token steht nie in der
-Overlay-URL. Dieser Header ist ein Secret und darf ebenfalls nicht
-protokolliert werden.
+lokal und verwendet ihn nur als `Authorization: Bearer`-Header für die
+Overlay-API; ein OAuth- oder Twitch-Token steht nie in der Overlay-URL. Dieser
+Header ist ein Secret und darf ebenfalls nicht protokolliert werden.
 
 Für Live-Updates öffnet das Overlay `GET /ws/overlay` mit den Protokollen
 `brobot.v1` und `brobot.token.<token>`. Der Token wird nie als Socket-Query
 übertragen. Der Worker prüft ihn und leitet nur einen internen Prinzipal mit
-Kanal- und Token-ID an das jeweilige Kanal-Durable-Object weiter. Der kleine
-Overlay-WebSocket-Client wird erst nach erfolgreicher Statusprüfung dynamisch
-geladen und verbindet mit exponentiellem Backoff neu.
+Kanal- und Token-ID an das jeweilige Kanal-Durable-Object weiter. Der
+Status-WebSocket-Client wird nach erfolgreicher Statusprüfung dynamisch geladen;
+die Variablenanzeige lädt ihren eigenen WebSocket-Client nur bei einer
+entsprechend konfigurierten Quelle. Beide verbinden mit exponentiellem Backoff
+neu.
 
 Diese Wahl schützt nicht vor Zugriff auf die OBS-Konfiguration: OBS speichert
 die vollständige Browserquellen-URL einschließlich Fragment im Klartext in
@@ -115,6 +116,26 @@ HTTP-Statusabrufe keine fortlaufenden D1-Schreibvorgänge erzeugen.
 Der Status-Endpunkt liefert `CF_VERSION_METADATA.id`. Damit stammt die
 angezeigte Version aus dem laufenden Deployment und nicht aus einem statischen
 Bild oder einer im Overlay-Bundle fest eingetragenen Versionszeichenkette.
+
+Die Variablenanzeige ist ebenfalls eine OBS-Browserquelle und wird lazy aus
+`src/overlay/` geladen. Ihre Konfiguration steht ausschließlich im Fragment:
+`#token=…&var=<name>&text=<Vorlage mit {value}>`. Eine Quelle zeigt genau eine
+Kanalvariable. Der token-gebundene Endpunkt
+`GET /api/overlay/variables/:name` leitet den Kanal nur aus dem Token-Datensatz
+ab und antwortet mit `{ name, value }`; `Content-Language` enthält die
+Kanalsprache und `Cache-Control: no-store` verhindert zwischengespeicherte
+Werte. Das Overlay lädt den Wert beim Start, nach einem Reconnect und 1,5
+Sekunden nach dem letzten passenden Variablenereignis erneut. Die Nachricht
+`variables.changed` wird sowohl an Panel- als auch Overlay-Sockets verteilt und
+enthält nur aktuelle Ganzzahlwerte und entfernte Namen. Ihre Empfänger stehen
+explizit in `src/realtime-contract.ts`. Im Chatpfad wird sie gemeinsam mit
+`event_log.new` durch denselben Durable-Object-Aufruf gesendet.
+
+Der Widget-Text wird als Text gerendert und verwendet die stabilen Klassen
+`.brobot-variable`, `.brobot-variable__text` und `.brobot-variable__value` für
+OBS-CSS. Nicht vorhandene oder gelöschte Variablen zeigen nichts. Die
+Zahlenformatierung nutzt den Sprachheader und den gemeinsamen Helper
+`src/text.ts`; das Overlay importiert dafür keinen Worker-Code.
 
 ## Vorlagenvariablen und Kanalwerte
 

@@ -107,7 +107,7 @@ export function Button(props: ButtonProps) {
     ...(formDensity === "form" ? { "--button-fz": "14px" } : undefined),
     ...(iconOnly ? { width: size === "compact" ? 34 : 44, minWidth: size === "compact" ? 34 : 44, paddingInline: 0 } : undefined),
     fontWeight,
-    ...(disabled || ariaDisabled ? { opacity: 0.55, cursor: "not-allowed" } : undefined),
+    ...(disabled || ariaDisabled ? { opacity: 0.7, cursor: "not-allowed" } : undefined),
   } as CSSProperties;
   const label = iconOnly ? undefined : props.children;
   const leadingIcon = iconOnly || icon === undefined ? undefined : <Icon name={icon} size={16} />;

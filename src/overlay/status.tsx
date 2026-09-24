@@ -1,5 +1,30 @@
-import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
+import { lazy, Suspense, useEffect, useState, type CSSProperties, type ReactElement } from "react";
 import type { ModuleLanguage } from "../modules/contract";
+
+const LazyVariableOverlay = lazy(async () => {
+  const module = await import("./variable");
+  return { default: module.VariableOverlay };
+});
+
+type OverlayEntryConfig =
+  | { kind: "status" }
+  | { kind: "variable"; token: string | null; name: string; text: string };
+
+const readOverlayEntryConfig = (): OverlayEntryConfig => {
+  const fragment = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const parameters = new URLSearchParams(fragment);
+  const name = parameters.get("var");
+  if (name === null) return { kind: "status" };
+  const token = parameters.get("token");
+  return {
+    kind: "variable",
+    token: token === null || token.length === 0 ? null : token,
+    name,
+    text: parameters.get("text") ?? `${name}: {value}`,
+  };
+};
 
 interface OverlayStatus {
   version: string;
@@ -168,4 +193,20 @@ export const OverlayStatusView = (): ReactElement | null => {
   }, []);
 
   return status === null ? null : <span style={labelStyle}>{texts[status.language].version} {status.version}</span>;
+};
+
+/** Keeps the version view as the default and loads the variable widget only when configured. */
+export const OverlayEntry = (): ReactElement => {
+  const [config, setConfig] = useState(readOverlayEntryConfig);
+
+  useEffect(() => {
+    const handleHashChange = (): void => setConfig(readOverlayEntryConfig());
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  if (config.kind === "status") return <OverlayStatusView />;
+  return <Suspense fallback={null}>
+    <LazyVariableOverlay key={`${config.token ?? ""}:${config.name}:${config.text}`} {...config} />
+  </Suspense>;
 };

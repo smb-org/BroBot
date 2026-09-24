@@ -66,10 +66,12 @@ import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUserAndModule,
 } from "../module-scopes";
-import { canManage } from "../../contracts/values";
+import { canManage, type ApiErrorCode } from "../../contracts/values";
+import { findChannelVariable } from "../db/channel-variables";
 
 const nowIso = (): string => new Date().toISOString();
 const REALTIME_TOKEN_CLOSE_TIMEOUT_MS = 2_000;
+const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 
 const closeRealtimeTokenBeforeResponse = async (
   namespace: Env["CHANNEL"] | undefined,
@@ -355,6 +357,31 @@ authRouter.get("/api/overlay/status", async (context) => {
 
   context.header("Cache-Control", "no-store");
   return context.json({ version: context.env.CF_VERSION_METADATA.id, language: record.language });
+});
+
+authRouter.get("/api/overlay/variables/:name", async (context) => {
+  context.header("Cache-Control", "no-store");
+  const token = readBearerToken(context.req.header("Authorization"));
+  if (token === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
+
+  const record = await authenticateOverlayToken(context.env.DB, {
+    token,
+    pepper: context.env.OVERLAY_TOKEN_PEPPER,
+    now: nowIso(),
+  });
+  if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
+
+  const name = context.req.param("name");
+  if (!OVERLAY_VARIABLE_NAME_PATTERN.test(name)) {
+    return context.json({ error: "variable_data_invalid" satisfies ApiErrorCode }, 400);
+  }
+  const variable = await findChannelVariable(context.env.DB, record.channelId, name);
+  if (variable === null) {
+    return context.json({ error: "overlay_variable_not_found" satisfies ApiErrorCode }, 404);
+  }
+
+  context.header("Content-Language", record.language);
+  return context.json({ name: variable.name, value: variable.value });
 });
 
 authRouter.get("/auth/login", async (context) => {

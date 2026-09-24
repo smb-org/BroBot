@@ -342,21 +342,26 @@ Minuten begrenzte Token-Nachweis.
 ### Daten an Overlay-Gegenstellen
 
 Die Empfängertabelle in `src/realtime-contract.ts` ordnet jeden Nachrichtentyp
-explizit `panel`, `overlay` oder beiden zu. Aktuell darf ein Overlay nur
-`system.hello` empfangen. Diese leere Begrüßung enthält Protokollversion,
-Nachrichtenkennung, Serverzeit und `channelId`; sie enthält weder Token noch
-sonstige Kanalinhalte. `event_log.new` ist ausschließlich für das Panel
-klassifiziert und wird vom Durable Object nicht an Overlay-Sockets gesendet.
+explizit `panel`, `overlay` oder beiden zu. Ein Overlay darf
+`system.hello` und `variables.changed` empfangen. Die leere Begrüßung enthält
+Protokollversion, Nachrichtenkennung, Serverzeit und `channelId`; sie enthält
+weder Token noch sonstige Kanalinhalte. `event_log.new` ist ausschließlich für
+das Panel klassifiziert und wird vom Durable Object nicht an Overlay-Sockets
+gesendet.
 
-Als nächster fachlicher Overlay-Datensatz sind für #186 die Namen und aktuellen
-Ganzzahlwerte **aller** Kanalvariablen vorgesehen, wie im unversionierten
-Konzeptdokument `docs/input/overlay-variablen-konzept.md` am Ende entschieden.
+`variables.changed` enthält ausschließlich gesetzte `{ name, value }`-Paare und
+entfernte Namen. Die Nachricht wird nach jeder Kanalvariablen-Mutation an
+Overlay- und Panel-Sockets verteilt. Der Host bündelt Chat-Aktionen mit
+`event_log.new` in einem Durable-Object-Aufruf. Der token-gebundene
+`GET /api/overlay/variables/:name` liest den Kanal ausschließlich aus dem
+Overlay-Token und gibt nur Name und aktuellen Ganzzahlwert zurück. Der
+`Content-Language`-Header liefert die Kanalsprache für die Zahlenformatierung.
+
 Diese Werte sind bereits über Chatbefehle abrufbar. Namen und Werte dürfen daher
 an Inhaber eines Overlay-Tokens gehen; Beschreibungen, Chattexte,
 Ereignisprotokoll, Auslöser, Akteur-IDs, Sitzungen und Twitch-Zugangsdaten
-gehören nicht in Overlay-Nachrichten. #197 sendet diese Variablen noch nicht;
-neue Typen müssen vor ihrer Einführung ebenfalls in der Empfängertabelle
-klassifiziert werden.
+gehören nicht in Overlay-Nachrichten. Neue Nachrichtentypen müssen vor ihrer
+Einführung ebenfalls in der Empfängertabelle klassifiziert werden.
 
 Ein Widerruf schließt bestehende Overlay-Sockets über `revokeToken()` nach der
 erfolgreichen Mutation. Das Alarmnetz prüft den Token spätestens nach

@@ -8,6 +8,7 @@ import {
   upsertBotIdentity,
 } from "../../src/worker/db/bot-identity";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
+import { CHANNEL_VARIABLE_MAXIMUM_VALUE } from "../../src/contracts/values";
 import { insertAppAccessToken, insertChannel, insertMember } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
@@ -124,6 +125,97 @@ const eventCodes = async (database: TestD1Database): Promise<string[]> => {
 };
 
 describe("Text commands module", () => {
+  it.each([
+    { name: "an equal-value set", initialValue: 4, operation: "set" as const, amount: 4, message: "!same" },
+    { name: "set_argument equal to the current value", initialValue: 4, operation: "set_argument" as const, amount: 0, message: "!same 4" },
+    { name: "an increment clamped at the limit", initialValue: CHANNEL_VARIABLE_MAXIMUM_VALUE, operation: "add" as const, amount: 1, message: "!same" },
+  ])("keeps $name claims successful without publishing a variable change", async ({ initialValue, operation, amount, message }) => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await activate(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+         VALUES ('kanal-a', 'score', ?, ?, ?)`,
+      ).bind(initialValue, NOW, NOW).run();
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await repository.create({
+        channelId: "kanal-a", name: "same", text: "Score {var.score}", kind: "text", cooldownSeconds: 0,
+        variableAction: { name: "score", operation, amount }, now: NOW,
+      }, { userId: "user-1" });
+      const publish = vi.fn();
+      const env = {
+        ...environment(database),
+        CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish }) },
+      } as unknown as Env;
+
+      await dispatchEventSubNotification(env, eventFor(message), fetcherForChat(), [textCommandModule]);
+
+      await expect(database.prepare("SELECT value, updated_at FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: initialValue, updated_at: NOW });
+      await expect(database.prepare("SELECT use_count, last_used_at FROM text_commands WHERE command_name = 'same'").first())
+        .resolves.toEqual({ use_count: 1, last_used_at: NOW });
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([{ type: "event_log.new" }]);
+      expect(publish.mock.calls[0]?.[0]).not.toContainEqual(expect.objectContaining({ type: "variables.changed" }));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("publishes a successful variable action with the event hint in one DO call and no extra D1 batch", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await activate(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 4, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await repository.create({
+        channelId: "kanal-a", name: "increment", text: "", kind: "text", cooldownSeconds: 0,
+        variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
+      }, { userId: "user-1" });
+
+      const batches: number[] = [];
+      const databaseWithBatchCount = {
+        prepare: (sql: string) => database.prepare(sql),
+        batch: async (statements: TestPreparedStatement[]) => {
+          batches.push(statements.length);
+          return database.batch(statements);
+        },
+      } as unknown as D1Database;
+      const publish = vi.fn();
+      const env = {
+        ...environment(database),
+        DB: databaseWithBatchCount,
+        CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish }) },
+      } as unknown as Env;
+
+      await dispatchEventSubNotification(env, eventFor("!increment"), fetcherForChat(), [textCommandModule]);
+
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([
+        { type: "event_log.new" },
+        { type: "variables.changed", payload: { set: [{ name: "score", value: 5 }], removed: [] } },
+      ]);
+      expect(batches).toEqual([3, 1]);
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 5 });
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not let a same-timestamp cooldown loser undo the winning variable claim", async () => {
     const database = new TestD1Database();
     try {

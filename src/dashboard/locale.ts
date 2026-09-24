@@ -195,6 +195,22 @@ export interface ChannelVariablesTexts {
   conflict: string;
   created: string;
   updated: string;
+  overlayLink: string;
+  overlayText: string;
+  overlayTextHint: string;
+  generateOverlayLink: string;
+  existingOverlayLink: string;
+  useExistingOverlayLink: string;
+  widgetUrl: string;
+  obsCss: string;
+  copyLink: string;
+  copyCss: string;
+  secretNotice: string;
+  overlayLinkError: string;
+  overlayTemplateInvalid: string;
+  existingOverlayLinkInvalid: string;
+  copied: string;
+  copyUnavailable: string;
 }
 
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
@@ -207,7 +223,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     value: "Wert", setValue: "Setzen auf", valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.",
     resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird zurückgesetzt, wenn der nächste Stream startet.",
     limitNote: (maximum) => `Bis zu ${String(maximum)} Variablen pro Kanal.`,
-    renameHint: "Vorlagen mit dieser Variable werden beim Umbenennen angepasst.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
+    renameHint: "Vorlagen werden angepasst. Overlay-Links mit diesem Namen müssen neu erzeugt werden.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "zählt eine Aktion" : "Vorlage"}`,
     set: "Setzen", increase: "+1", decrease: "−1", increaseDraftValue: "Setzwert um eins erhöhen", decreaseDraftValue: "Setzwert um eins verringern", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
     deleteDescription: (name, usages) => usages.length === 0 ? `„${name}“ wird dauerhaft gelöscht.` : `„${name}“ wird dauerhaft gelöscht. Verwendungen: ${usages}`,
@@ -216,6 +232,13 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
     valueLocked: "Nur Kanalmitglieder dürfen den Wert ändern.", limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
     conflict: "Die Variable wurde inzwischen geändert.", created: "Variable angelegt.", updated: "Variable gespeichert.",
+    overlayLink: "Overlay-Link", overlayText: "Anzeige", overlayTextHint: "Vorlage mit {value}; höchstens 100 Zeichen.",
+    generateOverlayLink: "Link erzeugen", existingOverlayLink: "Vorhandenen Overlay-Link einfügen", useExistingOverlayLink: "Link übernehmen",
+    widgetUrl: "Widget-URL", obsCss: "OBS CSS", copyLink: "Link kopieren", copyCss: "CSS kopieren",
+    secretNotice: "Geheim: Wer den Link hat, kann Variablenwerte dieses Kanals sehen.",
+    overlayLinkError: "Der Overlay-Link konnte nicht erstellt werden.", overlayTemplateInvalid: "Verwende {value} einmal; höchstens 100 Zeichen.",
+    existingOverlayLinkInvalid: "Füge eine BroBot-Overlay-URL mit Token ein.", copied: "Kopiert.",
+    copyUnavailable: "Automatisches Kopieren nicht verfügbar; Text markieren und kopieren.",
   },
   en: {
     title: "Channel variables", list: "Variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
@@ -226,7 +249,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     value: "Value", setValue: "Set to", valueHint: "Integer from −999,999,999 to 999,999,999.",
     resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets when the next stream starts.",
     limitNote: (maximum) => `Up to ${String(maximum)} variables per channel.`,
-    renameHint: "Templates that use this variable will be updated when it is renamed.", usages: "Used in", noUsages: "Not used yet.",
+    renameHint: "Templates are updated. Overlay links using this name must be regenerated.", usages: "Used in", noUsages: "Not used yet.",
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "changes a variable" : "template"}`,
     set: "Set", increase: "+1", decrease: "−1", increaseDraftValue: "Increase the value to set by one", decreaseDraftValue: "Decrease the value to set by one", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
     deleteDescription: (name, usages) => usages.length === 0 ? `“${name}” will be deleted permanently.` : `“${name}” will be deleted permanently. Used in: ${usages}`,
@@ -235,6 +258,13 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
     valueLocked: "Only channel members may change the value.", limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
     conflict: "This variable has changed since it was loaded.", created: "Variable created.", updated: "Variable saved.",
+    overlayLink: "Overlay link", overlayText: "Display", overlayTextHint: "Template with {value}; up to 100 characters.",
+    generateOverlayLink: "Generate link", existingOverlayLink: "Paste an existing overlay link", useExistingOverlayLink: "Use link",
+    widgetUrl: "Widget URL", obsCss: "OBS CSS", copyLink: "Copy link", copyCss: "Copy CSS",
+    secretNotice: "Secret: anyone with this link can see this channel's variable values.",
+    overlayLinkError: "The overlay link could not be created.", overlayTemplateInvalid: "Use {value} once; up to 100 characters.",
+    existingOverlayLinkInvalid: "Paste a BroBot overlay URL that contains a token.", copied: "Copied.",
+    copyUnavailable: "Automatic copying is unavailable; select and copy the text.",
   },
 };
 
@@ -2001,6 +2031,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     overlay_revocation_reason_invalid: "Widerrufsgrund fehlt oder ist ungültig.",
     overlay_token_not_found: "Overlay-Token nicht gefunden.",
     overlay_token_invalid: "Overlay-Zugang ungültig.",
+    overlay_variable_not_found: "Die Kanalvariable wurde nicht gefunden.",
     unknown_api_route: "Unbekannte API-Route.",
   },
   en: {
@@ -2085,6 +2116,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     overlay_revocation_reason_invalid: "Revocation reason missing or invalid.",
     overlay_token_not_found: "Overlay token not found.",
     overlay_token_invalid: "Overlay access invalid.",
+    overlay_variable_not_found: "The channel variable was not found.",
     unknown_api_route: "Unknown API route.",
   },
 };

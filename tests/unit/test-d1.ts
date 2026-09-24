@@ -23,6 +23,18 @@ export class TestPreparedStatement {
   }
 
   public runSync(): TestD1Result {
+    if (/^\s*SELECT\b/iu.test(this.sql)) {
+      const results = this.statement.all(...this.values) as unknown[];
+      const metadata = this.database.prepare("SELECT changes() AS changes, last_insert_rowid() AS last_row_id").get() as {
+        changes: number;
+        last_row_id: number;
+      };
+      return {
+        results,
+        success: true,
+        meta: { changes: metadata.changes, last_row_id: metadata.last_row_id, size: 0 },
+      };
+    }
     if (/\bRETURNING\b/iu.test(this.sql)) {
       const results = this.statement.all(...this.values) as unknown[];
       const metadata = this.database.prepare("SELECT changes() AS changes, last_insert_rowid() AS last_row_id").get() as {

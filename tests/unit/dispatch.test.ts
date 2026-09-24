@@ -40,11 +40,12 @@ const silentModule = (id: string) => fakeModule(id, () => ({ actions: [], diagno
 const activation = (moduleId: string, enabled = true, settings = '{"prefix":"!"}') =>
   ({ moduleId, enabled, settings });
 
-const environment = (database: TestD1Database) => ({
+const environment = (database: TestD1Database, publish = vi.fn()) => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: keyRing,
+  CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish }) } as unknown as Env["CHANNEL"],
 });
 
 const chatResponse = (body: unknown, status = 200) =>
@@ -610,7 +611,8 @@ describe("dispatch and execution", () => {
       );
 
       expect(publish).toHaveBeenCalledTimes(1);
-      const [message] = publish.mock.calls[0] as [{ payload: { entries: unknown[] } }, string];
+      const [messages] = publish.mock.calls[0] as [[{ payload: { entries: unknown[] } }], string];
+      const [message] = messages;
       expect(message.payload.entries).toHaveLength(2);
     } finally {
       database.close();
@@ -822,9 +824,11 @@ describe("dispatch and execution", () => {
       await insertChannel(database, "kanal-a");
       await database.prepare(
         `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
-         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
-      ).bind(NOW, NOW).run();
-      const dispatchOnline = (startedAt: string, receivedAt: string, triggerId: string) => dispatchEventSubNotification(environment(database), {
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?), ('kanal-a', 'zero', 0, 1, ?, ?)`,
+      ).bind(NOW, NOW, NOW, NOW).run();
+      const publish = vi.fn();
+      const env = environment(database, publish);
+      const dispatchOnline = (startedAt: string, receivedAt: string, triggerId: string) => dispatchEventSubNotification(env, {
         channelId: "kanal-a", subscriptionType: "stream.online", triggerId,
         payload: { started_at: startedAt }, receivedAt,
       }, sent(), []);
@@ -834,8 +838,15 @@ describe("dispatch and execution", () => {
       await dispatchOnline("2026-09-19T11:55:00.000Z", "2026-09-19T12:00:02.000Z", "online-duplicate");
       await dispatchOnline("2026-09-19T11:54:00.000Z", "2026-09-19T12:00:03.000Z", "online-late-old-session");
 
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([
+        { type: "variables.changed", payload: { set: [{ name: "score", value: 0 }], removed: [] } },
+      ]);
+
       await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
         .resolves.toEqual({ value: 9 });
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'zero'").first())
+        .resolves.toEqual({ value: 0 });
       await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
         .resolves.toEqual({ started_at: "2026-09-19T11:55:00.000Z" });
     } finally {

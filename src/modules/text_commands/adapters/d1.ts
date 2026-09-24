@@ -620,7 +620,12 @@ export const createTextCommandRepository = (
     ).bind(now, now, channelId, name, now, knownCommand?.revision ?? null, knownCommand?.revision ?? null,
       userId ?? null, channelId, name, userId ?? null, now);
 
-    const statements: D1PreparedStatement[] = variableChange === null ? [claim] : [variableChange, claim];
+    const variableBefore = variableChange === null ? null : db.prepare(
+      "SELECT value FROM channel_variables WHERE channel_id = ? AND name = ?",
+    ).bind(channelId, action?.name ?? "");
+    const statements: D1PreparedStatement[] = variableChange === null
+      ? [claim]
+      : [variableBefore as D1PreparedStatement, variableChange, claim];
     if (userCooldownSeconds > 0 && userId !== undefined && userId !== null) {
       // Gated on changes() of the immediately preceding statement, which is
       // always `claim` here: the previously read use_count is stale once a
@@ -632,7 +637,7 @@ export const createTextCommandRepository = (
       ).bind(channelId, name, userId, now));
     }
     const results = statements.length === 1 ? [await claim.run()] : await db.batch(statements);
-    const claimResult = results[variableChange === null ? 0 : 1];
+    const claimResult = results[variableChange === null ? 0 : 2];
     if (claimResult === undefined) throw new Error("Command claim returned no result.");
     const globalChanges = claimResult.meta.changes;
 
@@ -645,7 +650,7 @@ export const createTextCommandRepository = (
           : await this.find(channelId, name);
     if (current === null) return null;
     if (globalChanges > 0) {
-      const actionResult = variableChange === null ? undefined : results[0];
+      const actionResult = variableChange === null ? undefined : results[1];
       if (variableChange !== null && (actionResult?.meta.changes ?? 0) === 0) {
         return {
           command: await this.find(channelId, name) ?? current,
@@ -659,7 +664,13 @@ export const createTextCommandRepository = (
           "value" in changedResult && typeof changedResult.value === "number"
         ? { name: changedResult.name, value: changedResult.value }
         : undefined;
-      return { command: current, claimed: true, ...(changed === undefined ? {} : { changedVariable: changed }) };
+      const previousResult = variableChange === null ? undefined : results[0]?.results[0];
+      const previousValue = typeof previousResult === "object" && previousResult !== null &&
+          "value" in previousResult && typeof previousResult.value === "number"
+        ? previousResult.value
+        : undefined;
+      const changedVariable = changed === undefined || changed.value === previousValue ? undefined : changed;
+      return { command: current, claimed: true, ...(changedVariable === undefined ? {} : { changedVariable }) };
     }
 
     if (commandBeforeClaim !== null && current.revision !== commandBeforeClaim.revision) {

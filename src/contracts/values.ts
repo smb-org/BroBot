@@ -362,6 +362,7 @@ export const API_ERROR_CODES = [
   "overlay_revocation_reason_invalid",
   "overlay_token_not_found",
   "overlay_token_invalid",
+  "overlay_variable_not_found",
   "unknown_api_route",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];

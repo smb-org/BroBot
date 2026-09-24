@@ -604,6 +604,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .channel-variable-value-controls > strong { overflow: hidden; color: var(--text-2); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .channel-variable-usages { display: grid; gap: 8px; }
 .channel-variable-usages ul { display: grid; gap: 4px; margin: 0; padding-left: 18px; }
+.channel-variable-overlay-link { display: grid; gap: 10px; min-width: 0; }
+.channel-variable-overlay-link__divider { width: 100%; border: 0; border-top: 1px solid var(--line); margin: 0 0 6px; }
+.channel-variable-overlay-link h3 { margin: 0; color: var(--text-2); font-size: 14px; }
+.channel-variable-overlay-link__output { min-width: 0; }
+.channel-variable-overlay-link__output textarea { overflow-wrap: anywhere; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; }
 .channel-variable-editor__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ui-editor-shell.command-editor-shell { height: min(calc(100dvh - 32px), calc(100vh - 32px)); }
 .ui-switch-card__children .command-variable-action { display: grid; gap: 16px; }

@@ -108,6 +108,8 @@ const sessionHeaders = async (
 
 const issuePath = "https://brobot.example/api/channels/kanal-a/overlay-tokens";
 const statusPath = "https://brobot.example/api/overlay/status";
+const variablePath = (name: string): string =>
+  `https://brobot.example/api/overlay/variables/${encodeURIComponent(name)}`;
 const revokePath = (channelId: string, tokenId: string): string =>
   `https://brobot.example/api/channels/${channelId}/overlay-tokens/${tokenId}/revoke`;
 
@@ -731,5 +733,62 @@ describe("Overlay routes", () => {
 
     expect(response.status).toBe(404);
     expect(status.status).toBe(200);
+  });
+
+  it("reads only a named variable from the token tenant", async () => {
+    await insertChannel(database, "kanal-b");
+    await insertMember(database, "kanal-a");
+    await insertMember(database, "kanal-b");
+    await database.prepare("UPDATE channels SET language = 'en' WHERE channel_id = 'kanal-a'").run();
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('kanal-b', 'score', 99, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('kanal-a', 'lives', 7, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')`,
+    ).run();
+    const tokenA = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    const tokenB = await issueTestToken(database, {
+      channelId: "kanal-b", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    const bearer = (issuedUrl: string): string => `Bearer ${tokenFromIssuedUrl(issuedUrl)}`;
+
+    const crossTenant = await authRouter.fetch(new Request(variablePath("score"), {
+      headers: { Authorization: bearer(tokenA.overlayUrl) },
+    }), environment);
+    const scopedValue = await authRouter.fetch(new Request(variablePath("score"), {
+      headers: { Authorization: bearer(tokenB.overlayUrl) },
+    }), environment);
+    const channelLanguage = await authRouter.fetch(new Request(variablePath("lives"), {
+      headers: { Authorization: bearer(tokenA.overlayUrl) },
+    }), environment);
+
+    expect(crossTenant.status).toBe(404);
+    expect(scopedValue.status).toBe(200);
+    expect(await scopedValue.json()).toEqual({ name: "score", value: 99 });
+    expect(scopedValue.headers.get("Cache-Control")).toBe("no-store");
+    expect(channelLanguage.status).toBe(200);
+    expect(await channelLanguage.json()).toEqual({ name: "lives", value: 7 });
+    expect(channelLanguage.headers.get("Content-Language")).toBe("en");
+  });
+
+  it("rejects an invalid overlay variable name", async () => {
+    await insertMember(database, "kanal-a");
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt: "2026-09-18T00:00:00.000Z",
+    });
+
+    const response = await authRouter.fetch(new Request(variablePath("Bad Name"), {
+      headers: { Authorization: `Bearer ${tokenFromIssuedUrl(issued.overlayUrl)}` },
+    }), environment);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "variable_data_invalid" });
   });
 });

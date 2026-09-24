@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelVariablesPage } from "../../src/dashboard/ChannelVariablesPage";
@@ -20,10 +20,36 @@ const response = (body: unknown): Response => new Response(JSON.stringify(body),
   headers: { "Content-Type": "application/json" },
 });
 
+class DashboardSocket {
+  public static instances: DashboardSocket[] = [];
+  public readonly listeners = new Map<string, Set<EventListener>>();
+  public protocol = "brobot.v1";
+
+  public constructor(public readonly url: string, public readonly protocols?: string | string[]) {
+    DashboardSocket.instances.push(this);
+  }
+
+  public addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+    listeners.add(typeof listener === "function" ? listener : (event) => listener.handleEvent(event));
+    this.listeners.set(type, listeners);
+  }
+
+  public close(code = 1000): void {
+    this.dispatch("close", { code, reason: "closed" } as CloseEvent);
+  }
+
+  public dispatch(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
 describe("Channel variables page", () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
+    DashboardSocket.instances = [];
   });
 
   it("shows a spaced table, reset indicator, quick controls, and disabled Save for operators", async () => {
@@ -58,5 +84,148 @@ describe("Channel variables page", () => {
     expect(controls.getByRole("spinbutton", { name: "Setzen auf" })).toBeInTheDocument();
     expect(controls.getByRole("button", { name: "Speichern" })).toBeDisabled();
     expect(controls.getByRole("button", { name: "Speichern" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
+    expect(screen.queryByText("Overlay-Link")).not.toBeInTheDocument();
+  });
+
+  it("issues a token and builds a copyable overlay URL and OBS CSS for managers", async () => {
+    const issuedUrl = `https://brobot.example/overlay#token=${"s".repeat(43)}`;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/api/csrf")) return Promise.resolve(response({ token: "csrf-token" }));
+      if (url.endsWith("/api/channels/kanal-a/variables")) {
+        return Promise.resolve(response({ variables: [variable], count: 1, maximum: 25 }));
+      }
+      if (url.endsWith("/api/channels/kanal-a/overlay-tokens") && init?.method === "POST") {
+        return Promise.resolve(response({ tokenId: "token-1", overlayUrl: issuedUrl, expiresAt: null }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    const row = await screen.findByRole("row", { name: /score/i });
+    fireEvent.click(row);
+
+    expect(await screen.findByText("Overlay-Link")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Anzeige"), { target: { value: "Punkte {value}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Link erzeugen" }));
+
+    const overlayUrl = await screen.findByLabelText("Widget-URL");
+    expect(overlayUrl).toHaveValue(`http://localhost:3000/overlay#token=${"s".repeat(43)}&var=score&text=Punkte+%7Bvalue%7D`);
+    expect(fetcher.mock.calls.some(([input, init]) => {
+      const requestUrl = typeof input === "string" ? new URL(input, window.location.href)
+        : input instanceof URL ? input : new URL(input.url);
+      return requestUrl.pathname === "/api/channels/kanal-a/overlay-tokens" && init?.method === "POST";
+    })).toBe(true);
+    expect(screen.getByLabelText("OBS CSS")).toHaveValue(`.brobot-variable {
+  font: 700 48px system-ui, sans-serif;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+}`);
+    expect(screen.getByText(/Geheim/i)).toBeInTheDocument();
+  });
+
+  it("reuses a pasted overlay token in the browser without issuing another token", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ variables: [variable], count: 1, maximum: 25 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByLabelText("Vorhandenen Overlay-Link einfügen"), {
+      target: { value: `https://brobot.example/overlay#token=${"e".repeat(43)}` },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Link übernehmen" }));
+
+    expect(await screen.findByLabelText("Widget-URL")).toHaveValue(`http://localhost:3000/overlay#token=${"e".repeat(43)}&var=score&text=score%3A+%7Bvalue%7D`);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps variable actions before a separated overlay section and a visible disabled import button", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ variables: [variable], count: 1, maximum: 25 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+
+    const inspector = document.querySelector(".list-detail__inspector");
+    if (!(inspector instanceof HTMLElement)) throw new Error("Variable inspector is missing.");
+    const controls = within(inspector);
+    const precedes = (first: Node, second: Node): boolean =>
+      (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    const variableName = controls.getByLabelText("Name");
+    const valueControls = inspector.querySelector(".channel-variable-value-controls");
+    const usages = controls.getByRole("heading", { name: "Verwendet in" });
+    const actions = inspector.querySelector(".channel-variable-editor__actions");
+    const overlaySection = controls.getByRole("region", { name: "Overlay-Link" });
+    const divider = within(overlaySection).getByRole("separator");
+    const deleteButton = controls.getByRole("button", { name: "Variable löschen" });
+    const useExistingButton = controls.getByRole("button", { name: "Link übernehmen" });
+
+    if (valueControls === null || actions === null) throw new Error("Variable controls are missing.");
+    expect(precedes(variableName, valueControls)).toBe(true);
+    expect(precedes(valueControls, usages)).toBe(true);
+    expect(precedes(usages, actions)).toBe(true);
+    expect(precedes(actions, overlaySection)).toBe(true);
+    expect(precedes(divider, within(overlaySection).getByRole("heading", { name: "Overlay-Link" }))).toBe(true);
+    expect(precedes(overlaySection, deleteButton)).toBe(true);
+    expect(inspector.querySelector(".channel-variable-editor")?.lastElementChild).toBe(deleteButton);
+    expect(useExistingButton).toBeDisabled();
+    expect(useExistingButton.style.opacity).toBe("0.7");
+  });
+
+  it("coalesces variable hints, bounds continuous refreshes, and keeps one request in flight", async () => {
+    let releaseThird: ((result: Response) => void) | null = null;
+    const fetcher = vi.fn<typeof fetch>();
+    fetcher.mockImplementation(() => fetcher.mock.calls.length === 3
+      ? new Promise((resolve) => { releaseThird = resolve; })
+      : Promise.resolve(response({ variables: [variable], count: 1, maximum: 25 })));
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", DashboardSocket);
+
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    await screen.findByRole("table");
+    expect(DashboardSocket.instances).toHaveLength(1);
+    vi.useFakeTimers();
+    DashboardSocket.instances[0]?.dispatch("open", new Event("open"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    const sendHint = (id: number): void => DashboardSocket.instances[0]?.dispatch("message", {
+      data: JSON.stringify({
+        version: 1,
+        id: `variables-changed-${String(id)}`,
+        createdAt: "2026-09-24T12:00:00.000Z",
+        channelId: "kanal-a",
+        type: "variables.changed",
+        payload: { set: [{ name: "score", value: 1235 }], removed: [] },
+      }),
+    } as MessageEvent<string>);
+    for (let index = 0; index < 10; index++) sendHint(index);
+    await act(async () => { await vi.advanceTimersByTimeAsync(119); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+
+    for (let index = 10; index < 25; index++) {
+      sendHint(index);
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(releaseThird).toBeTypeOf("function");
+    await act(async () => {
+      releaseThird?.(response({ variables: [variable], count: 1, maximum: 25 }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    fireEvent.focus(window);
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 });

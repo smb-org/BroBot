@@ -17,6 +17,8 @@ const RECONNECT_GRACE_MS = 400;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const BATCH_DELAY_MS = 120;
+const VARIABLE_REFRESH_DELAY_MS = 120;
+const VARIABLE_REFRESH_MAX_WAIT_MS = 1_500;
 
 export type RealtimeFeedStatus = "connecting" | "connected" | "reconnecting" | "offline" | "renew";
 
@@ -121,6 +123,133 @@ const realtimeUrl = (channelId: string): string => {
   const url = new URL(`/ws/channels/${encodeURIComponent(channelId)}`, window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
+};
+
+const isVariablesChangedPayload = (value: unknown): boolean => isRecord(value) &&
+  Array.isArray(value.set) && value.set.every((entry) => isRecord(entry) &&
+    typeof entry.name === "string" && entry.name.length > 0 &&
+    typeof entry.value === "number" && Number.isSafeInteger(entry.value)) &&
+  Array.isArray(value.removed) && value.removed.every((name) => typeof name === "string" && name.length > 0);
+
+/** Keeps variable definitions and values current while their channel page is open. */
+export const useRealtimeVariableUpdates = ({
+  channelId,
+  refresh,
+}: {
+  channelId: string;
+  refresh: () => Promise<void>;
+}): void => {
+  const refreshRef = useRef(refresh);
+
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
+  useEffect(() => {
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let variableRefreshTimer: number | null = null;
+    let maximumVariableRefreshTimer: number | null = null;
+    let variableRefreshInFlight = false;
+    let variableRefreshQueued = false;
+    let reconnectAttempt = 0;
+    let fatalProtocolError = false;
+    const hasPendingVariableRefresh = (): boolean => !disposed && variableRefreshQueued;
+
+    const stopVariableRefreshTimers = (): void => {
+      if (variableRefreshTimer !== null) window.clearTimeout(variableRefreshTimer);
+      if (maximumVariableRefreshTimer !== null) window.clearTimeout(maximumVariableRefreshTimer);
+      variableRefreshTimer = null;
+      maximumVariableRefreshTimer = null;
+    };
+
+    const refreshVariables = async (): Promise<void> => {
+      stopVariableRefreshTimers();
+      if (disposed) return;
+      if (variableRefreshInFlight) {
+        variableRefreshQueued = true;
+        return;
+      }
+      variableRefreshQueued = false;
+      variableRefreshInFlight = true;
+      try {
+        await refreshRef.current();
+      } catch {
+        // A later socket hint or reconnect will retry the refresh.
+      } finally {
+        variableRefreshInFlight = false;
+        if (hasPendingVariableRefresh()) void refreshVariables();
+      }
+    };
+
+    const scheduleVariableRefresh = (): void => {
+      if (variableRefreshTimer !== null) window.clearTimeout(variableRefreshTimer);
+      variableRefreshTimer = window.setTimeout(() => { void refreshVariables(); }, VARIABLE_REFRESH_DELAY_MS);
+      maximumVariableRefreshTimer ??= window.setTimeout(() => { void refreshVariables(); }, VARIABLE_REFRESH_MAX_WAIT_MS);
+    };
+
+    const scheduleReconnect = (): void => {
+      if (disposed || fatalProtocolError || reconnectTimer !== null) return;
+      const delay = reconnectDelay(reconnectAttempt);
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
+    };
+
+    const handleMessage = (event: MessageEvent<unknown>): void => {
+      if (typeof event.data !== "string") return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(event.data) as unknown;
+      } catch {
+        return;
+      }
+      if (!isRecord(parsed) || parsed.version !== 1 || typeof parsed.channelId !== "string") return;
+      if (parsed.channelId !== channelId) {
+        fatalProtocolError = true;
+        try { socket?.close(1008, "Foreign channel"); } catch { /* socket may already be closed */ }
+        return;
+      }
+      if (parsed.type !== "variables.changed" || !isVariablesChangedPayload(parsed.payload)) return;
+      scheduleVariableRefresh();
+    };
+
+    const handleOpen = (): void => {
+      reconnectAttempt = 0;
+      void refreshVariables();
+    };
+
+    const handleClose = (event: CloseEvent): void => {
+      if (event.code === SOCKET_EXPIRED_CODE || event.code === SOCKET_REVOKED_CODE || event.code === 1008) {
+        fatalProtocolError = true;
+        return;
+      }
+      scheduleReconnect();
+    };
+
+    function connect(): void {
+      if (disposed || fatalProtocolError) return;
+      const WebSocketConstructor = window.WebSocket;
+      if (typeof WebSocketConstructor !== "function") return;
+      try {
+        socket = new WebSocketConstructor(realtimeUrl(channelId), REALTIME_PROTOCOL);
+        socket.addEventListener("open", handleOpen);
+        socket.addEventListener("message", handleMessage);
+        socket.addEventListener("close", handleClose);
+      } catch {
+        scheduleReconnect();
+      }
+    }
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      stopVariableRefreshTimers();
+      try { socket?.close(1000, "Leaving channel variables"); } catch { /* socket may already be closed */ }
+    };
+  }, [channelId]);
 };
 
 export const useRealtimeEventFeed = ({

@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import {
   changeChannelVariableValue,
   createChannelVariable,
   deleteChannelVariable,
   fetchChannelVariables,
+  issueOverlayToken,
   PanelApiError,
   updateChannelVariable,
   type PanelChannelVariable,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage } from "./locale";
-import { Button, ConfirmDialog, Field, Icon, ListDetail, NumberField, SubInspector, Switch } from "./ui";
+import { useRealtimeVariableUpdates } from "./realtime";
+import { Button, ConfirmDialog, Field, Icon, ListDetail, NumberField, ReadOnlyTextArea, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 
 interface ChannelVariablesPageProperties {
@@ -21,11 +23,39 @@ interface ChannelVariablesPageProperties {
 
 const normalizedVariableName = (value: string): string => value.trim().toLowerCase();
 const variableNamePattern = /^[a-z][a-z0-9_]{0,31}$/u;
+const overlayTokenPattern = /^[A-Za-z0-9_-]{43}$/u;
+const obsCssExample = `.brobot-variable {
+  font: 700 48px system-ui, sans-serif;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+}`;
+
+const tokenFromOverlayUrl = (value: string): string | null => {
+  try {
+    const url = new URL(value, window.location.href);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") ||
+        (url.pathname !== "/overlay" && url.pathname !== "/overlay.html")) return null;
+    const token = url.hash.slice(1);
+    const parsed = new URLSearchParams(token).get("token");
+    return parsed !== null && overlayTokenPattern.test(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const variableWidgetUrl = (token: string, name: string, text: string): string => {
+  const url = new URL("/overlay", window.location.origin);
+  const parameters = new URLSearchParams();
+  parameters.set("token", token);
+  parameters.set("var", name);
+  parameters.set("text", text);
+  url.hash = parameters.toString();
+  return url.toString();
+};
 
 export function ChannelVariablesPage({ channelId, canManage: canManageContent, onOpenCommand }: ChannelVariablesPageProperties): ReactElement {
   const language = dashboardLanguage();
   const labels = channelVariablesTexts(language);
-  const loadErrorText = labels.loadError;
   const [variables, setVariables] = useState<readonly PanelChannelVariable[]>([]);
   const [maximum, setMaximum] = useState(CHANNEL_VARIABLE_MAXIMUM_COUNT);
   const [loading, setLoading] = useState(true);
@@ -38,43 +68,37 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const [draftSetValue, setDraftSetValue] = useState<number | "">(0);
   const [pending, setPending] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [overlayText, setOverlayText] = useState("{value}");
+  const [existingOverlayLink, setExistingOverlayLink] = useState("");
+  const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
+  const [overlayError, setOverlayError] = useState<string | null>(null);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const refreshRequest = useRef(0);
+  const invalidateRefresh = useCallback((): void => { refreshRequest.current++; }, []);
 
-  const refresh = async (): Promise<void> => {
+  const refresh = useCallback(async (): Promise<void> => {
+    const requestId = ++refreshRequest.current;
     try {
       const result = await fetchChannelVariables(channelId);
+      if (requestId !== refreshRequest.current) return;
       setVariables(result.variables);
       setMaximum(result.maximum);
       setError(null);
     } catch (caught) {
+      if (requestId !== refreshRequest.current) return;
+      const loadErrorText = channelVariablesTexts(dashboardLanguage()).loadError;
       setError(caught instanceof PanelApiError ? apiErrorText(caught.code, loadErrorText) : loadErrorText);
     } finally {
-      setLoading(false);
+      if (requestId === refreshRequest.current) setLoading(false);
     }
-  };
+  }, [channelId]);
 
   useEffect(() => {
-    let active = true;
-    const load = (): void => {
-      void fetchChannelVariables(channelId).then((result) => {
-        if (!active) return;
-        setVariables(result.variables);
-        setMaximum(result.maximum);
-        setError(null);
-      }).catch((caught: unknown) => {
-        if (!active) return;
-        setError(caught instanceof PanelApiError ? apiErrorText(caught.code, loadErrorText) : loadErrorText);
-      }).finally(() => { if (active) setLoading(false); });
-    };
-    const reload = (): void => { if (document.visibilityState === "visible") load(); };
-    load();
-    window.addEventListener("focus", reload);
-    document.addEventListener("visibilitychange", reload);
-    return () => {
-      active = false;
-      window.removeEventListener("focus", reload);
-      document.removeEventListener("visibilitychange", reload);
-    };
-  }, [channelId, loadErrorText]);
+    void Promise.resolve().then(refresh);
+    return () => { invalidateRefresh(); };
+  }, [invalidateRefresh, refresh]);
+
+  useRealtimeVariableUpdates({ channelId, refresh });
 
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
   const selectedUsages = selected?.usages ?? [];
@@ -89,6 +113,11 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setDraftDescription("");
     setDraftReset(false);
     setDraftSetValue(0);
+    setOverlayText("{value}");
+    setExistingOverlayLink("");
+    setOverlayUrl(null);
+    setOverlayError(null);
+    setCopyNotice(null);
     setError(null);
   };
   const selectVariable = (variable: PanelChannelVariable): void => {
@@ -98,6 +127,11 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
     setDraftDescription(variable.description);
     setDraftReset(variable.resetOnStreamStart);
     setDraftSetValue(variable.value);
+    setOverlayText(`${variable.name}: {value}`);
+    setExistingOverlayLink("");
+    setOverlayUrl(null);
+    setOverlayError(null);
+    setCopyNotice(null);
     setError(null);
   };
   const closeInspector = (): void => {
@@ -121,6 +155,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         await refresh();
         setCreating(false);
         setSelectedName(response.variable.name);
+        setOverlayText(`${response.variable.name}: {value}`);
       } else if (selected !== null) {
         const response = await updateChannelVariable(channelId, selected.name, {
           newName: name,
@@ -130,6 +165,12 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         await refresh();
         setSelectedName(response.variable.name);
         setDraftName(response.variable.name);
+        if (response.variable.name !== selected.name) {
+          setOverlayText(`${response.variable.name}: {value}`);
+          setExistingOverlayLink("");
+          setOverlayUrl(null);
+          setOverlayError(null);
+        }
       }
     } catch (caught) {
       setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
@@ -149,6 +190,42 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
     } finally {
       setPending(false);
+    }
+  };
+  const overlayTemplateValid = overlayText.length <= 100 && overlayText.split("{value}").length === 2;
+  const generateOverlayLink = async (): Promise<void> => {
+    if (selected === null || !canManageContent || !overlayTemplateValid) return;
+    setPending(true);
+    setOverlayError(null);
+    setCopyNotice(null);
+    try {
+      const issued = await issueOverlayToken(channelId);
+      const token = tokenFromOverlayUrl(issued.overlayUrl);
+      if (token === null) throw new Error(labels.overlayLinkError);
+      setExistingOverlayLink(issued.overlayUrl);
+      setOverlayUrl(variableWidgetUrl(token, selected.name, overlayText));
+    } catch (caught) {
+      setOverlayError(caught instanceof PanelApiError
+        ? apiErrorText(caught.code, labels.overlayLinkError)
+        : labels.overlayLinkError);
+    } finally {
+      setPending(false);
+    }
+  };
+  const useExistingOverlayLink = (): void => {
+    if (selected === null || !overlayTemplateValid) return;
+    const token = tokenFromOverlayUrl(existingOverlayLink.trim());
+    setOverlayError(token === null ? labels.existingOverlayLinkInvalid : null);
+    setCopyNotice(null);
+    setOverlayUrl(token === null ? null : variableWidgetUrl(token, selected.name, overlayText));
+  };
+  const copyText = async (value: string): Promise<void> => {
+    setCopyNotice(null);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyNotice(labels.copied);
+    } catch {
+      setCopyNotice(labels.copyUnavailable);
     }
   };
   const remove = async (): Promise<void> => {
@@ -236,13 +313,51 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             ))}</ul>}
           </div>
           {selectedUsages.some((usage) => usage.kind === "action") ? <p className="muted" role="note">{labels.inUseReason(usageNames.filter((_, index) => selectedUsages[index]?.kind === "action").join(", "))}</p> : null}
-          <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} {...(!canManageContent ? { title: labels.managementLocked } : selectedUsages.some((usage) => usage.kind === "action") ? { title: labels.inUseReason(usageNames.join(", ")) } : {})} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>
         </>}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
         <div className="channel-variable-editor__actions">
           <Button variant="primary" disabled={!canManageContent || pending || nameInvalid || draftSetValue === ""} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { void save(); }}>{labels.save}</Button>
           <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.discard}</Button>
         </div>
+        {selected !== null && canManageContent ? <section className="config-section channel-variable-overlay-link" aria-label={labels.overlayLink}>
+          <hr className="channel-variable-overlay-link__divider" />
+          <h3>{labels.overlayLink}</h3>
+          <Field
+            id="channel-variable-overlay-text"
+            label={labels.overlayText}
+            hint={overlayTemplateValid ? labels.overlayTextHint : labels.overlayTemplateInvalid}
+            value={overlayText}
+            maxLength={100}
+            countLabel={(count, max) => `${String(count)} / ${String(max)}`}
+            disabled={pending}
+            onChange={(value) => { setOverlayText(value); setOverlayUrl(null); setCopyNotice(null); }}
+            {...(!overlayTemplateValid ? { error: labels.overlayTemplateInvalid } : {})}
+          />
+          <Button disabled={pending || !overlayTemplateValid} onClick={() => { void generateOverlayLink(); }}>
+            {labels.generateOverlayLink}
+          </Button>
+          <Field
+            id="channel-variable-overlay-existing"
+            label={labels.existingOverlayLink}
+            value={existingOverlayLink}
+            maxLength={2_000}
+            countLabel={(count, max) => `${String(count)} / ${String(max)}`}
+            disabled={pending}
+            onChange={(value) => { setExistingOverlayLink(value); setOverlayUrl(null); setOverlayError(null); setCopyNotice(null); }}
+          />
+          <Button variant="neutral" disabled={pending || !overlayTemplateValid || existingOverlayLink.trim().length === 0}
+            onClick={useExistingOverlayLink}>{labels.useExistingOverlayLink}</Button>
+          {overlayError === null ? null : <p className="form-error" role="alert">{overlayError}</p>}
+          {overlayUrl === null ? null : <>
+            <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-url" label={labels.widgetUrl} value={overlayUrl} minRows={3} />
+            <Button variant="neutral" onClick={() => { void copyText(overlayUrl); }}>{labels.copyLink}</Button>
+            <p className="muted" role="note">{labels.secretNotice}</p>
+            <ReadOnlyTextArea className="channel-variable-overlay-link__output" id="channel-variable-overlay-css" label={labels.obsCss} value={obsCssExample} minRows={6} />
+            <Button variant="neutral" onClick={() => { void copyText(obsCssExample); }}>{labels.copyCss}</Button>
+            {copyNotice === null ? null : <p className="muted" role="status">{copyNotice}</p>}
+          </>}
+        </section> : null}
+        {selected !== null ? <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} {...(!canManageContent ? { title: labels.managementLocked } : selectedUsages.some((usage) => usage.kind === "action") ? { title: labels.inUseReason(usageNames.join(", ")) } : {})} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button> : null}
         {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
       </div>
     </SubInspector>
