@@ -36,12 +36,12 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
         const updates = [loaded, ...(current === null ? [] : [current])];
         const buffered = latestRealtimeRef.current;
         if (buffered !== null) {
-          const newest = updates.reduce(pickNewestSchedule, loaded);
+          const newest = updates.reduce((newestSoFar, candidate) => pickNewestSchedule(newestSoFar, candidate), loaded);
           if (Date.parse(buffered.asOf) > Date.parse(newest.asOf ?? "")) {
             return { ...loaded, schedule: buffered.schedule, asOf: buffered.asOf };
           }
         }
-        return updates.reduce(pickNewestSchedule, loaded);
+        return updates.reduce((newestSoFar, candidate) => pickNewestSchedule(newestSoFar, candidate), loaded);
       });
       setLoadError(false);
     }).catch(() => { if (active) setLoadError(true); });
