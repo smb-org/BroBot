@@ -134,6 +134,25 @@ describe("create clip", () => {
     expect(body.detail.twitchMessage).toBeUndefined();
   });
 
+  it("reports a network error with a null message, not a missing one (issue #201 follow-up)", async () => {
+    // A rejected fetch never reaches a Twitch response body at all --
+    // `helixRequest` (worker/twitch/helix.ts) sets `message: null` for
+    // "network_error"/"timeout", so `detail.twitchMessage` is `null` here
+    // too, not a nonempty string. `apiErrorDetail` still has to convert it
+    // to `detail.message: null` -- leaving the key out entirely would read
+    // to a client as "no diagnostic detail was even attempted".
+    const environment = await asMember("broadcaster");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockRejectedValue(new Error("boom")));
+
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/clips"), environment);
+
+    expect(response.status).toBe(503);
+    const body = await response.json<{ error: string; reason: string; detail: Record<string, unknown> }>();
+    expect(body).toMatchObject({ error: "clip_create_failed", reason: "network_error" });
+    expect(body.detail).toHaveProperty("message", null);
+    expect(body.detail.twitchMessage).toBeUndefined();
+  });
+
   it("maps Twitch's offline response to the readable closed reason", async () => {
     const environment = await asMember("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(

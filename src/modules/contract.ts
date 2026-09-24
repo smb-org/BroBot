@@ -69,20 +69,30 @@ export interface ModuleDiagnostic {
  * carries for the event-log diagnostic's sake (provenance: only genuinely
  * Twitch-sourced wording gets labelled "Twitch: ..." in the dashboard
  * popover, see `dashboard/events/model.ts`'s `eventCause`) -- for a route's
- * own JSON error response, which has always used `message` and has to keep
- * doing so for existing clients. A producer's `result.detail` otherwise
- * flows straight into both the diagnostic and the response body; this is
- * the one conversion point every route that forwards `result.detail` as an
- * error response calls, instead of each route inlining its own rename.
+ * own JSON error response, which has always used `message` (including a
+ * bare `null` for a timeout/network error, where there was never a Twitch
+ * body to read one from -- `helixRequest` in `worker/twitch/helix.ts`) and
+ * has to keep doing so for existing clients. Converts whenever the
+ * `twitchMessage` key is present at all, not only when its value is a
+ * nonempty string: a `null` still has to become `detail.message: null`,
+ * not vanish and leave the key missing entirely, which previously read to
+ * a client as "no diagnostic detail was even attempted" instead of "Twitch
+ * gave no message". A producer's `result.detail` otherwise flows straight
+ * into both the diagnostic and the response body; this is the one
+ * conversion point every route that forwards `result.detail` as an error
+ * response calls, instead of each route inlining its own rename.
  */
 export const apiErrorDetail = (
   detail: Readonly<Record<string, string | number | boolean | null>>,
 ): Readonly<Record<string, string | number | boolean | null>> => {
-  const twitchMessage = detail.twitchMessage;
-  if (typeof twitchMessage !== "string" || twitchMessage.length === 0 || detail.message !== undefined) return detail;
+  if (!Object.hasOwn(detail, "twitchMessage") || Object.hasOwn(detail, "message")) return detail;
+  // `Object.hasOwn` above already proves the key exists -- `noUncheckedIndexedAccess`
+  // still types a plain index-signature read as possibly `undefined`, so this narrows
+  // back to what it actually is: one of the detail value types, `undefined` excluded.
+  const twitchMessage = detail.twitchMessage as string | number | boolean | null;
   const rest: Record<string, string | number | boolean | null> = { ...detail };
-  delete rest.twitchMessage;
   rest.message = twitchMessage;
+  delete rest.twitchMessage;
   return rest;
 };
 
