@@ -30,9 +30,9 @@ describe("Overlay tokens page", () => {
   });
 
   it.each([
-    ["de-DE", "In OBS einrichten", "Füge in OBS eine Browserquelle hinzu", "Geheimnis", "jederzeit auf der Seite Overlay-Links widerrufen", "Diagnoseinformationen", "Benutzerdefiniertes CSS"],
-    ["en-US", "Set up in OBS", "Add a Browser Source in OBS", "contains a secret", "revoke it at any time on the Overlay links page", "show diagnostics", "Custom CSS"],
-  ])("shows the localized OBS guide on the overlay links page (%s)", async (language, summary, sourceStep, secret, revoke, diagnostics, customCss) => {
+    ["de-DE", "In OBS einrichten", "Füge in OBS eine Browserquelle hinzu", "Geheimnis", "jederzeit auf der Seite Overlay-Links widerrufen", "Diagnoseinformationen", "Benutzerdefiniertes CSS", "Browser bei Szenenaktivierung aktualisieren", "Deaktivieren, wenn Quelle nicht sichtbar ist"],
+    ["en-US", "Set up in OBS", "Add a Browser Source in OBS", "contains a secret", "revoke it at any time on the Overlay links page", "show diagnostics", "Custom CSS", "Refresh browser when scene becomes active", "Shutdown source when not visible"],
+  ])("shows the localized OBS guide on the overlay links page (%s)", async (language, summary, sourceStep, secret, revoke, diagnostics, customCss, refreshLabel, shutdownLabel) => {
     setBrowserLanguage(language);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(response({ tokens: [] })));
 
@@ -49,6 +49,8 @@ describe("Overlay tokens page", () => {
     expect(guide).toHaveTextContent(diagnostics);
     expect(guide).toHaveTextContent("&debug=1");
     expect(guide).toHaveTextContent(customCss);
+    expect(guide).toHaveTextContent(refreshLabel);
+    expect(guide).toHaveTextContent(shutdownLabel);
     expect(guide).toHaveTextContent("font: 700 48px system-ui, sans-serif");
   });
 

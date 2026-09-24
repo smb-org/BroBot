@@ -169,7 +169,7 @@ export const replaceDashboardRoute = (route: DashboardRoute): void => {
   }, () => undefined);
 };
 
-export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute) => void] => {
+export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute, onNavigated?: () => void) => void] => {
   const [route, setRoute] = useState<DashboardRoute>(() => parseDashboardRoute(window.location.pathname, window.location.search));
 
   useEffect(() => {
@@ -199,8 +199,11 @@ export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute) =>
     return () => { window.removeEventListener("popstate", onPopState); };
   }, []);
 
-  const navigate = (nextRoute: DashboardRoute): void => {
-    navigateToDashboardRoute(nextRoute, () => { setRoute(nextRoute); });
+  const navigate = (nextRoute: DashboardRoute, onNavigated?: () => void): void => {
+    navigateToDashboardRoute(nextRoute, () => {
+      setRoute(nextRoute);
+      onNavigated?.();
+    });
   };
 
   return [route, navigate];

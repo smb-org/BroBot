@@ -16,6 +16,9 @@ import { Spotlight, type SpotlightItem } from "./ui";
 
 const SHOUTOUT_KEYWORD = "shoutout";
 
+const botBlocksRoute = (route: DashboardRoute, botSignedIn: boolean | undefined): boolean =>
+  botSignedIn === false && dashboardRouteRequiresBot(route);
+
 /**
  * Presence and availability for a module's immediate action, from the exact
  * same source Stream Manager reads (`ImmediateActions` in stream-manager.tsx)
@@ -49,11 +52,11 @@ interface ChannelSpotlightProperties {
   botSignedIn?: boolean;
   streamState?: "online" | "offline" | null | undefined;
   modules: PanelModuleState[];
-  onNavigate: (route: DashboardRoute) => void;
-  /** Set right before navigating to the text_commands module, so its panel can pre-select the command. */
+  onNavigate: (route: DashboardRoute, onNavigated?: () => void) => void;
+  /** Set after navigation succeeds, so its panel can pre-select the command. */
   onOpenCommand: (commandName: string) => void;
-  /** Set right before navigating to the variables page, so it can pre-select the variable (#208). */
-  onOpenVariable: (variableName: string) => void;
+  /** Set after navigation succeeds, scoped to the channel the variable belongs to (#208). */
+  onOpenVariable: (channelId: string, variableName: string) => void;
 }
 
 const variableDescription = (variable: PanelChannelVariable): string =>
@@ -85,39 +88,46 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
   }, [channelId]);
 
   const moduleItems = useMemo<SpotlightItem[]>(() => MODULES.map((module) => {
+    const route: DashboardRoute = { kind: "module", channelId, moduleId: module.id };
     const description = moduleDescription(module.id);
     const accessibleDescription = module.mandatory === true
       ? `${description === null ? "" : `${description} `}${moduleWorkspaceTexts().mandatoryReason}`
       : description;
+    const blockedByBot = botBlocksRoute(route, botSignedIn);
     return {
       id: `module:${module.id}`,
       label: moduleName(module.id),
       icon: <ModuleIcon moduleId={module.id} className="spotlight-module-icon" />,
       ...(accessibleDescription === null || accessibleDescription.length === 0 ? {} : { description: accessibleDescription }),
       group: texts.spotlight.groupModules,
-      onTrigger: () => { onNavigate({ kind: "module", channelId, moduleId: module.id }); },
+      ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
+      onTrigger: () => { onNavigate(route); },
     };
-  }), [channelId, onNavigate, texts.spotlight.groupModules]);
+  }), [botSignedIn, channelId, onNavigate, texts.blocking.botTitle, texts.spotlight.groupModules]);
 
-  const commandItems = useMemo<SpotlightItem[]>(() => commands.map((command) => ({
-    id: `command:${command.name}`,
-    label: `!${command.name}`,
-    description: texts.spotlight.openCommand(command.name),
-    icon: <ModuleIcon moduleId="text_commands" className="spotlight-module-icon" />,
-    group: texts.spotlight.groupCommands,
-    keywords: [command.name],
-    onTrigger: () => {
-      onOpenCommand(command.name);
-      onNavigate({ kind: "module", channelId, moduleId: "text_commands" });
-    },
-  })), [commands, channelId, onNavigate, onOpenCommand, texts.spotlight]);
+  const commandItems = useMemo<SpotlightItem[]>(() => commands.map((command) => {
+    const route: DashboardRoute = { kind: "module", channelId, moduleId: "text_commands" };
+    const blockedByBot = botBlocksRoute(route, botSignedIn);
+    return {
+      id: `command:${command.name}`,
+      label: `!${command.name}`,
+      description: texts.spotlight.openCommand(command.name),
+      icon: <ModuleIcon moduleId="text_commands" className="spotlight-module-icon" />,
+      group: texts.spotlight.groupCommands,
+      keywords: [command.name],
+      ...(blockedByBot ? { disabled: true, disabledReason: texts.blocking.botTitle } : {}),
+      onTrigger: () => {
+        onNavigate(route, () => { onOpenCommand(command.name); });
+      },
+    };
+  }), [botSignedIn, commands, channelId, onNavigate, onOpenCommand, texts.blocking.botTitle, texts.spotlight]);
 
   // Every sidebar page, indexed from the same `NAV_PAGES` list `PanelSidebar`
   // renders from (#208) -- a page added there appears here too, and the
   // platform page is gated by the same account-wide flag the sidebar uses.
   const pageItems = useMemo<SpotlightItem[]>(() => visibleNavPages({ isPlatformAdmin }).map((page) => {
     const pageRoute = page.route(channelId);
-    const blockedByBot = botSignedIn === false && dashboardRouteRequiresBot(pageRoute);
+    const blockedByBot = botBlocksRoute(pageRoute, botSignedIn);
     return {
       id: `page:${page.id}`,
       label: page.label(texts),
@@ -137,8 +147,7 @@ export const ChannelSpotlight = ({ channelId, ownRole, isPlatformAdmin = false, 
     group: texts.spotlight.groupVariables,
     keywords: [variable.name],
     onTrigger: () => {
-      onOpenVariable(variable.name);
-      onNavigate({ kind: "channel", channelId, section: "variables" });
+      onNavigate({ kind: "channel", channelId, section: "variables" }, () => { onOpenVariable(channelId, variable.name); });
     },
   })), [variables, channelId, onNavigate, onOpenVariable, texts.spotlight]);
 

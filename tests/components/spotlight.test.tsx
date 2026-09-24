@@ -7,6 +7,7 @@ import { UiProvider } from "../../src/dashboard/ui";
 import { Spotlight } from "../../src/dashboard/ui/Spotlight";
 import { ChannelSpotlight } from "../../src/dashboard/spotlight";
 import { ModuleIcon } from "../../src/dashboard/module-panels";
+import type { DashboardRoute } from "../../src/dashboard/router";
 import { jsonResponse } from "../unit/fixtures";
 
 const renderWithMantine = (element: ReactElement): ReturnType<typeof render> => render(<UiProvider>{element}</UiProvider>);
@@ -141,7 +142,7 @@ describe("Channel Spotlight", () => {
 
   it("finds a text command by its bang name and opens it in the editor", async () => {
     stubFetch();
-    const onNavigate = vi.fn();
+    const onNavigate = vi.fn((_route: DashboardRoute, onNavigated?: () => void) => { onNavigated?.(); });
     const onOpenCommand = vi.fn();
     renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={onNavigate} onOpenCommand={onOpenCommand} onOpenVariable={vi.fn()} />);
 
@@ -153,7 +154,7 @@ describe("Channel Spotlight", () => {
     fireEvent.click(action);
 
     expect(onOpenCommand).toHaveBeenCalledWith("clip");
-    expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "text_commands" });
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "module", channelId: "kanal-a", moduleId: "text_commands" }, expect.any(Function));
   });
 
   it("no longer offers a member as a search result (#208)", async () => {
@@ -206,6 +207,27 @@ describe("Channel Spotlight", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["module", "Shoutout", "Shoutout"],
+    ["command", "!clip", "!clip"],
+  ])("disables a %s result while the bot is signed out", async (_kind, query, label) => {
+    stubFetch();
+    const onNavigate = vi.fn();
+    renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" botSignedIn={false} modules={[]} onNavigate={onNavigate} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()} />);
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: query } });
+
+    const result = await screen.findByText(label);
+    const action = result.closest(".mantine-Spotlight-action");
+    expect(action).not.toBeNull();
+    expect(action).toBeDisabled();
+    expect(action).toHaveTextContent("Der Bot ist nicht angemeldet");
+    fireEvent.click(result);
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
   it("hides the operator-only platform page for a non-operator (#208)", async () => {
     stubFetch();
     renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()} />);
@@ -226,7 +248,7 @@ describe("Channel Spotlight", () => {
 
   it("navigates to the variables page and selects the variable (#208)", async () => {
     stubFetch();
-    const onNavigate = vi.fn();
+    const onNavigate = vi.fn((_route: DashboardRoute, onNavigated?: () => void) => { onNavigated?.(); });
     const onOpenVariable = vi.fn();
     renderWithMantine(<ChannelSpotlight channelId="kanal-a" ownRole="manager" modules={[]} onNavigate={onNavigate} onOpenCommand={vi.fn()} onOpenVariable={onOpenVariable} />);
 
@@ -237,8 +259,8 @@ describe("Channel Spotlight", () => {
     const action = await screen.findByText("{var.counter}");
     fireEvent.click(action);
 
-    expect(onOpenVariable).toHaveBeenCalledWith("counter");
-    expect(onNavigate).toHaveBeenCalledWith({ kind: "channel", channelId: "kanal-a", section: "variables" });
+    expect(onOpenVariable).toHaveBeenCalledWith("kanal-a", "counter");
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "channel", channelId: "kanal-a", section: "variables" }, expect.any(Function));
   });
 
   it("runs the ads-off registered action for a manager", async () => {

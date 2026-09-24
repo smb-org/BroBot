@@ -208,7 +208,9 @@ describe("Overlay status view", () => {
 
     await waitFor(() => expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("12,345"));
     expect(container.querySelector(".brobot-variable__text")?.textContent).toBe("Score: ");
-    expect(container.querySelector(".brobot-variable")).toHaveAttribute("data-variable", "score");
+    const variable = container.querySelector(".brobot-variable");
+    expect(variable).toHaveAttribute("data-variable", "score");
+    expect(variable).not.toHaveAttribute("style");
   });
 
   it("renders overlay templates as text nodes", async () => {
