@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, SHOUTOUT_SUPPRESSED_REASONS,
 } from "../../src/contracts/values";
-import { apiErrorText, channelVariablesTexts, dashboardLanguage, eventCauseText, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
+import { apiErrorText, channelVariablesTexts, dashboardLanguage, eventCauseText, eventText, eventToneEntries, overlayTokensTexts, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -28,6 +28,13 @@ describe("dashboard locale", () => {
 
     expect(dashboardLanguage()).toBe("de");
     expect(roleLabel("operator")).toBe("Bediener");
+  });
+
+  it("states honestly in German and English when overlay windows are still closing", () => {
+    expect(overlayTokensTexts("de").revokedPending)
+      .toBe("Overlay-Link widerrufen. Verbundene Overlay-Fenster werden noch geschlossen.");
+    expect(overlayTokensTexts("en").revokedPending)
+      .toBe("Overlay link revoked. Connected overlay windows are still being closed.");
   });
 
   it("describes the variable reset timing without exposing the EventSub event name", () => {

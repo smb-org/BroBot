@@ -5,7 +5,7 @@ import {
   getUsableOverlayToken,
   revokeOverlayToken as revokeStoredOverlayToken,
   touchOverlayToken,
-  type ActiveOverlayTokenRecord,
+  type ActiveOverlayTokenPage,
   type OverlayTokenRecord,
 } from "./overlay-token-repository";
 import type {
@@ -44,6 +44,7 @@ export interface RevokeOverlayTokenInput {
 export interface ListActiveOverlayTokensInput {
   channelId: string;
   now: string;
+  offset?: number;
 }
 
 const TOKEN_BYTE_LENGTH = 32;
@@ -108,7 +109,7 @@ export const issueOverlayToken = async (
 export const getActiveOverlayTokens = async (
   db: D1Database,
   input: ListActiveOverlayTokensInput,
-): Promise<ActiveOverlayTokenRecord[]> => listActiveOverlayTokens(db, input.channelId, input.now);
+): Promise<ActiveOverlayTokenPage> => listActiveOverlayTokens(db, input.channelId, input.now, input.offset);
 
 export const authenticateOverlayToken = async (
   db: D1Database,

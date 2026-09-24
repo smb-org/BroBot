@@ -32,7 +32,7 @@ describe("Overlay tokens page", () => {
 
     const table = await screen.findByRole("table");
     expect(within(table).getByText("token-123")).toBeInTheDocument();
-    expect(table.querySelectorAll("thead th")).toHaveLength(3);
+    expect(table.querySelectorAll("thead th")).toHaveLength(6);
     fireEvent.click(table.querySelector("tbody tr") as HTMLTableRowElement);
 
     const inspector = document.querySelector(".list-detail__inspector");
@@ -42,6 +42,9 @@ describe("Overlay tokens page", () => {
     expect(within(inspector).getByText("Zuletzt verwendet").parentElement).toHaveTextContent("Nie");
     expect(within(inspector).getByRole("button", { name: "Link widerrufen" })).toBeDisabled();
     expect(within(inspector).getByRole("button", { name: "Link widerrufen" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
+    expect(within(table).getByText("Sample Creator")).toBeInTheDocument();
+    expect(within(table).getByText("Läuft ab")).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "Link widerrufen" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Overlay-Link ausstellen" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Overlay-Link ausstellen" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
     expect(within(inspector).getByText(/Nur Broadcaster/)).toBeInTheDocument();
@@ -63,6 +66,9 @@ describe("Overlay tokens page", () => {
 
     expect(await screen.findByText(link)).toBeInTheDocument();
     expect(screen.getByText(/wird nur jetzt angezeigt/)).toBeInTheDocument();
+    const table = await screen.findByRole("table");
+    fireEvent.click(within(table).getByText("new-token"));
+    expect(screen.getByText(link)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Link kopieren" }));
     expect(writeText).toHaveBeenCalledWith(link);
     expect(await screen.findByRole("button", { name: "Kopiert" })).toBeInTheDocument();
@@ -83,8 +89,7 @@ describe("Overlay tokens page", () => {
 
     render(<UiProvider><OverlayTokensPage channelId="kanal-a" canManage /></UiProvider>);
     const table = await screen.findByRole("table");
-    fireEvent.click(within(table).getByText("token-123"));
-    fireEvent.click(screen.getByRole("button", { name: "Link widerrufen" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Link widerrufen" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/wird sofort ungültig/)).toBeInTheDocument();
@@ -98,5 +103,46 @@ describe("Overlay tokens page", () => {
     });
     expect(revokeRequest?.[1]?.body).toBe(JSON.stringify({ reason: "Widerruf über das Dashboard" }));
     expect(screen.queryByText("token-123")).not.toBeInTheDocument();
+  });
+
+  it("reports that connected windows are still closing after a pending revoke", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ tokens: [token], nextOffset: null }))
+      .mockResolvedValueOnce(response({ token: "csrf" }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ closingPending: true }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(response({ tokens: [], nextOffset: null }));
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><OverlayTokensPage channelId="kanal-a" canManage /></UiProvider>);
+    const table = await screen.findByRole("table");
+    fireEvent.click(within(table).getByRole("button", { name: "Link widerrufen" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "token-123 widerrufen" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Verbundene Overlay-Fenster werden noch geschlossen.");
+  });
+
+  it("ignores an older list response that arrives after a newer refresh", async () => {
+    let resolveInitial!: (result: Response) => void;
+    let resolveRefresh!: (result: Response) => void;
+    const initial = new Promise<Response>((resolve) => { resolveInitial = resolve; });
+    const refresh = new Promise<Response>((resolve) => { resolveRefresh = resolve; });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockReturnValueOnce(initial)
+      .mockReturnValueOnce(refresh);
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<UiProvider><OverlayTokensPage channelId="kanal-a" canManage /></UiProvider>);
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
+    window.dispatchEvent(new Event("focus"));
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(2); });
+
+    resolveRefresh(response({ tokens: [], nextOffset: null }));
+    expect(await screen.findByText("Noch keine Overlay-Links ausgestellt.")).toBeInTheDocument();
+    resolveInitial(response({ tokens: [token], nextOffset: null }));
+    await vi.waitFor(() => { expect(screen.queryByText("token-123")).not.toBeInTheDocument(); });
   });
 });

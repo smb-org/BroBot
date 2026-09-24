@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { authRouter } from "../../src/worker/auth/routes";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
   issueOverlayToken,
   revokeOverlayToken,
@@ -28,6 +29,7 @@ const makeEnvironment = (database: TestD1Database): TestEnvironment => ({
   PUBLIC_ORIGIN: "https://brobot.example",
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
   SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
+  TWITCH_CLIENT_ID: "test-client-id",
   OVERLAY_TOKEN_PEPPER: key(4),
 } as TestEnvironment);
 
@@ -50,6 +52,18 @@ const insertSession = async (database: TestD1Database): Promise<void> => {
       (session_id, user_id, login, expires_at, created_at, updated_at)
      VALUES ('session-1', 'user-1', 'tester', ?, ?, ?)`,
   ).bind("2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+};
+
+const insertBotIdentity = async (database: TestD1Database, environment: TestEnvironment): Promise<void> => {
+  const keys = parseKeyRing(environment.SESSION_ENCRYPTION_KEYS ?? "");
+  const access = await encryptJson({ token: "bot-access-token" }, keys);
+  const refresh = await encryptJson({ token: "bot-refresh-token" }, keys);
+  await database.prepare(
+    `INSERT INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, created_at, updated_at)
+     VALUES (1, 'bot-user', 'bot', '[]', ?, ?, ?, ?, ?)`,
+  ).bind(access, refresh, "2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
 };
 
 const insertMember = async (database: TestD1Database, channelId = "kanal-a"): Promise<void> => {
@@ -139,6 +153,8 @@ describe("Overlay routes", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
     database.close();
   });
 
@@ -163,7 +179,9 @@ describe("Overlay routes", () => {
     expect(response.status).toBe(403);
   });
 
-  it("lists only active tokens for the authorized channel without returning secrets or hashes", async () => {
+  it("lists only active same-channel tokens, resolves and caches creators, and omits secrets", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
     await insertMember(database, "kanal-a");
     await insertChannel(database, "kanal-b");
     await database.prepare(
@@ -179,11 +197,40 @@ describe("Overlay routes", () => {
       channelId: "kanal-b", pepper: environment.OVERLAY_TOKEN_PEPPER,
       publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt,
     });
+    // The list must use its token row's creator reference, not rejoin audit JSON.
+    await database.prepare("UPDATE overlay_tokens SET created_by_user_id = ? WHERE token_id = ?")
+      .bind("stored-creator", tokenA.tokenId).run();
+    const revokedToken = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt,
+    });
+    const expiredToken = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt,
+    });
+    await revokeOverlayToken(database as unknown as D1Database, {
+      channelId: "kanal-a", tokenId: revokedToken.tokenId, actor: TEST_ACTOR,
+      reason: "Route fixture", revokedAt: new Date().toISOString(),
+    });
+    await database.prepare("UPDATE overlay_tokens SET expires_at = ? WHERE token_id = ?")
+      .bind("2020-01-01T00:00:00.000Z", expiredToken.tokenId).run();
+    await insertBotIdentity(database, environment);
+    const helix = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.pathname).toBe("/helix/users");
+      expect(url.searchParams.getAll("id")).toEqual(["stored-creator"]);
+      return Promise.resolve(new Response(JSON.stringify({ data: [{ id: "stored-creator", login: "tester", display_name: "Sample Creator" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", helix);
     const secret = tokenFromIssuedUrl(tokenA.overlayUrl);
 
-    const response = await authRouter.fetch(new Request(issuePath, {
+    const listRequest = async (): Promise<Response> => authRouter.fetch(new Request(issuePath, {
       headers: await sessionHeaders(environment, false),
     }), environment);
+    const [response, concurrentRefresh] = await Promise.all([listRequest(), listRequest()]);
     const responseText = await response.text();
     const body: unknown = JSON.parse(responseText);
 
@@ -193,16 +240,50 @@ describe("Overlay routes", () => {
         id: tokenA.tokenId,
         name: null,
         createdAt,
-        createdBy: null,
+        createdBy: "Sample Creator",
         lastUsedAt: null,
         expiresAt: null,
       }],
+      nextOffset: null,
     });
     expect(responseText).not.toContain(secret);
     expect(responseText).not.toContain("tokenHash");
     expect(responseText).not.toContain("token_hash");
     expect(responseText).not.toContain(tokenB.tokenId);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(concurrentRefresh.status).toBe(200);
+    expect(helix).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(body)).not.toContain(revokedToken.tokenId);
+    expect(JSON.stringify(body)).not.toContain(expiredToken.tokenId);
+    expect(JSON.stringify(body)).not.toContain(tokenB.tokenId);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
+    const refreshed = await listRequest();
+    expect(refreshed.status).toBe(200);
+    expect(helix).toHaveBeenCalledTimes(2);
+  });
+
+  it("paginates active token lists in stable 50-row pages", async () => {
+    await insertMember(database);
+    for (let index = 0; index < 51; index += 1) {
+      const id = `page-token-${String(index).padStart(2, "0")}`;
+      await database.prepare(
+        `INSERT INTO overlay_tokens (token_id, channel_id, token_hash, created_at)
+         VALUES (?, 'kanal-a', ?, ?)`,
+      ).bind(id, `hash-${id}`, `2026-09-24T09:${String(index).padStart(2, "0")}:00.000Z`).run();
+    }
+    const headers = await sessionHeaders(environment, false);
+    const firstPage = await authRouter.fetch(new Request(issuePath, { headers }), environment);
+    const firstBody = await firstPage.json<{ tokens: Array<{ id: string }>; nextOffset: number | null }>();
+    const secondPage = await authRouter.fetch(new Request(`${issuePath}?offset=50`, {
+      headers: await sessionHeaders(environment, false),
+    }), environment);
+    const secondBody = await secondPage.json<{ tokens: Array<{ id: string }>; nextOffset: number | null }>();
+
+    expect(firstBody.tokens).toHaveLength(50);
+    expect(firstBody.nextOffset).toBe(50);
+    expect(secondBody.tokens).toHaveLength(1);
+    expect(secondBody.nextOffset).toBeNull();
+    expect(firstBody.tokens.at(-1)?.id).not.toBe(secondBody.tokens[0]?.id);
   });
 
   it.each([
@@ -268,7 +349,7 @@ describe("Overlay routes", () => {
     });
     let finishClose: (() => void) | undefined;
     let signalCloseStarted: (() => void) | undefined;
-    const closeGate = new Promise<void>((resolve) => { finishClose = resolve; });
+    const closeGate = new Promise<boolean>((resolve) => { finishClose = () => { resolve(true); }; });
     const closeStarted = new Promise<void>((resolve) => { signalCloseStarted = resolve; });
     const close = vi.fn(() => {
       signalCloseStarted?.();
@@ -299,7 +380,7 @@ describe("Overlay routes", () => {
     expect(close).toHaveBeenCalledWith(issued.tokenId);
   });
 
-  it("still returns success and logs when the realtime token close rejects", async () => {
+  it("reports pending when the realtime token close rejects", async () => {
     await insertMember(database);
     const issued = await issueTestToken(database, {
       channelId: "kanal-a",
@@ -321,7 +402,8 @@ describe("Overlay routes", () => {
         body: JSON.stringify({ reason: "Round two failure" }),
       }), environment);
 
-      expect(response.status).toBe(204);
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ closingPending: true });
       expect(warning).toHaveBeenCalledWith("Realtime revocation for token failed.", expect.any(Error));
       const revokedRow = await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
         .bind(issued.tokenId).first<{ revoked_at: string | null }>();
@@ -331,7 +413,7 @@ describe("Overlay routes", () => {
     }
   });
 
-  it("returns success and logs when the realtime close fails or times out", async () => {
+  it("reports pending when the realtime close times out", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -360,9 +442,10 @@ describe("Overlay routes", () => {
       await vi.advanceTimersByTimeAsync(2_000);
       const response = await responsePromise;
 
-      expect(response.status).toBe(204);
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ closingPending: true });
       expect(warning).toHaveBeenCalledWith(
-        "Realtime token revocation timed out; the security round remains the backstop.",
+        "Realtime token revocation is pending; the Durable Object will retry.",
       );
       const revokedRow = await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
         .bind(issued.tokenId).first<{ revoked_at: string | null }>();
@@ -371,6 +454,33 @@ describe("Overlay routes", () => {
       warning.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  it("retries realtime closure when revocation is requested for an already-revoked row", async () => {
+    await insertMember(database);
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a",
+      pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN,
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    const close = vi.fn().mockResolvedValue(false).mockResolvedValueOnce(true);
+    environment.CHANNEL = {
+      idFromName: vi.fn(() => "channel-object"),
+      get: vi.fn(() => ({ revokeToken: close })),
+    } as unknown as Env["CHANNEL"];
+    const headers = await sessionHeaders(environment, true);
+    const first = await authRouter.fetch(new Request(revokePath("kanal-a", issued.tokenId), {
+      method: "POST", headers, body: JSON.stringify({ reason: "Retry test" }),
+    }), environment);
+    expect(first.status).toBe(204);
+    const secondHeaders = await sessionHeaders(environment, true);
+    const second = await authRouter.fetch(new Request(revokePath("kanal-a", issued.tokenId), {
+      method: "POST", headers: secondHeaders, body: JSON.stringify({ reason: "Retry test" }),
+    }), environment);
+    expect(second.status).toBe(202);
+    expect(close).toHaveBeenCalledTimes(2);
   });
 
   it.each([

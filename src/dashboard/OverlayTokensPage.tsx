@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import {
   fetchOverlayTokens,
@@ -16,6 +16,7 @@ interface OverlayTokensPageProperties {
 }
 
 const rowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, onSelect: () => void): void => {
+  if (event.target !== event.currentTarget) return;
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
     onSelect();
@@ -27,43 +28,85 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
   const labels = overlayTokensTexts(language);
   const [tokens, setTokens] = useState<readonly PanelOverlayToken[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [oneTimeLink, setOneTimeLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const listRequestVersion = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
+    const requestVersion = ++listRequestVersion.current;
     try {
       const result = await fetchOverlayTokens(channelId);
+      if (listRequestVersion.current !== requestVersion) return;
       setTokens(result.tokens);
+      setNextOffset(result.nextOffset ?? null);
       setError(null);
     } catch (caught) {
+      if (listRequestVersion.current !== requestVersion) return;
       setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
     } finally {
-      setLoading(false);
+      if (listRequestVersion.current === requestVersion) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [channelId, labels.loadError]);
+
+  const loadMore = async (): Promise<void> => {
+    if (nextOffset === null || loadingMore || pending) return;
+    const requestVersion = ++listRequestVersion.current;
+    setLoadingMore(true);
+    try {
+      const result = await fetchOverlayTokens(channelId, nextOffset);
+      if (listRequestVersion.current !== requestVersion) return;
+      setTokens((current) => [...current, ...result.tokens]);
+      setNextOffset(result.nextOffset ?? null);
+      setError(null);
+    } catch (caught) {
+      if (listRequestVersion.current !== requestVersion) return;
+      setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
+    } finally {
+      if (listRequestVersion.current === requestVersion) setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
     const refresh = (): void => {
+      const requestVersion = ++listRequestVersion.current;
       void fetchOverlayTokens(channelId).then((result) => {
-        if (!active) return;
+        if (!active || listRequestVersion.current !== requestVersion) return;
         setTokens(result.tokens);
+        setNextOffset(result.nextOffset ?? null);
         setError(null);
       }).catch((caught: unknown) => {
-        if (!active) return;
+        if (!active || listRequestVersion.current !== requestVersion) return;
         setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.loadError) : labels.loadError);
-      }).finally(() => { if (active) setLoading(false); });
+      }).finally(() => {
+        if (!active || listRequestVersion.current !== requestVersion) return;
+        setLoading(false);
+        setLoadingMore(false);
+      });
     };
     refresh();
-    const reload = (): void => { if (document.visibilityState === "visible") refresh(); };
+    const reload = (): void => {
+      if (document.visibilityState !== "visible") return;
+      setLoading(true);
+      setLoadingMore(false);
+      setNextOffset(null);
+      refresh();
+    };
     window.addEventListener("focus", reload);
     document.addEventListener("visibilitychange", reload);
     return () => {
       active = false;
+      listRequestVersion.current += 1;
       window.removeEventListener("focus", reload);
       document.removeEventListener("visibilitychange", reload);
     };
@@ -81,10 +124,18 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
   };
 
   const selectToken = (token: PanelOverlayToken): void => {
+    // A newly issued URL is the only copy of its secret. Row selection must
+    // not silently replace the issued-link inspector before explicit dismissal.
+    if (oneTimeLink !== null) return;
     setSelectedId(token.id);
-    setOneTimeLink(null);
     setCopied(false);
     setError(null);
+  };
+
+  const dismissIssuedLink = (): void => {
+    setOneTimeLink(null);
+    setSelectedId(null);
+    setCopied(false);
   };
 
   const issue = async (): Promise<void> => {
@@ -97,6 +148,7 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
       const result = await issueOverlayToken(channelId);
       setSelectedId(result.tokenId);
       setOneTimeLink(result.overlayUrl);
+      setNotice(null);
       await load();
     } catch (caught) {
       setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
@@ -121,10 +173,11 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
     setPending(true);
     setError(null);
     try {
-      await revokeOverlayToken(channelId, selectedId, labels.revocationReason);
+      const result = await revokeOverlayToken(channelId, selectedId, labels.revocationReason);
       setConfirmRevoke(false);
       closeInspector();
       await load();
+      setNotice(result.closingPending ? labels.revokedPending : labels.revoked);
     } catch (caught) {
       setError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
     } finally {
@@ -148,18 +201,33 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
       <table className="table overlay-tokens-table">
         <thead><tr>
           <th scope="col">{labels.identifier}</th>
+          <th scope="col">{labels.createdBy}</th>
           <th scope="col">{labels.createdAt}</th>
           <th scope="col">{labels.lastUsedAt}</th>
+          <th scope="col">{labels.expiresAt}</th>
+          <th scope="col"><span className="visually-hidden">{labels.revoke}</span></th>
         </tr></thead>
         <tbody>{tokens.map((token) => (
           <tr key={token.id} tabIndex={0} aria-selected={token.id === selectedId} onClick={() => { selectToken(token); }} onKeyDown={(event) => { rowKeyDown(event, () => { selectToken(token); }); }}>
             <th scope="row" className="mono" title={token.id}>{token.name ?? token.id}</th>
+            <td>{token.createdBy ?? labels.unknownCreator}</td>
             <td><time dateTime={token.createdAt} title={token.createdAt}>{formatTimestamp(token.createdAt)}</time></td>
             <td>{token.lastUsedAt === null ? labels.never : <time dateTime={token.lastUsedAt} title={token.lastUsedAt}>{formatTimestamp(token.lastUsedAt)}</time>}</td>
+            <td>{token.expiresAt === null ? labels.never : <time dateTime={token.expiresAt} title={token.expiresAt}>{formatTimestamp(token.expiresAt)}</time>}</td>
+            <td className="overlay-tokens-table__action" onClick={(event) => { event.stopPropagation(); }}>
+              <Button danger="subtle" icon="remove" iconOnly ariaLabel={labels.revoke}
+                disabled={!canManageTokens || pending || oneTimeLink !== null}
+                {...(manageReason !== undefined ? { title: manageReason } : oneTimeLink !== null ? { title: labels.issueBlocked } : {})}
+                onClick={() => { setSelectedId(token.id); setConfirmRevoke(true); }} />
+            </td>
           </tr>
         ))}</tbody>
       </table>
     </div> : null}
+    {nextOffset === null ? null : <Button variant="neutral" disabled={loadingMore || pending} onClick={() => { void loadMore(); }}>
+      {loadingMore ? labels.loadingMore : labels.loadMore}
+    </Button>}
+    {notice === null ? null : <p className="muted" role="status">{notice}</p>}
     {manageReason === undefined ? null : <p className="muted" role="note">{manageReason}</p>}
   </section>;
 
@@ -178,6 +246,7 @@ export function OverlayTokensPage({ channelId, canManage: canManageTokens }: Ove
         <Button variant="neutral" disabled={pending} onClick={() => { void copyLink(); }}>
           <Icon name="copy" size={16} /> {copied ? labels.copied : labels.copy}
         </Button>
+        <Button variant="subtle" disabled={pending} onClick={dismissIssuedLink}>{labels.dismissLink}</Button>
       </section>}
       {selected === null ? null : <dl className="properties overlay-token-properties">
         <div><dt>{labels.identifier}</dt><dd className="mono">{selected.id}</dd></div>

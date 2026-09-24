@@ -75,22 +75,23 @@ const closeRealtimeTokenBeforeResponse = async (
   namespace: Env["CHANNEL"] | undefined,
   channelId: string,
   tokenId: string,
-): Promise<void> => {
+): Promise<boolean> => {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const outcome = await Promise.race([
-      revokeRealtimeToken(namespace, channelId, tokenId).then(() => "closed" as const),
+      revokeRealtimeToken(namespace, channelId, tokenId),
       new Promise<"timeout">((resolve) => {
         timeout = setTimeout(() => { resolve("timeout"); }, REALTIME_TOKEN_CLOSE_TIMEOUT_MS);
       }),
     ]);
-    if (outcome === "timeout") {
-      console.warn("Realtime token revocation timed out; the security round remains the backstop.");
+    if (outcome === "timeout" || !outcome) {
+      console.warn("Realtime token revocation is pending; the Durable Object will retry.");
+      return false;
     }
+    return true;
   } catch (error: unknown) {
-    // The D1 revocation is authoritative. A failed immediate close is logged,
-    // and the Durable Object security round will recheck the token.
     console.warn("Realtime token revocation could not close the connection.", error);
+    return false;
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
@@ -283,18 +284,24 @@ authRouter.get(
   "/api/channels/:channelId/overlay-tokens",
   requireChannelAuthorization(),
   async (context) => {
+    const offsetValue = context.req.query("offset");
+    const offset = offsetValue === undefined ? 0 : Number(offsetValue);
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10_000) {
+      return context.json({ error: "overlay_list_offset_invalid" }, 400);
+    }
     const tokens = await getActiveOverlayTokens(context.env.DB, {
       channelId: context.req.param("channelId"),
       now: nowIso(),
+      offset,
     });
     const creators = await fetchTwitchUsersById(
       fetch,
       context.env,
-      [...new Set(tokens.flatMap((token) => token.createdByUserId === null ? [] : [token.createdByUserId]))],
+      [...new Set(tokens.tokens.flatMap((token) => token.createdByUserId === null ? [] : [token.createdByUserId]))],
     );
     context.header("Cache-Control", "no-store");
     return context.json({
-      tokens: tokens.map((token) => ({
+      tokens: tokens.tokens.map((token) => ({
         id: token.tokenId,
         name: token.name,
         createdAt: token.createdAt,
@@ -302,6 +309,7 @@ authRouter.get(
         lastUsedAt: token.lastUsedAt,
         expiresAt: token.expiresAt,
       })),
+      nextOffset: tokens.nextOffset,
     });
   },
 );
@@ -327,8 +335,9 @@ authRouter.post(
       revokedAt: nowIso(),
     });
     if (!revoked) return context.json({ error: "overlay_token_not_found" }, 404);
-    await closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, tokenId);
+    const closed = await closeRealtimeTokenBeforeResponse(context.env.CHANNEL, channelId, tokenId);
     context.header("Cache-Control", "no-store");
+    if (!closed) return context.json({ closingPending: true }, 202);
     return context.body(null, 204);
   },
 );

@@ -7,6 +7,29 @@ interface JsonRecord {
   [key: string]: unknown;
 }
 
+const USER_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_USER_IDS_PER_REQUEST = 100;
+
+interface CachedUser {
+  expiresAt: number;
+  user: TwitchUser | null;
+}
+
+interface UserResolutionCache {
+  users: Map<string, CachedUser>;
+  pending: Map<string, Promise<TwitchUser | null>>;
+}
+
+const caches = new WeakMap<typeof fetch, UserResolutionCache>();
+
+const cacheFor = (fetcher: typeof fetch): UserResolutionCache => {
+  const existing = caches.get(fetcher);
+  if (existing !== undefined) return existing;
+  const created = { users: new Map(), pending: new Map() } satisfies UserResolutionCache;
+  caches.set(fetcher, created);
+  return created;
+};
+
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -22,7 +45,48 @@ const readStoredBotAccessToken = async (environment: Env): Promise<string | null
     : null;
 };
 
-/** Resolve display names in one Helix request per 100 users, if the bot identity is available. */
+interface BatchLookupResult {
+  users: Map<string, TwitchUser>;
+  cacheable: boolean;
+}
+
+const fetchUserBatch = async (
+  fetcher: typeof fetch,
+  environment: Env,
+  userIds: string[],
+): Promise<BatchLookupResult> => {
+  const resolved = new Map<string, TwitchUser>();
+  try {
+    const accessToken = await readStoredBotAccessToken(environment);
+    if (accessToken === null) return { users: resolved, cacheable: false };
+    const url = new URL("https://api.twitch.tv/helix/users");
+    for (const userId of userIds) url.searchParams.append("id", userId);
+    const result = await helixRequest<JsonRecord>({
+      url: url.toString(),
+      accessToken,
+      clientId: environment.TWITCH_CLIENT_ID,
+      fetcher,
+    });
+    if (!result.ok || !Array.isArray(result.data.data)) return { users: resolved, cacheable: false };
+    for (const entry of result.data.data as unknown[]) {
+      if (!isRecord(entry) || typeof entry.id !== "string" || typeof entry.login !== "string" ||
+          typeof entry.display_name !== "string") continue;
+      resolved.set(entry.id, {
+        userId: entry.id,
+        login: entry.login,
+        displayName: entry.display_name,
+        profileImageUrl: typeof entry.profile_image_url === "string" && entry.profile_image_url.length > 0
+          ? entry.profile_image_url
+          : null,
+      });
+    }
+    return { users: resolved, cacheable: true };
+  } catch {
+    return { users: resolved, cacheable: false };
+  }
+};
+
+/** Resolve at most 100 distinct users, caching by ID and coalescing overlapping lookups. */
 export const fetchTwitchUsersById = async (
   fetcher: typeof fetch,
   environment: Env,
@@ -31,34 +95,42 @@ export const fetchTwitchUsersById = async (
   const resolved = new Map<string, TwitchUser>();
   if (userIds.length === 0) return resolved;
 
-  try {
-    const accessToken = await readStoredBotAccessToken(environment);
-    if (accessToken === null) return resolved;
-    for (let offset = 0; offset < userIds.length; offset += 100) {
-      const url = new URL("https://api.twitch.tv/helix/users");
-      for (const userId of userIds.slice(offset, offset + 100)) url.searchParams.append("id", userId);
-      const result = await helixRequest<JsonRecord>({
-        url: url.toString(),
-        accessToken,
-        clientId: environment.TWITCH_CLIENT_ID,
-        fetcher,
-      });
-      if (!result.ok || !Array.isArray(result.data.data)) break;
-      for (const entry of result.data.data as unknown[]) {
-        if (!isRecord(entry) || typeof entry.id !== "string" || typeof entry.login !== "string" ||
-            typeof entry.display_name !== "string") continue;
-        resolved.set(entry.id, {
-          userId: entry.id,
-          login: entry.login,
-          displayName: entry.display_name,
-          profileImageUrl: typeof entry.profile_image_url === "string" && entry.profile_image_url.length > 0
-            ? entry.profile_image_url
-            : null,
-        });
-      }
+  const cache = cacheFor(fetcher);
+  const now = Date.now();
+  const requestedIds = [...new Set(userIds)].slice(0, MAX_USER_IDS_PER_REQUEST);
+  const missing: string[] = [];
+  for (const userId of requestedIds) {
+    const cached = cache.users.get(userId);
+    if (cached !== undefined && cached.expiresAt > now) {
+      if (cached.user !== null) resolved.set(userId, cached.user);
+      continue;
     }
-  } catch {
-    return resolved;
+    if (cached !== undefined) cache.users.delete(userId);
+    if (!cache.pending.has(userId)) missing.push(userId);
+  }
+
+  for (let offset = 0; offset < missing.length; offset += MAX_USER_IDS_PER_REQUEST) {
+    const batchIds = missing.slice(offset, offset + MAX_USER_IDS_PER_REQUEST);
+    const batch = fetchUserBatch(fetcher, environment, batchIds);
+    for (const userId of batchIds) {
+      const pending = batch.then((result) => {
+        const user = result.users.get(userId) ?? null;
+        if (result.cacheable) cache.users.set(userId, { expiresAt: Date.now() + USER_CACHE_TTL_MS, user });
+        return user;
+      }).finally(() => {
+        if (cache.pending.get(userId) === pending) cache.pending.delete(userId);
+      });
+      cache.pending.set(userId, pending);
+    }
+  }
+
+  const lookups = await Promise.all(requestedIds.map(async (userId) => {
+    const cached = cache.users.get(userId);
+    if (cached !== undefined && cached.expiresAt > Date.now()) return [userId, cached.user] as const;
+    return [userId, await cache.pending.get(userId)] as const;
+  }));
+  for (const [userId, user] of lookups) {
+    if (user !== null && user !== undefined) resolved.set(userId, user);
   }
   return resolved;
 };

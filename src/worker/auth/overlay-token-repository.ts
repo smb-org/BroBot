@@ -55,6 +55,11 @@ export interface ActiveOverlayTokenRecord {
   expiresAt: string | null;
 }
 
+export interface ActiveOverlayTokenPage {
+  tokens: ActiveOverlayTokenRecord[];
+  nextOffset: number | null;
+}
+
 interface ActiveOverlayTokenRow {
   token_id: string;
   created_at: string;
@@ -103,24 +108,20 @@ export const overlayTokenReturningColumns = `
   revoked_at, revocation_reason, last_used_at`;
 
 /**
- * The issuance audit row is the durable creator reference. The token table
- * deliberately stores no secret-adjacent display metadata such as a label or
- * actor identity; the API resolves this user ID for presentation separately.
+ * Creator IDs are stored directly on token rows so dashboard listing does not
+ * need to join and extract the issuance audit JSON for every token.
  */
 export const listActiveOverlayTokens = async (
   db: D1Database,
   channelId: string,
   now: string,
-): Promise<ActiveOverlayTokenRecord[]> => {
+  offset = 0,
+): Promise<ActiveOverlayTokenPage> => {
+  const pageSize = 50;
   const rows = await db.prepare(
-    `SELECT token.token_id, token.created_at,
-            issued.actor_user_id AS created_by_user_id,
+    `SELECT token.token_id, token.created_at, token.created_by_user_id,
             token.last_used_at, token.expires_at
        FROM overlay_tokens AS token
-       LEFT JOIN audit_log AS issued
-         ON issued.channel_id = token.channel_id
-        AND issued.action = 'overlay.token.issued'
-        AND json_extract(issued.after_json, '$.tokenId') = token.token_id
       WHERE token.channel_id = ?
         AND token.revoked_at IS NULL
         AND (
@@ -130,16 +131,21 @@ export const listActiveOverlayTokens = async (
             AND julianday(token.expires_at) > julianday(?)
           )
         )
-      ORDER BY token.created_at DESC, token.token_id DESC`,
-  ).bind(channelId, now).all<ActiveOverlayTokenRow>();
-  return rows.results.map((row) => ({
-    tokenId: row.token_id,
-    name: null,
-    createdAt: row.created_at,
-    createdByUserId: row.created_by_user_id,
-    lastUsedAt: row.last_used_at,
-    expiresAt: row.expires_at,
-  }));
+      ORDER BY token.created_at DESC, token.token_id DESC
+      LIMIT ? OFFSET ?`,
+  ).bind(channelId, now, pageSize + 1, offset).all<ActiveOverlayTokenRow>();
+  const hasMore = rows.results.length > pageSize;
+  return {
+    tokens: rows.results.slice(0, pageSize).map((row) => ({
+      tokenId: row.token_id,
+      name: null,
+      createdAt: row.created_at,
+      createdByUserId: row.created_by_user_id,
+      lastUsedAt: row.last_used_at,
+      expiresAt: row.expires_at,
+    })),
+    nextOffset: hasMore ? offset + pageSize : null,
+  };
 };
 
 /**
@@ -157,9 +163,9 @@ export const createOverlayToken = async (
 ): Promise<boolean> => {
   const mutation = db.prepare(
     `INSERT INTO overlay_tokens
-      (token_id, channel_id, token_hash, expires_at, created_at,
+      (token_id, channel_id, token_hash, expires_at, created_at, created_by_user_id,
        revoked_at, revocation_reason, last_used_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE 1 = 1
       ${actorGuard(overlayTokenRoles)}`,
   ).bind(
@@ -168,6 +174,7 @@ export const createOverlayToken = async (
     token.tokenHash,
     token.expiresAt,
     token.createdAt,
+    actor.userId,
     token.revokedAt,
     token.revocationReason,
     token.lastUsedAt,
@@ -243,6 +250,14 @@ export const revokeOverlayToken = async (
       WHERE token_id = ? AND channel_id = ?`,
   ).bind(tokenId, channelId).first<OverlayTokenAuditRow>();
   if (beforeRow === null) return false;
+  // A repeated revoke is a useful retry for the realtime close. The row is
+  // already authoritative, so don't write a second audit entry.
+  if (beforeRow.revoked_at !== null) {
+    const authorized = await db.prepare(
+      `SELECT 1 AS allowed WHERE 1 = 1 ${actorGuard(overlayTokenRoles)}`,
+    ).bind(...bindActorGuard(actor, channelId, revokedAt)).first<{ allowed: number }>();
+    return authorized !== null;
+  }
 
   const before = overlayTokenAuditSnapshot({
     tokenId: beforeRow.token_id,

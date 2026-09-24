@@ -250,6 +250,69 @@ describe("ChannelObject realtime path", () => {
     expect(other.close.mock.calls).toHaveLength(0);
   });
 
+  it("rejects a handshake that is still in flight when its token is revoked", async () => {
+    const token = {
+      v: 1 as const,
+      kind: "overlay" as const,
+      channelId: "kanal-a",
+      tokenId: "token-in-flight",
+      expiresAt: null,
+    };
+    const object = objectFor([]);
+    let releaseHandshake!: () => void;
+    let signalHandshakeStarted!: () => void;
+    const handshakeGate = new Promise<void>((resolve) => { releaseHandshake = resolve; });
+    const handshakeStarted = new Promise<void>((resolve) => { signalHandshakeStarted = resolve; });
+    vi.spyOn(object as unknown as { allowOverlayHandshake: (tokenId: string, now: number) => Promise<boolean> }, "allowOverlayHandshake")
+      .mockImplementation(async () => {
+        signalHandshakeStarted();
+        await handshakeGate;
+        return true;
+      });
+    const accept = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx.acceptWebSocket;
+
+    const handshake = object.fetch(upgradeRequest(token));
+    await handshakeStarted;
+    await object.revokeToken(token.tokenId);
+    releaseHandshake();
+    const response = await handshake;
+
+    expect(response.status).toBe(403);
+    expect(accept).not.toHaveBeenCalled();
+    expect(storageOf(object).values.get(`overlay_revoked:${token.tokenId}`)).toBe(true);
+  });
+
+  it("retries a failed overlay socket close from its durable revocation marker", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const token = {
+      v: 1 as const,
+      kind: "overlay" as const,
+      channelId: "kanal-a",
+      tokenId: "token-retry",
+      expiresAt: null,
+    };
+    const socket = overlaySocketFor(token);
+    const sockets = [socket];
+    socket.close.mockImplementationOnce(() => { throw new Error("socket close failed"); })
+      .mockImplementation(() => { sockets.splice(sockets.indexOf(socket), 1); });
+    const object = objectFor(sockets);
+
+    await expect(object.revokeToken(token.tokenId)).resolves.toBe(false);
+    expect(storageOf(object).values.get(`overlay_revoked:${token.tokenId}`)).toBe(true);
+    expect(storageOf(object).values.get("security_retry")).toBe(now + 60_000);
+
+    vi.setSystemTime(now + 60_000);
+    await object.alarm();
+
+    expect(socket.close.mock.calls).toEqual([
+      [4003, "Overlay token revoked"],
+      [4003, "Authorization revoked"],
+    ]);
+    expect(sockets).toHaveLength(0);
+  });
+
   it("preserves the earlier security deadline when a connection joins", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-09-21T12:00:00.000Z");

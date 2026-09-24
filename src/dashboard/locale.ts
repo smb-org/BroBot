@@ -259,6 +259,7 @@ export interface OverlayTokensTexts {
   unknownCreator: string;
   linkLabel: string;
   linkNote: string;
+  dismissLink: string;
   copy: string;
   copied: string;
   copyError: string;
@@ -269,6 +270,9 @@ export interface OverlayTokensTexts {
   revokeConfirm: (name: string) => string;
   revokeCancel: string;
   revoked: string;
+  revokedPending: string;
+  loadMore: string;
+  loadingMore: string;
   close: string;
 }
 
@@ -280,11 +284,13 @@ const overlayTokensCatalog: LocaleCatalog<OverlayTokensTexts> = {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Overlay-Links ausstellen oder widerrufen.",
     identifier: "Kennung", createdAt: "Ausgestellt am", createdBy: "Ausgestellt von", lastUsedAt: "Zuletzt verwendet",
     expiresAt: "Läuft ab", never: "Nie", unknownCreator: "Nicht verfügbar", linkLabel: "Vollständiger Overlay-Link",
-    linkNote: "Dieser Link wird nur jetzt angezeigt. Kopiere ihn, bevor du schließt; danach kann er nicht erneut angezeigt werden.",
+    linkNote: "Dieser Link wird nur jetzt angezeigt. Kopiere ihn, bevor du schließt; danach kann er nicht erneut angezeigt werden.", dismissLink: "Linkanzeige schließen",
     copy: "Link kopieren", copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.",
     revoke: "Link widerrufen", revocationReason: "Widerruf über das Dashboard", revokeTitle: (name) => `Overlay-Link ${name} widerrufen?`,
-    revokeDescription: (name) => `Der Link ${name} wird sofort ungültig und verbundene Overlay-Fenster werden geschlossen.`,
-    revokeConfirm: (name) => `${name} widerrufen`, revokeCancel: "Abbrechen", revoked: "Overlay-Link widerrufen.", close: "Schließen",
+    revokeDescription: (name) => `Der Link ${name} wird sofort ungültig. Verbundene Overlay-Fenster werden so schnell wie möglich geschlossen.`,
+    revokeConfirm: (name) => `${name} widerrufen`, revokeCancel: "Abbrechen", revoked: "Overlay-Link widerrufen.",
+    revokedPending: "Overlay-Link widerrufen. Verbundene Overlay-Fenster werden noch geschlossen.",
+    loadMore: "Weitere Links laden", loadingMore: "Weitere Links werden geladen …", close: "Schließen",
   },
   en: {
     title: "Overlay links", list: "Overlay links", create: "Issue overlay link", issueBlocked: "Close the displayed link before issuing another one.",
@@ -293,11 +299,13 @@ const overlayTokensCatalog: LocaleCatalog<OverlayTokensTexts> = {
     managementLocked: "Only broadcasters and managers may issue or revoke overlay links.",
     identifier: "ID", createdAt: "Created", createdBy: "Created by", lastUsedAt: "Last used",
     expiresAt: "Expires", never: "Never", unknownCreator: "Unavailable", linkLabel: "Full overlay link",
-    linkNote: "This link is shown only now. Copy it before closing; it cannot be shown again afterward.",
+    linkNote: "This link is shown only now. Copy it before closing; it cannot be shown again afterward.", dismissLink: "Dismiss link",
     copy: "Copy link", copied: "Copied", copyError: "The link could not be copied.",
     revoke: "Revoke link", revocationReason: "Revoked from the dashboard", revokeTitle: (name) => `Revoke overlay link ${name}?`,
-    revokeDescription: (name) => `The link ${name} will stop working immediately, and connected overlay windows will close.`,
-    revokeConfirm: (name) => `Revoke ${name}`, revokeCancel: "Cancel", revoked: "Overlay link revoked.", close: "Close",
+    revokeDescription: (name) => `The link ${name} will stop working immediately. Connected overlay windows will close as soon as possible.`,
+    revokeConfirm: (name) => `Revoke ${name}`, revokeCancel: "Cancel", revoked: "Overlay link revoked.",
+    revokedPending: "Overlay link revoked. Connected overlay windows are still being closed.",
+    loadMore: "Load more links", loadingMore: "Loading more links …", close: "Close",
   },
 };
 
