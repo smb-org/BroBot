@@ -32,6 +32,7 @@ const keyRingSecretNames = new Set([
 ]);
 const placeholderPattern = /replace-with|example\.invalid/i;
 const environmentNames = ["staging", "production"];
+const requiredRunWorkerFirstPaths = ["/overlay", "/overlay.html"];
 const expectedWorkerNames = {
   local: "brobot-local",
   staging: "brobot-staging",
@@ -173,6 +174,23 @@ const checkEnvironmentShape = (config, environment, failures) => {
   const missingRequired = deploymentBindings.filter((name) => !required.has(name));
   if (missingRequired.length > 0) {
     failures.push(`${environment}: Erforderliche Secrets fehlen: ${missingRequired.join(", ")}`);
+  }
+
+  // Ohne diese Pfade in `run_worker_first` liefert Cloudflare overlay.html als
+  // statisches Asset aus, bevor der Worker die Overlay-CSP setzt (siehe
+  // src/worker/index.ts) -- die CSP greift dann im Deployment nie. Nur für
+  // staging/production geprüft: der Top-Level-Block ist nie deploybar (kein
+  // `wrangler deploy` ohne --env) und dient lokal `wrangler dev`/Vite, wo die
+  // strikte CSP das Fast-Refresh-Preamble-Script blockieren würde.
+  if (environment === "local") return;
+  const runWorkerFirst = new Set(section.assets?.run_worker_first ?? []);
+  const missingRunWorkerFirst = requiredRunWorkerFirstPaths.filter(
+    (runtimePath) => !runWorkerFirst.has(runtimePath),
+  );
+  if (missingRunWorkerFirst.length > 0) {
+    failures.push(
+      `${environment}: assets.run_worker_first fehlen Overlay-Pfade: ${missingRunWorkerFirst.join(", ")}`,
+    );
   }
 };
 
