@@ -16,6 +16,7 @@ import {
   setBotIdentityStatus,
 } from "../../src/worker/db/bot-identity";
 import { scheduled } from "../../src/worker/scheduled";
+import { jsonResponse } from "./fixtures";
 
 const environment = {
   TWITCH_CLIENT_ID: "client-id",
@@ -28,6 +29,28 @@ const environment = {
     retired: [],
   }),
 };
+
+const validationResponse = (expiresIn = 3599): Response => jsonResponse({
+  user_id: "bot-user",
+  login: "brobot",
+  expires_in: expiresIn,
+});
+
+const refreshedTokensResponse = (): Response => jsonResponse({
+  access_token: "access-neu",
+  refresh_token: "refresh-neu",
+  expires_in: 7200,
+  scope: [],
+});
+
+const moderatedChannelsResponse = (channelIds = ["channel-1"]): Response => jsonResponse({
+  data: channelIds.map((broadcaster_id) => ({ broadcaster_id })),
+});
+
+const invalidOAuthResponse = (): Response => jsonResponse({ message: "Invalid OAuth token" }, 401);
+
+const refreshFailureResponse = (status = 400, error = "invalid_grant"): Response =>
+  jsonResponse({ error }, status);
 
 const makeMaintenanceEnvironment = async (
   expiresAt: string,
@@ -179,8 +202,8 @@ describe("bot maintenance", () => {
       { scopes: granted },
     );
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 7200 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      .mockResolvedValueOnce(validationResponse(7200))
+      .mockResolvedValueOnce(moderatedChannelsResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -197,10 +220,7 @@ describe("bot maintenance", () => {
   });
 
   it("exchanges a refresh token for both new tokens", async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }),
-      { status: 200 },
-    ));
+    const fetcher = vi.fn().mockResolvedValue(refreshedTokensResponse());
 
     await expect(refreshBotToken(fetcher, environment, "refresh-alt")).resolves.toEqual({
       accessToken: "access-neu",
@@ -212,10 +232,7 @@ describe("bot maintenance", () => {
   });
 
   it("adopts the Twitch error code from the refresh response", async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ error: "invalid_client" }),
-      { status: 400 },
-    ));
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse({ error: "invalid_client" }, 400));
 
     await expect(refreshBotToken(fetcher, environment, "refresh-alt")).rejects.toMatchObject({
       status: 400,
@@ -224,10 +241,9 @@ describe("bot maintenance", () => {
   });
 
   it("validates an access token via Twitch", async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ client_id: "client-id", user_id: "bot-user", login: "brobot", expires_in: 3600, scopes: [] }),
-      { status: 200 },
-    ));
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse({
+      client_id: "client-id", user_id: "bot-user", login: "brobot", expires_in: 3600, scopes: [],
+    }));
 
     await expect(validateBotToken(fetcher, environment, "access-token")).resolves.toEqual({
       userId: "bot-user",
@@ -238,10 +254,7 @@ describe("bot maintenance", () => {
   });
 
   it("reads the channels where the bot is a moderator", async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ data: [{ broadcaster_id: "channel-1" }, { broadcaster_id: "channel-2" }] }),
-      { status: 200 },
-    ));
+    const fetcher = vi.fn().mockResolvedValue(moderatedChannelsResponse(["channel-1", "channel-2"]));
 
     await expect(fetchModeratedChannels(fetcher, environment.TWITCH_CLIENT_ID, "bot-user", "access-token"))
       .resolves.toEqual(["channel-1", "channel-2"]);
@@ -249,17 +262,11 @@ describe("bot maintenance", () => {
 
   it("reads all pages of the moderator channel query", async () => {
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({
-          data: [{ broadcaster_id: "channel-1" }],
-          pagination: { cursor: "cursor-1" },
-        }),
-        { status: 200 },
-      ))
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ data: [{ broadcaster_id: "channel-2" }], pagination: {} }),
-        { status: 200 },
-      ));
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{ broadcaster_id: "channel-1" }],
+        pagination: { cursor: "cursor-1" },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ broadcaster_id: "channel-2" }], pagination: {} }));
 
     await expect(fetchModeratedChannels(fetcher, environment.TWITCH_CLIENT_ID, "bot-user", "access-token"))
       .resolves.toEqual(["channel-1", "channel-2"]);
@@ -269,8 +276,8 @@ describe("bot maintenance", () => {
   it("doesn't call the refresh endpoint when expiry is far away", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 7200 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      .mockResolvedValueOnce(validationResponse(7200))
+      .mockResolvedValueOnce(moderatedChannelsResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -285,9 +292,9 @@ describe("bot maintenance", () => {
       getInitialRefreshTokenCiphertext,
     } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      .mockResolvedValueOnce(validationResponse())
+      .mockResolvedValueOnce(refreshedTokensResponse())
+      .mockResolvedValueOnce(moderatedChannelsResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -304,9 +311,9 @@ describe("bot maintenance", () => {
       { failTokenWriteOnce: true },
     );
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      .mockResolvedValueOnce(validationResponse())
+      .mockResolvedValueOnce(refreshedTokensResponse())
+      .mockResolvedValueOnce(moderatedChannelsResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -328,9 +335,9 @@ describe("bot maintenance", () => {
       { failTokenWriteAfterCommitOnce: true },
     );
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      .mockResolvedValueOnce(validationResponse())
+      .mockResolvedValueOnce(refreshedTokensResponse())
+      .mockResolvedValueOnce(moderatedChannelsResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -346,18 +353,12 @@ describe("bot maintenance", () => {
     );
     const fetcher = vi.fn().mockImplementation((url: string) => {
       if (url === "https://id.twitch.tv/oauth2/validate") {
-        return Promise.resolve(new Response(
-          JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }),
-          { status: 200 },
-        ));
+        return Promise.resolve(validationResponse());
       }
       if (url === "https://id.twitch.tv/oauth2/token") {
-        return Promise.resolve(new Response(
-          JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }),
-          { status: 200 },
-        ));
+        return Promise.resolve(refreshedTokensResponse());
       }
-      return Promise.resolve(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      return Promise.resolve(moderatedChannelsResponse());
     });
 
     await Promise.all([
@@ -374,9 +375,9 @@ describe("bot maintenance", () => {
   it("tries the valid refresh once for an expired access token", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-17T23:59:59.000Z");
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      .mockResolvedValueOnce(invalidOAuthResponse())
+      .mockResolvedValueOnce(refreshedTokensResponse())
+      .mockResolvedValueOnce(moderatedChannelsResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -386,9 +387,9 @@ describe("bot maintenance", () => {
   it("also refreshes exactly once after a 401 when expiry is still far away", async () => {
     const { environment: env, read, readStatus } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      .mockResolvedValueOnce(invalidOAuthResponse())
+      .mockResolvedValueOnce(refreshedTokensResponse())
+      .mockResolvedValueOnce(moderatedChannelsResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -400,8 +401,8 @@ describe("bot maintenance", () => {
   it("sets revoked on a fresh 401 only after the refresh has failed", async () => {
     const { environment: env, readStatus } = await makeMaintenanceEnvironment("2026-09-18T02:00:01.000Z");
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+      .mockResolvedValueOnce(invalidOAuthResponse())
+      .mockResolvedValueOnce(refreshFailureResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -422,14 +423,14 @@ describe("bot maintenance", () => {
         return validation;
       }
       if (url === "https://id.twitch.tv/oauth2/token") {
-        return Promise.resolve(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }));
+        return Promise.resolve(refreshedTokensResponse());
       }
-      return Promise.resolve(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      return Promise.resolve(moderatedChannelsResponse());
     });
     const maintenance = maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
     await validationStarted;
     await setBotIdentityStatus(env.DB, "error", "temporary", "2026-09-18T00:00:01.000Z");
-    releaseValidation(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }));
+    releaseValidation(validationResponse());
     await maintenance;
 
     expect(read().expires_at).toBe("2026-09-18T02:00:00.000Z");
@@ -447,16 +448,16 @@ describe("bot maintenance", () => {
     let refreshCalls = 0;
     const fetcher = vi.fn().mockImplementation((url: string) => {
       if (url === "https://id.twitch.tv/oauth2/validate") {
-        return Promise.resolve(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }));
+        return Promise.resolve(validationResponse());
       }
       if (url === "https://id.twitch.tv/oauth2/token") {
         refreshCalls += 1;
         if (refreshCalls === 1) {
-          return Promise.resolve(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }));
+          return Promise.resolve(refreshedTokensResponse());
         }
-        return rotationCommitted.then(() => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+        return rotationCommitted.then(() => refreshFailureResponse());
       }
-      return Promise.resolve(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      return Promise.resolve(moderatedChannelsResponse());
     });
 
     await Promise.all([
@@ -488,16 +489,16 @@ describe("bot maintenance", () => {
     let refreshCalls = 0;
     const fetcher = vi.fn().mockImplementation((url: string) => {
       if (url === "https://id.twitch.tv/oauth2/validate") {
-        return Promise.resolve(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }));
+        return Promise.resolve(validationResponse());
       }
       if (url.startsWith("https://api.twitch.tv/helix/moderation/channels")) {
-        return Promise.resolve(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+        return Promise.resolve(moderatedChannelsResponse());
       }
       refreshCalls += 1;
       if (refreshCalls === 1) {
-        return Promise.resolve(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }));
+        return Promise.resolve(refreshedTokensResponse());
       }
-      return Promise.resolve(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+      return Promise.resolve(refreshFailureResponse());
     });
 
     const successfulRun = maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
@@ -522,18 +523,18 @@ describe("bot maintenance", () => {
     const fetcher = vi.fn().mockImplementation((url: string) => {
       if (url === "https://id.twitch.tv/oauth2/validate") {
         validateCalls += 1;
-        return Promise.resolve(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 7200 }), { status: 200 }));
+        return Promise.resolve(validationResponse(7200));
       }
       if (url === "https://api.twitch.tv/helix/moderation/channels?user_id=bot-user&first=100") {
         markModerationStarted();
         return moderation;
       }
-      return Promise.resolve(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+      return Promise.resolve(moderatedChannelsResponse());
     });
     const maintenance = maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
     await moderationStarted;
     await setBotIdentityStatus(env.DB, "revoked", "authorization_revoked", "2026-09-18T00:00:01.000Z");
-    releaseModeration(new Response(JSON.stringify({ data: [{ broadcaster_id: "channel-1" }] }), { status: 200 }));
+    releaseModeration(moderatedChannelsResponse());
     await maintenance;
 
     expect(validateCalls).toBe(1);
@@ -543,8 +544,8 @@ describe("bot maintenance", () => {
   it("marks a rejected refresh as revoked and doesn't keep retrying forever", async () => {
     const { environment: env } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+      .mockResolvedValueOnce(validationResponse())
+      .mockResolvedValueOnce(refreshFailureResponse());
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -555,8 +556,8 @@ describe("bot maintenance", () => {
   it("also permanently ends a refresh rejected with 401", async () => {
     const { environment: env, readStatus } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 401 }));
+      .mockResolvedValueOnce(validationResponse())
+      .mockResolvedValueOnce(refreshFailureResponse(401));
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -571,8 +572,8 @@ describe("bot maintenance", () => {
   it("treats invalid_client as only temporary, even with a 400", async () => {
     const { environment: env, readStatus } = await makeMaintenanceEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "bot-user", login: "brobot", expires_in: 3599 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_client" }), { status: 400 }));
+      .mockResolvedValueOnce(validationResponse())
+      .mockResolvedValueOnce(refreshFailureResponse(400, "invalid_client"));
 
     await maintainBotIdentity(env, "2026-09-18T00:00:00.000Z", fetcher);
 
@@ -597,17 +598,11 @@ describe("bot maintenance", () => {
     const waitUntil = vi.fn();
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
       if (url === "https://id.twitch.tv/oauth2/token") {
-        return Promise.resolve(new Response(
-          JSON.stringify({ access_token: "app-access", expires_in: 7200 }),
-          { status: 200 },
-        ));
+        return Promise.resolve(jsonResponse({ access_token: "app-access", expires_in: 7200 }));
       }
-      return Promise.resolve(new Response(
-        JSON.stringify(url.includes("/users")
-          ? { user_id: "bot-user", login: "brobot", expires_in: 7200 }
-          : { data: [{ broadcaster_id: "channel-1" }] }),
-        { status: 200 },
-      ));
+      return Promise.resolve(url.includes("/users")
+        ? validationResponse(7200)
+        : moderatedChannelsResponse());
     }));
 
     await scheduled(
