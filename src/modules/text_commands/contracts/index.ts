@@ -49,6 +49,7 @@ export type PrepareTextCommandVariableChange = (
   channelId: string,
   change: { name: string; operation: ChannelVariableOperation; amount: number | null },
   now: string,
+  claim: { commandName: string; revision: number; userId: string | null },
 ) => D1PreparedStatement;
 
 export interface NewTextCommand {

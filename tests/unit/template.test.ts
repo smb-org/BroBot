@@ -29,6 +29,7 @@ describe("template helpers", () => {
 
   it("only suggests close names", () => {
     expect(closestTemplateVariable("viewr", variables)).toBe("viewers");
+    expect(closestTemplateVariable("donations", [...variables, { name: "var.donations", sample: "0", maxLength: 10 }])).toBe("var.donations");
     expect(closestTemplateVariable("zzzzzz", variables)).toBeNull();
     expect(closestTemplateVariable("viewer_count", variables)).toBeNull();
   });

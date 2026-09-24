@@ -124,9 +124,9 @@ const templateMessages: LocaleCatalog<TextAreaMessages> = {
   de: {
     countLabel: (count, maximum) => `${String(count)} von ${String(maximum)} Zeichen`,
     previewCountLabel: (count) => `${String(count)} Zeichen`,
-    unknownVariable: (name, suggestion, available) => suggestion === null
-      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Verfügbar: ${available.map((item) => `{${item}}`).join(", ")}`
-      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}?`,
+    unknownVariable: (name, suggestion) => suggestion === null
+      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Nutze den Variablen-Picker.`
+      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}? Nutze den Variablen-Picker.`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
     worstCaseLength: (length, maximum) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maximum)} ab.`,
     variablePicker: {
@@ -138,9 +138,9 @@ const templateMessages: LocaleCatalog<TextAreaMessages> = {
   en: {
     countLabel: (count, maximum) => `${String(count)} of ${String(maximum)} characters`,
     previewCountLabel: (count) => `${String(count)} characters`,
-    unknownVariable: (name, suggestion, available) => suggestion === null
-      ? `Unknown variable {${name}} — it will be sent literally. Available: ${available.map((item) => `{${item}}`).join(", ")}`
-      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}?`,
+    unknownVariable: (name, suggestion) => suggestion === null
+      ? `Unknown variable {${name}} — it will be sent literally. Use the variable picker.`
+      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}? Use the variable picker.`,
     insertSuggestionLabel: (name) => `Insert {${name}}`,
     worstCaseLength: (length, maximum) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maximum)}.`,
     variablePicker: {

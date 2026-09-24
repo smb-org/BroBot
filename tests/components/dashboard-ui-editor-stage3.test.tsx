@@ -26,9 +26,9 @@ const templateOptions: readonly TemplateVariableOption[] = [
 const textAreaMessages: TextAreaMessages = {
   countLabel: (count, max) => `${String(count)} von ${String(max)} Zeichen`,
   previewCountLabel: (count) => `${String(count)} Zeichen`,
-  unknownVariable: (name, suggestion, available) => suggestion === null
-    ? `Unbekannte Variable {${name}}. Verfügbar: ${available.map((item) => `{${item}}`).join(", ")}`
-    : `Unbekannte Variable {${name}} — Meintest du {${suggestion}}?`,
+  unknownVariable: (name, suggestion) => suggestion === null
+    ? `Unbekannte Variable {${name}}. Nutze den Variablen-Picker.`
+    : `Unbekannte Variable {${name}} — Meintest du {${suggestion}}? Nutze den Variablen-Picker.`,
   insertSuggestionLabel: (name) => `{${name}} einsetzen`,
   worstCaseLength: (length) => `Mit den längsten Werten bis zu ${String(length)} Zeichen.`,
   variablePicker: {
@@ -262,6 +262,8 @@ describe("template field", () => {
     expect(known[0]).toHaveAttribute("data-kind", "module");
     expect(unknown[0]).toHaveAttribute("data-kind", "unknown");
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hi {user} {viewer}");
+    expect(screen.getByText(/Unbekannte Variable \{viewer\}.*Variablen-Picker/u)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveStyle({ paddingRight: "54px" });
   });
 
   it("shows composing text, delays issue checks until composition ends, inserts picker variables at the saved selection, and handles suggestions", async () => {

@@ -162,6 +162,7 @@ export interface ModuleExecutionContext {
     channelId: string,
     change: { name: string; operation: ChannelVariableOperation; amount: number | null },
     now: string,
+    claim: { commandName: string; revision: number; userId: string | null },
   ) => D1PreparedStatement;
   /** Lazily reads the channel's configured chat-template language. */
   channelLanguage: () => Promise<ModuleLanguage>;

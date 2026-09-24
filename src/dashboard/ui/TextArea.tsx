@@ -24,7 +24,7 @@ export interface TemplateVariableOption {
 export interface TextAreaMessages {
   countLabel: (count: number, maxLength: number) => string;
   previewCountLabel: (count: number) => ReactNode;
-  unknownVariable: (name: string, suggestion: string | null, available: readonly string[]) => ReactNode;
+  unknownVariable: (name: string, suggestion: string | null) => ReactNode;
   insertSuggestionLabel: (name: string) => string;
   worstCaseLength: (length: number, maxLength: number) => ReactNode;
   variablePicker?: TemplateVariablePickerMessages;
@@ -121,7 +121,6 @@ export function TextArea({
   const [activeIndex, setActiveIndex] = useState(0);
   const [variablePickerOpen, setVariablePickerOpen] = useState(false);
   const declarations = useMemo(() => templateDeclarations(variables ?? []), [variables]);
-  const variableNames = variables?.map((variable) => variable.name) ?? [];
   const count = value.length;
   const overLimit = maxLength !== undefined && count > maxLength;
   const nearLimit = maxLength !== undefined && count >= maxLength * 0.9;
@@ -286,7 +285,7 @@ export function TextArea({
             return (
               <div className="ui-textarea__warning" key={`${tokenName}-${String(index)}`}>
                 <Icon name="warning" size={16} />
-                <span>{messages.unknownVariable(tokenName, suggestion, variableNames)}</span>
+                <span>{messages.unknownVariable(tokenName, suggestion)}</span>
                 {suggestion === null || token === undefined ? null : (
                   <Button size="compact" variant="subtle" type="button" disabled={disabled || readOnly} onClick={() => insertText(`{${suggestion}}`, token.start, token.start + token.text.length)}>
                     {messages.insertSuggestionLabel(suggestion)}
@@ -337,7 +336,7 @@ export function TextArea({
           <RichTextarea
             className="template-field__input"
             ref={textareaRef}
-            style={{ width: "100%" }}
+            style={{ width: "100%", paddingRight: 54 }}
             value={value}
             onChange={(event) => {
               if (programmaticEdit.current) {

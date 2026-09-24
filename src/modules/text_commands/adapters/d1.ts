@@ -593,6 +593,16 @@ export const createTextCommandRepository = (
     variableAmount?: number | null,
     knownCommand?: TextCommand,
   ): Promise<TextCommandClaim | null> {
+    const commandBeforeClaim = knownCommand ?? null;
+    const action = commandBeforeClaim?.variableAction ?? null;
+    const variableChange = action !== null && prepareVariableChange !== undefined &&
+      (action.operation !== "set_argument" || variableAmount !== null && variableAmount !== undefined)
+      ? prepareVariableChange(channelId, {
+        name: action.name,
+        operation: action.operation,
+        amount: action.operation === "set_argument" ? variableAmount ?? 0 : action.amount,
+      }, now, { commandName: name, revision: knownCommand?.revision ?? 0, userId: userId ?? null })
+      : null;
     const claim = db.prepare(
       `UPDATE text_commands
           SET last_used_at = ?, updated_at = ?, use_count = use_count + 1
@@ -605,33 +615,12 @@ export const createTextCommandRepository = (
              WHERE user_cooldown.channel_id = ? AND user_cooldown.command_name = ? AND user_cooldown.user_id = ?
                AND julianday(user_cooldown.last_used_at) > julianday(?) - text_commands.user_cooldown_seconds / 86400.0
           ))
+          ${variableChange === null ? "" : "AND changes() > 0"}
         RETURNING ${textCommandSelectColumns}`,
     ).bind(now, now, channelId, name, now, knownCommand?.revision ?? null, knownCommand?.revision ?? null,
       userId ?? null, channelId, name, userId ?? null, now);
 
-    const statements: D1PreparedStatement[] = [claim];
-    const commandBeforeClaim = knownCommand ?? null;
-    const action = commandBeforeClaim?.variableAction ?? null;
-    const variableChange = action !== null && prepareVariableChange !== undefined &&
-      (action.operation !== "set_argument" || variableAmount !== null && variableAmount !== undefined)
-      ? prepareVariableChange(channelId, {
-        name: action.name,
-        operation: action.operation,
-        amount: action.operation === "set_argument" ? variableAmount ?? 0 : action.amount,
-      }, now)
-      : null;
-    if (variableChange !== null) {
-      statements.push(variableChange);
-      if (commandBeforeClaim !== null) {
-        statements.push(db.prepare(
-          `UPDATE text_commands
-              SET last_used_at = ?, updated_at = ?, use_count = use_count - 1
-            WHERE channel_id = ? AND command_name = ? AND revision = ?
-              AND last_used_at = ? AND use_count = ? AND changes() = 0`,
-        ).bind(commandBeforeClaim.lastUsedAt, commandBeforeClaim.updatedAt, channelId, name,
-          commandBeforeClaim.revision, now, commandBeforeClaim.useCount + 1));
-      }
-    }
+    const statements: D1PreparedStatement[] = variableChange === null ? [claim] : [variableChange, claim];
     if (userCooldownSeconds > 0 && userId !== undefined && userId !== null) {
       statements.push(commandBeforeClaim !== null && variableChange !== null
         ? db.prepare(
@@ -651,7 +640,7 @@ export const createTextCommandRepository = (
         ).bind(channelId, name, userId, now));
     }
     const results = statements.length === 1 ? [await claim.run()] : await db.batch(statements);
-    const claimResult = results[0];
+    const claimResult = results[variableChange === null ? 0 : 1];
     if (claimResult === undefined) throw new Error("Command claim returned no result.");
     const globalChanges = claimResult.meta.changes;
 
@@ -664,7 +653,7 @@ export const createTextCommandRepository = (
           : await this.find(channelId, name);
     if (current === null) return null;
     if (globalChanges > 0) {
-      const actionResult = variableChange === null ? undefined : results[1];
+      const actionResult = variableChange === null ? undefined : results[0];
       if (variableChange !== null && (actionResult?.meta.changes ?? 0) === 0) {
         return {
           command: await this.find(channelId, name) ?? current,
@@ -686,7 +675,13 @@ export const createTextCommandRepository = (
     }
 
     const globalRemaining = cooldownRemaining(current.lastUsedAt, now, current.cooldownSeconds);
-    if (globalRemaining > 0 || userId === undefined || userId === null || current.userCooldownSeconds === 0) {
+    if (globalRemaining > 0) {
+      return { command: current, claimed: false, reason: "cooldown", remainingSeconds: globalRemaining };
+    }
+    if (variableChange !== null && (userId === undefined || userId === null || current.userCooldownSeconds === 0)) {
+      return { command: current, claimed: false, reason: "variable_update_failed" };
+    }
+    if (userId === undefined || userId === null || current.userCooldownSeconds === 0) {
       return { command: current, claimed: false, reason: "cooldown", remainingSeconds: globalRemaining };
     }
     const userCooldown = await db.prepare(
@@ -695,6 +690,7 @@ export const createTextCommandRepository = (
         WHERE channel_id = ? AND command_name = ? AND user_id = ?`,
     ).bind(channelId, name, userId).first<UserCooldownRow>();
     const userRemaining = cooldownRemaining(userCooldown?.last_used_at ?? null, now, current.userCooldownSeconds);
+    if (variableChange !== null && userRemaining === 0) return { command: current, claimed: false, reason: "variable_update_failed" };
     return {
       command: current,
       claimed: false,

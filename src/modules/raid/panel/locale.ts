@@ -5,9 +5,9 @@ const templateMessages = {
   de: {
     countLabel: (count: number, maxLength: number) => `${String(count)} von ${String(maxLength)} Zeichen`,
     previewCountLabel: (count: number) => `${String(count)} Zeichen`,
-    unknownVariable: (name: string, suggestion: string | null, available: readonly string[]) => suggestion === null
-      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Verfügbar: ${available.map((item) => `{${item}}`).join(", ")}`
-      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}?`,
+    unknownVariable: (name: string, suggestion: string | null) => suggestion === null
+      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Nutze den Variablen-Picker.`
+      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}? Nutze den Variablen-Picker.`,
     insertSuggestionLabel: (name: string) => `{${name}} einsetzen`,
     worstCaseLength: (length: number, maxLength: number) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maxLength)} ab.`,
     variablePicker: {
@@ -19,9 +19,9 @@ const templateMessages = {
   en: {
     countLabel: (count: number, maxLength: number) => `${String(count)} of ${String(maxLength)} characters`,
     previewCountLabel: (count: number) => `${String(count)} characters`,
-    unknownVariable: (name: string, suggestion: string | null, available: readonly string[]) => suggestion === null
-      ? `Unknown variable {${name}} — it will be sent literally. Available: ${available.map((item) => `{${item}}`).join(", ")}`
-      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}?`,
+    unknownVariable: (name: string, suggestion: string | null) => suggestion === null
+      ? `Unknown variable {${name}} — it will be sent literally. Use the variable picker.`
+      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}? Use the variable picker.`,
     insertSuggestionLabel: (name: string) => `Insert {${name}}`,
     worstCaseLength: (length: number, maxLength: number) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maxLength)}.`,
     variablePicker: {

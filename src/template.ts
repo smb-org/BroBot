@@ -67,7 +67,8 @@ export const closestTemplateVariable = (
   let closest: string | null = null;
   let closestDistance = Number.POSITIVE_INFINITY;
   for (const variable of declared) {
-    const distance = editDistance(candidate, folded(variable.name));
+    const comparableName = variable.name.startsWith("var.") ? variable.name.slice(4) : variable.name;
+    const distance = editDistance(candidate, folded(comparableName));
     if (distance <= 2 && distance < name.length / 2 && distance < closestDistance) {
       closest = variable.name;
       closestDistance = distance;

@@ -12,6 +12,12 @@ CREATE TABLE channel_variables (
   FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE
 ) WITHOUT ROWID;
 
+CREATE TABLE channel_variable_stream_resets (
+  channel_id TEXT PRIMARY KEY NOT NULL,
+  started_at TEXT NOT NULL,
+  FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE
+) WITHOUT ROWID;
+
 CREATE TABLE text_command_aliases_migration_backup AS
 SELECT channel_id, alias, command_name FROM text_command_aliases;
 

@@ -18,7 +18,7 @@ import { lookupAndRefreshStreamState } from "./stream-state-lookup";
 import { clearStreamEndChannelControls, readDispatchChannelState } from "./db/channel-controls";
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
-import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariables } from "./db/channel-variables";
+import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariablesForStream } from "./db/channel-variables";
 import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails } from "./template-resolver";
 import type { ChannelVariableOperation } from "../contracts/values";
 import type { TemplateVariable } from "../template";
@@ -445,8 +445,8 @@ export const dispatchEventSubNotification = async (
       event.eventSubTimestamp ?? event.receivedAt,
       startedAt,
     );
-    if (streamStateUpdated && event.subscriptionType === "stream.online") {
-      await prepareResetChannelVariables(environment.DB, event.channelId, event.eventSubTimestamp ?? event.receivedAt).run();
+    if (event.subscriptionType === "stream.online" && startedAt !== null) {
+      await prepareResetChannelVariablesForStream(environment.DB, event.channelId, startedAt, event.eventSubTimestamp ?? event.receivedAt);
     }
   }
   const dispatchState = await readDispatchChannelState(environment.DB, event.channelId, event.receivedAt);
@@ -516,9 +516,10 @@ export const dispatchEventSubNotification = async (
     channelId: string,
     change: { name: string; operation: ChannelVariableOperation; amount: number | null },
     now: string,
+    claim: { commandName: string; revision: number; userId: string | null },
   ): D1PreparedStatement => {
     if (channelId !== event.channelId) throw new Error("Variable changes must use the event channel.");
-    return prepareChannelVariableChange(environment.DB, channelId, change, now);
+    return prepareChannelVariableChange(environment.DB, channelId, change, now, claim);
   };
 
   for (const moduleId of unknownModules) {

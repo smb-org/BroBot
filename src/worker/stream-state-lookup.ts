@@ -10,6 +10,7 @@ import {
 } from "./db/stream-state";
 import { listChannelIdsNeedingStreamStateRefresh } from "./db/channels";
 import { prepareHelixOfflineStreamEndControlsCleanup } from "./db/channel-controls";
+import { prepareResetChannelVariablesForStream } from "./db/channel-variables";
 import { logMaintenanceError } from "./bot-maintenance";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -108,6 +109,9 @@ export const lookupAndRefreshStreamState = async (
     ]);
   } else {
     await refreshHelixStreamState(env.DB, channelId, fromHelix.state, now, fromHelix.startedAt);
+  }
+  if (stored.state === "offline" && fromHelix.state === "online" && fromHelix.startedAt !== null) {
+    await prepareResetChannelVariablesForStream(env.DB, channelId, fromHelix.startedAt, now);
   }
   return asResult(await readChannelStreamState(env.DB, channelId));
 };

@@ -85,6 +85,7 @@ export const prepareChannelVariableChange = (
   channelId: string,
   change: ChannelVariableChange,
   now: string,
+  claim: { commandName: string; revision: number; userId: string | null },
 ): D1PreparedStatement => {
   const amount = change.amount ?? 0;
   const minimumValue = String(CHANNEL_VARIABLE_MINIMUM_VALUE);
@@ -98,16 +99,39 @@ export const prepareChannelVariableChange = (
               ELSE max(${minimumValue}, min(${maximumValue}, value - ?))
             END,
             updated_at = ?
-      WHERE channel_id = ? AND name = ? AND changes() > 0
+      WHERE channel_id = ? AND name = ?
+        AND EXISTS (
+          SELECT 1 FROM text_commands AS command
+           WHERE command.channel_id = ? AND command.command_name = ? AND command.enabled = 1
+             AND (command.last_used_at IS NULL OR julianday(command.last_used_at) <= julianday(?) - command.cooldown_seconds / 86400.0)
+             AND command.revision = ?
+             AND (? IS NULL OR command.user_cooldown_seconds = 0 OR NOT EXISTS (
+               SELECT 1 FROM text_command_user_cooldowns AS user_cooldown
+                WHERE user_cooldown.channel_id = command.channel_id
+                  AND user_cooldown.command_name = command.command_name
+                  AND user_cooldown.user_id = ?
+                  AND julianday(user_cooldown.last_used_at) > julianday(?) - command.user_cooldown_seconds / 86400.0
+             ))
+        )
       RETURNING name, value`,
-  ).bind(change.operation, amount, amount, amount, amount, now, channelId, change.name);
+  ).bind(change.operation, amount, amount, amount, amount, now, channelId, change.name,
+    channelId, claim.commandName, now, claim.revision, claim.userId, claim.userId, now);
 };
 
-export const prepareResetChannelVariables = (
+export const prepareResetChannelVariablesForStream = (
   db: D1Database,
   channelId: string,
+  startedAt: string,
   now: string,
-): D1PreparedStatement => db.prepare(
-  `UPDATE channel_variables SET value = 0, updated_at = ?
-    WHERE channel_id = ? AND reset_on_stream_start = 1`,
-).bind(now, channelId);
+): Promise<boolean> => db.batch([
+  db.prepare(
+    `INSERT INTO channel_variable_stream_resets (channel_id, started_at)
+     VALUES (?, ?)
+     ON CONFLICT (channel_id) DO UPDATE SET started_at = excluded.started_at
+       WHERE julianday(excluded.started_at) > julianday(channel_variable_stream_resets.started_at)`,
+  ).bind(channelId, startedAt),
+  db.prepare(
+    `UPDATE channel_variables SET value = 0, updated_at = ?
+      WHERE channel_id = ? AND reset_on_stream_start = 1 AND changes() > 0`,
+  ).bind(now, channelId),
+]).then((results) => (results[0]?.meta.changes ?? 0) > 0);

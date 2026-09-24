@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { textCommandModule, type TextCommandKind, type TextCommandMinimumTier } from "../../src/modules/text_commands";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
+import { prepareChannelVariableChange } from "../../src/worker/db/channel-variables";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
@@ -123,6 +124,45 @@ const eventCodes = async (database: TestD1Database): Promise<string[]> => {
 };
 
 describe("Text commands module", () => {
+  it("does not let a same-timestamp cooldown loser undo the winning variable claim", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 0, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await repository.create({
+        channelId: "kanal-a", name: "increment", text: "Score {var.score}", kind: "text", cooldownSeconds: 60,
+        variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
+      }, { userId: "user-1" });
+      const knownCommand = await repository.find("kanal-a", "increment");
+      if (knownCommand === null) throw new Error("Command missing before the concurrent claims.");
+      const prepareChange = (channelId: string, change: Parameters<typeof prepareChannelVariableChange>[2], at: string, guard: Parameters<typeof prepareChannelVariableChange>[4]) =>
+        prepareChannelVariableChange(database as unknown as D1Database, channelId, change, at, guard);
+
+      const claims = await Promise.all([
+        repository.claim("kanal-a", "increment", NOW, "user-1", 60, prepareChange, null, knownCommand),
+        repository.claim("kanal-a", "increment", NOW, "user-1", 60, prepareChange, null, knownCommand),
+      ]);
+
+      expect(claims.filter((claim) => claim?.claimed)).toHaveLength(1);
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 1 });
+      await expect(database.prepare("SELECT last_used_at, use_count FROM text_commands WHERE command_name = 'increment'").first())
+        .resolves.toEqual({ last_used_at: NOW, use_count: 1 });
+      await expect(database.prepare("SELECT last_used_at FROM text_command_user_cooldowns WHERE command_name = 'increment' AND user_id = 'user-1'").first())
+        .resolves.toEqual({ last_used_at: NOW });
+    } finally {
+      database.close();
+    }
+  });
+
   it("treats removed edit commands as unknown and doesn't change module data", async () => {
     const database = new TestD1Database();
     try {
@@ -297,7 +337,7 @@ describe("Text commands module", () => {
 
       const prepare = database.prepare.bind(database);
       database.prepare = (sql) => prepare(sql.includes("UPDATE channel_variables") && sql.includes("RETURNING name, value")
-        ? sql.replace("AND changes() > 0", "AND changes() > 0 AND 1 = 0")
+        ? sql.replace("WHERE channel_id = ? AND name = ?", "WHERE channel_id = ? AND name = ? AND 1 = 0")
         : sql);
       const fetcher = fetcherForChat();
 
