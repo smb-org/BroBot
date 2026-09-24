@@ -6,6 +6,9 @@ import type { AdsScheduleResponse } from "../contracts";
 import { loadAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
 
+const pickNewestSchedule = (left: AdsScheduleResponse, right: AdsScheduleResponse): AdsScheduleResponse =>
+  Date.parse(left.asOf ?? "") >= Date.parse(right.asOf ?? "") ? left : right;
+
 const formatTimestamp = (value: string | null, language: DashboardLanguage): string => {
   if (value === null) return "—";
   const date = new Date(value);
@@ -33,12 +36,12 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
         const updates = [loaded, ...(current === null ? [] : [current])];
         const buffered = latestRealtimeRef.current;
         if (buffered !== null) {
-          const newest = updates.reduce((left, right) => Date.parse(left.asOf ?? "") >= Date.parse(right.asOf ?? "") ? left : right);
+          const newest = updates.reduce(pickNewestSchedule, loaded);
           if (Date.parse(buffered.asOf) > Date.parse(newest.asOf ?? "")) {
             return { ...loaded, schedule: buffered.schedule, asOf: buffered.asOf };
           }
         }
-        return updates.reduce((left, right) => Date.parse(left.asOf ?? "") >= Date.parse(right.asOf ?? "") ? left : right);
+        return updates.reduce(pickNewestSchedule, loaded);
       });
       setLoadError(false);
     }).catch(() => { if (active) setLoadError(true); });

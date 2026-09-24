@@ -243,7 +243,7 @@ export class ChannelObject extends DurableObject<Env> {
       await refreshAdPrewarningAlarm(this.env, channelId, schedule, broadcasterHasScope, scheduler, grantedScopes);
       await this.ctx.storage.put(AD_PREWARNING_RECONCILED_KEY, {
         schedule: JSON.stringify(schedule),
-        scopes: grantedScopes === undefined ? null : [...grantedScopes].sort().join("\u001f"),
+        scopes: grantedScopes === undefined ? null : [...grantedScopes].sort((a, b) => a.localeCompare(b)).join("\u001f"),
         reconciledAt: Date.now(),
       });
     } catch (error: unknown) {
