@@ -37,9 +37,17 @@ export type EventSubStreamWriteResult =
   | "ambiguous_offline"
   | "invalid_timestamp";
 
+/** Strips trailing zeros without backtracking-prone regex (`fraction` is bounded, but stay boring). */
+const trimTrailingZeros = (value: string): string => {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 48 /* "0" */) end--;
+  return value.slice(0, end);
+};
+
 const timestampOrder = (value: string | null): TimestampOrder | null => {
   if (value === null) return null;
-  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/iu.exec(value);
+  // Fraction capped at 9 digits (nanosecond precision, Twitch never sends more) to bound backtracking.
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/iu.exec(value);
   if (match === null) return null;
   const [date, time, fraction, sourceZone] = match.slice(1);
   if (date === undefined || time === undefined || sourceZone === undefined) return null;
@@ -48,7 +56,7 @@ const timestampOrder = (value: string | null): TimestampOrder | null => {
   if (!Number.isFinite(wholeSeconds)) return null;
   return {
     seconds: Math.floor(wholeSeconds / 1000),
-    fraction: (fraction ?? "").replace(/0+$/u, ""),
+    fraction: trimTrailingZeros(fraction ?? ""),
   };
 };
 
