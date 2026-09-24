@@ -19,7 +19,7 @@ import { clearStreamEndChannelControls, readDispatchChannelState } from "./db/ch
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariables } from "./db/channel-variables";
-import { createTemplateRenderer } from "./template-resolver";
+import { createTemplateRenderer, type TemplateChannelDetails, type TemplateStreamDetails } from "./template-resolver";
 import type { ChannelVariableOperation } from "../contracts/values";
 import type { TemplateVariable } from "../template";
 
@@ -56,44 +56,67 @@ const firstDataRecord = (result: unknown): Readonly<Record<string, unknown>> | n
   return recordValue(first) ? first : null;
 };
 
-const channelInfoFor = async (
+const channelDetailsFor = async (
   environment: DispatchEnvironment,
   channelId: string,
+  accessTokenFor: () => Promise<string>,
   fetcher: typeof fetch,
-): Promise<ModuleChannelInfo | null> => {
+): Promise<TemplateChannelDetails | null> => {
   try {
-    const accessToken = await getAppAccessToken(environment as unknown as Env, new Date().toISOString(), fetcher);
-    const [channelResult, streamResult] = await Promise.all([
-      helixRequest<{ data?: unknown }>({
-        url: "https://api.twitch.tv/helix/channels",
-        query: { broadcaster_id: channelId },
-        accessToken,
-        clientId: environment.TWITCH_CLIENT_ID,
-        fetcher,
-      }),
-      helixRequest<{ data?: unknown }>({
-        url: "https://api.twitch.tv/helix/streams",
-        query: { user_id: channelId, type: "live" },
-        accessToken,
-        clientId: environment.TWITCH_CLIENT_ID,
-        fetcher,
-      }),
-    ]);
-    if (!channelResult.ok || !streamResult.ok) return null;
-    const channel = firstDataRecord(channelResult.data);
+    const result = await helixRequest<{ data?: unknown }>({
+      url: "https://api.twitch.tv/helix/channels",
+      query: { broadcaster_id: channelId },
+      accessToken: await accessTokenFor(),
+      clientId: environment.TWITCH_CLIENT_ID,
+      fetcher,
+    });
+    if (!result.ok) return null;
+    const channel = firstDataRecord(result.data);
     if (channel === null || typeof channel.title !== "string" || typeof channel.game_name !== "string") return null;
-    const streams = recordValue(streamResult.data) && arrayValue(streamResult.data.data) ? streamResult.data.data : null;
-    if (streams === null) return null;
-    const stream = streams[0];
-    if (stream === undefined) return { title: channel.title, gameName: channel.game_name, startedAt: null, viewerCount: 0 };
+    return { title: channel.title, gameName: channel.game_name };
+  } catch {
+    return null;
+  }
+};
+
+const streamDetailsFor = async (
+  environment: DispatchEnvironment,
+  channelId: string,
+  accessTokenFor: () => Promise<string>,
+  fetcher: typeof fetch,
+): Promise<TemplateStreamDetails | null> => {
+  try {
+    const result = await helixRequest<{ data?: unknown }>({
+      url: "https://api.twitch.tv/helix/streams",
+      query: { user_id: channelId, type: "live" },
+      accessToken: await accessTokenFor(),
+      clientId: environment.TWITCH_CLIENT_ID,
+      fetcher,
+    });
+    if (!result.ok || !recordValue(result.data) || !arrayValue(result.data.data)) return null;
+    const stream = result.data.data[0];
+    if (stream === undefined) return { startedAt: null, viewerCount: 0 };
     if (!recordValue(stream) || typeof stream.started_at !== "string") return null;
     const viewerCount = typeof stream.viewer_count === "number" && Number.isSafeInteger(stream.viewer_count)
       ? stream.viewer_count
       : 0;
-    return { title: channel.title, gameName: channel.game_name, startedAt: stream.started_at, viewerCount };
+    return { startedAt: stream.started_at, viewerCount };
   } catch {
     return null;
   }
+};
+
+const channelInfoFor = async (
+  environment: DispatchEnvironment,
+  channelId: string,
+  accessTokenFor: () => Promise<string>,
+  fetcher: typeof fetch,
+): Promise<ModuleChannelInfo | null> => {
+  const [channel, stream] = await Promise.all([
+    channelDetailsFor(environment, channelId, accessTokenFor, fetcher),
+    streamDetailsFor(environment, channelId, accessTokenFor, fetcher),
+  ]);
+  return channel === null || stream === null ? null : { ...channel, ...stream };
 };
 
 const botAccessTokenFor = async (environment: DispatchEnvironment): Promise<{ userId: string; accessToken: string } | null> => {
@@ -432,6 +455,9 @@ export const dispatchEventSubNotification = async (
   const newEntries: WrittenModuleDiagnostic[] = [];
   let streamStatePromise: Promise<ModuleStreamState> | undefined;
   let channelInfoPromise: Promise<ModuleChannelInfo | null> | undefined;
+  let channelDetailsPromise: Promise<TemplateChannelDetails | null> | undefined;
+  let streamDetailsPromise: Promise<TemplateStreamDetails | null> | undefined;
+  let appAccessTokenPromise: Promise<string> | undefined;
   let channelLanguagePromise: Promise<ModuleLanguage> | undefined;
   let followerTotalPromise: Promise<number | null> | undefined;
   let chattersTotalPromise: Promise<number | null> | undefined;
@@ -441,8 +467,20 @@ export const dispatchEventSubNotification = async (
     streamStatePromise ??= streamStateForEvent(environment, event.channelId, fetcher);
     return streamStatePromise;
   };
+  const appAccessToken = (): Promise<string> => {
+    appAccessTokenPromise ??= getAppAccessToken(environment as unknown as Env, new Date().toISOString(), fetcher);
+    return appAccessTokenPromise;
+  };
+  const channelDetails = (): Promise<TemplateChannelDetails | null> => {
+    channelDetailsPromise ??= channelDetailsFor(environment, event.channelId, appAccessToken, fetcher);
+    return channelDetailsPromise;
+  };
+  const streamDetails = (): Promise<TemplateStreamDetails | null> => {
+    streamDetailsPromise ??= streamDetailsFor(environment, event.channelId, appAccessToken, fetcher);
+    return streamDetailsPromise;
+  };
   const channelInfo = (): Promise<ModuleChannelInfo | null> => {
-    channelInfoPromise ??= channelInfoFor(environment, event.channelId, fetcher);
+    channelInfoPromise ??= channelInfoFor(environment, event.channelId, appAccessToken, fetcher);
     return channelInfoPromise;
   };
   const followedAt = (userId: string): Promise<ModuleFollowedAt> => {
@@ -515,7 +553,8 @@ export const dispatchEventSubNotification = async (
       const moduleVariables = Object.values(module.templateFields ?? {}).flatMap((variables) => variables ?? []) as TemplateVariable[];
       const render = createTemplateRenderer(moduleEvent, module.templateContext ?? "event", moduleVariables, {
         streamState,
-        channelInfo,
+        channelDetails,
+        streamDetails,
         followedAt,
         followerTotal,
         chattersTotal,

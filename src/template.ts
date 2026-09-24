@@ -200,10 +200,11 @@ export const renderTemplate = (
   const declarations = new Map(declared.map((variable) => [variable.name, variable]));
   return text.replace(TEMPLATE_VARIABLE_PATTERN, (token, name: string, parameter: string | undefined) => {
     const variable = declarations.get(name);
-    if (parameter !== undefined) {
+    if (parameter !== undefined || (name === "random" && variable?.parameters === "range")) {
       const resolver = parameterValues[name];
-      if (variable === undefined || !parameterIsValid(variable, parameter) || resolver === undefined) return token;
-      return resolver(parameter);
+      const resolvedParameter = parameter ?? "";
+      if (variable === undefined || (parameter !== undefined && !parameterIsValid(variable, resolvedParameter)) || resolver === undefined) return token;
+      return resolver(resolvedParameter);
     }
     return Object.hasOwn(values, name) ? String(values[name]) : token;
   });

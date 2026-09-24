@@ -61,13 +61,13 @@ describe("template variable catalog", () => {
     const template = `${variableTokens}|{random 1-100}|{pick red|blue}|{missing}`;
     const rendered = renderTemplate(template, values, {
       random: (parameter) => {
-        const range = parseTemplateRange(parameter);
+        const range = parseTemplateRange(parameter || "1-100");
         return range === null ? "?" : String(range.min);
       },
       pick: (parameter) => parameter.split("|")[0]?.trim() ?? "",
     }, declared);
 
-    expect(rendered).toBe(`${declared.map(({ sample }) => sample).join("|")}|1|red|{missing}`);
+    expect(rendered).toBe(`${declared.map(({ name, sample }) => name === "random" ? "1" : sample).join("|")}|1|red|{missing}`);
     expect(unknownTemplateVariables(template, declared)).toEqual(["missing"]);
   });
 });

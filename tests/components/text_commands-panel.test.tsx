@@ -93,6 +93,8 @@ describe("Text command editor", () => {
     expect(editor().querySelector(".ui-field__prefix")).toHaveTextContent("!");
     expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
     expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" })).toBeInTheDocument();
+    expect(screen.getAllByText(textCommandsTexts("de").variableSelectHint)).toHaveLength(1);
+    expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" }).closest(".ui-switch-card")?.querySelector(".ui-switch-card__children")).toBeNull();
 
     fireEvent.click(advancedTab);
     const copy = textCommandsTexts("de");
@@ -124,14 +126,61 @@ describe("Text command editor", () => {
   it("offers the shared system variable catalog in the response picker", async () => {
     renderPanel(panelFetch({ commands: () => [] }));
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    fireEvent.click(screen.getByRole("button", { name: "Variable einfügen" }));
+    const trigger = screen.getByRole("button", { name: "Variable einfügen" });
+    expect(trigger.querySelector("svg")).toHaveClass("tabler-icon-braces");
+    fireEvent.click(trigger);
     const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
     expect(within(picker).getByRole("option", { name: /\{user\}/u, hidden: true })).toBeInTheDocument();
     expect(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true })).toBeInTheDocument();
     expect(within(picker).getByRole("option", { name: /\{random 1-100\}/u, hidden: true })).toBeInTheDocument();
     expect(within(picker).getByRole("group", { name: "Stream", hidden: true })).toBeInTheDocument();
+    expect(picker.querySelector(".ui-variable-picker__option-copy .ui-variable-picker__description")).not.toBeNull();
+    expect(picker.querySelector(".ui-variable-picker__sample")).not.toBeNull();
     fireEvent.click(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true }));
     expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("{uptime}");
+  });
+
+  it("keeps the variable action in a left-aligned switch card and the command body scrollable", async () => {
+    renderPanel(panelFetch());
+    await selectCommand();
+
+    expect(editor()).toHaveClass("command-editor-shell");
+    expect(editor().querySelector(".ui-editor-shell__body")).toHaveClass("ui-editor-shell__body");
+    const toggle = screen.getByRole("switch", { name: "Kanalvariable ändern" });
+    expect(toggle.closest(".ui-switch-card")).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle.closest(".ui-switch-card")?.querySelector(".ui-switch-card__children")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Variable" }).closest(".ui-switch-card__children")).not.toBeNull();
+  });
+
+  it("describes a silent action in the response column", async () => {
+    const actionCommand = makeCommand({
+      text: "",
+      variableAction: { name: "score", operation: "add", amount: 1 },
+    });
+    renderPanel(panelFetch({ commands: () => [actionCommand] }));
+    const cell = await screen.findByRole("cell", { name: "Ändert score um +1" });
+    expect(cell).toHaveClass("table__answer--placeholder");
+  });
+
+  it("renders the picker as a grouped bottom sheet below 600 pixels", async () => {
+    const originalMatchMedia = window.matchMedia.bind(window);
+    window.matchMedia = (query: string): MediaQueryList => ({
+      matches: query === "(max-width: 599px)", media: query, onchange: null,
+      addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
+    });
+    try {
+      renderPanel(panelFetch({ commands: () => [] }));
+      fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+      fireEvent.click(screen.getByRole("button", { name: "Variable einfügen" }));
+      const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
+      expect(picker.parentElement).toHaveClass("ui-variable-picker--sheet");
+      expect(picker.parentElement?.querySelector(".ui-variable-picker__mobile-header")).toBeInTheDocument();
+      expect(picker.parentElement?.querySelector(".ui-variable-picker__search")).toBeInTheDocument();
+      expect(picker.parentElement?.querySelector(".ui-variable-picker__option-copy")).toBeInTheDocument();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
   });
 
   it("shows the shoutout usage response and its Twitch cooldown hint", async () => {

@@ -10,7 +10,7 @@ import {
   type PanelChannelVariable,
 } from "./api";
 import { apiErrorText, channelVariablesTexts, dashboardLanguage } from "./locale";
-import { Button, ConfirmDialog, Field, ListDetail, NumberField, SubInspector, Switch } from "./ui";
+import { Button, ConfirmDialog, Field, Icon, ListDetail, NumberField, SubInspector, Switch } from "./ui";
 import { CHANNEL_VARIABLE_MAXIMUM_COUNT, CHANNEL_VARIABLE_MAXIMUM_VALUE, CHANNEL_VARIABLE_MINIMUM_VALUE } from "../contracts/values";
 
 interface ChannelVariablesPageProperties {
@@ -175,20 +175,33 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
         <Button icon="add" iconOnly ariaLabel={labels.create} disabled={createDisabled} onClick={beginCreate} />
       </span>
     </div>
+    <p className="muted channel-variables-limit-note" role="note">{labels.limitNote(maximum)}</p>
     {canManageContent && variables.length >= maximum ? <p className="muted" role="note">{labels.limitReached}</p> : null}
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
     {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     {!loading && variables.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-    <ul className="channel-variables-list">
-      {variables.map((variable) => (
-        <li key={variable.name}>
-          <button type="button" className="channel-variable-row" aria-current={variable.name === selectedName ? "true" : undefined} onClick={() => { selectVariable(variable); }}>
-            <span><strong className="mono">{`{var.${variable.name}}`}</strong><small>{variable.description || labels.noDescription}</small></span>
-            <strong className="channel-variable-row__value">{new Intl.NumberFormat(language).format(variable.value)}</strong>
-          </button>
-        </li>
-      ))}
-    </ul>
+    {!loading && variables.length > 0 ? <div className="table-wrap channel-variables-table-wrap">
+      <table className="table channel-variables-table">
+        <thead><tr>
+          <th scope="col">{labels.name}</th>
+          <th scope="col">{labels.description}</th>
+          <th scope="col" className="channel-variables-table__value-heading">{labels.value}</th>
+          <th scope="col" className="channel-variables-table__reset-heading"><span className="sr-only">{labels.resetOnStreamStart}</span><Icon name="reload" size={16} /></th>
+        </tr></thead>
+        <tbody>{variables.map((variable) => (
+          <tr key={variable.name} tabIndex={0} aria-selected={variable.name === selectedName} onClick={() => { selectVariable(variable); }} onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectVariable(variable); }
+          }}>
+            <th scope="row" className="mono">{`{var.${variable.name}}`}</th>
+            <td className="channel-variables-table__description" title={variable.description || labels.noDescription}>{variable.description || labels.noDescription}</td>
+            <td className="number channel-variables-table__value">{new Intl.NumberFormat(language).format(variable.value)}</td>
+            <td className="channel-variables-table__reset">
+              {variable.resetOnStreamStart ? <span role="img" aria-label={labels.resetOnStreamStart} title={labels.resetOnStreamStart}><Icon name="reload" size={16} /></span> : <span className="muted" aria-hidden="true">—</span>}
+            </td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div> : null}
     {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
   </section>;
 
@@ -211,7 +224,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             <Button variant="neutral" disabled={pending} title={labels.decrease} onClick={() => { void changeValue("subtract", 1); }}>{labels.decrease}</Button>
             <Button variant="neutral" disabled={pending} title={labels.increase} onClick={() => { void changeValue("add", 1); }}>{labels.increase}</Button>
           </div>
-          <NumberField id="channel-variable-set-value" label={labels.setValue} hint={labels.valueHint} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} increaseLabel={labels.increase} decreaseLabel={labels.decrease} value={draftSetValue} disabled={pending} onChange={setDraftSetValue} />
+          <NumberField id="channel-variable-set-value" label={labels.setValue} hint={labels.valueHint} min={CHANNEL_VARIABLE_MINIMUM_VALUE} max={CHANNEL_VARIABLE_MAXIMUM_VALUE} step={1} increaseLabel={labels.increaseDraftValue} decreaseLabel={labels.decreaseDraftValue} value={draftSetValue} disabled={pending} onChange={setDraftSetValue} />
           <Button disabled={pending || draftSetValue === "" || !Number.isInteger(draftSetValue)} onClick={() => { if (typeof draftSetValue === "number") void changeValue("set", draftSetValue); }}>{labels.set}</Button>
           <div className="channel-variable-usages"><h3>{labels.usages}</h3>
             {usageNames.length === 0 ? <p className="muted">{labels.noUsages}</p> : <ul>{selectedUsages.map((usage, index) => (
@@ -226,7 +239,11 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
           <Button danger="subtle" disabled={!canManageContent || pending || selectedUsages.some((usage) => usage.kind === "action")} {...(!canManageContent ? { title: labels.managementLocked } : selectedUsages.some((usage) => usage.kind === "action") ? { title: labels.inUseReason(usageNames.join(", ")) } : {})} onClick={() => { setConfirmDelete(true); }}>{labels.delete}</Button>
         </>}
         {error === null ? null : <p className="form-error" role="alert">{error}</p>}
-        {canManageContent ? <div className="channel-variable-editor__actions"><Button variant="primary" disabled={pending || nameInvalid || draftSetValue === ""} onClick={() => { void save(); }}>{labels.save}</Button><Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.discard}</Button></div> : <p className="muted" role="note">{labels.managementLocked}</p>}
+        <div className="channel-variable-editor__actions">
+          <Button variant="primary" disabled={!canManageContent || pending || nameInvalid || draftSetValue === ""} {...(!canManageContent ? { title: labels.managementLocked } : {})} onClick={() => { void save(); }}>{labels.save}</Button>
+          <Button variant="subtle" disabled={pending} onClick={closeInspector}>{labels.discard}</Button>
+        </div>
+        {!canManageContent ? <p className="muted" role="note">{labels.managementLocked}</p> : null}
       </div>
     </SubInspector>
   ) : null;

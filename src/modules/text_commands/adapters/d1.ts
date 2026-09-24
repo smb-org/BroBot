@@ -52,6 +52,7 @@ const auditValues = async (command: TextCommand) => ({
   ...(command.notFollowingText === undefined ? {} : await previewField("notFollowingText", command.notFollowingText)),
   ...(command.unavailableText === undefined ? {} : await previewField("unavailableText", command.unavailableText)),
   ...(command.usageText === undefined ? {} : await previewField("usageText", command.usageText)),
+  ...(command.legacyFallback === true ? { legacyFallback: true } : {}),
 });
 
 const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
@@ -67,18 +68,20 @@ const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
   left.streamCondition === right.streamCondition &&
   left.responseType === right.responseType &&
   JSON.stringify(left.variableAction) === JSON.stringify(right.variableAction) &&
+  left.legacyFallback === right.legacyFallback &&
   extraTemplateKeys.every((key) => left[key] === right[key]);
 
-const extraTemplatesOf = (value: Pick<TextCommand, typeof extraTemplateKeys[number]>): Record<string, string> => {
-  const entries: [string, string][] = [];
+const extraTemplatesOf = (value: Pick<TextCommand, typeof extraTemplateKeys[number] | "legacyFallback">): Record<string, string | boolean> => {
+  const entries: [string, string | boolean][] = [];
   for (const key of extraTemplateKeys) {
     const template = value[key];
     if (template !== undefined) entries.push([key, template]);
   }
+  if (value.legacyFallback === true) entries.push(["legacyFallback", true]);
   return Object.fromEntries(entries);
 };
 
-const storedExtraTemplates = (value: unknown): Pick<TextCommand, typeof extraTemplateKeys[number]> => {
+const storedExtraTemplates = (value: unknown): Pick<TextCommand, typeof extraTemplateKeys[number] | "legacyFallback"> => {
   let parsed: unknown;
   try {
     parsed = typeof value === "string" ? JSON.parse(value) as unknown : null;
@@ -86,11 +89,12 @@ const storedExtraTemplates = (value: unknown): Pick<TextCommand, typeof extraTem
     parsed = null;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-  const templates: Partial<Record<(typeof extraTemplateKeys)[number], string>> = {};
+  const templates: Partial<Record<(typeof extraTemplateKeys)[number], string>> & { legacyFallback?: true } = {};
   for (const key of extraTemplateKeys) {
     const template: unknown = Reflect.get(parsed, key);
     if (typeof template === "string") templates[key] = template;
   }
+  if (Reflect.get(parsed, "legacyFallback") === true) templates.legacyFallback = true;
   return templates;
 };
 
@@ -590,13 +594,15 @@ export const createTextCommandRepository = (
         WHERE channel_id = ? AND command_name = ?
           AND enabled = 1
           AND (last_used_at IS NULL OR julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)
+          AND (? IS NULL OR revision = ?)
           AND (? IS NULL OR user_cooldown_seconds = 0 OR NOT EXISTS (
             SELECT 1 FROM text_command_user_cooldowns AS user_cooldown
              WHERE user_cooldown.channel_id = ? AND user_cooldown.command_name = ? AND user_cooldown.user_id = ?
                AND julianday(user_cooldown.last_used_at) > julianday(?) - text_commands.user_cooldown_seconds / 86400.0
           ))
         RETURNING ${textCommandSelectColumns}`,
-    ).bind(now, now, channelId, name, now, userId ?? null, channelId, name, userId ?? null, now);
+    ).bind(now, now, channelId, name, now, knownCommand?.revision ?? null, knownCommand?.revision ?? null,
+      userId ?? null, channelId, name, userId ?? null, now);
 
     const statements: D1PreparedStatement[] = [claim];
     if (userCooldownSeconds > 0 && userId !== undefined && userId !== null) {
@@ -628,7 +634,7 @@ export const createTextCommandRepository = (
         ? await this.find(channelId, name)
         : globalChanges > 0
           ? { ...commandBeforeClaim, lastUsedAt: now, updatedAt: now, useCount: commandBeforeClaim.useCount + 1 }
-          : commandBeforeClaim;
+          : await this.find(channelId, name);
     if (current === null) return null;
     if (globalChanges > 0) {
       const actionResult = variableChange === null ? undefined : results.at(-1)?.results[0];
@@ -638,6 +644,10 @@ export const createTextCommandRepository = (
         ? { name: actionResult.name, value: actionResult.value }
         : undefined;
       return { command: current, claimed: true, ...(changed === undefined ? {} : { changedVariable: changed }) };
+    }
+
+    if (commandBeforeClaim !== null && current.revision !== commandBeforeClaim.revision) {
+      return { command: current, claimed: false, stale: true };
     }
 
     const globalRemaining = cooldownRemaining(current.lastUsedAt, now, current.cooldownSeconds);

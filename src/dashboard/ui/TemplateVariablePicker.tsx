@@ -311,7 +311,7 @@ export function TemplateVariablePicker({
             disabled={disabled}
             onClick={() => changeOpened(!opened)}
           >
-            <Icon name="token" size={20} />
+            <Icon name="variable" size={20} />
           </button>
         </MantinePopover.Target>
         <MantinePopover.Dropdown role="dialog" aria-label={messages.title} className="ui-variable-picker__popover">

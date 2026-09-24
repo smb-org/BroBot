@@ -9,9 +9,13 @@ import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 import { templateLanguageText } from "../modules/template-language";
 import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState } from "../modules/contract";
 
+export type TemplateChannelDetails = Pick<ModuleChannelInfo, "title" | "gameName">;
+export type TemplateStreamDetails = Pick<ModuleChannelInfo, "startedAt" | "viewerCount">;
+
 export interface TemplateResolverSources {
   streamState: () => Promise<ModuleStreamState>;
-  channelInfo: () => Promise<ModuleChannelInfo | null>;
+  channelDetails: () => Promise<TemplateChannelDetails | null>;
+  streamDetails: () => Promise<TemplateStreamDetails | null>;
   followedAt: (userId: string) => Promise<ModuleFollowedAt>;
   followerTotal: () => Promise<number | null>;
   chattersTotal: () => Promise<number | null>;
@@ -87,7 +91,11 @@ export const createTemplateRenderer = (
   moduleValues: Readonly<Record<string, string | number>>,
   changed?: { name: string; value: number },
 ): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> => {
-  const names = templateVariableNames(text);
+  const templateSource = moduleValues.legacyFallback === "true"
+    ? [text, moduleValues.offlineText, moduleValues.notFollowingText, moduleValues.unavailableText]
+      .filter((value): value is string => typeof value === "string").join(" ")
+    : text;
+  const names = templateVariableNames(templateSource);
   const requested = new Set(names);
   const channelNames = [...requested]
     .flatMap((name) => name.startsWith("var.") ? [name.slice(4)] : []);
@@ -102,11 +110,13 @@ export const createTemplateRenderer = (
   );
   const declaredSystem = eligibleSystem.filter((variable) => !moduleVariables.some((moduleVariable) => moduleVariable.name === variable.name));
   const requiredSystem = new Set([...requested].filter((name) => declaredSystem.some((variable) => variable.name === name)));
-  const requiresChannelInfo = ["game", "title", "uptime", "viewers"].some((name) => requiredSystem.has(name));
+  const requiresChannelDetails = ["game", "title"].some((name) => requiredSystem.has(name));
+  const requiresStreamDetails = ["uptime", "viewers"].some((name) => requiredSystem.has(name));
   const requiresLanguage = ["game", "title", "uptime", "followage", "accountage", "date", "time", "followers", "viewers", "var"].some((name) => requiredSystem.has(name)) || channelNames.length > 0;
-  const [language, channelInfo, streamState, followedAt, followerTotal, chattersTotal, channelValues] = await Promise.all([
+  const [language, channelDetails, streamDetails, streamState, followedAt, followerTotal, chattersTotal, channelValues] = await Promise.all([
     requiresLanguage ? sources.channelLanguage() : Promise.resolve("de" as const),
-    requiresChannelInfo ? sources.channelInfo() : Promise.resolve(null),
+    requiresChannelDetails ? sources.channelDetails() : Promise.resolve(null),
+    requiresStreamDetails ? sources.streamDetails() : Promise.resolve(null),
     requiredSystem.has("live") ? sources.streamState() : Promise.resolve("unknown" as const),
     requiredSystem.has("followage") ? (() => {
       const userId = event.actor?.userId ?? payloadString(event, "chatter_user_id");
@@ -138,14 +148,14 @@ export const createTemplateRenderer = (
     else if (name === "target") values[name] = target;
     else if (name === "args") values[name] = args.length > 100 ? `${args.slice(0, 99)}…` : args;
     else if (name === "subage") values[name] = subageFrom(event);
-    else if (name === "game") values[name] = channelInfo === null ? missing(name) : (channelInfo.gameName || "?");
-    else if (name === "title") values[name] = channelInfo === null ? missing(name) : (channelInfo.title || "?");
-    else if (name === "uptime") values[name] = channelInfo === null
+    else if (name === "game") values[name] = channelDetails === null ? missing(name) : (channelDetails.gameName || "?");
+    else if (name === "title") values[name] = channelDetails === null ? missing(name) : (channelDetails.title || "?");
+    else if (name === "uptime") values[name] = streamDetails === null
       ? missing(name)
-      : channelInfo.startedAt === null ? valueFrom(moduleValues.offlineText) ?? templateLanguageText[language].offline : formatDuration(channelInfo.startedAt, now, language);
-    else if (name === "viewers") values[name] = channelInfo === null
+      : streamDetails.startedAt === null ? valueFrom(moduleValues.offlineText) ?? templateLanguageText[language].offline : formatDuration(streamDetails.startedAt, now, language);
+    else if (name === "viewers") values[name] = streamDetails === null
       ? missing(name)
-      : formatCount(channelInfo.startedAt === null ? 0 : channelInfo.viewerCount, language);
+      : formatCount(streamDetails.startedAt === null ? 0 : streamDetails.viewerCount, language);
     else if (name === "live") values[name] = streamState === "unknown" ? missing(name) : streamState;
     else if (name === "followers") values[name] = followerTotal === null ? missing(name) : formatCount(followerTotal, language);
     else if (name === "chatters") values[name] = chattersTotal === null ? missing(name) : formatCount(chattersTotal, language);
@@ -205,6 +215,16 @@ export const createTemplateRenderer = (
       return choices[randomIndex(choices.length)]?.trim() ?? "";
     },
   };
-  const rendered = renderTemplate(text, values, parameterValues, effectiveForRender);
+  let renderSource = text;
+  if (moduleValues.legacyFallback === "true") {
+    if (requiredSystem.has("uptime") && streamDetails?.startedAt === null) {
+      renderSource = valueFrom(moduleValues.offlineText) ?? templateLanguageText[language].offline;
+    } else if (requiredSystem.has("followage") && followedAt === null) {
+      renderSource = valueFrom(moduleValues.notFollowingText) ?? templateLanguageText[language].notFollowing;
+    } else if (requiredSystem.has("followage") && followedAt === "unavailable") {
+      renderSource = valueFrom(moduleValues.unavailableText) ?? "?";
+    }
+  }
+  const rendered = renderTemplate(renderSource, values, parameterValues, effectiveForRender);
   return { text: rendered, diagnostics };
 };

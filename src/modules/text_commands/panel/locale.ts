@@ -112,6 +112,7 @@ export interface TextCommandsTexts {
   variableAmount: string;
   variableSilentHint: string;
   variableEveryoneWarning: string;
+  actionResponse: (name: string, operation: "add" | "subtract" | "set" | "set_argument", amount: number | null) => string;
   externalCooldownWarning: string;
   argsEveryoneWarning: string;
   tagInputMessages: TagInputMessages;
@@ -221,6 +222,9 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Zählt hoch.", subtract: "Zählt herunter.", set: "Setzt auf den Wert.", set_argument: "Setzt auf das erste Argument. Ungültige Zahlen zeigen den Nutzungshinweis." },
     variableAmount: "Betrag", variableSilentHint: "Antwort leer lassen, um still zu zählen.", variableEveryoneWarning: "Jeder im Chat kann diese Variable ändern.",
+    actionResponse: (name, operation, amount) => operation === "add" ? `Ändert ${name} um +${String(amount ?? 1)}`
+      : operation === "subtract" ? `Ändert ${name} um −${String(amount ?? 1)}`
+        : operation === "set" ? `Setzt ${name} auf ${String(amount ?? 0)}` : `Setzt ${name} auf das erste Argument`,
     externalCooldownWarning: "Fragt Twitch bei jedem Auslösen. Eine Abkühlzeit von mindestens 5 Sekunden wird empfohlen.",
     argsEveryoneWarning: "Mit {args} kann jede Person im Chat Text an den Bot übergeben.",
   },
@@ -294,6 +298,9 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
     variableOperationHelp: { add: "Increase the value.", subtract: "Decrease the value.", set: "Set the value directly.", set_argument: "Set from the first argument. Invalid numbers show the usage response." },
     variableAmount: "Amount", variableSilentHint: "Leave the response empty to count silently.", variableEveryoneWarning: "Everyone in chat can change this variable.",
+    actionResponse: (name, operation, amount) => operation === "add" ? `Changes ${name} by +${String(amount ?? 1)}`
+      : operation === "subtract" ? `Changes ${name} by −${String(amount ?? 1)}`
+        : operation === "set" ? `Sets ${name} to ${String(amount ?? 0)}` : `Sets ${name} from the first argument`,
     externalCooldownWarning: "Requests Twitch every time the command runs. A cooldown of at least 5 seconds is recommended.",
     argsEveryoneWarning: "With {args}, anyone in chat can pass text to the bot.",
   },

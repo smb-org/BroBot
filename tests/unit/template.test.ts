@@ -63,6 +63,17 @@ describe("template helpers", () => {
     }, variables)).toBe("5|blue|{random nope}|{user nope}|grinst");
   });
 
+  it("resolves parameterless random with its default range", () => {
+    const random = vi.fn((maximumExclusive: number) => maximumExclusive - 1);
+    const resolver = (parameter: string): string => {
+      const range = parseTemplateRange(parameter || "1-100");
+      return range === null ? "?" : String(range.min + random(range.max - range.min + 1));
+    };
+
+    expect(renderTemplate("{random}", {}, { random: resolver }, variables)).toBe("100");
+    expect(random).toHaveBeenCalledWith(100);
+  });
+
   it("counts maximum substitutions and an absent-variable fallback", () => {
     const duration: readonly TemplateVariable[] = [
       { name: "duration", group: "event", sample: "90", maxLength: 4, fallbackWhenAbsent: 15 },

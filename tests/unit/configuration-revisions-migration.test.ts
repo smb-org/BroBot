@@ -95,9 +95,9 @@ describe("configuration revisions and channel variables migrations", () => {
            FROM text_commands WHERE channel_id = 'channel-a' AND command_name IN ('up', 'follow', 'game')
           ORDER BY command_name`,
       ).all()).toEqual([
-        { command_name: "follow", kind: "text", response_text: "{user} {followage}", template_fields_json: '{"notFollowingText":"Not following","unavailableText":"Unavailable"}', use_count: 0, variable_name: null, variable_operation: null, variable_amount: null },
+        { command_name: "follow", kind: "text", response_text: "{user} {followage}", template_fields_json: '{"notFollowingText":"Not following","unavailableText":"Unavailable","legacyFallback":true}', use_count: 0, variable_name: null, variable_operation: null, variable_amount: null },
         { command_name: "game", kind: "text", response_text: "{game} {title}", template_fields_json: "{}", use_count: 0, variable_name: null, variable_operation: null, variable_amount: null },
-        { command_name: "up", kind: "text", response_text: "{channel} {uptime}", template_fields_json: '{"offlineText":"Offline"}', use_count: 0, variable_name: null, variable_operation: null, variable_amount: null },
+        { command_name: "up", kind: "text", response_text: "{channel} {uptime}", template_fields_json: '{"offlineText":"Offline","legacyFallback":true}', use_count: 0, variable_name: null, variable_operation: null, variable_amount: null },
       ]);
 
       const aliasPlan = database.prepare(

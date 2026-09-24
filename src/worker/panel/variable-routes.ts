@@ -129,9 +129,12 @@ variableRouter.patch("/api/channels/:channelId/variables/:name", async (context)
     `UPDATE channel_variables
         SET name = ?, description = ?, reset_on_stream_start = ?, updated_at = ?
       WHERE channel_id = ? AND name = ?
+        AND value = ? AND description = ? AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
         AND (name = ? OR NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?))
         ${authorization.sql}`,
-  ).bind(newName, description, resetOnStreamStart ? 1 : 0, now, channelId, name, name, channelId, newName, ...authorization.values);
+  ).bind(newName, description, resetOnStreamStart ? 1 : 0, now, channelId, name,
+    before.value, before.description, before.resetOnStreamStart ? 1 : 0, before.createdAt, before.updatedAt,
+    name, channelId, newName, ...authorization.values);
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null, "channel.variable.renamed",
     recordSnapshot(before), { name: newName, value: before.value, description });
   const referenceUpdates = newName === name ? [] : MODULES.flatMap((module) =>
@@ -167,6 +170,7 @@ variableRouter.post("/api/channels/:channelId/variables/:name/value", async (con
             END,
             updated_at = ?
       WHERE channel_id = ? AND name = ?
+        AND value = ? AND description = ? AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
         AND value <> CASE ?
               WHEN 'set' THEN ?
               WHEN 'add' THEN max(${MINIMUM_VALUE_SQL}, min(${MAXIMUM_VALUE_SQL}, value + ?))
@@ -175,6 +179,7 @@ variableRouter.post("/api/channels/:channelId/variables/:name/value", async (con
         ${authorization.sql}
       RETURNING channel_id, name, value, description, reset_on_stream_start, created_at, updated_at`,
   ).bind(parsed.data.operation, parsed.data.amount, parsed.data.amount, parsed.data.amount, now, channelId, name,
+    before.value, before.description, before.resetOnStreamStart ? 1 : 0, before.createdAt, before.updatedAt,
     parsed.data.operation, parsed.data.amount, parsed.data.amount, parsed.data.amount, ...authorization.values);
   const nextValue = parsed.data.operation === "set"
     ? parsed.data.amount
@@ -188,6 +193,11 @@ variableRouter.post("/api/channels/:channelId/variables/:name/value", async (con
   if (mutationResult.meta.changes === 0) {
     const current = await findChannelVariable(context.env.DB, channelId, name);
     if (current === null) return context.json({ error: "variable_not_found" }, 404);
+    if (current.value !== before.value || current.description !== before.description ||
+      current.resetOnStreamStart !== before.resetOnStreamStart || current.createdAt !== before.createdAt ||
+      current.updatedAt !== before.updatedAt) {
+      return context.json({ error: "variable_changed_concurrently" }, 409);
+    }
     const stillAuthorized = await context.env.DB.prepare(
       `SELECT 1 AS allowed FROM channels WHERE channel_id = ? ${authorization.sql}`,
     ).bind(channelId, ...authorization.values).first<{ allowed: number }>();
@@ -218,8 +228,11 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
   const now = nowIso();
   const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `DELETE FROM channel_variables WHERE channel_id = ? AND name = ? ${authorization.sql}`,
-  ).bind(channelId, name, ...authorization.values);
+    `DELETE FROM channel_variables
+      WHERE channel_id = ? AND name = ? AND value = ? AND description = ? AND reset_on_stream_start = ?
+        AND created_at = ? AND updated_at = ? ${authorization.sql}`,
+  ).bind(channelId, name, before.value, before.description, before.resetOnStreamStart ? 1 : 0,
+    before.createdAt, before.updatedAt, ...authorization.values);
   const audit = prepareAudit(context.env.DB, context.get("actor").userId, now, channelId, null,
     "channel.variable.removed", recordSnapshot(before), null);
   try {

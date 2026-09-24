@@ -294,6 +294,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     streamCondition,
     responseType,
     variableAction,
+    ...(before.legacyFallback === undefined ? {} : { legacyFallback: before.legacyFallback }),
     expectedRevision: body.revision,
     onlyToggle: !contentChanged,
     now,

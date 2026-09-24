@@ -216,6 +216,7 @@ export const EVENT_CODES = [
   "text_commands.lookup_unavailable",
   "text_commands.argument_missing",
   "text_commands.argument_invalid",
+  "text_commands.changed_concurrently",
   "template_parameters_invalid",
 ] as const;
 export type EventCode = (typeof EVENT_CODES)[number];

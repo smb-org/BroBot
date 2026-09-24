@@ -118,4 +118,62 @@ describe("Channel variable routes", () => {
     expect(deletion.status).toBe(409);
     await expect(deletion.json()).resolves.toMatchObject({ error: "variable_in_use" });
   });
+
+  it("rejects a stale value edit and writes no audit for the value written concurrently", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 0, description: "Score", resetOnStreamStart: false,
+    });
+    const auditBefore = await database.prepare("SELECT COUNT(*) AS count FROM audit_log").first<{ count: number }>();
+    const prepare = database.prepare.bind(database);
+    let raced = false;
+    database.prepare = (sql: string) => {
+      if (!raced && sql.includes("SET value = CASE ?")) {
+        raced = true;
+        database.sqlite.prepare("UPDATE channel_variables SET value = 7, updated_at = ? WHERE channel_id = 'channel-a' AND name = 'score'")
+          .run("2026-09-24T12:00:01.000Z");
+      }
+      return prepare(sql);
+    };
+
+    const changed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score/value", "POST", {
+      operation: "add", amount: 1,
+    });
+
+    expect(raced).toBe(true);
+    expect(changed.status).toBe(409);
+    await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+      .resolves.toEqual({ value: 7 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual(auditBefore);
+  });
+
+  it("returns a metadata conflict without auditing stale metadata", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 0, description: "Original", resetOnStreamStart: false,
+    });
+    const auditBefore = await database.prepare("SELECT COUNT(*) AS count FROM audit_log").first<{ count: number }>();
+    const prepare = database.prepare.bind(database);
+    let raced = false;
+    database.prepare = (sql: string) => {
+      if (!raced && sql.includes("SET name = ?, description = ?")) {
+        raced = true;
+        database.sqlite.prepare("UPDATE channel_variables SET description = ?, updated_at = ? WHERE channel_id = 'channel-a' AND name = 'score'")
+          .run("Concurrent", "2026-09-24T12:00:01.000Z");
+      }
+      return prepare(sql);
+    };
+
+    const changed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { description: "Stale edit" });
+
+    expect(raced).toBe(true);
+    expect(changed.status).toBe(409);
+    await expect(database.prepare("SELECT description FROM channel_variables WHERE name = 'score'").first())
+      .resolves.toEqual({ description: "Concurrent" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log").first()).resolves.toEqual(auditBefore);
+  });
 });

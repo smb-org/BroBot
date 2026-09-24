@@ -168,6 +168,7 @@ export interface ChannelVariablesTexts {
   setValue: string;
   valueHint: string;
   resetOnStreamStart: string;
+  limitNote: (maximum: number) => string;
   resetHint: string;
   renameHint: string;
   usages: string;
@@ -176,6 +177,8 @@ export interface ChannelVariablesTexts {
   set: string;
   increase: string;
   decrease: string;
+  increaseDraftValue: string;
+  decreaseDraftValue: string;
   delete: string;
   deleteTitle: (name: string) => string;
   deleteDescription: (name: string, usages: string) => string;
@@ -203,9 +206,10 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
     value: "Wert", setValue: "Setzen auf", valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.",
     resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird beim nächsten stream.online-Ereignis zurückgesetzt.",
+    limitNote: (maximum) => `Bis zu ${String(maximum)} Variablen pro Kanal.`,
     renameHint: "Vorlagen mit dieser Variable werden beim Umbenennen angepasst.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "zählt eine Aktion" : "Vorlage"}`,
-    set: "Setzen", increase: "+1", decrease: "−1", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
+    set: "Setzen", increase: "+1", decrease: "−1", increaseDraftValue: "Setzwert um eins erhöhen", decreaseDraftValue: "Setzwert um eins verringern", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
     deleteDescription: (name, usages) => usages.length === 0 ? `„${name}“ wird dauerhaft gelöscht.` : `„${name}“ wird dauerhaft gelöscht. Verwendungen: ${usages}`,
     deleteConfirm: (name) => `${name} endgültig löschen`, deleteCancel: "Abbrechen",
     inUseReason: (usages) => `Wird von ${usages} verwendet. Entferne zuerst die Befehlsaktion.`,
@@ -221,9 +225,10 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",
     value: "Value", setValue: "Set to", valueHint: "Integer from −999,999,999 to 999,999,999.",
     resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets on the next stream.online event.",
+    limitNote: (maximum) => `Up to ${String(maximum)} variables per channel.`,
     renameHint: "Templates that use this variable will be updated when it is renamed.", usages: "Used in", noUsages: "Not used yet.",
     usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "changes a variable" : "template"}`,
-    set: "Set", increase: "+1", decrease: "−1", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
+    set: "Set", increase: "+1", decrease: "−1", increaseDraftValue: "Increase the value to set by one", decreaseDraftValue: "Decrease the value to set by one", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
     deleteDescription: (name, usages) => usages.length === 0 ? `“${name}” will be deleted permanently.` : `“${name}” will be deleted permanently. Used in: ${usages}`,
     deleteConfirm: (name) => `Delete ${name} permanently`, deleteCancel: "Cancel",
     inUseReason: (usages) => `Used by ${usages}. Remove the command action first.`,
@@ -1442,6 +1447,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.lookup_unavailable": (detail) => `Textbefehl !${detailText(detail, "name", "unbekannt")}: ${detail.kind === "uptime" ? "Stream-Daten" : detail.kind === "followage" ? "Followage" : "Spielinformationen"} nicht verfügbar`,
     "text_commands.argument_missing": (detail) => eventTextWithName(detail, "Shoutout-Ziel fehlt", (name) => `Befehl !${name}: Twitch-Name fehlt`),
     "text_commands.argument_invalid": (detail) => eventTextWithName(detail, "Ungültiges Argument", (name) => `Befehl !${name}: Argument muss eine Ganzzahl im erlaubten Bereich sein`),
+    "text_commands.changed_concurrently": (detail) => eventTextWithName(detail, "Befehl während Ausführung geändert", (name) => `Befehl !${name} wurde während der Ausführung mehrfach geändert`),
   },
   en: {
     "host.action.failed": "Action failed",
@@ -1537,6 +1543,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.lookup_unavailable": (detail) => `Command !${detailText(detail, "name", "unknown")}: ${detail.kind === "uptime" ? "stream data" : detail.kind === "followage" ? "followage" : "game information"} unavailable`,
     "text_commands.argument_missing": (detail) => eventTextWithName(detail, "Shoutout target missing", (name) => `Command !${name}: Twitch login missing`),
     "text_commands.argument_invalid": (detail) => eventTextWithName(detail, "Invalid argument", (name) => `Command !${name}: argument must be an integer in the allowed range`),
+    "text_commands.changed_concurrently": (detail) => eventTextWithName(detail, "Command changed during execution", (name) => `Command !${name} changed repeatedly during execution`),
   },
 };
 
@@ -1618,6 +1625,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "text_commands.lookup_unavailable": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "text_commands.argument_missing": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "text_commands.argument_invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "text_commands.changed_concurrently": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
 };
 
 export function eventText(code: string, language?: DashboardLanguage): string;

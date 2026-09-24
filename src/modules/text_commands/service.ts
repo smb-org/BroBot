@@ -92,7 +92,7 @@ const rejection = (code: EventCode, detail: NonNullable<ModuleDiagnostic["detail
 });
 
 const argumentValue = (value: string | undefined): number | null => {
-  const normalized = value?.trim() ?? "";
+  const normalized = value?.trim().split(/\s+/u)[0] ?? "";
   if (!/^-?(?:0|[1-9]\d*)$/u.test(normalized)) return null;
   const parsed = Number(normalized);
   return Number.isSafeInteger(parsed) && parsed >= CHANNEL_VARIABLE_MINIMUM_VALUE && parsed <= CHANNEL_VARIABLE_MAXIMUM_VALUE
@@ -120,6 +120,7 @@ const moduleValuesFor = (
     ...(command.offlineText === undefined ? {} : { offlineText: command.offlineText }),
     ...(command.notFollowingText === undefined ? {} : { notFollowingText: command.notFollowingText }),
     ...(command.unavailableText === undefined ? {} : { unavailableText: command.unavailableText }),
+    ...(command.legacyFallback === true ? { legacyFallback: "true" } : {}),
   };
 };
 
@@ -155,10 +156,11 @@ const render = async (
   };
 };
 
-export const processTextCommandMessage = async (
+const processTextCommandMessageAttempt = async (
   event: ModuleEvent,
   repository: TextCommandRepository,
-  context: Partial<Pick<ModuleExecutionContext, "streamState" | "renderTemplate" | "prepareVariableChange">> = {},
+  context: Partial<Pick<ModuleExecutionContext, "streamState" | "renderTemplate" | "prepareVariableChange">>,
+  staleRetries: number,
 ): Promise<ModuleResult> => {
   const text = messageText(event);
   if (text === null) return { actions: [], diagnostics: [] };
@@ -193,6 +195,17 @@ export const processTextCommandMessage = async (
   const action = command.variableAction;
   const parsedAmount = action?.operation === "set_argument" ? argumentValue(input.arguments) : undefined;
   const invalidActionArgument = action?.operation === "set_argument" && parsedAmount === null;
+  if (invalidActionArgument) {
+    return response(
+      event,
+      input,
+      command,
+      command.usageText ?? TEXT_COMMAND_DEFAULT_USAGE_TEXT,
+      alias,
+      streamState,
+      { forceChat: true, diagnostics: [{ code: "text_commands.argument_invalid" satisfies EventCode, detail: { name: command.name } }] },
+    );
+  }
   const claim = await repository.claim(
     event.channelId,
     command.name,
@@ -204,6 +217,11 @@ export const processTextCommandMessage = async (
     command,
   );
   if (claim === null) return rejection("text_commands.unknown", { name: input.name });
+  if (claim.stale) {
+    return staleRetries < 1
+      ? processTextCommandMessageAttempt(event, repository, context, staleRetries + 1)
+      : rejection("text_commands.changed_concurrently", { name: command.name });
+  }
   if (!claim.claimed) {
     const remainingSeconds = claim.remainingSeconds ?? cooldownRemaining(claim.command.lastUsedAt, event.receivedAt, claim.command.cooldownSeconds);
     return claim.reason === "user_cooldown"
@@ -216,18 +234,6 @@ export const processTextCommandMessage = async (
     const commands = (await repository.list(event.channelId)).filter((entry) => entry.enabled).sort((left, right) => left.name.localeCompare(right.name));
     const list = commands.length === 0 ? NO_COMMANDS_REPLY : commandListReply(commands.map((entry) => entry.name));
     return response(event, input, claimed, list, alias, streamState);
-  }
-
-  if (invalidActionArgument) {
-    return response(
-      event,
-      input,
-      claimed,
-      claimed.usageText ?? TEXT_COMMAND_DEFAULT_USAGE_TEXT,
-      alias,
-      streamState,
-      { forceChat: true, diagnostics: [{ code: "text_commands.argument_invalid" satisfies EventCode, detail: { name: claimed.name } }] },
-    );
   }
 
   if (claimed.kind === "shoutout") {
@@ -256,3 +262,9 @@ export const processTextCommandMessage = async (
     noChat: rendered.text.length === 0,
   });
 };
+
+export const processTextCommandMessage = (
+  event: ModuleEvent,
+  repository: TextCommandRepository,
+  context: Partial<Pick<ModuleExecutionContext, "streamState" | "renderTemplate" | "prepareVariableChange">> = {},
+): Promise<ModuleResult> => processTextCommandMessageAttempt(event, repository, context, 0);

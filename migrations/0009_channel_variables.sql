@@ -71,7 +71,10 @@ INSERT INTO text_commands_migration_new (
 SELECT channel_id, command_name, response_text, cooldown_seconds, last_used_at, created_at, updated_at,
        CASE WHEN kind IN ('uptime', 'followage', 'game') THEN 'text' ELSE kind END,
        enabled, minimum_level, aliases_json, user_cooldown_seconds, stream_condition, response_type,
-       template_fields_json, revision, 0, NULL, NULL, NULL
+       CASE WHEN kind IN ('uptime', 'followage')
+            THEN json_set(template_fields_json, '$.legacyFallback', json('true'))
+            ELSE template_fields_json END,
+       revision, 0, NULL, NULL, NULL
   FROM text_commands_migration_old;
 
 DROP TABLE text_commands_migration_old;

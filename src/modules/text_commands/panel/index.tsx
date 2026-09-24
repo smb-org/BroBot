@@ -113,7 +113,9 @@ const TextCommandRow = ({ initial, language, selected, onSelect, rowRef, canMana
     <tr ref={rowRef} tabIndex={0} aria-selected={selected} onClick={onSelect} onKeyDown={(event) => { commandRowKeyDown(event, onSelect); }}>
       <th scope="row" className="mono">!{initial.name}</th>
       <td>{labels.kindLabels[initial.kind]}</td>
-      <td className="table__answer" title={initial.kind === "list" ? undefined : initial.text}>{initial.kind === "list" ? "—" : initial.text}</td>
+      <td className={`table__answer${initial.text.length === 0 && initial.variableAction !== null ? " table__answer--placeholder" : ""}`} title={initial.kind === "list" ? undefined : initial.text}>
+        {initial.kind === "list" ? "—" : initial.text.length > 0 ? initial.text : initial.variableAction === null ? "—" : labels.actionResponse(initial.variableAction.name, initial.variableAction.operation, initial.variableAction.amount)}
+      </td>
       <td>
         <div className="minimum-tier-select" onClick={(event) => { event.stopPropagation(); }} onKeyDown={(event) => { event.stopPropagation(); }}>
           <Select
@@ -431,8 +433,9 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
         </> : null}
         {draft.kind === "text" ? <>
           <Switch
+            layout="card"
             label={labels.variableAction}
-            hint={variableAction === null ? labels.variableSelectHint : labels.variableOperationHelp[variableAction.operation]}
+            description={variableAction === null ? labels.variableSelectHint : labels.variableOperationHelp[variableAction.operation]}
             checked={variableAction !== null}
             disabled={!canManageContent || pending}
             onChange={(enabled) => {
@@ -440,7 +443,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
                 ? { name: channelVariables[0]?.name ?? "", operation: "add", amount: 1 }
                 : null);
             }}
-          />
+          >
           {variableAction === null ? null : <div className="command-variable-action">
             <Select
               label={labels.variableSelect}
@@ -482,6 +485,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
             {variableAction.operation === "set_argument" && draft.minimumTier === "everyone" ? <p className="form-warning" role="note">{labels.variableEveryoneWarning}</p> : null}
             {draft.text.trim().length === 0 ? <p className="muted">{labels.variableSilentHint}</p> : null}
           </div>}
+          </Switch>
         </> : null}
         {draft.kind === "shoutout" ? null : <SegmentedControl
           label={labels.responseType}
@@ -589,6 +593,7 @@ const TextCommandEditor = ({ channelId, language, initial, command, commands, ch
   const deleteButton = command === null ? undefined : <Button icon="remove" iconOnly ariaLabel={labels.delete} title={labels.delete} danger="subtle" onClick={() => { setConfirmingDelete(true); }} />;
   return <>
     <EditorShell
+      className="command-editor-shell"
       ariaLabel={isCreate ? labels.add : labels.details(command.name)}
       title={isCreate ? labels.add : <span className="mono">!{command.name}</span>}
       {...(command === null ? {} : { identifier: command.name })}

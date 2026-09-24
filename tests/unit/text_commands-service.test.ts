@@ -325,4 +325,44 @@ describe("Text commands service", () => {
     }
   });
 
+  it("uses the first set_argument token and leaves the claim untouched for invalid input", async () => {
+    const entry = {
+      ...command("score", "Score updated"),
+      usageText: "Usage: !score <number>",
+      variableAction: { name: "score", operation: "set_argument" as const, amount: 0 },
+    };
+    const repository = repositoryFor([entry]);
+    const claim = vi.spyOn(repository, "claim");
+
+    const invalid = await processTextCommandMessage(eventFor("!score nope 5"), repository);
+    expect(invalid.actions).toEqual([{ kind: "chat", text: "Usage: !score <number>" }]);
+    expect(invalid.diagnostics).toContainEqual({ code: "text_commands.argument_invalid", detail: { name: "score" } });
+    expect(claim).not.toHaveBeenCalled();
+
+    const valid = await processTextCommandMessage(eventFor("!score 5 add a note"), repository);
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(claim.mock.calls[0]?.[6]).toBe(5);
+    expect(valid.actions).toEqual([{ kind: "chat", text: "Score updated", replyToMessageId: "twitch-message-1" }]);
+  });
+
+  it.each([
+    ["permission", { minimumTier: "moderator" as const }, "text_commands.permission_denied"],
+    ["cooldown", { cooldownSeconds: 60, lastUsedAt: NOW }, "text_commands.cooldown"],
+  ] as const)("rechecks %s after a stale command claim", async (_scenario, change, diagnostic) => {
+    const initial = command("hallo", "Original");
+    const commands = [initial];
+    const repository = repositoryFor(commands);
+    const updated = { ...initial, ...change, text: "Updated" };
+    const claim = vi.spyOn(repository, "claim").mockImplementationOnce(() => {
+      commands[0] = updated;
+      return Promise.resolve({ command: updated, claimed: false, stale: true });
+    });
+
+    const result = await processTextCommandMessage(eventFor("!hallo"), repository);
+
+    expect(result.actions).toEqual([]);
+    expect(result.diagnostics[0]?.code).toBe(diagnostic);
+    expect(claim).toHaveBeenCalledTimes(_scenario === "permission" ? 1 : 2);
+  });
+
 });
