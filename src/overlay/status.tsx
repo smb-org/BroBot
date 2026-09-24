@@ -74,22 +74,28 @@ export const OverlayStatusView = (): ReactElement | null => {
     let realtimeToken: string | null = null;
     let stopRealtime: (() => void) | null = null;
     let realtimeGeneration = 0;
+    let realtimeTerminalClose = false;
 
     const disconnectRealtime = (): void => {
       realtimeGeneration += 1;
       stopRealtime?.();
       stopRealtime = null;
       realtimeToken = null;
+      realtimeTerminalClose = false;
     };
 
     const connectRealtime = (token: string): void => {
-      if (realtimeToken === token) return;
+      if (realtimeToken === token && !realtimeTerminalClose) return;
       disconnectRealtime();
       realtimeToken = token;
       const generation = realtimeGeneration;
       void import("./realtime").then(({ connectOverlayRealtime }) => {
         if (disposed || generation !== realtimeGeneration) return;
-        const stop = connectOverlayRealtime(token);
+        const stop = connectOverlayRealtime(token, () => {
+          // Let the next successful status poll reopen a socket that reached a
+          // terminal close. The HTTP check remains authoritative for revocation.
+          if (realtimeToken === token) realtimeTerminalClose = true;
+        });
         stopRealtime = stop;
       }).catch(() => {
         // The HTTP status remains available if the optional realtime chunk fails to load.

@@ -74,6 +74,18 @@ describe("overlay realtime client", () => {
     stop();
   });
 
+  it("reconnects after the server marks a close as transient", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const stop = connectOverlayRealtime("z".repeat(43));
+
+    FakeWebSocket.instances[0]?.dispatch("close", { code: 4008, reason: "temporary" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    stop();
+  });
+
   it("does not reconnect after a token is revoked", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -83,6 +95,17 @@ describe("overlay realtime client", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(FakeWebSocket.instances).toHaveLength(1);
+    stop();
+  });
+
+  it("reports a terminal close so a later successful status poll can restart it", () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const terminalClose = vi.fn();
+    const stop = connectOverlayRealtime("z".repeat(43), terminalClose);
+
+    FakeWebSocket.instances[0]?.dispatch("close", { code: 4003, reason: "revoked" } as CloseEvent);
+
+    expect(terminalClose).toHaveBeenCalledTimes(1);
     stop();
   });
 });

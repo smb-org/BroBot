@@ -12,14 +12,28 @@ import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
+const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
+const OVERLAY_HANDSHAKE_WINDOW_MS = 60 * 1000;
+const MAX_OVERLAY_HANDSHAKES_PER_TOKEN = 30;
+const MAX_OVERLAY_SOCKETS_PER_TOKEN = 10;
+const MAX_CHANNEL_SOCKETS = 512;
+// Keep a quarter of the room available to panel connections even when overlay
+// tokens are being used at their limit.
+const MAX_OVERLAY_SOCKETS_PER_CHANNEL = 384;
+const D1_IN_PARAMETER_LIMIT = 100;
+const FIXED_D1_PARAMETER_COUNT = 2;
+const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 // On reset, the Durable Object class instance is discarded, so new keys are
 // safe. Without this reset, scheduleEarliestAlarm() would not find the old
 // deadlines, would silently delete the alarm, and both the security round
 // and the ad prewarning would stop firing.
 const SECURITY_DEADLINE_KEY = "security_round";
+const SECURITY_RETRY_KEY = "security_retry";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
+const SOCKET_TRANSIENT_CODE = 4008;
+const SOCKET_POLICY_VIOLATION_CODE = 1008;
 
 type SessionValidityRow = {
   session_id: string;
@@ -28,6 +42,8 @@ type SessionValidityRow = {
 };
 
 type TokenValidityRow = { token_id: string };
+
+type OverlayHandshakeWindow = { startedAt: number; count: number };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -77,6 +93,14 @@ const tagsFor = (principal: RealtimePrincipal): string[] => principal.kind === "
   ? [`kind:${principal.kind}`, `user:${principal.userId}`, `session:${principal.sessionId}`]
   : [`kind:${principal.kind}`, `token:${principal.tokenId}`];
 
+const chunksOf = <T>(values: readonly T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += size) {
+    chunks.push(values.slice(offset, offset + size));
+  }
+  return chunks;
+};
+
 const envelopeFor = (
   channelId: string,
   type: "system.hello",
@@ -109,10 +133,20 @@ export class ChannelObject extends DurableObject<Env> {
   private async scheduleEarliestAlarm(): Promise<void> {
     const deadlines = await Promise.all([
       this.ctx.storage.get(SECURITY_DEADLINE_KEY),
+      this.ctx.storage.get(SECURITY_RETRY_KEY),
       this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
     ]);
-    const validDeadlines = deadlines.filter((deadline): deadline is number =>
-      typeof deadline === "number" && Number.isFinite(deadline));
+    const retryDeadline = deadlines[1];
+    const securityDeadline = deadlines[0];
+    const validDeadlines = deadlines.filter((deadline, index): deadline is number => {
+      if (typeof deadline !== "number" || !Number.isFinite(deadline)) return false;
+      // A failed due round keeps its original deadline as evidence that the
+      // periodic round is still owed. The separate retry alarm avoids a tight
+      // loop on that past-due value.
+      return !(index === 0 && typeof retryDeadline === "number" &&
+        Number.isFinite(retryDeadline) && typeof securityDeadline === "number" &&
+        securityDeadline <= Date.now());
+    });
     if (validDeadlines.length === 0) {
       await this.ctx.storage.deleteAlarm();
       return;
@@ -123,8 +157,12 @@ export class ChannelObject extends DurableObject<Env> {
   private async scheduleSecurityAlarm(): Promise<void> {
     if (this.ctx.getWebSockets().length === 0) {
       await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
+      await this.ctx.storage.delete(SECURITY_RETRY_KEY);
     } else {
-      await this.ctx.storage.put(SECURITY_DEADLINE_KEY, Date.now() + SECURITY_ALARM_INTERVAL_MS);
+      const deadline = await this.ctx.storage.get(SECURITY_DEADLINE_KEY);
+      if (typeof deadline !== "number" || !Number.isFinite(deadline)) {
+        await this.ctx.storage.put(SECURITY_DEADLINE_KEY, Date.now() + SECURITY_ALARM_INTERVAL_MS);
+      }
     }
     await this.scheduleEarliestAlarm();
   }
@@ -132,8 +170,33 @@ export class ChannelObject extends DurableObject<Env> {
   private async stopSecurityAlarmIfIdle(): Promise<void> {
     if (this.ctx.getWebSockets().length === 0) {
       await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
+      await this.ctx.storage.delete(SECURITY_RETRY_KEY);
       await this.scheduleEarliestAlarm();
     }
+  }
+
+  private async allowOverlayHandshake(tokenId: string, now: number): Promise<boolean> {
+    const key = `overlay_handshakes:${tokenId}`;
+    return this.ctx.storage.transaction(async (transaction) => {
+      const previous = await transaction.get<OverlayHandshakeWindow>(key);
+      if (previous === undefined || !Number.isFinite(previous.startedAt) ||
+          !Number.isFinite(previous.count) || previous.count < 0 ||
+          now - previous.startedAt >= OVERLAY_HANDSHAKE_WINDOW_MS || now < previous.startedAt) {
+        await transaction.put(key, { startedAt: now, count: 1 } satisfies OverlayHandshakeWindow);
+        return true;
+      }
+      if (previous.count >= MAX_OVERLAY_HANDSHAKES_PER_TOKEN) return false;
+      await transaction.put(key, { ...previous, count: previous.count + 1 });
+      return true;
+    });
+  }
+
+  private hasConnectionCapacity(principal: RealtimePrincipal): boolean {
+    const sockets = this.ctx.getWebSockets();
+    if (sockets.length >= MAX_CHANNEL_SOCKETS) return false;
+    if (principal.kind === "panel") return true;
+    return this.ctx.getWebSockets("kind:overlay").length < MAX_OVERLAY_SOCKETS_PER_CHANNEL &&
+      this.ctx.getWebSockets(`token:${principal.tokenId}`).length < MAX_OVERLAY_SOCKETS_PER_TOKEN;
   }
 
   public async scheduleAdPrewarning(dueAtMs: number): Promise<void> {
@@ -150,7 +213,7 @@ export class ChannelObject extends DurableObject<Env> {
     await this.scheduleEarliestAlarm();
   }
 
-  override fetch(request: Request): Response {
+  override async fetch(request: Request): Promise<Response> {
     const rawPrincipal = request.headers.get(REALTIME_PRINCIPAL_HEADER);
     let principal: RealtimePrincipal | null = null;
     if (rawPrincipal !== null) {
@@ -173,10 +236,29 @@ export class ChannelObject extends DurableObject<Env> {
       return new Response("Realtime protocol is not supported.", { status: 426 });
     }
 
+    if (principal.kind === "overlay") {
+      let withinHandshakeLimit: boolean;
+      try {
+        withinHandshakeLimit = await this.allowOverlayHandshake(principal.tokenId, Date.now());
+      } catch (error: unknown) {
+        console.error("Realtime overlay handshake limit could not be checked.", error);
+        return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
+      }
+      if (!withinHandshakeLimit) {
+        return new Response(null, { status: 429, headers: { "Retry-After": "60" } });
+      }
+    }
+
+    // This check follows any awaited rate-limit operation, so the subsequent
+    // accept is synchronous and another handshake observes the new socket.
+    if (!this.hasConnectionCapacity(principal)) {
+      return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
+    }
+
     const pair = new WebSocketPair();
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
-    void this.scheduleSecurityAlarm();
+    await this.scheduleSecurityAlarm();
     pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
     return new Response(null, {
       status: 101,
@@ -210,7 +292,7 @@ export class ChannelObject extends DurableObject<Env> {
       try {
         webSocket.send(serialized);
       } catch {
-        closeSocket(webSocket, SOCKET_REVOKED_CODE, "connection unavailable");
+        closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
       }
     }
   }
@@ -233,6 +315,7 @@ export class ChannelObject extends DurableObject<Env> {
     for (const webSocket of this.ctx.getWebSockets(`token:${tokenId}`)) {
       closeSocket(webSocket, SOCKET_REVOKED_CODE, "Overlay token revoked");
     }
+    await this.ctx.storage.delete(`overlay_handshakes:${tokenId}`);
     await this.stopSecurityAlarmIfIdle();
   }
 
@@ -245,92 +328,113 @@ export class ChannelObject extends DurableObject<Env> {
       this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
     ]);
     const securityDue = typeof securityDeadline === "number" && Number.isFinite(securityDeadline) && securityDeadline <= now;
+    const retryDeadline = await this.ctx.storage.get(SECURITY_RETRY_KEY);
+    const securityRetryDue = typeof retryDeadline === "number" && Number.isFinite(retryDeadline) && retryDeadline <= now;
     const warningDue = typeof warningDeadline === "number" && Number.isFinite(warningDeadline) && warningDeadline <= now;
     const expired = new Set<WebSocket>();
+    const revoked = new Set<WebSocket>();
+    let transientFailure = false;
 
     if (warningDue) await this.ctx.storage.delete(AD_PREWARNING_DEADLINE_KEY);
 
     const principals = webSockets.map((webSocket) => ({ webSocket, principal: readAttachment(webSocket) }));
 
-    if (securityDue && webSockets.length > 0) {
+    if ((securityDue || securityRetryDue) && webSockets.length > 0) {
       for (const { webSocket, principal } of principals) {
-        if (principal === null || isExpired(principal, now)) expired.add(webSocket);
+        if (principal === null) revoked.add(webSocket);
+        else if (isExpired(principal, now)) expired.add(webSocket);
       }
     }
 
-    if (securityDue && webSockets.length > 0) try {
+    if ((securityDue || securityRetryDue) && webSockets.length > 0) try {
       const ownChannelId = this.ownChannelId();
       if (ownChannelId === null) {
-        for (const webSocket of webSockets) closeSocket(webSocket, SOCKET_REVOKED_CODE, "invalid channel");
+        for (const webSocket of webSockets) revoked.add(webSocket);
       } else {
         const panelPrincipals = principals.flatMap(({ webSocket, principal }) =>
-          principal?.kind === "panel" && !expired.has(webSocket) ? [{ webSocket, principal }] : []);
+          principal?.kind === "panel" && !expired.has(webSocket) && !revoked.has(webSocket) ? [{ webSocket, principal }] : []);
         const overlayPrincipals = principals.flatMap(({ webSocket, principal }) =>
-          principal?.kind === "overlay" && !expired.has(webSocket) ? [{ webSocket, principal }] : []);
+          principal?.kind === "overlay" && !expired.has(webSocket) && !revoked.has(webSocket) ? [{ webSocket, principal }] : []);
 
-        const validSessions = new Set<string>();
         const sessionIds = [...new Set(panelPrincipals.map(({ principal }) => principal.sessionId))];
-        if (sessionIds.length > 0) {
-          const placeholders = sessionIds.map(() => "?").join(", ");
-          const result = await this.env.DB.prepare(
-            `SELECT session.session_id, session.user_id, member.role
-               FROM auth_sessions AS session
-               JOIN twitch_login_identity AS identity ON identity.user_id = session.user_id
-               LEFT JOIN channel_members AS member
-                 ON member.channel_id = ? AND member.user_id = session.user_id
-              WHERE session.session_id IN (${placeholders})
-                AND session.revoked_at IS NULL
-                AND session.expires_at > ?
-                AND identity.status <> 'revoked'`,
-          ).bind(ownChannelId, ...sessionIds, nowIso).all<SessionValidityRow>();
-          for (const row of result.results) {
-            if (row.role !== null) validSessions.add(`${row.session_id}:${row.user_id}:${row.role}`);
+        for (const batch of chunksOf(sessionIds, D1_IDS_PER_QUERY)) {
+          const placeholders = batch.map(() => "?").join(", ");
+          try {
+            const result = await this.env.DB.prepare(
+              `SELECT session.session_id, session.user_id, member.role
+                 FROM auth_sessions AS session
+                 JOIN twitch_login_identity AS identity ON identity.user_id = session.user_id
+                 LEFT JOIN channel_members AS member
+                   ON member.channel_id = ? AND member.user_id = session.user_id
+                WHERE session.session_id IN (${placeholders})
+                  AND session.revoked_at IS NULL
+                  AND session.expires_at > ?
+                  AND identity.status <> 'revoked'`,
+            ).bind(ownChannelId, ...batch, nowIso).all<SessionValidityRow>();
+            const validSessions = new Set(result.results
+              .filter((row) => row.role !== null)
+              .map((row) => `${row.session_id}:${row.user_id}:${String(row.role)}`));
+            for (const { webSocket, principal } of panelPrincipals) {
+              if (batch.includes(principal.sessionId) &&
+                  !validSessions.has(`${principal.sessionId}:${principal.userId}:${principal.role}`)) {
+                revoked.add(webSocket);
+              }
+            }
+          } catch (error: unknown) {
+            transientFailure = true;
+            console.error("Realtime session authorization check failed.", error);
           }
         }
 
-        const validTokens = new Set<string>();
         const tokenIds = [...new Set(overlayPrincipals.map(({ principal }) => principal.tokenId))];
-        if (tokenIds.length > 0) {
-          const placeholders = tokenIds.map(() => "?").join(", ");
-          const result = await this.env.DB.prepare(
-            `SELECT token_id
-               FROM overlay_tokens
-              WHERE channel_id = ?
-                AND token_id IN (${placeholders})
-                AND revoked_at IS NULL
-                AND (expires_at IS NULL OR expires_at > ?)`,
-          ).bind(ownChannelId, ...tokenIds, nowIso).all<TokenValidityRow>();
-          for (const row of result.results) validTokens.add(row.token_id);
-        }
-
-        for (const { webSocket, principal } of panelPrincipals) {
-          if (!validSessions.has(`${principal.sessionId}:${principal.userId}:${principal.role}`)) {
-            expired.add(webSocket);
+        for (const batch of chunksOf(tokenIds, D1_IDS_PER_QUERY)) {
+          const placeholders = batch.map(() => "?").join(", ");
+          try {
+            const result = await this.env.DB.prepare(
+              `SELECT token_id
+                 FROM overlay_tokens
+                WHERE channel_id = ?
+                  AND token_id IN (${placeholders})
+                  AND revoked_at IS NULL
+                  AND (expires_at IS NULL OR expires_at > ?)`,
+            ).bind(ownChannelId, ...batch, nowIso).all<TokenValidityRow>();
+            const validTokens = new Set(result.results.map((row) => row.token_id));
+            for (const { webSocket, principal } of overlayPrincipals) {
+              if (batch.includes(principal.tokenId) && !validTokens.has(principal.tokenId)) revoked.add(webSocket);
+            }
+          } catch (error: unknown) {
+            transientFailure = true;
+            console.error("Realtime overlay token authorization check failed.", error);
           }
-        }
-        for (const { webSocket, principal } of overlayPrincipals) {
-          if (!validTokens.has(principal.tokenId)) expired.add(webSocket);
         }
       }
     } catch (error: unknown) {
-      // On a database error, connections are closed for safety; an alarm
-      // must not leave access open that can no longer be verified.
-      console.error("Realtime authorization check failed.", error);
-      for (const webSocket of webSockets) expired.add(webSocket);
+      // Keep connections open when authorization cannot be checked. D1 errors
+      // are transient; a separate retry alarm repeats the incomplete round.
+      transientFailure = true;
+      console.error("Realtime authorization round failed.", error);
     }
 
     for (const webSocket of expired) {
+      closeSocket(webSocket, SOCKET_EXPIRED_CODE, "Authorization expired");
+    }
+    for (const webSocket of revoked) {
       closeSocket(webSocket, SOCKET_REVOKED_CODE, "Authorization revoked");
     }
 
-    if (securityDue) {
+    if (securityDue || securityRetryDue) {
       if (this.ctx.getWebSockets().length === 0) {
         await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
+        await this.ctx.storage.delete(SECURITY_RETRY_KEY);
+      } else if (transientFailure) {
+        await this.ctx.storage.put(SECURITY_RETRY_KEY, now + SECURITY_RETRY_INTERVAL_MS);
       } else {
+        await this.ctx.storage.delete(SECURITY_RETRY_KEY);
         await this.ctx.storage.put(SECURITY_DEADLINE_KEY, now + SECURITY_ALARM_INTERVAL_MS);
       }
     } else if (this.ctx.getWebSockets().length === 0) {
       await this.ctx.storage.delete(SECURITY_DEADLINE_KEY);
+      await this.ctx.storage.delete(SECURITY_RETRY_KEY);
     }
 
     const ownChannel = this.ownChannelId();
@@ -359,9 +463,11 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   override webSocketMessage(webSocket: WebSocket, message: string | ArrayBuffer): void {
-    // The channel is one-way; incoming messages are ignored.
+    // This socket is one-way. Closing data senders prevents authenticated
+    // clients from waking the object with an unbounded stream of frames.
     void webSocket;
     void message;
+    closeSocket(webSocket, SOCKET_POLICY_VIOLATION_CODE, "Realtime channel is one-way");
   }
 
   override webSocketClose(webSocket: WebSocket, code: number, reason: string, wasClean: boolean): void {

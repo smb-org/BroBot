@@ -1,14 +1,34 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
+
+vi.mock("../../src/overlay/realtime", () => realtimeMocks);
+
 import { OverlayStatusView } from "../../src/overlay/status";
 
 class QuietWebSocket {
+  public static instances: QuietWebSocket[] = [];
   public protocol = "brobot.v1";
+  public readonly listeners = new Map<string, Set<EventListener>>();
 
-  public addEventListener(): void {}
+  public constructor() {
+    QuietWebSocket.instances.push(this);
+  }
 
-  public close(): void {}
+  public addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+    listeners.add(typeof listener === "function" ? listener : (event) => listener.handleEvent(event));
+    this.listeners.set(type, listeners);
+  }
+
+  public close(code = 1000): void {
+    this.dispatch("close", { code, reason: "closed" } as CloseEvent);
+  }
+
+  public dispatch(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
 }
 
 const versionResponse = (version: string): Response => new Response(
@@ -25,6 +45,7 @@ const setFragment = (token: string): void => {
 describe("Overlay status view", () => {
   beforeEach(() => {
     setFragment("erstes-token");
+    QuietWebSocket.instances = [];
     vi.stubGlobal("WebSocket", QuietWebSocket);
   });
 
@@ -32,6 +53,7 @@ describe("Overlay status view", () => {
     cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    realtimeMocks.connectOverlayRealtime.mockReset();
     setFragment("");
   });
 
@@ -116,6 +138,26 @@ describe("Overlay status view", () => {
 
     expect(container).toBeEmptyDOMElement();
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("restarts a terminally closed socket after a successful status poll", async () => {
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(versionResponse("laufend")));
+    vi.stubGlobal("fetch", fetcher);
+    realtimeMocks.connectOverlayRealtime.mockReturnValue(vi.fn());
+
+    render(<OverlayStatusView />);
+    await waitFor(() => expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1));
+
+    const onTerminalClose = realtimeMocks.connectOverlayRealtime.mock.calls[0]?.[1] as (() => void) | undefined;
+    expect(onTerminalClose).toBeTypeOf("function");
+    act(() => onTerminalClose?.());
+    await act(async () => {
+      await Promise.resolve();
+      window.dispatchEvent(new Event("hashchange"));
+    });
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(2));
   });
 
   it("moderately increases the interval after repeated failures", async () => {

@@ -75,6 +75,7 @@ const storageOf = (object: ChannelObject): StorageDouble =>
 
 const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObject => {
   const values = new Map<string, unknown>();
+  let transactionQueue = Promise.resolve();
   const storage: StorageDouble = {
     values,
     setAlarm: vi.fn(),
@@ -89,6 +90,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
     getWebSockets: (tag?: string) => tag === undefined
       ? sockets
       : sockets.filter((socket) => socket.tags.includes(tag)),
+    acceptWebSocket: vi.fn((socket: WebSocket) => { sockets.push(socket as SocketDouble); }),
     storage: {
       ...storage,
       get: vi.fn((key: string) => Promise.resolve(values.get(key))),
@@ -99,6 +101,28 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
       delete: vi.fn((key: string) => {
         values.delete(key);
         return Promise.resolve(true);
+      }),
+      transaction: vi.fn(async <T>(closure: (transaction: {
+        get: <Value>(key: string) => Promise<Value | undefined>;
+        put: (key: string, value: unknown) => Promise<void>;
+        delete: (key: string) => Promise<boolean>;
+      }) => Promise<T>) => {
+        const predecessor = transactionQueue;
+        let release!: () => void;
+        transactionQueue = new Promise<void>((resolve) => { release = resolve; });
+        await predecessor;
+        try {
+          return await closure({
+            get: <Value>(key: string) => Promise.resolve(values.get(key) as Value | undefined),
+            put: (key: string, value: unknown) => {
+              values.set(key, value);
+              return Promise.resolve();
+            },
+            delete: (key: string) => Promise.resolve(values.delete(key)),
+          });
+        } finally {
+          release();
+        }
       }),
     },
   } as unknown as DurableObjectState;
@@ -126,25 +150,26 @@ describe("ChannelObject realtime path", () => {
   it("rejects a connection without a principal with 403", () => {
     const object = objectFor([]);
 
-    expect(object.fetch(upgradeRequest()).status).toBe(403);
+    return expect(object.fetch(upgradeRequest())).resolves.toHaveProperty("status", 403);
   });
 
-  it("rejects a principal for a foreign channel with 403", () => {
+  it("rejects a principal for a foreign channel with 403", async () => {
     const object = objectFor([]);
 
-    expect(object.fetch(upgradeRequest(validPrincipal({ channelId: "kanal-b" }))).status).toBe(403);
+    await expect(object.fetch(upgradeRequest(validPrincipal({ channelId: "kanal-b" })))
+      .then((response) => response.status)).resolves.toBe(403);
   });
 
-  it("rejects an overlay principal for a foreign channel with 403", () => {
+  it("rejects an overlay principal for a foreign channel with 403", async () => {
     const object = objectFor([]);
 
-    expect(object.fetch(upgradeRequest({
+    await expect(object.fetch(upgradeRequest({
       v: 1,
       kind: "overlay",
       channelId: "kanal-b",
       tokenId: "token-1",
       expiresAt: null,
-    })).status).toBe(403);
+    })).then((response) => response.status)).resolves.toBe(403);
   });
 
   it("rejects a publish for a foreign channel", () => {
@@ -223,6 +248,179 @@ describe("ChannelObject realtime path", () => {
 
     expect(affected.close.mock.calls).toEqual([[4003, "Overlay token revoked"]]);
     expect(other.close.mock.calls).toHaveLength(0);
+  });
+
+  it("preserves the earlier security deadline when a connection joins", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([socketFor(validPrincipal())]);
+    const storage = storageOf(object);
+    storage.values.set("security_round", now + 2_000);
+
+    await (object as unknown as { scheduleSecurityAlarm: () => Promise<void> }).scheduleSecurityAlarm();
+
+    expect(storage.values.get("security_round")).toBe(now + 2_000);
+    expect(storage.setAlarm).toHaveBeenLastCalledWith(now + 2_000);
+  });
+
+  it("keeps sockets open and retries after a transient authorization query error", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const socket = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-1",
+      expiresAt: null,
+    });
+    const panel = socketFor(validPrincipal());
+    const sockets = [socket, panel];
+    let sessionChecks = 0;
+    const database = {
+      prepare: vi.fn((query: string) => ({
+        bind: vi.fn(() => ({
+          all: vi.fn(() => {
+            if (!query.includes("auth_sessions")) return Promise.resolve({ results: [] });
+            sessionChecks += 1;
+            return sessionChecks === 1
+              ? Promise.reject(new Error("D1 temporarily unavailable"))
+              : Promise.resolve({ results: [{ session_id: "session-1", user_id: "user-1", role: "operator" }] });
+          }),
+        })),
+      })),
+    } as unknown as D1Database;
+    const object = objectFor(sockets, database);
+    const storage = storageOf(object);
+    storage.values.set("security_round", now - 1);
+    socket.close.mockImplementation(() => { sockets.splice(sockets.indexOf(socket), 1); });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await object.alarm();
+      expect(panel.close.mock.calls).toHaveLength(0);
+      expect(socket.close.mock.calls).toEqual([[4003, "Authorization revoked"]]);
+      expect(storage.values.get("security_round")).toBe(now - 1);
+      expect(storage.values.get("security_retry")).toBe(now + 60_000);
+      expect(errorLog).toHaveBeenCalled();
+
+      vi.setSystemTime(now + 60_000);
+      await object.alarm();
+      expect(panel.close.mock.calls).toHaveLength(0);
+      expect(storage.values.get("security_round")).toBe(now + 16 * 60_000);
+      expect(storage.values.has("security_retry")).toBe(false);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("chunks session and token checks below D1's 100-parameter limit", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const panels = Array.from({ length: 101 }, (_, index) => socketFor(validPrincipal({
+      userId: `user-${String(index)}`,
+      sessionId: `session-${String(index)}`,
+    })));
+    const overlays = Array.from({ length: 101 }, (_, index) => overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: `token-${String(index)}`,
+      expiresAt: null,
+    }));
+    const binds: unknown[][] = [];
+    const database = {
+      prepare: vi.fn((query: string) => {
+        const statement = {
+          bind: vi.fn((...values: unknown[]) => {
+            binds.push(values);
+            return {
+              all: () => Promise.resolve({
+                results: query.includes("auth_sessions")
+                  ? values.slice(1, -1).map((sessionId) => ({
+                    session_id: sessionId,
+                    user_id: `user-${String(sessionId).slice("session-".length)}`,
+                    role: "operator",
+                  }))
+                  : values.slice(1, -1).map((tokenId) => ({ token_id: tokenId })),
+              }),
+            };
+          }),
+        };
+        return statement;
+      }),
+    } as unknown as D1Database;
+    const object = objectFor([...panels, ...overlays], database);
+    storageOf(object).values.set("security_round", now - 1);
+
+    await object.alarm();
+
+    expect(binds).toHaveLength(4);
+    expect(Math.max(...binds.map((values) => values.length))).toBeLessThanOrEqual(100);
+    expect([...panels, ...overlays].every((socket) => socket.close.mock.calls.length === 0)).toBe(true);
+  });
+
+  it("enforces socket capacity before accepting and reserves room for panels", async () => {
+    const token = { v: 1 as const, kind: "overlay" as const, channelId: "kanal-a", tokenId: "token-1", expiresAt: null };
+    const sameTokenSockets = Array.from({ length: 10 }, () => overlaySocketFor(token));
+    const object = objectFor(sameTokenSockets);
+    const response = await object.fetch(upgradeRequest(token));
+    const state = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx;
+
+    expect(response.status).toBe(503);
+    expect(state.acceptWebSocket).not.toHaveBeenCalled();
+
+    const overlays = Array.from({ length: 384 }, (_, index) => overlaySocketFor({ ...token, tokenId: `token-${String(index)}` }));
+    const panelSockets = Array.from({ length: 127 }, (_, index) => socketFor(validPrincipal({
+      userId: `panel-${String(index)}`,
+      sessionId: `panel-session-${String(index)}`,
+    })));
+    const nearlyFull = objectFor([...overlays, ...panelSockets]);
+    const hasCapacity = (target: ChannelObject, principal: RealtimePrincipal): boolean =>
+      (target as unknown as { hasConnectionCapacity: (value: RealtimePrincipal) => boolean })
+        .hasConnectionCapacity(principal);
+
+    expect(hasCapacity(nearlyFull, validPrincipal())).toBe(true);
+    expect(hasCapacity(nearlyFull, { ...token, tokenId: "new-token" })).toBe(false);
+
+    const full = objectFor(Array.from({ length: 512 }, (_, index) => socketFor(validPrincipal({
+      userId: `panel-${String(index)}`,
+      sessionId: `full-session-${String(index)}`,
+    }))));
+    expect(hasCapacity(full, validPrincipal({ userId: "late-panel", sessionId: "late-session" }))).toBe(false);
+  });
+
+  it("rate-limits repeated overlay handshakes per token", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-21T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([]);
+    const allow = (object as unknown as {
+      allowOverlayHandshake: (tokenId: string, at: number) => Promise<boolean>;
+    }).allowOverlayHandshake;
+
+    const attempts = await Promise.all(Array.from({ length: 30 }, () => allow.call(object, "token-1", now)));
+    expect(attempts.every(Boolean)).toBe(true);
+    await expect(allow.call(object, "token-1", now)).resolves.toBe(false);
+    await expect(allow.call(object, "token-2", now)).resolves.toBe(true);
+    await expect(allow.call(object, "token-1", now + 60_000)).resolves.toBe(true);
+  });
+
+  it("closes sockets that send application data", () => {
+    const socket = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-1",
+      expiresAt: null,
+    });
+    const object = objectFor([socket]);
+
+    object.webSocketMessage(socket, JSON.stringify({ type: "client.message" }));
+
+    expect(socket.close.mock.calls).toEqual([[1008, "Realtime channel is one-way"]]);
   });
 
   it("revokes only the connection of the affected user", async () => {

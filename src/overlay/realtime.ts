@@ -5,6 +5,7 @@ import {
 
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
+const SOCKET_POLICY_VIOLATION_CODE = 1008;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
@@ -23,7 +24,10 @@ const reconnectDelay = (attempt: number): number => Math.min(
 );
 
 /** Opens the token-authenticated, one-way overlay socket and retries transient failures. */
-export const connectOverlayRealtime = (token: string): (() => void) => {
+export const connectOverlayRealtime = (
+  token: string,
+  onTerminalClose?: () => void,
+): (() => void) => {
   let disposed = false;
   let fatalProtocolError = false;
   let socket: WebSocket | null = null;
@@ -108,7 +112,12 @@ export const connectOverlayRealtime = (token: string): (() => void) => {
     activeSocket.addEventListener("close", (event: CloseEvent) => {
       if (socket === activeSocket) socket = null;
       if (disposed || fatalProtocolError) return;
-      if (event.code === SOCKET_EXPIRED_CODE || event.code === SOCKET_REVOKED_CODE) return;
+      if (event.code === SOCKET_EXPIRED_CODE || event.code === SOCKET_REVOKED_CODE ||
+          event.code === SOCKET_POLICY_VIOLATION_CODE) {
+        if (event.code === SOCKET_POLICY_VIOLATION_CODE) fatalProtocolError = true;
+        onTerminalClose?.();
+        return;
+      }
       scheduleReconnect();
     });
   }
