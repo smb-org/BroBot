@@ -62,6 +62,16 @@ describe("overlay-token audit labels", () => {
   });
 });
 
+describe("stored overlay audit labels", () => {
+  it("localizes overlay actions and names the affected overlay", () => {
+    const entry = baseEntry({ action: "overlay.updated", after: JSON.stringify({ name: "Gameplay" }) });
+    expect(auditRowLabel(entry, "de")).toBe("Overlay geändert: Gameplay");
+    expect(auditRowLabel(entry, "en")).toBe("Overlay updated: Gameplay");
+    expect(auditFieldLabel("elementCount", "de")).toBe("Elemente");
+    expect(auditFieldLabel("elementCount", "en")).toBe("Elements");
+  });
+});
+
 describe("auditDiffRows", () => {
   it("hides unchanged fields and structural addressing keys", () => {
     const before = JSON.stringify({ channelId: "kanal-a", moduleId: "ads", userId: "user-9", createdAt: "t", updatedAt: "t", enabled: true });

@@ -1,0 +1,59 @@
+import { DatabaseSync } from "node:sqlite";
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
+const readMigration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
+
+describe("stored overlays migration", () => {
+  it("adds overlay tables to a seeded database with tenant and variable foreign keys", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec("PRAGMA foreign_keys = ON");
+      for (const file of readdirSync(migrationsDirectory).filter((name) => name < "0012_overlays.sql").sort()) {
+        database.exec(readMigration(file));
+      }
+      database.exec(`
+        INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+        VALUES ('channel-a', 'channel-a', 'Channel A', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z');
+        INSERT INTO channel_variables (channel_id, name, created_at, updated_at)
+        VALUES ('channel-a', 'score', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z');
+      `);
+
+      database.exec(readMigration("0012_overlays.sql"));
+      database.exec(`
+        INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+        VALUES ('overlay-a', 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z');
+        INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name, text)
+        VALUES ('element-a', 'channel-a', 'overlay-a', 'variable', 'score', 'Score {value}');
+      `);
+
+      expect(database.prepare(
+        "SELECT width, height, css, revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = 'overlay-a'",
+      ).get()).toEqual({ width: 1920, height: 1080, css: "", revision: 1 });
+      expect(database.prepare(
+        "SELECT variable_name, text, scale_percent, in_composition FROM overlay_elements WHERE channel_id = 'channel-a' AND element_id = 'element-a'",
+      ).get()).toEqual({ variable_name: "score", text: "Score {value}", scale_percent: 100, in_composition: 1 });
+
+      database.prepare("UPDATE channel_variables SET name = 'points' WHERE channel_id = 'channel-a' AND name = 'score'").run();
+      expect(database.prepare("SELECT variable_name FROM overlay_elements WHERE element_id = 'element-a'").get())
+        .toEqual({ variable_name: "points" });
+
+      expect(() => database.prepare(
+        "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, scale_percent) VALUES ('bad-element', 'channel-a', 'overlay-a', 'variable', 401)",
+      ).run()).toThrow();
+      expect(() => database.prepare(
+        "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, config_json) VALUES ('bad-json', 'channel-a', 'overlay-a', 'variable', 'not-json')",
+      ).run()).toThrow();
+
+      database.prepare("DELETE FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = 'overlay-a'").run();
+      expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a'").get())
+        .toEqual({ count: 0 });
+      expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+});

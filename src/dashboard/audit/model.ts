@@ -183,7 +183,8 @@ export const auditSubjectText = (entry: PanelAuditEntry, language: DashboardLang
     const login = record !== null && typeof record.login === "string" && record.login.length > 0 ? record.login : null;
     return login === null ? null : `@${login}`;
   }
-  return null;
+  const name = record !== null && typeof record.name === "string" && record.name.length > 0 ? record.name : null;
+  return name;
 };
 
 /** The action's label with its subject appended, e.g. "Modul aktiviert: Werbung". */

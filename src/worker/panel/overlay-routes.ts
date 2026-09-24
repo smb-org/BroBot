@@ -1,0 +1,173 @@
+import { Hono } from "hono";
+import { z } from "zod";
+
+import {
+  OVERLAY_ELEMENT_KINDS,
+  OVERLAY_ELEMENT_MAXIMUM_COUNT,
+  OVERLAY_MAXIMUM_COUNT,
+  canManage,
+} from "../../contracts/values";
+import {
+  countOverlaysForChannel,
+  createOverlayWithAudit,
+  deleteOverlayWithAudit,
+  getOverlayForChannel,
+  isOverlayManagementAllowed,
+  listOverlaysForChannel,
+} from "../db/overlays";
+import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
+import { actorOf } from "./member-routes";
+import { saveOverlayDraft } from "../overlays/service";
+
+interface OverlayRouteEnvironment {
+  Bindings: Env;
+  Variables: ChannelAuthorizationVariables;
+}
+
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
+const VARIABLE_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
+const nowIso = (): string => new Date().toISOString();
+
+const nameSchema = z.string().trim().min(1).max(40);
+const createOverlaySchema = z.object({
+  name: nameSchema,
+  width: z.number().int().min(64).max(3840).default(1920),
+  height: z.number().int().min(64).max(2160).default(1080),
+}).strict();
+
+const elementSchema = z.object({
+  id: z.string().regex(ID_PATTERN),
+  kind: z.enum(OVERLAY_ELEMENT_KINDS),
+  label: z.string().max(40).default(""),
+  variableName: z.string().regex(VARIABLE_PATTERN).nullable().default(null),
+  text: z.string().max(100).refine((value) => value.match(/\{value\}/gu)?.length === 1).default("{value}"),
+  config: z.object({}).catchall(z.unknown()).default({}),
+  x: z.number().int().default(0),
+  y: z.number().int().default(0),
+  scalePercent: z.number().int().min(25).max(400).default(100),
+  z: z.number().int().default(0),
+  inComposition: z.boolean().default(true),
+}).strict();
+
+const updateOverlaySchema = z.object({
+  baseRevision: z.number().int().min(1),
+  name: nameSchema,
+  width: z.number().int().min(64).max(3840),
+  height: z.number().int().min(64).max(2160),
+  css: z.string().max(16_000),
+  elements: z.array(elementSchema).max(OVERLAY_ELEMENT_MAXIMUM_COUNT),
+}).strict().superRefine((draft, context) => {
+  const identifiers = new Set<string>();
+  draft.elements.forEach((element, index) => {
+    if (identifiers.has(element.id)) {
+      context.addIssue({ code: "custom", path: ["elements", index, "id"], message: "duplicate element id" });
+    }
+    identifiers.add(element.id);
+    if (element.x < 0 || element.x > draft.width) {
+      context.addIssue({ code: "custom", path: ["elements", index, "x"], message: "x is outside the overlay" });
+    }
+    if (element.y < 0 || element.y > draft.height) {
+      context.addIssue({ code: "custom", path: ["elements", index, "y"], message: "y is outside the overlay" });
+    }
+  });
+});
+
+const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
+  context.json({ error: "overlay_management_denied" }, 403);
+
+export const overlayRouter = new Hono<OverlayRouteEnvironment>();
+overlayRouter.use("/api/channels/:channelId/overlays", requireChannelAuthorization());
+overlayRouter.use("/api/channels/:channelId/overlays/*", requireChannelAuthorization());
+
+overlayRouter.get("/api/channels/:channelId/overlays", async (context) => {
+  const channelId = context.req.param("channelId");
+  return context.json({
+    overlays: await listOverlaysForChannel(context.env.DB, channelId),
+    maximum: OVERLAY_MAXIMUM_COUNT,
+    elementMaximum: OVERLAY_ELEMENT_MAXIMUM_COUNT,
+  });
+});
+
+overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
+  if (!canManage(context.get("channelRole"))) return managementDenied(context);
+  const parsed = createOverlaySchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: "overlay_data_invalid" }, 400);
+
+  const channelId = context.req.param("channelId");
+  const now = nowIso();
+  const id = crypto.randomUUID();
+  const created = await createOverlayWithAudit(context.env.DB, actorOf(context), {
+    id,
+    channelId,
+    name: parsed.data.name,
+    width: parsed.data.width,
+    height: parsed.data.height,
+  }, now);
+  if (created.changes > 0) {
+    const overlay = await getOverlayForChannel(context.env.DB, channelId, id);
+    if (overlay === null) throw new Error("Created overlay could not be read back.");
+    return context.json({ overlay }, 201);
+  }
+  if (!await isOverlayManagementAllowed(context.env.DB, actorOf(context), channelId, now)) {
+    return managementDenied(context);
+  }
+  if (await countOverlaysForChannel(context.env.DB, channelId) >= OVERLAY_MAXIMUM_COUNT) {
+    return context.json({ error: "overlay_limit_reached" }, 409);
+  }
+  return context.json({ error: "overlay_changed_concurrently" }, 409);
+});
+
+overlayRouter.get("/api/channels/:channelId/overlays/:overlayId", async (context) => {
+  const overlay = await getOverlayForChannel(context.env.DB,
+    context.req.param("channelId"), context.req.param("overlayId"));
+  return overlay === null
+    ? context.json({ error: "overlay_not_found" }, 404)
+    : context.json({ overlay });
+});
+
+overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context) => {
+  if (!canManage(context.get("channelRole"))) return managementDenied(context);
+  const body: unknown = await context.req.json().catch(() => null);
+  const submittedElements: unknown = body !== null && typeof body === "object" && !Array.isArray(body)
+    ? Reflect.get(body, "elements")
+    : null;
+  if (Array.isArray(submittedElements) && submittedElements.length > OVERLAY_ELEMENT_MAXIMUM_COUNT) {
+    return context.json({ error: "overlay_element_limit_reached" }, 409);
+  }
+  const parsed = updateOverlaySchema.safeParse(body);
+  if (!parsed.success) {
+    return context.json({ error: "overlay_data_invalid" }, 400);
+  }
+
+  const channelId = context.req.param("channelId");
+  const overlayId = context.req.param("overlayId");
+  const { baseRevision, ...draft } = parsed.data;
+  const result = await saveOverlayDraft(context.env.DB, actorOf(context), channelId, overlayId,
+    baseRevision, draft, nowIso());
+  if (result.outcome === "not_found") return context.json({ error: "overlay_not_found" }, 404);
+  if (result.outcome === "forbidden") return managementDenied(context);
+  if (result.outcome === "element_limit") return context.json({ error: "overlay_element_limit_reached" }, 409);
+  if (result.outcome === "invalid_reference") return context.json({ error: "overlay_data_invalid" }, 400);
+  if (result.outcome === "conflict") {
+    return context.json({
+      error: "overlay_changed_concurrently",
+      currentRevision: result.current?.revision ?? null,
+    }, 409);
+  }
+  return context.json({ overlay: result.overlay });
+});
+
+overlayRouter.delete("/api/channels/:channelId/overlays/:overlayId", async (context) => {
+  if (!canManage(context.get("channelRole"))) return managementDenied(context);
+  const channelId = context.req.param("channelId");
+  const overlayId = context.req.param("overlayId");
+  const before = await getOverlayForChannel(context.env.DB, channelId, overlayId);
+  if (before === null) return context.json({ error: "overlay_not_found" }, 404);
+  const now = nowIso();
+  const deleted = await deleteOverlayWithAudit(context.env.DB, actorOf(context), before, now);
+  if (deleted.changes > 0) return new Response(null, { status: 204 });
+  if (!await isOverlayManagementAllowed(context.env.DB, actorOf(context), channelId, now)) {
+    return managementDenied(context);
+  }
+  return context.json({ error: "overlay_not_found" }, 404);
+});

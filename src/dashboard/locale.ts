@@ -1864,6 +1864,9 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.pause.disabled": "Automatische Aktionen fortgesetzt",
     "overlay.token.issued": "Overlay-Token ausgestellt",
     "overlay.token.revoked": "Overlay-Token widerrufen",
+    "overlay.created": "Overlay erstellt",
+    "overlay.updated": "Overlay geändert",
+    "overlay.deleted": "Overlay gelöscht",
   },
   en: {
     "channel.released": "Channel released",
@@ -1888,6 +1891,9 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "channel.pause.disabled": "Automatic actions resumed",
     "overlay.token.issued": "Overlay token issued",
     "overlay.token.revoked": "Overlay token revoked",
+    "overlay.created": "Overlay created",
+    "overlay.updated": "Overlay updated",
+    "overlay.deleted": "Overlay deleted",
   },
 };
 
@@ -1927,13 +1933,15 @@ const auditFieldLabels: LocaleCatalog<Record<string, string>> = {
     role: "Rolle", enabled: "Aktiv", fullConsent: "Vollzustimmung", revocationReason: "Widerrufsgrund",
     expiresAt: "Gültig bis", createdAt: "Erstellt am", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
     clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename",
-    name: "Name", value: "Wert", description: "Beschreibung",
+    name: "Name", value: "Wert", description: "Beschreibung", overlayId: "Overlay-ID",
+    width: "Breite", height: "Höhe", revision: "Revision", elementCount: "Elemente",
   },
   en: {
     role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
     expiresAt: "Valid until", createdAt: "Created at", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
     clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name",
-    name: "Name", value: "Value", description: "Description",
+    name: "Name", value: "Value", description: "Description", overlayId: "Overlay ID",
+    width: "Width", height: "Height", revision: "Revision", elementCount: "Elements",
   },
 };
 
@@ -2032,6 +2040,12 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     overlay_token_not_found: "Overlay-Token nicht gefunden.",
     overlay_token_invalid: "Overlay-Zugang ungültig.",
     overlay_variable_not_found: "Die Kanalvariable wurde nicht gefunden.",
+    overlay_management_denied: "Nur Broadcaster und Verwalter dürfen Overlays ändern.",
+    overlay_data_invalid: "Overlay-Daten sind ungültig.",
+    overlay_not_found: "Overlay nicht gefunden.",
+    overlay_limit_reached: "Ein Kanal kann höchstens 20 Overlays haben.",
+    overlay_element_limit_reached: "Ein Overlay kann höchstens 20 Elemente haben.",
+    overlay_changed_concurrently: "Overlay wurde inzwischen geändert.",
     unknown_api_route: "Unbekannte API-Route.",
   },
   en: {
@@ -2117,6 +2131,12 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     overlay_token_not_found: "Overlay token not found.",
     overlay_token_invalid: "Overlay access invalid.",
     overlay_variable_not_found: "The channel variable was not found.",
+    overlay_management_denied: "Only broadcasters and managers may change overlays.",
+    overlay_data_invalid: "Overlay data is invalid.",
+    overlay_not_found: "Overlay not found.",
+    overlay_limit_reached: "A channel can have at most 20 overlays.",
+    overlay_element_limit_reached: "An overlay can have at most 20 elements.",
+    overlay_changed_concurrently: "The overlay has changed since it was loaded.",
     unknown_api_route: "Unknown API route.",
   },
 };
