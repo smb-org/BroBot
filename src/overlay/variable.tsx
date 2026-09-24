@@ -19,8 +19,9 @@ interface OverlayVariableProperties {
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 const RELOAD_DEBOUNCE_MS = 250;
 const RELOAD_MAX_WAIT_MS = 1_500;
-const MAX_LOAD_RETRIES = 3;
-const INITIAL_LOAD_RETRY_DELAY_MS = 1_000;
+const LOAD_RETRY_BASE_DELAY_MS = 1_000;
+const MAX_LOAD_RETRY_DELAY_MS = 60_000;
+const MAX_LOAD_RETRY_ATTEMPT = 6;
 
 const variableStyle: CSSProperties = {
   backgroundColor: "transparent",
@@ -81,6 +82,8 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
     let disposed = false;
     let requestNumber = 0;
     let activeController: AbortController | null = null;
+    let loadInFlight = false;
+    let reloadPending = false;
     let reloadTimer: number | null = null;
     let maximumReloadTimer: number | null = null;
     let retryTimer: number | null = null;
@@ -93,10 +96,15 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
     };
 
     const load = async (): Promise<void> => {
+      if (loadInFlight) {
+        reloadPending = true;
+        return;
+      }
+
       const currentRequest = ++requestNumber;
-      activeController?.abort();
       const controller = new AbortController();
       activeController = controller;
+      loadInFlight = true;
       try {
         const next = await requestOverlayVariable(token, name, controller.signal);
         if (disposed || currentRequest !== requestNumber) return;
@@ -104,13 +112,21 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
         retryAttempt = 0;
         stopRetryTimer();
       } catch {
-        if (disposed || currentRequest !== requestNumber || retryTimer !== null || retryAttempt >= MAX_LOAD_RETRIES) return;
-        const delay = INITIAL_LOAD_RETRY_DELAY_MS * (2 ** retryAttempt);
-        retryAttempt++;
+        if (disposed || currentRequest !== requestNumber || controller.signal.aborted || retryTimer !== null) return;
+        const delay = Math.min(LOAD_RETRY_BASE_DELAY_MS * (2 ** retryAttempt), MAX_LOAD_RETRY_DELAY_MS);
+        retryAttempt = Math.min(retryAttempt + 1, MAX_LOAD_RETRY_ATTEMPT);
         retryTimer = window.setTimeout(() => {
           retryTimer = null;
           void load();
         }, delay);
+      } finally {
+        if (activeController === controller) activeController = null;
+        loadInFlight = false;
+        if (reloadPending) {
+          reloadPending = false;
+          stopRetryTimer();
+          void load();
+        }
       }
     };
 
@@ -142,6 +158,7 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
       requestNumber++;
       activeController?.abort();
       activeController = null;
+      reloadPending = false;
     };
 
     const stopRealtime = connectOverlayRealtime(token, () => {
@@ -158,7 +175,6 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
       },
       onMessage: (message) => {
         if (!hasVariableHint(message, name)) return;
-        invalidatePendingLoad();
         stopRetryTimer();
         retryAttempt = 0;
         scheduleReload();
@@ -169,6 +185,7 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
     return () => {
       disposed = true;
       requestNumber++;
+      reloadPending = false;
       activeController?.abort();
       stopReloadTimer();
       stopMaximumReloadTimer();
