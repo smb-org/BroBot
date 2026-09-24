@@ -415,6 +415,54 @@ describe("Panel read endpoints", () => {
     });
   });
 
+  it("shows an offline control as pending and hides a control bound to an older stream", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T10:00:00.000Z"));
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertStreamEventSubCoverage(database, "kanal-a");
+    await database.prepare(
+      `INSERT INTO channel_stream_state
+        (channel_id, state, changed_at, source, checked_at, eventsub_changed_at)
+       VALUES ('kanal-a', 'offline', '2026-09-23T10:00:00.000Z', 'eventsub', '2026-09-23T10:00:00.000Z', '2026-09-23T10:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO channel_controls (channel_id, muted, mute_until_stream_end, updated_at)
+       VALUES ('kanal-a', 1, 1, '2026-09-23T09:00:00.000Z')`,
+    ).run();
+
+    const pendingResponse = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+    await expect(pendingResponse.json()).resolves.toMatchObject({
+      streamState: "offline",
+      controls: { mute: { active: false, pending: true, mode: "until_stream_end" } },
+    });
+
+    await database.prepare(
+      `UPDATE channel_stream_state
+          SET state = 'online', started_at = '2026-09-23T09:59:00.000Z',
+              changed_at = '2026-09-23T10:00:00.000Z', checked_at = '2026-09-23T10:00:00.000Z',
+              eventsub_changed_at = '2026-09-23T10:00:00.000Z'
+        WHERE channel_id = 'kanal-a'`,
+    ).run();
+    await database.prepare(
+      `UPDATE channel_controls SET mute_stream_started_at = '2026-09-23T09:00:00.000Z'
+        WHERE channel_id = 'kanal-a'`,
+    ).run();
+    const restartedResponse = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+      environment,
+    );
+    await expect(restartedResponse.json()).resolves.toMatchObject({
+      streamState: "online",
+      streamStartedAt: "2026-09-23T09:59:00.000Z",
+      controls: { mute: { active: false, mode: null } },
+    });
+  });
+
   it("returns the stored scope state and all EventSub subscriptions in the system contract", async () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertLoginIdentityAndSession(database, "user-1");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { readChannelControls, setChannelControl } from "../../src/worker/db/channel-controls";
+import { readChannelControls, readDispatchChannelState, setChannelControl } from "../../src/worker/db/channel-controls";
+import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -27,7 +28,7 @@ describe("channel controls", () => {
       expect(mute.outcome).toBe("changed");
       expect(pause.outcome).toBe("changed");
       await expect(readChannelControls(db, "kanal-a", NOW)).resolves.toEqual({
-        mute: { active: true, until: null, mode: "until_stream_end" },
+        mute: { active: false, pending: true, until: null, mode: "until_stream_end" },
         pause: { active: true, until: "2026-09-23T10:00:00.000Z", mode: "timed" },
       });
       const auditRows = await database.prepare(
@@ -75,6 +76,81 @@ describe("channel controls", () => {
         { actor_user_id: actor.userId, action: "channel.mute.enabled", actor_kind: "member" },
         { actor_user_id: actor.userId, action: "channel.pause.enabled", actor_kind: "member" },
       ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("stores a live stream session and derives activity from the current session", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      const db = database as unknown as D1Database;
+      const startedAt = "2026-09-23T08:00:00.000Z";
+      await writeEventSubStreamState(db, "kanal-a", "online", NOW, startedAt);
+      await setChannelControl(db, actor, "kanal-a", "mute", "until_stream_end", NOW);
+
+      await expect(database.prepare(
+        "SELECT mute_until_stream_end, mute_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ mute_until_stream_end: 1, mute_stream_started_at: startedAt });
+      await expect(readDispatchChannelState(db, "kanal-a", NOW)).resolves.toMatchObject({
+        controls: { mute: { active: true, mode: "until_stream_end" } },
+      });
+
+      await writeEventSubStreamState(db, "kanal-a", "offline", "2026-09-23T10:00:00.000Z", null);
+      await expect(readChannelControls(db, "kanal-a", "2026-09-23T10:00:00.000Z")).resolves.toMatchObject({
+        mute: { active: false },
+      });
+      await writeEventSubStreamState(db, "kanal-a", "online", "2026-09-23T11:00:00.000Z", "2026-09-23T10:59:00.000Z");
+      await expect(readDispatchChannelState(db, "kanal-a", "2026-09-23T11:00:00.000Z")).resolves.toMatchObject({
+        controls: { mute: { active: false, mode: null } },
+      });
+      await expect(database.prepare(
+        "SELECT muted, mute_until_stream_end, mute_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ muted: 1, mute_until_stream_end: 1, mute_stream_started_at: startedAt });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps an offline control pending for the next stream and ends it with that session", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      const db = database as unknown as D1Database;
+      await setChannelControl(db, actor, "kanal-a", "pause", "until_stream_end", NOW);
+
+      await expect(readChannelControls(db, "kanal-a", NOW)).resolves.toMatchObject({
+        pause: { active: false, pending: true, mode: "until_stream_end" },
+      });
+      await expect(readDispatchChannelState(db, "kanal-a", NOW)).resolves.toMatchObject({
+        controls: { pause: { active: false, mode: null } },
+      });
+      await expect(database.prepare(
+        "SELECT pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ pause_stream_started_at: null });
+
+      const startedAt = "2026-09-23T09:30:00.000Z";
+      await writeEventSubStreamState(db, "kanal-a", "online", "2026-09-23T09:31:00.000Z", startedAt);
+      await expect(database.prepare(
+        "SELECT pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ pause_stream_started_at: startedAt });
+      await expect(readDispatchChannelState(db, "kanal-a", "2026-09-23T09:31:00.000Z")).resolves.toMatchObject({
+        controls: { pause: { active: true, mode: "until_stream_end" } },
+      });
+
+      await writeEventSubStreamState(db, "kanal-a", "offline", "2026-09-23T10:30:00.000Z", null);
+      await expect(readDispatchChannelState(db, "kanal-a", "2026-09-23T10:30:00.000Z")).resolves.toMatchObject({
+        controls: { pause: { active: false, mode: null } },
+      });
+      await writeEventSubStreamState(db, "kanal-a", "offline", "2026-09-23T10:30:00.000Z", null);
+      await writeEventSubStreamState(db, "kanal-a", "online", "2026-09-23T10:00:00.000Z", "2026-09-23T09:55:00.000Z");
+      await expect(database.prepare(
+        "SELECT state, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "offline", started_at: null });
+      await expect(database.prepare(
+        "SELECT paused, pause_until_stream_end, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ paused: 1, pause_until_stream_end: 1, pause_stream_started_at: startedAt });
     } finally {
       database.close();
     }

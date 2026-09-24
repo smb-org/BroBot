@@ -2143,6 +2143,20 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("Pausiert")).toBeInTheDocument();
   });
 
+  it("shows an offline stream-end control as pending and keeps its disable action available", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      controls: {
+        mute: { active: false, pending: true, until: null, mode: "until_stream_end" as const },
+        pause: { active: false, until: null, mode: null },
+      },
+    };
+    await showChannelOverview(channel);
+
+    expect(screen.getByText("Gilt ab dem nächsten Stream")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stummschaltung aufheben" })).toBeInTheDocument();
+  });
+
   it("reloads channel state on visibility change and every three minutes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));

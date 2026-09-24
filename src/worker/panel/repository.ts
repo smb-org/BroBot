@@ -79,9 +79,11 @@ interface ChannelStateRow {
   muted: ChannelControlFields["muted"];
   muted_until: string | null;
   mute_until_stream_end: ChannelControlFields["mute_until_stream_end"];
+  mute_stream_started_at: string | null;
   paused: ChannelControlFields["paused"];
   paused_until: string | null;
   pause_until_stream_end: ChannelControlFields["pause_until_stream_end"];
+  pause_stream_started_at: string | null;
 }
 
 interface ActiveModuleRow {
@@ -170,9 +172,11 @@ export const channelStateQuery = `
            channel_controls.muted AS muted,
            channel_controls.muted_until AS muted_until,
            channel_controls.mute_until_stream_end AS mute_until_stream_end,
+           channel_controls.mute_stream_started_at AS mute_stream_started_at,
            channel_controls.paused AS paused,
            channel_controls.paused_until AS paused_until,
            channel_controls.pause_until_stream_end AS pause_until_stream_end,
+           channel_controls.pause_stream_started_at AS pause_stream_started_at,
            moderator.is_moderator AS moderator_is_moderator,
            moderator.checked_at AS moderator_checked_at,
            moderator.reason AS moderator_reason,

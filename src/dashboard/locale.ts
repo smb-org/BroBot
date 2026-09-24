@@ -545,6 +545,7 @@ export interface DashboardTexts {
     muteRemaining: (minutes: string) => string;
     pauseRemaining: (minutes: string) => string;
     untilStreamEnd: string;
+    pendingUntilStreamStart: string;
     unlimited: string;
     durationTitle: (control: string) => string;
     durationDescription: (control: string) => string;
@@ -765,6 +766,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       muteRemaining: (minutes) => `Stumm · ${minutes} min`,
       pauseRemaining: (minutes) => `Pause · ${minutes} min`,
       untilStreamEnd: "Bis Streamende",
+      pendingUntilStreamStart: "Gilt ab dem nächsten Stream",
       unlimited: "Unbegrenzt",
       durationTitle: (control) => `${control} aktivieren`,
       durationDescription: (control) => `Wähle, wie lange ${control.toLowerCase()} aktiv bleibt.`,
@@ -775,7 +777,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       duration1h: "1 Stunde",
       duration1hDescription: "Endet automatisch nach einer Stunde.",
       durationStream: "Bis Streamende",
-      durationStreamDescription: "Wird beim nächsten Streamende aufgehoben.",
+      durationStreamDescription: "Wird beim Ende des aktuellen Streams aufgehoben. Ist keiner live, gilt es für den nächsten Stream.",
       durationUnlimited: "Unbegrenzt",
       durationUnlimitedDescription: "Bleibt aktiv, bis du es aufhebst.",
       enable: "Aktivieren",
@@ -968,6 +970,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       muteRemaining: (minutes) => `Muted · ${minutes} min`,
       pauseRemaining: (minutes) => `Paused · ${minutes} min`,
       untilStreamEnd: "Until stream ends",
+      pendingUntilStreamStart: "Applies starting with the next stream",
       unlimited: "Unlimited",
       durationTitle: (control) => `Enable ${control.toLowerCase()}`,
       durationDescription: (control) => `Choose how long ${control.toLowerCase()} stays active.`,
@@ -978,7 +981,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       duration1h: "1 hour",
       duration1hDescription: "Ends automatically after one hour.",
       durationStream: "Until stream ends",
-      durationStreamDescription: "Turns off when the stream next ends.",
+      durationStreamDescription: "Turns off when the current stream ends. If offline, it applies to the next stream and ends with it.",
       durationUnlimited: "Unlimited",
       durationUnlimitedDescription: "Stays on until you turn it off.",
       enable: "Enable",
