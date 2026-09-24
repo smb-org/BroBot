@@ -38,6 +38,7 @@ const renderElement = (
   isolated: boolean,
 ): ReactElement | null => {
   if (element.kind !== "variable" || element.variableName === null) return null;
+  if (!Object.hasOwn(variables, element.variableName)) return null;
   const value = variables[element.variableName];
   if (value === undefined) return null;
 
@@ -75,9 +76,15 @@ export const OverlayCanvas = ({ overlay, language, variables, elementId, debug }
     : { position: "relative", width: "max-content", height: "max-content" };
 
   return <div className="brobot-overlay" style={canvasStyle}>
-    {elements.map((element) => <ElementErrorBoundary key={element.id}>
+    {elements.map((element) => {
+      const value = element.variableName !== null && Object.hasOwn(variables, element.variableName)
+        ? variables[element.variableName]
+        : null;
+      const resetKey = JSON.stringify([overlay.revision, element, language, value, isolatedElement !== null]);
+      return <ElementErrorBoundary key={resetKey}>
       {renderElement(element, language, variables, isolatedElement !== null)}
-    </ElementErrorBoundary>)}
+      </ElementErrorBoundary>;
+    })}
     {debug && elements.length === 0 ? <span className="brobot-overlay-debug">No visible overlay elements.</span> : null}
   </div>;
 };

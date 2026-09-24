@@ -139,7 +139,12 @@ describe("OverlayShell and OverlayCanvas", () => {
     vi.stubGlobal("fetch", fetcher);
 
     const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')).toHaveTextContent("1,200");
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1);
@@ -168,6 +173,153 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps a live variable update newer than an in-flight bootstrap response", async () => {
+    let finishReload: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(overlayPayload(1200))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishReload = resolve; }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    await waitFor(() => expect(container.querySelector('[data-element="element-first"]')).not.toBeNull());
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+
+    act(() => realtimeCallbacks?.onMessage?.(createVariableMessage(3400)));
+    expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')).toHaveTextContent("3,400");
+    await act(async () => {
+      finishReload?.(overlayPayload(1200));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')).toHaveTextContent("3,400"));
+  });
+
+  it("reconciles the bootstrap after the first successful socket open", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(overlayPayload());
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    act(() => realtimeCallbacks?.onOpen?.(false));
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps revoked sources transparent when an active bootstrap finishes", async () => {
+    let finishBootstrap: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(overlayPayload())
+      .mockImplementationOnce(() => new Promise((resolve) => { finishBootstrap = resolve; }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    await waitFor(() => expect(container.querySelector("[data-element]")).not.toBeNull());
+    await waitFor(() => expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1));
+    const terminalClose = realtimeMocks.connectOverlayRealtime.mock.calls[0]?.[1] as (() => void) | undefined;
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    const activeSignal = fetcher.mock.calls[1]?.[1]?.signal;
+    act(() => terminalClose?.());
+    expect(activeSignal?.aborted).toBe(true);
+    await act(async () => {
+      finishBootstrap?.(overlayPayload());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector("[data-element]")).toBeNull();
+    act(() => realtimeCallbacks?.onOpen?.(false));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector("[data-element]")).toBeNull();
+  });
+
+  it("cancels queued reloads and coalesces reconnects while a bootstrap is in flight", async () => {
+    vi.useFakeTimers();
+    let finishReload: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(overlayPayload())
+      .mockImplementationOnce(() => new Promise((resolve) => { finishReload = resolve; }))
+      .mockResolvedValue(overlayPayload());
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    act(() => realtimeCallbacks?.onOverlayChanged?.({
+      version: 1,
+      id: "fixture-change",
+      createdAt: "2026-09-25T08:00:00.000Z",
+      channelId: "fixture-channel",
+      type: "overlay.changed",
+      payload: { overlayId: "overlay-fixture", revision: 2 },
+    }));
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      finishReload?.(overlayPayload());
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("lets the legacy entry own the only realtime connection for an unbound link", async () => {
+    window.history.replaceState(null, "", "/overlay#token=fictional-token&var=score&text=%7Bvalue%7D");
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ language: "en", overlay: null, variables: {} }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify({ name: "score", value: 12 }), { status: 200, headers: { "Content-Language": "en" } }));
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+
+    await waitFor(() => expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetcher.mock.calls.some(([input]) => input === "/api/overlay/variables/score")).toBe(true));
+    expect(fetcher).toHaveBeenCalledWith("/api/overlay/bootstrap", expect.anything());
+    expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers an element boundary after its rendered value changes", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(13)));
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    await waitFor(() => expect(container.querySelectorAll("[data-element]")).toHaveLength(2));
+    act(() => realtimeCallbacks?.onMessage?.(createVariableMessage(1200)));
+
+    await waitFor(() => expect(container.querySelectorAll("[data-element]")).toHaveLength(3));
+    expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')).toHaveTextContent("1,200");
+  });
+
+  it("keeps a missing constructor variable transparent", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      language: "en",
+      overlay: {
+        id: "overlay-fixture", revision: 1, width: 1920, height: 1080, css: "",
+        elements: [element("element-constructor", 0, 0, 100, 0, true, "constructor")],
+      },
+      variables: {},
+    }), { status: 200 })));
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    await waitFor(() => expect(container.querySelector(".brobot-overlay")).not.toBeNull());
+
+    expect(container.querySelector("[data-element]")).toBeNull();
+  });
+
   it("keeps sibling elements visible when one variable element throws", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(13)));
 
@@ -185,5 +337,18 @@ describe("OverlayShell and OverlayCanvas", () => {
 
     await waitFor(() => expect(document.head.querySelector("style[data-brobot-overlay-css]")).not.toBeNull());
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("strips imports and remote CSS URLs before injection while retaining relative assets", async () => {
+    const css = '@import url("https://assets.example/theme.css"); .brobot-overlay { background: url("https://assets.example/image.png"); mask: url("../assets/mask.svg"); }';
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(1200, css)));
+
+    render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+
+    await waitFor(() => expect(document.head.querySelector("style[data-brobot-overlay-css]")?.textContent)
+      .toContain("../assets/mask.svg"));
+    const installedCss = document.head.querySelector("style[data-brobot-overlay-css]")?.textContent ?? "";
+    expect(installedCss).not.toContain("@import");
+    expect(installedCss).not.toContain("https://assets.example");
   });
 });

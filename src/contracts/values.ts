@@ -381,6 +381,7 @@ export const API_ERROR_CODES = [
   "overlay_token_invalid",
   "overlay_variable_not_found",
   "overlay_management_denied",
+  "overlay_css_invalid",
   "overlay_data_invalid",
   "overlay_not_found",
   "overlay_limit_reached",

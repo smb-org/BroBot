@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { RealtimeEnvelope } from "../realtime-contract";
+import { sanitizeOverlayCss } from "../contracts/overlay-css";
 import { connectOverlayRealtime } from "./realtime";
 import { OverlayCanvas } from "./canvas";
 import type { OverlayBootstrapData, OverlayElementData, OverlayLanguage } from "./model";
@@ -23,9 +24,10 @@ interface OverlayShellProperties {
   debug: boolean;
 }
 
-type LoadState = "loading" | "ready" | "unbound" | "error";
+type LoadState = "loading" | "ready" | "unbound" | "error" | "revoked";
 interface OverlayLifecycle {
   disposed: boolean;
+  revoked: boolean;
   requestNumber: number;
   reloadPending: boolean;
 }
@@ -38,8 +40,6 @@ const takePendingReload = (lifecycle: OverlayLifecycle): boolean => {
   lifecycle.reloadPending = false;
   return true;
 };
-
-const isDisposed = (lifecycle: OverlayLifecycle): boolean => lifecycle.disposed;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -128,7 +128,8 @@ const installOverlayCss = (css: string): (() => void) => {
     document.head.appendChild(style);
   }
   const installedStyle = style;
-  installedStyle.textContent = css;
+  // TODO(#210): replace the URL filter with the overlay document's restrictive CSP.
+  installedStyle.textContent = sanitizeOverlayCss(css);
   return () => installedStyle.remove();
 };
 
@@ -140,9 +141,11 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
   const bootstrapRef = useRef<OverlayBootstrapData | null>(null);
 
   useEffect(() => {
-    const lifecycle: OverlayLifecycle = { disposed: false, requestNumber: 0, reloadPending: false };
+    const lifecycle: OverlayLifecycle = { disposed: false, revoked: false, requestNumber: 0, reloadPending: false };
     let activeController: AbortController | null = null;
     let loadInFlight = false;
+    let realtimeStarted = false;
+    let stopRealtime: () => void = () => undefined;
     let reloadTimer: number | null = null;
     let maximumReloadTimer: number | null = null;
     let retryTimer: number | null = null;
@@ -184,7 +187,7 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
     };
 
     const load = async (): Promise<void> => {
-      if (lifecycle.disposed) return;
+      if (lifecycle.disposed || lifecycle.revoked) return;
       if (loadInFlight) {
         lifecycle.reloadPending = true;
         return;
@@ -209,7 +212,9 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
         }
         let payload: unknown;
         try {
-          payload = JSON.parse(await response.text()) as unknown;
+          const responseText = await response.text();
+          if (!isCurrentRequest(lifecycle, currentRequest)) return;
+          payload = JSON.parse(responseText) as unknown;
         } catch {
           throw new Error("Overlay bootstrap response was not valid JSON.");
         }
@@ -219,10 +224,10 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
         pendingVariableChanges.clear();
         document.documentElement.lang = next.language;
         install(next, next.overlay === null ? "unbound" : "ready");
+        if (next.overlay !== null) startRealtime();
         setDiagnostic("Overlay data could not be loaded.");
         retryAttempt = 0;
         stopRetryTimer();
-        if (takePendingReload(lifecycle)) scheduleReload();
       } catch {
         if (!isCurrentRequest(lifecycle, currentRequest) || controller.signal.aborted) return;
         install(null, "error");
@@ -231,7 +236,9 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
       } finally {
         if (activeController === controller) activeController = null;
         loadInFlight = false;
-        if (takePendingReload(lifecycle) && !isDisposed(lifecycle)) {
+        if (takePendingReload(lifecycle)) {
+          stopReloadTimer();
+          stopMaximumReloadTimer();
           stopRetryTimer();
           void load();
         }
@@ -254,40 +261,50 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
       }, RELOAD_MAX_WAIT_MS);
     };
 
-    const stopRealtime = connectOverlayRealtime(token, () => {
-      stopReloadTimer();
-      stopMaximumReloadTimer();
-      stopRetryTimer();
-      pendingVariableChanges.clear();
-      install(null, "error");
-      setDiagnostic("Overlay access is unavailable.");
-    }, {
-      onOpen: (reconnected) => {
-        if (!reconnected) return;
+    const startRealtime = (): void => {
+      if (realtimeStarted || lifecycle.disposed || lifecycle.revoked) return;
+      realtimeStarted = true;
+      stopRealtime = connectOverlayRealtime(token, () => {
+        lifecycle.revoked = true;
+        lifecycle.requestNumber++;
+        lifecycle.reloadPending = false;
+        activeController?.abort();
+        activeController = null;
+        stopReloadTimer();
+        stopMaximumReloadTimer();
         stopRetryTimer();
-        retryAttempt = 0;
-        void load();
-      },
-      onMessage: (message) => {
-        const current = bootstrapRef.current;
-        if (current === null) {
-          for (const item of message.payload.set) pendingVariableChanges.set(item.name, item.value);
-          for (const name of message.payload.removed) pendingVariableChanges.set(name, null);
-          return;
-        }
-        const next = applyVariableMessage(current, message);
-        bootstrapRef.current = next;
-        setBootstrap(next);
-      },
-      onOverlayChanged: (message) => {
-        const current = bootstrapRef.current;
-        if (current === null) {
-          lifecycle.reloadPending = true;
-          return;
-        }
-        if (message.payload.overlayId === current.overlay?.id) scheduleReload();
-      },
-    });
+        pendingVariableChanges.clear();
+        install(null, "revoked");
+        setDiagnostic("Overlay access is unavailable.");
+      }, {
+        onOpen: () => {
+          stopReloadTimer();
+          stopMaximumReloadTimer();
+          stopRetryTimer();
+          retryAttempt = 0;
+          void load();
+        },
+        onMessage: (message) => {
+          const current = bootstrapRef.current;
+          if (loadInFlight || current === null) {
+            for (const item of message.payload.set) pendingVariableChanges.set(item.name, item.value);
+            for (const name of message.payload.removed) pendingVariableChanges.set(name, null);
+          }
+          if (current === null) return;
+          const next = applyVariableMessage(current, message);
+          bootstrapRef.current = next;
+          setBootstrap(next);
+        },
+        onOverlayChanged: (message) => {
+          const current = bootstrapRef.current;
+          if (current === null) {
+            lifecycle.reloadPending = true;
+            return;
+          }
+          if (message.payload.overlayId === current.overlay?.id) scheduleReload();
+        },
+      });
+    };
 
     void load();
     return () => {
@@ -311,6 +328,7 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
     if (elementId !== null) return null;
     return <Suspense fallback={null}><LazyLegacyOverlayEntry /></Suspense>;
   }
+  if (loadState === "revoked") return null;
   if (loadState === "error") {
     if (debug && elementId === null) return <Suspense fallback={null}><LazyLegacyOverlayEntry /></Suspense>;
     return debug ? <span className="brobot-overlay-debug">{diagnostic}</span> : null;
