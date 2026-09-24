@@ -54,7 +54,7 @@ export type ModuleDiagnosticDetailKey =
   | "reason" | "recipient" | "remainingSeconds" | "requiredTier" | "response"
   | "scheduledAt" | "scheduledFor" | "scope" | "seconds" | "source"
   | "sourceChannelId" | "startedAt" | "status" | "streamState" | "target" | "targetChannelId" | "variable"
-  | "text" | "threshold" | "tier" | "triggerLogin" | "type" | "viewers";
+  | "text" | "threshold" | "tier" | "triggerLogin" | "twitchMessage" | "type" | "viewers";
 
 export interface ModuleDiagnostic {
   code: string;

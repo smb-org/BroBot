@@ -106,16 +106,16 @@ export const getAdSchedule = async (
   });
   if (!result.ok) {
     if (result.reason === "timeout" || result.reason === "network_error") {
-      return failure(result.reason, { status: null, message: result.message });
+      return failure(result.reason, { status: null, twitchMessage: result.message });
     }
-    return failure(scheduleReasonFor(result.status ?? 0), { status: result.status, message: result.message });
+    return failure(scheduleReasonFor(result.status ?? 0), { status: result.status, twitchMessage: result.message });
   }
 
   const body = isRecord(result.data) ? result.data : {};
   return {
     fetched: true,
     reason: null,
-    detail: { status: result.status, message: textOrNull(body.message) },
+    detail: { status: result.status, twitchMessage: textOrNull(body.message) },
     schedule: scheduleFrom(body),
   };
 };
@@ -151,7 +151,7 @@ export const snoozeNextAd = async (
   });
   if (!result.ok) {
     if (result.reason === "timeout" || result.reason === "network_error") {
-      return snoozeFailure(result.reason, { status: null, message: result.message });
+      return snoozeFailure(result.reason, { status: null, twitchMessage: result.message });
     }
     const status = result.status ?? 0;
     const reason = status === 429
@@ -159,14 +159,14 @@ export const snoozeNextAd = async (
       : status === 401 && missingScopeMessage(result.message)
         ? "scope_missing"
         : status === 401 ? "unauthorized" : `http_${String(status)}`;
-    return snoozeFailure(reason, { status: result.status, message: result.message });
+    return snoozeFailure(reason, { status: result.status, twitchMessage: result.message });
   }
 
   const body = isRecord(result.data) ? result.data : {};
   return {
     snoozed: true,
     reason: null,
-    detail: { status: result.status, message: textOrNull(body.message) },
+    detail: { status: result.status, twitchMessage: textOrNull(body.message) },
     schedule: scheduleFrom(body),
   };
 };

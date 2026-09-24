@@ -105,6 +105,17 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.chat.unknown", {})).toBe("Unknown chat notification");
   });
 
+  it("treats a row already stored with the old 'unbekannt' placeholder the same as no type at all (issue #201 follow-up)", () => {
+    // Rows written before the producer fix (`channel_events/domain/index.ts`)
+    // still carry the literal old sentinel in `art` -- the event log's
+    // 14-day retention means the formatter has to keep tolerating it.
+    setBrowserLanguage("de-DE");
+    expect(eventText("channel_events.chat.unknown", { art: "unbekannt" })).toBe("Unbekannte Chat-Benachrichtigung");
+
+    setBrowserLanguage("en-US");
+    expect(eventText("channel_events.chat.unknown", { art: "unbekannt" })).toBe("Unknown chat notification");
+  });
+
   it("renders moderation details bilingually with a meaning-carrying tone", () => {
     setBrowserLanguage("de-DE");
     expect(eventText("channel_events.moderation.timeout", {
@@ -237,6 +248,22 @@ describe("dashboard locale", () => {
 
     setBrowserLanguage("en-US");
     expect(eventCauseText("host.chat.failed", { reason: "http_500" })).toBe("Twitch responded with error 500");
+  });
+
+  it("prefers detail.twitchMessage over detail.message when a producer somehow sets both (issue #201)", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventCauseText("host.chat.failed", {
+      reason: "http_403", twitchMessage: "Twitch's own wording", message: "a local wording",
+    })).toBe("Twitch's own wording");
+  });
+
+  it("still reads a legacy row's plain detail.message the same way, now that producers write twitchMessage (issue #201)", () => {
+    // Rows written before the `twitchMessage` rename (worker/shoutout.ts et
+    // al.) only ever had `message` -- `eventCauseText` still has to resolve
+    // those the same way it always did.
+    setBrowserLanguage("de-DE");
+    expect(eventCauseText("host.chat.failed", { reason: "http_403", message: "You are banned from chatting in this channel" }))
+      .toBe("You are banned from chatting in this channel");
   });
 
   it("falls back to a localized generic cause for a reason that isn't http_<status> either", () => {

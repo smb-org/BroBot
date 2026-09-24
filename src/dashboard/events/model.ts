@@ -33,30 +33,42 @@ export interface EventCauseInfo {
   /** The localized cause, from the same catalog lookup the code's own row
    *  formatter draws on (`eventCauseText`). */
   text: string;
-  /** Twitch's own diagnostic `message`, when the diagnostic detail carries
-   *  a nonempty one that isn't already exactly `text` (that happens when
-   *  `eventCauseText` itself had nothing more specific to fall back to than
-   *  that same message) -- no row ever surfaces this literally otherwise. */
-  twitchMessage: string | null;
+  /** A diagnostic message worth showing beyond `text` -- Twitch's own
+   *  wording (`detail.twitchMessage`) or, failing that, a local one
+   *  (`detail.message`, e.g. a caught exception's `.message`) -- when the
+   *  detail carries a nonempty one that isn't already exactly `text` (that
+   *  happens when `eventCauseText` itself had nothing more specific to fall
+   *  back to than that same message). No row ever surfaces this literally
+   *  otherwise. */
+  message: string | null;
+  /** Whether `message` came from Twitch's own response (`detail.
+   *  twitchMessage`) rather than a local error (`detail.message`) -- only
+   *  genuinely Twitch-sourced wording gets labelled "Twitch: ..."; a local
+   *  message gets a neutral label instead, since it was never Twitch
+   *  talking (see the ads commercial producer's `getAppAccessToken`
+   *  failure, which puts its own exception text in `detail.message`). */
+  messageIsFromTwitch: boolean;
 }
 
 /** The row's failure cause for the hover/focus icon -- null on any tone
  *  other than warning/error, when the diagnostic detail carries none of the
  *  usual reason/cause/message keys, or when the row's own text already
- *  shows that exact cause (`eventCauseAlreadyShown`) and Twitch supplied no
- *  further `message` beyond it. The icon earns its place either by adding
- *  the cause the row left out, or by surfacing Twitch's own wording the row
- *  never quotes verbatim. */
+ *  shows that exact cause (`eventCauseAlreadyShown`) and there's no further
+ *  message beyond it. The icon earns its place either by adding the cause
+ *  the row left out, or by surfacing a message (Twitch's own, or a local
+ *  one) the row never quotes verbatim. */
 export const eventCause = (entry: PanelEventEntry): EventCauseInfo | null => {
   const tone = eventTone(entry.code);
   if (tone !== "warning" && tone !== "error") return null;
   const detail = eventDetail(entry.detail, entry.code);
   const text = eventCauseText(entry.code, detail);
   if (text === null) return null;
-  const rawMessage = typeof detail.message === "string" && detail.message.length > 0 ? detail.message : null;
-  const twitchMessage = rawMessage !== null && rawMessage !== text ? rawMessage : null;
-  if (twitchMessage === null && eventCauseAlreadyShown(entry.code, detail)) return null;
-  return { text, twitchMessage };
+  const twitchMessage = typeof detail.twitchMessage === "string" && detail.twitchMessage.length > 0 ? detail.twitchMessage : null;
+  const localMessage = typeof detail.message === "string" && detail.message.length > 0 ? detail.message : null;
+  const rawMessage = twitchMessage ?? localMessage;
+  const message = rawMessage !== null && rawMessage !== text ? rawMessage : null;
+  if (message === null && eventCauseAlreadyShown(entry.code, detail)) return null;
+  return { text, message, messageIsFromTwitch: message !== null && twitchMessage !== null };
 };
 
 export interface EventGroup {

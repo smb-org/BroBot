@@ -52,9 +52,9 @@ export const createClip = async (
   });
   if (!result.ok) {
     if (result.reason === "timeout" || result.reason === "network_error") {
-      return failure(result.reason, { status: null, message: result.message });
+      return failure(result.reason, { status: null, twitchMessage: result.message });
     }
-    return failure(clipReasonFor(result.status ?? 0), { status: result.status, message: result.message });
+    return failure(clipReasonFor(result.status ?? 0), { status: result.status, twitchMessage: result.message });
   }
 
   const body = isRecord(result.data) ? result.data : {};

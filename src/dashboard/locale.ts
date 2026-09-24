@@ -478,10 +478,15 @@ export interface DashboardTexts {
      *  own event label so two icons on screen never share one name. */
     showCause: (eventLabel: string) => string;
     /** The popover's second line when Twitch supplied its own diagnostic
-     *  `message` alongside the localized cause (see `eventCause` in
+     *  message alongside the localized cause (see `eventCause` in
      *  `events/model.ts`) -- labelled so it reads as a quote, not another
      *  translated phrase. */
     causeTwitchMessage: (message: string) => string;
+    /** The popover's second line when that extra message is local (a caught
+     *  exception's own text, not anything Twitch said) -- a neutral label,
+     *  since calling it "Twitch: ..." would misattribute it (see
+     *  `eventCause`'s `messageIsFromTwitch`). */
+    causeDetailMessage: (message: string) => string;
   };
   signIn: {
     required: string;
@@ -717,6 +722,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       trigger: "Auslöser", moderator: "Moderator", affectedPerson: "Betroffene Person",
       showCause: (eventLabel) => `Ursache anzeigen: ${eventLabel}`,
       causeTwitchMessage: (message) => `Twitch: ${message}`,
+      causeDetailMessage: (message) => `Details: ${message}`,
     },
     signIn: {
       required: "Anmeldung erforderlich", explanation: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -924,6 +930,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       trigger: "Trigger", moderator: "Moderator", affectedPerson: "Affected person",
       showCause: (eventLabel) => `Show cause: ${eventLabel}`,
       causeTwitchMessage: (message) => `Twitch: ${message}`,
+      causeDetailMessage: (message) => `Details: ${message}`,
     },
     signIn: {
       required: "Sign-in required", explanation: "Sign in with your Twitch account to see available channels.",
@@ -1048,14 +1055,23 @@ const eventTextWithName = (
 /** `channel_events.chat.unknown`'s notice type ("art"): shown when Twitch's
  *  own type is present, left out entirely (not even a placeholder) when the
  *  producer had none to record -- issue #201, "Unbekannte Chat-
- *  Benachrichtigung: unbekannt" doubled up the same "unknown" twice. */
+ *  Benachrichtigung: unbekannt" doubled up the same "unknown" twice. Rows
+ *  written before that fix still carry the old `"unbekannt"` placeholder
+ *  literally (the producer stored its own internal branching sentinel,
+ *  fixed at the source too, but the event log's 14-day retention means
+ *  already-persisted rows keep the old value) -- treated the same as no
+ *  type at all, not shown as if it were a real notice type. */
+const LEGACY_UNKNOWN_NOTICE_TYPE = "unbekannt";
+
 const chatUnknownText = (
   detail: EventDetail,
   withoutType: string,
   withType: (art: string) => string,
 ): string => {
   const art = detail.art;
-  return typeof art === "string" && art.length > 0 ? withType(art) : withoutType;
+  return typeof art === "string" && art.length > 0 && art !== LEGACY_UNKNOWN_NOTICE_TYPE
+    ? withType(art)
+    : withoutType;
 };
 
 const detailText = (detail: EventDetail, key: string, fallback: string): string =>
@@ -1339,33 +1355,38 @@ const unknownCauseText: LocaleCatalog<string> = {
 
 /**
  * The localized cause behind a warning/error event, read from the
- * `reason`/`cause`/`message` diagnostic keys. Looks up the code's own
- * failure catalog first (`REASON_CATALOG_BY_CODE`), falls back to the small
- * shared `genericFailureTexts` only when the code has none. When neither
- * covers the value: a nonempty `detail.message` wins next -- Twitch's own
- * message (e.g. a chat drop reason's `message`, or a Helix error body's
- * `message`) reads better than a bare code; then an `http_<status>` pattern
+ * `reason`/`cause`/`twitchMessage`/`message` diagnostic keys. Looks up the
+ * code's own failure catalog first (`REASON_CATALOG_BY_CODE`), falls back
+ * to the small shared `genericFailureTexts` only when the code has none.
+ * When neither covers the value: a nonempty `detail.twitchMessage` wins
+ * next, then a nonempty `detail.message` -- Twitch's own message (a Helix
+ * error body's `message`, or a chat drop reason's `message`; producers
+ * label it `twitchMessage` specifically where it came from a Twitch
+ * response, keeping `message` for a caught exception's own local text --
+ * see `writeModuleDiagnostics` in `worker/event-log.ts`, which caps both at
+ * ingestion) reads better than a bare code; then an `http_<status>` pattern
  * gets a generic "Twitch responded with error <status>"; anything else
- * uncatalogued falls back to `unknownCauseText`. The raw machine value never
- * reaches this function's return value -- it stays visible only in the
- * inspector's technical details (`formatEventDetail`). Reused by the events
- * list's hover icon so the cause is readable without opening the inspector,
- * even for codes whose own row text stays generic (`host.chat.failed`,
- * `host.action.failed`, ...). Returns null when the detail carries none of
- * those keys, so the row gets no icon at all.
+ * uncatalogued falls back to `unknownCauseText`.
+ * The raw machine value never reaches this function's return value -- it
+ * stays visible only in the inspector's technical details
+ * (`formatEventDetail`). Reused by the events list's hover icon so the
+ * cause is readable without opening the inspector, even for codes whose own
+ * row text stays generic (`host.chat.failed`, `host.action.failed`, ...).
+ * Returns null when the detail carries none of those keys, so the row gets
+ * no icon at all.
  */
 export const eventCauseText = (
   code: string,
   detail: EventDetail,
   language: DashboardLanguage = dashboardLanguage(),
 ): string | null => {
-  const raw = detail.reason ?? detail.cause ?? detail.message;
+  const raw = detail.reason ?? detail.cause ?? detail.twitchMessage ?? detail.message;
   if (typeof raw !== "string" || raw.length === 0) return null;
   const ownCatalog = REASON_CATALOG_BY_CODE[code as EventCode];
   const localized = (ownCatalog === undefined ? undefined : catalogString(ownCatalog[language], raw))
     ?? catalogString(genericFailureTexts[language], raw);
   if (localized !== undefined) return localized;
-  const message = detail.message;
+  const message = detail.twitchMessage ?? detail.message;
   if (typeof message === "string" && message.length > 0) return message;
   const httpStatus = HTTP_STATUS_REASON_PATTERN.exec(raw)?.[1];
   if (httpStatus !== undefined) return httpStatusCauseText(httpStatus, language);

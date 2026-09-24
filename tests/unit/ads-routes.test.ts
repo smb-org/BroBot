@@ -329,7 +329,7 @@ describe("start commercial", () => {
       outcome: "failed",
       reason: "stream_offline",
       status: 400,
-      message: "The broadcaster must be live to start a commercial.",
+      twitchMessage: "The broadcaster must be live to start a commercial.",
     });
   });
 

@@ -25,6 +25,38 @@ export interface WrittenModuleDiagnostic {
   actorUserId: string | null;
 }
 
+/** External wording -- Twitch's own error body, or a caught exception's
+ *  `.message` -- has no length guarantee from either source, and the
+ *  dashboard popover renders it verbatim (`events/model.ts`'s
+ *  `eventCause`). Capped here, not at each producer: this is the one place
+ *  every diagnostic, worker- and module-level alike, passes through before
+ *  reaching `event_log.detail_json`, so a new producer can't reintroduce
+ *  the gap by forgetting to cap its own message. */
+const DIAGNOSTIC_MESSAGE_MAXIMUM_LENGTH = 300;
+const DIAGNOSTIC_MESSAGE_KEYS = ["message", "twitchMessage"] as const;
+
+const truncatedDiagnosticMessage = (value: string): string =>
+  value.length <= DIAGNOSTIC_MESSAGE_MAXIMUM_LENGTH
+    ? value
+    : `${value.slice(0, DIAGNOSTIC_MESSAGE_MAXIMUM_LENGTH - 1)}…`;
+
+/** Caps `message`/`twitchMessage` in place; every other detail key already
+ *  goes through its own producer-side truncation (`truncateTo200Chars`) or
+ *  has no unbounded external source to begin with. Returns `detail`
+ *  untouched when neither key needs capping, so the common case allocates
+ *  nothing new. */
+const cappedDetail = (detail: ModuleDiagnostic["detail"]): ModuleDiagnostic["detail"] => {
+  if (detail === undefined) return detail;
+  let capped: NonNullable<ModuleDiagnostic["detail"]> | undefined;
+  for (const key of DIAGNOSTIC_MESSAGE_KEYS) {
+    const value = detail[key];
+    if (typeof value === "string" && value.length > DIAGNOSTIC_MESSAGE_MAXIMUM_LENGTH) {
+      capped = { ...(capped ?? detail), [key]: truncatedDiagnosticMessage(value) };
+    }
+  }
+  return capped ?? detail;
+};
+
 /**
  * Writes module justifications as well as host-side action and outcome
  * diagnostics. Does not trim -- see `EVENT_LOG_LIMIT`'s comment for why
@@ -58,7 +90,7 @@ export const writeModuleDiagnostics = async (
     moduleId,
     triggerId,
     diagnostic.code,
-    JSON.stringify(diagnostic.detail ?? {}),
+    JSON.stringify(cappedDetail(diagnostic.detail) ?? {}),
     actorUserId,
   ));
   await db.batch(inserts);

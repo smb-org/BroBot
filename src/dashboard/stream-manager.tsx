@@ -130,7 +130,11 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
                   <Popover triggerLabel={texts.events.showCause(label)} icon="cause">
                     <span className="event-cause">
                       <span>{cause.text}</span>
-                      {cause.twitchMessage === null ? null : <span className="event-cause__twitch">{texts.events.causeTwitchMessage(cause.twitchMessage)}</span>}
+                      {cause.message === null ? null : (
+                        <span className="event-cause__message">
+                          {cause.messageIsFromTwitch ? texts.events.causeTwitchMessage(cause.message) : texts.events.causeDetailMessage(cause.message)}
+                        </span>
+                      )}
                     </span>
                   </Popover>
                 )}
