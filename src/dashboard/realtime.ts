@@ -9,6 +9,7 @@ import type {
   RealtimeMessage,
 } from "../realtime-contract";
 import type { AdsSchedule } from "../modules/ads/contracts";
+import type { PanelChannelControl, PanelChannelControls } from "../panel-contract";
 import { REALTIME_PROTOCOL } from "../realtime-contract";
 import { eventToneEntries, type EventCode } from "./locale";
 
@@ -53,6 +54,15 @@ const isAdSchedule = (value: unknown): value is AdsSchedule => isRecord(value) &
   (value.prerollFreeTime === null || typeof value.prerollFreeTime === "number") &&
   (value.snoozeCount === null || typeof value.snoozeCount === "number") &&
   (value.snoozeRefreshAt === null || typeof value.snoozeRefreshAt === "string");
+
+const isPanelChannelControl = (value: unknown): value is PanelChannelControl =>
+  isRecord(value) && typeof value.active === "boolean" &&
+  (value.pending === undefined || typeof value.pending === "boolean") &&
+  (value.until === null || typeof value.until === "string") &&
+  (value.mode === null || value.mode === "timed" || value.mode === "until_stream_end" || value.mode === "unlimited");
+
+const isPanelChannelControls = (value: unknown): value is PanelChannelControls =>
+  isRecord(value) && isPanelChannelControl(value.mute) && isPanelChannelControl(value.pause);
 
 const isKnownEnvelope = (value: Record<string, unknown>): value is Record<string, unknown> & {
   version: 1;
@@ -103,7 +113,8 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
       (parsed.payload.startedAt === null || typeof parsed.payload.startedAt === "string") &&
       typeof parsed.payload.changedAt === "string" && parsed.payload.changedAt.length > 0 &&
       (parsed.payload.checkedAt === undefined ||
-        (typeof parsed.payload.checkedAt === "string" && parsed.payload.checkedAt.length > 0))
+        (typeof parsed.payload.checkedAt === "string" && parsed.payload.checkedAt.length > 0)) &&
+      (parsed.payload.controls === undefined || isPanelChannelControls(parsed.payload.controls))
       ? { kind: "message", message: parsed as RealtimeEnvelope<"stream.state.changed"> }
       : { kind: "ignored" };
   }

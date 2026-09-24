@@ -148,6 +148,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   (object as unknown as { adScheduleRefresh: Promise<unknown> | null }).adScheduleRefresh = null;
   (object as unknown as { adScheduleRefreshStartedAt: number }).adScheduleRefreshStartedAt = 0;
   (object as unknown as { adScheduleRefreshGeneration: number }).adScheduleRefreshGeneration = 0;
+  (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
   return object;
 };
 
@@ -175,8 +176,8 @@ const eventMessage: RealtimeEnvelope<"event_log.new"> = {
 describe("ChannelObject realtime path", () => {
   afterEach(() => {
     vi.useRealTimers();
-    mocks.processAdPrewarning.mockClear();
-    mocks.refreshAdPrewarningAlarm.mockClear();
+    mocks.processAdPrewarning.mockReset().mockResolvedValue(undefined);
+    mocks.refreshAdPrewarningAlarm.mockReset().mockResolvedValue(undefined);
     mocks.getAdSchedule.mockReset();
   });
 
@@ -349,6 +350,51 @@ describe("ChannelObject realtime path", () => {
     const result = await refresh;
     expect(result.changed).toBe(false);
     await expect(object.getCachedAdSchedule()).resolves.toEqual({ schedule: snoozed, asOf: "2026-09-24T12:01:00.000Z" });
+  });
+
+  it("rejects an EventSub schedule save based on an older cache generation", async () => {
+    const object = objectFor([]);
+    const initial = adSchedule("2026-09-24T19:00:00.000Z");
+    const latest = adSchedule("2026-09-24T19:30:00.000Z");
+    const staleFetch = adSchedule("2026-09-24T18:45:00.000Z");
+    await object.storeAdSchedule(initial, "2026-09-24T12:00:00.000Z");
+    const fetchGeneration = await object.getAdScheduleGeneration();
+    await object.storeAdSchedule(latest, "2026-09-24T12:01:00.000Z");
+
+    await expect(object.storeAdSchedule(
+      staleFetch,
+      "2026-09-24T12:02:00.000Z",
+      undefined,
+      fetchGeneration,
+    )).resolves.toBeNull();
+    await expect(object.getCachedAdSchedule()).resolves.toEqual({ schedule: latest, asOf: "2026-09-24T12:01:00.000Z" });
+  });
+
+  it("serializes cached alarm reconciliation with a newer schedule save", async () => {
+    const object = objectFor([]);
+    const older = adSchedule("2026-09-24T19:00:00.000Z");
+    const newer = adSchedule("2026-09-24T19:30:00.000Z");
+    await object.storeAdSchedule(older, "2026-09-24T12:00:00.000Z");
+    mocks.refreshAdPrewarningAlarm.mockClear();
+    let finishOlderReconcile!: () => void;
+    const olderReconcileBlocked = new Promise<void>((resolve) => { finishOlderReconcile = resolve; });
+    const alarmScheduleWrites: Array<string | null> = [];
+    mocks.refreshAdPrewarningAlarm.mockImplementation(async (_env: unknown, _channelId: string, schedule: AdsSchedule) => {
+      if (schedule.nextAdAt === older.nextAdAt) await olderReconcileBlocked;
+      alarmScheduleWrites.push(schedule.nextAdAt);
+    });
+
+    const olderReconcile = object.reconcileCachedAdPrewarning();
+    await vi.waitFor(() => { expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(1); });
+    const newerSave = object.storeAdSchedule(newer, "2026-09-24T12:01:00.000Z");
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(1);
+
+    finishOlderReconcile();
+    await Promise.all([olderReconcile, newerSave]);
+
+    expect(alarmScheduleWrites).toEqual([older.nextAdAt, newer.nextAdAt]);
+    await expect(object.getCachedAdSchedule()).resolves.toEqual({ schedule: newer, asOf: "2026-09-24T12:01:00.000Z" });
   });
 
   it("retries failed alarm reconciliation independently of schedule changes and notices scope changes", async () => {

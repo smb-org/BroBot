@@ -2401,7 +2401,14 @@ describe("Dashboard skeleton", () => {
   });
 
   it("updates stored stream status from the panel realtime socket", async () => {
-    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      modules: [],
+      controls: {
+        mute: { active: false, until: null, mode: null },
+        pause: { active: false, pending: true, until: null, mode: "until_stream_end" as const },
+      },
+    };
     vi.stubGlobal("WebSocket", TestWebSocket);
     stubDashboardFetch((url) => {
       if (url.pathname === "/api/channels/kanal-a/system") return jsonResponse(system);
@@ -2423,12 +2430,23 @@ describe("Dashboard skeleton", () => {
       createdAt: new Date().toISOString(),
       channelId: "kanal-a",
       type: "stream.state.changed",
-      payload: { state: "online", startedAt: relativeIso(-60 * 60 * 1000), changedAt, checkedAt: changedAt },
+      payload: {
+        state: "online",
+        startedAt: relativeIso(-60 * 60 * 1000),
+        changedAt,
+        checkedAt: changedAt,
+        controls: {
+          mute: { active: false, until: null, mode: null },
+          pause: { active: true, until: null, mode: "until_stream_end" },
+        },
+      },
     }));
 
     expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
     expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
     expect(screen.getByText(/^Zustand geprüft/)).toBeInTheDocument();
+    expect(screen.getByText(/^Pausiert ·/)).toBeInTheDocument();
+    expect(screen.queryByText("Gilt ab dem nächsten Stream")).not.toBeInTheDocument();
     expect(document.querySelector(".dashboard-header__status .data-age:not(.dashboard-header__stream-age)")?.textContent).toBe(channelDataAge);
 
     socket.receive(JSON.stringify({
@@ -2440,6 +2458,74 @@ describe("Dashboard skeleton", () => {
       payload: { state: "offline", startedAt: null, changedAt: relativeIso(-1_000), checkedAt: relativeIso(-1_000) },
     }));
     expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+  });
+
+  it("keeps a newer realtime stream update when an older channels refresh finishes later", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      streamStateChangedAt: relativeIso(-10_000),
+      streamStateCheckedAt: relativeIso(-10_000),
+      controls: {
+        mute: { active: false, until: null, mode: null },
+        pause: { active: false, pending: true, until: null, mode: "until_stream_end" as const },
+      },
+    };
+    let channelsCalls = 0;
+    let resolveDelayedChannels: ((response: Response) => void) | undefined;
+    const delayedChannels = new Promise<Response>((resolve) => { resolveDelayedChannels = resolve; });
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelsCalls += 1;
+        return channelsCalls === 1
+          ? Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }))
+          : delayedChannels;
+      }
+      if (path === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(overview(channel)));
+      if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (path === "/api/channels/kanal-a/events") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(channelsCalls).toBe(2));
+
+    const changedAt = relativeIso(1_000);
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "stream-state-newer-than-http",
+      createdAt: new Date().toISOString(),
+      channelId: "kanal-a",
+      type: "stream.state.changed",
+      payload: {
+        state: "online",
+        startedAt: relativeIso(-60 * 60 * 1000),
+        changedAt,
+        checkedAt: changedAt,
+        controls: {
+          mute: { active: false, until: null, mode: null },
+          pause: { active: true, until: null, mode: "until_stream_end" },
+        },
+      },
+    }));
+    expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveDelayedChannels?.(jsonResponse({ channels: [channel], bot: channel.bot }));
+      await delayedChannels;
+    });
+
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+    expect(screen.getByText(/^Pausiert ·/)).toBeInTheDocument();
+    expect(screen.queryByText("Gilt ab dem nächsten Stream")).not.toBeInTheDocument();
   });
 
   it("reconciles the channel overview when its realtime socket connects", async () => {

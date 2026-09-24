@@ -136,6 +136,7 @@ export const lookupAndRefreshStreamState = async (
         stored.checkedAt !== refreshedStored.checkedAt)) {
     await publishStreamStateChanged(
       env.CHANNEL,
+      env.DB,
       channelId,
       refreshedStored.state,
       refreshedStored.startedAt,

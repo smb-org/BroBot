@@ -372,6 +372,31 @@ const streamDuration = (startedAt: string | null | undefined, now: number): stri
   return `${String(Math.floor(minutes / 60))}:${String(minutes % 60).padStart(2, "0")}`;
 };
 
+const mergeChannelStreamVersion = (incoming: PanelChannelState, current: PanelChannelState | undefined): PanelChannelState => {
+  if (current === undefined) return incoming;
+  const incomingChangedAt = incoming.streamStateChangedAt == null ? Number.NaN : Date.parse(incoming.streamStateChangedAt);
+  const currentChangedAt = current.streamStateChangedAt == null ? Number.NaN : Date.parse(current.streamStateChangedAt);
+  const incomingCheckedAt = incoming.streamStateCheckedAt == null ? Number.NaN : Date.parse(incoming.streamStateCheckedAt);
+  const currentCheckedAt = current.streamStateCheckedAt == null ? Number.NaN : Date.parse(current.streamStateCheckedAt);
+  const checkedAt = Number.isFinite(currentCheckedAt) &&
+      (!Number.isFinite(incomingCheckedAt) || currentCheckedAt > incomingCheckedAt)
+    ? current.streamStateCheckedAt
+    : incoming.streamStateCheckedAt;
+  if (Number.isFinite(currentChangedAt) &&
+      (!Number.isFinite(incomingChangedAt) || currentChangedAt > incomingChangedAt)) {
+    return {
+      ...incoming,
+      ...(current.streamState === undefined ? {} : { streamState: current.streamState }),
+      ...(current.streamStartedAt === undefined ? {} : { streamStartedAt: current.streamStartedAt }),
+      ...(current.streamStateChangedAt === undefined ? {} : { streamStateChangedAt: current.streamStateChangedAt }),
+      ...(checkedAt === undefined ? {} : { streamStateCheckedAt: checkedAt }),
+      ...(current.controls === undefined ? {} : { controls: current.controls }),
+    };
+  }
+  if (checkedAt === incoming.streamStateCheckedAt) return incoming;
+  return checkedAt === undefined ? incoming : { ...incoming, streamStateCheckedAt: checkedAt };
+};
+
 const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
   channelId: string;
   controls: PanelChannelControls | undefined;
@@ -1080,6 +1105,7 @@ export const DashboardApp = (): ReactElement => {
       const streamStartedAt = payload.startedAt;
       const changedAt = payload.changedAt;
       const checkedAt = typeof payload.checkedAt === "string" ? payload.checkedAt : changedAt;
+      const controls = payload.controls as PanelChannelControls | undefined;
       const isNotOlder = (storedChangedAt: string | null | undefined): boolean => {
         const storedVersion = storedChangedAt === undefined || storedChangedAt === null ? Number.NaN : Date.parse(storedChangedAt);
         return !Number.isFinite(storedVersion) || Date.parse(changedAt) >= storedVersion;
@@ -1097,6 +1123,7 @@ export const DashboardApp = (): ReactElement => {
           streamStartedAt,
           streamStateChangedAt: changedAt,
           streamStateCheckedAt: newerCheckedAt(channel.streamStateCheckedAt),
+          ...(controls === undefined ? {} : { controls }),
         }),
       });
       setOverview((current) => current.data?.channelId !== channelId || !isNotOlder(current.data.streamStateChangedAt) ? current : {
@@ -1107,6 +1134,7 @@ export const DashboardApp = (): ReactElement => {
           streamStartedAt,
           streamStateChangedAt: changedAt,
           streamStateCheckedAt: newerCheckedAt(current.data.streamStateCheckedAt),
+          ...(controls === undefined ? {} : { controls }),
         },
       });
     };
@@ -1121,7 +1149,10 @@ export const DashboardApp = (): ReactElement => {
     try {
       const response = await fetchChannels();
       if (channelsRequestGeneration.current !== generation) return;
-      setChannels(loadedState(response.channels));
+      setChannels((current) => loadedState(response.channels.map((channel) => mergeChannelStreamVersion(
+        channel,
+        current.data?.find((stored) => stored.channelId === channel.channelId),
+      ))));
       setIsPlatform(response.platformAdmin);
       setViewerIsBot(response.viewerIsBot);
       setBotLogin(response.botLogin ?? null);

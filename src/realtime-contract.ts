@@ -1,6 +1,7 @@
 import type { ChannelRole } from "./contracts/values";
 import type { ChannelStreamState } from "./contracts/values";
 import type { AdsSchedule } from "./modules/ads/contracts";
+import type { PanelChannelControls } from "./panel-contract";
 
 /** The only protocol version used on the wire. */
 export type RealtimeProtocolVersion = 1;
@@ -35,7 +36,13 @@ export interface RealtimePayloads {
     removed: readonly string[];
   };
   "ads.schedule.updated": { schedule: AdsSchedule; asOf: string };
-  "stream.state.changed": { state: ChannelStreamState; startedAt: string | null; changedAt: string; checkedAt?: string };
+  "stream.state.changed": {
+    state: ChannelStreamState;
+    startedAt: string | null;
+    changedAt: string;
+    checkedAt?: string;
+    controls?: PanelChannelControls;
+  };
 }
 
 export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageType> = {

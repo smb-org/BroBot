@@ -165,6 +165,7 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefresh: Promise<AdScheduleRefreshResult> | null = null;
   private adScheduleRefreshStartedAt = 0;
   private adScheduleRefreshGeneration = 0;
+  private adScheduleOperationQueue: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -176,39 +177,59 @@ export class ChannelObject extends DurableObject<Env> {
     return typeof name === "string" && name.length > 0 ? name : null;
   }
 
+  /** Keep schedule cache writes and their alarm reconciliation in one order. */
+  private async withAdScheduleOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.adScheduleOperationQueue;
+    let release!: () => void;
+    this.adScheduleOperationQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
   private async saveAdSchedule(
     schedule: AdsSchedule,
     asOf: string,
     grantedScopes?: readonly string[],
     expectedGeneration?: number,
+    reconcileAlarm = true,
   ): Promise<boolean | null> {
-    const channelId = this.ownChannelId();
-    if (channelId === null) throw new Error("Channel-bound data requires a named Durable Object.");
-    const cache = { schedule, asOf } satisfies CachedAdSchedule;
-    const changed = await this.ctx.storage.transaction(async (transaction) => {
-      const currentGeneration = await transaction.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
-      if (expectedGeneration !== undefined && currentGeneration !== expectedGeneration) return null;
-      const previous = await transaction.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
-      await transaction.put(AD_SCHEDULE_GENERATION_KEY, currentGeneration + 1);
-      await transaction.put(AD_SCHEDULE_CACHE_KEY, cache);
-      return previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule);
+    return this.withAdScheduleOperation(async () => {
+      const channelId = this.ownChannelId();
+      if (channelId === null) throw new Error("Channel-bound data requires a named Durable Object.");
+      const cache = { schedule, asOf } satisfies CachedAdSchedule;
+      const changed = await this.ctx.storage.transaction(async (transaction) => {
+        const currentGeneration = await transaction.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
+        if (expectedGeneration !== undefined && currentGeneration !== expectedGeneration) return null;
+        const previous = await transaction.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
+        await transaction.put(AD_SCHEDULE_GENERATION_KEY, currentGeneration + 1);
+        await transaction.put(AD_SCHEDULE_CACHE_KEY, cache);
+        return previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule);
+      });
+      if (changed === null) return null;
+      if (reconcileAlarm) await this.reconcileAdPrewarning(schedule, grantedScopes);
+      this.publish([{
+        version: 1,
+        id: crypto.randomUUID(),
+        createdAt: asOf,
+        channelId,
+        type: "ads.schedule.updated",
+        payload: { schedule, asOf },
+      }]);
+      return changed;
     });
-    if (changed === null) return null;
-    await this.reconcileAdPrewarning(schedule, grantedScopes);
-    this.publish([{
-      version: 1,
-      id: crypto.randomUUID(),
-      createdAt: asOf,
-      channelId,
-      type: "ads.schedule.updated",
-      payload: { schedule, asOf },
-    }]);
-    return changed;
   }
 
   public async reconcileCachedAdPrewarning(grantedScopes?: readonly string[]): Promise<void> {
-    const cache = await this.getCachedAdSchedule();
-    if (cache !== null) await this.reconcileAdPrewarning(cache.schedule, grantedScopes);
+    await this.withAdScheduleOperation(async () => {
+      // Read after entering the queue: an EventSub or Helix schedule save that
+      // was queued first must be the value reconciled by this panel read.
+      const cache = await this.getCachedAdSchedule();
+      if (cache !== null) await this.reconcileAdPrewarning(cache.schedule, grantedScopes);
+    });
   }
 
   private async reconcileAdPrewarning(schedule: AdsSchedule, grantedScopes?: readonly string[]): Promise<void> {
@@ -236,6 +257,10 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) return null;
     const cache = await this.ctx.storage.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
     return cache ?? null;
+  }
+
+  public async getAdScheduleGeneration(): Promise<number> {
+    return await this.ctx.storage.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
   }
 
   public async refreshAdSchedule(grantedScopes?: readonly string[]): Promise<AdScheduleRefreshResult> {
@@ -312,8 +337,11 @@ export class ChannelObject extends DurableObject<Env> {
     schedule: AdsSchedule,
     asOf: string,
     grantedScopes?: readonly string[],
-  ): Promise<CachedAdSchedule> {
-    await this.saveAdSchedule(schedule, asOf, grantedScopes);
+    expectedGeneration?: number,
+    reconcileAlarm = true,
+  ): Promise<CachedAdSchedule | null> {
+    const saved = await this.saveAdSchedule(schedule, asOf, grantedScopes, expectedGeneration, reconcileAlarm);
+    if (saved === null) return null;
     return { schedule, asOf };
   }
 
@@ -780,6 +808,16 @@ export class ChannelObject extends DurableObject<Env> {
           {
             schedule: async (dueAtMs) => { await this.scheduleAdPrewarning(dueAtMs); },
             clear: async () => { await this.clearAdPrewarning(); },
+            readScheduleGeneration: () => this.getAdScheduleGeneration(),
+            storeSchedule: async (schedule, asOf, options) => {
+              await this.storeAdSchedule(
+                schedule,
+                asOf,
+                undefined,
+                options?.expectedGeneration,
+                options?.reconcileAlarm,
+              );
+            },
           },
         );
       } catch (error: unknown) {

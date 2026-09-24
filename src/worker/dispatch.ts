@@ -19,7 +19,7 @@ import {
   writeEventSubStreamState,
 } from "./db/stream-state";
 import { lookupAndRefreshStreamState } from "./stream-state-lookup";
-import { readDispatchChannelState } from "./db/channel-controls";
+import { readChannelControls, readDispatchChannelState } from "./db/channel-controls";
 import { getBotIdentity } from "./db/bot-identity";
 import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto";
 import { readChannelVariables, prepareChannelVariableChange, prepareResetChannelVariablesForStream } from "./db/channel-variables";
@@ -481,6 +481,7 @@ export const dispatchEventSubNotification = async (
     if (stateWrite === "written" &&
         (streamBefore?.state !== (isOnline ? "online" : "offline") ||
           streamBefore.startedAt !== startedAt || streamBefore.streamId !== streamId)) {
+      const controls = await readChannelControls(environment.DB, event.channelId, event.receivedAt);
       streamStateChanged = {
         version: 1,
         id: crypto.randomUUID(),
@@ -491,6 +492,7 @@ export const dispatchEventSubNotification = async (
           state: isOnline ? "online" : "offline",
           startedAt,
           changedAt: event.eventSubTimestamp ?? event.receivedAt,
+          controls,
         },
       };
     }

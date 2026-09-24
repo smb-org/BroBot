@@ -370,9 +370,10 @@ describe("lookupAndRefreshStreamState", () => {
          VALUES ('kanal-a', 1, NULL, 1, 1, NULL, 1, ?)`,
       ).bind(STALE).run();
       await withAppToken(database);
+      const publish = vi.fn();
 
       const result = await lookupAndRefreshStreamState(
-        { ...environment(database), DB: databaseWithStreamTransitionAfterRefresh(database) },
+        { ...environment(database, publish), DB: databaseWithStreamTransitionAfterRefresh(database) },
         "kanal-a",
         NOW,
         helixResponse(false),
@@ -390,6 +391,15 @@ describe("lookupAndRefreshStreamState", () => {
       ).first()).resolves.toEqual({
         muted: 1, mute_until_stream_end: 1, paused: 1, pause_until_stream_end: 1, updated_at: "2026-09-23T12:00:01.000Z",
       });
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([{
+        type: "stream.state.changed",
+        payload: {
+          controls: {
+            mute: { active: true, mode: "until_stream_end" },
+            pause: { active: true, mode: "until_stream_end" },
+          },
+        },
+      }]);
     } finally {
       database.close();
     }

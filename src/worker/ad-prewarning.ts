@@ -10,7 +10,7 @@ import { moduleBroadcasterScopeState } from "./module-scopes";
 import { sendChatMessage } from "./chat";
 import { writeModuleDiagnostics } from "./event-log";
 import { getAppAccessToken } from "./app-token";
-import { getAdSchedule, type AdScheduleResult } from "../modules/ads/adapters/ad-schedule";
+import { getAdSchedule, type AdSchedule, type AdScheduleResult } from "../modules/ads/adapters/ad-schedule";
 import { helixRequest } from "./twitch/helix";
 
 const MODULE_ID = "ads";
@@ -37,6 +37,13 @@ export interface AdPrewarningEnvironment {
 export interface AdScheduler {
   schedule: (dueAtMs: number) => Promise<void>;
   clear: () => Promise<void>;
+  /** Store a freshly fetched schedule through the channel object's generation guard. */
+  storeSchedule?: (
+    schedule: AdSchedule,
+    asOf: string,
+    options?: { expectedGeneration?: number; reconcileAlarm?: boolean },
+  ) => Promise<unknown>;
+  readScheduleGeneration?: () => Promise<number>;
 }
 
 const nowMsFrom = (now: string): number => {
@@ -59,7 +66,18 @@ const moduleSettings = (record: ChannelModuleRecord | null) => {
 const channelObject = (
   environment: AdPrewarningEnvironment,
   channelId: string,
-): { scheduleAdPrewarning: (dueAtMs: number) => Promise<void>; clearAdPrewarning: () => Promise<void> } | null => {
+): {
+  scheduleAdPrewarning: (dueAtMs: number) => Promise<void>;
+  clearAdPrewarning: () => Promise<void>;
+  storeAdSchedule: (
+    schedule: AdSchedule,
+    asOf: string,
+    grantedScopes?: readonly string[],
+    expectedGeneration?: number,
+    reconcileAlarm?: boolean,
+  ) => Promise<unknown>;
+  getAdScheduleGeneration: () => Promise<number>;
+} | null => {
   if (environment.CHANNEL === undefined) return null;
   return environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId));
 };
@@ -75,6 +93,17 @@ const schedulerFor = (
   return {
     schedule: async (dueAtMs) => { await stub.scheduleAdPrewarning(dueAtMs); },
     clear: async () => { await stub.clearAdPrewarning(); },
+    readScheduleGeneration: () => stub.getAdScheduleGeneration(),
+    storeSchedule: async (schedule, asOf, options) => {
+      if (options === undefined) await stub.storeAdSchedule(schedule, asOf);
+      else await stub.storeAdSchedule(
+        schedule,
+        asOf,
+        undefined,
+        options.expectedGeneration,
+        options.reconcileAlarm,
+      );
+    },
   };
 };
 
@@ -191,6 +220,7 @@ export const refreshAdPrewarning = async (
     return;
   }
 
+  const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
   const result = alreadyFetchedSchedule ?? await getAdSchedule(
     environment as unknown as Env,
     channelId,
@@ -209,15 +239,25 @@ export const refreshAdPrewarning = async (
     }
     return;
   }
+  // EventSub fetches happen outside the ChannelObject's schedule refresh path.
+  // Persist the fetched value there before touching its alarm so a subsequent
+  // panel read cannot reconcile an older cached schedule over this one.
+  const storedByChannelObject = scheduler?.storeSchedule !== undefined;
+  if (storedByChannelObject) {
+    const stored = await scheduler.storeSchedule?.(result.schedule, now, {
+      ...(scheduleGeneration === undefined ? {} : { expectedGeneration: scheduleGeneration }),
+    });
+    if (stored === null) return;
+  }
   if (result.schedule.nextAdAt === null) {
-    await clear(scheduler);
+    if (!storedByChannelObject) await clear(scheduler);
     if (shouldWriteDiagnostics) {
       await writeOne(environment, channelId, triggerId, now, "ads.prewarning.no_schedule");
     }
     return;
   }
 
-  await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
+  if (!storedByChannelObject) await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
 };
 
 /** Runs the due prewarning after a fresh schedule fetch. */
@@ -234,6 +274,7 @@ export const processAdPrewarning = async (
   const configured = await settingRecord(environment, channelId, triggerId, now, scheduler);
   if (configured === null || !configured.settings.prewarning) return;
 
+  const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
   const result = await getAdSchedule(
     environment as unknown as Env,
     channelId,
@@ -250,6 +291,14 @@ export const processAdPrewarning = async (
     }
     return;
   }
+
+  // The alarm run has already claimed its deadline, so refresh the cached
+  // schedule without rearming from the cache before its decision is applied.
+  const storedSchedule = await scheduler?.storeSchedule?.(result.schedule, now, {
+    ...(scheduleGeneration === undefined ? {} : { expectedGeneration: scheduleGeneration }),
+    reconcileAlarm: false,
+  });
+  if (storedSchedule === null) return;
 
   const decision = decideAdPrewarning({
     settings: configured.settings,

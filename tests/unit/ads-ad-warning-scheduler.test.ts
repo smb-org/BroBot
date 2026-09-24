@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { processAdPrewarning, type AdScheduler } from "../../src/worker/ad-prewarning";
+import { processAdPrewarning, refreshAdPrewarning, type AdScheduler } from "../../src/worker/ad-prewarning";
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -95,5 +95,46 @@ describe("ad prewarning in the channel object", () => {
     );
 
     expect(idFromName).not.toHaveBeenCalled();
+  });
+
+  it("stores an EventSub schedule fetch through the channel object before relying on its alarm", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":true,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
+    ).run();
+    const schedule = {
+      nextAdAt: "2026-09-21T12:05:00.000Z",
+      duration: 60,
+      lastAdAt: null,
+      prerollFreeTime: 120,
+      snoozeCount: 1,
+      snoozeRefreshAt: null,
+    };
+    const storeAdSchedule = vi.fn().mockResolvedValue({ schedule, asOf: "2026-09-21T12:00:00.000Z" });
+    const scheduleAdPrewarning = vi.fn().mockResolvedValue(undefined);
+    const clearAdPrewarning = vi.fn().mockResolvedValue(undefined);
+    const env = environment();
+    const getAdScheduleGeneration = vi.fn().mockResolvedValue(0);
+    (env as unknown as { CHANNEL: Env["CHANNEL"] }).CHANNEL = {
+      idFromName: vi.fn(() => "kanal-a"),
+      get: () => ({ storeAdSchedule, scheduleAdPrewarning, clearAdPrewarning, getAdScheduleGeneration }),
+    } as unknown as Env["CHANNEL"];
+
+    await refreshAdPrewarning(
+      env,
+      "kanal-a",
+      "eventsub-online",
+      "2026-09-21T12:00:00.000Z",
+      noNetwork,
+      { fetched: true, reason: null, detail: {}, schedule },
+    );
+
+    expect(getAdScheduleGeneration).toHaveBeenCalledOnce();
+    expect(storeAdSchedule).toHaveBeenCalledWith(schedule, "2026-09-21T12:00:00.000Z", undefined, 0, undefined);
+    expect(scheduleAdPrewarning).not.toHaveBeenCalled();
+    expect(clearAdPrewarning).not.toHaveBeenCalled();
   });
 });
