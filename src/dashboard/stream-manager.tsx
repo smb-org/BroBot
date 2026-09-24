@@ -126,7 +126,14 @@ export const WarningsAndErrorsFeed = ({ channelId, onNavigate }: { channelId: st
                   <span className="stream-manager-feed__text">{label}</span>
                   <time className="stream-manager-feed__time mono" dateTime={entry.createdAt} title={entry.createdAt}>{formatStreamManagerFeedTime(entry.createdAt)}</time>
                 </a>
-                {cause === null ? null : <Popover triggerLabel={texts.events.showCause(label)} icon="cause">{cause}</Popover>}
+                {cause === null ? null : (
+                  <Popover triggerLabel={texts.events.showCause(label)} icon="cause">
+                    <span className="event-cause">
+                      <span>{cause.text}</span>
+                      {cause.twitchMessage === null ? null : <span className="event-cause__twitch">{texts.events.causeTwitchMessage(cause.twitchMessage)}</span>}
+                    </span>
+                  </Popover>
+                )}
               </li>
             );
           })}

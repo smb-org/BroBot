@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, SHOUTOUT_SUPPRESSED_REASONS,
 } from "../../src/contracts/values";
-import { apiErrorText, channelVariablesTexts, dashboardLanguage, eventCauseText, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
+import { apiErrorText, channelVariablesTexts, dashboardLanguage, eventCauseAlreadyShown, eventCauseText, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -95,6 +95,14 @@ describe("dashboard locale", () => {
     expect(eventText("ads.commercial.failed", { reason: "stream_offline" })).toBe("Commercial not started: The stream is offline");
     expect(apiErrorText("commercial_stream_offline", "Fallback")).toBe("A commercial cannot run while the stream is offline.");
     expect(shoutoutFailureReasonText("twitch_user_not_found")).toBe("Twitch user not found");
+  });
+
+  it("drops the placeholder entirely for an unknown notification with no type at all, instead of doubling up (issue #201)", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventText("channel_events.chat.unknown", {})).toBe("Unbekannte Chat-Benachrichtigung");
+
+    setBrowserLanguage("en-US");
+    expect(eventText("channel_events.chat.unknown", {})).toBe("Unknown chat notification");
   });
 
   it("renders moderation details bilingually with a meaning-carrying tone", () => {
@@ -239,6 +247,22 @@ describe("dashboard locale", () => {
 
     setBrowserLanguage("en-US");
     expect(eventCauseText("host.chat.failed", { reason: "banned_word" })).toBe("Unknown cause");
+  });
+
+  it("only reports host.shoutout.failed's cause as already shown when it's one of its own catalogued reasons (issue #201)", () => {
+    expect(eventCauseAlreadyShown("host.shoutout.failed", { cause: "twitch_error" })).toBe(true);
+    expect(eventCauseAlreadyShown("host.shoutout.failed", { cause: "twitch_user_not_found" })).toBe(true);
+    // An uncatalogued Helix status the row's own formatter has no wording
+    // for at all -- "Shoutout failed", full stop, no reason folded in.
+    expect(eventCauseAlreadyShown("host.shoutout.failed", { cause: "http_400" })).toBe(false);
+  });
+
+  it("treats ads.commercial.failed's cause as always shown, since its own reason function never returns null", () => {
+    expect(eventCauseAlreadyShown("ads.commercial.failed", { reason: "twitch_error" })).toBe(true);
+    // Even an uncatalogued reason still renders the catalog's own fallback
+    // wording ("Twitch rejected the request") -- the icon then only earns
+    // its place via a Twitch `message`, checked separately in `eventCause`.
+    expect(eventCauseAlreadyShown("ads.commercial.failed", { reason: "something_new" })).toBe(true);
   });
 
   it("never returns a raw snake_case reason for any value a current producer can emit", () => {

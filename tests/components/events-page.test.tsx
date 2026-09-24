@@ -268,6 +268,37 @@ describe("EventsPage failure cause icon", () => {
     expect(screen.getByText(/Werbeeinblendung nicht gestartet: Twitch hat den Start abgelehnt/)).toBeInTheDocument();
   });
 
+  it("shows the icon for an uncatalogued shoutout cause and quotes Twitch's own message in the popover (issue #201)", async () => {
+    // `detail.cause` isn't one of `SHOUTOUT_FAILURE_REASONS` -- the row then
+    // shows nothing but "Shoutout fehlgeschlagen", full stop, and Twitch's
+    // own explanation would otherwise only be visible in technical details.
+    renderPage([entry({
+      eventId: "shoutout-http-400", moduleId: "host", code: "host.shoutout.failed",
+      detail: "{\"cause\":\"http_400\",\"message\":\"The broadcaster is not streaming live or does not have one or more viewers.\"}",
+    })]);
+
+    expect(screen.getByText("Shoutout fehlgeschlagen")).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.mouseEnter(trigger);
+
+    expect(await screen.findByText("The broadcaster is not streaming live or does not have one or more viewers.")).toBeInTheDocument();
+  });
+
+  it("shows the icon for a catalogued ads.commercial.failed cause when Twitch also supplied its own message (issue #201)", async () => {
+    // The row only ever shows the generic catalogued phrase -- Twitch's own,
+    // more specific explanation never appears anywhere else.
+    renderPage([entry({
+      eventId: "commercial-twitch-error", moduleId: "ads", code: "ads.commercial.failed",
+      detail: "{\"reason\":\"twitch_error\",\"message\":\"The broadcaster is not streaming live or does not have one or more viewers.\"}",
+    })]);
+
+    const trigger = screen.getByRole("button", { name: causeButtonName });
+    fireEvent.mouseEnter(trigger);
+
+    expect(await screen.findByText("Twitch hat den Start abgelehnt")).toBeInTheDocument();
+    expect(await screen.findByText("Twitch: The broadcaster is not streaming live or does not have one or more viewers.")).toBeInTheDocument();
+  });
+
   it("hides the icon for host.announcement.failed and uses the shared shoutout catalog wording in the row", () => {
     renderPage([entry({
       eventId: "announcement-failed", moduleId: "host", code: "host.announcement.failed",
@@ -306,6 +337,32 @@ describe("EventsPage failure cause icon", () => {
     fireEvent.mouseEnter(trigger);
 
     expect(await screen.findByText("Twitch cooldown is active")).toBeInTheDocument();
+  });
+
+  it("shows a localized label for the host module instead of the raw id (issue #201)", () => {
+    renderPage([entry({ eventId: "host-row", moduleId: "host", code: "host.clip.failed", detail: "{}" })]);
+
+    // Once in the module column, once in the mobile meta line -- both read
+    // the same `moduleLabel`.
+    expect(screen.getAllByText("System").length).toBeGreaterThan(0);
+    expect(screen.queryByText("host")).not.toBeInTheDocument();
+  });
+
+  it("renders just the generic label when a chat notification's type is missing, without a doubled placeholder (issue #201)", () => {
+    renderPage([entry({
+      eventId: "chat-unknown", moduleId: "channel_events", code: "channel_events.chat.unknown", detail: "{}",
+    })]);
+
+    expect(screen.getByText("Unbekannte Chat-Benachrichtigung")).toBeInTheDocument();
+    expect(screen.queryByText(/unbekannt$/)).not.toBeInTheDocument();
+  });
+
+  it("still shows the notice type when a chat notification's type is present but unhandled", () => {
+    renderPage([entry({
+      eventId: "chat-unknown-typed", moduleId: "channel_events", code: "channel_events.chat.unknown", detail: "{\"art\":\"charity_donation\"}",
+    })]);
+
+    expect(screen.getByText("Unbekannte Chat-Benachrichtigung: charity_donation")).toBeInTheDocument();
   });
 
   it("still opens the inspector when the row itself is clicked", () => {

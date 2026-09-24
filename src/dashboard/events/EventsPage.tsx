@@ -335,7 +335,14 @@ export const EventsPage = ({
                               <span className="event-label event-table__primary">
                                 <EventChipPair code={entry.code} detail={eventDetail(entry.detail, entry.code)} texts={texts} />
                                 <span className={`event-table__text${eventMetadata(entry.code) === null ? " mono" : ""}`}>{eventLabel}</span>
-                                {cause === null ? null : <Popover triggerLabel={texts.events.showCause(eventLabel)} icon="cause">{cause}</Popover>}
+                                {cause === null ? null : (
+                                  <Popover triggerLabel={texts.events.showCause(eventLabel)} icon="cause">
+                                    <span className="event-cause">
+                                      <span>{cause.text}</span>
+                                      {cause.twitchMessage === null ? null : <span className="event-cause__twitch">{texts.events.causeTwitchMessage(cause.twitchMessage)}</span>}
+                                    </span>
+                                  </Popover>
+                                )}
                               </span>
                               <span className="event-table__mobile-meta muted">
                                 <span className={moduleLabel(entry) === entry.moduleId ? "mono" : undefined} title={moduleLabel(entry)}>{moduleLabel(entry)}</span>

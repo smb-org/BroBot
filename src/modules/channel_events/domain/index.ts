@@ -148,7 +148,10 @@ const chatNotificationDiagnostic = (
   }
   return {
     code: "channel_events.chat.unknown",
-    detail: detail({ art: truncateTo200Chars(type) }),
+    // `noticeType`, not the `"unbekannt"`-sentinel `type` used for the
+    // branching above -- that sentinel leaking into the stored detail is
+    // what doubled up "unknown" in the dashboard row (issue #201).
+    detail: detail(noticeType === null ? {} : { art: noticeType }),
   };
 };
 
