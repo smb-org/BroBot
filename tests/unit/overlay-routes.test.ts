@@ -207,6 +207,122 @@ describe("Overlay routes", () => {
       .toEqual({ revoked_at: null });
   });
 
+  it("waits for the realtime token close before returning a successful revocation", async () => {
+    await insertMember(database);
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a",
+      pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN,
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    let finishClose: (() => void) | undefined;
+    let signalCloseStarted: (() => void) | undefined;
+    const closeGate = new Promise<void>((resolve) => { finishClose = resolve; });
+    const closeStarted = new Promise<void>((resolve) => { signalCloseStarted = resolve; });
+    const close = vi.fn(() => {
+      signalCloseStarted?.();
+      return closeGate;
+    });
+    environment.CHANNEL = {
+      idFromName: vi.fn(() => "channel-object"),
+      get: vi.fn(() => ({ revokeToken: close })),
+    } as unknown as Env["CHANNEL"];
+    let responseReturned = false;
+
+    const responsePromise = Promise.resolve(authRouter.fetch(new Request(revokePath("kanal-a", issued.tokenId), {
+      method: "POST",
+      headers: await sessionHeaders(environment, true),
+      body: JSON.stringify({ reason: "Round two test" }),
+    }), environment)).then((response) => {
+      responseReturned = true;
+      return response;
+    });
+
+    await closeStarted;
+    await Promise.resolve();
+    expect(responseReturned).toBe(false);
+    finishClose?.();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(204);
+    expect(close).toHaveBeenCalledWith(issued.tokenId);
+  });
+
+  it("still returns success and logs when the realtime token close rejects", async () => {
+    await insertMember(database);
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a",
+      pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN,
+      expiresAt: null,
+      createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    environment.CHANNEL = {
+      idFromName: vi.fn(() => "channel-object"),
+      get: vi.fn(() => ({ revokeToken: vi.fn().mockRejectedValue(new Error("DO unavailable")) })),
+    } as unknown as Env["CHANNEL"];
+
+    try {
+      const response = await authRouter.fetch(new Request(revokePath("kanal-a", issued.tokenId), {
+        method: "POST",
+        headers: await sessionHeaders(environment, true),
+        body: JSON.stringify({ reason: "Round two failure" }),
+      }), environment);
+
+      expect(response.status).toBe(204);
+      expect(warning).toHaveBeenCalledWith("Realtime revocation for token failed.", expect.any(Error));
+      const revokedRow = await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
+        .bind(issued.tokenId).first<{ revoked_at: string | null }>();
+      expect(revokedRow?.revoked_at).toBeTruthy();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("returns success and logs when the realtime close fails or times out", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await insertMember(database);
+      const issued = await issueTestToken(database, {
+        channelId: "kanal-a",
+        pepper: environment.OVERLAY_TOKEN_PEPPER,
+        publicOrigin: environment.PUBLIC_ORIGIN,
+        expiresAt: null,
+        createdAt: "2026-09-18T00:00:00.000Z",
+      });
+      const neverSettles = new Promise<void>(() => undefined);
+      const close = vi.fn(() => neverSettles);
+      environment.CHANNEL = {
+        idFromName: vi.fn(() => "channel-object"),
+        get: vi.fn(() => ({ revokeToken: close })),
+      } as unknown as Env["CHANNEL"];
+      const responsePromise = authRouter.fetch(new Request(revokePath("kanal-a", issued.tokenId), {
+        method: "POST",
+        headers: await sessionHeaders(environment, true),
+        body: JSON.stringify({ reason: "Round two timeout" }),
+      }), environment);
+
+      await vi.waitFor(() => { expect(close).toHaveBeenCalledTimes(1); });
+      await vi.advanceTimersByTimeAsync(2_000);
+      const response = await responsePromise;
+
+      expect(response.status).toBe(204);
+      expect(warning).toHaveBeenCalledWith(
+        "Realtime token revocation timed out; the security round remains the backstop.",
+      );
+      const revokedRow = await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
+        .bind(issued.tokenId).first<{ revoked_at: string | null }>();
+      expect(revokedRow?.revoked_at).toBeTruthy();
+    } finally {
+      warning.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["a missing Authorization header", undefined],
     ["an empty bearer token", "Bearer "],

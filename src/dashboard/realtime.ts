@@ -8,9 +8,9 @@ import type {
   RealtimeEventLogHint,
   RealtimeMessage,
 } from "../realtime-contract";
+import { REALTIME_PROTOCOL } from "../realtime-contract";
 import { eventToneEntries, type EventCode } from "./locale";
 
-const REALTIME_PROTOCOL = "brobot.v1";
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
 const RECONNECT_GRACE_MS = 400;

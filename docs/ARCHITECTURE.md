@@ -89,6 +89,13 @@ lokal und verwendet ihn nur als `Authorization: Bearer`-Header für
 Overlay-URL. Dieser Header ist ein Secret und darf ebenfalls nicht
 protokolliert werden.
 
+Für Live-Updates öffnet das Overlay `GET /ws/overlay` mit den Protokollen
+`brobot.v1` und `brobot.token.<token>`. Der Token wird nie als Socket-Query
+übertragen. Der Worker prüft ihn und leitet nur einen internen Prinzipal mit
+Kanal- und Token-ID an das jeweilige Kanal-Durable-Object weiter. Der kleine
+Overlay-WebSocket-Client wird erst nach erfolgreicher Statusprüfung dynamisch
+geladen und verbindet mit exponentiellem Backoff neu.
+
 Diese Wahl schützt nicht vor Zugriff auf die OBS-Konfiguration: OBS speichert
 die vollständige Browserquellen-URL einschließlich Fragment im Klartext in
 der Szenensammlung. Wer Zugriff auf die Szenensammlung hat, hat damit Zugriff

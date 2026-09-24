@@ -111,7 +111,7 @@ export const authenticateOverlayToken = async (
   const cutoff = new Date(nowTimestamp - LAST_USED_INTERVAL_MS).toISOString();
   let touched: boolean;
   try {
-    touched = await touchOverlayToken(db, record.tokenId, input.now, cutoff);
+    touched = await touchOverlayToken(db, record.channelId, record.tokenId, input.now, cutoff);
   } catch {
     return record;
   }

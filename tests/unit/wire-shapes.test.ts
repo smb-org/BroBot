@@ -59,6 +59,7 @@ import type {
   RealtimeMessageType,
   RealtimeRecipientKind,
 } from "../../src/realtime-contract";
+import { REALTIME_MESSAGE_TYPES, REALTIME_RECIPIENTS } from "../../src/realtime-contract";
 import type { ChannelRole, EventTone } from "../../src/contracts/values";
 import type { TextCommand } from "../../src/modules/text_commands/contracts";
 import type { AdsScheduleResponse } from "../../src/modules/ads/contracts";
@@ -697,6 +698,8 @@ describe("serialized contract shapes", () => {
       expect(Object.keys(allRoles).sort()).toEqual(["broadcaster", "manager", "operator"]);
       expect(Object.keys(allMessageTypes).sort()).toEqual(["event_log.new", "system.hello"]);
       expect(Object.keys(allRecipientKinds).sort()).toEqual(["overlay", "panel"]);
+      expect(Object.keys(REALTIME_RECIPIENTS).sort()).toEqual([...REALTIME_MESSAGE_TYPES].sort());
+      expect(REALTIME_RECIPIENTS["event_log.new"]).toEqual(["panel"]);
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
       expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "chat", "overlay", "shoutout"]);
       expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);
