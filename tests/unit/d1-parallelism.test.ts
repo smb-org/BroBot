@@ -57,11 +57,11 @@ describe("independent dashboard D1 reads", () => {
     await pending;
   });
 
-  it("starts all module variable-reference queries before awaiting results", async () => {
+  it("starts all module and overlay variable-reference queries before awaiting results", async () => {
     const { db, calls } = tracingDatabase();
     const pending = referencesFor(db, "kanal-a", "score");
 
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4); // three module queries plus the overlay usage query
     await pending;
   });
 });

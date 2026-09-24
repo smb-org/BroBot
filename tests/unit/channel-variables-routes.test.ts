@@ -130,6 +130,127 @@ describe("Channel variable routes", () => {
     await expect(deletion.json()).resolves.toMatchObject({ error: "variable_in_use" });
   });
 
+  it("bumps overlays on variable rename so an old draft cannot bind a recreated name", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const originalVariable = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 10, description: "", resetOnStreamStart: false,
+    });
+    expect(originalVariable.status).toBe(201);
+    const overlayId = "overlay-a";
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES (?, 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).bind(overlayId).run();
+    const staleDraft = {
+      baseRevision: 1,
+      name: "Gameplay",
+      width: 1920,
+      height: 1080,
+      css: "",
+      elements: [{
+        id: "score-element",
+        kind: "variable",
+        label: "Score",
+        variableName: "score",
+        text: "Score {value}",
+        config: {},
+        x: 0,
+        y: 0,
+        scalePercent: 100,
+        z: 0,
+        inComposition: true,
+      }],
+    };
+    const firstSave = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", staleDraft);
+    expect(firstSave.status).toBe(200);
+
+    const renamed = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "PATCH", { newName: "points" });
+    expect(renamed.status).toBe(200);
+    await expect(database.prepare(
+      "SELECT revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = ?",
+    ).bind(overlayId).first()).resolves.toEqual({ revision: 3 });
+    const recreatedVariable = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 99, description: "New score", resetOnStreamStart: false,
+    });
+    expect(recreatedVariable.status).toBe(201);
+
+    const staleSave = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", staleDraft);
+    expect(staleSave.status).toBe(409);
+    await expect(staleSave.json()).resolves.toMatchObject({
+      error: "overlay_changed_concurrently",
+      currentRevision: 3,
+    });
+    await expect(database.prepare(
+      "SELECT variable_name FROM overlay_elements WHERE channel_id = 'channel-a' AND overlay_id = ?",
+    ).bind(overlayId).first()).resolves.toEqual({ variable_name: "points" });
+  });
+
+  it("warns about overlay display use and detaches elements when deleting a variable", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const createdVariable = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 10, description: "", resetOnStreamStart: false,
+    });
+    expect(createdVariable.status).toBe(201);
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements
+        (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
+       VALUES ('score-element', 'channel-a', 'overlay-a', 'variable', 'Death Count', 'score', 'Score {value}', '{}')`,
+    ).run();
+
+    const listed = await fetchPanel("manager-a", "/api/channels/channel-a/variables");
+    const listedBody: unknown = await listed.json();
+    expect(listedBody).toMatchObject({ variables: [{ usages: [{
+      moduleId: "overlays",
+      itemName: "Gameplay → Death Count",
+      kind: "display",
+    }] }] });
+
+    const deleted = await fetchPanel("manager-a", "/api/channels/channel-a/variables/score", "DELETE");
+    expect(deleted.status).toBe(204);
+    await expect(database.prepare(
+      "SELECT revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = 'overlay-a'",
+    ).first()).resolves.toEqual({ revision: 2 });
+    const recreatedVariable = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 99, description: "New score", resetOnStreamStart: false,
+    });
+    expect(recreatedVariable.status).toBe(201);
+    const staleSave = await fetchPanel("manager-a", "/api/channels/channel-a/overlays/overlay-a", "PUT", {
+      baseRevision: 1,
+      name: "Gameplay",
+      width: 1920,
+      height: 1080,
+      css: "",
+      elements: [{
+        id: "score-element",
+        kind: "variable",
+        label: "Death Count",
+        variableName: "score",
+        text: "Score {value}",
+        config: {},
+        x: 0,
+        y: 0,
+        scalePercent: 100,
+        z: 0,
+        inComposition: true,
+      }],
+    });
+    expect(staleSave.status).toBe(409);
+    await expect(database.prepare(
+      "SELECT variable_name FROM overlay_elements WHERE channel_id = 'channel-a' AND overlay_id = 'overlay-a'",
+    ).first()).resolves.toEqual({ variable_name: null });
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM channel_variables WHERE channel_id = 'channel-a' AND name = 'score'",
+    ).first()).resolves.toEqual({ count: 1 });
+  });
+
   it("rejects a stale value edit and writes no audit for the value written concurrently", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");
