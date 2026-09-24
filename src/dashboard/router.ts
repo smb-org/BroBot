@@ -17,6 +17,11 @@ export type DashboardRoute =
   }
   | { kind: "module"; channelId: string; moduleId: string };
 
+/** Routes whose page content cannot work until the installation bot is signed in. */
+export const dashboardRouteRequiresBot = (route: DashboardRoute): boolean =>
+  route.kind === "overview" || route.kind === "module" || (route.kind === "channel" &&
+    route.section !== "system" && route.section !== "audit" && route.section !== "variables" && route.section !== "overlay-links");
+
 let suppressNextPopState = false;
 let historyIndex = 0;
 
@@ -164,7 +169,7 @@ export const replaceDashboardRoute = (route: DashboardRoute): void => {
   }, () => undefined);
 };
 
-export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute) => void] => {
+export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute, onNavigated?: () => void) => void] => {
   const [route, setRoute] = useState<DashboardRoute>(() => parseDashboardRoute(window.location.pathname, window.location.search));
 
   useEffect(() => {
@@ -194,8 +199,11 @@ export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute) =>
     return () => { window.removeEventListener("popstate", onPopState); };
   }, []);
 
-  const navigate = (nextRoute: DashboardRoute): void => {
-    navigateToDashboardRoute(nextRoute, () => { setRoute(nextRoute); });
+  const navigate = (nextRoute: DashboardRoute, onNavigated?: () => void): void => {
+    navigateToDashboardRoute(nextRoute, () => {
+      setRoute(nextRoute);
+      onNavigated?.();
+    });
   };
 
   return [route, navigate];

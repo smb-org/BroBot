@@ -341,6 +341,44 @@ const overlayTokensCatalog: LocaleCatalog<OverlayTokensTexts> = {
 
 export const overlayTokensTexts = (language: DashboardLanguage = dashboardLanguage()): OverlayTokensTexts => overlayTokensCatalog[language];
 
+export interface OverlayObsInstructionsTexts {
+  summary: string;
+  addBrowserSource: string;
+  sourceSize: string;
+  refreshWhenActive: string;
+  shutdownWhenHidden: string;
+  customCss: string;
+  secret: string;
+  diagnostics: string;
+}
+
+const overlayObsInstructionsCatalog: LocaleCatalog<OverlayObsInstructionsTexts> = {
+  de: {
+    summary: "In OBS einrichten",
+    addBrowserSource: "Füge in OBS eine Browserquelle hinzu und setze den vollständigen Overlay-Link als URL ein.",
+    sourceSize: "Empfohlener Start: 800 × 120 px. Der Text passt sich dem aktuellen Variablenwert an; plane Platz für den längsten erwarteten Text ein.",
+    refreshWhenActive: "„Browser bei Szenenaktivierung aktualisieren“ ausgeschaltet lassen.",
+    shutdownWhenHidden: "„Deaktivieren, wenn Quelle nicht sichtbar ist“ ausgeschaltet lassen.",
+    customCss: "Zum Anpassen füge dieses CSS in den Einstellungen der Browserquelle in „Benutzerdefiniertes CSS“ ein:",
+    secret: "Der Link enthält ein Geheimnis. Du kannst ihn jederzeit auf der Seite Overlay-Links widerrufen.",
+    diagnostics: "Für Diagnoseinformationen an einen Link ohne Widget &debug=1 im Fragment anhängen (zum Beispiel #token=…&debug=1). Ohne dieses Flag bleibt die Overlay-Seite leer.",
+  },
+  en: {
+    summary: "Set up in OBS",
+    addBrowserSource: "Add a Browser Source in OBS and paste the complete overlay link into its URL field.",
+    sourceSize: "Suggested starting size: 800 × 120 px. The text follows the current variable value; leave room for the longest text you expect.",
+    refreshWhenActive: "Leave “Refresh browser when scene becomes active” off.",
+    shutdownWhenHidden: "Leave “Shutdown source when not visible” off.",
+    customCss: "To style the widget, paste this CSS into the Browser Source’s Custom CSS field:",
+    secret: "The link contains a secret. You can revoke it at any time on the Overlay links page.",
+    diagnostics: "To show diagnostics on a link with no widget, append &debug=1 to its fragment (for example, #token=…&debug=1). Without this flag, the overlay page stays empty.",
+  },
+};
+
+export const overlayObsInstructionsTexts = (
+  language: DashboardLanguage = dashboardLanguage(),
+): OverlayObsInstructionsTexts => overlayObsInstructionsCatalog[language];
+
 export interface DashboardTexts {
   header: {
     connectionRunning: string;
@@ -684,14 +722,13 @@ export interface DashboardTexts {
     empty: string;
     groupModules: string;
     groupCommands: string;
-    groupMembers: string;
+    groupVariables: string;
     groupActions: string;
     adOff: string;
     adOn: string;
     shoutoutHint: string;
     shoutoutMissingLogin: string;
     openCommand: (name: string) => string;
-    openMember: string;
   };
   /** Full-page states from #159: they replace page content (navigation
    *  stays usable) instead of stacking another red box on a normal page. */
@@ -904,14 +941,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       empty: "Keine Treffer.",
       groupModules: "Module",
       groupCommands: "Befehle",
-      groupMembers: "Mitglieder",
+      groupVariables: "Variablen",
       groupActions: "Aktionen",
       adOff: "Werbung aus",
       adOn: "Werbung an",
       shoutoutHint: "shoutout <Twitch-Name>",
       shoutoutMissingLogin: "Twitch-Name nach „shoutout“ eingeben.",
       openCommand: (name) => `Befehl !${name} öffnen`,
-      openMember: "Mitglied öffnen",
     },
     blocking: {
       botTitle: "Der Bot ist nicht angemeldet",
@@ -1111,14 +1147,13 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       empty: "No matches.",
       groupModules: "Modules",
       groupCommands: "Commands",
-      groupMembers: "Members",
+      groupVariables: "Variables",
       groupActions: "Actions",
       adOff: "Ads off",
       adOn: "Ads on",
       shoutoutHint: "shoutout <Twitch login>",
       shoutoutMissingLogin: "Type a Twitch login after “shoutout”.",
       openCommand: (name) => `Open command !${name}`,
-      openMember: "Open member",
     },
     blocking: {
       botTitle: "The bot is not signed in",

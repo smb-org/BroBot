@@ -17,7 +17,7 @@ describe("Overlay-Locale", () => {
 
   it("setzt die Overlay-Sprache aus dem Kanalstatus statt aus dem Browser", async () => {
     setBrowserLanguage("en-US");
-    window.history.replaceState(null, "", "/overlay#token=kanal-token");
+    window.history.replaceState(null, "", "/overlay#token=kanal-token&debug=1");
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(
       JSON.stringify({ version: "laufend", language: "de" }),
       { status: 200, headers: { "Content-Type": "application/json" } },

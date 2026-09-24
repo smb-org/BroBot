@@ -1,9 +1,10 @@
-import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 
 import { formatCount } from "../text";
 import type { ModuleLanguage } from "../modules/contract";
 import type { RealtimeEnvelope } from "../realtime-contract";
 import { connectOverlayRealtime } from "./realtime";
+import "./variable.css";
 
 interface OverlayVariableValue {
   value: number;
@@ -22,16 +23,6 @@ const RELOAD_MAX_WAIT_MS = 1_500;
 const LOAD_RETRY_BASE_DELAY_MS = 1_000;
 const MAX_LOAD_RETRY_DELAY_MS = 60_000;
 const MAX_LOAD_RETRY_ATTEMPT = 6;
-
-const variableStyle: CSSProperties = {
-  backgroundColor: "transparent",
-  color: "rgba(255, 255, 255, 0.96)",
-  fontFamily: "system-ui, sans-serif",
-  fontSize: "48px",
-  fontWeight: 700,
-  lineHeight: 1.1,
-  textShadow: "0 1px 3px rgba(0, 0, 0, 0.9)",
-};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -202,7 +193,7 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
     : text.slice(0, placeholderIndex);
   const after = placeholderIndex === -1 ? "" : text.slice(placeholderIndex + "{value}".length);
 
-  return <div className="brobot-variable" data-variable={name} style={variableStyle}>
+  return <div className="brobot-variable" data-variable={name}>
     <span className="brobot-variable__text">{before}</span>
     <span className="brobot-variable__value">{formatted}</span>
     {after.length === 0 ? null : <span className="brobot-variable__text">{after}</span>}
