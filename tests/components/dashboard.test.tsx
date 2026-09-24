@@ -2112,6 +2112,60 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("Pausiert")).toBeInTheDocument();
   });
 
+  it("keeps a control edit's fresher overview state against an older, slower reconnect reload", async () => {
+    const pausedChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      controls: {
+        mute: { active: false, until: null as string | null, mode: null as "timed" | "until_stream_end" | "unlimited" | null },
+        pause: { active: true, until: null, mode: "unlimited" as const },
+      },
+    };
+    const resumedControls = { ...pausedChannel.controls, pause: { active: false, until: null, mode: null } };
+    let resolveReconnectReload: ((response: Response) => void) | undefined;
+    const reconnectReload = new Promise<Response>((resolve) => { resolveReconnectReload = resolve; });
+    let overviewRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [pausedChannel], bot: pausedChannel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/controls/pause" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ controls: resumedControls }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overview") {
+        overviewRequestCount += 1;
+        // 1st: initial mount load. 2nd: the reconnect reload, held open so it
+        // resolves after the control edit's own refresh below (3rd). 3rd: the
+        // control edit's refresh, resolved immediately with the new state.
+        if (overviewRequestCount === 1) return Promise.resolve(jsonResponse(overview(pausedChannel)));
+        if (overviewRequestCount === 2) return reconnectReload;
+        return Promise.resolve(jsonResponse(overview({ ...pausedChannel, controls: resumedControls })));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("brobot:realtime-connected", { detail: { channelId: "kanal-a" } }));
+    });
+    await waitFor(() => { expect(overviewRequestCount).toBe(2); });
+
+    fireEvent.click(screen.getByRole("button", { name: "Automatische Aktionen fortsetzen" }));
+    await screen.findByRole("button", { name: "Automatische Aktionen pausieren" });
+    await waitFor(() => { expect(overviewRequestCount).toBe(3); });
+
+    await act(async () => {
+      resolveReconnectReload?.(jsonResponse(overview(pausedChannel)));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: "Automatische Aktionen pausieren" })).toBeInTheDocument();
+  });
+
   it("shows an offline stream-end control as pending and keeps its disable action available", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),

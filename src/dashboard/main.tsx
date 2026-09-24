@@ -1103,6 +1103,12 @@ export const DashboardApp = (): ReactElement => {
   // poll), and without this an older response can overwrite a newer one.
   const modulesRequestGeneration = useRef(0);
   const channelsRequestGeneration = useRef(0);
+  // Same guard for `reloadOverview`: a control edit's own refresh can resolve
+  // before a reload that started earlier (e.g. on reconnect). Controls don't
+  // touch streamStateChangedAt, so the changedAt-based merge alone can't tell
+  // the two apart -- only the later-started request may ever apply its
+  // response (latest-started wins).
+  const overviewRequestGeneration = useRef(0);
   // Spotlight (#164): set right before navigating to a module so its panel
   // can pre-select something on mount (e.g. a text command by name). Not
   // part of the route/URL -- see the deep-link discussion in that commit.
@@ -1528,13 +1534,15 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
+    const generation = overviewRequestGeneration.current + 1;
+    overviewRequestGeneration.current = generation;
     await reloadData(
       routePath,
       setOverview,
       () => fetchChannelOverview(channelId),
       true,
       () => setOverviewRoutePath(routePath),
-      undefined,
+      () => overviewRequestGeneration.current === generation,
       (response, current) => mergeAndRememberChannelStreamVersion(
         response,
         latestStreamByChannel.current,

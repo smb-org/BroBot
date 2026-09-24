@@ -99,4 +99,66 @@ describe("ad prewarning schedule generations", () => {
       { code: "ads.prewarning.rescheduled" },
     ]);
   });
+
+  it("recheck a snooze landing between decision and send skips the stale announcement", async () => {
+    const original: AdSchedule = {
+      nextAdAt: "2026-09-24T12:05:00.000Z",
+      duration: 60,
+      lastAdAt: null,
+      prerollFreeTime: 120,
+      snoozeCount: 0,
+      snoozeRefreshAt: null,
+    };
+    const snoozed: AdSchedule = { ...original, nextAdAt: "2026-09-24T12:20:00.000Z", snoozeCount: 1 };
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "a",
+        manual: "m",
+        prewarning: true,
+        leadSeconds: 60,
+        prewarningText: "In {seconds} Sekunden startet die Werbung.",
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule: original });
+    mocks.writeModuleDiagnostics.mockResolvedValue([]);
+    mocks.sendChatMessage.mockResolvedValue({ sent: true, truncated: false, reason: null, detail: {} });
+    const scheduled: number[] = [];
+    const scheduler: AdScheduler = {
+      schedule: (dueAtMs) => { scheduled.push(dueAtMs); return Promise.resolve(); },
+      clear: () => Promise.resolve(),
+      readScheduleGeneration: () => Promise.resolve(1),
+      // The fetch-and-store step above already landed the original schedule
+      // (matching generation, no race there). A snooze then completes in the
+      // window between that decision and the chat send: the cache this read
+      // resolves against has already moved on.
+      readSchedule: () => Promise.resolve(snoozed),
+      storeSchedule: (schedule) => Promise.resolve(schedule),
+    };
+    const environment = {
+      DB: {} as D1Database,
+      TWITCH_CLIENT_ID: "client",
+      TWITCH_CLIENT_SECRET: "secret",
+    };
+
+    await processAdPrewarning(
+      environment,
+      "kanal-a",
+      Date.parse("2026-09-24T12:04:00.000Z"),
+      "alarm-1",
+      "2026-09-24T12:04:00.000Z",
+      vi.fn() as typeof fetch,
+      scheduler,
+    );
+
+    expect(mocks.sendChatMessage).not.toHaveBeenCalled();
+    expect(scheduled).toEqual([Date.parse("2026-09-24T12:19:00.000Z")]);
+    expect(mocks.writeModuleDiagnostics.mock.calls[0]?.[5]).toMatchObject([
+      { code: "ads.prewarning.rescheduled" },
+    ]);
+  });
 });

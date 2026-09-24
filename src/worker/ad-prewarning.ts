@@ -332,14 +332,30 @@ export const processAdPrewarning = async (
     },
   });
 
+  // A snooze can land after the decision above but before the chat message
+  // actually goes out (sendChatMessage awaits a network call). Re-read the
+  // same guarded cache immediately before sending and recompute the decision
+  // from it, so a schedule change in that window skips/reschedules instead
+  // of announcing the now-stale ad time.
+  const freshSchedule = decision.kind === "announce" ? await scheduler?.readSchedule?.() ?? null : null;
+  const finalDecision = freshSchedule === null || freshSchedule.nextAdAt === currentSchedule.nextAdAt
+    ? decision
+    : decideAdPrewarning({
+      settings: configured.settings,
+      scopeAvailable: true,
+      nowAtMs: nowMsFrom(now),
+      plannedAtMs: scheduledDueAtMs + configured.settings.leadSeconds * 1000,
+      schedule: { nextAdAt: freshSchedule.nextAdAt, lastAdAt: freshSchedule.lastAdAt },
+    });
+
   const diagnostics: ModuleDiagnostic[] = [{
-    code: decisionCode(decision),
-    detail: decisionDetail(decision),
+    code: decisionCode(finalDecision),
+    detail: decisionDetail(finalDecision),
   }];
-  if (decision.kind === "announce") {
-    const sent = await sendChatMessage(environment, channelId, decision.text, undefined, fetcher);
+  if (finalDecision.kind === "announce") {
+    const sent = await sendChatMessage(environment, channelId, finalDecision.text, undefined, fetcher);
     if (sent.truncated) {
-      diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: decision.text.length } });
+      diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: finalDecision.text.length } });
     }
     diagnostics.push(sent.sent
       ? { code: "host.chat.sent" satisfies EventCode, detail: sent.detail }
@@ -347,8 +363,8 @@ export const processAdPrewarning = async (
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 
-  if (shouldReplan(decision)) {
-    await replanFromSchedule(scheduler, configured.settings, currentSchedule.nextAdAt);
+  if (shouldReplan(finalDecision)) {
+    await replanFromSchedule(scheduler, configured.settings, (freshSchedule ?? currentSchedule).nextAdAt);
   }
 };
 
