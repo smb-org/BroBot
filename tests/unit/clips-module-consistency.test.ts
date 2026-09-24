@@ -5,7 +5,7 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { getChannelOverviewForUser } from "../../src/worker/panel/repository";
 import { readDispatchChannelState } from "../../src/worker/db/channel-controls";
 import { panelRouter } from "../../src/worker/panel/routes";
-import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 // The module list API, the overview's activeModules, and dispatch's
@@ -15,12 +15,6 @@ import { TestD1Database } from "./test-d1";
 // directly and saw it as off. This checks all three now agree, in both
 // directions, straight off the same table -- with the real module registry,
 // not a test double.
-
-const key = (byte: number): string =>
-  btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
 
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),

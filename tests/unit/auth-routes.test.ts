@@ -6,7 +6,7 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { LOGIN_SCOPES } from "../../src/worker/auth/oauth";
 import { maintainBotIdentity } from "../../src/worker/bot-maintenance";
 import { maintainEventSubSubscriptions } from "../../src/worker/eventsub-subscriptions";
-import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 
@@ -29,12 +29,6 @@ const mockedMaintainEventSubSubscriptions = vi.mocked(maintainEventSubSubscripti
  * timestamps.
  */
 const freshTimestamp = (): string => new Date().toISOString();
-
-const key = (byte: number): string =>
-  btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
 
 const PLATFORM_USER_ID = "4711";
 

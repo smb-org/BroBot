@@ -9,13 +9,8 @@ import {
   type ChannelAuthorizationVariables,
 } from "../../src/worker/auth/guards";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
-
-const key = (byte: number): string =>
-  btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
 
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
@@ -45,46 +40,6 @@ app.get("/api/platform/probe", (context) => {
     prepareModuleAudit: variables.prepareModuleAudit ?? null,
   });
 });
-
-const insertChannel = async (database: TestD1Database, channelId: string): Promise<void> => {
-  await database.prepare(
-    `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).bind(channelId, channelId, channelId, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
-};
-
-const insertSession = async (database: TestD1Database, userId: string): Promise<void> => {
-  await database.prepare(
-    `INSERT INTO twitch_login_identity
-      (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-       expires_at, status, reason, created_at, updated_at)
-     VALUES (?, ?, '[]', 'access', 'refresh', ?, 'connected', NULL, ?, ?)`,
-  ).bind(userId, userId, "2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
-  await database.prepare(
-    `INSERT INTO auth_sessions
-      (session_id, user_id, login, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    `session-${userId}`,
-    userId,
-    userId,
-    "2099-09-19T00:00:00.000Z",
-    "2026-09-18T00:00:00.000Z",
-    "2026-09-18T00:00:00.000Z",
-  ).run();
-};
-
-const insertMember = async (
-  database: TestD1Database,
-  channelId: string,
-  userId: string,
-  role: "broadcaster" | "manager" | "operator",
-): Promise<void> => {
-  await database.prepare(
-    `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).bind(channelId, userId, role, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
-};
 
 const makeRequest = async (
   environment: GuardEnvironment,
@@ -130,7 +85,7 @@ describe("channel-scoped route guard", () => {
     } as GuardEnvironment;
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
-    await insertSession(database, "user-1");
+    await insertLoginIdentityAndSession(database, "user-1");
   });
 
   afterEach(() => {
@@ -166,7 +121,7 @@ describe("channel-scoped route guard", () => {
   });
 
   it("lets an operator with a session through and sets only session and actor", async () => {
-    await insertSession(database, "26876135");
+    await insertLoginIdentityAndSession(database, "26876135");
     environment.PLATFORM_USER_IDS = '["26876135"]';
 
     const response = await app.fetch(
@@ -196,7 +151,7 @@ describe("channel-scoped route guard", () => {
   });
 
   it("doesn't let an operator without a member row through on the channel route", async () => {
-    await insertSession(database, "26876135");
+    await insertLoginIdentityAndSession(database, "26876135");
     environment.PLATFORM_USER_IDS = '["26876135"]';
 
     const response = await app.fetch(

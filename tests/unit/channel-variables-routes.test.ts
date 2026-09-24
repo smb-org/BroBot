@@ -4,11 +4,8 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import type { RealtimeMessage } from "../../src/realtime-contract";
-import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
-
-const key = (byte: number): string => btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
-  .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),

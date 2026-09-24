@@ -1,5 +1,10 @@
 import type { TestD1Database } from "./test-d1";
 
+export const testKey = (byte: number): string => btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
+  .replaceAll("+", "-")
+  .replaceAll("/", "_")
+  .replaceAll("=", "");
+
 export const jsonResponse = (body: unknown, status = 200): Response => new Response(
   JSON.stringify(body),
   { status, headers: { "Content-Type": "application/json" } },

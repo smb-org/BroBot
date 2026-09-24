@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
+import { jsonResponse } from "../unit/fixtures";
 
 const relativeIso = (milliseconds: number): string => new Date(Date.now() + milliseconds).toISOString();
 
@@ -37,11 +38,6 @@ const requestUrl = (input: RequestInfo | URL): URL => {
   if (input instanceof URL) return input;
   return new URL(input, window.location.origin);
 };
-
-const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "Content-Type": "application/json" },
-});
 
 const renderModulePage = (modules = moduleStates, channels = [channel]): void => {
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {

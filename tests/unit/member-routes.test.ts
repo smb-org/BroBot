@@ -4,59 +4,14 @@ import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { panelRouter } from "../../src/worker/panel/routes";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 type MemberRole = "broadcaster" | "manager" | "operator";
 
-const key = (byte: number): string =>
-  btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
-
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
   SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
-};
-
-const insertChannel = async (database: TestD1Database, channelId: string): Promise<void> => {
-  await database.prepare(
-    `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).bind(channelId, channelId, channelId, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
-};
-
-const insertSession = async (database: TestD1Database, userId: string): Promise<void> => {
-  await database.prepare(
-    `INSERT INTO twitch_login_identity
-      (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
-       expires_at, status, reason, created_at, updated_at)
-     VALUES (?, ?, '[]', 'access', 'refresh', ?, 'connected', NULL, ?, ?)`,
-  ).bind(userId, userId, "2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
-  await database.prepare(
-    `INSERT INTO auth_sessions
-      (session_id, user_id, login, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    `session-${userId}`,
-    userId,
-    userId,
-    "2099-09-19T00:00:00.000Z",
-    "2026-09-18T00:00:00.000Z",
-    "2026-09-18T00:00:00.000Z",
-  ).run();
-};
-
-const insertMember = async (
-  database: TestD1Database,
-  channelId: string,
-  userId: string,
-  role: MemberRole,
-): Promise<void> => {
-  await database.prepare(
-    `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).bind(channelId, userId, role, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
 };
 
 const setupChannel = async (
@@ -66,7 +21,7 @@ const setupChannel = async (
   userId = "user-1",
 ): Promise<void> => {
   await insertChannel(database, channelId);
-  await insertSession(database, userId);
+  await insertLoginIdentityAndSession(database, userId);
   await insertMember(database, channelId, userId, role);
 };
 
@@ -453,7 +408,7 @@ describe("Member management", () => {
   it("uses only the channelId from the route for POST, PATCH, and DELETE", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
-    await insertSession(database, "user-1");
+    await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
 
     const addResponse = await panelRouter.fetch(
@@ -502,7 +457,7 @@ describe("Member management", () => {
   it("denies changes in a foreign channel despite a valid session", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
-    await insertSession(database, "user-1");
+    await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
 
     const response = await panelRouter.fetch(

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
+import { jsonResponse } from "../unit/fixtures";
 
 const moderator = {
   isModerator: true,
@@ -63,16 +64,11 @@ const systemFor = (reason: string) => ({
 
 const audit = { entries: [], nextCursor: null };
 
-const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "Content-Type": "application/json" },
-});
-
 type DashboardRoute = (url: URL) => Response | Promise<Response> | undefined;
 
 const stubDashboardFetch = (
   route: DashboardRoute,
-  channels: ReturnType<typeof healthyChannel>[] = [healthyChannel("kanal-a", "Alpha")],
+  channels: Array<{ bot?: unknown }> = [healthyChannel("kanal-a", "Alpha")],
 ) => {
   const fetcher = vi.fn((input: RequestInfo | URL) => {
     const url = requestUrl(input);
@@ -1473,12 +1469,9 @@ describe("Dashboard skeleton", () => {
       ...healthyChannel("kanal-a", "Alpha"),
       botPermissions: { missingScopes: ["user:bot", "user:read:chat"] },
     };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -1500,12 +1493,9 @@ describe("Dashboard skeleton", () => {
       role: "broadcaster",
       broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
     };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -1519,12 +1509,9 @@ describe("Dashboard skeleton", () => {
 
   it("shows no full-consent state for an unflagged channel", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: null };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -1536,12 +1523,9 @@ describe("Dashboard skeleton", () => {
 
   it("shows no full-consent state for a fully consented channel", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), broadcasterPermissions: { missingScopes: [] } };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -1557,12 +1541,9 @@ describe("Dashboard skeleton", () => {
       role: "manager",
       broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
     };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -1575,12 +1556,9 @@ describe("Dashboard skeleton", () => {
 
   it("shows full bot permissions as a healthy state with a word", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), botPermissions: { missingScopes: [] } };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -2628,12 +2606,9 @@ describe("Dashboard skeleton", () => {
       moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
       lastError: { source: "moderator", reason: "moderator_entfernt", at: "2026-09-18T02:00:00.000Z" },
     };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -2657,12 +2632,9 @@ describe("Dashboard skeleton", () => {
       },
     };
     const showChannel = async (): Promise<void> => {
-      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-        const path = requestUrl(input).pathname;
-        if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-        if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-        return jsonResponse({}, 404);
-      }));
+      stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
       window.history.replaceState({}, "", "/channels/kanal-a");
       render(<DashboardApp />);
       await screen.findByRole("heading", { name: "Alpha", level: 1 });
@@ -2722,12 +2694,9 @@ describe("Dashboard skeleton", () => {
       role: "manager",
       moderator: { isModerator: false, checkedAt: "2026-09-18T02:00:00.000Z", reason: "moderator_entfernt" },
     };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -2857,12 +2826,9 @@ describe("Dashboard skeleton", () => {
         loginExpiresAt: "2099-09-19T00:00:00.000Z",
       },
     };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);
@@ -2878,12 +2844,9 @@ describe("Dashboard skeleton", () => {
   it("shows a working channel with three hours remaining as healthy", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     const secondChannel = healthyChannel("kanal-b", "Beta");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel, secondChannel], bot: channel.bot }));
-      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel, secondChannel]);
     window.history.replaceState({}, "", "/");
 
     render(<DashboardApp />);
@@ -2917,12 +2880,9 @@ describe("Dashboard skeleton", () => {
       },
     };
     const secondChannel = healthyChannel("kanal-b", "Beta");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel, secondChannel], bot: channel.bot }));
-      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel, secondChannel]);
     window.history.replaceState({}, "", "/");
 
     render(<DashboardApp />);
@@ -2946,12 +2906,9 @@ describe("Dashboard skeleton", () => {
       },
     };
     const secondChannel = healthyChannel("kanal-b", "Beta");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel, secondChannel], bot: channel.bot }));
-      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel, secondChannel]);
     window.history.replaceState({}, "", "/");
 
     render(<DashboardApp />);
@@ -2967,12 +2924,9 @@ describe("Dashboard skeleton", () => {
       bot: { status: "connected", reason: null, updatedAt: relativeIso(-(60 * 60 * 1000 + 1)) },
     };
     const secondChannel = healthyChannel("kanal-b", "Beta");
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel, secondChannel], bot: channel.bot }));
-      if (path.endsWith("/overview")) return Promise.resolve(jsonResponse({ ...channel, activeModules: [] }));
-      return Promise.resolve(jsonResponse({}, 404));
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel, secondChannel]);
     window.history.replaceState({}, "", "/");
 
     render(<DashboardApp />);
@@ -3363,12 +3317,9 @@ describe("Dashboard skeleton", () => {
       botPermissions: { missingScopes: ["user:bot"] },
       broadcasterPermissions: { missingScopes: ["channel:manage:broadcast"] },
     };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const path = requestUrl(input).pathname;
-      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
-      if (path.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
-      return jsonResponse({}, 404);
-    }));
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse({ ...channel, activeModules: [] });
+    }, [channel]);
     window.history.replaceState({}, "", "/channels/kanal-a");
 
     render(<DashboardApp />);

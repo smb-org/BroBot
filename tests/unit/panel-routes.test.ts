@@ -6,17 +6,11 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 import { panelRouter } from "../../src/worker/panel/routes";
 import * as eventsubMaintenance from "../../src/worker/eventsub-subscriptions";
-import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
+import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const requestedUrl = (input?: RequestInfo | URL): string =>
   typeof input === "string" ? input : input instanceof URL ? input.href : input?.url ?? "";
-
-const key = (byte: number): string =>
-  btoa(String.fromCharCode(...new Uint8Array(32).fill(byte)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
 
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
