@@ -1586,6 +1586,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : "Shoutout"} wegen Kanal-Stummschaltung`,
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
+    "host.chat.skipped": "Chat-Nachricht übersprungen: Zeitplan hat sich in letzter Sekunde geändert",
     "host.announcement.sent": (detail) => `Chat-Ankündigung gesendet: ${detailText(detail, "text", "ohne Text")}`,
     "host.announcement.failed": (detail) => {
       const reason = eventCauseText("host.announcement.failed", detail, "de") ?? "unbekannter Grund";
@@ -1683,6 +1684,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : "shoutout"} while the channel is muted`,
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
+    "host.chat.skipped": "Chat message skipped: schedule changed at the last moment",
     "host.announcement.sent": (detail) => `Chat announcement sent: ${detailText(detail, "text", "no text")}`,
     "host.announcement.failed": (detail) => {
       const reason = eventCauseText("host.announcement.failed", detail, "en") ?? "unknown reason";
@@ -1793,6 +1795,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.action.suppressed": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "host.chat.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.chat.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "host.chat.skipped": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.announcement.failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.announcement.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "template_truncated": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },

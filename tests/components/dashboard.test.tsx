@@ -2166,6 +2166,56 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Automatische Aktionen pausieren" })).toBeInTheDocument();
   });
 
+  it("keeps a control edit's fresher overview state against a slower initial overview load", async () => {
+    const pausedChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      controls: {
+        mute: { active: false, until: null as string | null, mode: null as "timed" | "until_stream_end" | "unlimited" | null },
+        pause: { active: true, until: null, mode: "unlimited" as const },
+      },
+    };
+    const resumedControls = { ...pausedChannel.controls, pause: { active: false, until: null, mode: null } };
+    let resolveInitialLoad: ((response: Response) => void) | undefined;
+    const initialLoad = new Promise<Response>((resolve) => { resolveInitialLoad = resolve; });
+    let overviewRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [pausedChannel], bot: pausedChannel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/controls/pause" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ controls: resumedControls }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overview") {
+        overviewRequestCount += 1;
+        // 1st: the initial mount load, held open so it resolves after the
+        // control edit's own refresh below (2nd), which resolves immediately
+        // with the new state.
+        if (overviewRequestCount === 1) return initialLoad;
+        return Promise.resolve(jsonResponse(overview({ ...pausedChannel, controls: resumedControls })));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    // The pause control comes from the channel list, so it's available
+    // before the (held-back) initial overview fetch resolves.
+    fireEvent.click(await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" }));
+    await screen.findByRole("button", { name: "Automatische Aktionen pausieren" });
+    await waitFor(() => { expect(overviewRequestCount).toBe(2); });
+
+    // The stale initial response arrives last and must not overwrite the
+    // control edit's newer state.
+    await act(async () => {
+      resolveInitialLoad?.(jsonResponse(overview(pausedChannel)));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: "Automatische Aktionen pausieren" })).toBeInTheDocument();
+  });
+
   it("shows an offline stream-end control as pending and keeps its disable action available", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),

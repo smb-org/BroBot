@@ -353,13 +353,25 @@ export const processAdPrewarning = async (
     detail: decisionDetail(finalDecision),
   }];
   if (finalDecision.kind === "announce") {
-    const sent = await sendChatMessage(environment, channelId, finalDecision.text, undefined, fetcher);
+    // sendChatMessage still awaits bot identity and an access token before
+    // its own POST, so a snooze can land after the recheck above but before
+    // that call goes out. stillValid re-reads the cache one more time right
+    // before the POST -- the smallest remaining window (see the `ponytail:`
+    // note on sendChatMessage's `stillValid` parameter).
+    const validatedNextAdAt = (freshSchedule ?? currentSchedule).nextAdAt;
+    const stillValid = async (): Promise<boolean> => {
+      const latestSchedule = await scheduler?.readSchedule?.() ?? null;
+      return latestSchedule === null || latestSchedule.nextAdAt === validatedNextAdAt;
+    };
+    const sent = await sendChatMessage(environment, channelId, finalDecision.text, undefined, fetcher, stillValid);
     if (sent.truncated) {
       diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: finalDecision.text.length } });
     }
     diagnostics.push(sent.sent
       ? { code: "host.chat.sent" satisfies EventCode, detail: sent.detail }
-      : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
+      : sent.reason === "stale_before_send"
+        ? { code: "host.chat.skipped" satisfies EventCode, detail: sent.detail }
+        : { code: "host.chat.failed" satisfies EventCode, detail: { reason: sent.reason, ...sent.detail } });
   }
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 

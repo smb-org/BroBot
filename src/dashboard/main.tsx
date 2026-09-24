@@ -1334,9 +1334,14 @@ export const DashboardApp = (): ReactElement => {
       // The module page shows the same channel header as the overview and
       // therefore needs the same data.
       if (route.kind === "module" || route.section === "overview") {
+        // Same generation guard `reloadOverview` uses: a control edit's own
+        // reload can resolve before this initial fetch does, and without
+        // this the initial response would overwrite the edit on arrival.
+        const overviewGeneration = overviewRequestGeneration.current + 1;
+        overviewRequestGeneration.current = overviewGeneration;
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
-          if (!cancelled) {
+          if (!cancelled && overviewRequestGeneration.current === overviewGeneration) {
             const orderedResponse = mergeAndRememberChannelStreamVersion(response, latestStreamByChannel.current);
             setOverview((current) => loadedState(mergeChannelStreamVersion(
               orderedResponse,
@@ -1345,7 +1350,7 @@ export const DashboardApp = (): ReactElement => {
             setOverviewRoutePath(expectedOverviewPath);
           }
         } catch (error) {
-          if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
+          if (!cancelled && overviewRequestGeneration.current === overviewGeneration && !(error instanceof DOMException && error.name === "AbortError")) {
             setOverview({ status: "error", data: null, error: errorMessage(error) });
             if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
           }

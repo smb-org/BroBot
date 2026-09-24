@@ -153,7 +153,7 @@ describe("dashboard locale", () => {
 
   it("carries family, tier, word, and number key for every known event code", () => {
     const codes: EventCode[] = [
-      "host.action.failed", "host.action.suppressed", "host.chat.failed", "host.chat.sent", "host.announcement.failed", "host.announcement.sent",
+      "host.action.failed", "host.action.suppressed", "host.chat.failed", "host.chat.sent", "host.chat.skipped", "host.announcement.failed", "host.announcement.sent",
       "template_truncated", "host.module.error",
       "host.module.unknown", "host.overlay.not_executed", "host.shoutout.failed", "host.shoutout.sent", "host.clip.failed", "channel_events.raid.incoming",
       "channel_events.raid.outgoing", "channel_events.shoutout.sent", "channel_events.shoutout.received",
