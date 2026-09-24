@@ -52,7 +52,7 @@ describe("Twitch ad schedule", () => {
     await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
       fetched: true,
       reason: null,
-      detail: { status: 200, message: null },
+      detail: { status: 200, twitchMessage: null },
       schedule: {
         nextAdAt: "2026-09-21T12:00:00Z",
         duration: 60,
@@ -127,7 +127,7 @@ describe("Twitch ad schedule", () => {
     await expect(getAdSchedule(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
       fetched: false,
       reason,
-      detail: { status, message: "Twitch-Antwort" },
+      detail: { status, twitchMessage: "Twitch-Antwort" },
       schedule: null,
     });
   });
@@ -147,7 +147,7 @@ describe("Twitch ad schedule", () => {
     await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
       snoozed: true,
       reason: null,
-      detail: { status: 200, message: null },
+      detail: { status: 200, twitchMessage: null },
       schedule: {
         nextAdAt: "2026-09-21T12:05:00Z",
         duration: 60,
@@ -178,7 +178,7 @@ describe("Twitch ad schedule", () => {
     await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
       snoozed: false,
       reason: "rate_limited",
-      detail: { status: 429, message: "Twitch-Antwort" },
+      detail: { status: 429, twitchMessage: "Twitch-Antwort" },
       schedule: null,
     });
   });
@@ -192,7 +192,7 @@ describe("Twitch ad schedule", () => {
     await expect(snoozeNextAd(environment(), "kanal-a", "2026-09-21T11:00:00.000Z", getAppAccessToken, helixRequest, fetcher)).resolves.toEqual({
       snoozed: false,
       reason: "scope_missing",
-      detail: { status: 401, message: "Missing required scope: channel:manage:ads" },
+      detail: { status: 401, twitchMessage: "Missing required scope: channel:manage:ads" },
       schedule: null,
     });
   });

@@ -128,6 +128,30 @@ describe("ad routes", () => {
     expect(schedule).toHaveBeenCalled();
   });
 
+  it("keeps Twitch's own message under the API's message key on a failed snooze (issue #201 follow-up)", async () => {
+    const environment = await setup("operator");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "slow down" }),
+      { status: 429 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/snooze", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(429);
+    await expect(database.prepare(
+      "SELECT code FROM event_log WHERE channel_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ code: "ads.snooze" });
+    // The event-log diagnostic carries this same message under
+    // `twitchMessage`, but the API error response has always used `message`.
+    const body = await response.json<{ error: string; reason: string; detail: Record<string, unknown> }>();
+    expect(body).toMatchObject({ error: "ad_snooze_failed", reason: "rate_limited" });
+    expect(body.detail.message).toBe("slow down");
+    expect(body.detail.twitchMessage).toBeUndefined();
+  });
+
   it("separates snooze operation from the managing settings threshold", async () => {
     const environment = await setup("operator");
     const response = await panelRouter.fetch(
@@ -201,6 +225,12 @@ describe("ad routes", () => {
     await expect(database.prepare(
       "SELECT code FROM event_log WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ code: "ads.prewarning.schedule_error" });
+    // Issue #201 follow-up: the event-log diagnostic carries this same
+    // message under `twitchMessage`, but the API error response has always
+    // used `message`.
+    const body = await response.json<{ detail: Record<string, unknown> }>();
+    expect(body.detail.message).toBe("Twitch nicht erreichbar");
+    expect(body.detail.twitchMessage).toBeUndefined();
   });
 
   it("handles an empty successful schedule without an event", async () => {
@@ -304,7 +334,13 @@ describe("start commercial", () => {
     );
 
     expect(response.status).toBe(429);
-    await expect(response.json()).resolves.toMatchObject({ error: "commercial_start_failed", reason: "rate_limited" });
+    // Issue #201 follow-up: the event-log diagnostic carries this same
+    // message under `twitchMessage` (provenance for the dashboard popover),
+    // but the API error response has always used `message`.
+    const body = await response.json<{ error: string; reason: string; detail: Record<string, unknown> }>();
+    expect(body).toMatchObject({ error: "commercial_start_failed", reason: "rate_limited" });
+    expect(body.detail.message).toBe("slow down");
+    expect(body.detail.twitchMessage).toBeUndefined();
   });
 
   it("maps Twitch's offline rejection to a closed error and diagnostic reason", async () => {
@@ -329,7 +365,7 @@ describe("start commercial", () => {
       outcome: "failed",
       reason: "stream_offline",
       status: 400,
-      message: "The broadcaster must be live to start a commercial.",
+      twitchMessage: "The broadcaster must be live to start a commercial.",
     });
   });
 

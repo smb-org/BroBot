@@ -36,6 +36,11 @@ describe("Module labels", () => {
     expect(moduleDescription("gibtesnicht", "de")).toBeNull();
   });
 
+  it("labels the unregistered host module id instead of showing it raw (issue #201)", () => {
+    expect(moduleName("host", "de")).toBe("System");
+    expect(moduleName("host", "en")).toBe("System");
+  });
+
   it("uses the Shoutout name for the existing raid module id in both catalogues", () => {
     expect(moduleName("raid", "de")).toBe("Shoutout");
     expect(moduleName("raid", "en")).toBe("Shoutout");

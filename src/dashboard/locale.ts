@@ -477,6 +477,16 @@ export interface DashboardTexts {
      *  error row's cause without opening the inspector -- takes the row's
      *  own event label so two icons on screen never share one name. */
     showCause: (eventLabel: string) => string;
+    /** The popover's second line when Twitch supplied its own diagnostic
+     *  message alongside the localized cause (see `eventCause` in
+     *  `events/model.ts`) -- labelled so it reads as a quote, not another
+     *  translated phrase. */
+    causeTwitchMessage: (message: string) => string;
+    /** The popover's second line when that extra message is local (a caught
+     *  exception's own text, not anything Twitch said) -- a neutral label,
+     *  since calling it "Twitch: ..." would misattribute it (see
+     *  `eventCause`'s `messageIsFromTwitch`). */
+    causeDetailMessage: (message: string) => string;
   };
   signIn: {
     required: string;
@@ -711,6 +721,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       retry: "Erneut versuchen", technicalDetails: "Technische Details", copyId: "ID kopieren", copied: "Kopiert",
       trigger: "Auslöser", moderator: "Moderator", affectedPerson: "Betroffene Person",
       showCause: (eventLabel) => `Ursache anzeigen: ${eventLabel}`,
+      causeTwitchMessage: (message) => `Twitch: ${message}`,
+      causeDetailMessage: (message) => `Details: ${message}`,
     },
     signIn: {
       required: "Anmeldung erforderlich", explanation: "Bitte melde dich mit deinem Twitch-Konto an, um freigegebene Kanäle zu sehen.",
@@ -917,6 +929,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       retry: "Retry", technicalDetails: "Technical details", copyId: "Copy ID", copied: "Copied",
       trigger: "Trigger", moderator: "Moderator", affectedPerson: "Affected person",
       showCause: (eventLabel) => `Show cause: ${eventLabel}`,
+      causeTwitchMessage: (message) => `Twitch: ${message}`,
+      causeDetailMessage: (message) => `Details: ${message}`,
     },
     signIn: {
       required: "Sign-in required", explanation: "Sign in with your Twitch account to see available channels.",
@@ -1036,6 +1050,28 @@ const eventTextWithName = (
 ): string => {
   const name = textCommandName(detail);
   return name === null ? withoutName : withName(name);
+};
+
+/** `channel_events.chat.unknown`'s notice type ("art"): shown when Twitch's
+ *  own type is present, left out entirely (not even a placeholder) when the
+ *  producer had none to record -- issue #201, "Unbekannte Chat-
+ *  Benachrichtigung: unbekannt" doubled up the same "unknown" twice. Rows
+ *  written before that fix still carry the old `"unbekannt"` placeholder
+ *  literally (the producer stored its own internal branching sentinel,
+ *  fixed at the source too, but the event log's 14-day retention means
+ *  already-persisted rows keep the old value) -- treated the same as no
+ *  type at all, not shown as if it were a real notice type. */
+const LEGACY_UNKNOWN_NOTICE_TYPE = "unbekannt";
+
+const chatUnknownText = (
+  detail: EventDetail,
+  withoutType: string,
+  withType: (art: string) => string,
+): string => {
+  const art = detail.art;
+  return typeof art === "string" && art.length > 0 && art !== LEGACY_UNKNOWN_NOTICE_TYPE
+    ? withType(art)
+    : withoutType;
 };
 
 const detailText = (detail: EventDetail, key: string, fallback: string): string =>
@@ -1281,11 +1317,11 @@ const genericFailureTexts: LocaleCatalog<Record<string, string>> = {
  * announcement.ts`) emits exactly the same `not_moderator`/
  * `bot_identity_missing`/`app_token_unavailable` (plus the generic Helix
  * reasons) as `sendShoutout` does. `ads.skipped`, `raid.invalid`, and
- * `shoutout.suppressed` are listed here too even though `events/model.ts`'s
- * `CODES_WITH_CAUSE_IN_TEXT` currently suppresses their icon outright (their
- * row text is exhaustive over every reason their producer emits) -- belt
- * and suspenders: if that suppression ever changes, no machine id leaks
- * through by accident.
+ * `shoutout.suppressed` are listed here too even though
+ * `eventCauseAlreadyShown` below currently suppresses their icon outright
+ * (their row text is exhaustive over every reason their producer emits) --
+ * belt and suspenders: if that suppression ever changes, no machine id
+ * leaks through by accident.
  */
 const REASON_CATALOG_BY_CODE: Partial<Record<EventCode, LocaleCatalog<Record<string, string>>>> = {
   "host.shoutout.failed": shoutoutFailureTexts,
@@ -1319,38 +1355,85 @@ const unknownCauseText: LocaleCatalog<string> = {
 
 /**
  * The localized cause behind a warning/error event, read from the
- * `reason`/`cause`/`message` diagnostic keys. Looks up the code's own
- * failure catalog first (`REASON_CATALOG_BY_CODE`), falls back to the small
- * shared `genericFailureTexts` only when the code has none. When neither
- * covers the value: a nonempty `detail.message` wins next -- Twitch's own
- * message (e.g. a chat drop reason's `message`, or a Helix error body's
- * `message`) reads better than a bare code; then an `http_<status>` pattern
+ * `reason`/`cause`/`twitchMessage`/`message` diagnostic keys. Looks up the
+ * code's own failure catalog first (`REASON_CATALOG_BY_CODE`), falls back
+ * to the small shared `genericFailureTexts` only when the code has none.
+ * When neither covers the value: a nonempty `detail.twitchMessage` wins
+ * next, then a nonempty `detail.message` -- Twitch's own message (a Helix
+ * error body's `message`, or a chat drop reason's `message`; producers
+ * label it `twitchMessage` specifically where it came from a Twitch
+ * response, keeping `message` for a caught exception's own local text --
+ * see `writeModuleDiagnostics` in `worker/event-log.ts`, which caps both at
+ * ingestion) reads better than a bare code; then an `http_<status>` pattern
  * gets a generic "Twitch responded with error <status>"; anything else
- * uncatalogued falls back to `unknownCauseText`. The raw machine value never
- * reaches this function's return value -- it stays visible only in the
- * inspector's technical details (`formatEventDetail`). Reused by the events
- * list's hover icon so the cause is readable without opening the inspector,
- * even for codes whose own row text stays generic (`host.chat.failed`,
- * `host.action.failed`, ...). Returns null when the detail carries none of
- * those keys, so the row gets no icon at all.
+ * uncatalogued falls back to `unknownCauseText`.
+ * The raw machine value never reaches this function's return value -- it
+ * stays visible only in the inspector's technical details
+ * (`formatEventDetail`). Reused by the events list's hover icon so the
+ * cause is readable without opening the inspector, even for codes whose own
+ * row text stays generic (`host.chat.failed`, `host.action.failed`, ...).
+ * Returns null when the detail carries none of those keys, so the row gets
+ * no icon at all.
  */
 export const eventCauseText = (
   code: string,
   detail: EventDetail,
   language: DashboardLanguage = dashboardLanguage(),
 ): string | null => {
-  const raw = detail.reason ?? detail.cause ?? detail.message;
+  const raw = detail.reason ?? detail.cause ?? detail.twitchMessage ?? detail.message;
   if (typeof raw !== "string" || raw.length === 0) return null;
   const ownCatalog = REASON_CATALOG_BY_CODE[code as EventCode];
   const localized = (ownCatalog === undefined ? undefined : catalogString(ownCatalog[language], raw))
     ?? catalogString(genericFailureTexts[language], raw);
   if (localized !== undefined) return localized;
-  const message = detail.message;
+  const message = detail.twitchMessage ?? detail.message;
   if (typeof message === "string" && message.length > 0) return message;
   const httpStatus = HTTP_STATUS_REASON_PATTERN.exec(raw)?.[1];
   if (httpStatus !== undefined) return httpStatusCauseText(httpStatus, language);
   return unknownCauseText[language];
 };
+
+/**
+ * Codes whose own `eventTexts` row formatter always folds *some* phrase for
+ * the failure cause into what it renders, however uncatalogued the raw
+ * value: `host.announcement.failed` and `ads.prewarning.schedule_error`
+ * embed the full `eventCauseText` resolution verbatim (own/generic catalog,
+ * then Twitch's own `message`, then the `http_<status>` pattern, then the
+ * unknown-cause fallback -- always something, once there's a raw value at
+ * all). `ads.commercial.failed`, `raid.invalid`, `ads.skipped`, and
+ * `shoutout.suppressed` each read their own reason function that has no
+ * null branch either: every value their closed union allows already has
+ * covering text, `ads.commercial.failed`'s falling back to its own generic
+ * "Twitch rejected the request" wording for anything else. The hover icon
+ * would only repeat that -- unless Twitch also supplied a `message` these
+ * never surface (see `eventCause` in `events/model.ts`, which checks that
+ * separately).
+ *
+ * `host.shoutout.failed` is deliberately absent: its formatter's own
+ * `shoutoutFailureReasonText` returns null for anything outside
+ * `SHOUTOUT_FAILURE_REASONS`, and the row then shows nothing extra at all
+ * ("Shoutout failed", full stop) -- exactly the case the icon needs to
+ * cover, so `eventCauseAlreadyShown` checks that catalog directly below
+ * instead of assuming it.
+ */
+const CODES_ALWAYS_FOLDING_CAUSE = new Set<EventCode>([
+  "host.announcement.failed",
+  "ads.commercial.failed",
+  "raid.invalid",
+  "ads.prewarning.schedule_error",
+  "shoutout.suppressed",
+  "ads.skipped",
+]);
+
+/** Whether `code`'s own row text (`eventTexts`) already shows the cause
+ *  `eventCauseText` would resolve for this entry -- the other half of
+ *  `eventCause`'s icon decision besides a Twitch `message` (see there).
+ *  Derived from the same catalog lookups each formatter draws on, not from
+ *  comparing rendered strings: a wording mismatch between this and the row
+ *  would otherwise go unnoticed (see `CODES_ALWAYS_FOLDING_CAUSE`). */
+export const eventCauseAlreadyShown = (code: string, detail: EventDetail): boolean =>
+  CODES_ALWAYS_FOLDING_CAUSE.has(code as EventCode) ||
+  (code === "host.shoutout.failed" && shoutoutFailureReasonText(detail.cause) !== null);
 
 export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
   de: {
@@ -1387,7 +1470,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "channel_events.chat.gift_sub": (detail) => `Gift-Sub von ${detailText(detail, "gifter", "unbekannt")} an ${detailText(detail, "recipient", "unbekannt")}`,
     "channel_events.chat.community_gift": (detail) => `Community-Gift von ${detailText(detail, "gifter", "unbekannt")} für ${detailNumber(detail, "count", "unbekannte Anzahl")} Subs`,
     "channel_events.chat.announcement": (detail) => `Ankündigung von ${detailText(detail, "person", "unbekannt")}: ${detailText(detail, "text", "ohne Text")}`,
-    "channel_events.chat.unknown": (detail) => `Unbekannte Chat-Benachrichtigung: ${detailText(detail, "art", "unbekannt")}`,
+    "channel_events.chat.unknown": (detail) => chatUnknownText(detail, "Unbekannte Chat-Benachrichtigung", (art) => `Unbekannte Chat-Benachrichtigung: ${art}`),
     "channel_events.moderation.ban": (detail) => `${detailText(detail, "person", "unbekannt")} gebannt von ${detailText(detail, "moderator", "unbekannt")}${detailReason(detail)}`,
     "channel_events.moderation.timeout": (detail) => `${detailText(detail, "person", "unbekannt")} für ${detailDuration(detail, "Sekunden", "unbekannte Dauer")} getimeoutet von ${detailText(detail, "moderator", "unbekannt")}${detailReason(detail)}`,
     "channel_events.moderation.untimeout": (detail) => `${detailText(detail, "person", "unbekannt")} aus dem Timeout genommen von ${detailText(detail, "moderator", "unbekannt")}`,
@@ -1484,7 +1567,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "channel_events.chat.gift_sub": (detail) => `Gift sub from ${detailText(detail, "gifter", "unknown")} to ${detailText(detail, "recipient", "unknown")}`,
     "channel_events.chat.community_gift": (detail) => `Community gift from ${detailText(detail, "gifter", "unknown")} for ${detailNumber(detail, "count", "unknown number")} subs`,
     "channel_events.chat.announcement": (detail) => `Announcement from ${detailText(detail, "person", "unknown")}: ${detailText(detail, "text", "no text")}`,
-    "channel_events.chat.unknown": (detail) => `Unknown chat notification: ${detailText(detail, "art", "unknown")}`,
+    "channel_events.chat.unknown": (detail) => chatUnknownText(detail, "Unknown chat notification", (art) => `Unknown chat notification: ${art}`),
     "channel_events.moderation.ban": (detail) => `${detailText(detail, "person", "unknown")} banned by ${detailText(detail, "moderator", "unknown")}${detailReason(detail)}`,
     "channel_events.moderation.timeout": (detail) => `${detailText(detail, "person", "unknown")} timed out for ${detailDuration(detail, "seconds", "unknown duration")} by ${detailText(detail, "moderator", "unknown")}${detailReason(detail)}`,
     "channel_events.moderation.untimeout": (detail) => `${detailText(detail, "person", "unknown")} removed from timeout by ${detailText(detail, "moderator", "unknown")}`,

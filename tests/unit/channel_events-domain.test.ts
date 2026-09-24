@@ -107,6 +107,16 @@ describe("channel events domain", () => {
     }]);
   });
 
+  it("leaves the notice type out of the detail entirely when Twitch sent none, instead of a placeholder value", () => {
+    // Issue #201: a stored `"unbekannt"` placeholder made the dashboard row
+    // say "Unbekannte Chat-Benachrichtigung: unbekannt" -- the word for
+    // "unknown" twice. The internal branching sentinel must not leak here.
+    expect(diagnose("channel.chat.notification", {})).toEqual([{
+      code: "channel_events.chat.unknown",
+      detail: {},
+    }]);
+  });
+
   it.each([
     ["ban", "channel_events.moderation.ban"],
     ["warn", "channel_events.moderation.warn"],

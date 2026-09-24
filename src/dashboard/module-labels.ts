@@ -10,6 +10,10 @@ type ModuleNames = Record<string, string>;
 
 const moduleNames: LocaleCatalog<ModuleNames> = {
   de: {
+    // Not a registered module (see `docs/CONTRIBUTING.md`'s `modul:host`) --
+    // the worker/auth/overlay foundation events without a module of their
+    // own still get a readable label instead of the raw id (issue #201).
+    host: "System",
     text_commands: "Textbefehle",
     channel_events: "Kanalereignisse",
     ads: "Werbung",
@@ -17,6 +21,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     clips: "Clips",
   },
   en: {
+    host: "System",
     text_commands: "Text commands",
     channel_events: "Channel events",
     ads: "Ad breaks",

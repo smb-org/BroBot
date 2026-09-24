@@ -815,8 +815,11 @@ describe("dispatch and execution", () => {
       expect(requestedUrl(fetcher.mock.calls[1]?.[0])).toContain("/helix/chat/messages");
       const rows = await eventLog(database);
       expect(rows.map((row) => row.code)).toEqual(["host.announcement.failed", "host.chat.sent"]);
+      // Issue #201 follow-up: Twitch's own explanation used to be dropped
+      // here -- sendChatAnnouncement's result carried it, but dispatch only
+      // ever copied `status` across into the diagnostic.
       expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({
-        reason: `http_${String(status)}`, outcome: "sent_as_message", status,
+        reason: `http_${String(status)}`, outcome: "sent_as_message", status, twitchMessage: "denied",
       });
     } finally {
       database.close();
