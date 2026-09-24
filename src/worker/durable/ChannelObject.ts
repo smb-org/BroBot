@@ -809,8 +809,9 @@ export class ChannelObject extends DurableObject<Env> {
             schedule: async (dueAtMs) => { await this.scheduleAdPrewarning(dueAtMs); },
             clear: async () => { await this.clearAdPrewarning(); },
             readScheduleGeneration: () => this.getAdScheduleGeneration(),
+            readSchedule: async () => (await this.getCachedAdSchedule())?.schedule ?? null,
             storeSchedule: async (schedule, asOf, options) => {
-              await this.storeAdSchedule(
+              return await this.storeAdSchedule(
                 schedule,
                 asOf,
                 undefined,

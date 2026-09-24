@@ -44,6 +44,7 @@ export interface AdScheduler {
     options?: { expectedGeneration?: number; reconcileAlarm?: boolean },
   ) => Promise<unknown>;
   readScheduleGeneration?: () => Promise<number>;
+  readSchedule?: () => Promise<AdSchedule | null>;
 }
 
 const nowMsFrom = (now: string): number => {
@@ -77,6 +78,7 @@ const channelObject = (
     reconcileAlarm?: boolean,
   ) => Promise<unknown>;
   getAdScheduleGeneration: () => Promise<number>;
+  getCachedAdSchedule: () => Promise<{ schedule: AdSchedule } | null>;
 } | null => {
   if (environment.CHANNEL === undefined) return null;
   return environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId));
@@ -94,9 +96,10 @@ const schedulerFor = (
     schedule: async (dueAtMs) => { await stub.scheduleAdPrewarning(dueAtMs); },
     clear: async () => { await stub.clearAdPrewarning(); },
     readScheduleGeneration: () => stub.getAdScheduleGeneration(),
+    readSchedule: async () => (await stub.getCachedAdSchedule())?.schedule ?? null,
     storeSchedule: async (schedule, asOf, options) => {
-      if (options === undefined) await stub.storeAdSchedule(schedule, asOf);
-      else await stub.storeAdSchedule(
+      if (options === undefined) return await stub.storeAdSchedule(schedule, asOf);
+      return await stub.storeAdSchedule(
         schedule,
         asOf,
         undefined,
@@ -114,6 +117,24 @@ const schedule = async (scheduler: AdScheduler | null, dueAtMs: number): Promise
 
 const clear = async (scheduler: AdScheduler | null): Promise<void> => {
   await scheduler?.clear();
+};
+
+/**
+ * A rejected generation means this fetch lost to a newer schedule save. Some
+ * adapters historically returned void after awaiting the guarded save, so
+ * treat an ambiguous result the same way: only use the fetched value when a
+ * successful save is explicit. Otherwise use the object cache or skip.
+ */
+const storeScheduleAndResolveCurrent = async (
+  scheduler: AdScheduler | null,
+  schedule: AdSchedule,
+  asOf: string,
+  options?: { expectedGeneration?: number; reconcileAlarm?: boolean },
+): Promise<AdSchedule | null> => {
+  if (scheduler?.storeSchedule === undefined) return schedule;
+  const stored = await scheduler.storeSchedule(schedule, asOf, options);
+  if (stored !== null && stored !== undefined) return schedule;
+  return await scheduler.readSchedule?.() ?? null;
 };
 
 const writeDiagnostics = async (
@@ -243,13 +264,13 @@ export const refreshAdPrewarning = async (
   // Persist the fetched value there before touching its alarm so a subsequent
   // panel read cannot reconcile an older cached schedule over this one.
   const storedByChannelObject = scheduler?.storeSchedule !== undefined;
-  if (storedByChannelObject) {
-    const stored = await scheduler.storeSchedule?.(result.schedule, now, {
+  const currentSchedule = storedByChannelObject
+    ? await storeScheduleAndResolveCurrent(scheduler, result.schedule, now, {
       ...(scheduleGeneration === undefined ? {} : { expectedGeneration: scheduleGeneration }),
-    });
-    if (stored === null) return;
-  }
-  if (result.schedule.nextAdAt === null) {
+    })
+    : result.schedule;
+  if (currentSchedule === null) return;
+  if (currentSchedule.nextAdAt === null) {
     if (!storedByChannelObject) await clear(scheduler);
     if (shouldWriteDiagnostics) {
       await writeOne(environment, channelId, triggerId, now, "ads.prewarning.no_schedule");
@@ -257,7 +278,7 @@ export const refreshAdPrewarning = async (
     return;
   }
 
-  if (!storedByChannelObject) await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
+  if (!storedByChannelObject) await replanFromSchedule(scheduler, configured.settings, currentSchedule.nextAdAt);
 };
 
 /** Runs the due prewarning after a fresh schedule fetch. */
@@ -294,11 +315,11 @@ export const processAdPrewarning = async (
 
   // The alarm run has already claimed its deadline, so refresh the cached
   // schedule without rearming from the cache before its decision is applied.
-  const storedSchedule = await scheduler?.storeSchedule?.(result.schedule, now, {
+  const currentSchedule = await storeScheduleAndResolveCurrent(scheduler, result.schedule, now, {
     ...(scheduleGeneration === undefined ? {} : { expectedGeneration: scheduleGeneration }),
     reconcileAlarm: false,
   });
-  if (storedSchedule === null) return;
+  if (currentSchedule === null) return;
 
   const decision = decideAdPrewarning({
     settings: configured.settings,
@@ -306,8 +327,8 @@ export const processAdPrewarning = async (
     nowAtMs: nowMsFrom(now),
     plannedAtMs: scheduledDueAtMs + configured.settings.leadSeconds * 1000,
     schedule: {
-      nextAdAt: result.schedule.nextAdAt,
-      lastAdAt: result.schedule.lastAdAt,
+      nextAdAt: currentSchedule.nextAdAt,
+      lastAdAt: currentSchedule.lastAdAt,
     },
   });
 
@@ -327,7 +348,7 @@ export const processAdPrewarning = async (
   await writeDiagnostics(environment, channelId, triggerId, now, diagnostics);
 
   if (shouldReplan(decision)) {
-    await replanFromSchedule(scheduler, configured.settings, result.schedule.nextAdAt);
+    await replanFromSchedule(scheduler, configured.settings, currentSchedule.nextAdAt);
   }
 };
 

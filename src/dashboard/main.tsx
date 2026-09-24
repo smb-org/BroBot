@@ -372,7 +372,18 @@ const streamDuration = (startedAt: string | null | undefined, now: number): stri
   return `${String(Math.floor(minutes / 60))}:${String(minutes % 60).padStart(2, "0")}`;
 };
 
-const mergeChannelStreamVersion = (incoming: PanelChannelState, current: PanelChannelState | undefined): PanelChannelState => {
+type ChannelStreamVersion = Pick<PanelChannelState, "channelId" | "streamState" | "streamStartedAt" | "streamStateChangedAt" | "streamStateCheckedAt" | "controls">;
+
+const streamVersionOf = (channel: ChannelStreamVersion): ChannelStreamVersion => ({
+  channelId: channel.channelId,
+  ...(channel.streamState === undefined ? {} : { streamState: channel.streamState }),
+  ...(channel.streamStartedAt === undefined ? {} : { streamStartedAt: channel.streamStartedAt }),
+  ...(channel.streamStateChangedAt === undefined ? {} : { streamStateChangedAt: channel.streamStateChangedAt }),
+  ...(channel.streamStateCheckedAt === undefined ? {} : { streamStateCheckedAt: channel.streamStateCheckedAt }),
+  ...(channel.controls === undefined ? {} : { controls: channel.controls }),
+});
+
+const mergeChannelStreamVersion = <T extends ChannelStreamVersion>(incoming: T, current: ChannelStreamVersion | undefined): T => {
   if (current === undefined) return incoming;
   const incomingChangedAt = incoming.streamStateChangedAt == null ? Number.NaN : Date.parse(incoming.streamStateChangedAt);
   const currentChangedAt = current.streamStateChangedAt == null ? Number.NaN : Date.parse(current.streamStateChangedAt);
@@ -382,19 +393,31 @@ const mergeChannelStreamVersion = (incoming: PanelChannelState, current: PanelCh
       (!Number.isFinite(incomingCheckedAt) || currentCheckedAt > incomingCheckedAt)
     ? current.streamStateCheckedAt
     : incoming.streamStateCheckedAt;
-  if (Number.isFinite(currentChangedAt) &&
-      (!Number.isFinite(incomingChangedAt) || currentChangedAt > incomingChangedAt)) {
-    return {
-      ...incoming,
+  const currentIsNewer = Number.isFinite(currentChangedAt) &&
+      (!Number.isFinite(incomingChangedAt) || currentChangedAt > incomingChangedAt);
+  const merged: ChannelStreamVersion = {
+    ...incoming,
+    ...(currentIsNewer ? {
       ...(current.streamState === undefined ? {} : { streamState: current.streamState }),
       ...(current.streamStartedAt === undefined ? {} : { streamStartedAt: current.streamStartedAt }),
       ...(current.streamStateChangedAt === undefined ? {} : { streamStateChangedAt: current.streamStateChangedAt }),
-      ...(checkedAt === undefined ? {} : { streamStateCheckedAt: checkedAt }),
       ...(current.controls === undefined ? {} : { controls: current.controls }),
-    };
-  }
-  if (checkedAt === incoming.streamStateCheckedAt) return incoming;
-  return checkedAt === undefined ? incoming : { ...incoming, streamStateCheckedAt: checkedAt };
+    } : {}),
+    ...(incoming.controls === undefined && current.controls !== undefined ? { controls: current.controls } : {}),
+    ...(checkedAt === undefined ? {} : { streamStateCheckedAt: checkedAt }),
+  };
+  return merged as T;
+};
+
+const mergeAndRememberChannelStreamVersion = <T extends ChannelStreamVersion>(
+  incoming: T,
+  latestByChannel: Map<string, ChannelStreamVersion>,
+  current?: ChannelStreamVersion,
+): T => {
+  const withCurrent = mergeChannelStreamVersion(incoming, current);
+  const merged = mergeChannelStreamVersion(withCurrent, latestByChannel.get(incoming.channelId));
+  latestByChannel.set(incoming.channelId, streamVersionOf(merged));
+  return merged;
 };
 
 const ChannelControlActions = ({ channelId, controls, now, onRefresh }: {
@@ -1047,6 +1070,7 @@ export const DashboardApp = (): ReactElement => {
     (route.section === "overview" || route.section === "events" || route.section === "variables");
   useRealtimePanelMessages(realtimeChannelId, realtimeChannelId !== null && !routeHasOwnRealtimeFeed);
   const [channels, setChannels] = useState<LoadState<PanelChannelState[]>>(() => idleState());
+  const latestStreamByChannel = useRef(new Map<string, ChannelStreamVersion>());
   const [, setFreshnessTick] = useState(0);
   const [isPlatform, setIsPlatform] = useState(false);
   const [viewerIsBot, setViewerIsBot] = useState(false);
@@ -1101,40 +1125,26 @@ export const DashboardApp = (): ReactElement => {
           typeof payload.changedAt !== "string" || !Number.isFinite(Date.parse(payload.changedAt)) ||
           (payload.checkedAt !== undefined && (typeof payload.checkedAt !== "string" || !Number.isFinite(Date.parse(payload.checkedAt))))) return;
       const { channelId } = message;
-      const streamState = payload.state;
-      const streamStartedAt = payload.startedAt;
-      const changedAt = payload.changedAt;
-      const checkedAt = typeof payload.checkedAt === "string" ? payload.checkedAt : changedAt;
-      const controls = payload.controls as PanelChannelControls | undefined;
-      const isNotOlder = (storedChangedAt: string | null | undefined): boolean => {
-        const storedVersion = storedChangedAt === undefined || storedChangedAt === null ? Number.NaN : Date.parse(storedChangedAt);
-        return !Number.isFinite(storedVersion) || Date.parse(changedAt) >= storedVersion;
-      };
-      const newerCheckedAt = (storedCheckedAt: string | null | undefined): string =>
-        storedCheckedAt !== undefined && storedCheckedAt !== null && Number.isFinite(Date.parse(storedCheckedAt)) &&
-          Date.parse(storedCheckedAt) > Date.parse(checkedAt) ? storedCheckedAt : checkedAt;
-      setChannels((current) => current.data === null || !current.data.some((channel) =>
-        channel.channelId === channelId && isNotOlder(channel.streamStateChangedAt),
-      ) ? current : {
+      const streamVersion = mergeAndRememberChannelStreamVersion({
+        channelId,
+        streamState: payload.state,
+        streamStartedAt: payload.startedAt,
+        streamStateChangedAt: payload.changedAt,
+        streamStateCheckedAt: typeof payload.checkedAt === "string" ? payload.checkedAt : payload.changedAt,
+        ...(payload.controls === undefined ? {} : { controls: payload.controls as PanelChannelControls }),
+      }, latestStreamByChannel.current);
+      setChannels((current) => current.data === null || !current.data.some((channel) => channel.channelId === channelId) ? current : {
         ...current,
         data: current.data.map((channel) => channel.channelId !== channelId ? channel : {
           ...channel,
-          streamState,
-          streamStartedAt,
-          streamStateChangedAt: changedAt,
-          streamStateCheckedAt: newerCheckedAt(channel.streamStateCheckedAt),
-          ...(controls === undefined ? {} : { controls }),
+          ...mergeChannelStreamVersion({ ...channel, ...streamVersion }, channel),
         }),
       });
-      setOverview((current) => current.data?.channelId !== channelId || !isNotOlder(current.data.streamStateChangedAt) ? current : {
+      setOverview((current) => current.data?.channelId !== channelId ? current : {
         ...current,
         data: {
           ...current.data,
-          streamState,
-          streamStartedAt,
-          streamStateChangedAt: changedAt,
-          streamStateCheckedAt: newerCheckedAt(current.data.streamStateCheckedAt),
-          ...(controls === undefined ? {} : { controls }),
+          ...mergeChannelStreamVersion({ ...current.data, ...streamVersion }, current.data),
         },
       });
     };
@@ -1149,10 +1159,10 @@ export const DashboardApp = (): ReactElement => {
     try {
       const response = await fetchChannels();
       if (channelsRequestGeneration.current !== generation) return;
-      setChannels((current) => loadedState(response.channels.map((channel) => mergeChannelStreamVersion(
-        channel,
-        current.data?.find((stored) => stored.channelId === channel.channelId),
-      ))));
+      const orderedChannels = response.channels.map((channel) =>
+        mergeAndRememberChannelStreamVersion(channel, latestStreamByChannel.current),
+      );
+      setChannels(loadedState(orderedChannels));
       setIsPlatform(response.platformAdmin);
       setViewerIsBot(response.viewerIsBot);
       setBotLogin(response.botLogin ?? null);
@@ -1321,7 +1331,11 @@ export const DashboardApp = (): ReactElement => {
         try {
           const response = await fetchChannelOverview(route.channelId, controller.signal);
           if (!cancelled) {
-            setOverview(loadedState(response));
+            const orderedResponse = mergeAndRememberChannelStreamVersion(response, latestStreamByChannel.current);
+            setOverview((current) => loadedState(mergeChannelStreamVersion(
+              orderedResponse,
+              current.data?.channelId === route.channelId ? current.data : undefined,
+            )));
             setOverviewRoutePath(expectedOverviewPath);
           }
         } catch (error) {
@@ -1473,12 +1487,13 @@ export const DashboardApp = (): ReactElement => {
     afterLoad?: () => void,
     /** Lets a superseded call discard its own response instead of overwriting a newer one. */
     isCurrent: () => boolean = () => true,
+    mergeResponse?: (response: T, current: T | null) => T,
   ): Promise<void> => {
     setState((current) => loadingState(current));
     try {
       const response = await fetchData();
       if (!isCurrent() || window.location.pathname !== routePath) return;
-      setState(loadedState(response));
+      setState((current) => loadedState(mergeResponse?.(response, current.data) ?? response));
       afterLoad?.();
     } catch (error) {
       if (!isCurrent() || window.location.pathname !== routePath) return;
@@ -1513,7 +1528,19 @@ export const DashboardApp = (): ReactElement => {
     if (route.kind !== "module" && !(route.kind === "channel" && route.section === "overview")) return;
     const channelId = route.channelId;
     const routePath = dashboardRoutePath(route);
-    await reloadData(routePath, setOverview, () => fetchChannelOverview(channelId), true, () => setOverviewRoutePath(routePath));
+    await reloadData(
+      routePath,
+      setOverview,
+      () => fetchChannelOverview(channelId),
+      true,
+      () => setOverviewRoutePath(routePath),
+      undefined,
+      (response, current) => mergeAndRememberChannelStreamVersion(
+        response,
+        latestStreamByChannel.current,
+        current?.channelId === channelId ? current : undefined,
+      ),
+    );
   };
   const reloadOverviewRef = useRef(reloadOverview);
   reloadOverviewRef.current = reloadOverview;
