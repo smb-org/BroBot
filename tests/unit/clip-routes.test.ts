@@ -125,7 +125,13 @@ describe("create clip", () => {
     const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/clips"), environment);
 
     expect(response.status).toBe(429);
-    await expect(response.json()).resolves.toMatchObject({ error: "clip_create_failed", reason: "rate_limited" });
+    // Issue #201 follow-up: the event-log diagnostic carries this same
+    // message under `twitchMessage` (provenance for the dashboard popover),
+    // but the API error response has always used `message`.
+    const body = await response.json<{ error: string; reason: string; detail: Record<string, unknown> }>();
+    expect(body).toMatchObject({ error: "clip_create_failed", reason: "rate_limited" });
+    expect(body.detail.message).toBe("slow down");
+    expect(body.detail.twitchMessage).toBeUndefined();
   });
 
   it("maps Twitch's offline response to the readable closed reason", async () => {

@@ -38,6 +38,7 @@ import { moduleRouter } from "./module-routes";
 import { variableRouter } from "./variable-routes";
 import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
+import { apiErrorDetail } from "../../modules/contract";
 import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
 import { createClip, type CreateClipResult } from "../clip";
 import { fetchTwitchUserByLogin, sendShoutout, type ShoutoutSendResult } from "../shoutout";
@@ -355,7 +356,7 @@ panelRouter.post(
       return context.json({
         error: result.reason === "not_live" ? "clip_stream_offline" : "clip_create_failed",
         reason: result.reason,
-        detail: result.detail,
+        detail: apiErrorDetail(result.detail),
       }, clipStatusFor(result.reason));
     }
 
@@ -421,7 +422,7 @@ panelRouter.post(
     ], now);
 
     if (!result.sent) {
-      return context.json({ error: "shoutout_send_failed", reason: result.reason, detail: result.detail }, shoutoutStatusFor(result.reason));
+      return context.json({ error: "shoutout_send_failed", reason: result.reason, detail: apiErrorDetail(result.detail) }, shoutoutStatusFor(result.reason));
     }
     return context.json({ sent: true });
   },

@@ -64,6 +64,28 @@ export interface ModuleDiagnostic {
   >>>;
 }
 
+/**
+ * Undoes the `message` -> `twitchMessage` rename a producer's result
+ * carries for the event-log diagnostic's sake (provenance: only genuinely
+ * Twitch-sourced wording gets labelled "Twitch: ..." in the dashboard
+ * popover, see `dashboard/events/model.ts`'s `eventCause`) -- for a route's
+ * own JSON error response, which has always used `message` and has to keep
+ * doing so for existing clients. A producer's `result.detail` otherwise
+ * flows straight into both the diagnostic and the response body; this is
+ * the one conversion point every route that forwards `result.detail` as an
+ * error response calls, instead of each route inlining its own rename.
+ */
+export const apiErrorDetail = (
+  detail: Readonly<Record<string, string | number | boolean | null>>,
+): Readonly<Record<string, string | number | boolean | null>> => {
+  const twitchMessage = detail.twitchMessage;
+  if (typeof twitchMessage !== "string" || twitchMessage.length === 0 || detail.message !== undefined) return detail;
+  const rest: Record<string, string | number | boolean | null> = { ...detail };
+  delete rest.twitchMessage;
+  rest.message = twitchMessage;
+  return rest;
+};
+
 /** A semantically well-named module action for the host to execute. */
 export type ModuleAction =
   | { kind: "chat"; text: string; replyToMessageId?: string }
