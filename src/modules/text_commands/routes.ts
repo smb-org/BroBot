@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import { canManage } from "../../contracts/values";
-import type { TextCommand } from "./contracts";
+import type { TextCommand, TextCommandVariableAction } from "./contracts";
 import type { TextCommandAliasConflict } from "./repository";
 import {
   TEXT_COMMAND_MAX_ALIASES,
@@ -10,12 +10,10 @@ import {
   TEXT_COMMAND_MINIMUM_TIERS,
   TEXT_COMMAND_RESPONSE_TYPES,
   TEXT_COMMAND_STREAM_CONDITIONS,
-  TEXT_COMMAND_TEMPLATE_FIELDS,
 } from "./contracts";
-import type { ModuleRouteEnvironment } from "../contract";
+import { SYSTEM_TEMPLATE_VARIABLE_LIST, effectiveTemplateVariables, templateWarnings, type ModuleChannelVariable, type ModuleRouteEnvironment, type TemplateVariable } from "../contract";
 import { createTextCommandRepository } from "./adapters/d1";
 import { COMMAND_NAME_PATTERN, initialTextCommandRevision, validCommandName } from "./domain";
-import { templateFieldsWarnings } from "../contract";
 import { textCommandDefaultsFor } from "./contracts/chat-defaults";
 
 const aliasesSchema = z.array(z.string().regex(COMMAND_NAME_PATTERN))
@@ -25,7 +23,7 @@ const aliasesSchema = z.array(z.string().regex(COMMAND_NAME_PATTERN))
 const bodySchema = z.object({
   name: z.string(),
   kind: z.enum(TEXT_COMMAND_KINDS).default("text"),
-  minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).default("everyone"),
+  minimumTier: z.enum(TEXT_COMMAND_MINIMUM_TIERS).optional(),
   text: z.string().max(500).optional(),
   offlineText: z.string().max(500).optional(),
   notFollowingText: z.string().max(500).optional(),
@@ -36,6 +34,11 @@ const bodySchema = z.object({
   userCooldownSeconds: z.number().int().min(0).max(86400).default(0),
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).default("any"),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).default("say"),
+  variableAction: z.object({
+    name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
+    operation: z.enum(["add", "subtract", "set", "set_argument"]),
+    amount: z.number().int().min(-999999999).max(999999999),
+  }).nullable().default(null),
 });
 
 const editBodySchema = z.object({
@@ -54,16 +57,27 @@ const editBodySchema = z.object({
   userCooldownSeconds: z.number().int().min(0).max(86400).optional(),
   streamCondition: z.enum(TEXT_COMMAND_STREAM_CONDITIONS).optional(),
   responseType: z.enum(TEXT_COMMAND_RESPONSE_TYPES).optional(),
+  variableAction: z.object({
+    name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/u),
+    operation: z.enum(["add", "subtract", "set", "set_argument"]),
+    amount: z.number().int().min(-999999999).max(999999999),
+  }).nullable().optional(),
 });
 
 const nowIso = (): string => new Date().toISOString();
 
+const validVariableAction = (action: TextCommandVariableAction | null): boolean => action === null || (
+  action.operation === "add" || action.operation === "subtract"
+    ? action.amount !== null && action.amount >= 1 && action.amount <= 1000
+    : action.operation === "set_argument"
+      ? action.amount === 0
+      : action.amount !== null && action.amount >= -999999999 && action.amount <= 999999999
+);
+
 type TemplateInput = Pick<TextCommand, "offlineText" | "notFollowingText" | "unavailableText" | "usageText"> & { text: string };
 
 const defaultsForKind = (kind: TextCommand["kind"]): Partial<TemplateInput> =>
-  kind === "uptime" || kind === "followage" || kind === "game" || kind === "shoutout"
-    ? textCommandDefaultsFor(kind)
-    : {};
+  kind === "shoutout" ? textCommandDefaultsFor(kind) : {};
 
 const readBody = async (request: Request): Promise<unknown> => {
   try {
@@ -73,14 +87,18 @@ const readBody = async (request: Request): Promise<unknown> => {
   }
 };
 
-type ValidTextCommandBody = Omit<z.infer<typeof bodySchema>, "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText"> & TemplateInput;
+type ValidTextCommandBody = Omit<z.infer<typeof bodySchema>, "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier"> &
+  { minimumTier: TextCommand["minimumTier"] } & TemplateInput;
 
 const validBody = async (request: Request): Promise<ValidTextCommandBody | null> => {
   const parsed = bodySchema.safeParse(await readBody(request));
   if (!parsed.success || !validCommandName(parsed.data.name) || parsed.data.aliases.includes(parsed.data.name)) return null;
+  const variableAction = parsed.data.variableAction;
+  if (variableAction !== null && parsed.data.kind !== "text") return null;
+  if (!validVariableAction(variableAction)) return null;
   const defaults = defaultsForKind(parsed.data.kind);
   const text = parsed.data.kind === "list" ? "" : parsed.data.text ?? defaults.text ?? "";
-  if (parsed.data.kind !== "list" && text.trim().length === 0) return null;
+  if (parsed.data.kind !== "list" && text.trim().length === 0 && variableAction === null) return null;
   const offlineText = parsed.data.offlineText ?? defaults.offlineText;
   const notFollowingText = parsed.data.notFollowingText ?? defaults.notFollowingText;
   const unavailableText = parsed.data.unavailableText ?? defaults.unavailableText;
@@ -88,20 +106,19 @@ const validBody = async (request: Request): Promise<ValidTextCommandBody | null>
   const body: ValidTextCommandBody = {
     name: parsed.data.name,
     kind: parsed.data.kind,
-    minimumTier: parsed.data.minimumTier,
+    minimumTier: parsed.data.minimumTier ?? (variableAction?.operation === "set_argument" ? "moderator" : "everyone"),
     cooldownSeconds: parsed.data.cooldownSeconds,
     aliases: parsed.data.aliases,
     userCooldownSeconds: parsed.data.userCooldownSeconds,
     streamCondition: parsed.data.streamCondition,
     responseType: parsed.data.responseType,
+    variableAction,
     text,
     ...(offlineText === undefined ? {} : { offlineText }),
     ...(notFollowingText === undefined ? {} : { notFollowingText }),
     ...(unavailableText === undefined ? {} : { unavailableText }),
     ...(usageText === undefined ? {} : { usageText }),
   };
-  if (parsed.data.kind === "uptime" && body.offlineText?.trim().length === 0) return null;
-  if (parsed.data.kind === "followage" && (body.notFollowingText?.trim().length === 0 || body.unavailableText?.trim().length === 0)) return null;
   if (parsed.data.kind === "shoutout" && body.usageText?.trim().length === 0) return null;
   return body;
 };
@@ -125,9 +142,27 @@ export const textCommandRoutes = new Hono<ModuleRouteEnvironment>();
 const param = (context: { req: { param: (name: string) => string | undefined } }, name: string): string =>
   context.req.param(name) ?? "";
 
+const effectiveCommandVariables = (variables: readonly ModuleChannelVariable[]): TemplateVariable[] => {
+  const channelVariables: TemplateVariable[] = variables.map((variable) => ({
+    name: `var.${variable.name}`,
+    group: "channel",
+    sample: String(variable.value),
+    maxLength: 10,
+    source: "channel",
+  }));
+  return effectiveTemplateVariables("chat_command", [], channelVariables, SYSTEM_TEMPLATE_VARIABLE_LIST);
+};
+
+const warningsForText = (text: string, variables: readonly TemplateVariable[]) => templateWarnings("text", text, variables);
+
 textCommandRoutes.get("/commands", async (context) => {
+  const channelId = param(context, "channelId");
   const repository = createTextCommandRepository(context.env.DB, context.get("authorizeMutation"));
-  return context.json({ commands: await repository.list(param(context, "channelId")) });
+  const [commands, variables] = await Promise.all([
+    repository.list(channelId),
+    context.get("listChannelVariables")(channelId),
+  ]);
+  return context.json({ commands, variables: variables.map(({ name, value, description }) => ({ name, value, description })) });
 });
 
 textCommandRoutes.post("/commands", async (context) => {
@@ -140,10 +175,14 @@ textCommandRoutes.post("/commands", async (context) => {
     context.get("prepareModuleAudit"),
   );
   const channelId = param(context, "channelId");
+  if (body.variableAction !== null && await context.get("findChannelVariable")(channelId, body.variableAction.name) === null) {
+    return context.json({ error: "command_data_invalid" }, 400);
+  }
   const now = nowIso();
+  const variables = effectiveCommandVariables(await context.get("listChannelVariables")(channelId));
   const warnings = body.kind === "list"
     ? []
-    : templateFieldsWarnings(body, TEXT_COMMAND_TEMPLATE_FIELDS[body.kind]);
+    : warningsForText(body.text, variables);
   const created = await repository.create({ channelId, ...body, now }, context.get("actor"));
   if (created.ok) {
     const command: TextCommand = {
@@ -162,6 +201,8 @@ textCommandRoutes.post("/commands", async (context) => {
       userCooldownSeconds: body.userCooldownSeconds,
       streamCondition: body.streamCondition,
       responseType: body.responseType,
+      variableAction: body.variableAction,
+      useCount: 0,
       lastUsedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -197,6 +238,9 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   const kind = body.kind ?? before.kind;
   const defaults = defaultsForKind(kind);
   const kindChanged = kind !== before.kind;
+  const variableAction = body.variableAction === undefined ? before.variableAction : body.variableAction;
+  if (variableAction !== null && kind !== "text") return context.json({ error: "command_data_invalid" }, 400);
+  if (!validVariableAction(variableAction)) return context.json({ error: "command_data_invalid" }, 400);
   const text = kind === "list" ? "" : body.text ?? (kindChanged ? defaults.text ?? before.text : before.text);
   const offlineText = body.offlineText ?? (kindChanged ? defaults.offlineText : before.offlineText);
   const notFollowingText = body.notFollowingText ?? (kindChanged ? defaults.notFollowingText : before.notFollowingText);
@@ -208,22 +252,25 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     ...(unavailableText === undefined ? {} : { unavailableText }),
     ...(usageText === undefined ? {} : { usageText }),
   };
-  if (kind !== "list" && text.trim().length === 0) {
+  if (kind !== "list" && text.trim().length === 0 && variableAction === null) {
     return context.json({ error: "command_data_invalid" }, 400);
   }
-  if ((kind === "uptime" && !templateValues.offlineText?.trim()) ||
-      (kind === "followage" && (!templateValues.notFollowingText?.trim() || !templateValues.unavailableText?.trim())) ||
-      (kind === "shoutout" && !templateValues.usageText?.trim())) {
+  if (kind === "shoutout" && !templateValues.usageText?.trim()) {
+    return context.json({ error: "command_data_invalid" }, 400);
+  }
+  if (variableAction !== null && await context.get("findChannelVariable")(channelId, variableAction.name) === null) {
     return context.json({ error: "command_data_invalid" }, 400);
   }
   const cooldownSeconds = body.cooldownSeconds ?? before.cooldownSeconds;
-  const minimumTier = body.minimumTier ?? before.minimumTier;
+  const minimumTier = body.minimumTier ?? (variableAction?.operation === "set_argument" && before.variableAction?.operation !== "set_argument"
+    ? "moderator"
+    : before.minimumTier);
   const userCooldownSeconds = body.userCooldownSeconds ?? before.userCooldownSeconds;
   const streamCondition = body.streamCondition ?? before.streamCondition;
   const responseType = body.responseType ?? before.responseType;
   const warnings = kind === "list"
     ? []
-    : templateFieldsWarnings({ text, ...templateValues }, TEXT_COMMAND_TEMPLATE_FIELDS[kind]);
+    : warningsForText(text, effectiveCommandVariables(await context.get("listChannelVariables")(channelId)));
   const authorizeMutation = contentChanged
     ? context.get("authorizeManagementMutation")
     : context.get("authorizeMutation");
@@ -246,6 +293,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     userCooldownSeconds,
     streamCondition,
     responseType,
+    variableAction,
     expectedRevision: body.revision,
     onlyToggle: !contentChanged,
     now,
@@ -264,6 +312,8 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
       userCooldownSeconds,
       streamCondition,
       responseType,
+      variableAction,
+      useCount: before.useCount,
       enabled: body.enabled ?? before.enabled,
       updatedAt: now,
       revision: before.revision + 1,

@@ -426,7 +426,7 @@ const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, ov
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
 const allActionKinds: Record<ModuleAction["kind"], true> = { announcement: true, chat: true, shoutout: true, overlay: true };
 const allLanguages: Record<ModuleLanguage, true> = { de: true, en: true };
-const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true, uptime: true, followage: true, game: true, shoutout: true };
+const allTextCommandKinds: Record<TextCommandKind, true> = { text: true, list: true, shoutout: true };
 const allTextCommandResponseTypes: Record<TextCommandResponseType, true> = { say: true, reply: true, announcement: true };
 const allTextCommandStreamConditions: Record<TextCommandStreamCondition, true> = { any: true, online: true, offline: true };
 const allEventOrigins: Record<PanelEventOrigin, true> = { channel: true, module: true };
@@ -525,6 +525,8 @@ describe("serialized contract shapes", () => {
         userCooldownSeconds: 30,
         streamCondition: "online",
         responseType: "announcement",
+        variableAction: null,
+        useCount: 0,
         lastUsedAt: null,
         createdAt: "2026-09-21T12:00:00.000Z",
         updatedAt: "2026-09-21T12:00:00.000Z",
@@ -674,7 +676,7 @@ describe("serialized contract shapes", () => {
         "$.realtime.panelPrincipal: channelId,expiresAt,kind,role,sessionId,userId,v",
         "$.realtime.systemHello: channelId,createdAt,id,payload,type,version",
         "$.realtime.systemHello.payload: ",
-        "$.textCommand: aliases,channelId,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,updatedAt,userCooldownSeconds",
+        "$.textCommand: aliases,channelId,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,updatedAt,useCount,userCooldownSeconds,variableAction",
       ]);
       expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
       expect(MODULES.map((module) => module.id).sort()).toEqual([
@@ -698,7 +700,7 @@ describe("serialized contract shapes", () => {
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
       expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "chat", "overlay", "shoutout"]);
       expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);
-      expect(Object.keys(allTextCommandKinds).sort()).toEqual(["followage", "game", "list", "shoutout", "text", "uptime"]);
+      expect(Object.keys(allTextCommandKinds).sort()).toEqual(["list", "shoutout", "text"]);
       expect(Object.keys(allTextCommandResponseTypes).sort()).toEqual([...TEXT_COMMAND_RESPONSE_TYPES].sort());
       expect(Object.keys(allTextCommandStreamConditions).sort()).toEqual([...TEXT_COMMAND_STREAM_CONDITIONS].sort());
       expect(Object.keys(allEventOrigins).sort()).toEqual(["channel", "module"]);

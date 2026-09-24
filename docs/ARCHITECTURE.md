@@ -109,6 +109,31 @@ Der Status-Endpunkt liefert `CF_VERSION_METADATA.id`. Damit stammt die
 angezeigte Version aus dem laufenden Deployment und nicht aus einem statischen
 Bild oder einer im Overlay-Bundle fest eingetragenen Versionszeichenkette.
 
+## Vorlagenvariablen und Kanalwerte
+
+`channel_variables` speichert benannte Ganzzahlen pro `channel_id`. Der Host
+deklariert Systemvariablen in `src/template-variables.ts` und löst Vorlagen
+lazy auf: Er durchsucht nur den tatsächlich gerenderten Text und fragt nur
+Helix- oder D1-Quellen ab, die dessen Tokens benötigen. Mehrere
+Kanalvariablen werden in einer einzelnen, kanalgebundenen Abfrage gelesen.
+
+Textbefehle können eine Kanalvariable innerhalb derselben D1-Batch wie ihre
+Claim- und Cooldown-Mutationen ändern. Die Änderung hängt am erfolgreichen
+Claim und wird zusammen mit der Antwort gerendert; eine abgelehnte Abkühlzeit
+führt zu keiner Änderung. Bestehende Revision-CAS- und Alias-Indizes bleiben
+Teil des Befehlsmodells. Migration `0009_channel_variables.sql` legt die
+Kanalvariablentabelle an und wandelt die auslaufenden Befehlsarten `uptime`,
+`followage` und `game` in normale Textbefehle um.
+
+Die Verwaltungs-API liegt unter
+`/api/channels/:channelId/variables`: GET listet Werte und Verwendungen,
+POST legt eine Variable an, PATCH benennt sie um oder ändert Metadaten, DELETE
+entfernt sie, und POST `/:name/value` setzt oder verschiebt den Wert.
+Jede SQL-Abfrage ist an `channel_id` gebunden. Broadcaster und Manager
+verwalten Definitionen; alle Kanalrollen dürfen Werte ändern. Eine Umbenennung
+schreibt bekannte Vorlagenreferenzen in Textbefehlen und Moduleinstellungen in
+derselben D1-Batch um. Eine Variable mit Befehlsaktion lässt sich nicht löschen.
+
 ## Verbindliche Architekturentscheidungen
 
 1. **Kein `BROADCASTER_ID`-Secret.** Der Kanal kommt aus Route und Session; die Freigabe erfolgt über eine Zeile in `channels`, nicht über einen Konfigurationswert. So wird ein Kanal nicht durch einen geheimen Konfigurationswert mit der Identität des Benutzers verwechselt.

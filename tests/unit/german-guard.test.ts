@@ -35,8 +35,10 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/clips/panel/locale.ts": "Bilingual DE/EN clips immediate-action text catalogue; only its `de` half is German.",
   "src/modules/text_commands/panel/locale.ts": "Bilingual DE/EN text-commands panel text catalogue; only its `de` half is German.",
   "src/modules/ads/contracts/chat-defaults.ts": "Default chat text the bot posts in the channel; chat templates are channel content and stay in the channel language (umbau-plan.md, section on chat templates).",
+  "src/modules/ads/contracts/language.ts": "Bilingual DE/EN catalog for runtime ads wording; only its `de` half is German.",
   "src/modules/raid/contracts/chat-defaults.ts": "Default chat text the bot posts in the channel; chat templates are channel content and stay in the channel language (umbau-plan.md, section on chat templates).",
   "src/modules/text_commands/contracts/chat-defaults.ts": "Default chat text the bot posts in the channel; chat templates are channel content and stay in the channel language (umbau-plan.md, section on chat templates).",
+  "src/modules/template-language.ts": "Bilingual DE/EN catalog for runtime system-variable wording; only its `de` half is German.",
   "src/worker/auth/oauth-error-texts.ts": "Bilingual DE/EN catalogue for OAuth redirect pages the browser shows directly -- no dashboard script sits between Twitch's redirect and the page to translate a code, so this stays prose (see the file's own comment).",
   "src/dashboard/events/legacy-reasons.ts": "Migration map from old German event-log reason values (issue #191) to their English replacements -- the old values are map keys, not prose, and have to appear as literal source text for 14 days of event-log retention; see the file's own comment for the drop date.",
 };

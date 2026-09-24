@@ -126,3 +126,18 @@ Beide Zustände lassen sich für 15 Minuten, eine Stunde, bis zum Streamende ode
 unbegrenzt setzen. Zeitlich begrenzte Zustände werden beim Lesen nach Ablauf als
 aus behandelt. „Bis Streamende" wird mit dem nächsten frischen
 stream.offline-Ereignis aufgehoben.
+
+## 10. Kanalvariablen (#185)
+
+Kanalvariablen ergänzen die Schwellen aus Abschnitt 1: Jede Kanalrolle darf
+einen bestehenden Wert ändern. Das ist eine betriebliche Handlung wie die
+Notbremsen aus Abschnitt 9. Nur Broadcaster und Manager dürfen Variablen
+anlegen, umbenennen, ihre Beschreibung oder den Streamstart-Reset ändern und
+Variablen löschen.
+
+Das gilt sowohl für die sichtbaren Dashboard-Bedienelemente als auch für die
+SQL-Mutation. Werteänderungen verwenden die betriebliche Sitzungs- und
+Mitgliedschaftsprüfung; Änderungen an der Variablendefinition verwenden die
+verwaltende Prüfung. Rollen ohne Definitionsrecht sehen die Definitionen und
+deaktivierte Verwaltungsaktionen mit einem sichtbaren Grund, können den Wert
+aber weiterhin ändern.

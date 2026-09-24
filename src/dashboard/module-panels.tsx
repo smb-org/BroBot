@@ -8,6 +8,7 @@ import { PanelApiError, getChannelModuleSettings, saveChannelModuleSettings, set
 import { apiErrorText, dashboardLanguage, dashboardTexts, formatNumber, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleSymbol, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
+import { effectivePanelTemplateVariables, panelTemplateOptions, type PanelChannelVariable } from "./ui/template-variable-options";
 import { ConfirmDialog, EditorShell, Icon, ListRow, registerDashboardNavigationGuard, SettingsEditor, Switch, useDraftGuard, type EditorSection, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateVariableOption } from "./ui";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
@@ -191,7 +192,7 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }:
   canManageContent: boolean;
   language: DashboardLanguage;
 }): ReactElement | null => {
-  const [loaded, setLoaded] = useState<{ definition: SettingsEditorDefinition<Record<string, unknown>>; settings: Record<string, unknown>; revision: number } | null>(null);
+  const [loaded, setLoaded] = useState<{ definition: SettingsEditorDefinition<Record<string, unknown>>; settings: Record<string, unknown>; revision: number; variables: PanelChannelVariable[] } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
@@ -202,7 +203,7 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }:
       getChannelModuleSettings(channelId, module.id),
     ]).then(([definition, response]) => {
       if (!active) return;
-      setLoaded({ definition: definition.default, settings: response.settings, revision: response.revision });
+      setLoaded({ definition: definition.default, settings: response.settings, revision: response.revision, variables: response.variables });
       setLoadError(null);
     }).catch((error: unknown) => {
       if (!active) return;
@@ -221,18 +222,20 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language }:
     canManageContent={canManageContent}
     definition={loaded.definition}
     copy={copy}
+    channelVariables={loaded.variables}
     initial={loaded.settings}
     initialRevision={loaded.revision}
     onReload={() => { setLoaded(null); setLoadError(null); setGeneration((current) => current + 1); }}
   />;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, initial, initialRevision, onReload }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, definition, copy, channelVariables, initial, initialRevision, onReload }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
   definition: SettingsEditorDefinition<Record<string, unknown>>;
   copy: SettingsEditorDefinition<Record<string, unknown>>["locales"]["de"];
+  channelVariables: readonly PanelChannelVariable[];
   initial: Record<string, unknown>;
   initialRevision: number;
   onReload: () => void;
@@ -255,13 +258,21 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   }, []);
   const spec = definition.spec;
   const templateFields = (module.templateFields ?? {}) as Readonly<Record<string, readonly TemplateVariable[] | undefined>>;
-  const templateMetadata = Object.fromEntries(Object.entries(templateFields).map(([key, variables]) => [
-    key,
-    variables?.map((variable) => ({
-      ...variable,
-      description: copy.fields[key]?.variables?.find((option) => option.name === variable.name)?.description ?? "",
-    })),
-  ])) as Readonly<Partial<Record<string, readonly (TemplateVariableOption & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
+  const templateMetadata = Object.fromEntries(Object.entries(templateFields).map(([key, variables]) => {
+    const context = module.templateContext ?? "event";
+    const declared = effectivePanelTemplateVariables(context, variables ?? [], channelVariables);
+    const localized = panelTemplateOptions(context, variables ?? [], channelVariables, dashboardLanguage(), copy.fields[key]?.variables ?? []);
+    const byName = new Map(declared.map((variable) => [variable.name, variable]));
+    return [key, localized.flatMap((option) => {
+      const variable = byName.get(option.name);
+      return variable === undefined ? [] : [{
+        ...option,
+        maxLength: variable.maxLength,
+        ...(variable.fallbackWhenAbsent === undefined ? {} : { fallbackWhenAbsent: variable.fallbackWhenAbsent }),
+      }];
+    })];
+  })) as Readonly<Partial<Record<string, readonly (TemplateVariableOption & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
+  const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateVariableOption[]>>> = templateMetadata;
   const settingsEditor = (sectionId: string, fieldErrors: Readonly<Record<string, string>>): ReactElement => (
     <SettingsEditor
       spec={spec}
@@ -269,7 +280,9 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
       settings={value}
       onChange={(key, next) => { setValue((current) => ({ ...current, [key]: next })); setDirty(true); setSaved(false); setConflict(false); setError(undefined); }}
       texts={copy}
+      variables={templateVariableOptions}
       templateMetadata={templateMetadata}
+      createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`}
       templateMessages={copy.templateMessages}
       fieldErrors={fieldErrors}
       disabled={pending}
@@ -351,7 +364,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, defin
   const discard = (): void => { setValue(baseline.settings); setDirty(false); setSaved(false); setConflict(false); setError(undefined); setServerWarnings([]); setLocalIssues({}); };
   const navigationGuard = useDraftGuard(dirty, save, discard);
   useEffect(() => registerDashboardNavigationGuard(navigationGuard.guardSwitch), [navigationGuard.guardSwitch]);
-  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={value} onChange={() => undefined} texts={copy} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
+  const readOnly = !canManageContent ? { reason: copy.readOnlyReason, content: <SettingsEditor spec={spec} sectionId={spec.sections[0]?.id ?? ""} settings={value} onChange={() => undefined} texts={copy} variables={templateVariableOptions} templateMetadata={templateMetadata} templateMessages={copy.templateMessages} createVariableHref={`/channels/${encodeURIComponent(channelId)}/variables`} readOnly enabledLabel={copy.enabledLabel} disabledLabel={copy.disabledLabel} /> } : undefined;
   return <>
     <EditorShell
     ariaLabel={copy.ariaLabel}

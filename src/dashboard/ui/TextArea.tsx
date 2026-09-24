@@ -1,17 +1,24 @@
-import { Combobox, Input, Pill, useCombobox } from "@mantine/core";
+import { Combobox, Input, useCombobox } from "@mantine/core";
 import { RichTextarea, type CaretPosition, type RichTextareaHandle } from "rich-textarea";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 
 import { closestTemplateVariable, tokenizeTemplate, unknownTemplateVariables, type TemplateVariable } from "../../template";
+import type { TemplateVariableGroup } from "../../contracts/values";
 import { Button } from "./Button";
 import { ChatPreview } from "./ChatPreview";
 import { Icon } from "./Icon";
 import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
+import { TemplateVariablePicker, type TemplateVariablePickerMessages, type TemplateVariablePickerOption, type TemplateVariablePickerRange } from "./TemplateVariablePicker";
 
 export interface TemplateVariableOption {
   name: string;
   description: string;
   sample: string;
+  group?: TemplateVariableGroup;
+  kind?: "system" | "module" | "channel";
+  external?: boolean;
+  parameters?: NonNullable<TemplateVariable["parameters"]>;
+  parameter?: { value: string };
 }
 
 export interface TextAreaMessages {
@@ -20,6 +27,7 @@ export interface TextAreaMessages {
   unknownVariable: (name: string, suggestion: string | null, available: readonly string[]) => ReactNode;
   insertSuggestionLabel: (name: string) => string;
   worstCaseLength: (length: number, maxLength: number) => ReactNode;
+  variablePicker?: TemplateVariablePickerMessages;
 }
 
 export interface TextAreaProps {
@@ -42,6 +50,7 @@ export interface TextAreaProps {
   id?: string;
   name?: string;
   messages: TextAreaMessages;
+  createVariableHref?: string;
 }
 
 interface SuggestionQuery {
@@ -56,7 +65,15 @@ interface CaretAnchor {
 }
 
 const templateDeclarations = (options: readonly TemplateVariableOption[]): TemplateVariable[] =>
-  options.map((option) => ({ name: option.name, sample: option.sample, maxLength: 0 }));
+  options.map((option) => ({
+    name: option.name,
+    sample: option.sample,
+    maxLength: 0,
+    group: option.group ?? "context",
+    source: option.kind ?? "module",
+    ...(option.parameters === undefined ? {} : { parameters: option.parameters }),
+    ...(option.external === undefined ? {} : { external: option.external }),
+  }));
 
 const getSuggestionQuery = (value: string, caret: number): SuggestionQuery | null => {
   const prefix = value.slice(0, caret);
@@ -87,6 +104,7 @@ export function TextArea({
   id: suppliedId,
   name,
   messages,
+  createVariableHref,
 }: TextAreaProps): ReactElement {
   const generatedId = useId();
   const disabledReason = useDisabledFieldReason();
@@ -101,6 +119,7 @@ export function TextArea({
   const [query, setQuery] = useState<SuggestionQuery | null>(null);
   const [caretAnchor, setCaretAnchor] = useState<CaretAnchor>({ left: 12, top: 32 });
   const [activeIndex, setActiveIndex] = useState(0);
+  const [variablePickerOpen, setVariablePickerOpen] = useState(false);
   const declarations = useMemo(() => templateDeclarations(variables ?? []), [variables]);
   const variableNames = variables?.map((variable) => variable.name) ?? [];
   const count = value.length;
@@ -171,7 +190,7 @@ export function TextArea({
     }
   };
 
-  const insertText = (insert: string, start: number, end: number): void => {
+  const insertText = (insert: string, start: number, end: number, selectionAfter?: TemplateVariablePickerRange): void => {
     const textarea = textareaRef.current;
     if (textarea === null || disabled || readOnly) return;
     const nextValue = `${textarea.value.slice(0, start)}${insert}${textarea.value.slice(end)}`;
@@ -179,13 +198,13 @@ export function TextArea({
     textarea.setRangeText(insert, start, end, "end");
     programmaticEdit.current = false;
     onChange(nextValue);
-    const caret = start + insert.length;
-    selection.current = { start: caret, end: caret };
+    const targetSelection = selectionAfter ?? { start: start + insert.length, end: start + insert.length };
+    selection.current = targetSelection;
     setQuery(null);
     combobox.closeDropdown();
     window.requestAnimationFrame(() => {
       textarea.focus();
-      textarea.setSelectionRange(caret, caret);
+      textarea.setSelectionRange(targetSelection.start, targetSelection.end);
     });
   };
 
@@ -208,6 +227,13 @@ export function TextArea({
       if (isComposing) return;
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.code === "Space") {
+      event.preventDefault();
+      setQuery(null);
+      combobox.closeDropdown();
+      setVariablePickerOpen(true);
       return;
     }
     if (isComposing) return;
@@ -274,24 +300,6 @@ export function TextArea({
           ) : null}
         </div>
       ) : null}
-      {variables === undefined ? null : (
-        <div className="ui-textarea__chips">
-          {variables.map((variable) => (
-            <Pill key={variable.name} className="ui-textarea__chip" size="sm" withRemoveButton={false}>
-              <button
-                type="button"
-                title={variable.description}
-                aria-description={variable.description}
-                disabled={disabled || readOnly}
-                onClick={() => {
-                  const saved = selection.current;
-                  insertText(`{${variable.name}}`, saved.start, saved.end);
-                }}
-              >{`{${variable.name}}`}</button>
-            </Pill>
-          ))}
-        </div>
-      )}
       {preview === undefined || previewLabel === undefined || previewSpeaker === undefined ? null : (
         <ChatPreview label={previewLabel} speaker={previewSpeaker} text={previewText ?? ""} countLabel={messages.previewCountLabel(previewCount)} />
       )}
@@ -364,6 +372,32 @@ export function TextArea({
           >
             {renderDecoratedValue}
           </RichTextarea>
+          {variables !== undefined && messages.variablePicker !== undefined ? (
+            <div className="template-field__variable-picker">
+              <TemplateVariablePicker
+                options={variables.map((variable): TemplateVariablePickerOption => ({
+                  name: variable.name,
+                  description: variable.description,
+                  sample: variable.sample,
+                  group: variable.group ?? "context",
+                  kind: variable.kind ?? "module",
+                  ...(variable.external === undefined ? {} : { external: variable.external }),
+                  ...(variable.parameter === undefined ? {} : { parameter: variable.parameter }),
+                }))}
+                messages={messages.variablePicker}
+                opened={variablePickerOpen}
+                onOpenedChange={setVariablePickerOpen}
+                disabled={disabled || readOnly}
+                {...(createVariableHref === undefined ? {} : { createVariableHref })}
+                getSelection={() => selection.current}
+                focusEditor={() => { textareaRef.current?.focus(); }}
+                setEditorSelection={(range) => { selection.current = range; textareaRef.current?.setSelectionRange(range.start, range.end); }}
+                onInsert={({ text: token, replaceRange, selectionRange }) => {
+                  insertText(token, replaceRange.start, replaceRange.end, selectionRange);
+                }}
+              />
+            </div>
+          ) : null}
           <Combobox.Target withKeyboardNavigation={false} withAriaAttributes={false}>
             <span aria-hidden="true" className="template-field__caret-anchor" style={{ left: caretAnchor.left, top: caretAnchor.top }} />
           </Combobox.Target>

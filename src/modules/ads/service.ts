@@ -1,7 +1,8 @@
 import type { EventCode } from "../../contracts/values";
-import type { ModuleEvent, ModuleResult } from "../contract";
+import { templateVariableNames, type ModuleDiagnostic, type ModuleEvent, type ModuleLanguage, type ModuleResult } from "../contract";
 import type { AdsSettings } from "./contracts";
 import { decideAdBreak, renderAdBreakText } from "./domain";
+import { adsChatLanguage } from "./contracts/language";
 
 const diagnoseDetail = (
   event: ReturnType<typeof decideAdBreak>,
@@ -25,9 +26,17 @@ const diagnoseDetail = (
 const diagnosticCode = (event: ReturnType<typeof decideAdBreak>): EventCode =>
   event.kind === "announce" ? "ads.announcement" : "ads.skipped";
 
-export const processAdBreak = (
+export function processAdBreak(event: ModuleEvent<AdsSettings>): ModuleResult;
+export function processAdBreak(
   event: ModuleEvent<AdsSettings>,
-): ModuleResult => {
+  render: (text: string, values: Readonly<Record<string, string | number>>) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>,
+  language: ModuleLanguage,
+): Promise<ModuleResult>;
+export function processAdBreak(
+  event: ModuleEvent<AdsSettings>,
+  render?: (text: string, values: Readonly<Record<string, string | number>>) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>,
+  language: ModuleLanguage = "de",
+): ModuleResult | Promise<ModuleResult> {
   const decision = decideAdBreak(event.payload);
   if (decision.kind === "skip") {
     return {
@@ -37,8 +46,16 @@ export const processAdBreak = (
   }
 
   const template = decision.event.automatic ? event.settings.automatic : event.settings.manual;
-  return {
-    actions: [{ kind: "chat", text: renderAdBreakText(template, decision.event.durationSeconds) }],
-    diagnostics: [{ code: diagnosticCode(decision), detail: diagnoseDetail(decision) }],
-  };
-};
+  const makeResult = (text: string, templateDiagnostics: readonly ModuleDiagnostic[] = []): ModuleResult => ({
+    actions: [{ kind: "chat", text }],
+    diagnostics: [...templateDiagnostics, { code: diagnosticCode(decision), detail: diagnoseDetail(decision) }],
+  });
+  if (render !== undefined) {
+    return render(template, { duration: decision.event.durationSeconds }).then(({ text, diagnostics }) => {
+      const hasDuration = templateVariableNames(template.trim()).includes("duration");
+      const completed = hasDuration ? text : `${text} (${String(decision.event.durationSeconds)} ${adsChatLanguage[language].seconds})`;
+      return makeResult(completed, diagnostics);
+    });
+  }
+  return makeResult(renderAdBreakText(template, decision.event.durationSeconds));
+}

@@ -1,0 +1,210 @@
+import type { TemplateContext, TemplateVariable } from "../template";
+import {
+  effectiveTemplateVariables,
+  parseTemplateRange,
+  renderTemplate,
+  templateVariableNames,
+} from "../template";
+import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
+import { templateLanguageText } from "../modules/template-language";
+import type { ModuleChannelInfo, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleStreamState } from "../modules/contract";
+
+export interface TemplateResolverSources {
+  streamState: () => Promise<ModuleStreamState>;
+  channelInfo: () => Promise<ModuleChannelInfo | null>;
+  followedAt: (userId: string) => Promise<ModuleFollowedAt>;
+  followerTotal: () => Promise<number | null>;
+  chattersTotal: () => Promise<number | null>;
+  userCreatedAt: (userId: string) => Promise<string | null>;
+  channelLanguage: () => Promise<ModuleLanguage>;
+  readChannelVariables: (names: readonly string[]) => Promise<Readonly<Record<string, number>>>;
+  now?: () => number;
+  random?: (maximumExclusive: number) => number;
+}
+
+const valueFrom = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
+const recordFrom = (value: unknown): Readonly<Record<string, unknown>> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null;
+
+const payloadString = (event: ModuleEvent, key: string): string | null => valueFrom(event.payload[key]);
+
+const formatCount = (value: number, language: ModuleLanguage): string =>
+  new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 }).format(value);
+
+const formatDuration = (start: string, now: number, language: ModuleLanguage): string => {
+  const startTime = Date.parse(start);
+  const minutes = Number.isFinite(startTime) ? Math.max(0, Math.floor((now - startTime) / 60_000)) : 0;
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const remainder = minutes % 60;
+  const text = templateLanguageText[language];
+  return text.duration(days > 0 ? text.day(days) : "", text.hour(hours), text.minute(remainder));
+};
+
+const durationSince = (value: string, now: number, language: ModuleLanguage): string => {
+  const createdAt = Date.parse(value);
+  if (!Number.isFinite(createdAt)) return "?";
+  const years = Math.max(0, Math.floor((now - createdAt) / (365.2425 * 24 * 60 * 60 * 1000)));
+  const remainingMonths = Math.max(0, Math.floor((now - createdAt) / (30.436875 * 24 * 60 * 60 * 1000)) - years * 12);
+  const text = templateLanguageText[language];
+  const yearsText = years > 0 ? text.year(years) : "";
+  const monthsText = years === 0 || remainingMonths > 0 ? text.month(remainingMonths) : "";
+  return text.elapsed(yearsText, monthsText);
+};
+
+const subageFrom = (event: ModuleEvent): number => {
+  const badges = event.payload.badges;
+  if (!Array.isArray(badges)) return 0;
+  for (const badge of badges) {
+    const record = recordFrom(badge);
+    if (record?.set_id !== "subscriber" || typeof record.info !== "string") continue;
+    const months = Number(record.info);
+    if (Number.isSafeInteger(months) && months >= 0) return months;
+  }
+  return 0;
+};
+
+const secureRandomInteger = (maximumExclusive: number): number => {
+  if (maximumExclusive <= 1) return 0;
+  const range = 0x1_0000_0000;
+  const cutoff = range - range % maximumExclusive;
+  const buffer = new Uint32Array(1);
+  let value: number;
+  do {
+    crypto.getRandomValues(buffer);
+    value = buffer[0] ?? 0;
+  } while (value >= cutoff);
+  return value % maximumExclusive;
+};
+
+export const createTemplateRenderer = (
+  event: ModuleEvent,
+  context: TemplateContext,
+  moduleVariables: readonly TemplateVariable[],
+  sources: TemplateResolverSources,
+) => async (
+  text: string,
+  moduleValues: Readonly<Record<string, string | number>>,
+  changed?: { name: string; value: number },
+): Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }> => {
+  const names = templateVariableNames(text);
+  const requested = new Set(names);
+  const channelNames = [...requested]
+    .flatMap((name) => name.startsWith("var.") ? [name.slice(4)] : []);
+  const changedName = changed?.name;
+  const namesToRead = channelNames.filter((name) => name !== changedName);
+  const channelValuesPromise = namesToRead.length > 0
+    ? sources.readChannelVariables(namesToRead)
+    : Promise.resolve<Readonly<Record<string, number>>>({});
+
+  const eligibleSystem = SYSTEM_TEMPLATE_VARIABLE_LIST.filter((variable) =>
+    variable.contexts?.includes(context) ?? true,
+  );
+  const declaredSystem = eligibleSystem.filter((variable) => !moduleVariables.some((moduleVariable) => moduleVariable.name === variable.name));
+  const requiredSystem = new Set([...requested].filter((name) => declaredSystem.some((variable) => variable.name === name)));
+  const requiresChannelInfo = ["game", "title", "uptime", "viewers"].some((name) => requiredSystem.has(name));
+  const requiresLanguage = ["game", "title", "uptime", "followage", "accountage", "date", "time", "followers", "viewers", "var"].some((name) => requiredSystem.has(name)) || channelNames.length > 0;
+  const [language, channelInfo, streamState, followedAt, followerTotal, chattersTotal, channelValues] = await Promise.all([
+    requiresLanguage ? sources.channelLanguage() : Promise.resolve("de" as const),
+    requiresChannelInfo ? sources.channelInfo() : Promise.resolve(null),
+    requiredSystem.has("live") ? sources.streamState() : Promise.resolve("unknown" as const),
+    requiredSystem.has("followage") ? (() => {
+      const userId = event.actor?.userId ?? payloadString(event, "chatter_user_id");
+      return userId === null ? Promise.resolve("unavailable" as const) : sources.followedAt(userId);
+    })() : Promise.resolve("unavailable" as const),
+    requiredSystem.has("followers") ? sources.followerTotal() : Promise.resolve(null),
+    requiredSystem.has("chatters") ? sources.chattersTotal() : Promise.resolve(null),
+    channelValuesPromise,
+  ]);
+
+  const eventTime = Date.parse(event.receivedAt);
+  const now = sources.now?.() ?? (Number.isFinite(eventTime) ? eventTime : Date.now());
+  const values: Record<string, string | number> = { ...moduleValues };
+  const diagnostics: ModuleDiagnostic[] = [];
+  const missing = (name: string): string => {
+    diagnostics.push({ code: "template.lookup_unavailable", detail: { name } });
+    return "?";
+  };
+  const userLogin = event.actor?.login ?? payloadString(event, "chatter_user_login") ?? "unknown";
+  const displayName = payloadString(event, "chatter_user_name") ?? userLogin;
+  const channelLogin = payloadString(event, "broadcaster_user_login") ?? event.channelId;
+  const target = valueFrom(moduleValues.target) ?? userLogin;
+  const args = valueFrom(moduleValues.args) ?? "";
+
+  for (const name of requiredSystem) {
+    if (name === "user") values[name] = userLogin;
+    else if (name === "displayname") values[name] = displayName;
+    else if (name === "channel") values[name] = channelLogin;
+    else if (name === "target") values[name] = target;
+    else if (name === "args") values[name] = args.length > 100 ? `${args.slice(0, 99)}…` : args;
+    else if (name === "subage") values[name] = subageFrom(event);
+    else if (name === "game") values[name] = channelInfo === null ? missing(name) : (channelInfo.gameName || "?");
+    else if (name === "title") values[name] = channelInfo === null ? missing(name) : (channelInfo.title || "?");
+    else if (name === "uptime") values[name] = channelInfo === null
+      ? missing(name)
+      : channelInfo.startedAt === null ? valueFrom(moduleValues.offlineText) ?? templateLanguageText[language].offline : formatDuration(channelInfo.startedAt, now, language);
+    else if (name === "viewers") values[name] = channelInfo === null
+      ? missing(name)
+      : formatCount(channelInfo.startedAt === null ? 0 : channelInfo.viewerCount, language);
+    else if (name === "live") values[name] = streamState === "unknown" ? missing(name) : streamState;
+    else if (name === "followers") values[name] = followerTotal === null ? missing(name) : formatCount(followerTotal, language);
+    else if (name === "chatters") values[name] = chattersTotal === null ? missing(name) : formatCount(chattersTotal, language);
+    else if (name === "followage") {
+      if (followedAt === "unavailable") {
+        diagnostics.push({ code: "template.lookup_unavailable", detail: { name } });
+        values[name] = valueFrom(moduleValues.unavailableText) ?? "?";
+      } else if (followedAt === null) values[name] = valueFrom(moduleValues.notFollowingText) ?? templateLanguageText[language].notFollowing;
+      else values[name] = durationSince(followedAt, now, language);
+    } else if (name === "accountage") {
+      const userId = event.actor?.userId ?? payloadString(event, "chatter_user_id");
+      const createdAt = userId === null ? null : await sources.userCreatedAt(userId);
+      values[name] = createdAt === null ? missing(name) : durationSince(createdAt, now, language);
+    } else if (name === "date") {
+      values[name] = new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", {
+        day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Berlin",
+      }).format(now);
+    } else if (name === "time") {
+      values[name] = new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", {
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Europe/Berlin",
+      }).format(now);
+    }
+  }
+
+  const formattedChannelValues: TemplateVariable[] = Object.entries(channelValues).map(([name, value]) => ({
+    name: `var.${name}`,
+    group: "channel",
+    maxLength: 10,
+    sample: formatCount(value, language),
+    source: "channel",
+  }));
+  const effectiveChannelVariables = new Set(formattedChannelValues.map((variable) => variable.name));
+  if (changed !== undefined && requested.has(`var.${changed.name}`)) {
+    values[`var.${changed.name}`] = formatCount(changed.value, language);
+    effectiveChannelVariables.add(`var.${changed.name}`);
+    if (!formattedChannelValues.some((variable) => variable.name === `var.${changed.name}`)) {
+      formattedChannelValues.push({ name: `var.${changed.name}`, group: "channel", maxLength: 10, sample: values[`var.${changed.name}`] as string, source: "channel" });
+    }
+  }
+  for (const [name, value] of Object.entries(channelValues)) values[`var.${name}`] = formatCount(value, language);
+
+  const effective = effectiveTemplateVariables(context, moduleVariables, formattedChannelValues, SYSTEM_TEMPLATE_VARIABLE_LIST);
+  const variableNames = new Set(effective.map((variable) => variable.name));
+  for (const name of requested) {
+    if (name.startsWith("var.") && !effectiveChannelVariables.has(name)) variableNames.delete(name);
+  }
+  const effectiveForRender = effective.filter((variable) => variableNames.has(variable.name));
+  const randomIndex = sources.random ?? secureRandomInteger;
+  const parameterValues: Record<string, (parameter: string) => string> = {
+    random: (parameter) => {
+      const range = parseTemplateRange(parameter || "1-100");
+      if (range === null) return "{random}";
+      return String(range.min + randomIndex(range.max - range.min + 1));
+    },
+    pick: (parameter) => {
+      const choices = parameter.split("|");
+      return choices[randomIndex(choices.length)]?.trim() ?? "";
+    },
+  };
+  const rendered = renderTemplate(text, values, parameterValues, effectiveForRender);
+  return { text: rendered, diagnostics };
+};

@@ -92,10 +92,12 @@ const installMocks = async (page: Page, events: readonly unknown[] = []): Promis
           userCooldownSeconds: 0,
           streamCondition: "any",
           responseType: "say",
+          variableAction: null,
+          useCount: 0,
           lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }),
+        }], variables: [] }),
       });
       return;
     }

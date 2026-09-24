@@ -97,6 +97,11 @@ const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]>
       : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}?`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
     worstCaseLength: (length, maxLength) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maxLength)} ab.`,
+    variablePicker: {
+      triggerLabel: "Variable einfügen", title: "Variable auswählen", searchLabel: "Variablen suchen", closeLabel: "Variablenauswahl schließen",
+      noResults: "Keine Variablen gefunden.", createVariableLabel: "Variable anlegen …", externalHelp: "Fragt Twitch beim Auslösen",
+      groupLabels: { context: "Kontext", stream: "Stream", person: "Person", command: "Befehl", time_random: "Zeit & Zufall", event: "Ereignis", channel: "Kanalvariablen" },
+    },
   },
   en: {
     countLabel: (count, maxLength) => `${String(count)} of ${String(maxLength)} characters`,
@@ -106,6 +111,11 @@ const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]>
       : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}?`,
     insertSuggestionLabel: (name) => `Insert {${name}}`,
     worstCaseLength: (length, maxLength) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maxLength)}.`,
+    variablePicker: {
+      triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
+      noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Requests Twitch when the template runs",
+      groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel variables" },
+    },
   },
 };
 
@@ -121,7 +131,9 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     templateMessages: templateMessages.de,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unbekannte Variable${warning.unknownVariables.length === 1 ? "" : "n"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
-      : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
+      : warning.code === "template_parameters_invalid"
+        ? `Ungültige Variablenparameter: ${warning.invalidVariables.join(", ")}`
+        : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
     sections: { announcements: "Ansagen", prewarning: "Vorwarnung" },
     fields: {
       automatic: {
@@ -154,7 +166,9 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     templateMessages: templateMessages.en,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unknown variable${warning.unknownVariables.length === 1 ? "" : "s"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
-      : `Template can be ${String(warning.worstCaseLength)} characters long.`,
+      : warning.code === "template_parameters_invalid"
+        ? `Invalid variable parameters: ${warning.invalidVariables.join(", ")}`
+        : `Template can be ${String(warning.worstCaseLength)} characters long.`,
     sections: { announcements: "Announcements", prewarning: "Prewarning" },
     fields: {
       automatic: {

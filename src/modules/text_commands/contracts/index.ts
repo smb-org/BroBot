@@ -1,6 +1,7 @@
-import type { TemplateFields, TemplateVariable } from "../contract";
+import type { ChannelVariableOperation } from "../../../contracts/values";
+import type { TemplateFields } from "../contract";
 
-export const TEXT_COMMAND_KINDS = ["text", "list", "uptime", "followage", "game", "shoutout"] as const;
+export const TEXT_COMMAND_KINDS = ["text", "list", "shoutout"] as const;
 export type TextCommandKind = (typeof TEXT_COMMAND_KINDS)[number];
 export const TEXT_COMMAND_MINIMUM_TIERS = ["everyone", "subscriber", "vip", "moderator", "broadcaster"] as const;
 export type TextCommandMinimumTier = (typeof TEXT_COMMAND_MINIMUM_TIERS)[number];
@@ -26,11 +27,25 @@ export interface TextCommand {
   userCooldownSeconds: number;
   streamCondition: TextCommandStreamCondition;
   responseType: TextCommandResponseType;
+  variableAction: TextCommandVariableAction | null;
+  useCount: number;
   lastUsedAt: string | null;
   createdAt: string;
   updatedAt: string;
   revision: number;
 }
+
+export interface TextCommandVariableAction {
+  name: string;
+  operation: ChannelVariableOperation;
+  amount: number | null;
+}
+
+export type PrepareTextCommandVariableChange = (
+  channelId: string,
+  change: { name: string; operation: ChannelVariableOperation; amount: number | null },
+  now: string,
+) => D1PreparedStatement;
 
 export interface NewTextCommand {
   channelId: string;
@@ -47,6 +62,7 @@ export interface NewTextCommand {
   userCooldownSeconds?: number;
   streamCondition?: TextCommandStreamCondition;
   responseType?: TextCommandResponseType;
+  variableAction?: TextCommandVariableAction | null;
   now: string;
 }
 
@@ -68,6 +84,7 @@ export interface TextCommandChange {
   userCooldownSeconds: number;
   streamCondition: TextCommandStreamCondition;
   responseType: TextCommandResponseType;
+  variableAction?: TextCommandVariableAction | null;
   expectedRevision?: number;
   now: string;
 }
@@ -75,6 +92,7 @@ export interface TextCommandChange {
 export interface TextCommandClaim {
   command: TextCommand;
   claimed: boolean;
+  changedVariable?: { name: string; value: number };
   reason?: "cooldown" | "user_cooldown";
   remainingSeconds?: number;
 }
@@ -84,47 +102,8 @@ export interface TextCommandActor {
   sessionId?: string;
 }
 
-export const TEXT_COMMAND_VARIABLES = [
-  { name: "user", sample: "zuschauerin", maxLength: 25 },
-  { name: "channel", sample: "beispielkanal", maxLength: 25 },
-] as const satisfies readonly TemplateVariable[];
-
-export const TEXT_COMMAND_UPTIME_VARIABLES = [
-  ...TEXT_COMMAND_VARIABLES,
-  { name: "uptime", sample: "2 Std. 14 Min.", maxLength: 32 },
-] as const satisfies readonly TemplateVariable[];
-
-export const TEXT_COMMAND_FOLLOWAGE_VARIABLES = [
-  ...TEXT_COMMAND_VARIABLES,
-  { name: "followage", sample: "1 Jahr, 3 Monate", maxLength: 48 },
-] as const satisfies readonly TemplateVariable[];
-
-export const TEXT_COMMAND_GAME_VARIABLES = [
-  TEXT_COMMAND_VARIABLES[1],
-  { name: "game", sample: "Minecraft", maxLength: 100 },
-  { name: "title", sample: "A cozy evening", maxLength: 140 },
-] as const satisfies readonly TemplateVariable[];
-
-export const TEXT_COMMAND_SHOUTOUT_VARIABLES = [
-  TEXT_COMMAND_VARIABLES[0],
-  { name: "target", sample: "streamerin", maxLength: 25 },
-] as const satisfies readonly TemplateVariable[];
-
 export const TEXT_COMMAND_TEMPLATE_FIELDS = {
-  text: { text: TEXT_COMMAND_VARIABLES },
+  text: { text: [] },
   list: {},
-  uptime: {
-    text: TEXT_COMMAND_UPTIME_VARIABLES,
-    offlineText: [TEXT_COMMAND_VARIABLES[1]],
-  },
-  followage: {
-    text: TEXT_COMMAND_FOLLOWAGE_VARIABLES,
-    notFollowingText: TEXT_COMMAND_VARIABLES,
-    unavailableText: [],
-  },
-  game: { text: TEXT_COMMAND_GAME_VARIABLES },
-  shoutout: {
-    text: TEXT_COMMAND_SHOUTOUT_VARIABLES,
-    usageText: [],
-  },
+  shoutout: { text: [], usageText: [] },
 } as const satisfies Readonly<Record<TextCommandKind, TemplateFields<TextCommand>>>;

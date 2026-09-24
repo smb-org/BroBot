@@ -3,7 +3,7 @@ import {
   IconDiamond, IconExternalLink, IconInfoCircle, IconKey, IconLock, IconMinus, IconMovie, IconPlus, IconRefresh,
   IconMessage, IconSearch, IconSettings, IconSpeakerphone, IconStar, IconSword, IconTrash, IconUser, IconUserMinus,
   IconUserPlus, IconUsers, IconVideo, IconX, IconBroadcast, IconBroadcastOff, IconClockHour4,
-  IconPlayerPause, IconPlayerPlay, IconVolume3, IconVolumeOff,
+  IconPlayerPause, IconPlayerPlay, IconVolume3, IconVolumeOff, IconBraces,
 } from "@tabler/icons-react";
 import type { TablerIcon } from "@tabler/icons-react";
 import type { ReactElement } from "react";
@@ -22,7 +22,7 @@ const glyphs = {
   "volume-off": IconVolumeOff, "player-pause": IconPlayerPause, "player-play": IconPlayerPlay,
   "clock-hour-4": IconClockHour4,
   cause: IconInfoCircle,
-  token: IconKey,
+  token: IconKey, variable: IconBraces,
 } as const satisfies Record<string, TablerIcon>;
 
 export type IconName = keyof typeof glyphs;

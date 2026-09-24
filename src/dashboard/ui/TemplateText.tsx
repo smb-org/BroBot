@@ -10,7 +10,15 @@ export interface TemplateTextProps {
 }
 
 export function TemplateText({ value, variables, className }: TemplateTextProps): ReactElement {
-  const declarations: TemplateVariable[] = variables.map(({ name, sample }) => ({ name, sample, maxLength: 0 }));
+  const declarations: TemplateVariable[] = variables.map(({ name, sample, group, kind, parameters, external }) => ({
+    name,
+    sample,
+    maxLength: 0,
+    group: group ?? "context",
+    source: kind ?? "module",
+    ...(parameters === undefined ? {} : { parameters }),
+    ...(external === undefined ? {} : { external }),
+  }));
   const pieces = tokenizeTemplate(value, declarations);
   return (
     <span className={`ui-template-text${className === undefined ? "" : ` ${className}`}`}>

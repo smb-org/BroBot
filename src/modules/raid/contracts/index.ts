@@ -12,8 +12,8 @@ export const raidSettingsSchema = z.object({
 export type RaidSettings = z.output<typeof raidSettingsSchema>;
 
 export const RAID_VARIABLES = {
-  channel: { name: "channel", sample: "beispielkanal", maxLength: 25 },
-  viewers: { name: "viewers", sample: "42", maxLength: 7 },
+  channel: { name: "channel", group: "event", sample: "samplechannel", maxLength: 25 },
+  viewers: { name: "viewers", group: "event", sample: "42", maxLength: 7 },
 } as const satisfies Record<string, TemplateVariable>;
 
 export const RAID_TEMPLATE_FIELDS = {

@@ -329,23 +329,23 @@ describe("Text commands panel", () => {
     });
   });
 
-  it("validates new kinds and supplies their German template defaults", async () => {
+  it("accepts the supported command kinds and rejects retired kinds", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
     const environment = environmentFor(database);
-    const kinds = ["uptime", "followage", "game", "shoutout"] as const;
-    const responses: Response[] = [];
-    for (const kind of kinds) {
-      responses.push(await panelRouter.fetch(
-        await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-          name: kind, kind, cooldownSeconds: 5,
-        }),
-        environment,
-      ));
-    }
-
-    expect(responses.map((response) => response.status)).toEqual([201, 201, 201, 201]);
+    const responses = await Promise.all([
+      panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "simple", kind: "text", text: "Hello {user}", cooldownSeconds: 5,
+      }), environment),
+      panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "list", kind: "list", cooldownSeconds: 5,
+      }), environment),
+      panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "shoutout", kind: "shoutout", text: "Visit {target}", cooldownSeconds: 5,
+      }), environment),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([201, 201, 201]);
     const commands = await Promise.all(responses.map(async (response) => {
       const payload: unknown = await response.json();
       if (typeof payload !== "object" || payload === null || !("command" in payload)) {
@@ -353,23 +353,19 @@ describe("Text commands panel", () => {
       }
       return payload.command;
     }));
-    expect(commands[0]).toMatchObject({
-      kind: "uptime", text: "{channel} ist seit {uptime} live!", offlineText: "{channel} ist gerade offline.",
-    });
-    expect(commands[1]).toMatchObject({
-      kind: "followage", text: "{user} folgt {channel} seit {followage}.",
-      notFollowingText: "{user} folgt {channel} noch nicht.", unavailableText: "Followage ist gerade nicht verfügbar.",
-    });
-    expect(commands[2]).toMatchObject({ kind: "game", text: "{channel} spielt gerade {game}: {title}" });
-    expect(commands[3]).toMatchObject({ kind: "shoutout", text: "Schaut bei {target} vorbei: twitch.tv/{target}", usageText: "Nutzung: !so <name>" });
+    expect(commands[0]).toMatchObject({ kind: "text", text: "Hello {user}" });
+    expect(commands[1]).toMatchObject({ kind: "list", text: "" });
+    expect(commands[2]).toMatchObject({ kind: "shoutout", text: "Visit {target}", usageText: "Nutzung: !so <name>" });
 
-    const invalidTemplate = await panelRouter.fetch(
-      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
-        name: "bad", kind: "uptime", text: "live {uptime}", offlineText: "", cooldownSeconds: 5,
-      }),
-      environment,
-    );
-    expect(invalidTemplate.status).toBe(400);
+    for (const [index, kind] of ["uptime", "followage", "game"].entries()) {
+      const rejected = await panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+          name: `retired${String(index)}`, kind, text: "Legacy", cooldownSeconds: 5,
+        }),
+        environment,
+      );
+      expect(rejected.status).toBe(400);
+    }
   });
 
   it("defaults new command options, and requires a manager to change response type", async () => {

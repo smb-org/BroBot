@@ -14,13 +14,13 @@ describe("editor seam styles", () => {
     const geometry = styles.match(/\.template-field \.template-field__input\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(geometry).toContain("font-size: 14px;");
     expect(geometry).toContain("line-height: 1.5;");
-    expect(geometry).toContain("padding: 10px 12px;");
+    expect(geometry).toContain("padding: 48px 12px 10px;");
     expect(styles).not.toContain("template-field__mirror");
     expect(styles).not.toContain("data-highlight-ready");
-    const known = styles.match(/\.template-field__decoration--known\s*\{([^}]+)\}/u)?.[1] ?? "";
-    expect(known).toContain("color: var(--brand-text);");
-    expect(known).toContain("background: var(--tint-1);");
-    expect(known).not.toMatch(/padding|border|letter-spacing|font(?:-family|-size|-weight)?\s*:/u);
+    const module = styles.match(/\.template-field__decoration--module\s*\{([^}]+)\}/u)?.[1] ?? "";
+    expect(module).toContain("color: var(--brand-text);");
+    expect(module).toContain("background: var(--tint-1);");
+    expect(module).not.toMatch(/padding|border|letter-spacing|font(?:-family|-size|-weight)?\s*:/u);
     const unknown = styles.match(/\.template-field__decoration--unknown\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(unknown).toContain("text-decoration: underline wavy var(--warn);");
     expect(unknown).not.toMatch(/padding|border|letter-spacing|font(?:-family|-size|-weight)?\s*:/u);

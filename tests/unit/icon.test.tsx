@@ -42,6 +42,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   "clock-hour-4": true,
   cause: true,
   token: true,
+  variable: true,
 };
 
 afterEach(cleanup);

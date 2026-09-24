@@ -140,18 +140,36 @@ Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben. Panel-Ansichten erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
 
 Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Jede Zeile hat
-eine Art (`text`, `list`, `uptime`, `followage`, `game` oder `shoutout`), einen Schalter und eine Mindeststufe
+eine Art (`text`, `list` oder `shoutout`), einen Schalter und eine Mindeststufe
 (`everyone`, `subscriber`, `vip`, `moderator` oder `broadcaster`). Die Art `list`
 zählt beim Auslösen alle eingeschalteten Zeilen auf. Die angelegten Befehle
-werden kanalbezogen als `!<name>` ausgelöst. `{user}` und `{channel}` werden
-erst bei der Ausgabe ersetzt. Die atomare `beanspruchen`-Mutation setzt
-`last_used_at`; scheitert sie wegen der Abkühlzeit, bleibt die Chataktion leer
-und das Modul meldet `text_commands.abgekuehlt`. Ein unbekannter, ausgeschalteter
-oder für den Chatstatus zu niedriger `!`-Befehl erzeugt keine Chataktion,
-sondern jeweils die Diagnose `text_commands.unbekannt`,
-`text_commands.deaktiviert` bzw. `text_commands.berechtigung`.
+werden kanalbezogen als `!<name>` ausgelöst. Der Host löst Systemvariablen und
+`{var.<name>}`-Kanalvariablen erst bei der Ausgabe auf; Helix- und D1-Lookups
+bleiben lazy und lesen nur die angeforderten Werte. Ein Befehl kann zusätzlich
+eine Kanalvariable atomar im Claim-Batch ändern. Revision-CAS und die indizierte
+Alias-Tabelle bleiben Teil der bestehenden Befehlsmutationen.
 
 A chat command whose complete configuration is its name, minimum tier, cooldown, template, and exactly one host action is a text-command kind; a feature with its own state or events belongs in its own module.
+
+## Host-owned template variables
+
+`src/template-variables.ts` declares the system-variable names, contexts,
+groups, and maximum output lengths. The dashboard owns the bilingual system
+descriptions and examples in `src/dashboard/locale.ts`. Module variables may
+shadow a same-named system variable within that module's template fields;
+channel variables always use the separate `var.` namespace.
+
+The host passes `renderTemplate` and a channel-bound `readChannelVariables`
+function through `ModuleExecutionContext`. The renderer first discovers tokens
+in the source text, then asks only for the sources those tokens require. A text
+without tokens makes no variable D1 read or Helix request. Channel variable
+reads use one `channel_id`-scoped query for all requested names.
+
+Text-command variable actions are stored in `text_commands` and are prepared by
+the host. The action update shares the command claim batch and is gated by the
+claim's `changes()` result, so cooldown rejection cannot change the value. The
+action preserves command revision checks, alias indexing, and the existing
+cooldown update order.
 
 ## Aktionen und Begründungen melden
 

@@ -751,15 +751,18 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .template-field:focus-within { border-color: var(--brand-text); }
 .template-field .template-field__input {
   box-sizing: border-box; display: block; width: 100%; min-height: 112px; margin: 0; border: 0;
-  padding: 10px 12px; font-family: Archivo, ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 400;
+  padding: 48px 12px 10px; font-family: Archivo, ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 400;
   line-height: 1.5; tab-size: 4; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; scrollbar-gutter: stable;
   resize: vertical; color: var(--text); background: transparent; caret-color: var(--text); outline: 0;
 }
-.template-field__decoration--known { color: var(--brand-text); background: var(--tint-1); }
+.template-field__decoration--system, .template-field__decoration--module { color: var(--brand-text); background: var(--tint-1); }
+.template-field__decoration--channel { color: var(--community); background: color-mix(in srgb, var(--community) 10%, var(--surface-well)); }
+.template-field__decoration--invalid { text-decoration: underline wavy var(--warn); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .template-field__decoration--unknown { text-decoration: underline wavy var(--warn); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .template-field__input::selection { color: transparent; background: color-mix(in srgb, var(--brand) 35%, transparent); }
 .template-field__input:focus-visible { outline: 0; }
 .template-field__caret-anchor { position: absolute; z-index: 3; width: 1px; height: 1px; pointer-events: none; }
+.template-field__variable-picker { position: absolute; z-index: 4; top: 6px; right: 6px; }
 .ui-textarea__description-content { display: grid; gap: 8px; }
 .ui-textarea__warnings { display: grid; gap: 4px; }
 .ui-textarea__warning { flex-wrap: wrap; align-items: center; }

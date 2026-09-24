@@ -32,6 +32,19 @@ export type { TagInputMessages, TagInputProps } from "./TagInput";
 export { TextArea } from "./TextArea";
 export type { TemplateVariableOption, TextAreaMessages, TextAreaProps } from "./TextArea";
 
+export { TemplateVariablePicker } from "./TemplateVariablePicker";
+export { effectivePanelTemplateVariables, panelTemplateOptions } from "./template-variable-options";
+export type { PanelChannelVariable } from "./template-variable-options";
+export type {
+  TemplateVariableInsertion,
+  TemplateVariablePickerGroup,
+  TemplateVariablePickerKind,
+  TemplateVariablePickerMessages,
+  TemplateVariablePickerOption,
+  TemplateVariablePickerProps,
+  TemplateVariablePickerRange,
+} from "./TemplateVariablePicker";
+
 export { TemplateText } from "./TemplateText";
 export type { TemplateTextProps } from "./TemplateText";
 

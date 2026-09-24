@@ -1,14 +1,16 @@
 import type { Hono } from "hono";
 import type { ComponentType } from "react";
 import type { z } from "zod";
-import type { AuditWriteAction, ChannelRole, ChannelStreamState, ImmediateActionRequirement } from "../contracts/values";
-import type { TemplateFields } from "../template";
+import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ImmediateActionRequirement } from "../contracts/values";
+import type { TemplateContext, TemplateFields } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
 export { truncateTo200Chars, textFingerprintIfTruncated } from "../text";
 export {
   closestTemplateVariable,
+  effectiveTemplateVariables,
+  invalidTemplateParameters,
   renderTemplate,
   templateFieldsWarnings,
   templateVariableNames,
@@ -20,6 +22,7 @@ export {
   TEMPLATE_VARIABLE_PATTERN,
 } from "../template";
 export type { TemplateFields, TemplateVariable, TemplateValues, TemplateWarning } from "../template";
+export { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 /** Status of the chat-triggering person, derived from Twitch badges. */
 export type ModuleChatStatus = "viewer" | "subscriber" | "vip" | "moderator" | "broadcaster";
@@ -50,7 +53,7 @@ export type ModuleDiagnosticDetailKey =
   | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person" | "alias"
   | "reason" | "recipient" | "remainingSeconds" | "requiredTier" | "response"
   | "scheduledAt" | "scheduledFor" | "scope" | "seconds" | "source"
-  | "sourceChannelId" | "startedAt" | "status" | "streamState" | "target" | "targetChannelId"
+  | "sourceChannelId" | "startedAt" | "status" | "streamState" | "target" | "targetChannelId" | "variable"
   | "text" | "threshold" | "tier" | "triggerLogin" | "type" | "viewers";
 
 export interface ModuleDiagnostic {
@@ -146,6 +149,20 @@ export interface ModuleExecutionContext {
   channelInfo: () => Promise<ModuleChannelInfo | null>;
   /** Lazily loads whether the caller follows the current channel. */
   followedAt: (userId: string) => Promise<ModuleFollowedAt>;
+  followerTotal: () => Promise<number | null>;
+  chattersTotal: () => Promise<number | null>;
+  userCreatedAt: (userId: string) => Promise<string | null>;
+  readChannelVariables: (names: readonly string[]) => Promise<Readonly<Record<string, number>>>;
+  renderTemplate: (
+    text: string,
+    moduleValues: Readonly<Record<string, string | number>>,
+    changed?: { name: string; value: number },
+  ) => Promise<{ text: string; diagnostics: readonly ModuleDiagnostic[] }>;
+  prepareVariableChange: (
+    channelId: string,
+    change: { name: string; operation: ChannelVariableOperation; amount: number | null },
+    now: string,
+  ) => D1PreparedStatement;
   /** Lazily reads the channel's configured chat-template language. */
   channelLanguage: () => Promise<ModuleLanguage>;
 }
@@ -158,7 +175,72 @@ export interface ModuleChannelInfo {
   title: string;
   gameName: string;
   startedAt: string | null;
+  viewerCount: number;
 }
+
+export interface ModuleVariableReferenceUsage {
+  moduleId: string;
+  itemName: string;
+  kind: "action" | "template";
+}
+
+export interface ModuleVariableReferences {
+  usages: (db: D1Database, channelId: string, name: string) => Promise<readonly ModuleVariableReferenceUsage[]>;
+  rename: (db: D1Database, channelId: string, from: string, to: string) => readonly D1PreparedStatement[];
+}
+
+export interface ModuleChannelVariable {
+  name: string;
+  value: number;
+  description: string;
+}
+
+/** Host-backed variable access for module routes; each call is channel-scoped. */
+export interface ModuleChannelVariableAccess {
+  listChannelVariables: (channelId: string) => Promise<readonly ModuleChannelVariable[]>;
+  findChannelVariable: (channelId: string, name: string) => Promise<ModuleChannelVariable | null>;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Finds and rewrites channel-variable template references in module settings. */
+export const settingsVariableReferences = (
+  moduleId: string,
+  fields: readonly string[],
+): ModuleVariableReferences => ({
+  async usages(db, channelId, name): Promise<readonly ModuleVariableReferenceUsage[]> {
+    const row = await db.prepare(
+      "SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, moduleId).first<{ settings: string }>();
+    if (row === null) return [];
+    let settings: unknown;
+    try {
+      settings = JSON.parse(row.settings) as unknown;
+    } catch {
+      return [];
+    }
+    if (!isRecord(settings)) return [];
+    const token = `{var.${name}}`;
+    return fields.flatMap((field) => {
+      const value = settings[field];
+      return typeof value === "string" && value.includes(token)
+        ? [{ moduleId, itemName: field, kind: "template" as const }]
+        : [];
+    });
+  },
+  rename(db, channelId, from, to) {
+    const oldToken = `{var.${from}}`;
+    const nextToken = `{var.${to}}`;
+    return [db.prepare(
+      `UPDATE channel_modules
+          SET settings = replace(settings, ?, ?), revision = revision + 1
+        WHERE channel_id = ? AND module_id = ? AND instr(settings, ?) > 0
+          AND EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)
+          AND NOT EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?)`,
+    ).bind(oldToken, nextToken, channelId, moduleId, oldToken, channelId, to, channelId, from)];
+  },
+});
 
 /** Infrastructure for one-time initial data when a module is enabled. */
 export interface ModuleEnableContext {
@@ -257,6 +339,8 @@ export interface ModuleRouteVariables {
   authorizeManagementMutation: AuthorizeModuleMutation;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
+  listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];
+  findChannelVariable: ModuleChannelVariableAccess["findChannelVariable"];
   writeModuleDiagnostics: (
     db: D1Database,
     channelId: string,
@@ -314,6 +398,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   defaultSettings: z.output<SettingsSchema>;
   /** Template fields and variables used by both panel validation and worker rendering. */
   templateFields?: TemplateFields<z.output<SettingsSchema>>;
+  /** Which host catalog groups are available in this module's templates. */
+  templateContext?: TemplateContext;
+  /** Optional references to channel variables stored in module-owned data. */
+  variableReferences?: ModuleVariableReferences;
   /** Broadcaster consent the host verifies before the EventSub subscription. */
   broadcasterScopes?: readonly string[];
   eventSubTypes?: readonly string[];

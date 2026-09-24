@@ -1,5 +1,6 @@
 import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleLanguage } from "../modules/contract";
+import type { SystemVariableName } from "../template-variables";
 
 export type DashboardLanguage = ModuleLanguage;
 export type LocaleCatalog<T> = Record<DashboardLanguage, T>;
@@ -84,6 +85,156 @@ export const dashboardLanguage = (): DashboardLanguage => browserModuleLanguage(
 
 export const dashboardCommonTexts = (): DashboardCommonTexts => commonTexts[dashboardLanguage()];
 
+export interface SystemTemplateVariableLocale {
+  description: string;
+  sample: string;
+}
+
+export type SystemTemplateVariableCatalog = Readonly<Record<SystemVariableName, SystemTemplateVariableLocale>>;
+
+export const systemTemplateVariableLocale: Readonly<Record<DashboardLanguage, SystemTemplateVariableCatalog>> = {
+  de: {
+    user: { description: "Login der Person im Chat", sample: "zuschauerin" },
+    displayname: { description: "Anzeigename der Person im Chat", sample: "Zuschauerin" },
+    channel: { description: "Login deines Kanals", sample: "beispielkanal" },
+    target: { description: "Erstes Argument oder die auslösende Person", sample: "freund" },
+    args: { description: "Alle Argumente des Befehls", sample: "hallo zusammen" },
+    game: { description: "Aktuelle Kategorie des Streams", sample: "Minecraft" },
+    title: { description: "Aktueller Streamtitel", sample: "Ein gemütlicher Abend" },
+    uptime: { description: "Laufzeit des Streams oder offline", sample: "2 Std. 14 Min." },
+    viewers: { description: "Aktuelle Zuschauerzahl", sample: "42" },
+    live: { description: "Ob der Kanal live oder offline ist", sample: "live" },
+    followers: { description: "Gesamtzahl der Follower", sample: "12.345" },
+    chatters: { description: "Personen im Chat", sample: "42" },
+    followage: { description: "Wie lange die Person dem Kanal folgt", sample: "1 Jahr, 3 Monate" },
+    subage: { description: "Monate des aktuellen Abzeichens", sample: "6" },
+    accountage: { description: "Alter des Twitch-Kontos", sample: "4 Jahre" },
+    uses: { description: "Auslösungen dieses Befehls einschließlich dieser", sample: "12" },
+    cooldown: { description: "Abkühlzeit des Befehls in Sekunden", sample: "5" },
+    command: { description: "Befehlsname oder verwendeter Alias", sample: "hallo" },
+    date: { description: "Heutiges Datum in Europe/Berlin", sample: "23.09.2026" },
+    time: { description: "Aktuelle Uhrzeit in Europe/Berlin", sample: "20:15" },
+    random: { description: "Zufallszahl; Beispielbereich 1–100", sample: "73" },
+    pick: { description: "Zufällige Auswahl aus deinen Optionen", sample: "Kopf" },
+  },
+  en: {
+    user: { description: "Login of the person in chat", sample: "viewer" },
+    displayname: { description: "Display name of the person in chat", sample: "Viewer" },
+    channel: { description: "Login of your channel", sample: "samplechannel" },
+    target: { description: "First argument or the person who triggered the command", sample: "friend" },
+    args: { description: "All command arguments", sample: "hello everyone" },
+    game: { description: "Current stream category", sample: "Minecraft" },
+    title: { description: "Current stream title", sample: "A cozy evening" },
+    uptime: { description: "Stream duration or offline", sample: "2 h 14 min" },
+    viewers: { description: "Current viewer count", sample: "42" },
+    live: { description: "Whether the channel is live or offline", sample: "live" },
+    followers: { description: "Total follower count", sample: "12,345" },
+    chatters: { description: "People in chat", sample: "42" },
+    followage: { description: "How long this person has followed the channel", sample: "1 year, 3 months" },
+    subage: { description: "Months on the current subscriber badge", sample: "6" },
+    accountage: { description: "Age of the Twitch account", sample: "4 years" },
+    uses: { description: "Command triggers including this one", sample: "12" },
+    cooldown: { description: "Command cooldown in seconds", sample: "5" },
+    command: { description: "Command name or alias used", sample: "hello" },
+    date: { description: "Today's date in Europe/Berlin", sample: "23.09.2026" },
+    time: { description: "Current time in Europe/Berlin", sample: "20:15" },
+    random: { description: "Random number; example range 1–100", sample: "73" },
+    pick: { description: "Random choice from your options", sample: "Heads" },
+  },
+};
+
+export const channelVariableTemplateDescription: Readonly<Record<DashboardLanguage, string>> = {
+  de: "Kanalvariable",
+  en: "Channel variable",
+};
+
+export interface ChannelVariablesTexts {
+  title: string;
+  list: string;
+  create: string;
+  count: (count: number, maximum: number) => string;
+  empty: string;
+  loading: string;
+  loadError: string;
+  saveError: string;
+  deleteError: string;
+  name: string;
+  nameHint: string;
+  nameInvalid: string;
+  description: string;
+  descriptionHint: string;
+  noDescription: string;
+  value: string;
+  setValue: string;
+  valueHint: string;
+  resetOnStreamStart: string;
+  resetHint: string;
+  renameHint: string;
+  usages: string;
+  noUsages: string;
+  usageLine: (moduleId: string, itemName: string, kind: "template" | "action") => string;
+  set: string;
+  increase: string;
+  decrease: string;
+  delete: string;
+  deleteTitle: (name: string) => string;
+  deleteDescription: (name: string, usages: string) => string;
+  deleteConfirm: (name: string) => string;
+  deleteCancel: string;
+  inUseReason: (usages: string) => string;
+  managementLocked: string;
+  valueLocked: string;
+  limitReached: string;
+  newVariable: string;
+  save: string;
+  discard: string;
+  close: string;
+  conflict: string;
+  created: string;
+  updated: string;
+}
+
+const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
+  de: {
+    title: "Kanalvariablen", list: "Variablen", create: "Variable anlegen", count: (count, maximum) => `${String(count)} von ${String(maximum)}`,
+    empty: "Noch keine Kanalvariablen angelegt.", loading: "Kanalvariablen werden geladen …", loadError: "Kanalvariablen konnten nicht geladen werden.",
+    saveError: "Die Kanalvariable konnte nicht gespeichert werden.", deleteError: "Die Kanalvariable konnte nicht gelöscht werden.",
+    name: "Name", nameHint: "Kleinbuchstaben, Zahlen und Unterstrich; höchstens 32 Zeichen.", nameInvalid: "Nur Kleinbuchstaben, Zahlen und Unterstrich.",
+    description: "Beschreibung", descriptionHint: "Erscheint in der Variablenauswahl. Höchstens 80 Zeichen.", noDescription: "Keine Beschreibung",
+    value: "Wert", setValue: "Setzen auf", valueHint: "Ganze Zahl von −999.999.999 bis 999.999.999.",
+    resetOnStreamStart: "Bei Streamstart auf null setzen", resetHint: "Wird beim nächsten stream.online-Ereignis zurückgesetzt.",
+    renameHint: "Vorlagen mit dieser Variable werden beim Umbenennen angepasst.", usages: "Verwendet in", noUsages: "Noch nicht verwendet.",
+    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "zählt eine Aktion" : "Vorlage"}`,
+    set: "Setzen", increase: "+1", decrease: "−1", delete: "Variable löschen", deleteTitle: (name) => `Variable ${name} löschen?`,
+    deleteDescription: (name, usages) => usages.length === 0 ? `„${name}“ wird dauerhaft gelöscht.` : `„${name}“ wird dauerhaft gelöscht. Verwendungen: ${usages}`,
+    deleteConfirm: (name) => `${name} endgültig löschen`, deleteCancel: "Abbrechen",
+    inUseReason: (usages) => `Wird von ${usages} verwendet. Entferne zuerst die Befehlsaktion.`,
+    managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
+    valueLocked: "Nur Kanalmitglieder dürfen den Wert ändern.", limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
+    conflict: "Die Variable wurde inzwischen geändert.", created: "Variable angelegt.", updated: "Variable gespeichert.",
+  },
+  en: {
+    title: "Channel variables", list: "Variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
+    empty: "No channel variables yet.", loading: "Loading channel variables …", loadError: "Channel variables could not be loaded.",
+    saveError: "The channel variable could not be saved.", deleteError: "The channel variable could not be deleted.",
+    name: "Name", nameHint: "Lowercase letters, numbers, and underscores; up to 32 characters.", nameInvalid: "Use lowercase letters, numbers, and underscores only.",
+    description: "Description", descriptionHint: "Shown in the variable picker. Up to 80 characters.", noDescription: "No description",
+    value: "Value", setValue: "Set to", valueHint: "Integer from −999,999,999 to 999,999,999.",
+    resetOnStreamStart: "Reset to zero when the stream starts", resetHint: "Resets on the next stream.online event.",
+    renameHint: "Templates that use this variable will be updated when it is renamed.", usages: "Used in", noUsages: "Not used yet.",
+    usageLine: (moduleId, itemName, kind) => `${moduleId === "text_commands" ? "!" : ""}${itemName} · ${kind === "action" ? "changes a variable" : "template"}`,
+    set: "Set", increase: "+1", decrease: "−1", delete: "Delete variable", deleteTitle: (name) => `Delete variable ${name}?`,
+    deleteDescription: (name, usages) => usages.length === 0 ? `“${name}” will be deleted permanently.` : `“${name}” will be deleted permanently. Used in: ${usages}`,
+    deleteConfirm: (name) => `Delete ${name} permanently`, deleteCancel: "Cancel",
+    inUseReason: (usages) => `Used by ${usages}. Remove the command action first.`,
+    managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
+    valueLocked: "Only channel members may change the value.", limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
+    conflict: "This variable has changed since it was loaded.", created: "Variable created.", updated: "Variable saved.",
+  },
+};
+
+export const channelVariablesTexts = (language: DashboardLanguage = dashboardLanguage()): ChannelVariablesTexts => channelVariablesCatalog[language];
+
 export interface DashboardTexts {
   header: {
     connectionRunning: string;
@@ -134,6 +285,7 @@ export interface DashboardTexts {
     channel: string;
     system: string;
     members: string;
+    variables: string;
     module: string;
     events: string;
     audit: string;
@@ -468,7 +620,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Hauptnavigation", overview: "Übersicht", channel: "Kanal", system: "System",
-      members: "Mitglieder", module: "Module", events: "Ereignisse", audit: "Audit-Log", selectChannel: "Kanal auswählen",
+      members: "Mitglieder", variables: "Variablen", module: "Module", events: "Ereignisse", audit: "Audit-Log", selectChannel: "Kanal auswählen",
       selectModule: "Modul auswählen",
       signInWithTwitch: "Mit Twitch anmelden", twitchAccount: "Twitch-Konto",
       signingOut: "Abmeldung …", signOut: "Abmelden",
@@ -680,7 +832,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     },
     navigation: {
       mainNavigation: "Main navigation", overview: "Overview", channel: "Channel", system: "System",
-      members: "Members", module: "Modules", events: "Events", audit: "Audit log", selectChannel: "Select channel",
+      members: "Members", variables: "Variables", module: "Modules", events: "Events", audit: "Audit log", selectChannel: "Select channel",
       selectModule: "Select module",
       signInWithTwitch: "Sign in with Twitch", twitchAccount: "Twitch account",
       signingOut: "Signing out …", signOut: "Sign out",
@@ -1209,6 +1361,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
         : `Ankündigung nicht möglich (${reason}) — nicht gesendet`;
     },
     "template_truncated": (detail) => `Chatnachricht auf 500 Zeichen gekürzt (ursprünglich ${detailNumber(detail, "current", "unbekannte Länge")})`,
+    "template.lookup_unavailable": (detail) => `Vorlagenvariable ${detailText(detail, "name", "unbekannt")} ist gerade nicht verfügbar`,
+    "template_parameters_invalid": (detail) => `Ungültiger Variablenparameter: ${detailText(detail, "name", "unbekannt")}`,
     "host.module.error": "Modulfehler",
     "host.module.unknown": "Unbekanntes Modul",
     "host.overlay.not_executed": "Overlay nicht ausgeführt",
@@ -1287,6 +1441,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.invalid": "Textbefehl ungültig",
     "text_commands.lookup_unavailable": (detail) => `Textbefehl !${detailText(detail, "name", "unbekannt")}: ${detail.kind === "uptime" ? "Stream-Daten" : detail.kind === "followage" ? "Followage" : "Spielinformationen"} nicht verfügbar`,
     "text_commands.argument_missing": (detail) => eventTextWithName(detail, "Shoutout-Ziel fehlt", (name) => `Befehl !${name}: Twitch-Name fehlt`),
+    "text_commands.argument_invalid": (detail) => eventTextWithName(detail, "Ungültiges Argument", (name) => `Befehl !${name}: Argument muss eine Ganzzahl im erlaubten Bereich sein`),
   },
   en: {
     "host.action.failed": "Action failed",
@@ -1301,6 +1456,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
         : `Announcement unavailable (${reason}); not sent`;
     },
     "template_truncated": (detail) => `Chat message shortened to 500 characters (originally ${detailNumber(detail, "current", "unknown length")})`,
+    "template.lookup_unavailable": (detail) => `Template variable ${detailText(detail, "name", "unknown")} is currently unavailable`,
+    "template_parameters_invalid": (detail) => `Invalid variable parameter: ${detailText(detail, "name", "unknown")}`,
     "host.module.error": "Module error",
     "host.module.unknown": "Unknown module",
     "host.overlay.not_executed": "Overlay not executed",
@@ -1379,6 +1536,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.invalid": "Invalid text command",
     "text_commands.lookup_unavailable": (detail) => `Command !${detailText(detail, "name", "unknown")}: ${detail.kind === "uptime" ? "stream data" : detail.kind === "followage" ? "followage" : "game information"} unavailable`,
     "text_commands.argument_missing": (detail) => eventTextWithName(detail, "Shoutout target missing", (name) => `Command !${name}: Twitch login missing`),
+    "text_commands.argument_invalid": (detail) => eventTextWithName(detail, "Invalid argument", (name) => `Command !${name}: argument must be an integer in the allowed range`),
   },
 };
 
@@ -1401,6 +1559,8 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.announcement.failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.announcement.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "template_truncated": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "template.lookup_unavailable": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "template_parameters_invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.module.error": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.module.unknown": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.overlay.not_executed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
@@ -1457,6 +1617,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "text_commands.invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "text_commands.lookup_unavailable": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "text_commands.argument_missing": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "text_commands.argument_invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
 };
 
 export function eventText(code: string, language?: DashboardLanguage): string;
@@ -1490,6 +1651,10 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.created": "Textbefehl erstellt",
     "text_commands.command.updated": "Textbefehl aktualisiert",
     "text_commands.command.removed": "Textbefehl entfernt",
+    "channel.variable.created": "Kanalvariable erstellt",
+    "channel.variable.renamed": "Kanalvariable geändert",
+    "channel.variable.removed": "Kanalvariable gelöscht",
+    "channel.variable.value_changed": "Kanalvariablenwert geändert",
     "ads.commercial_started": "Werbung gestartet",
     "clip.created": "Clip erstellt",
     "channel.mute.enabled": "Kanal stummgeschaltet",
@@ -1510,6 +1675,10 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "text_commands.command.created": "Text command created",
     "text_commands.command.updated": "Text command updated",
     "text_commands.command.removed": "Text command removed",
+    "channel.variable.created": "Channel variable created",
+    "channel.variable.renamed": "Channel variable changed",
+    "channel.variable.removed": "Channel variable deleted",
+    "channel.variable.value_changed": "Channel variable value changed",
     "ads.commercial_started": "Commercial started",
     "clip.created": "Clip created",
     "channel.mute.enabled": "Channel muted",
@@ -1557,11 +1726,13 @@ const auditFieldLabels: LocaleCatalog<Record<string, string>> = {
     role: "Rolle", enabled: "Aktiv", fullConsent: "Vollzustimmung", revocationReason: "Widerrufsgrund",
     expiresAt: "Gültig bis", revokedAt: "Widerrufen am", length: "Länge (Sekunden)", retryAfter: "Erneut möglich ab",
     clipId: "Clip-ID", tokenId: "Token-ID", login: "Login", displayName: "Anzeigename",
+    name: "Name", value: "Wert", description: "Beschreibung",
   },
   en: {
     role: "Role", enabled: "Enabled", fullConsent: "Full consent", revocationReason: "Revocation reason",
     expiresAt: "Valid until", revokedAt: "Revoked at", length: "Length (seconds)", retryAfter: "Retry after",
     clipId: "Clip ID", tokenId: "Token ID", login: "Login", displayName: "Display name",
+    name: "Name", value: "Value", description: "Description",
   },
 };
 
@@ -1636,6 +1807,14 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     command_update_denied: "Der Befehl darf nicht geändert werden.",
     command_changed_concurrently: "Der Befehl wurde inzwischen geändert.",
     command_delete_denied: "Der Befehl darf nicht gelöscht werden.",
+    variable_data_invalid: "Die Variablendaten sind ungültig.",
+    variable_not_found: "Die Kanalvariable wurde nicht gefunden.",
+    variable_already_exists: "Eine Variable mit diesem Namen gibt es bereits.",
+    variable_limit_reached: "Der Kanal hat bereits 50 Variablen.",
+    variable_in_use: "Eine Textbefehlsaktion verwendet diese Variable.",
+    variable_changed_concurrently: "Die Kanalvariable wurde inzwischen geändert.",
+    variable_management_denied: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen oder löschen.",
+    variable_value_change_denied: "Du darfst den Variablenwert nicht ändern.",
     ad_schedule_read_failed: "Der Werbezeitplan konnte nicht gelesen werden.",
     ad_snooze_failed: "Die nächste Werbepause konnte nicht verschoben werden.",
     commercial_length_invalid: "Die Werbedauer ist ungültig.",
@@ -1712,6 +1891,14 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     command_update_denied: "This command may not be changed.",
     command_changed_concurrently: "This command has since changed.",
     command_delete_denied: "This command may not be removed.",
+    variable_data_invalid: "The variable data is invalid.",
+    variable_not_found: "The channel variable was not found.",
+    variable_already_exists: "A variable with this name already exists.",
+    variable_limit_reached: "This channel already has 50 variables.",
+    variable_in_use: "A text command action uses this variable.",
+    variable_changed_concurrently: "The channel variable has since changed.",
+    variable_management_denied: "Only broadcasters and managers may create, rename, or delete variables.",
+    variable_value_change_denied: "You may not change the variable value.",
     ad_schedule_read_failed: "The ad schedule could not be read.",
     ad_snooze_failed: "The next ad break could not be postponed.",
     commercial_length_invalid: "The commercial length is invalid.",

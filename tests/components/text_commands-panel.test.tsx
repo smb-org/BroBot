@@ -26,6 +26,8 @@ const makeCommand = (overrides: Partial<TextCommand> = {}): TextCommand => ({
   userCooldownSeconds: 15,
   streamCondition: "online",
   responseType: "reply",
+  variableAction: null,
+  useCount: 0,
   lastUsedAt: null,
   createdAt: "2026-09-19T12:00:00.000Z",
   updatedAt: "2026-09-19T12:00:00.000Z",
@@ -43,7 +45,7 @@ const panelFetch = ({ commands = () => [makeCommand()], onMutation = () => jsonR
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
-    if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands() }));
+    if (url.pathname.endsWith("/commands") && method === "GET") return Promise.resolve(jsonResponse({ commands: commands(), variables: [] }));
     if (url.pathname.includes("/commands/") || (url.pathname.endsWith("/commands") && method !== "GET")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null;
       return Promise.resolve(onMutation(method, url.pathname, body));
@@ -90,7 +92,7 @@ describe("Text command editor", () => {
     expect(screen.getByText("a–z, 0–9, - und _")).toBeInTheDocument();
     expect(editor().querySelector(".ui-field__prefix")).toHaveTextContent("!");
     expect(screen.getByText(renderCommandText("Hallo {user} aus {channel}", { user: "zuschauerin", channel: "beispielkanal" }))).toBeInTheDocument();
-    expect(within(editor()).queryByRole("switch")).not.toBeInTheDocument();
+    expect(within(editor()).getByRole("switch", { name: "Kanalvariable ändern" })).toBeInTheDocument();
 
     fireEvent.click(advancedTab);
     const copy = textCommandsTexts("de");
@@ -115,45 +117,33 @@ describe("Text command editor", () => {
     await waitFor(() => {
       expect(screen.getByRole("listbox")).toHaveTextContent("AntworttextAntwortet mit dem Text unten.");
       expect(screen.getByRole("listbox")).toHaveTextContent("BefehlslisteZählt alle eingeschalteten Befehle auf (ohne Aliase).");
-      expect(screen.getByRole("listbox")).toHaveTextContent("Stream-LaufzeitZeigt die aktuelle Laufzeit des Streams.");
-      expect(screen.getByRole("listbox")).toHaveTextContent("FollowageZeigt, seit wann die auslösende Person folgt.");
-      expect(screen.getByRole("listbox")).toHaveTextContent("Spiel und TitelZeigt die aktuelle Kategorie und den Streamtitel.");
       expect(screen.getByRole("listbox")).toHaveTextContent("Shoutout!so <name> empfiehlt einen Twitch-Kanal im Chat.");
     });
   });
 
-  it("shows each kind's template fields and variable chips in its editor", async () => {
-    const createWithKind = async (label: RegExp): Promise<void> => {
-      cleanup();
-      renderPanel(panelFetch({ commands: () => [] }));
-      fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-      fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
-      fireEvent.click(await screen.findByRole("option", { name: label }));
-    };
+  it("offers the shared system variable catalog in the response picker", async () => {
+    renderPanel(panelFetch({ commands: () => [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Variable einfügen" }));
+    const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
+    expect(within(picker).getByRole("option", { name: /\{user\}/u, hidden: true })).toBeInTheDocument();
+    expect(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true })).toBeInTheDocument();
+    expect(within(picker).getByRole("option", { name: /\{random 1-100\}/u, hidden: true })).toBeInTheDocument();
+    expect(within(picker).getByRole("group", { name: "Stream", hidden: true })).toBeInTheDocument();
+    fireEvent.click(within(picker).getByRole("option", { name: /\{uptime\}/u, hidden: true }));
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("{uptime}");
+  });
 
-    await createWithKind(/Stream-Laufzeit/u);
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Offline-Antwort" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "{uptime}" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "{channel}" })).toHaveLength(2);
-
-    await createWithKind(/Followage/u);
-    expect(screen.getByRole("textbox", { name: "Antwort" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Antwort ohne Follow" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Antwort bei fehlenden Daten" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "{followage}" })).toBeInTheDocument();
-
-    await createWithKind(/Spiel und Titel/u);
-    expect(screen.getByRole("button", { name: "{game}" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "{title}" })).toBeInTheDocument();
-
-    await createWithKind(/Shoutout/u);
+  it("shows the shoutout usage response and its Twitch cooldown hint", async () => {
+    renderPanel(panelFetch({ commands: () => [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Art" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Shoutout/u }));
     expect(screen.getByRole("textbox", { name: "Nutzungshinweis" })).toBeInTheDocument();
     expect(screen.getByText("Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Erweitert" }));
     const tierGroup = screen.getByRole("radiogroup", { name: "Wer darf auslösen" });
-    const selectedTier = within(tierGroup).getByRole("radio", { checked: true });
-    expect(selectedTier).toHaveAccessibleName("Moderatoren. Moderatoren und Broadcaster.");
+    expect(within(tierGroup).getByRole("radio", { checked: true })).toHaveAccessibleName("Moderatoren. Moderatoren und Broadcaster.");
   });
 
   it("puts the Art select's hint below the field, not between the label and the control", async () => {
@@ -170,8 +160,10 @@ describe("Text command editor", () => {
     const fetcher = panelFetch({ commands: () => [] });
     renderPanel(fetcher);
     fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
-    expect(screen.getByRole("button", { name: "{user}" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "{channel}" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Variable einfügen" }));
+    const picker = await screen.findByRole("listbox", { name: "Variable auswählen" });
+    expect(within(picker).getByRole("option", { name: /\{user\}/u, hidden: true })).toBeInTheDocument();
+    expect(within(picker).getByRole("option", { name: /\{channel\}/u, hidden: true })).toBeInTheDocument();
   });
 
   it("uses the chat preview, not plain text, for a command list's response", async () => {
@@ -230,6 +222,7 @@ describe("Text command editor", () => {
         userCooldownSeconds: 0,
         streamCondition: "online",
         responseType: "reply",
+        variableAction: null,
       }));
     });
   });
@@ -259,6 +252,7 @@ describe("Text command editor", () => {
       userCooldownSeconds: 0,
       streamCondition: "any",
       responseType: "say",
+      variableAction: null,
     }));
   });
 
@@ -289,6 +283,7 @@ describe("Text command editor", () => {
       userCooldownSeconds: 0,
       streamCondition: "any",
       responseType: "say",
+      variableAction: null,
     }));
   });
 
@@ -592,6 +587,7 @@ describe("Text command editor", () => {
         userCooldownSeconds: 15,
         streamCondition: "online",
         responseType: "reply",
+        variableAction: null,
       },
     ]);
     expect(await screen.findByRole("button", { name: "Serverstand laden" })).toBeInTheDocument();

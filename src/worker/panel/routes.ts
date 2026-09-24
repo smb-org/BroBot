@@ -35,6 +35,7 @@ import {
 } from "./repository";
 import { fetchTwitchUsersById, memberRouter } from "./member-routes";
 import { moduleRouter } from "./module-routes";
+import { variableRouter } from "./variable-routes";
 import { EVENT_TONES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
 import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../../panel-contract";
@@ -176,6 +177,7 @@ export const panelRouter = new Hono<PanelEnvironment>();
 
 panelRouter.route("/", memberRouter);
 panelRouter.route("/", moduleRouter);
+panelRouter.route("/", variableRouter);
 
 panelRouter.post(
   "/api/channels/:channelId/controls/:control",

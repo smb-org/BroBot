@@ -1,4 +1,4 @@
-import type { AuditAction } from "../../../contracts/values";
+import type { AuditAction, ChannelVariableOperation } from "../../../contracts/values";
 import type {
   NewTextCommand,
   TextCommand,
@@ -8,6 +8,7 @@ import type {
   TextCommandKind,
   TextCommandResponseType,
   TextCommandStreamCondition,
+  PrepareTextCommandVariableChange,
 } from "../contracts";
 import { textFingerprintIfTruncated, truncateTo200Chars, type AuthorizeModuleMutation, type PrepareModuleAudit } from "../contract";
 import type {
@@ -42,6 +43,11 @@ const auditValues = async (command: TextCommand) => ({
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
   responseType: command.responseType,
+  ...(command.variableAction === null ? {} : {
+    variableName: command.variableAction.name,
+    variableOperation: command.variableAction.operation,
+    variableAmount: command.variableAction.amount,
+  }),
   ...(command.offlineText === undefined ? {} : await previewField("offlineText", command.offlineText)),
   ...(command.notFollowingText === undefined ? {} : await previewField("notFollowingText", command.notFollowingText)),
   ...(command.unavailableText === undefined ? {} : await previewField("unavailableText", command.unavailableText)),
@@ -60,6 +66,7 @@ const sameMutationValues = (left: TextCommand, right: TextCommand): boolean =>
   left.userCooldownSeconds === right.userCooldownSeconds &&
   left.streamCondition === right.streamCondition &&
   left.responseType === right.responseType &&
+  JSON.stringify(left.variableAction) === JSON.stringify(right.variableAction) &&
   extraTemplateKeys.every((key) => left[key] === right[key]);
 
 const extraTemplatesOf = (value: Pick<TextCommand, typeof extraTemplateKeys[number]>): Record<string, string> => {
@@ -134,6 +141,10 @@ interface TextCommandRow {
   created_at: string;
   updated_at: string;
   revision: number;
+  use_count: number;
+  variable_name: string | null;
+  variable_operation: ChannelVariableOperation | null;
+  variable_amount: number | null;
 }
 
 const mapTextCommand = (row: TextCommandRow): TextCommand => ({
@@ -149,6 +160,10 @@ const mapTextCommand = (row: TextCommandRow): TextCommand => ({
   userCooldownSeconds: row.user_cooldown_seconds,
   streamCondition: row.stream_condition,
   responseType: row.response_type,
+  variableAction: row.variable_name === null || row.variable_operation === null || row.variable_amount === null
+    ? null
+    : { name: row.variable_name, operation: row.variable_operation, amount: row.variable_amount },
+  useCount: row.use_count,
   lastUsedAt: row.last_used_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -196,7 +211,8 @@ const aliasConflict = async (
 
 export const textCommandSelectColumns = `channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
                                        aliases_json, user_cooldown_seconds, stream_condition, response_type,
-                                       template_fields_json, last_used_at, created_at, updated_at, revision`;
+                                       template_fields_json, last_used_at, created_at, updated_at, revision,
+                                       use_count, variable_name, variable_operation, variable_amount`;
 
 export const createTextCommandRepository = (
   db: D1Database,
@@ -228,7 +244,7 @@ export const createTextCommandRepository = (
               command.minimum_level, command.cooldown_seconds, command.aliases_json,
               command.user_cooldown_seconds, command.stream_condition, command.response_type,
               command.template_fields_json, command.last_used_at, command.created_at, command.updated_at,
-              command.revision
+              command.revision, command.use_count, command.variable_name, command.variable_operation, command.variable_amount
          FROM text_command_aliases AS alias
          JOIN text_commands AS command
            ON command.channel_id = alias.channel_id AND command.command_name = alias.command_name
@@ -251,8 +267,9 @@ export const createTextCommandRepository = (
       `INSERT INTO text_commands
         (channel_id, command_name, response_text, kind, enabled, minimum_level, cooldown_seconds,
          aliases_json, user_cooldown_seconds, stream_condition, response_type,
-         template_fields_json, last_used_at, created_at, updated_at, revision)
-       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
+         template_fields_json, variable_name, variable_operation, variable_amount,
+         last_used_at, created_at, updated_at, revision)
+       SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM text_commands AS other
            WHERE other.channel_id = ? AND other.command_name = ?
@@ -280,6 +297,9 @@ export const createTextCommandRepository = (
       streamCondition,
       responseType,
       extraTemplatesJson,
+      input.variableAction?.name ?? null,
+      input.variableAction?.operation ?? null,
+      input.variableAction?.amount ?? null,
       input.now,
       input.now,
       initialTextCommandRevision(input.now),
@@ -306,6 +326,8 @@ export const createTextCommandRepository = (
       userCooldownSeconds,
       streamCondition,
       responseType,
+      variableAction: input.variableAction ?? null,
+      useCount: 0,
       lastUsedAt: null,
       createdAt: input.now,
       updatedAt: input.now,
@@ -358,8 +380,9 @@ export const createTextCommandRepository = (
       : db.prepare(
         `UPDATE text_commands
             SET command_name = ?, response_text = ?, kind = ?, enabled = ?, minimum_level = ?, cooldown_seconds = ?,
-                aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?,
-                template_fields_json = ?, updated_at = ?, revision = revision + 1
+              aliases_json = ?, user_cooldown_seconds = ?, stream_condition = ?, response_type = ?,
+                template_fields_json = ?, variable_name = ?, variable_operation = ?, variable_amount = ?,
+                updated_at = ?, revision = revision + 1
           WHERE channel_id = ? AND command_name = ? AND revision = ?
             AND (command_name = ? OR NOT EXISTS (
               SELECT 1 FROM text_commands AS other
@@ -388,6 +411,9 @@ export const createTextCommandRepository = (
         input.streamCondition,
         input.responseType,
         extraTemplatesJson,
+        input.variableAction?.name ?? null,
+        input.variableAction?.operation ?? null,
+        input.variableAction?.amount ?? null,
         input.now,
         input.channelId,
         input.name,
@@ -419,6 +445,8 @@ export const createTextCommandRepository = (
         userCooldownSeconds: input.userCooldownSeconds,
         streamCondition: input.streamCondition,
         responseType: input.responseType,
+        variableAction: input.variableAction ?? null,
+        useCount: before.useCount,
         ...extraTemplates,
         updatedAt: input.now,
         revision: before.revision + 1,
@@ -507,6 +535,7 @@ export const createTextCommandRepository = (
           AND minimum_level = ? AND cooldown_seconds = ? AND aliases_json = ?
           AND user_cooldown_seconds = ? AND stream_condition = ? AND response_type = ?
           AND template_fields_json = ?
+          AND variable_name IS ? AND variable_operation IS ? AND variable_amount IS ?
           ${authorization.sql}`,
     ).bind(
       channelId,
@@ -522,6 +551,9 @@ export const createTextCommandRepository = (
       before.streamCondition,
       before.responseType,
       JSON.stringify(extraTemplatesOf(before)),
+      before.variableAction?.name ?? null,
+      before.variableAction?.operation ?? null,
+      before.variableAction?.amount ?? null,
       ...authorization.values,
     );
     const cleanupCooldowns = db.prepare(
@@ -548,10 +580,13 @@ export const createTextCommandRepository = (
     now: string,
     userId?: string | null,
     userCooldownSeconds = 0,
+    prepareVariableChange?: PrepareTextCommandVariableChange,
+    variableAmount?: number | null,
+    knownCommand?: TextCommand,
   ): Promise<TextCommandClaim | null> {
     const claim = db.prepare(
       `UPDATE text_commands
-          SET last_used_at = ?, updated_at = ?
+          SET last_used_at = ?, updated_at = ?, use_count = use_count + 1
         WHERE channel_id = ? AND command_name = ?
           AND enabled = 1
           AND (last_used_at IS NULL OR julianday(last_used_at) <= julianday(?) - cooldown_seconds / 86400.0)
@@ -559,25 +594,51 @@ export const createTextCommandRepository = (
             SELECT 1 FROM text_command_user_cooldowns AS user_cooldown
              WHERE user_cooldown.channel_id = ? AND user_cooldown.command_name = ? AND user_cooldown.user_id = ?
                AND julianday(user_cooldown.last_used_at) > julianday(?) - text_commands.user_cooldown_seconds / 86400.0
-          ))`,
+          ))
+        RETURNING ${textCommandSelectColumns}`,
     ).bind(now, now, channelId, name, now, userId ?? null, channelId, name, userId ?? null, now);
 
-    let globalChanges: number;
+    const statements: D1PreparedStatement[] = [claim];
     if (userCooldownSeconds > 0 && userId !== undefined && userId !== null) {
-      const updateUserCooldown = db.prepare(
+      statements.push(db.prepare(
         `INSERT INTO text_command_user_cooldowns (channel_id, command_name, user_id, last_used_at)
          SELECT ?, ?, ?, ? WHERE changes() > 0
          ON CONFLICT (channel_id, command_name, user_id) DO UPDATE SET last_used_at = excluded.last_used_at`,
-      ).bind(channelId, name, userId, now);
-      const results = await db.batch([claim, updateUserCooldown]);
-      globalChanges = results[0]?.meta.changes ?? 0;
-    } else {
-      globalChanges = (await claim.run()).meta.changes;
+      ).bind(channelId, name, userId, now));
     }
+    const commandBeforeClaim = knownCommand ?? null;
+    const action = commandBeforeClaim?.variableAction ?? null;
+    const variableChange = action !== null && prepareVariableChange !== undefined &&
+      (action.operation !== "set_argument" || variableAmount !== null && variableAmount !== undefined)
+      ? prepareVariableChange(channelId, {
+        name: action.name,
+        operation: action.operation,
+        amount: action.operation === "set_argument" ? variableAmount ?? 0 : action.amount,
+      }, now)
+      : null;
+    if (variableChange !== null) statements.push(variableChange);
+    const results = statements.length === 1 ? [await claim.run()] : await db.batch(statements);
+    const claimResult = results[0];
+    if (claimResult === undefined) throw new Error("Command claim returned no result.");
+    const globalChanges = claimResult.meta.changes;
 
-    const current = await this.find(channelId, name);
+    const current = claimResult.results[0] !== undefined
+      ? mapTextCommand(claimResult.results[0] as TextCommandRow)
+      : commandBeforeClaim === null
+        ? await this.find(channelId, name)
+        : globalChanges > 0
+          ? { ...commandBeforeClaim, lastUsedAt: now, updatedAt: now, useCount: commandBeforeClaim.useCount + 1 }
+          : commandBeforeClaim;
     if (current === null) return null;
-    if (globalChanges > 0) return { command: current, claimed: true };
+    if (globalChanges > 0) {
+      const actionResult = variableChange === null ? undefined : results.at(-1)?.results[0];
+      const changed = typeof actionResult === "object" && actionResult !== null &&
+          "name" in actionResult && typeof actionResult.name === "string" &&
+          "value" in actionResult && typeof actionResult.value === "number"
+        ? { name: actionResult.name, value: actionResult.value }
+        : undefined;
+      return { command: current, claimed: true, ...(changed === undefined ? {} : { changedVariable: changed }) };
+    }
 
     const globalRemaining = cooldownRemaining(current.lastUsedAt, now, current.cooldownSeconds);
     if (globalRemaining > 0 || userId === undefined || userId === null || current.userCooldownSeconds === 0) {
