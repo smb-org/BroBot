@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { readChannelControls, readDispatchChannelState, setChannelControl } from "../../src/worker/db/channel-controls";
-import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
+import { writeEventSubStreamState, writeHelixStreamStateIfUnknown } from "../../src/worker/db/stream-state";
 import { insertChannel, insertLoginIdentityAndSession, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -181,6 +181,36 @@ describe("channel controls", () => {
     }
   });
 
+  it("accepts an offline event newer than an online observation with no recorded start", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedOperator(database);
+      await database.prepare(
+        `INSERT INTO channel_stream_state
+          (channel_id, state, changed_at, source, started_at, checked_at)
+         VALUES ('kanal-a', 'online', '2026-09-23T09:00:00.000Z', 'eventsub', NULL, '2026-09-23T09:00:00.000Z')`,
+      ).run();
+
+      await expect(writeEventSubStreamState(
+        database as unknown as D1Database,
+        "kanal-a",
+        "offline",
+        "2026-09-23T10:00:00.000Z",
+        null,
+      )).resolves.toBe("written");
+      await expect(database.prepare(
+        "SELECT state, changed_at, source, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({
+        state: "offline",
+        changed_at: "2026-09-23T10:00:00.000Z",
+        source: "eventsub",
+        started_at: null,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it("orders EventSub timestamps at full sub-millisecond precision and keeps the first exact tie", async () => {
     const database = new TestD1Database();
     try {
@@ -201,30 +231,40 @@ describe("channel controls", () => {
     }
   });
 
-  it("keeps migration-preserved controls active on the unresolved legacy live session", async () => {
+  it("rejects an online event for an older session after Helix records the current live session", async () => {
     const database = new TestD1Database();
     try {
       await seedOperator(database);
-      await database.prepare(
-        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
-         VALUES ('kanal-a', 'online', ?, 'eventsub', '__legacy_current_live_session__')`,
-      ).bind(NOW).run();
-      await database.prepare(
-        `INSERT INTO channel_controls
-          (channel_id, muted, mute_until_stream_end, mute_stream_started_at,
-           paused, pause_until_stream_end, pause_stream_started_at, updated_at)
-         VALUES ('kanal-a', 1, 1, '__legacy_current_live_session__',
-                 1, 1, '__legacy_current_live_session__', ?)
-         ON CONFLICT (channel_id) DO UPDATE SET
-           muted = 1, mute_until_stream_end = 1, mute_stream_started_at = '__legacy_current_live_session__',
-           paused = 1, pause_until_stream_end = 1, pause_stream_started_at = '__legacy_current_live_session__'`,
-      ).bind(NOW).run();
+      const db = database as unknown as D1Database;
+      const currentStartedAt = "2026-09-23T11:00:00.000Z";
+      await writeHelixStreamStateIfUnknown(
+        db,
+        "kanal-a",
+        "online",
+        "2026-09-23T11:30:00.000Z",
+        currentStartedAt,
+      );
+      await setChannelControl(db, actor, "kanal-a", "pause", "until_stream_end", NOW);
 
-      await expect(readDispatchChannelState(database as unknown as D1Database, "kanal-a", NOW)).resolves.toMatchObject({
-        controls: {
-          mute: { active: true, mode: "until_stream_end" },
-          pause: { active: true, mode: "until_stream_end" },
-        },
+      await expect(writeEventSubStreamState(
+        db,
+        "kanal-a",
+        "online",
+        NOW,
+        "2026-09-23T09:00:00.000Z",
+      )).resolves.toBe("superseded");
+      await expect(database.prepare(
+        "SELECT state, source, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", source: "helix", started_at: currentStartedAt });
+      await expect(database.prepare(
+        "SELECT paused, pause_until_stream_end, pause_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({
+        paused: 1,
+        pause_until_stream_end: 1,
+        pause_stream_started_at: currentStartedAt,
+      });
+      await expect(readDispatchChannelState(db, "kanal-a", NOW)).resolves.toMatchObject({
+        controls: { pause: { active: true, mode: "until_stream_end" } },
       });
     } finally {
       database.close();

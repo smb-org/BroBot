@@ -1,9 +1,5 @@
 import type { ModuleStreamState } from "../../modules/contract";
-import {
-  LEGACY_CURRENT_LIVE_SESSION,
-  prepareAdoptLegacyLiveSessionControls,
-  prepareBindPendingStreamControls,
-} from "./channel-controls";
+import { prepareBindPendingStreamControls } from "./channel-controls";
 
 export type StoredStreamState = Exclude<ModuleStreamState, "unknown">;
 export type StreamStateSource = "eventsub" | "helix";
@@ -83,7 +79,7 @@ export const readChannelStreamState = async (
     state: row.state,
     source: row.source,
     changedAt: row.changed_at,
-    startedAt: row.started_at === LEGACY_CURRENT_LIVE_SESSION ? null : row.started_at,
+    startedAt: row.started_at,
     checkedAt: row.checked_at,
   };
 };
@@ -99,13 +95,20 @@ export const writeEventSubStreamState = async (
   if (eventOrder === null) return "invalid_timestamp";
   const [startedAtSeconds, startedAtFraction] = timestampOrderBindings(startedAt);
   const current = await readChannelStreamState(db, channelId);
+  if (state === "online" && current?.state === "online" && startedAt !== null && current.startedAt !== null) {
+    const incomingSessionOrder = timestampOrder(startedAt);
+    const currentSessionOrder = timestampOrder(current.startedAt);
+    if (incomingSessionOrder !== null && currentSessionOrder !== null &&
+      compareTimestampOrders(incomingSessionOrder, currentSessionOrder) < 0) return "superseded";
+  }
   if (state === "offline" && current?.state === "online") {
     const sessionOrder = timestampOrder(current.startedAt);
-    if (sessionOrder === null) return "ambiguous_offline";
-    const order = compareTimestampOrders(eventOrder, sessionOrder);
+    const boundaryOrder = sessionOrder ?? timestampOrder(current.changedAt);
+    if (boundaryOrder === null) return "ambiguous_offline";
+    const order = compareTimestampOrders(eventOrder, boundaryOrder);
     if (order < 0) return "stale_offline";
-    // An offline event at the exact start instant cannot be ordered against
-    // the session boundary. Let a forced Helix observation settle it.
+    // An event at the exact known boundary cannot be ordered safely. Let a
+    // forced Helix observation settle it.
     if (order === 0) return "ambiguous_offline";
   }
   const [eventSeconds, eventFraction] = timestampOrderBindings(changedAt);
@@ -130,13 +133,21 @@ export const writeEventSubStreamState = async (
          OR (excluded.eventsub_changed_at_seconds = channel_stream_state.eventsub_changed_at_seconds
           AND excluded.eventsub_changed_at_fraction > channel_stream_state.eventsub_changed_at_fraction))
        AND (excluded.state <> 'offline' OR channel_stream_state.state <> 'online'
+         OR (channel_stream_state.started_at_seconds IS NULL
+          AND channel_stream_state.started_at IS NULL
+          AND channel_stream_state.changed_at = ?)
          OR (channel_stream_state.started_at_seconds IS NOT NULL
           AND (excluded.eventsub_changed_at_seconds > channel_stream_state.started_at_seconds
             OR (excluded.eventsub_changed_at_seconds = channel_stream_state.started_at_seconds
-             AND excluded.eventsub_changed_at_fraction > channel_stream_state.started_at_fraction))))`,
+             AND excluded.eventsub_changed_at_fraction > channel_stream_state.started_at_fraction))))
+       AND (excluded.state <> 'online' OR channel_stream_state.state <> 'online'
+         OR channel_stream_state.started_at_seconds IS NULL OR excluded.started_at_seconds IS NULL
+         OR excluded.started_at_seconds > channel_stream_state.started_at_seconds
+            OR (excluded.started_at_seconds = channel_stream_state.started_at_seconds
+          AND COALESCE(excluded.started_at_fraction, '') >= COALESCE(channel_stream_state.started_at_fraction, '')))`,
   ).bind(
     channelId, state, changedAt, startedAt, changedAt, changedAt,
-    startedAtSeconds, startedAtFraction, eventSeconds, eventFraction,
+    startedAtSeconds, startedAtFraction, eventSeconds, eventFraction, current?.changedAt ?? null,
   )];
   if (state === "online" && startedAt !== null) {
     statements.push(prepareBindPendingStreamControls(db, channelId, startedAt));
@@ -197,15 +208,10 @@ export const refreshHelixStreamState = async (
   changedAt: string,
   startedAt: string | null,
 ): Promise<boolean> => {
-  const statements: D1PreparedStatement[] = [];
-  if (state === "online" && startedAt !== null) {
-    statements.push(prepareAdoptLegacyLiveSessionControls(db, channelId, startedAt, changedAt));
-  }
-  statements.push(prepareRefreshHelixStreamState(db, channelId, state, changedAt, startedAt));
+  const statements: D1PreparedStatement[] = [prepareRefreshHelixStreamState(db, channelId, state, changedAt, startedAt)];
   if (state === "online" && startedAt !== null) {
     statements.push(prepareBindPendingStreamControls(db, channelId, startedAt));
   }
   const results = await db.batch(statements);
-  const refreshIndex = state === "online" && startedAt !== null ? 1 : 0;
-  return (results[refreshIndex]?.meta.changes ?? 0) > 0;
+  return (results[0]?.meta.changes ?? 0) > 0;
 };

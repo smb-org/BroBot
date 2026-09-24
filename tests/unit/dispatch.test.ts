@@ -704,7 +704,7 @@ describe("dispatch and execution", () => {
         subscriptionType: "stream.offline",
         triggerId: "offline-ambiguous",
         payload: {},
-        eventSubTimestamp: "2026-09-19T12:00:01.000Z",
+        eventSubTimestamp: NOW,
         receivedAt: "2026-09-19T12:00:02.000Z",
       }, fetcher, []);
 

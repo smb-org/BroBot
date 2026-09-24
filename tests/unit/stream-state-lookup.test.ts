@@ -255,35 +255,6 @@ describe("lookupAndRefreshStreamState", () => {
     }
   });
 
-  it("adopts migrated legacy live controls when Helix resolves the same current session", async () => {
-    const database = new TestD1Database();
-    try {
-      await insertChannel(database, "kanal-a");
-      await insertStreamState(database, "kanal-a", "online", STALE, "helix", "__legacy_current_live_session__");
-      await database.prepare(
-        `INSERT INTO channel_controls
-          (channel_id, muted, mute_until_stream_end, mute_stream_started_at, updated_at)
-         VALUES ('kanal-a', 1, 1, '__legacy_current_live_session__', ?)`,
-      ).bind(STALE).run();
-      await withAppToken(database);
-      const startedAt = "2026-09-23T09:00:00.000Z";
-
-      const result = await lookupAndRefreshStreamState(
-        environment(database),
-        "kanal-a",
-        NOW,
-        helixResponse(true, startedAt),
-      );
-
-      expect(result).toEqual({ state: "online", startedAt, rateLimited: false });
-      await expect(database.prepare(
-        "SELECT mute_stream_started_at FROM channel_controls WHERE channel_id = 'kanal-a'",
-      ).first()).resolves.toEqual({ mute_stream_started_at: startedAt });
-    } finally {
-      database.close();
-    }
-  });
-
   it("corrects a missed EventSub transition after the stale row's coverage has been restored", async () => {
     const database = new TestD1Database();
     try {

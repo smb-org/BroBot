@@ -164,7 +164,7 @@ export const channelStateQuery = `
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
              LIMIT 1) AS stream_state,
-           (SELECT CASE WHEN stream_state.started_at = '__legacy_current_live_session__' THEN NULL ELSE stream_state.started_at END
+           (SELECT stream_state.started_at
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
                AND stream_state.state = 'online'

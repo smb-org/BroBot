@@ -7,15 +7,8 @@ ALTER TABLE channel_stream_state ADD COLUMN started_at_fraction TEXT;
 ALTER TABLE channel_stream_state ADD COLUMN eventsub_changed_at_seconds INTEGER;
 ALTER TABLE channel_stream_state ADD COLUMN eventsub_changed_at_fraction TEXT;
 
--- Preserve controls on live rows from migration 0006 that do not yet have a
--- known Twitch start time. The application adopts this marker when Helix
--- resolves the current live session.
-UPDATE channel_stream_state
-   SET started_at = '__legacy_current_live_session__'
- WHERE state = 'online' AND started_at IS NULL;
-
--- Preserve existing stream-end controls. Rows with no live state marker
--- remain pending, including channels currently recorded offline.
+-- Preserve existing stream-end controls for a recorded live session. Rows
+-- without a known live start remain pending for the next recorded session.
 UPDATE channel_controls
    SET mute_stream_started_at = (
          SELECT stream_state.started_at
@@ -60,12 +53,12 @@ WITH started_times AS (
              ELSE length(substr(started_at, 21))
            END), '0') ELSE '' END AS fraction
     FROM channel_stream_state
-   WHERE started_at IS NOT NULL AND started_at <> '__legacy_current_live_session__'
+   WHERE started_at IS NOT NULL
 )
 UPDATE channel_stream_state
    SET started_at_seconds = (SELECT seconds FROM started_times WHERE started_times.channel_id = channel_stream_state.channel_id),
        started_at_fraction = (SELECT fraction FROM started_times WHERE started_times.channel_id = channel_stream_state.channel_id)
- WHERE started_at IS NOT NULL AND started_at <> '__legacy_current_live_session__';
+ WHERE started_at IS NOT NULL;
 
 WITH eventsub_times AS (
   SELECT channel_id,
