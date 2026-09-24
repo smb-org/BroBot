@@ -11,7 +11,11 @@ export interface TestD1Result {
 export class TestPreparedStatement {
   private values: SQLInputValue[] = [];
 
-  public constructor(private readonly statement: ReturnType<DatabaseSync["prepare"]>) {}
+  public constructor(
+    private readonly database: DatabaseSync,
+    private readonly statement: ReturnType<DatabaseSync["prepare"]>,
+    private readonly sql: string,
+  ) {}
 
   public bind(...values: SQLInputValue[]): this {
     this.values = values;
@@ -19,6 +23,18 @@ export class TestPreparedStatement {
   }
 
   public runSync(): TestD1Result {
+    if (/\bRETURNING\b/iu.test(this.sql)) {
+      const results = this.statement.all(...this.values) as unknown[];
+      const metadata = this.database.prepare("SELECT changes() AS changes, last_insert_rowid() AS last_row_id").get() as {
+        changes: number;
+        last_row_id: number;
+      };
+      return {
+        results,
+        success: true,
+        meta: { changes: metadata.changes, last_row_id: metadata.last_row_id, size: 0 },
+      };
+    }
     const result = this.statement.run(...this.values);
     return {
       results: [],
@@ -65,7 +81,7 @@ export class TestD1Database {
   }
 
   public prepare(sql: string): TestPreparedStatement {
-    return new TestPreparedStatement(this.sqlite.prepare(sql));
+    return new TestPreparedStatement(this.sqlite, this.sqlite.prepare(sql), sql);
   }
 
   public batch(statements: TestPreparedStatement[]): Promise<TestD1Result[]> {

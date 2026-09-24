@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleResult } from "../../src/modules/contract";
-import { formatFollowage, formatUptime } from "../../src/modules/text_commands/domain";
 import { processTextCommandMessage } from "../../src/modules/text_commands/service";
 import type { TextCommand, TextCommandRepository } from "../../src/modules/text_commands";
 
@@ -19,6 +18,8 @@ const command = (name: string, text: string, lastUsedAt: string | null = null): 
   userCooldownSeconds: 0,
   streamCondition: "any",
   responseType: "reply",
+  variableAction: null,
+  useCount: 0,
   lastUsedAt,
   createdAt: NOW,
   updatedAt: NOW,
@@ -73,67 +74,21 @@ describe("Text commands service", () => {
     }]);
   });
 
-  it("renders uptime and its offline template through the same declared command path", async () => {
-    const online = await processTextCommandMessage(
-      eventFor("!uptime"),
-      repositoryFor([{ ...command("uptime", "{user}|{channel}|{uptime}"), kind: "uptime" }]),
-      {
-        channelInfo: () => Promise.resolve({ title: "Title", gameName: "Game", startedAt: "2026-09-19T10:00:00.000Z" }),
-        channelLanguage: () => Promise.resolve("de"),
-      },
-    );
-    const offline = await processTextCommandMessage(
-      eventFor("!uptime"),
-      repositoryFor([{ ...command("uptime", "Live"), kind: "uptime", offlineText: "{channel} ist offline" }]),
-      { channelInfo: () => Promise.resolve({ title: "Title", gameName: "Game", startedAt: null }) },
-    );
-
-    expect(online.actions[0]).toMatchObject({ kind: "chat", text: "alice|kanal-a-login|2 Std. 0 Min." });
-    expect(offline.actions[0]).toMatchObject({ kind: "chat", text: "kanal-a-login ist offline" });
-    expect(formatUptime("2026-09-19T10:00:00.000Z", NOW, "en")).toBe("2 h 0 min");
-  });
-
-  it("renders followage, not-following, and unavailable templates with diagnostics", async () => {
-    const following = await processTextCommandMessage(
-      eventFor("!followage"),
-      repositoryFor([{ ...command("followage", "{user}|{channel}|{followage}"), kind: "followage" }]),
-      { followedAt: () => Promise.resolve("2025-09-19T12:00:00.000Z"), channelLanguage: () => Promise.resolve("de") },
-    );
-    const notFollowing = await processTextCommandMessage(
-      eventFor("!followage"),
-      repositoryFor([{ ...command("followage", "Default"), kind: "followage", notFollowingText: "{user} folgt {channel} noch nicht" }]),
-      { followedAt: () => Promise.resolve(null) },
-    );
-    const unavailable = await processTextCommandMessage(
-      eventFor("!followage"),
-      repositoryFor([{ ...command("followage", "Default"), kind: "followage", unavailableText: "Followage fehlt" }]),
-      { followedAt: () => Promise.resolve("unavailable") },
-    );
-
-    expect(following.actions[0]).toMatchObject({ kind: "chat", text: "alice|kanal-a-login|1 Jahr" });
-    expect(notFollowing.actions[0]).toMatchObject({ kind: "chat", text: "alice folgt kanal-a-login noch nicht" });
-    expect(unavailable.actions[0]).toMatchObject({ kind: "chat", text: "Followage fehlt" });
-    expect(unavailable.diagnostics[0]?.code).toBe("text_commands.lookup_unavailable");
-    expect(formatFollowage("2025-06-19T12:00:00.000Z", NOW, "de")).toBe("1 Jahr, 3 Monate");
-    expect(formatFollowage("2025-06-19T12:00:00.000Z", NOW, "en")).toBe("1 year, 3 months");
-  });
-
-  it("renders current game and title, and diagnoses a Helix lookup failure", async () => {
-    const commandEntry = { ...command("game", "{channel}|{game}|{title}"), kind: "game" as const };
+  it("uses the shared renderer for system and channel variables", async () => {
+    const renderTemplate = vi.fn((text: string) => Promise.resolve({
+      text: text.replace("{user}", "alice").replace("{var.points}", "42"),
+      diagnostics: [],
+    }));
     const result = await processTextCommandMessage(
-      eventFor("!game"),
-      repositoryFor([commandEntry]),
-      { channelInfo: () => Promise.resolve({ title: "A stream title", gameName: "Minecraft", startedAt: null }) },
-    );
-    const failed = await processTextCommandMessage(
-      eventFor("!game"),
-      repositoryFor([commandEntry]),
-      { channelInfo: () => Promise.resolve(null) },
+      eventFor("!hallo"),
+      repositoryFor([command("hallo", "Hello {user}: {var.points}")]),
+      { renderTemplate },
     );
 
-    expect(result.actions[0]).toMatchObject({ kind: "chat", text: "kanal-a-login|Minecraft|A stream title" });
-    expect(failed.actions).toEqual([]);
-    expect(failed.diagnostics[0]).toMatchObject({ code: "text_commands.lookup_unavailable", detail: { kind: "game" } });
+    expect(result.actions[0]).toMatchObject({ kind: "chat", text: "Hello alice: 42" });
+    expect(renderTemplate).toHaveBeenCalledWith("Hello {user}: {var.points}", expect.objectContaining({
+      target: "alice", command: "hallo", uses: 0,
+    }), undefined);
   });
 
   it("runs a shoutout before its template reply and uses the usage template without a target", async () => {
@@ -271,7 +226,7 @@ describe("Text commands service", () => {
     const result = await processTextCommandMessage(eventFor("!HI"), repository);
 
     expect(findByAlias).toHaveBeenCalledWith("kanal-a", "hi");
-    expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0);
+    expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0, undefined, undefined, entry);
     expect(result.actions).toEqual([{ kind: "chat", text: "Antwort", replyToMessageId: "twitch-message-1" }]);
     expect(result.diagnostics).toEqual([{
       code: "text_commands.triggered",
@@ -304,20 +259,16 @@ describe("Text commands service", () => {
     const findByAlias = vi.spyOn(repository, "findByAlias");
     const claim = vi.spyOn(repository, "claim");
     const streamState = vi.fn(() => Promise.resolve("online" as const));
-    const channelInfo = vi.fn(() => Promise.resolve(null));
-    const followedAt = vi.fn(() => Promise.resolve("unavailable" as const));
-    const channelLanguage = vi.fn(() => Promise.resolve("de" as const));
+    const renderTemplate = vi.fn(() => Promise.resolve({ text: "Antwort", diagnostics: [] }));
 
-    await processTextCommandMessage(eventFor("!hallo"), repository, { streamState, channelInfo, followedAt, channelLanguage });
+    await processTextCommandMessage(eventFor("!hallo"), repository, { streamState, renderTemplate });
 
     expect(find).toHaveBeenCalledTimes(1);
     expect(findByAlias).not.toHaveBeenCalled();
     expect(claim).toHaveBeenCalledTimes(1);
-    expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0);
+    expect(claim).toHaveBeenCalledWith("kanal-a", "hallo", NOW, "user-1", 0, undefined, undefined, entry);
     expect(streamState).not.toHaveBeenCalled();
-    expect(channelInfo).not.toHaveBeenCalled();
-    expect(followedAt).not.toHaveBeenCalled();
-    expect(channelLanguage).not.toHaveBeenCalled();
+    expect(renderTemplate).toHaveBeenCalledTimes(1);
   });
 
   it("checks tier before stream state and rejects an incompatible stream without claiming", async () => {
@@ -372,6 +323,46 @@ describe("Text commands service", () => {
     if (kind === "list" && (action?.kind === "chat" || action?.kind === "announcement")) {
       expect(action.text).not.toContain("hi");
     }
+  });
+
+  it("uses the first set_argument token and leaves the claim untouched for invalid input", async () => {
+    const entry = {
+      ...command("score", "Score updated"),
+      usageText: "Usage: !score <number>",
+      variableAction: { name: "score", operation: "set_argument" as const, amount: 0 },
+    };
+    const repository = repositoryFor([entry]);
+    const claim = vi.spyOn(repository, "claim");
+
+    const invalid = await processTextCommandMessage(eventFor("!score nope 5"), repository);
+    expect(invalid.actions).toEqual([{ kind: "chat", text: "Usage: !score <number>" }]);
+    expect(invalid.diagnostics).toContainEqual({ code: "text_commands.argument_invalid", detail: { name: "score" } });
+    expect(claim).not.toHaveBeenCalled();
+
+    const valid = await processTextCommandMessage(eventFor("!score 5 add a note"), repository);
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(claim.mock.calls[0]?.[6]).toBe(5);
+    expect(valid.actions).toEqual([{ kind: "chat", text: "Score updated", replyToMessageId: "twitch-message-1" }]);
+  });
+
+  it.each([
+    ["permission", { minimumTier: "moderator" as const }, "text_commands.permission_denied"],
+    ["cooldown", { cooldownSeconds: 60, lastUsedAt: NOW }, "text_commands.cooldown"],
+  ] as const)("rechecks %s after a stale command claim", async (_scenario, change, diagnostic) => {
+    const initial = command("hallo", "Original");
+    const commands = [initial];
+    const repository = repositoryFor(commands);
+    const updated = { ...initial, ...change, text: "Updated" };
+    const claim = vi.spyOn(repository, "claim").mockImplementationOnce(() => {
+      commands[0] = updated;
+      return Promise.resolve({ command: updated, claimed: false, stale: true });
+    });
+
+    const result = await processTextCommandMessage(eventFor("!hallo"), repository);
+
+    expect(result.actions).toEqual([]);
+    expect(result.diagnostics[0]?.code).toBe(diagnostic);
+    expect(claim).toHaveBeenCalledTimes(_scenario === "permission" ? 1 : 2);
   });
 
 });

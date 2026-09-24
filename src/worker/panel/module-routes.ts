@@ -11,7 +11,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleRouteVariables } from "../../modules/contract";
+import type { ModuleChannelVariable, ModuleRouteVariables } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import type { PanelModuleState } from "../../panel-contract";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
@@ -21,13 +21,17 @@ import { broadcasterHasScope } from "../broadcaster-scope";
 import { getAppAccessToken } from "../app-token";
 import { writeModuleDiagnostics } from "../event-log";
 import { helixRequest } from "../twitch/helix";
-import { templateFieldsWarnings } from "../../template";
+import { effectiveTemplateVariables, templateWarnings, type TemplateVariable } from "../../template";
+import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
+import { listChannelVariables } from "../db/channel-variables";
+import { findChannelVariable } from "../db/channel-variables";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
   Variables: ChannelAuthorizationVariables & Pick<
     ModuleRouteVariables,
     "writeModuleDiagnostics" | "broadcasterHasScope" | "getAppAccessToken" | "helixRequest"
+    | "listChannelVariables" | "findChannelVariable"
   >;
 }
 
@@ -77,6 +81,13 @@ moduleRouter.use("/api/channels/:channelId/modules/*", (context, next) => {
   context.set("broadcasterHasScope", broadcasterHasScope);
   context.set("getAppAccessToken", getAppAccessToken);
   context.set("helixRequest", helixRequest);
+  context.set("listChannelVariables", async (channelId): Promise<readonly ModuleChannelVariable[]> =>
+    (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description })),
+  );
+  context.set("findChannelVariable", async (channelId, name): Promise<ModuleChannelVariable | null> => {
+    const variable = await findChannelVariable(context.env.DB, channelId, name);
+    return variable === null ? null : { name: variable.name, value: variable.value, description: variable.description };
+  });
   return next();
 });
 
@@ -109,9 +120,10 @@ moduleRouter.get("/api/channels/:channelId/modules/:moduleId/settings", async (c
     return context.json({ error: "module_settings_invalid" }, 500);
   }
   const settings = module.settingsSchema.safeParse(rawSettings);
-  return settings.success
-    ? context.json({ settings: settings.data, revision: stored.revision })
-    : context.json({ error: "module_settings_invalid" }, 500);
+  if (!settings.success) return context.json({ error: "module_settings_invalid" }, 500);
+  const channelId = context.req.param("channelId");
+  const variables = (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description }));
+  return context.json({ settings: settings.data, revision: stored.revision, variables });
 });
 
 moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async (context) => {
@@ -129,12 +141,15 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   const expectedRevision = Reflect.get(body, "revision") as number;
   const settings = module.settingsSchema.safeParse(Reflect.get(body, "settings"));
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 400);
-  const warnings = module.templateFields === undefined
-    ? []
-    : templateFieldsWarnings(
-      settings.data as Readonly<Record<string, unknown>>,
-      module.templateFields,
-    );
+  const channelVariables = (await listChannelVariables(context.env.DB, channelId)).map((variable) => ({
+    name: `var.${variable.name}`, group: "channel" as const, sample: String(variable.value), maxLength: 10, source: "channel" as const,
+  }));
+  const warnings = module.templateFields === undefined ? [] : Object.entries(module.templateFields).flatMap(([field, variables]) => {
+    const value = (settings.data as Readonly<Record<string, unknown>>)[field];
+    if (typeof value !== "string") return [];
+    const effective = effectiveTemplateVariables(module.templateContext ?? "event", (variables ?? []) as readonly TemplateVariable[], channelVariables, SYSTEM_TEMPLATE_VARIABLE_LIST);
+    return templateWarnings(field, value, effective);
+  });
   const changed = await updateChannelModuleWithAudit(
     context.env.DB,
     actorOf(context),

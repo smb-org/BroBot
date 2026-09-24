@@ -341,7 +341,7 @@ describe("Module panel loader", () => {
 
     expect(screen.getByText("Modulansichten werden geladen …")).toBeInTheDocument();
     expect(editorFixture.loader).toHaveBeenCalledOnce();
-    resolveSettings?.(Response.json({ settings: editorFixtureSettings, revision: 1 }));
+    resolveSettings?.(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
 
     const amount = await screen.findByRole("spinbutton", { name: "Menge" });
     const handle = screen.getByRole("textbox", { name: "Konto" });
@@ -389,7 +389,7 @@ describe("Module panel loader", () => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       if (path === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
       if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") return Promise.resolve(Response.json({ error: "module_settings_changed_concurrently" }, { status: 409 }));
-      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: currentSettings, revision: 1, warnings: [] }));
+      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: currentSettings, revision: 1, variables: [], warnings: [] }));
       return Promise.resolve(Response.json({}));
     });
     renderSettingsFixture(fetcher);
@@ -413,7 +413,7 @@ describe("Module panel loader", () => {
       if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
         return Promise.resolve(Response.json({ settings: canonicalSettings, revision: 2, warnings: [] }));
       }
-      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1 }));
+      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
       return Promise.resolve(Response.json({}));
     });
     renderSettingsFixture(fetcher);
@@ -436,7 +436,7 @@ describe("Module panel loader", () => {
       if (path.endsWith("/modules/editor-fixture/settings") && init?.method === "PATCH") {
         return new Promise<Response>((resolve) => { resolvePatch = resolve; });
       }
-      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1 }));
+      if (path.endsWith("/modules/editor-fixture/settings")) return Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }));
       return Promise.resolve(Response.json({}));
     });
     renderSettingsFixture(fetcher);
@@ -452,7 +452,7 @@ describe("Module panel loader", () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
-        ? Response.json({ settings: editorFixtureSettings, revision: 1 })
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
         : Response.json({}));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -494,7 +494,7 @@ describe("Module panel loader", () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
-        ? Response.json({ settings: editorFixtureSettings, revision: 1 })
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
         : Response.json({}));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -532,7 +532,7 @@ describe("Module panel loader", () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
       return Promise.resolve(path.endsWith("/modules/editor-fixture/settings")
-        ? Response.json({ settings: editorFixtureSettings, revision: 1 })
+        ? Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] })
         : Response.json({}));
     });
     renderSettingsFixture(fetcher, "operator");

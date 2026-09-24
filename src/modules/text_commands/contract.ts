@@ -1,6 +1,7 @@
 export { truncateTo200Chars, textFingerprintIfTruncated } from "../contract";
 export {
   closestTemplateVariable,
+  invalidTemplateParameters,
   renderTemplate,
   templateFieldsWarnings,
   templateVariableNames,

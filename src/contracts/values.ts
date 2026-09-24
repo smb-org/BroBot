@@ -37,6 +37,28 @@ export type ImmediateActionUnavailableReason = (typeof IMMEDIATE_ACTION_UNAVAILA
 export const CHANNEL_CONTROL_DURATIONS = ["15m", "1h", "until_stream_end", "unlimited"] as const;
 export type ChannelControlDuration = (typeof CHANNEL_CONTROL_DURATIONS)[number];
 
+/** Groups that organize the template-variable catalog and picker. */
+export const TEMPLATE_VARIABLE_GROUPS = [
+  "context", "stream", "person", "command", "time_random", "event", "channel",
+] as const;
+export type TemplateVariableGroup = (typeof TEMPLATE_VARIABLE_GROUPS)[number];
+
+/** Template positions supported by the host renderer. */
+export const TEMPLATE_CONTEXTS = ["chat_command", "event", "system"] as const;
+export type TemplateContext = (typeof TEMPLATE_CONTEXTS)[number];
+
+/** Origins of values shown in template editors. */
+export const TEMPLATE_VARIABLE_SOURCES = ["system", "module", "channel"] as const;
+export type TemplateVariableSource = (typeof TEMPLATE_VARIABLE_SOURCES)[number];
+
+/** Closed operations available to text-command variable actions and dashboard controls. */
+export const CHANNEL_VARIABLE_OPERATIONS = ["add", "subtract", "set", "set_argument"] as const;
+export type ChannelVariableOperation = (typeof CHANNEL_VARIABLE_OPERATIONS)[number];
+
+export const CHANNEL_VARIABLE_MAXIMUM_COUNT = 50;
+export const CHANNEL_VARIABLE_MINIMUM_VALUE = -999_999_999;
+export const CHANNEL_VARIABLE_MAXIMUM_VALUE = 999_999_999;
+
 /** Stable reasons for a rejected manual or automatic shoutout. */
 export const SHOUTOUT_FAILURE_REASONS = [
   "app_token_unavailable",
@@ -176,6 +198,7 @@ export const EVENT_CODES = [
   "ads.snooze",
   "ads.commercial.failed",
   "host.clip.failed",
+  "template.lookup_unavailable",
   "text_commands.cooldown",
   "text_commands.user_cooldown",
   "text_commands.stream_state",
@@ -192,6 +215,10 @@ export const EVENT_CODES = [
   "text_commands.invalid",
   "text_commands.lookup_unavailable",
   "text_commands.argument_missing",
+  "text_commands.argument_invalid",
+  "text_commands.changed_concurrently",
+  "text_commands.variable_update_failed",
+  "template_parameters_invalid",
 ] as const;
 export type EventCode = (typeof EVENT_CODES)[number];
 
@@ -214,6 +241,10 @@ export const AUDIT_ACTIONS = [
   "text_commands.command.created",
   "text_commands.command.updated",
   "text_commands.command.removed",
+  "channel.variable.created",
+  "channel.variable.renamed",
+  "channel.variable.removed",
+  "channel.variable.value_changed",
   "ads.commercial_started",
   "clip.created",
   "channel.mute.enabled",
@@ -308,6 +339,14 @@ export const API_ERROR_CODES = [
   "command_update_denied",
   "command_changed_concurrently",
   "command_delete_denied",
+  "variable_data_invalid",
+  "variable_not_found",
+  "variable_already_exists",
+  "variable_limit_reached",
+  "variable_in_use",
+  "variable_changed_concurrently",
+  "variable_management_denied",
+  "variable_value_change_denied",
   "ad_schedule_read_failed",
   "ad_snooze_failed",
   "commercial_length_invalid",

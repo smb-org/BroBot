@@ -14,6 +14,7 @@ export interface EditorSection {
 }
 
 export interface EditorShellProps {
+  className?: string;
   ariaLabel: string;
   title: ReactNode;
   identifier?: string;
@@ -44,6 +45,7 @@ export interface EditorShellProps {
 }
 
 export function EditorShell({
+  className,
   ariaLabel,
   title,
   identifier,
@@ -150,7 +152,7 @@ export function EditorShell({
 
   return (
     <FormDensity.Provider value="form">
-      <section className="ui-editor-shell" aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
+      <section className={`ui-editor-shell${className === undefined ? "" : ` ${className}`}`} aria-label={ariaLabel} onKeyDown={handleEditorKeyDown}>
         <InspectorHeading level="h3" title={title} {...(identifier === undefined ? {} : { identifier })} {...(meta === undefined ? {} : { meta })} {...(closeAction === undefined ? {} : { action: closeAction })} />
         {sections.length < 2 ? null : (
           <div className="ui-editor-shell__tabs" role="tablist" aria-label={ariaLabel} onKeyDown={handleTabKeyDown}>

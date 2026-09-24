@@ -4,6 +4,7 @@ import type {
   TextCommandChange,
   TextCommandClaim,
   TextCommandActor,
+  PrepareTextCommandVariableChange,
 } from "./contracts";
 
 export type TextCommandMutationReason =
@@ -42,5 +43,8 @@ export interface TextCommandRepository {
     now: string,
     userId?: string | null,
     userCooldownSeconds?: number,
+    prepareVariableChange?: PrepareTextCommandVariableChange,
+    variableAmount?: number | null,
+    knownCommand?: TextCommand,
   ): Promise<TextCommandClaim | null>;
 }

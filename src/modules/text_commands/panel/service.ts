@@ -2,6 +2,17 @@ import type { TextCommand, TextCommandKind, TextCommandMinimumTier, TextCommandR
 import { PanelApiError } from "../../../contracts/panel-error";
 import type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../contract";
 
+export interface TextCommandChannelVariable {
+  name: string;
+  value: number;
+  description: string;
+}
+
+export interface TextCommandPanelData {
+  commands: TextCommand[];
+  variables: TextCommandChannelVariable[];
+}
+
 const pathFor = (channelId: string, name?: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/text_commands/commands${name === undefined ? "" : `/${encodeURIComponent(name)}`}`;
 
@@ -16,11 +27,12 @@ const json = async <T>(response: Response): Promise<T> => {
   return body as T;
 };
 
-export const loadTextCommands = async (channelId: string): Promise<TextCommand[]> => {
+export const loadTextCommandData = async (channelId: string): Promise<TextCommandPanelData> => {
   const response = await fetch(pathFor(channelId));
-  const body = await json<{ commands: TextCommand[] }>(response);
-  return body.commands;
+  return json<TextCommandPanelData>(response);
 };
+
+export const loadTextCommands = async (channelId: string): Promise<TextCommand[]> => (await loadTextCommandData(channelId)).commands;
 
 const mutation = async (
   channelId: string,
@@ -48,7 +60,7 @@ const mutation = async (
 
 export const createTextCommand = async (
   channelId: string,
-  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "responseType">,
+  command: Pick<TextCommand, "name" | "kind" | "text" | "offlineText" | "notFollowingText" | "unavailableText" | "usageText" | "minimumTier" | "cooldownSeconds" | "aliases" | "userCooldownSeconds" | "streamCondition" | "responseType" | "variableAction">,
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "POST", command);
 
 export const saveTextCommand = async (
@@ -69,6 +81,7 @@ export const saveTextCommand = async (
     userCooldownSeconds: number;
     streamCondition: TextCommandStreamCondition;
     responseType: TextCommandResponseType;
+    variableAction: TextCommand["variableAction"];
 },
 ): Promise<readonly PanelTemplateWarning[]> => mutation(channelId, "PATCH", {
   revision: command.revision,
@@ -85,6 +98,7 @@ export const saveTextCommand = async (
   userCooldownSeconds: command.userCooldownSeconds,
   streamCondition: command.streamCondition,
   responseType: command.responseType,
+  variableAction: command.variableAction,
 }, command.oldName);
 
 export const toggleTextCommand = async (

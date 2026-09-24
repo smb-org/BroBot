@@ -200,10 +200,12 @@ test("ListDetail shows the two-column form at 1280px, the second monitor next to
           userCooldownSeconds: 0,
           streamCondition: "any",
           responseType: "say",
+          variableAction: null,
+          useCount: 0,
           lastUsedAt: null,
           createdAt: "2026-09-19T12:00:00.000Z",
           updatedAt: "2026-09-19T12:00:00.000Z",
-        }] }),
+        }], variables: [] }),
       });
       return;
     }

@@ -79,6 +79,7 @@ export interface SettingsEditorProps<Settings extends object> {
   variables?: Readonly<Partial<Record<keyof Settings & string, readonly TemplateVariableOption[]>>>;
   templateMetadata?: Readonly<Partial<Record<keyof Settings & string, readonly (TemplateVariableOption & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   templateMessages: TextAreaMessages;
+  createVariableHref?: string;
   readOnly?: boolean;
   disabled?: boolean;
   enabledLabel?: string;
@@ -100,6 +101,7 @@ export function SettingsEditor<Settings extends object>({
   variables,
   templateMetadata,
   templateMessages,
+  createVariableHref,
   readOnly = false,
   disabled = false,
   enabledLabel,
@@ -178,6 +180,7 @@ export function SettingsEditor<Settings extends object>({
           {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
           {...(field.minRows === undefined ? {} : { minRows: field.minRows })}
           messages={templateMessages}
+          {...(createVariableHref === undefined ? {} : { createVariableHref })}
         />
       );
     }

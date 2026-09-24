@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, SHOUTOUT_SUPPRESSED_REASONS,
 } from "../../src/contracts/values";
-import { apiErrorText, dashboardLanguage, eventCauseText, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
+import { apiErrorText, channelVariablesTexts, dashboardLanguage, eventCauseText, eventText, eventToneEntries, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -30,6 +30,13 @@ describe("dashboard locale", () => {
     expect(roleLabel("operator")).toBe("Bediener");
   });
 
+  it("describes the variable reset timing without exposing the EventSub event name", () => {
+    expect(channelVariablesTexts("de").resetHint).toBe("Wird zurückgesetzt, wenn der nächste Stream startet.");
+    expect(channelVariablesTexts("en").resetHint).toBe("Resets when the next stream starts.");
+    expect(channelVariablesTexts("de").resetHint).not.toContain("stream.online");
+    expect(channelVariablesTexts("en").resetHint).not.toContain("stream.online");
+  });
+
   it("resolves event texts with detail and keeps fixed texts intact", () => {
     setBrowserLanguage("de-DE");
 
@@ -44,6 +51,7 @@ describe("dashboard locale", () => {
     expect(eventText("template_truncated", { current: 508 })).toBe("Chatnachricht auf 500 Zeichen gekürzt (ursprünglich 508)");
     expect(eventText("text_commands.lookup_unavailable", { name: "uptime", kind: "uptime" })).toBe("Textbefehl !uptime: Stream-Daten nicht verfügbar");
     expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Befehl !so: Twitch-Name fehlt");
+    expect(eventText("text_commands.variable_update_failed", { name: "score" })).toBe("Befehl !score konnte die Kanalvariable nicht ändern");
   });
 
   it("returns the English detail texts", () => {
@@ -58,6 +66,7 @@ describe("dashboard locale", () => {
     expect(eventText("template_truncated", { current: 508 })).toBe("Chat message shortened to 500 characters (originally 508)");
     expect(eventText("text_commands.lookup_unavailable", { name: "game", kind: "game" })).toBe("Command !game: game information unavailable");
     expect(eventText("text_commands.argument_missing", { name: "so" })).toBe("Command !so: Twitch login missing");
+    expect(eventText("text_commands.variable_update_failed", { name: "score" })).toBe("Command !score could not change the channel variable");
   });
 
   it("distinguishes a disabled shoutout from the threshold", () => {
@@ -122,6 +131,7 @@ describe("dashboard locale", () => {
       "text_commands.disabled", "text_commands.permission_denied", "text_commands.already_exists",
       "text_commands.not_authorized", "text_commands.unknown", "text_commands.invalid",
       "text_commands.lookup_unavailable", "text_commands.argument_missing",
+      "text_commands.argument_invalid", "text_commands.changed_concurrently", "text_commands.variable_update_failed", "template.lookup_unavailable", "template_parameters_invalid",
     ];
 
     expect(Object.keys(eventToneEntries).sort()).toEqual([...codes].sort());

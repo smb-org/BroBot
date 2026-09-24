@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createTextCommandRepository, initializeListCommand } from "../../src/modules/text_commands/adapters/d1";
+import { prepareChannelVariableChange } from "../../src/worker/db/channel-variables";
 import { purgeOldTextCommandUserCooldowns } from "../../src/worker/db/text-command-user-cooldowns";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
@@ -150,6 +151,69 @@ describe("Text commands D1 adapter", () => {
     await repository.claim("kanal-a", "hallo", NOW, "user-a", 60);
     await expect(repository.claim("kanal-a", "hallo", "2026-09-19T12:00:30.000Z", "user-b", 60))
       .resolves.toMatchObject({ claimed: false, reason: "cooldown", remainingSeconds: 30 });
+    await expect(database.prepare(
+      "SELECT user_id FROM text_command_user_cooldowns ORDER BY user_id",
+    ).all()).resolves.toMatchObject({ results: [{ user_id: "user-a" }] });
+  });
+
+  it("gives both users a per-user cooldown when a variable command is claimed by each at the same read timestamp", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('kanal-a', 'score', 0, ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await repository.create({
+      channelId: "kanal-a", name: "increment", text: "Score {var.score}", kind: "text", cooldownSeconds: 0,
+      userCooldownSeconds: 60, variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
+    }, ACTOR);
+    const knownCommand = await repository.find("kanal-a", "increment");
+    if (knownCommand === null) throw new Error("Command missing before the concurrent claims.");
+    const prepareChange = (channelId: string, change: Parameters<typeof prepareChannelVariableChange>[2], at: string, guard: Parameters<typeof prepareChannelVariableChange>[4]) =>
+      prepareChannelVariableChange(database as unknown as D1Database, channelId, change, at, guard);
+
+    // Both users read use_count = 0 before either claim's batch runs (#185).
+    const claims = await Promise.all([
+      repository.claim("kanal-a", "increment", NOW, "user-a", 60, prepareChange, null, knownCommand),
+      repository.claim("kanal-a", "increment", NOW, "user-b", 60, prepareChange, null, knownCommand),
+    ]);
+
+    expect(claims.map((claim) => claim?.claimed)).toEqual([true, true]);
+    await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+      .resolves.toEqual({ value: 2 });
+    await expect(database.prepare(
+      "SELECT user_id, last_used_at FROM text_command_user_cooldowns ORDER BY user_id",
+    ).all()).resolves.toMatchObject({ results: [
+      { user_id: "user-a", last_used_at: NOW },
+      { user_id: "user-b", last_used_at: NOW },
+    ] });
+  });
+
+  it("denies the second user's variable claim under a global cooldown without granting it a per-user cooldown", async () => {
+    await insertChannel(database, "kanal-a");
+    const repository = createTextCommandRepository(database as unknown as D1Database, authorize);
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('kanal-a', 'score', 0, ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await repository.create({
+      channelId: "kanal-a", name: "increment", text: "Score {var.score}", kind: "text", cooldownSeconds: 60,
+      userCooldownSeconds: 60, variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
+    }, ACTOR);
+    const knownCommand = await repository.find("kanal-a", "increment");
+    if (knownCommand === null) throw new Error("Command missing before the concurrent claims.");
+    const prepareChange = (channelId: string, change: Parameters<typeof prepareChannelVariableChange>[2], at: string, guard: Parameters<typeof prepareChannelVariableChange>[4]) =>
+      prepareChannelVariableChange(database as unknown as D1Database, channelId, change, at, guard);
+
+    const claims = await Promise.all([
+      repository.claim("kanal-a", "increment", NOW, "user-a", 60, prepareChange, null, knownCommand),
+      repository.claim("kanal-a", "increment", NOW, "user-b", 60, prepareChange, null, knownCommand),
+    ]);
+
+    expect(claims.map((claim) => claim?.claimed)).toEqual([true, false]);
+    expect(claims[1]).toMatchObject({ claimed: false, reason: "cooldown" });
+    await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+      .resolves.toEqual({ value: 1 });
     await expect(database.prepare(
       "SELECT user_id FROM text_command_user_cooldowns ORDER BY user_id",
     ).all()).resolves.toMatchObject({ results: [{ user_id: "user-a" }] });

@@ -601,6 +601,91 @@ describe("dispatch and execution", () => {
     }
   });
 
+  it("resets variables when EventSub arrives after a Helix online refresh", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_variables
+          (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?), ('kanal-a', 'kept', 7, 0, ?, ?)`,
+      ).bind(NOW, NOW, NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
+         VALUES ('kanal-a', 'online', '2026-09-19T12:00:01.000Z', 'helix', '2026-09-19T11:55:00.000Z')`,
+      ).run();
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a", subscriptionType: "stream.online", triggerId: "online-late",
+        payload: { started_at: "2026-09-19T11:55:00.000Z" }, receivedAt: NOW, eventSubTimestamp: NOW,
+      }, sent(), []);
+
+      await expect(database.prepare("SELECT name, value FROM channel_variables ORDER BY name").all())
+        .resolves.toMatchObject({ results: [{ name: "kept", value: 7 }, { name: "score", value: 0 }] });
+      await expect(database.prepare("SELECT state, source FROM channel_stream_state WHERE channel_id = 'kanal-a'").first())
+        .resolves.toEqual({ state: "online", source: "helix" });
+      await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
+        .resolves.toEqual({ started_at: "2026-09-19T11:55:00.000Z" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("resets a stream session once across duplicate stream.online deliveries", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      const dispatchOnline = (startedAt: string, receivedAt: string, triggerId: string) => dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a", subscriptionType: "stream.online", triggerId,
+        payload: { started_at: startedAt }, receivedAt,
+      }, sent(), []);
+
+      await dispatchOnline("2026-09-19T11:55:00.000Z", NOW, "online-first");
+      await database.prepare("UPDATE channel_variables SET value = 9 WHERE channel_id = 'kanal-a' AND name = 'score'").run();
+      await dispatchOnline("2026-09-19T11:55:00.000Z", "2026-09-19T12:00:02.000Z", "online-duplicate");
+      await dispatchOnline("2026-09-19T11:54:00.000Z", "2026-09-19T12:00:03.000Z", "online-late-old-session");
+
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 9 });
+      await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
+        .resolves.toEqual({ started_at: "2026-09-19T11:55:00.000Z" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("resets variables again for a new stream after offline", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      const dispatch = (subscriptionType: "stream.online" | "stream.offline", receivedAt: string, startedAt?: string) =>
+        dispatchEventSubNotification(environment(database), {
+          channelId: "kanal-a", subscriptionType, triggerId: `${subscriptionType}-${receivedAt}`,
+          payload: startedAt === undefined ? {} : { started_at: startedAt }, receivedAt,
+        }, sent(), []);
+
+      await dispatch("stream.online", NOW, "2026-09-19T11:55:00.000Z");
+      await database.prepare("UPDATE channel_variables SET value = 9 WHERE channel_id = 'kanal-a' AND name = 'score'").run();
+      await dispatch("stream.offline", "2026-09-19T12:05:00.000Z");
+      await dispatch("stream.online", "2026-09-19T12:10:00.000Z", "2026-09-19T12:09:00.000Z");
+
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 0 });
+      await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
+        .resolves.toEqual({ started_at: "2026-09-19T12:09:00.000Z" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("memoizes one lazy Helix stream lookup for every module in a dispatch", async () => {
     const database = new TestD1Database();
     try {

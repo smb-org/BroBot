@@ -92,20 +92,30 @@ const templateMessages: LocaleCatalog<SettingsEditorCatalog["templateMessages"]>
   de: {
     countLabel: (count, maxLength) => `${String(count)} von ${String(maxLength)} Zeichen`,
     previewCountLabel: (count) => `${String(count)} Zeichen`,
-    unknownVariable: (name, suggestion, available) => suggestion === null
-      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Verfügbar: ${available.map((item) => `{${item}}`).join(", ")}`
-      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}?`,
+    unknownVariable: (name, suggestion) => suggestion === null
+      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Nutze den Variablen-Picker.`
+      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}? Nutze den Variablen-Picker.`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
     worstCaseLength: (length, maxLength) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maxLength)} ab.`,
+    variablePicker: {
+      triggerLabel: "Variable einfügen", title: "Variable auswählen", searchLabel: "Variablen suchen", closeLabel: "Variablenauswahl schließen",
+      noResults: "Keine Variablen gefunden.", createVariableLabel: "Variable anlegen …", externalHelp: "Fragt Twitch live ab, wenn die Vorlage gerendert wird",
+      groupLabels: { context: "Kontext", stream: "Stream", person: "Person", command: "Befehl", time_random: "Zeit & Zufall", event: "Ereignis", channel: "Kanalvariablen" },
+    },
   },
   en: {
     countLabel: (count, maxLength) => `${String(count)} of ${String(maxLength)} characters`,
     previewCountLabel: (count) => `${String(count)} characters`,
-    unknownVariable: (name, suggestion, available) => suggestion === null
-      ? `Unknown variable {${name}} — it will be sent literally. Available: ${available.map((item) => `{${item}}`).join(", ")}`
-      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}?`,
+    unknownVariable: (name, suggestion) => suggestion === null
+      ? `Unknown variable {${name}} — it will be sent literally. Use the variable picker.`
+      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}? Use the variable picker.`,
     insertSuggestionLabel: (name) => `Insert {${name}}`,
     worstCaseLength: (length, maxLength) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maxLength)}.`,
+    variablePicker: {
+      triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
+      noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Looks up live data from Twitch when the template runs",
+      groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel variables" },
+    },
   },
 };
 
@@ -121,7 +131,9 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     templateMessages: templateMessages.de,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unbekannte Variable${warning.unknownVariables.length === 1 ? "" : "n"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
-      : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
+      : warning.code === "template_parameters_invalid"
+        ? `Ungültige Variablenparameter: ${warning.invalidVariables.join(", ")}`
+        : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
     sections: { announcements: "Ansagen", prewarning: "Vorwarnung" },
     fields: {
       automatic: {
@@ -154,7 +166,9 @@ const editorCatalog: LocaleCatalog<SettingsEditorCatalog> = {
     templateMessages: templateMessages.en,
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unknown variable${warning.unknownVariables.length === 1 ? "" : "s"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
-      : `Template can be ${String(warning.worstCaseLength)} characters long.`,
+      : warning.code === "template_parameters_invalid"
+        ? `Invalid variable parameters: ${warning.invalidVariables.join(", ")}`
+        : `Template can be ${String(warning.worstCaseLength)} characters long.`,
     sections: { announcements: "Announcements", prewarning: "Prewarning" },
     fields: {
       automatic: {

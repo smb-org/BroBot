@@ -26,11 +26,16 @@ const templateOptions: readonly TemplateVariableOption[] = [
 const textAreaMessages: TextAreaMessages = {
   countLabel: (count, max) => `${String(count)} von ${String(max)} Zeichen`,
   previewCountLabel: (count) => `${String(count)} Zeichen`,
-  unknownVariable: (name, suggestion, available) => suggestion === null
-    ? `Unbekannte Variable {${name}}. Verfügbar: ${available.map((item) => `{${item}}`).join(", ")}`
-    : `Unbekannte Variable {${name}} — Meintest du {${suggestion}}?`,
+  unknownVariable: (name, suggestion) => suggestion === null
+    ? `Unbekannte Variable {${name}}. Nutze den Variablen-Picker.`
+    : `Unbekannte Variable {${name}} — Meintest du {${suggestion}}? Nutze den Variablen-Picker.`,
   insertSuggestionLabel: (name) => `{${name}} einsetzen`,
   worstCaseLength: (length) => `Mit den längsten Werten bis zu ${String(length)} Zeichen.`,
+  variablePicker: {
+    triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
+    noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Requests Twitch when the command runs",
+    groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel" },
+  },
 };
 
 const originalRangeBounds = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
@@ -250,16 +255,18 @@ describe("template field", () => {
 
   it("renders known variable tint and unknown variable warning decorations around the same text", () => {
     const { container } = renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user} {viewer}" variables={templateOptions} onChange={() => {}} messages={textAreaMessages} />);
-    const known = container.querySelectorAll(".template-field__decoration--known");
+    const known = container.querySelectorAll(".template-field__decoration--module");
     const unknown = container.querySelectorAll(".template-field__decoration--unknown");
     expect(Array.from(known, (part) => part.textContent)).toEqual(["{user}"]);
     expect(Array.from(unknown, (part) => part.textContent)).toEqual(["{viewer}"]);
-    expect(known[0]).toHaveAttribute("data-kind", "known");
+    expect(known[0]).toHaveAttribute("data-kind", "module");
     expect(unknown[0]).toHaveAttribute("data-kind", "unknown");
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hi {user} {viewer}");
+    expect(screen.getByText(/Unbekannte Variable \{viewer\}.*Variablen-Picker/u)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Reply" })).toHaveStyle({ paddingRight: "54px" });
   });
 
-  it("shows composing text, delays issue checks until composition ends, inserts chips at the saved selection, and handles suggestions", async () => {
+  it("shows composing text, delays issue checks until composition ends, inserts picker variables at the saved selection, and handles suggestions", async () => {
     const onIssuesChange = vi.fn();
     const parentKeyDown = vi.fn();
     function Harness() {
@@ -285,13 +292,14 @@ describe("template field", () => {
     if (!(input instanceof HTMLTextAreaElement)) throw new TypeError("Expected a template textarea.");
     input.setSelectionRange(6, 6);
     fireEvent.select(input);
-    fireEvent.click(screen.getByRole("button", { name: "{user}" }));
+    fireEvent.click(screen.getByRole("button", { name: "Insert variable" }));
+    fireEvent.click(await screen.findByRole("option", { name: /\{user\}/u, hidden: true }));
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveValue("Hello {user}world");
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Reply" })).toHaveFocus());
 
     fireEvent.change(input, { target: { value: "{vi" } });
     expect(input).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("listbox", { hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "Choose a variable", hidden: true })).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(input).toHaveValue("{viewers}");
@@ -331,11 +339,10 @@ describe("template field", () => {
     expect(parentKeyDown).not.toHaveBeenCalledWith(expect.objectContaining({ key: "Escape" }));
   });
 
-  it("keeps read-only text selectable and disables editing chips", () => {
+  it("keeps read-only text selectable and disables the variable picker", () => {
     renderUi(<TextArea label="Reply" hint="What the bot writes." value="Hi {user}" variables={templateOptions} readOnly onChange={() => {}} messages={textAreaMessages} />);
     expect(screen.getByRole("textbox", { name: "Reply" })).toHaveAttribute("readonly");
-    expect(screen.getByRole("button", { name: "{user}" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "{viewers}" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Insert variable" })).toBeDisabled();
   });
 
   it("suggests replacement for an unknown token, shows worst-case warnings without blocking, and previews sample rendering", () => {
@@ -375,7 +382,7 @@ describe("template field", () => {
 
   it("renders reading templates with the same known and unknown token treatment", () => {
     renderUi(<TemplateText value="{user} {viewer}" variables={templateOptions} />);
-    expect(document.querySelector(".ui-template-text [data-kind='known']")).toHaveTextContent("{user}");
+    expect(document.querySelector(".ui-template-text [data-kind='module']")).toHaveTextContent("{user}");
     expect(document.querySelector(".ui-template-text [data-kind='unknown']")).toHaveTextContent("{viewer}");
     expect(document.querySelector(".ui-template-text")).toHaveTextContent("{user} {viewer}");
   });

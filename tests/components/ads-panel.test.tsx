@@ -45,7 +45,7 @@ const adsFetch = (
   vi.fn<typeof fetch>((input, init) => {
     const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
     if (path.endsWith("/settings") && init?.method === "PATCH") return Promise.resolve(patch());
-    if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings }));
+    if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
     if (path.endsWith("/schedule")) return Promise.resolve(jsonResponse(scheduleValue));
     if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(snooze());
     if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));

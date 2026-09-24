@@ -490,7 +490,7 @@ describe("Module management in the panel", () => {
     const path = "/api/channels/kanal-a/modules/test-modul/settings";
     const loadedA = await panelRouter.fetch(await requestFor("user-1", path), environment);
     const loaded = await loadedA.json<{ settings: { betrag: number }; revision: number }>();
-    expect(loaded).toEqual({ settings: { betrag: 42 }, revision: 1 });
+    expect(loaded).toEqual({ settings: { betrag: 42 }, revision: 1, variables: [] });
 
     const savedA = await panelRouter.fetch(
       await requestFor("user-1", path, "PATCH", { revision: loaded.revision, settings: { betrag: 41 } }),

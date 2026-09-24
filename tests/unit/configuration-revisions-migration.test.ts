@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
 const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const migration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
-describe("configuration revisions and alias index migration", () => {
-  it("applies 0000 through 0008 to seeded data and preserves keys, indexes, and foreign keys", () => {
+describe("configuration revisions and channel variables migrations", () => {
+  it("applies 0000 through 0009 to seeded data and retires legacy command kinds", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
@@ -24,10 +24,19 @@ describe("configuration revisions and alias index migration", () => {
         VALUES ('channel-a', 'zebra', 'Zebra', 7, '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
       `);
 
+      database.exec(migration("0001_eventsub_maintenance_locks.sql"));
+      database.exec(migration("0002_text_command_options.sql"));
+      database.exec(migration("0003_text_command_kinds.sql"));
+      database.exec(`
+        INSERT INTO text_commands (channel_id, command_name, response_text, kind, created_at, updated_at)
+        VALUES ('channel-a', 'up', '{channel} {uptime}', 'uptime', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+        INSERT INTO text_commands (channel_id, command_name, response_text, kind, created_at, updated_at)
+        VALUES ('channel-a', 'follow', '{user} {followage}', 'followage', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+        INSERT INTO text_commands (channel_id, command_name, response_text, kind, created_at, updated_at)
+        VALUES ('channel-a', 'game', '{game} {title}', 'game', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+      `);
+
       for (const name of [
-        "0001_eventsub_maintenance_locks.sql",
-        "0002_text_command_options.sql",
-        "0003_text_command_kinds.sql",
         "0004_channel_controls.sql",
         "0005_clips_default_on.sql",
         "0006_stream_started_at.sql",
@@ -45,6 +54,11 @@ describe("configuration revisions and alias index migration", () => {
         VALUES ('channel-a', 'hello', 'viewer-a', '2026-09-23T00:01:00.000Z');
       `);
       database.exec(migration("0008_configuration_revisions_and_alias_index.sql"));
+      database.prepare("UPDATE text_commands SET template_fields_json = ? WHERE channel_id = ? AND command_name = ?")
+        .run('{"offlineText":"Offline"}', "channel-a", "up");
+      database.prepare("UPDATE text_commands SET template_fields_json = ? WHERE channel_id = ? AND command_name = ?")
+        .run('{"notFollowingText":"Not following","unavailableText":"Unavailable"}', "channel-a", "follow");
+      database.exec(migration("0009_channel_variables.sql"));
 
       expect(database.prepare(
         `SELECT response_text, cooldown_seconds, aliases_json, user_cooldown_seconds,
@@ -75,6 +89,16 @@ describe("configuration revisions and alias index migration", () => {
         `SELECT enabled, settings FROM channel_modules
           WHERE channel_id = 'channel-a' AND module_id = 'clips'`,
       ).get()).toEqual({ enabled: 1, settings: "{}" });
+      expect(database.prepare(
+        `SELECT command_name, kind, response_text, template_fields_json, use_count,
+                variable_name, variable_operation, variable_amount
+           FROM text_commands WHERE channel_id = 'channel-a' AND command_name IN ('up', 'follow', 'game')
+          ORDER BY command_name`,
+      ).all()).toEqual([
+        { command_name: "follow", kind: "text", response_text: "{user} {followage}", template_fields_json: '{"notFollowingText":"Not following","unavailableText":"Unavailable","legacyFallback":true,"legacyKind":"followage"}', use_count: 0, variable_name: null, variable_operation: null, variable_amount: null },
+        { command_name: "game", kind: "text", response_text: "{game} {title}", template_fields_json: "{}", use_count: 0, variable_name: null, variable_operation: null, variable_amount: null },
+        { command_name: "up", kind: "text", response_text: "{channel} {uptime}", template_fields_json: '{"offlineText":"Offline","legacyFallback":true,"legacyKind":"uptime"}', use_count: 0, variable_name: null, variable_operation: null, variable_amount: null },
+      ]);
 
       const aliasPlan = database.prepare(
         "EXPLAIN QUERY PLAN SELECT command_name FROM text_command_aliases WHERE channel_id = ? AND alias = ?",
@@ -84,6 +108,8 @@ describe("configuration revisions and alias index migration", () => {
       expect(aliasIndexes.map(({ name }) => name)).toContain("text_command_aliases_command_idx");
       expect(database.prepare("PRAGMA foreign_key_list(text_command_aliases)").all()).toHaveLength(3);
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'channel_variables'").get())
+        .toEqual({ name: "channel_variables" });
 
       database.prepare("DELETE FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'hello'").run();
       database.prepare("DELETE FROM text_commands WHERE channel_id = 'channel-a' AND command_name = 'zebra'").run();

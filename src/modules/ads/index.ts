@@ -3,6 +3,7 @@ import { ADS_TEMPLATE_FIELDS, adsSettingsSchema } from "./contracts";
 import { DEFAULT_AUTOMATIC_TEXT, DEFAULT_MANUAL_TEXT, DEFAULT_PREWARNING_TEXT } from "./contracts/chat-defaults";
 import { processAdBreak } from "./service";
 import { adsRoutes } from "./routes";
+import { settingsVariableReferences } from "../contract";
 
 export { decideAdBreak, decideAdPrewarning, renderAdBreakText, renderPrewarningText } from "./domain";
 export { processAdBreak } from "./service";
@@ -14,6 +15,8 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   id: "ads",
   settingsSchema: adsSettingsSchema,
   templateFields: ADS_TEMPLATE_FIELDS,
+  templateContext: "system",
+  variableReferences: settingsVariableReferences("ads", ["automatic", "manual", "prewarningText"]),
   defaultSettings: {
     automatic: DEFAULT_AUTOMATIC_TEXT,
     manual: DEFAULT_MANUAL_TEXT,
@@ -30,7 +33,7 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
     requires: ["streamLive"],
     load: () => import("./panel/immediate-actions"),
   },
-  handleEvent: (event) => event.subscriptionType === "channel.ad_break.begin"
-    ? processAdBreak(event)
+  handleEvent: async (event, context) => event.subscriptionType === "channel.ad_break.begin"
+    ? processAdBreak(event, context.renderTemplate, await context.channelLanguage())
     : { actions: [], diagnostics: [] },
 };

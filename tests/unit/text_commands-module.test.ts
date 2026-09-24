@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { textCommandModule, type TextCommandKind, type TextCommandMinimumTier } from "../../src/modules/text_commands";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
+import { prepareChannelVariableChange } from "../../src/worker/db/channel-variables";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
@@ -85,7 +86,7 @@ const createBuiltinCommand = async (
   name: string,
   kind: TextCommandKind,
   text: string,
-  templates: { offlineText?: string; notFollowingText?: string; unavailableText?: string; usageText?: string } = {},
+  templates: { offlineText?: string; notFollowingText?: string; unavailableText?: string; usageText?: string; legacyFallback?: boolean; legacyKind?: "uptime" | "followage" } = {},
 ): Promise<void> => {
   const repository = createTextCommandRepository(
     database as unknown as D1Database,
@@ -123,6 +124,45 @@ const eventCodes = async (database: TestD1Database): Promise<string[]> => {
 };
 
 describe("Text commands module", () => {
+  it("does not let a same-timestamp cooldown loser undo the winning variable claim", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 0, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await repository.create({
+        channelId: "kanal-a", name: "increment", text: "Score {var.score}", kind: "text", cooldownSeconds: 60,
+        variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
+      }, { userId: "user-1" });
+      const knownCommand = await repository.find("kanal-a", "increment");
+      if (knownCommand === null) throw new Error("Command missing before the concurrent claims.");
+      const prepareChange = (channelId: string, change: Parameters<typeof prepareChannelVariableChange>[2], at: string, guard: Parameters<typeof prepareChannelVariableChange>[4]) =>
+        prepareChannelVariableChange(database as unknown as D1Database, channelId, change, at, guard);
+
+      const claims = await Promise.all([
+        repository.claim("kanal-a", "increment", NOW, "user-1", 60, prepareChange, null, knownCommand),
+        repository.claim("kanal-a", "increment", NOW, "user-1", 60, prepareChange, null, knownCommand),
+      ]);
+
+      expect(claims.filter((claim) => claim?.claimed)).toHaveLength(1);
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 1 });
+      await expect(database.prepare("SELECT last_used_at, use_count FROM text_commands WHERE command_name = 'increment'").first())
+        .resolves.toEqual({ last_used_at: NOW, use_count: 1 });
+      await expect(database.prepare("SELECT last_used_at FROM text_command_user_cooldowns WHERE command_name = 'increment' AND user_id = 'user-1'").first())
+        .resolves.toEqual({ last_used_at: NOW });
+    } finally {
+      database.close();
+    }
+  });
+
   it("treats removed edit commands as unknown and doesn't change module data", async () => {
     const database = new TestD1Database();
     try {
@@ -230,13 +270,14 @@ describe("Text commands module", () => {
         [textCommandModule],
       );
 
-      expect(preparedSql).toHaveLength(9);
-      expect(preparedSql.filter((sql) => /(?:FROM|UPDATE) text_commands/u.test(sql))).toHaveLength(3);
+      expect(preparedSql).toHaveLength(8);
+      expect(preparedSql.filter((sql) => /(?:FROM|UPDATE) text_commands/u.test(sql))).toHaveLength(2);
       expect(preparedSql.some((sql) => sql.includes("json_each"))).toBe(false);
       expect(preparedSql.filter((sql) => sql.includes("text_command_user_cooldowns"))).toHaveLength(1);
       expect(preparedSql.find((sql) => sql.includes("text_command_user_cooldowns"))?.trimStart())
         .toMatch(/^UPDATE text_commands/u);
       expect(preparedSql.some((sql) => sql.includes("channel_stream_state"))).toBe(false);
+      expect(preparedSql.some((sql) => sql.includes("channel_variables"))).toBe(false);
       expect(batchSizes).toEqual([2]);
       expect(fetcher).toHaveBeenCalledTimes(1);
     } finally {
@@ -244,15 +285,138 @@ describe("Text commands module", () => {
     }
   });
 
-  it("uses Helix channel data for uptime and game, and diagnoses a failed channel lookup", async () => {
+  it("reads only requested channel variables once and deduplicates repeated tokens", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
       await activate(database, "kanal-a");
-      await createBuiltinCommand(database, "laufzeit", "uptime", "{channel}|{uptime}", { offlineText: "{channel} ist offline" });
-      await createBuiltinCommand(database, "spiel", "game", "{game}|{title}");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 2, ?, ?), ('kanal-a', 'points', 5, ?, ?)`,
+      ).bind(NOW, NOW, NOW, NOW).run();
+      await createCommand(database, "vars", "everyone", "{var.score} {var.points} {var.score}");
+      const preparedSql: string[] = [];
+      const countedDb = {
+        prepare(sql: string) { preparedSql.push(sql); return database.prepare(sql); },
+        batch(statements: TestPreparedStatement[]) { return database.batch(statements); },
+      } as unknown as D1Database;
+      const fetcher = fetcherForChat();
+
+      await dispatchEventSubNotification({ ...environment(database), DB: countedDb }, eventFor("!vars"), fetcher, [textCommandModule]);
+
+      const variableReads = preparedSql.filter((sql) => sql.includes("FROM channel_variables") && sql.includes("SELECT name, value"));
+      expect(variableReads).toHaveLength(1);
+      expect(variableReads[0]).toContain("name IN (?, ?)");
+      expect(body(fetcher, 0).message).toBe("2 5 2");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not consume command or user cooldown when the variable action updates no row", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 0, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await repository.create({
+        channelId: "kanal-a", name: "increment", text: "", kind: "text", cooldownSeconds: 0,
+        userCooldownSeconds: 60, variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
+      }, { userId: "user-1" });
+
+      const prepare = database.prepare.bind(database);
+      database.prepare = (sql) => prepare(sql.includes("UPDATE channel_variables") && sql.includes("RETURNING name, value")
+        ? sql.replace("WHERE channel_id = ? AND name = ?", "WHERE channel_id = ? AND name = ? AND 1 = 0")
+        : sql);
+      const fetcher = fetcherForChat();
+
+      await dispatchEventSubNotification(environment(database), eventFor("!increment"), fetcher, [textCommandModule]);
+
+      expect(fetcher).not.toHaveBeenCalled();
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 0 });
+      await expect(database.prepare("SELECT use_count, last_used_at FROM text_commands WHERE command_name = 'increment'").first())
+        .resolves.toEqual({ use_count: 0, last_used_at: null });
+      await expect(database.prepare("SELECT COUNT(*) AS count FROM text_command_user_cooldowns WHERE command_name = 'increment'").first())
+        .resolves.toEqual({ count: 0 });
+      expect(await eventCodes(database)).toContain("text_commands.variable_update_failed");
+      expect(await eventCodes(database)).not.toContain("text_commands.triggered");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reloads and rechecks a command after its action is edited before claim", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 0, ?, ?), ('kanal-a', 'points', 0, ?, ?)`,
+      ).bind(NOW, NOW, NOW, NOW).run();
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] as const }),
+      );
+      await repository.create({
+        channelId: "kanal-a", name: "increment", text: "Score {var.score}", kind: "text", cooldownSeconds: 0,
+        variableAction: { name: "score", operation: "add", amount: 1 }, now: NOW,
+      }, { userId: "user-1" });
+      const originalBatch = database.batch.bind(database);
+      let edited = false;
+      database.batch = async (statements) => {
+        if (!edited) {
+          edited = true;
+          const current = await repository.find("kanal-a", "increment");
+          if (current === null) throw new Error("Command disappeared before the claim race.");
+          const change = await repository.change({
+            channelId: "kanal-a", name: current.name, newName: current.name,
+            text: "Points {var.points}", kind: "text", enabled: current.enabled, cooldownSeconds: 0,
+            aliases: current.aliases, userCooldownSeconds: 0, streamCondition: "any", responseType: "say",
+            variableAction: { name: "points", operation: "add", amount: 10 }, expectedRevision: current.revision,
+            now: "2026-09-19T12:00:01.000Z",
+          }, { userId: "user-1" });
+          if (!change.ok) throw new Error("Concurrent command edit did not apply.");
+        }
+        return originalBatch(statements);
+      };
+      const fetcher = fetcherForChat();
+
+      await dispatchEventSubNotification(environment(database), eventFor("!increment"), fetcher, [textCommandModule]);
+
+      await expect(database.prepare("SELECT name, value FROM channel_variables ORDER BY name").all())
+        .resolves.toMatchObject({ results: [{ name: "points", value: 10 }, { name: "score", value: 0 }] });
+      await expect(database.prepare("SELECT use_count FROM text_commands WHERE command_name = 'increment'").first())
+        .resolves.toEqual({ use_count: 1 });
+      expect(body(fetcher, 0).message).toBe("Points 10");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses Helix channel data for system template variables", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "uptime", "text", "{channel}|{uptime}", { offlineText: "The channel is offline" });
+      await createBuiltinCommand(database, "game", "text", "{game}|{title}");
       const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
         const url = requestedUrl(input);
         if (url.includes("/helix/channels?")) return Promise.resolve(new Response(JSON.stringify({ data: [{ title: "Streamtitel", game_name: "Stardew Valley" }] }), { status: 200 }));
@@ -260,8 +424,8 @@ describe("Text commands module", () => {
         return Promise.resolve(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
       });
 
-      await dispatchEventSubNotification(environment(database), eventFor("!laufzeit"), fetcher, [textCommandModule]);
-      await dispatchEventSubNotification(environment(database), eventFor("!spiel", "kanal-a", NOW, "game-trigger"), fetcher, [textCommandModule]);
+      await dispatchEventSubNotification(environment(database), eventFor("!uptime"), fetcher, [textCommandModule]);
+      await dispatchEventSubNotification(environment(database), eventFor("!game", "kanal-a", NOW, "game-trigger"), fetcher, [textCommandModule]);
 
       expect(fetcher.mock.calls.map(([input]) => requestedUrl(input))).toEqual(expect.arrayContaining([
         expect.stringContaining("/helix/channels?broadcaster_id=kanal-a"),
@@ -280,14 +444,14 @@ describe("Text commands module", () => {
     }
   });
 
-  it("records a Helix lookup failure and keeps uptime chat silent", async () => {
+  it("reports an unavailable Helix-backed variable and renders its fallback value", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
       await activate(database, "kanal-a");
-      await createBuiltinCommand(database, "uptime", "uptime", "Live seit {uptime}", { offlineText: "Offline" });
+      await createBuiltinCommand(database, "uptime", "text", "Live for {uptime}", { offlineText: "Offline" });
       const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => Promise.resolve(
         new Response(JSON.stringify({ message: "temporary failure" }), {
           status: requestedUrl(input).includes("/helix/channels?") ? 503 : 200,
@@ -297,22 +461,23 @@ describe("Text commands module", () => {
       await dispatchEventSubNotification(environment(database), eventFor("!uptime"), fetcher, [textCommandModule]);
 
       expect(fetcher.mock.calls).toHaveLength(2);
-      expect(fetcher.mock.calls.some(([input]) => requestedUrl(input).includes("/helix/chat/messages"))).toBe(false);
-      expect(await eventCodes(database)).toContain("text_commands.lookup_unavailable");
+      expect(fetcher.mock.calls.map(([input]) => requestedUrl(input))).not.toEqual(expect.arrayContaining([expect.stringContaining("/helix/channels?")]));
+      expect(body(fetcher, 1).message).toBe("Live for ?");
+      expect(await eventCodes(database)).toContain("template.lookup_unavailable");
     } finally {
       database.close();
     }
   });
 
-  it("returns the followage unavailable template on a BOT USER Helix failure and logs it", async () => {
+  it("uses a migrated fallback template when the follower lookup is unavailable", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
       await insertMember(database, "kanal-a", "user-1", "operator");
       await mitBot(database);
       await activate(database, "kanal-a");
-      await createBuiltinCommand(database, "followage", "followage", "{user} folgt seit {followage}", {
-        notFollowingText: "{user} folgt noch nicht", unavailableText: "Daten fehlen",
+      await createBuiltinCommand(database, "followage", "text", "{user} follows {followage}", {
+        notFollowingText: "Not following", unavailableText: "Data unavailable", legacyFallback: true,
       });
       const fetcher = vi.fn<typeof fetch>()
         .mockResolvedValueOnce(new Response(JSON.stringify({ message: "not moderator" }), { status: 403 }))
@@ -325,8 +490,126 @@ describe("Text commands module", () => {
       expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("user_id=user-1");
       expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("moderator_id=bot-1");
       expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("Authorization")).toBe("Bearer bot-token");
-      expect(body(fetcher, 1).message).toBe("Daten fehlen");
-      expect(await eventCodes(database)).toContain("text_commands.lookup_unavailable");
+      expect(body(fetcher, 1).message).toBe("Data unavailable");
+      expect(await eventCodes(database)).toContain("template.lookup_unavailable");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("replaces the complete legacy uptime reply when the stream is offline", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "uptime", "text", "{channel} has been live for {uptime}", {
+        offlineText: "{channel} is offline", legacyFallback: true,
+      });
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!uptime"), fetcher, [textCommandModule]);
+
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+      expect(body(fetcher, 1).message).toBe("kanal-a is offline");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("replaces the complete legacy followage reply when the viewer is not following", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "followage", "text", "{user} follows for {followage}", {
+        notFollowingText: "{user} does not follow this channel", legacyFallback: true,
+      });
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!followage"), fetcher, [textCommandModule]);
+
+      expect(body(fetcher, 1).message).toBe("alice does not follow this channel");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps migrated uptime fallback behavior when the saved reply has no uptime token", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "uptime", "text", "Welcome to chat", {
+        offlineText: "Actually offline", legacyFallback: true, legacyKind: "uptime",
+      });
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!uptime"), fetcher, [textCommandModule]);
+
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/streams?");
+      expect(body(fetcher, 1).message).toBe("Actually offline");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps migrated followage fallback behavior when the saved reply has no followage token", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createBuiltinCommand(database, "followage", "text", "Welcome to the channel", {
+        notFollowingText: "Please follow first", unavailableText: "Could not check follow status",
+        legacyFallback: true, legacyKind: "followage",
+      });
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+
+      await dispatchEventSubNotification(environment(database), eventFor("!followage"), fetcher, [textCommandModule]);
+
+      expect(requestedUrl(fetcher.mock.calls[0]?.[0])).toContain("/helix/channels/followers?");
+      expect(body(fetcher, 1).message).toBe("Please follow first");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fetches channel details independently for a title-only template", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertMember(database, "kanal-a", "user-1", "operator");
+      await mitBot(database);
+      await activate(database, "kanal-a");
+      await createCommand(database, "titel", "everyone", "{title}");
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+        const url = requestedUrl(input);
+        if (url.includes("/helix/channels?")) return Promise.resolve(new Response(JSON.stringify({ data: [{ title: "Independent", game_name: "Game" }] }), { status: 200 }));
+        if (url.includes("/helix/streams?")) return Promise.resolve(new Response("broken", { status: 503 }));
+        return Promise.resolve(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "chat-1" }] }), { status: 200 }));
+      });
+
+      await dispatchEventSubNotification(environment(database), eventFor("!titel"), fetcher, [textCommandModule]);
+
+      const urls = fetcher.mock.calls.map(([input]) => requestedUrl(input));
+      expect(urls.filter((url) => url.includes("/helix/channels?"))).toHaveLength(1);
+      expect(urls.some((url) => url.includes("/helix/streams?"))).toBe(false);
+      expect(body(fetcher, 1).message).toBe("Independent");
     } finally {
       database.close();
     }

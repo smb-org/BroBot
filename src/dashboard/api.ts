@@ -296,8 +296,72 @@ export const setChannelModuleEnabled = (
   { enabled },
 );
 
-export const getChannelModuleSettings = (channelId: string, moduleId: string): Promise<{ settings: Record<string, unknown>; revision: number }> =>
-  requestJson<{ settings: Record<string, unknown>; revision: number }>(`${modulePath(channelId, moduleId)}/settings`);
+export const getChannelModuleSettings = (channelId: string, moduleId: string): Promise<{
+  settings: Record<string, unknown>;
+  revision: number;
+  variables: { name: string; value: number; description: string }[];
+}> => requestJson<{ settings: Record<string, unknown>; revision: number; variables: { name: string; value: number; description: string }[] }>(`${modulePath(channelId, moduleId)}/settings`);
+
+export interface PanelChannelVariableRecord {
+  channelId: string;
+  name: string;
+  value: number;
+  description: string;
+  resetOnStreamStart: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PanelChannelVariableUsage {
+  moduleId: string;
+  itemName: string;
+  kind: "template" | "action";
+}
+
+export interface PanelChannelVariable extends PanelChannelVariableRecord {
+  usages: readonly PanelChannelVariableUsage[];
+}
+
+export interface PanelChannelVariablesResponse {
+  variables: readonly PanelChannelVariable[];
+  count: number;
+  maximum: number;
+}
+
+const variablesPath = (channelId: string, name?: string, suffix = ""): string =>
+  `${channelPath(channelId, "variables")}${name === undefined ? "" : `/${encodeURIComponent(name)}`}${suffix}`;
+
+export const fetchChannelVariables = (channelId: string): Promise<PanelChannelVariablesResponse> =>
+  requestJson<PanelChannelVariablesResponse>(variablesPath(channelId));
+
+export const createChannelVariable = (
+  channelId: string,
+  variable: Pick<PanelChannelVariableRecord, "name" | "value" | "description" | "resetOnStreamStart">,
+): Promise<{ variable: PanelChannelVariableRecord; usages: readonly PanelChannelVariableUsage[] }> =>
+  requestMutation(variablesPath(channelId), "POST", {
+    name: variable.name,
+    value: variable.value,
+    description: variable.description,
+    resetOnStreamStart: variable.resetOnStreamStart,
+  });
+
+export const updateChannelVariable = (
+  channelId: string,
+  name: string,
+  update: { newName: string; description: string; resetOnStreamStart: boolean },
+): Promise<{ variable: PanelChannelVariableRecord; usages: readonly PanelChannelVariableUsage[] }> =>
+  requestMutation(variablesPath(channelId, name), "PATCH", update);
+
+export const changeChannelVariableValue = (
+  channelId: string,
+  name: string,
+  operation: "add" | "subtract" | "set",
+  amount: number,
+): Promise<{ variable: PanelChannelVariableRecord }> =>
+  requestMutation(variablesPath(channelId, name, "/value"), "POST", { operation, amount });
+
+export const deleteChannelVariable = (channelId: string, name: string): Promise<undefined> =>
+  requestMutation<undefined>(variablesPath(channelId, name), "DELETE");
 
 export const saveChannelModuleSettings = <Settings extends object>(
   channelId: string,

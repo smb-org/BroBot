@@ -17,8 +17,8 @@ export interface TextCommandsTexts {
   deleteError: string;
   name: string;
   aliases: string;
-  variables: { user: string; channel: string; uptime: string; followage: string; game: string; title: string; target: string };
-  templateFieldLabels: { offlineText: string; notFollowingText: string; unavailableText: string; usageText: string };
+  templateFieldLabels: { usageText: string };
+  createVariable: string;
   shoutoutCooldownHint: string;
   kind: string;
   kindLabels: Record<TextCommandKind, string>;
@@ -103,6 +103,18 @@ export interface TextCommandsTexts {
   cooldownOff: string;
   notModerator: string;
   textAreaMessages: TextAreaMessages;
+  variableAction: string;
+  variableSelect: string;
+  variableSelectHint: string;
+  variableNone: string;
+  variableOperations: Record<"add" | "subtract" | "set" | "set_argument", string>;
+  variableOperationHelp: Record<"add" | "subtract" | "set" | "set_argument", string>;
+  variableAmount: string;
+  variableSilentHint: string;
+  variableEveryoneWarning: string;
+  actionResponse: (name: string, operation: "add" | "subtract" | "set" | "set_argument", amount: number | null) => string;
+  externalCooldownWarning: string;
+  argsEveryoneWarning: string;
   tagInputMessages: TagInputMessages;
   warningLabel: (warning: PanelTemplateWarning) => string;
   columns: { name: string; kind: string; response: string; minimumTier: string; active: string };
@@ -112,20 +124,30 @@ const templateMessages: LocaleCatalog<TextAreaMessages> = {
   de: {
     countLabel: (count, maximum) => `${String(count)} von ${String(maximum)} Zeichen`,
     previewCountLabel: (count) => `${String(count)} Zeichen`,
-    unknownVariable: (name, suggestion, available) => suggestion === null
-      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Verfügbar: ${available.map((item) => `{${item}}`).join(", ")}`
-      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}?`,
+    unknownVariable: (name, suggestion) => suggestion === null
+      ? `Unbekannte Variable {${name}} — wird wörtlich gesendet. Nutze den Variablen-Picker.`
+      : `Unbekannte Variable {${name}} — wird wörtlich gesendet. Meintest du {${suggestion}}? Nutze den Variablen-Picker.`,
     insertSuggestionLabel: (name) => `{${name}} einsetzen`,
     worstCaseLength: (length, maximum) => `Mit den längsten Werten bis zu ${String(length)} Zeichen — Twitch lehnt Nachrichten über ${String(maximum)} ab.`,
+    variablePicker: {
+      triggerLabel: "Variable einfügen", title: "Variable auswählen", searchLabel: "Variablen suchen", closeLabel: "Variablenauswahl schließen",
+      noResults: "Keine Variablen gefunden.", createVariableLabel: "Variable anlegen …", externalHelp: "Fragt Twitch live ab, wenn der Befehl ausgeführt wird",
+      groupLabels: { context: "Kontext", stream: "Stream", person: "Person", command: "Befehl", time_random: "Zeit & Zufall", event: "Ereignis", channel: "Kanalvariablen" },
+    },
   },
   en: {
     countLabel: (count, maximum) => `${String(count)} of ${String(maximum)} characters`,
     previewCountLabel: (count) => `${String(count)} characters`,
-    unknownVariable: (name, suggestion, available) => suggestion === null
-      ? `Unknown variable {${name}} — it will be sent literally. Available: ${available.map((item) => `{${item}}`).join(", ")}`
-      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}?`,
+    unknownVariable: (name, suggestion) => suggestion === null
+      ? `Unknown variable {${name}} — it will be sent literally. Use the variable picker.`
+      : `Unknown variable {${name}} — it will be sent literally. Did you mean {${suggestion}}? Use the variable picker.`,
     insertSuggestionLabel: (name) => `Insert {${name}}`,
     worstCaseLength: (length, maximum) => `With the longest values, this can reach ${String(length)} characters — Twitch rejects messages over ${String(maximum)}.`,
+    variablePicker: {
+      triggerLabel: "Insert variable", title: "Choose a variable", searchLabel: "Search variables", closeLabel: "Close variable picker",
+      noResults: "No variables found.", createVariableLabel: "Create variable …", externalHelp: "Looks up live data from Twitch when the command runs",
+      groupLabels: { context: "Context", stream: "Stream", person: "Person", command: "Command", time_random: "Time & random", event: "Event", channel: "Channel variables" },
+    },
   },
 };
 
@@ -134,17 +156,12 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     title: "Textbefehle", tabs: { settings: "Einstellungen", advanced: "Erweitert" }, list: "Befehle", details: (name) => `Eigenschaften von !${name}`, add: "Befehl anlegen", empty: "Noch keine Textbefehle angelegt.",
     load: "Textbefehle werden geladen …", loadError: "Die Textbefehle konnten nicht geladen werden.",
     saveError: "Der Textbefehl konnte nicht gespeichert werden.", deleteError: "Der Textbefehl konnte nicht gelöscht werden.",
-    name: "Name", aliases: "Aliase", variables: {
-      user: "Name des Zuschauers, der den Befehl auslöst", channel: "Name des Kanals", uptime: "Dauer des laufenden Streams",
-      followage: "Dauer, seit der Zuschauer dem Kanal folgt", game: "Aktuelle Twitch-Kategorie", title: "Aktueller Streamtitel", target: "Twitch-Login des Shoutout-Ziels",
-    },
-    templateFieldLabels: { offlineText: "Offline-Antwort", notFollowingText: "Antwort ohne Follow", unavailableText: "Antwort bei fehlenden Daten", usageText: "Nutzungshinweis" },
+    name: "Name", aliases: "Aliase", templateFieldLabels: { usageText: "Nutzungshinweis" }, createVariable: "Variable anlegen",
     shoutoutCooldownHint: "Twitch begrenzt Shoutouts selbst: 2 Minuten pro Kanal und 60 Minuten pro Ziel.",
-    kind: "Art", kindLabels: { text: "Antworttext", list: "Befehlsliste", uptime: "Stream-Laufzeit", followage: "Followage", game: "Spiel und Titel", shoutout: "Shoutout" },
+    kind: "Art", kindLabels: { text: "Antworttext", list: "Befehlsliste", shoutout: "Shoutout" },
     kindHints: {
       text: "Antwortet mit dem Text unten.", list: "Zählt alle eingeschalteten Befehle auf (ohne Aliase).",
-      uptime: "Zeigt die aktuelle Laufzeit des Streams.", followage: "Zeigt, seit wann die auslösende Person folgt.",
-      game: "Zeigt die aktuelle Kategorie und den Streamtitel.", shoutout: "!so <name> empfiehlt einen Twitch-Kanal im Chat.",
+      shoutout: "!so <name> empfiehlt einen Twitch-Kanal im Chat.",
     },
     response: "Antwort", responseHint: "Was der Bot schreibt. { öffnet die Variablen.", responseMissing: "Antworttext ausfüllen.",
     minimumTier: "Wer darf auslösen", minimumTierLocked: "Nur Broadcaster und Verwalter dürfen Mindeststufen ändern.",
@@ -197,24 +214,30 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     tagInputMessages: { countLabel: (count, max) => `${String(count)} von ${String(max)}`, atLimitHint: "Höchstens 10 Aliase.", duplicateWarning: (alias) => `${alias} steht schon in der Liste.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unbekannte Variable${warning.unknownVariables.length === 1 ? "" : "n"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
-      : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
+      : warning.code === "template_parameters_invalid"
+        ? `Ungültiger Parameter: ${warning.invalidVariables.join(", ")}`
+        : `Vorlage kann ${String(warning.worstCaseLength)} Zeichen lang sein.`,
     columns: { name: "!Name", kind: "Art", response: "Antwort", minimumTier: "Mindeststufe", active: "Aktiv" },
+    variableAction: "Kanalvariable ändern", variableSelect: "Variable", variableSelectHint: "Wird atomar mit dem Befehl geändert.", variableNone: "Keine Kanalvariablen angelegt.",
+    variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
+    variableOperationHelp: { add: "Zählt hoch.", subtract: "Zählt herunter.", set: "Setzt auf den Wert.", set_argument: "Setzt auf das erste Argument. Ungültige Zahlen zeigen den Nutzungshinweis." },
+    variableAmount: "Betrag", variableSilentHint: "Antwort leer lassen, um still zu zählen.", variableEveryoneWarning: "Jeder im Chat kann diese Variable ändern.",
+    actionResponse: (name, operation, amount) => operation === "add" ? `Ändert ${name} um +${String(amount ?? 1)}`
+      : operation === "subtract" ? `Ändert ${name} um −${String(amount ?? 1)}`
+        : operation === "set" ? `Setzt ${name} auf ${String(amount ?? 0)}` : `Setzt ${name} auf das erste Argument`,
+    externalCooldownWarning: "Fragt Twitch bei jedem Auslösen. Eine Abkühlzeit von mindestens 5 Sekunden wird empfohlen.",
+    argsEveryoneWarning: "Mit {args} kann jede Person im Chat Text an den Bot übergeben.",
   },
   en: {
     title: "Text commands", tabs: { settings: "Settings", advanced: "Advanced" }, list: "Commands", details: (name) => `Properties for !${name}`, add: "Add command", empty: "No text commands yet.",
     load: "Loading text commands …", loadError: "The text commands could not be loaded.",
     saveError: "The text command could not be saved.", deleteError: "The text command could not be deleted.",
-    name: "Name", aliases: "Aliases", variables: {
-      user: "Name of the viewer who triggered the command", channel: "Channel name", uptime: "Current stream duration",
-      followage: "How long the viewer has followed the channel", game: "Current Twitch category", title: "Current stream title", target: "Shoutout target's Twitch login",
-    },
-    templateFieldLabels: { offlineText: "Offline response", notFollowingText: "Not following response", unavailableText: "Unavailable response", usageText: "Usage response" },
+    name: "Name", aliases: "Aliases", templateFieldLabels: { usageText: "Usage response" }, createVariable: "Create variable",
     shoutoutCooldownHint: "Twitch enforces shoutout cooldowns: 2 minutes per channel and 60 minutes per target.",
-    kind: "Type", kindLabels: { text: "Response text", list: "Command list", uptime: "Stream uptime", followage: "Followage", game: "Game and title", shoutout: "Shoutout" },
+    kind: "Type", kindLabels: { text: "Response text", list: "Command list", shoutout: "Shoutout" },
     kindHints: {
       text: "Replies with the text below.", list: "Lists all enabled commands (without aliases).",
-      uptime: "Shows how long the current stream has been live.", followage: "Shows how long the caller has followed.",
-      game: "Shows the current category and stream title.", shoutout: "!so <name> recommends a Twitch channel in chat.",
+      shoutout: "!so <name> recommends a Twitch channel in chat.",
     },
     response: "Response", responseHint: "What the bot says. Type { to open variables.", responseMissing: "Enter a response.",
     minimumTier: "Who can use it", minimumTierLocked: "Only broadcasters and managers may change minimum levels.",
@@ -267,8 +290,19 @@ const catalog: LocaleCatalog<TextCommandsTexts> = {
     tagInputMessages: { countLabel: (count, max) => `${String(count)} of ${String(max)}`, atLimitHint: "Up to 10 aliases.", duplicateWarning: (alias) => `${alias} is already in the list.` },
     warningLabel: (warning) => warning.code === "unknown_template_variables"
       ? `Unknown variable${warning.unknownVariables.length === 1 ? "" : "s"}: ${warning.unknownVariables.map((name) => `{${name}}`).join(", ")}`
-      : `Template can be ${String(warning.worstCaseLength)} characters long.`,
+      : warning.code === "template_parameters_invalid"
+        ? `Invalid parameter: ${warning.invalidVariables.join(", ")}`
+        : `Template can be ${String(warning.worstCaseLength)} characters long.`,
     columns: { name: "!Name", kind: "Type", response: "Response", minimumTier: "Minimum level", active: "Active" },
+    variableAction: "Change channel variable", variableSelect: "Variable", variableSelectHint: "Applied atomically with the command.", variableNone: "No channel variables have been created.",
+    variableOperations: { add: "+", subtract: "−", set: "=", set_argument: "Argument" },
+    variableOperationHelp: { add: "Increase the value.", subtract: "Decrease the value.", set: "Set the value directly.", set_argument: "Set from the first argument. Invalid numbers show the usage response." },
+    variableAmount: "Amount", variableSilentHint: "Leave the response empty to count silently.", variableEveryoneWarning: "Everyone in chat can change this variable.",
+    actionResponse: (name, operation, amount) => operation === "add" ? `Changes ${name} by +${String(amount ?? 1)}`
+      : operation === "subtract" ? `Changes ${name} by −${String(amount ?? 1)}`
+        : operation === "set" ? `Sets ${name} to ${String(amount ?? 0)}` : `Sets ${name} from the first argument`,
+    externalCooldownWarning: "Requests Twitch every time the command runs. A cooldown of at least 5 seconds is recommended.",
+    argsEveryoneWarning: "With {args}, anyone in chat can pass text to the bot.",
   },
 };
 

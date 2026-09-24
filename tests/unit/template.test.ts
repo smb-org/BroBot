@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   closestTemplateVariable,
+  invalidTemplateParameters,
+  parseTemplateRange,
   renderTemplate,
   templateVariableNames,
   tokenizeTemplate,
@@ -11,8 +13,11 @@ import {
 } from "../../src/template";
 
 const variables: readonly TemplateVariable[] = [
-  { name: "user", sample: "viewer", maxLength: 25 },
-  { name: "viewers", sample: "42", maxLength: 7 },
+  { name: "user", group: "context", sample: "viewer", maxLength: 25, source: "system" },
+  { name: "viewers", group: "stream", sample: "42", maxLength: 7, source: "system" },
+  { name: "var.points", group: "channel", sample: "10", maxLength: 10, source: "channel" },
+  { name: "random", group: "time_random", sample: "73", maxLength: 7, parameters: "range", source: "system" },
+  { name: "pick", group: "time_random", sample: "heads", maxLength: 20, parameters: "choices", source: "system" },
 ];
 
 describe("template helpers", () => {
@@ -24,17 +29,20 @@ describe("template helpers", () => {
 
   it("only suggests close names", () => {
     expect(closestTemplateVariable("viewr", variables)).toBe("viewers");
+    expect(closestTemplateVariable("donations", [...variables, { name: "var.donations", sample: "0", maxLength: 10 }])).toBe("var.donations");
     expect(closestTemplateVariable("zzzzzz", variables)).toBeNull();
     expect(closestTemplateVariable("viewer_count", variables)).toBeNull();
   });
 
-  it("tokenizes known and unknown tokens with source offsets", () => {
-    expect(tokenizeTemplate("Hi {user}, {User}!", variables)).toEqual([
+  it("tokenizes variable sources and unknown tokens with source offsets", () => {
+    expect(tokenizeTemplate("Hi {user}, {var.points}, {User}!", variables)).toEqual([
       { kind: "text", text: "Hi ", start: 0 },
-      { kind: "known", text: "{user}", start: 3 },
+      { kind: "system", text: "{user}", start: 3, name: "user" },
       { kind: "text", text: ", ", start: 9 },
-      { kind: "unknown", text: "{User}", start: 11 },
-      { kind: "text", text: "!", start: 17 },
+      { kind: "channel", text: "{var.points}", start: 11, name: "var.points" },
+      { kind: "text", text: ", ", start: 23 },
+      { kind: "unknown", text: "{User}", start: 25, name: "User" },
+      { kind: "text", text: "!", start: 31 },
     ]);
   });
 
@@ -43,9 +51,33 @@ describe("template helpers", () => {
       .toBe("Hi alice, {zzz} and {User}");
   });
 
+  it("validates parameterized variables and keeps invalid or unsupported tokens literal", () => {
+    const random = vi.fn((maximumExclusive: number) => maximumExclusive - 1);
+    const template = "{random 2-5}|{pick red|blue}|{random nope}|{user nope}|grinst";
+    expect(invalidTemplateParameters(template, variables)).toEqual(["{random nope}"]);
+    expect(renderTemplate(template, { user: "alice" }, {
+      random: (parameter) => {
+        const range = parseTemplateRange(parameter);
+        return range === null ? "?" : String(range.min + random(range.max - range.min + 1));
+      },
+      pick: (parameter) => parameter.split("|").at(-1)?.trim() ?? "",
+    }, variables)).toBe("5|blue|{random nope}|{user nope}|grinst");
+  });
+
+  it("resolves parameterless random with its default range", () => {
+    const random = vi.fn((maximumExclusive: number) => maximumExclusive - 1);
+    const resolver = (parameter: string): string => {
+      const range = parseTemplateRange(parameter || "1-100");
+      return range === null ? "?" : String(range.min + random(range.max - range.min + 1));
+    };
+
+    expect(renderTemplate("{random}", {}, { random: resolver }, variables)).toBe("100");
+    expect(random).toHaveBeenCalledWith(100);
+  });
+
   it("counts maximum substitutions and an absent-variable fallback", () => {
     const duration: readonly TemplateVariable[] = [
-      { name: "duration", sample: "90", maxLength: 4, fallbackWhenAbsent: 15 },
+      { name: "duration", group: "event", sample: "90", maxLength: 4, fallbackWhenAbsent: 15 },
     ];
     expect(worstCaseTemplateLength("Pause", duration)).toBe(20);
     expect(worstCaseTemplateLength("Pause {duration}", duration)).toBe("Pause ".length + 4);

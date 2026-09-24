@@ -59,7 +59,12 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
 // Only `placeholders` is built at runtime and has no production literal.
 const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
+  ["minimumValue", "-999999999"],
+  ["maximumValue", "999999999"],
+  ["MINIMUM_VALUE_SQL", "-999999999"],
+  ["MAXIMUM_VALUE_SQL", "999999999"],
   ["prepareModuleAudit === undefined ? \"\" : \"AND changes() > 0\"", "AND changes() > 0"],
+  ["variableChange === null ? \"\" : \"AND changes() > 0\"", "AND changes() > 0"],
   ["actorGuard(overlayTokenRoles)", actorGuard(overlayTokenRoles)],
   ["overlayTokenSelectColumns", overlayTokenSelectColumns],
   ["overlayTokenReturningColumns", overlayTokenReturningColumns],
@@ -143,9 +148,9 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(24);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(26);
       expect(objects.filter((object) => object.type === "index")).toHaveLength(26);
-      expect(objects).toHaveLength(50);
+      expect(objects).toHaveLength(52);
     } finally {
       database.close();
     }

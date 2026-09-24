@@ -23,6 +23,7 @@ export interface SwitchProps {
 /** A single semantic switch control, with no separate checkbox indicator. */
 export function Switch({ label, ariaLabel, checked, onChange, disabled, pending, lockedReason, layout = "stacked", hint, description, children }: SwitchProps) {
   const id = useId();
+  const hasChildren = children !== undefined && children !== null;
   const reasonId = lockedReason === undefined ? undefined : `switch-reason-${id}`;
   const hintId = hint === undefined ? undefined : `switch-hint-${id}`;
   const descriptionId = description === undefined ? undefined : `switch-description-${id}`;
@@ -74,12 +75,12 @@ export function Switch({ label, ariaLabel, checked, onChange, disabled, pending,
         <div className="ui-switch-card__heading">
           {input}
           <label className="ui-switch-card__label" htmlFor={id}>
-            <span className="ui-switch-card__title">{label}</span>
+            <span className="ui-switch-card__title" id={labelId}>{label}</span>
             {description === undefined ? null : <span className="ui-switch-card__description" id={descriptionId}>{description}</span>}
           </label>
           {visual}
         </div>
-        {children === undefined ? null : (
+        {!hasChildren ? null : (
           <div className="ui-switch-card__children">
             {checked ? null : reasonLine}
             <DisabledFieldReasonContext.Provider value={!checked && lockedReason !== undefined && reasonId !== undefined ? { id: reasonId, reason: lockedReason } : null}>
@@ -90,7 +91,7 @@ export function Switch({ label, ariaLabel, checked, onChange, disabled, pending,
           </div>
         )}
         {hintLine}
-        {children === undefined ? reasonLine : null}
+        {!hasChildren ? reasonLine : null}
       </div>
     );
   }

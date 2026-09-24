@@ -142,6 +142,30 @@ describe("lookupAndRefreshStreamState", () => {
     }
   });
 
+  it("resets resettable variables on a Helix offline-to-online transition", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "offline", STALE, "helix");
+      await database.prepare(
+        `INSERT INTO channel_variables (channel_id, name, value, reset_on_stream_start, created_at, updated_at)
+         VALUES ('kanal-a', 'score', 42, 1, ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await withAppToken(database);
+
+      const startedAt = "2026-09-23T11:59:00.000Z";
+      const result = await lookupAndRefreshStreamState(environment(database), "kanal-a", NOW, helixResponse(true, startedAt));
+
+      expect(result).toMatchObject({ state: "online", startedAt });
+      await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
+        .resolves.toEqual({ value: 0 });
+      await expect(database.prepare("SELECT started_at FROM channel_variable_stream_resets WHERE channel_id = 'kanal-a'").first())
+        .resolves.toEqual({ started_at: startedAt });
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not call Helix when a fresh EventSub row has active stream coverage", async () => {
     const database = new TestD1Database();
     try {

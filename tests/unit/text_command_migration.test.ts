@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,34 @@ import { describe, expect, it } from "vitest";
 const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 
 describe("text command options migration", () => {
+  it("preserves migrated uptime and followage kinds for token-independent whole-reply fallbacks", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec(readFileSync(resolve(migrationsDirectory, "0000_baseline.sql"), "utf8"));
+      for (const migration of readdirSync(migrationsDirectory).filter((name) => name > "0000_baseline.sql" && name < "0009_channel_variables.sql").sort()) {
+        database.exec(readFileSync(resolve(migrationsDirectory, migration), "utf8"));
+      }
+      database.exec(`
+        INSERT INTO channels (channel_id, login, display_name, created_at, updated_at)
+        VALUES ('channel-a', 'channel-a', 'Channel A', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+        INSERT INTO text_commands (channel_id, command_name, response_text, kind, template_fields_json, created_at, updated_at)
+        VALUES
+          ('channel-a', 'uptime', '{channel} live {uptime}', 'uptime', '{"offlineText":"{channel} is offline"}', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z'),
+          ('channel-a', 'followage', '{user} follows {followage}', 'followage', '{"notFollowingText":"Not following","unavailableText":"Unavailable"}', '2026-09-23T00:00:00.000Z', '2026-09-23T00:00:00.000Z');
+      `);
+      database.exec(readFileSync(resolve(migrationsDirectory, "0009_channel_variables.sql"), "utf8"));
+
+      expect(database.prepare(
+        "SELECT command_name, kind, template_fields_json FROM text_commands ORDER BY command_name",
+      ).all()).toEqual([
+        { command_name: "followage", kind: "text", template_fields_json: '{"notFollowingText":"Not following","unavailableText":"Unavailable","legacyFallback":true,"legacyKind":"followage"}' },
+        { command_name: "uptime", kind: "text", template_fields_json: '{"offlineText":"{channel} is offline","legacyFallback":true,"legacyKind":"uptime"}' },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("preserves existing rows as replies and applies defaults to new rows", () => {
     const database = new DatabaseSync(":memory:");
     try {

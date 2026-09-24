@@ -17,8 +17,8 @@ export const adsSettingsSchema = z.object({
 export type AdsSettings = z.output<typeof adsSettingsSchema>;
 
 export const ADS_VARIABLES = {
-  duration: { name: "duration", sample: "90", maxLength: 4, fallbackWhenAbsent: 15 },
-  seconds: { name: "seconds", sample: "60", maxLength: 3 },
+  duration: { name: "duration", group: "event", sample: "90", maxLength: 4, fallbackWhenAbsent: 15 },
+  seconds: { name: "seconds", group: "event", sample: "60", maxLength: 3 },
 } as const satisfies Record<string, TemplateVariable>;
 
 export const ADS_TEMPLATE_FIELDS = {
