@@ -47,6 +47,8 @@ describe("stored overlays migration", () => {
         `INSERT INTO overlay_tokens (token_id, channel_id, token_hash, created_at, overlay_id, label, secret_envelope)
          VALUES ('bound-token', 'channel-a', 'bound-hash', '2026-09-24T00:00:00.000Z', 'overlay-a', 'OBS', 'ciphertext')`,
       ).run();
+      expect(database.prepare("SELECT overlay_id FROM overlay_tokens WHERE token_id = 'bound-token'").get())
+        .toEqual({ overlay_id: "overlay-a" });
 
       database.prepare("UPDATE channel_variables SET name = 'points' WHERE channel_id = 'channel-a' AND name = 'score'").run();
       expect(database.prepare("SELECT variable_name FROM overlay_elements WHERE element_id = 'element-a'").get())
@@ -63,7 +65,7 @@ describe("stored overlays migration", () => {
       expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a'").get())
         .toEqual({ count: 0 });
       expect(database.prepare("SELECT overlay_id FROM overlay_tokens WHERE token_id = 'bound-token'").get())
-        .toEqual({ overlay_id: null });
+        .toEqual({ overlay_id: "overlay-a" });
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {
       database.close();

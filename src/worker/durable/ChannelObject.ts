@@ -49,6 +49,7 @@ type TokenValidityRow = { token_id: string };
 type RevokedTokenMarker = { revokedAt: number };
 
 type OverlayHandshakeWindow = { startedAt: number; count: number };
+type RealtimeSocketAttachment = RealtimePrincipal & { referencedVariableNames?: string[] };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -72,10 +73,17 @@ const isRealtimePrincipal = (value: unknown): value is RealtimePrincipal => {
   return false;
 };
 
-const readAttachment = (webSocket: WebSocket): RealtimePrincipal | null => {
+const isRealtimeSocketAttachment = (value: unknown): value is RealtimeSocketAttachment => {
+  if (!isRealtimePrincipal(value)) return false;
+  const referencedVariableNames: unknown = Reflect.get(value, "referencedVariableNames");
+  return referencedVariableNames === undefined ||
+    (Array.isArray(referencedVariableNames) && referencedVariableNames.every(isNonEmptyString));
+};
+
+const readAttachment = (webSocket: WebSocket): RealtimeSocketAttachment | null => {
   try {
     const attachment: unknown = webSocket.deserializeAttachment();
-    return isRealtimePrincipal(attachment) ? attachment : null;
+    return isRealtimeSocketAttachment(attachment) ? attachment : null;
   } catch {
     return null;
   }
@@ -228,6 +236,16 @@ export class ChannelObject extends DurableObject<Env> {
     return row !== null;
   }
 
+  private async referencedVariableNames(channelId: string, overlayId: string): Promise<string[]> {
+    const result = await this.env.DB.prepare(
+      `SELECT DISTINCT variable_name
+         FROM overlay_elements
+        WHERE channel_id = ? AND overlay_id = ? AND variable_name IS NOT NULL
+        ORDER BY variable_name`,
+    ).bind(channelId, overlayId).all<{ variable_name: string }>();
+    return result.results.map((row) => row.variable_name);
+  }
+
   private async allowOverlayHandshake(tokenId: string, now: number): Promise<boolean> {
     const key = `overlay_handshakes:${tokenId}`;
     return this.ctx.storage.transaction(async (transaction) => {
@@ -291,6 +309,7 @@ export class ChannelObject extends DurableObject<Env> {
       return new Response("Realtime protocol is not supported.", { status: 426 });
     }
 
+    let referencedVariableNames: string[] | undefined;
     if (principal.kind === "overlay") {
       let withinHandshakeLimit: boolean;
       try {
@@ -325,13 +344,20 @@ export class ChannelObject extends DurableObject<Env> {
             Number.isFinite(marker.revokedAt) && Date.now() - marker.revokedAt < OVERLAY_REVOKED_MARKER_TTL_MS)) {
           return new Response("Overlay token revoked.", { status: 403 });
         }
+        if (principal.overlayId !== null) {
+          referencedVariableNames = await this.referencedVariableNames(ownChannelId, principal.overlayId);
+        }
       } catch (error: unknown) {
         console.error("Realtime overlay revocation could not be checked.", error);
         return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
       }
     }
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
-    pair[1].serializeAttachment(principal);
+    pair[1].serializeAttachment(
+      principal.kind === "overlay" && referencedVariableNames !== undefined
+        ? { ...principal, referencedVariableNames }
+        : principal,
+    );
     await this.scheduleSecurityAlarm();
     pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
     return new Response(null, {
@@ -342,9 +368,9 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   /** Distributes only within its own channel and only to principals of the requested kind. */
-  public publish(
+  public async publish(
     messages: readonly RealtimeMessage[],
-  ): void {
+  ): Promise<void> {
     if (messages.length === 0) return;
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || messages.some((message) => message.channelId !== ownChannelId)) {
@@ -354,19 +380,42 @@ export class ChannelObject extends DurableObject<Env> {
     const ordinarySockets = messages.some((message) => message.type !== "overlay.changed")
       ? this.ctx.getWebSockets()
       : [];
-    const serialized = messages.map((message) => ({
-      type: message.type,
-      overlayId: message.type === "overlay.changed" ? message.payload.overlayId : null,
-      recipients: REALTIME_RECIPIENTS[message.type],
-      payload: JSON.stringify(message),
-      sockets: message.type === "overlay.changed"
+    const overlaySocketsById = new Map<string, WebSocket[]>();
+    const failedOverlayRefreshes = new Set<string>();
+    const changedOverlayIds = new Set(messages.flatMap((message) =>
+      message.type === "overlay.changed" ? [message.payload.overlayId] : []));
+    for (const overlayId of changedOverlayIds) {
+      const sockets = this.ctx.getWebSockets(`overlay:${overlayId}`);
+      overlaySocketsById.set(overlayId, sockets);
+      if (sockets.length === 0) continue;
+      try {
+        const referencedVariableNames = await this.referencedVariableNames(ownChannelId, overlayId);
+        for (const webSocket of sockets) {
+          const principal = readAttachment(webSocket);
+          if (principal?.kind === "overlay" && principal.overlayId === overlayId) {
+            webSocket.serializeAttachment({ ...principal, referencedVariableNames });
+          }
+        }
+      } catch (error: unknown) {
+        console.error("Realtime overlay variable references could not be refreshed.", error);
+        failedOverlayRefreshes.add(overlayId);
+        for (const webSocket of sockets) {
+          closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "overlay access refresh unavailable");
+        }
+      }
+    }
+    const serialized = messages.map((envelope) => ({
+      envelope,
+      payload: JSON.stringify(envelope),
+      sockets: envelope.type === "overlay.changed"
         ? [
           ...this.ctx.getWebSockets("kind:panel"),
-          ...this.ctx.getWebSockets(`overlay:${message.payload.overlayId}`),
+          ...(overlaySocketsById.get(envelope.payload.overlayId) ?? []),
         ]
         : ordinarySockets,
     }));
     for (const message of serialized) {
+      const envelope = message.envelope;
       for (const webSocket of message.sockets) {
         const principal = readAttachment(webSocket);
         if (principal === null || principal.channelId !== ownChannelId) {
@@ -377,11 +426,25 @@ export class ChannelObject extends DurableObject<Env> {
           closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
           continue;
         }
-        if (message.type === "overlay.changed" && principal.kind === "overlay" &&
-            principal.overlayId !== message.overlayId) continue;
+        if (principal.kind === "overlay" && principal.overlayId !== null &&
+            failedOverlayRefreshes.has(principal.overlayId)) continue;
+        if (envelope.type === "overlay.changed" && principal.kind === "overlay" &&
+            principal.overlayId !== envelope.payload.overlayId) continue;
+        let payload = envelope.payload;
+        if (envelope.type === "variables.changed" && principal.kind === "overlay" && principal.overlayId !== null) {
+          const referencedVariableNames = new Set(principal.referencedVariableNames ?? []);
+          const set = envelope.payload.set.filter((entry) => referencedVariableNames.has(entry.name));
+          const removed = envelope.payload.removed.filter((name) => referencedVariableNames.has(name));
+          if (set.length === 0 && removed.length === 0) continue;
+          payload = { set, removed };
+        }
         try {
-          const recipients: readonly RealtimeRecipientKind[] = message.recipients;
-          if (recipients.includes(principal.kind)) webSocket.send(message.payload);
+          const recipients: readonly RealtimeRecipientKind[] = REALTIME_RECIPIENTS[envelope.type];
+          if (recipients.includes(principal.kind)) {
+            webSocket.send(payload === envelope.payload
+              ? message.payload
+              : JSON.stringify({ ...envelope, payload }));
+          }
         } catch {
           closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
         }

@@ -221,13 +221,17 @@ export const getOverlayBindingForToken = async (
   tokenId: string,
 ): Promise<string | null> => {
   const row = await db.prepare(
-    `SELECT overlay_id
+    `SELECT overlay_id, revoked_at
        FROM overlay_tokens
       WHERE channel_id = ? AND token_id = ?`,
-  ).bind(channelId, tokenId).first<{ overlay_id: string | null }>();
+  ).bind(channelId, tokenId).first<{
+    overlay_id: string | null;
+    revoked_at: string | null;
+  }>();
   // A missing row is an authentication consistency failure. Treating it as a
   // legacy token would grant channel-wide access after a failed binding read.
   if (row === null) throw new Error("Authenticated overlay token binding could not be read.");
+  if (row.revoked_at !== null) throw new Error("Authenticated overlay token has been revoked.");
   return row.overlay_id;
 };
 

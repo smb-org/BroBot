@@ -285,7 +285,7 @@ describe("overlay access routes", () => {
     expect(close).toHaveBeenCalledWith(access.tokenId);
     expect(await database.prepare("SELECT overlay_id, revoked_at, revocation_reason FROM overlay_tokens WHERE token_id = ?")
       .bind(access.tokenId).first()).toMatchObject({
-      overlay_id: null,
+      overlay_id: "overlay-a",
       revocation_reason: "overlay_deleted",
     });
     expect((await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
