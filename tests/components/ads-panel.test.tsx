@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModulePage } from "../../src/dashboard/module-panels";
@@ -168,6 +168,40 @@ describe("Ad settings editor declaration", () => {
     } }));
 
     expect(await screen.findByText(`Stand ${formatter.format(new Date("2026-09-24T13:00:00.000Z"))}`)).toBeInTheDocument();
+  });
+
+  it("keeps the newest realtime schedule when it arrives before the initial response", async () => {
+    let resolveInitial: ((response: Response) => void) | undefined;
+    const formatter = new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" });
+    const initial = { ...schedule, asOf: "2026-09-24T12:00:00.000Z" };
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), "https://brobot.example").pathname;
+      if (path.endsWith("/schedule")) return new Promise<Response>((resolve) => { resolveInitial = resolve; });
+      if (path === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf" }));
+      if (path.endsWith("/settings")) return Promise.resolve(jsonResponse({ settings, revision: 1, variables: [] }));
+      if (path.endsWith("/snooze") && init?.method === "POST") return Promise.resolve(jsonResponse(initial));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    renderAds(fetcher);
+
+    const newerAsOf = "2026-09-24T13:00:00.000Z";
+    window.dispatchEvent(new CustomEvent("brobot:realtime", { detail: {
+      version: 1,
+      id: "ads-schedule-early",
+      createdAt: newerAsOf,
+      channelId: "kanal-a",
+      type: "ads.schedule.updated",
+      payload: {
+        schedule: { ...schedule.schedule, nextAdAt: "2026-09-24T18:00:00.000Z", snoozeCount: 0 },
+        asOf: newerAsOf,
+      },
+    } }));
+    act(() => {
+      resolveInitial?.(jsonResponse(initial));
+    });
+
+    expect(await screen.findByText(`Stand ${formatter.format(new Date(newerAsOf))}`)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Snooze · 0 verfügbar/ })).toBeDisabled();
   });
 
   it("keeps a cleared prewarning lead time empty and blocks the save", async () => {

@@ -2415,17 +2415,58 @@ describe("Dashboard skeleton", () => {
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
+    const channelDataAge = document.querySelector(".dashboard-header__status .data-age:not(.dashboard-header__stream-age)")?.textContent;
+    const changedAt = relativeIso(1_000);
     socket.receive(JSON.stringify({
       version: 1,
       id: "stream-state-panel-1",
       createdAt: new Date().toISOString(),
       channelId: "kanal-a",
       type: "stream.state.changed",
-      payload: { state: "online", startedAt: relativeIso(-60 * 60 * 1000), changedAt: new Date().toISOString() },
+      payload: { state: "online", startedAt: relativeIso(-60 * 60 * 1000), changedAt, checkedAt: changedAt },
     }));
 
     expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
     expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+    expect(screen.getByText(/^Zustand geprüft/)).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__status .data-age:not(.dashboard-header__stream-age)")?.textContent).toBe(channelDataAge);
+
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "stream-state-panel-old",
+      createdAt: new Date().toISOString(),
+      channelId: "kanal-a",
+      type: "stream.state.changed",
+      payload: { state: "offline", startedAt: null, changedAt: relativeIso(-1_000), checkedAt: relativeIso(-1_000) },
+    }));
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+  });
+
+  it("reconciles the channel overview when its realtime socket connects", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      streamStateCheckedAt: "2026-09-24T12:00:00.000Z",
+      streamStateChangedAt: "2026-09-24T11:00:00.000Z",
+    };
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    const fetcher = stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse(overview(channel));
+      if (url.pathname.endsWith("/modules")) return jsonResponse({ modules: [] });
+      if (url.pathname.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/overview"))).toHaveLength(2);
+    });
   });
 
   it("switches channels through the header select and moves the route", async () => {

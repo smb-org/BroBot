@@ -35,7 +35,7 @@ export interface RealtimePayloads {
     removed: readonly string[];
   };
   "ads.schedule.updated": { schedule: AdsSchedule; asOf: string };
-  "stream.state.changed": { state: ChannelStreamState; startedAt: string | null; changedAt: string };
+  "stream.state.changed": { state: ChannelStreamState; startedAt: string | null; changedAt: string; checkedAt?: string };
 }
 
 export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageType> = {

@@ -101,7 +101,9 @@ export const parseRealtimeMessage = (raw: string, channelId: string): RealtimePa
     return isRecord(parsed.payload) &&
       (parsed.payload.state === "online" || parsed.payload.state === "offline") &&
       (parsed.payload.startedAt === null || typeof parsed.payload.startedAt === "string") &&
-      typeof parsed.payload.changedAt === "string" && parsed.payload.changedAt.length > 0
+      typeof parsed.payload.changedAt === "string" && parsed.payload.changedAt.length > 0 &&
+      (parsed.payload.checkedAt === undefined ||
+        (typeof parsed.payload.checkedAt === "string" && parsed.payload.checkedAt.length > 0))
       ? { kind: "message", message: parsed as RealtimeEnvelope<"stream.state.changed"> }
       : { kind: "ignored" };
   }
@@ -173,7 +175,10 @@ export const useRealtimePanelMessages = (channelId: string | null, enabled: bool
       if (disposed || typeof window.WebSocket !== "function") return;
       try {
         socket = new window.WebSocket(realtimeUrl(channelId), REALTIME_PROTOCOL);
-        socket.addEventListener("open", () => { reconnectAttempt = 0; });
+        socket.addEventListener("open", () => {
+          reconnectAttempt = 0;
+          window.dispatchEvent(new CustomEvent("brobot:realtime-connected", { detail: { channelId } }));
+        });
         socket.addEventListener("message", (event: MessageEvent<unknown>) => {
           if (typeof event.data !== "string") return;
           const parsed = parseRealtimeMessage(event.data, channelId);
@@ -518,6 +523,7 @@ export const useRealtimeEventFeed = ({
 
     const handleOpen = (): void => {
       if (disposed) return;
+      window.dispatchEvent(new CustomEvent("brobot:realtime-connected", { detail: { channelId } }));
       const isReconnection = hasConnectedRef.current;
       hasConnectedRef.current = true;
       reconnectAttemptRef.current = 0;

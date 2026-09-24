@@ -102,9 +102,15 @@ const makeEnvironment = (database: TestD1Database): Env => ({
 
 const makeStreamRefreshRuntime = (lease: string | null = "stream-refresh") => {
   const tasks: Promise<unknown>[] = [];
+  let retryAfter: number | null = null;
   const channelObject = {
     beginStreamStateRefresh: vi.fn(() => Promise.resolve(lease)),
     endStreamStateRefresh: vi.fn(() => Promise.resolve()),
+    getTwitchRateLimitRetryAfter: vi.fn(() => Promise.resolve(retryAfter !== null && retryAfter > Date.now() ? retryAfter : null)),
+    setTwitchRateLimitRetryAfter: vi.fn((deadline: number) => {
+      retryAfter = deadline;
+      return Promise.resolve();
+    }),
     publish: vi.fn(() => Promise.resolve()),
   };
   const CHANNEL = {
@@ -326,20 +332,61 @@ describe("Panel read endpoints", () => {
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
     await database.prepare(
-      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source)
-       VALUES ('kanal-a', 'offline', ?, 'eventsub')`,
-    ).bind(changedAt).run();
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, checked_at)
+       VALUES ('kanal-a', 'offline', ?, 'eventsub', ?)`,
+    ).bind(changedAt, changedAt).run();
     await insertStreamEventSubCoverage(database, "kanal-a");
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
+    const runtime = makeStreamRefreshRuntime();
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/overview"),
-      environment,
+      { ...environment, ...runtime },
+      runtime.executionContext,
     );
 
     expect(response.status).toBe(200);
     expect(fetcher).not.toHaveBeenCalled();
+    await expect(response.clone().json()).resolves.toMatchObject({
+      streamStateChangedAt: changedAt,
+      streamStateCheckedAt: changedAt,
+    });
+    expect(runtime.channelObject.beginStreamStateRefresh).not.toHaveBeenCalled();
+    expect(runtime.channelObject.endStreamStateRefresh).not.toHaveBeenCalled();
+  });
+
+  it("records a per-channel Twitch cooldown after a stream refresh is rate-limited", async () => {
+    await insertChannel(database, "kanal-a", "Alpha");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertAppAccessToken(
+      database,
+      await encryptJson({ token: "app-token" }, parseKeyRing(environmentKeys.SESSION_ENCRYPTION_KEYS)),
+      "2099-09-21T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+      "2026-09-18T00:00:00.000Z",
+    );
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
+    vi.stubGlobal("fetch", fetcher);
+    const runtime = makeStreamRefreshRuntime();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    for (let view = 0; view < 2; view++) {
+      const response = await panelRouter.fetch(
+        await makeRequest("user-1", "/api/channels/kanal-a/overview"),
+        { ...environment, ...runtime, TWITCH_CLIENT_ID: "client-id", TWITCH_CLIENT_SECRET: "client-secret" },
+        runtime.executionContext,
+      );
+      expect(response.status).toBe(200);
+      if (view === 0) await Promise.all(runtime.tasks);
+    }
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(runtime.channelObject.setTwitchRateLimitRetryAfter).toHaveBeenCalledTimes(1);
+    expect(runtime.channelObject.beginStreamStateRefresh).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith("Background stream-state refresh was rate-limited.", "kanal-a");
+    warning.mockRestore();
   });
 
   it("serves stale stream state and refreshes it in the background", async () => {

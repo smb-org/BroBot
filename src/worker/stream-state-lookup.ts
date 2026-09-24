@@ -20,7 +20,7 @@ const arrayValue = (value: unknown): value is readonly unknown[] => Array.isArra
  * Ten minutes bounds how stale any stored stream state may get before the
  * next read pays for a fresh Helix check.
  */
-const HELIX_STREAM_STATE_TTL_MS = 10 * 60 * 1000;
+export const HELIX_STREAM_STATE_TTL_MS = 10 * 60 * 1000;
 
 /** Cron cap (#178): oldest rows are refreshed first so a large backlog is
  *  spread across ticks without starving later channel ids. */
@@ -50,14 +50,19 @@ const fetchLiveStreamState = async (
       clientId: env.TWITCH_CLIENT_ID,
       fetcher,
     });
-    if (!result.ok) return result.reason === "rate_limited" ? "rate_limited" : null;
+    if (!result.ok) {
+      if (result.reason === "rate_limited") return "rate_limited";
+      console.warn("Twitch stream-state lookup failed.", channelId, result.reason, result.status);
+      return null;
+    }
     if (!isRecord(result.data) || !arrayValue(result.data.data)) return null;
     if (result.data.data.length === 0) return { state: "offline", startedAt: null, streamId: null };
     const firstStream = result.data.data[0];
     if (!isRecord(firstStream) || typeof firstStream.id !== "string") return null;
     const startedAt = typeof firstStream.started_at === "string" ? firstStream.started_at : null;
     return { state: "online", startedAt, streamId: firstStream.id };
-  } catch {
+  } catch (error: unknown) {
+    console.warn("Twitch stream-state lookup failed.", channelId, error);
     return null;
   }
 };
@@ -127,8 +132,16 @@ export const lookupAndRefreshStreamState = async (
     refreshedStored = await readChannelStreamState(env.DB, channelId);
   }
   if (refreshedStored !== null &&
-      (stored?.state !== refreshedStored.state || stored.startedAt !== refreshedStored.startedAt)) {
-    await publishStreamStateChanged(env.CHANNEL, channelId, refreshedStored.state, refreshedStored.startedAt, refreshedStored.changedAt);
+      (stored?.state !== refreshedStored.state || stored.startedAt !== refreshedStored.startedAt ||
+        stored.checkedAt !== refreshedStored.checkedAt)) {
+    await publishStreamStateChanged(
+      env.CHANNEL,
+      channelId,
+      refreshedStored.state,
+      refreshedStored.startedAt,
+      refreshedStored.changedAt,
+      refreshedStored.checkedAt ?? refreshedStored.changedAt,
+    );
   }
   return asResult(refreshedStored);
 };

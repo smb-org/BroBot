@@ -184,6 +184,7 @@ export const publishStreamStateChanged = async (
   state: "online" | "offline",
   startedAt: string | null,
   changedAt: string,
+  checkedAt: string,
 ): Promise<void> => {
   try {
     await publishRealtimeMessages(namespace, [{
@@ -192,7 +193,7 @@ export const publishStreamStateChanged = async (
       createdAt: new Date().toISOString(),
       channelId,
       type: "stream.state.changed",
-      payload: { state, startedAt, changedAt },
+      payload: { state, startedAt, changedAt, checkedAt },
     }]);
   } catch (error: unknown) {
     console.warn("Realtime stream state hint could not be sent.", error);

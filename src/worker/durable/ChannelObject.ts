@@ -18,6 +18,7 @@ import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarnin
 import { getAppAccessToken } from "../app-token";
 import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
+import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -41,6 +42,10 @@ const SECURITY_DEADLINE_KEY = "security_round";
 const SECURITY_RETRY_KEY = "security_retry";
 const AD_PREWARNING_DEADLINE_KEY = "ad_prewarning";
 const AD_SCHEDULE_CACHE_KEY = "ads:schedule";
+const AD_SCHEDULE_GENERATION_KEY = "ads:schedule_generation";
+const AD_PREWARNING_RECONCILED_KEY = "ads:prewarning_reconciled";
+const TWITCH_RETRY_AFTER_KEY = "twitch:retry_after";
+const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
 const STREAM_REFRESH_LEASE_KEY = "stream_state_refresh_lease";
 const STREAM_REFRESH_LEASE_MS = 30_000;
 const SOCKET_EXPIRED_CODE = 4001;
@@ -158,6 +163,8 @@ const envelopeFor = (
  */
 export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefresh: Promise<AdScheduleRefreshResult> | null = null;
+  private adScheduleRefreshStartedAt = 0;
+  private adScheduleRefreshGeneration = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -173,20 +180,21 @@ export class ChannelObject extends DurableObject<Env> {
     schedule: AdsSchedule,
     asOf: string,
     grantedScopes?: readonly string[],
-  ): Promise<boolean> {
+    expectedGeneration?: number,
+  ): Promise<boolean | null> {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Channel-bound data requires a named Durable Object.");
-    const previous = await this.ctx.storage.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
-    const changed = previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule);
     const cache = { schedule, asOf } satisfies CachedAdSchedule;
-    await this.ctx.storage.put(AD_SCHEDULE_CACHE_KEY, cache);
-    if (changed) {
-      const scheduler: AdPrewarningScheduler = {
-        schedule: (dueAtMs) => this.scheduleAdPrewarning(dueAtMs),
-        clear: () => this.clearAdPrewarning(),
-      };
-      await refreshAdPrewarningAlarm(this.env, channelId, schedule, broadcasterHasScope, scheduler, grantedScopes);
-    }
+    const changed = await this.ctx.storage.transaction(async (transaction) => {
+      const currentGeneration = await transaction.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
+      if (expectedGeneration !== undefined && currentGeneration !== expectedGeneration) return null;
+      const previous = await transaction.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
+      await transaction.put(AD_SCHEDULE_GENERATION_KEY, currentGeneration + 1);
+      await transaction.put(AD_SCHEDULE_CACHE_KEY, cache);
+      return previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule);
+    });
+    if (changed === null) return null;
+    await this.reconcileAdPrewarning(schedule, grantedScopes);
     this.publish([{
       version: 1,
       id: crypto.randomUUID(),
@@ -198,6 +206,31 @@ export class ChannelObject extends DurableObject<Env> {
     return changed;
   }
 
+  public async reconcileCachedAdPrewarning(grantedScopes?: readonly string[]): Promise<void> {
+    const cache = await this.getCachedAdSchedule();
+    if (cache !== null) await this.reconcileAdPrewarning(cache.schedule, grantedScopes);
+  }
+
+  private async reconcileAdPrewarning(schedule: AdsSchedule, grantedScopes?: readonly string[]): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const scheduler: AdPrewarningScheduler = {
+      schedule: (dueAtMs) => this.scheduleAdPrewarning(dueAtMs),
+      clear: () => this.clearAdPrewarning(),
+    };
+    try {
+      await refreshAdPrewarningAlarm(this.env, channelId, schedule, broadcasterHasScope, scheduler, grantedScopes);
+      await this.ctx.storage.put(AD_PREWARNING_RECONCILED_KEY, {
+        schedule: JSON.stringify(schedule),
+        scopes: grantedScopes === undefined ? null : [...grantedScopes].sort().join("\u001f"),
+        reconciledAt: Date.now(),
+      });
+    } catch (error: unknown) {
+      await this.ctx.storage.delete(AD_PREWARNING_RECONCILED_KEY);
+      console.warn("Ad prewarning alarm reconciliation failed.", error);
+    }
+  }
+
   public async getCachedAdSchedule(): Promise<CachedAdSchedule | null> {
     const channelId = this.ownChannelId();
     if (channelId === null) return null;
@@ -206,11 +239,24 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async refreshAdSchedule(grantedScopes?: readonly string[]): Promise<AdScheduleRefreshResult> {
-    if (this.adScheduleRefresh !== null) return this.adScheduleRefresh;
-    this.adScheduleRefresh = (async (): Promise<AdScheduleRefreshResult> => {
+    const now = Date.now();
+    if (this.adScheduleRefresh !== null && now - this.adScheduleRefreshStartedAt < AD_SCHEDULE_REFRESH_TIMEOUT_MS) {
+      return this.adScheduleRefresh;
+    }
+    const refreshGeneration = ++this.adScheduleRefreshGeneration;
+    this.adScheduleRefreshStartedAt = now;
+    const task = (async (): Promise<AdScheduleRefreshResult> => {
       const channelId = this.ownChannelId();
       if (channelId === null) return { cache: null, reason: "channel_missing", detail: {}, d1Ms: 0, helixMs: 0, changed: false };
-      const previous = await this.getCachedAdSchedule();
+      const snapshot = await this.ctx.storage.transaction(async (transaction) => ({
+        cache: await transaction.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY) ?? null,
+        generation: await transaction.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0,
+      }));
+      const previous = snapshot.cache;
+      const retryAfter = await this.getTwitchRateLimitRetryAfter(now);
+      if (retryAfter !== null) {
+        return { cache: previous, reason: "rate_limited", detail: { retryAfter }, d1Ms: 0, helixMs: 0, changed: false };
+      }
       let d1Ms = 0;
       let helixMs = 0;
       const timedGetAppAccessToken: typeof getAppAccessToken = async (...args) => {
@@ -231,16 +277,34 @@ export class ChannelObject extends DurableObject<Env> {
       };
       const result = await getAdSchedule(this.env, channelId, new Date().toISOString(), timedGetAppAccessToken, timedHelixRequest, fetch);
       if (!result.fetched || result.schedule === null) {
+        if (result.reason === "rate_limited") await this.setTwitchRateLimitRetryAfter(Date.now() + TWITCH_RATE_LIMIT_COOLDOWN_MS);
         return { cache: previous, reason: result.reason, detail: result.detail, d1Ms, helixMs, changed: false };
       }
+      if (refreshGeneration !== this.adScheduleRefreshGeneration) {
+        return { cache: await this.getCachedAdSchedule(), reason: null, detail: result.detail, d1Ms, helixMs, changed: false };
+      }
       const asOf = new Date().toISOString();
-      const changed = await this.saveAdSchedule(result.schedule, asOf, grantedScopes);
+      const changed = await this.saveAdSchedule(result.schedule, asOf, grantedScopes, snapshot.generation);
+      if (changed === null) {
+        return { cache: await this.getCachedAdSchedule(), reason: null, detail: result.detail, d1Ms, helixMs, changed: false };
+      }
       return { cache: { schedule: result.schedule, asOf }, reason: null, detail: result.detail, d1Ms, helixMs, changed };
     })();
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timedOut: Promise<AdScheduleRefreshResult> = new Promise((resolve) => {
+      timeoutId = setTimeout(() => {
+        resolve({ cache: null, reason: "timeout", detail: {}, d1Ms: 0, helixMs: 0, changed: false });
+      }, AD_SCHEDULE_REFRESH_TIMEOUT_MS);
+    });
+    this.adScheduleRefresh = Promise.race([task, timedOut]);
     try {
       return await this.adScheduleRefresh;
     } finally {
-      this.adScheduleRefresh = null;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (refreshGeneration === this.adScheduleRefreshGeneration) {
+        this.adScheduleRefresh = null;
+        this.adScheduleRefreshStartedAt = 0;
+      }
     }
   }
 
@@ -251,6 +315,17 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<CachedAdSchedule> {
     await this.saveAdSchedule(schedule, asOf, grantedScopes);
     return { schedule, asOf };
+  }
+
+  public async getTwitchRateLimitRetryAfter(now = Date.now()): Promise<number | null> {
+    const retryAfter = await this.ctx.storage.get<number>(TWITCH_RETRY_AFTER_KEY);
+    return typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > now
+      ? retryAfter
+      : null;
+  }
+
+  public async setTwitchRateLimitRetryAfter(retryAfter: number): Promise<void> {
+    await this.ctx.storage.put(TWITCH_RETRY_AFTER_KEY, retryAfter);
   }
 
   /** A durable short lease coalesces overview-triggered refreshes across Worker isolates. */

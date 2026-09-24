@@ -262,6 +262,26 @@ describe("lookupAndRefreshStreamState", () => {
     }
   });
 
+  it("publishes a successful unchanged refresh so panels can update the observation age", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "offline", STALE, "helix");
+      await withAppToken(database);
+      const publish = vi.fn();
+
+      await lookupAndRefreshStreamState(environment(database, publish), "kanal-a", NOW, helixResponse(false));
+
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([{
+        type: "stream.state.changed",
+        payload: { state: "offline", changedAt: NOW, checkedAt: NOW },
+      }]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("refreshes a stale EventSub row's timestamp and missing live start when Helix confirms its state", async () => {
     const database = new TestD1Database();
     try {

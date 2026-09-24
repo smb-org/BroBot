@@ -353,6 +353,7 @@ export interface DashboardTexts {
     streamLive: (duration: string | null) => string;
     streamOffline: string;
     streamUnknown: string;
+    streamChecked: (relativeTime: string) => string;
   };
   status: {
     connected: string;
@@ -724,6 +725,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
       streamOffline: "Offline",
       streamUnknown: "Status unbekannt",
+      streamChecked: (relativeTime) => `Zustand geprüft ${relativeTime}`,
     },
     status: {
       connected: "Verbunden", revoked: "Widerrufen", error: "Fehler",
@@ -940,6 +942,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
       streamOffline: "Offline",
       streamUnknown: "Status unknown",
+      streamChecked: (relativeTime) => `State checked ${relativeTime}`,
     },
     status: {
       connected: "Connected", revoked: "Revoked", error: "Error", loginIdentityMissing: "Login identity missing",

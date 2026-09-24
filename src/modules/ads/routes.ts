@@ -25,8 +25,11 @@ const statusFor = (reason: string | null): 403 | 429 | 502 | 503 => {
 const SCHEDULE_CACHE_TTL_MS = 60_000;
 interface ScheduleCacheValue { schedule: AdsSchedule; asOf: string }
 
-const scheduleStatusFor = (reason: string | null): 429 | 502 | 503 =>
-  reason === "rate_limited" ? 429 : reason === "network_error" || reason === "timeout" || reason === "app_token_unavailable" ? 503 : 502;
+const scheduleStatusFor = (reason: string | null): 403 | 429 | 502 | 503 =>
+  reason === "unauthorized" || reason === "scope_missing" ? 403
+    : reason === "rate_limited" ? 429
+      : reason === "network_error" || reason === "timeout" || reason === "app_token_unavailable" ? 503
+        : 502;
 
 const log = async (
   context: Context<ModuleRouteEnvironment>,
@@ -86,11 +89,17 @@ adsRoutes.get("/schedule", async (context) => {
   ]);
   const fresh = cached !== null && Date.now() - Date.parse(cached.asOf) < SCHEDULE_CACHE_TTL_MS;
   let current: ScheduleCacheValue | null = cached === null ? null : { schedule: cached.schedule, asOf: cached.asOf };
-  if (!fresh && cached !== null) {
-    context.get("scheduleBackgroundWork")(object.refreshAdSchedule(details[1]).then(() => undefined).catch((error: unknown) => {
+  if (cached !== null) {
+    await context.get("measureServerTiming")("do", () => object.reconcileCachedAdPrewarning(details[1]));
+  }
+  const retryAfter = await context.get("measureServerTiming")("do", () => object.getTwitchRateLimitRetryAfter());
+  if (!fresh && cached !== null && retryAfter === null) {
+    context.get("scheduleBackgroundWork")(object.refreshAdSchedule(details[1]).then((refresh) => {
+      if (refresh.reason !== null) console.warn("Background ad schedule refresh did not complete.", refresh.reason);
+    }).catch((error: unknown) => {
       console.warn("Background ad schedule refresh failed.", error);
     }));
-  } else if (!fresh) {
+  } else if (!fresh && cached === null && retryAfter === null) {
     const refresh = await context.get("measureServerTiming")("do", () => object.refreshAdSchedule(details[1]));
     context.get("recordServerTiming")("d1", refresh.d1Ms);
     context.get("recordServerTiming")("helix", refresh.helixMs);
@@ -102,6 +111,12 @@ adsRoutes.get("/schedule", async (context) => {
         detail: apiErrorDetail(refresh.detail),
       }, scheduleStatusFor(refresh.reason));
     }
+  } else if (!fresh && cached === null && retryAfter !== null) {
+    return context.json({
+      error: "ad_schedule_read_failed",
+      reason: "rate_limited",
+      detail: { retryAfter },
+    }, scheduleStatusFor("rate_limited"));
   }
 
   const schedule = current?.schedule;

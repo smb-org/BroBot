@@ -558,6 +558,10 @@ const DashboardHeader = ({ route, channels, activeChannel, loadedAt, onNavigate,
         {activeChannel === undefined ? null : <span className="dashboard-header__stream" data-state={streamState === "online" ? "live" : streamState === "offline" ? "offline" : "unknown"}>
           <Icon name={streamState === "online" ? "broadcast" : "broadcast-off"} size={20} />
           <span>{streamLabel}</span>
+          {activeChannel.streamStateCheckedAt === undefined || activeChannel.streamStateCheckedAt === null ||
+              !Number.isFinite(Date.parse(activeChannel.streamStateCheckedAt)) ? null : (
+            <DataAge since={Date.parse(activeChannel.streamStateCheckedAt)} format={texts.header.streamChecked} className="dashboard-header__stream-age" />
+          )}
         </span>}
         {connectionLed}
         {loadedAt === undefined ? null : <DataAge since={loadedAt} />}
@@ -615,13 +619,18 @@ const relativeTime = (since: number, now: number): string => {
  * Proves liveness without asserting a status. Deliberately neutral and
  * never in status color.
  */
-const DataAge = ({ since }: { since: number }): ReactElement => {
+const DataAge = ({ since, format, className }: {
+  since: number;
+  format?: (relativeTime: string) => string;
+  className?: string;
+}): ReactElement => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => { setNow(Date.now()); }, 1000);
     return () => { clearInterval(id); };
   }, []);
-  return <span className="data-age">{dashboardTexts().time.updated(relativeTime(since, now))}</span>;
+  const age = relativeTime(since, now);
+  return <span className={`data-age${className === undefined ? "" : ` ${className}`}`}>{format === undefined ? dashboardTexts().time.updated(age) : format(age)}</span>;
 };
 
 const ModeratorCheckAction = ({ canCheck, checking, checkError, nextAllowedAt, urgent, onCheck }: {
@@ -1022,6 +1031,8 @@ export const DashboardApp = (): ReactElement => {
   }, []);
 
   const [route, navigate] = useDashboardRoute();
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
   const routeHasOwnRealtimeFeed = route.kind === "channel" &&
     (route.section === "overview" || route.section === "events" || route.section === "variables");
@@ -1074,16 +1085,42 @@ export const DashboardApp = (): ReactElement => {
           typeof message.payload !== "object" || message.payload === null || Array.isArray(message.payload)) return;
       const payload = message.payload as Record<string, unknown>;
       if ((payload.state !== "online" && payload.state !== "offline") ||
-          (payload.startedAt !== null && typeof payload.startedAt !== "string")) return;
+          (payload.startedAt !== null && typeof payload.startedAt !== "string") ||
+          typeof payload.changedAt !== "string" || !Number.isFinite(Date.parse(payload.changedAt)) ||
+          (payload.checkedAt !== undefined && (typeof payload.checkedAt !== "string" || !Number.isFinite(Date.parse(payload.checkedAt))))) return;
       const { channelId } = message;
       const streamState = payload.state;
       const streamStartedAt = payload.startedAt;
-      setChannels((current) => current.data === null ? current : loadedState(current.data.map((channel) =>
-        channel.channelId === channelId ? { ...channel, streamState, streamStartedAt } : channel,
-      )));
-      setOverview((current) => current.data?.channelId !== channelId ? current : {
+      const changedAt = payload.changedAt;
+      const checkedAt = typeof payload.checkedAt === "string" ? payload.checkedAt : changedAt;
+      const isNotOlder = (storedChangedAt: string | null | undefined): boolean => {
+        const storedVersion = storedChangedAt === undefined || storedChangedAt === null ? Number.NaN : Date.parse(storedChangedAt);
+        return !Number.isFinite(storedVersion) || Date.parse(changedAt) >= storedVersion;
+      };
+      const newerCheckedAt = (storedCheckedAt: string | null | undefined): string =>
+        storedCheckedAt !== undefined && storedCheckedAt !== null && Number.isFinite(Date.parse(storedCheckedAt)) &&
+          Date.parse(storedCheckedAt) > Date.parse(checkedAt) ? storedCheckedAt : checkedAt;
+      setChannels((current) => current.data === null || !current.data.some((channel) =>
+        channel.channelId === channelId && isNotOlder(channel.streamStateChangedAt),
+      ) ? current : {
         ...current,
-        data: { ...current.data, streamState, streamStartedAt },
+        data: current.data.map((channel) => channel.channelId !== channelId ? channel : {
+          ...channel,
+          streamState,
+          streamStartedAt,
+          streamStateChangedAt: changedAt,
+          streamStateCheckedAt: newerCheckedAt(channel.streamStateCheckedAt),
+        }),
+      });
+      setOverview((current) => current.data?.channelId !== channelId || !isNotOlder(current.data.streamStateChangedAt) ? current : {
+        ...current,
+        data: {
+          ...current.data,
+          streamState,
+          streamStartedAt,
+          streamStateChangedAt: changedAt,
+          streamStateCheckedAt: newerCheckedAt(current.data.streamStateCheckedAt),
+        },
       });
     };
     window.addEventListener("brobot:realtime", handleRealtimeMessage);
@@ -1460,6 +1497,21 @@ export const DashboardApp = (): ReactElement => {
     const routePath = dashboardRoutePath(route);
     await reloadData(routePath, setOverview, () => fetchChannelOverview(channelId), true, () => setOverviewRoutePath(routePath));
   };
+  const reloadOverviewRef = useRef(reloadOverview);
+  reloadOverviewRef.current = reloadOverview;
+  useEffect(() => {
+    const reconcileOnSocketConnect = (event: Event): void => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return;
+      const channelId = Reflect.get(detail, "channelId") as unknown;
+      const currentRoute = routeRef.current;
+      if (typeof channelId === "string" &&
+          (currentRoute.kind === "channel" || currentRoute.kind === "module") &&
+          currentRoute.channelId === channelId) void reloadOverviewRef.current();
+    };
+    window.addEventListener("brobot:realtime-connected", reconcileOnSocketConnect);
+    return () => window.removeEventListener("brobot:realtime-connected", reconcileOnSocketConnect);
+  }, []);
 
   const reloadSystem = async (): Promise<void> => {
     if (route.kind !== "channel" || route.section !== "system") return;

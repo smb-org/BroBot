@@ -28,6 +28,7 @@ const environmentFor = (
   initialCache: { schedule: AdsSchedule; asOf: string } | null = null,
 ): Env => {
   let cache = initialCache;
+  let retryAfter: number | null = null;
   type RefreshResult = {
     cache: typeof cache;
     reason: string | null;
@@ -45,6 +46,12 @@ const environmentFor = (
   };
   const object = {
     getCachedAdSchedule: () => Promise.resolve(cache),
+    reconcileCachedAdPrewarning: vi.fn(() => Promise.resolve()),
+    getTwitchRateLimitRetryAfter: () => Promise.resolve(retryAfter !== null && retryAfter > Date.now() ? retryAfter : null),
+    setTwitchRateLimitRetryAfter: (deadline: number) => {
+      retryAfter = deadline;
+      return Promise.resolve();
+    },
     refreshAdSchedule: () => {
       if (refresh !== null) return refresh;
       refresh = (async () => {
@@ -58,7 +65,10 @@ const environmentFor = (
           fetch,
         );
         const helixMs = performance.now() - startedAt;
-        if (!result.fetched || result.schedule === null) return { cache, reason: result.reason, detail: result.detail, d1Ms: 0, helixMs, changed: false };
+        if (!result.fetched || result.schedule === null) {
+          if (result.reason === "rate_limited") retryAfter = Date.now() + 60_000;
+          return { cache, reason: result.reason, detail: result.detail, d1Ms: 0, helixMs, changed: false };
+        }
         const asOf = new Date().toISOString();
         const changed = save(result.schedule, asOf);
         return { cache, reason: null, detail: result.detail, d1Ms: 0, helixMs, changed };
@@ -316,8 +326,10 @@ describe("ad routes", () => {
       asOf: new Date(Date.now() - 61_000).toISOString(),
     } satisfies { schedule: AdsSchedule; asOf: string };
     const environment = await setup("operator", ["channel:read:ads", "channel:manage:ads"], cached);
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 })));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ message: "slow down" }), { status: 429 }));
+    vi.stubGlobal("fetch", fetcher);
     const tasks: Promise<unknown>[] = [];
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const executionContext = {
       waitUntil: (promise: Promise<unknown>) => { tasks.push(promise); },
       passThroughOnException: () => undefined,
@@ -333,6 +345,40 @@ describe("ad routes", () => {
     await expect(response.json()).resolves.toMatchObject(cached);
     await Promise.all(tasks);
     expect(schedule).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith("Background ad schedule refresh did not complete.", "rate_limited");
+
+    const nextViewTasks: Promise<unknown>[] = [];
+    const nextExecutionContext = {
+      waitUntil: (promise: Promise<unknown>) => { nextViewTasks.push(promise); },
+      passThroughOnException: () => undefined,
+    } as unknown as ExecutionContext;
+    const nextResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      environment,
+      nextExecutionContext,
+    );
+
+    expect(nextResponse.status).toBe(200);
+    await expect(nextResponse.json()).resolves.toMatchObject(cached);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(nextViewTasks).toHaveLength(0);
+    warning.mockRestore();
+  });
+
+  it("keeps a cold unauthorized schedule read mapped to 403", async () => {
+    const environment = await setup("operator");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "unauthorized" }),
+      { status: 401 },
+    )));
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/ads/schedule"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "ad_schedule_read_failed", reason: "unauthorized" });
   });
 
   it("keeps schedule-read failures out of D1 diagnostics", async () => {

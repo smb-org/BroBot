@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import { Button, Icon } from "../../../dashboard/ui";
@@ -19,15 +19,27 @@ const formatTimestamp = (value: string | null, language: DashboardLanguage): str
 export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; language?: DashboardLanguage }): ReactElement => {
   const labels = adsPanelTexts(language);
   const [schedule, setSchedule] = useState<AdsScheduleResponse | null>(null);
+  const latestRealtimeRef = useRef<{ schedule: AdsScheduleResponse["schedule"]; asOf: string } | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [snoozeBusy, setSnoozeBusy] = useState(false);
   const [snoozeOutcome, setSnoozeOutcome] = useState<"success" | "error" | null>(null);
 
   useEffect(() => {
     let active = true;
+    latestRealtimeRef.current = null;
     void loadAdsSchedule(channelId).then((loaded) => {
       if (!active) return;
-      setSchedule((current) => current !== null && Date.parse(current.asOf ?? "") > Date.parse(loaded.asOf ?? "") ? current : loaded);
+      setSchedule((current) => {
+        const updates = [loaded, ...(current === null ? [] : [current])];
+        const buffered = latestRealtimeRef.current;
+        if (buffered !== null) {
+          const newest = updates.reduce((left, right) => Date.parse(left.asOf ?? "") >= Date.parse(right.asOf ?? "") ? left : right);
+          if (Date.parse(buffered.asOf) > Date.parse(newest.asOf ?? "")) {
+            return { ...loaded, schedule: buffered.schedule, asOf: buffered.asOf };
+          }
+        }
+        return updates.reduce((left, right) => Date.parse(left.asOf ?? "") >= Date.parse(right.asOf ?? "") ? left : right);
+      });
       setLoadError(false);
     }).catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
@@ -42,10 +54,13 @@ export const AdsPanel = ({ channelId, language = "de" }: { channelId: string; la
           typeof message.payload !== "object" || message.payload === null || Array.isArray(message.payload)) return;
       const payload = message.payload as Record<string, unknown>;
       if (typeof payload.asOf !== "string" || typeof payload.schedule !== "object" || payload.schedule === null || Array.isArray(payload.schedule)) return;
-      setSchedule((current) => current === null ? current : {
+      const update = { schedule: payload.schedule as AdsScheduleResponse["schedule"], asOf: payload.asOf };
+      const buffered = latestRealtimeRef.current;
+      if (buffered === null || Date.parse(update.asOf) > Date.parse(buffered.asOf)) latestRealtimeRef.current = update;
+      setSchedule((current) => current === null || Date.parse(update.asOf) <= Date.parse(current.asOf ?? "") ? current : {
         ...current,
-        schedule: payload.schedule as AdsScheduleResponse["schedule"],
-        asOf: payload.asOf as string,
+        schedule: update.schedule,
+        asOf: update.asOf,
       });
     };
     window.addEventListener("brobot:realtime", handleRealtimeMessage);
