@@ -10,11 +10,15 @@ type OverlayEntryConfig =
   | { kind: "status" }
   | { kind: "variable"; token: string | null; name: string; text: string };
 
-const readOverlayEntryConfig = (): OverlayEntryConfig => {
+const readFragmentParameters = (): URLSearchParams => {
   const fragment = window.location.hash.startsWith("#")
     ? window.location.hash.slice(1)
     : window.location.hash;
-  const parameters = new URLSearchParams(fragment);
+  return new URLSearchParams(fragment);
+};
+
+const readOverlayEntryConfig = (): OverlayEntryConfig => {
+  const parameters = readFragmentParameters();
   const name = parameters.get("var");
   if (name === null) return { kind: "status" };
   const token = parameters.get("token");
@@ -55,12 +59,11 @@ const labelStyle: CSSProperties = {
 };
 
 const readTokenFromFragment = (): string | null => {
-  const fragment = window.location.hash.startsWith("#")
-    ? window.location.hash.slice(1)
-    : window.location.hash;
-  const token = new URLSearchParams(fragment).get("token");
+  const token = readFragmentParameters().get("token");
   return token === null || token.length === 0 ? null : token;
 };
+
+const debugRequested = (): boolean => readFragmentParameters().get("debug") === "1";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -142,7 +145,7 @@ export const OverlayStatusView = (): ReactElement | null => {
       activeController?.abort();
       const token = readTokenFromFragment();
       setStatus(null);
-      if (token === null) {
+      if (token === null || !debugRequested()) {
         disconnectRealtime();
         return;
       }

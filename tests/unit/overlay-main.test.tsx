@@ -27,9 +27,13 @@ const setFragment = (token: string): void => {
   window.history.replaceState(null, "", `/overlay#token=${token}`);
 };
 
+const setDebugFragment = (fragment = "erstes-token"): void => {
+  setFragment(`${fragment}&debug=1`);
+};
+
 describe("Overlay status view", () => {
   beforeEach(() => {
-    setFragment("erstes-token");
+    setDebugFragment();
     TestWebSocket.instances = [];
     vi.stubGlobal("WebSocket", TestWebSocket);
   });
@@ -56,6 +60,24 @@ describe("Overlay status view", () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keeps the default status page empty and only shows diagnostics with debug=1", async () => {
+    const fetcher = vi.fn().mockResolvedValue(versionResponse("debug-version"));
+    vi.stubGlobal("fetch", fetcher);
+    setFragment("erstes-token");
+
+    const { container } = render(<OverlayStatusView />);
+    expect(container).toBeEmptyDOMElement();
+    expect(fetcher).not.toHaveBeenCalled();
+
+    act(() => {
+      setDebugFragment();
+      window.dispatchEvent(new Event("hashchange"));
+    });
+
+    await waitFor(() => expect(container).toHaveTextContent("Version debug-version"));
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("retries after a startup error without reloading", async () => {
@@ -91,7 +113,7 @@ describe("Overlay status view", () => {
     await waitFor(() => expect(container).toHaveTextContent("Version alt"));
 
     act(() => {
-      setFragment("zweites-token");
+      setDebugFragment("zweites-token");
       window.dispatchEvent(new Event("hashchange"));
     });
 
@@ -186,7 +208,9 @@ describe("Overlay status view", () => {
 
     await waitFor(() => expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("12,345"));
     expect(container.querySelector(".brobot-variable__text")?.textContent).toBe("Score: ");
-    expect(container.querySelector(".brobot-variable")).toHaveAttribute("data-variable", "score");
+    const variable = container.querySelector(".brobot-variable");
+    expect(variable).toHaveAttribute("data-variable", "score");
+    expect(variable).not.toHaveAttribute("style");
   });
 
   it("renders overlay templates as text nodes", async () => {

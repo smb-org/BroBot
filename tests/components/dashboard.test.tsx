@@ -2469,6 +2469,56 @@ describe("Dashboard skeleton", () => {
     });
   });
 
+  it("closes an open Spotlight when the route changes channels, then loads the new channel's results", async () => {
+    const alpha = healthyChannel("kanal-a", "Alpha");
+    const beta = healthyChannel("kanal-b", "Beta");
+    const command = (channelId: string, name: string) => ({
+      channelId,
+      name,
+      text: "Test",
+      kind: "text",
+      enabled: true,
+      minimumTier: "everyone",
+      cooldownSeconds: 5,
+      lastUsedAt: null,
+      createdAt: "2026-09-19T00:00:00.000Z",
+      updatedAt: "2026-09-19T00:00:00.000Z",
+    });
+    const fetcher = vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta], bot: alpha.bot });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
+      if (path.endsWith("/modules/text_commands/commands")) {
+        const channelId = path.includes("kanal-b") ? "kanal-b" : "kanal-a";
+        return jsonResponse({ commands: [command(channelId, channelId === "kanal-a" ? "alphaonly" : "betaonly")] });
+      }
+      if (path.endsWith("/variables")) return jsonResponse({ variables: [], count: 0, maximum: 20 });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "System", level: 1 });
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    expect(await screen.findByText("!alphaonly")).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState({}, "", "/channels/kanal-b/system");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname === "/api/channels/kanal-b/system")).toBe(true);
+    });
+    await waitFor(() => { expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); });
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    expect(await screen.findByText("!betaonly")).toBeInTheDocument();
+  });
+
   it("switches channels through the header select and moves the route", async () => {
     const alpha = healthyChannel("kanal-a", "Alpha");
     const beta = healthyChannel("kanal-b", "Beta");
@@ -2543,6 +2593,121 @@ describe("Dashboard skeleton", () => {
         }
       }
     }
+  });
+
+  it.each([false, true])("keeps rendered sidebar and Spotlight page ids in sync (platform admin: %s)", async (platformAdmin) => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot, platformAdmin });
+      if (path.endsWith("/system")) return jsonResponse(system);
+      if (path.endsWith("/modules")) return jsonResponse({ modules: [] });
+      return jsonResponse({}, 404);
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "System", level: 1 });
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    const dialog = await screen.findByRole("dialog");
+
+    const sidebar = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    const sidebarPageIds = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-nav-page-id]"), (entry) => entry.dataset.navPageId)
+      .filter((id): id is string => id !== undefined);
+    const spotlightPageIds = Array.from(dialog.querySelectorAll<HTMLElement>("[data-spotlight-item-id^='page:']"), (action) => action.dataset.spotlightItemId?.slice("page:".length))
+      .filter((id): id is string => id !== undefined);
+    expect(spotlightPageIds).toEqual(sidebarPageIds);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+  });
+
+  it("does not retain a variable Spotlight selection when guarded navigation is canceled", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    const activeModuleOverview = { ...overview(channel), activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
+    const command = {
+      channelId: "kanal-a", name: "hallo", text: "Hallo {user}", kind: "text", enabled: true,
+      minimumTier: "everyone", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 15,
+      streamCondition: "online", responseType: "reply", variableAction: null, useCount: 0,
+      lastUsedAt: null, createdAt: "2026-09-19T00:00:00.000Z", updatedAt: "2026-09-19T00:00:00.000Z", revision: 1,
+    };
+    const variable = {
+      channelId: "kanal-a", name: "counter", value: 5, description: "", resetOnStreamStart: false,
+      createdAt: "2026-09-19T00:00:00.000Z", updatedAt: "2026-09-19T00:00:00.000Z", usages: [],
+    };
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse(activeModuleOverview);
+      if (url.pathname.endsWith("/modules")) return jsonResponse({ modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
+      if (url.pathname.endsWith("/modules/text_commands/commands")) return jsonResponse({ commands: [command], variables: [] });
+      if (url.pathname.endsWith("/variables")) return jsonResponse({ variables: [variable], count: 1, maximum: 25 });
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/text_commands");
+
+    render(<DashboardApp />);
+    fireEvent.click(await screen.findByRole("row", { name: /!hallo/i }));
+    const response = await screen.findByRole("textbox", { name: "Antwort" });
+    fireEvent.change(response, { target: { value: "Nicht gespeicherter Entwurf" } });
+
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "counter" } });
+    fireEvent.click(await screen.findByText("{var.counter}"));
+
+    const firstGuard = await screen.findByRole("dialog", { name: "Ungespeicherte Änderungen" });
+    fireEvent.click(within(firstGuard).getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(window.location.pathname).toBe("/channels/kanal-a/modules/text_commands");
+    expect(screen.getByRole("textbox", { name: "Antwort" })).toHaveValue("Nicht gespeicherter Entwurf");
+
+    const navigation = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    fireEvent.click(within(navigation).getByRole("link", { name: "Variablen" }));
+    const secondGuard = await screen.findByRole("dialog", { name: "Ungespeicherte Änderungen" });
+    fireEvent.click(within(secondGuard).getByRole("button", { name: "Verwerfen und wechseln" }));
+
+    expect(await screen.findByRole("heading", { name: "Kanalvariablen", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("row", { name: /counter/i })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a successful Spotlight variable selection scoped to its target channel", async () => {
+    const alpha = healthyChannel("kanal-a", "Alpha");
+    const beta = healthyChannel("kanal-b", "Beta");
+    const makeVariable = (channelId: string) => ({
+      channelId, name: "counter", value: 5, description: "", resetOnStreamStart: false,
+      createdAt: "2026-09-19T00:00:00.000Z", updatedAt: "2026-09-19T00:00:00.000Z", usages: [],
+    });
+    let alphaVariableRequests = 0;
+    stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse(overview(url.pathname.includes("kanal-b") ? beta : alpha));
+      if (url.pathname.endsWith("/modules")) return jsonResponse({ modules: [] });
+      if (url.pathname === "/api/channels/kanal-a/variables") {
+        alphaVariableRequests += 1;
+        return alphaVariableRequests === 1
+          ? jsonResponse({ variables: [makeVariable("kanal-a")], count: 1, maximum: 25 })
+          : new Promise<Response>(() => {});
+      }
+      if (url.pathname === "/api/channels/kanal-b/variables") {
+        return jsonResponse({ variables: [makeVariable("kanal-b")], count: 1, maximum: 25 });
+      }
+      if (url.pathname.endsWith("/commands")) return jsonResponse({ commands: [] });
+    }, [alpha, beta]);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByPlaceholderText("Suchen oder Aktion ausführen …"), { target: { value: "counter" } });
+    fireEvent.click(await screen.findByText("{var.counter}"));
+    await waitFor(() => expect(alphaVariableRequests).toBe(2));
+
+    const channelSelect = screen.getByRole("combobox", { name: "Kanal auswählen" });
+    fireEvent.click(channelSelect);
+    fireEvent.click(screen.getByRole("option", { name: "Beta — kanal-b", hidden: true }));
+    await waitFor(() => expect(window.location.pathname).toBe("/channels/kanal-b"));
+    const navigation = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    fireEvent.click(within(navigation).getByRole("link", { name: "Variablen" }));
+
+    expect(await screen.findByRole("row", { name: /counter/i })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
   });
 
   it("the brand acts as a focusable link to the channel list", async () => {

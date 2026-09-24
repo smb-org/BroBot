@@ -31,6 +31,8 @@ test("dashboard and overlay load as separate surfaces", async ({ page }) => {
   });
   // Playwright runs against the local Vite server, whose HTML entry is overlay.html.
   await overlayPage.goto("/overlay.html#token=e2e-token");
+  await expect(overlayPage.locator("#root")).toBeEmpty();
+  await overlayPage.evaluate(() => { window.location.hash = "token=e2e-token&debug=1"; });
   await expect(overlayPage.getByText("Version e2e-version")).toBeVisible();
   await expect(overlayPage.locator("html")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(overlayPage.locator("body")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
