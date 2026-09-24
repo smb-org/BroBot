@@ -1002,7 +1002,7 @@ describe("Panel read endpoints", () => {
       expect(url.searchParams.getAll("id").sort()).toEqual(["user-1", "user-2"]);
       return Promise.resolve(Response.json({ data: [
         { id: "user-1", login: "alice", display_name: "Alice" },
-        { id: "user-2", login: "sensitron", display_name: "sensitron" },
+        { id: "user-2", login: "member_c", display_name: "member_c" },
       ] }));
     });
     vi.stubGlobal("fetch", twitch);
@@ -1019,8 +1019,8 @@ describe("Panel read endpoints", () => {
       actorLogin: "alice",
       actorDisplayName: "Alice",
       subjectUserId: "user-2",
-      subjectLogin: "sensitron",
-      subjectDisplayName: "sensitron",
+      subjectLogin: "member_c",
+      subjectDisplayName: "member_c",
     })]);
   });
 
@@ -1110,14 +1110,14 @@ describe("Panel read endpoints", () => {
     ).run();
     const twitch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
-      expect(url.searchParams.get("login")).toBe("sensitron");
+      expect(url.searchParams.get("login")).toBe("member_c");
       expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer app-access-token");
-      return Promise.resolve(Response.json({ data: [{ id: "9002", login: "sensitron", display_name: "sensitron" }] }));
+      return Promise.resolve(Response.json({ data: [{ id: "9002", login: "member_c", display_name: "member_c" }] }));
     });
     vi.stubGlobal("fetch", twitch);
 
     const response = await panelRouter.fetch(
-      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=%40sensitron"),
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=%40member_c"),
       environment,
     );
     const body = await response.json<{ entries: Array<{ auditId: string }> }>();

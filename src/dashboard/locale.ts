@@ -844,7 +844,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       changedTruncated: "geändert (Text länger als die Vorschau)",
       filter: "Filter", person: "Person",
       personHint: "Wer die Aktion ausgeführt hat, nicht wer betroffen war.",
-      personPlaceholder: "Login oder ID, z. B. sensitron",
+      personPlaceholder: "Login oder ID, z. B. beispielnutzer",
       area: "Bereich", allAreas: "Alle Bereiche",
       areaLabels: { module: "Module", command: "Textbefehle", member: "Mitglieder", channel: "Kanal", overlay: "Overlay" },
       activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen", noMatches: "Keine Einträge passen zu den Filtern.",
@@ -1055,7 +1055,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       changedTruncated: "changed (text longer than preview)",
       filter: "Filters", person: "Person",
       personHint: "Who performed the action, not who was affected by it.",
-      personPlaceholder: "Login or ID, e.g. sensitron",
+      personPlaceholder: "Login or ID, e.g. example_user",
       area: "Area", allAreas: "All areas",
       areaLabels: { module: "Modules", command: "Text commands", member: "Members", channel: "Channel", overlay: "Overlay" },
       activeFilters: "Active filters:", resetFilters: "Reset filters", noMatches: "No entries match the filters.",
@@ -1959,7 +1959,7 @@ export const auditActionLabel = (
 
 const memberAsWords: LocaleCatalog<string> = { de: "als", en: "as" };
 
-/** The connector between a member's login and their role in an audit row's subject, e.g. "sensitron als Bediener" (#181). */
+/** The connector between a member's login and their role in an audit row's subject, e.g. "beispielnutzer als Bediener" (#181). */
 export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()): string => memberAsWords[language];
 
 /**

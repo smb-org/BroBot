@@ -529,7 +529,7 @@ describe("Dashboard skeleton", () => {
       moduleId: "channel_events",
       triggerId: "raid-trigger",
       code: "channel_events.raid.incoming",
-      detail: '{"source":"sensitron","viewers":1}',
+      detail: '{"source":"raider_b","viewers":1}',
       actorUserId: null,
       actorLogin: null,
       actorDisplayName: null,
@@ -556,7 +556,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByText("Raid von sensitron mit 1 Zuschauern")).toBeInTheDocument();
+    expect(await screen.findByText("Raid von raider_b mit 1 Zuschauern")).toBeInTheDocument();
     const initialRequest = fetcher.mock.calls.map(([input]) => requestUrl(input)).find((url) => url.pathname.endsWith("/events"));
     expect(initialRequest?.search).toBe("");
     const socket = TestWebSocket.instances[0];

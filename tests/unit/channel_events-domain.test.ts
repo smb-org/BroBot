@@ -209,14 +209,14 @@ describe("channel events domain", () => {
 
   it("maps an AutoMod hold with person, category, and message", () => {
     expect(diagnose("automod.message.hold", {
-      user_name: "TwitchDev",
-      user_login: "twitchdev",
+      user_name: "Viewer_A",
+      user_login: "viewer_a",
       category: "aggressive",
       message: { text: "Das ist eine zurückgehaltene Nachricht." },
     })).toEqual([{
       code: "channel_events.automod.held",
       detail: {
-        person: "TwitchDev (@twitchdev)",
+        person: "Viewer_A (@viewer_a)",
         reason: "aggressive",
         text: "Das ist eine zurückgehaltene Nachricht.",
       },
@@ -225,8 +225,8 @@ describe("channel events domain", () => {
 
   it("maps a suspicious-user message with documented classification and text", () => {
     expect(diagnose("channel.suspicious_user.message", {
-      user_name: "Xemdo",
-      user_login: "xemdo",
+      user_name: "Viewer_A",
+      user_login: "viewer_a",
       low_trust_status: "active_monitoring",
       types: ["ban_evader"],
       ban_evasion_evaluation: "possible",
@@ -234,7 +234,7 @@ describe("channel events domain", () => {
     })).toEqual([{
       code: "channel_events.suspicious.message",
       detail: {
-        person: "Xemdo (@xemdo)",
+        person: "Viewer_A (@viewer_a)",
         einstufung: "active_monitoring / ban_evader / possible",
         text: "Eine auffällige Nachricht.",
       },
@@ -243,29 +243,29 @@ describe("channel events domain", () => {
 
   it("distinguishes an escalated classification from a clearance, including the acting person", () => {
     expect(diagnose("channel.suspicious_user.update", {
-      user_name: "Xemdo",
-      user_login: "xemdo",
+      user_name: "Viewer_A",
+      user_login: "viewer_a",
       low_trust_status: "restricted",
-      moderator_user_name: "BlueLava",
-      moderator_user_login: "bluelava",
+      moderator_user_name: "Member_C",
+      moderator_user_login: "member_c",
     })).toEqual([{
       code: "channel_events.suspicious.classified",
       detail: {
-        person: "Xemdo (@xemdo)",
+        person: "Viewer_A (@viewer_a)",
         einstufung: "restricted",
-        moderator: "BlueLava (@bluelava)",
+        moderator: "Member_C (@member_c)",
       },
     }]);
     expect(diagnose("channel.suspicious_user.update", {
-      user_name: "Xemdo",
+      user_name: "Viewer_A",
       low_trust_status: "none",
-      moderator_user_name: "BlueLava",
+      moderator_user_name: "Member_C",
     })).toEqual([{
       code: "channel_events.suspicious.cleared",
       detail: {
-        person: "Xemdo",
+        person: "Viewer_A",
         einstufung: "none",
-        moderator: "BlueLava",
+        moderator: "Member_C",
       },
     }]);
   });
