@@ -428,6 +428,8 @@ const allMessageTypes: Record<RealtimeMessageType, true> = {
   "event_log.new": true,
   "variables.changed": true,
   "overlay.changed": true,
+  "ads.schedule.updated": true,
+  "stream.state.changed": true,
 };
 const allRecipientKinds: Record<RealtimeRecipientKind, true> = { panel: true, overlay: true };
 const allChatStatus: Record<ModuleChatStatus, true> = { viewer: true, subscriber: true, vip: true, moderator: true, broadcaster: true };
@@ -703,12 +705,16 @@ describe("serialized contract shapes", () => {
       // a new, removed, or renamed member breaks `pnpm run typecheck`,
       // and the assertion below freezes the spelling.
       expect(Object.keys(allRoles).sort()).toEqual(["broadcaster", "manager", "operator"]);
-      expect(Object.keys(allMessageTypes).sort()).toEqual(["event_log.new", "overlay.changed", "system.hello", "variables.changed"]);
+      expect(Object.keys(allMessageTypes).sort()).toEqual([
+        "ads.schedule.updated", "event_log.new", "overlay.changed", "stream.state.changed", "system.hello", "variables.changed",
+      ]);
       expect(Object.keys(allRecipientKinds).sort()).toEqual(["overlay", "panel"]);
       expect(Object.keys(REALTIME_RECIPIENTS).sort()).toEqual([...REALTIME_MESSAGE_TYPES].sort());
       expect(REALTIME_RECIPIENTS["event_log.new"]).toEqual(["panel"]);
       expect(REALTIME_RECIPIENTS["variables.changed"]).toEqual(["panel", "overlay"]);
       expect(REALTIME_RECIPIENTS["overlay.changed"]).toEqual(["panel", "overlay"]);
+      expect(REALTIME_RECIPIENTS["ads.schedule.updated"]).toEqual(["panel"]);
+      expect(REALTIME_RECIPIENTS["stream.state.changed"]).toEqual(["panel"]);
       expect(Object.keys(allChatStatus).sort()).toEqual(["broadcaster", "moderator", "subscriber", "viewer", "vip"]);
       expect(Object.keys(allActionKinds).sort()).toEqual(["announcement", "chat", "overlay", "shoutout"]);
       expect(Object.keys(allLanguages).sort()).toEqual(["de", "en"]);

@@ -49,8 +49,10 @@ import { writeModuleAudit } from "../module-audit";
 import { writeModuleDiagnostics } from "../event-log";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { isChannelControlInput, setChannelControl, type ChannelControlKind } from "../db/channel-controls";
-import { lookupAndRefreshStreamState } from "../stream-state-lookup";
+import { HELIX_STREAM_STATE_TTL_MS, lookupAndRefreshStreamState } from "../stream-state-lookup";
+import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { getChannelModuleForChannel } from "../db/channel-modules";
+import { measureServerTiming, scheduleBackgroundWork } from "../server-timing";
 
 interface PanelEnvironment {
   Bindings: Env;
@@ -215,11 +217,11 @@ panelRouter.post(
 
 panelRouter.get("/api/channels", requireSessionAuthorization(), async (context) => {
   const session = context.get("session");
-  const [channels, bot, botIdentity] = await Promise.all([
+  const [channels, bot, botIdentity] = await measureServerTiming(context, "d1", () => Promise.all([
     listChannelsForUser(context.env.DB, session.userId),
     getBotIdentityStatus(context.env.DB),
     getBotIdentity(context.env.DB),
-  ]);
+  ]));
   const platformAdmin = getPlatformUserIds(context.env).has(session.userId);
   const viewerIsBot = canConnectBot(session, context.env, botIdentity);
   return context.json({
@@ -242,14 +244,33 @@ panelRouter.get(
     const session = context.get("session");
     const channelId = context.req.param("channelId");
     const checkedAt = nowIso();
-    const looked = await lookupAndRefreshStreamState(context.env, channelId, checkedAt);
-    const overview = await getChannelOverviewForUser(context.env.DB, session.userId, channelId);
+    const overview = await measureServerTiming(context, "d1", () => getChannelOverviewForUser(context.env.DB, session.userId, channelId));
     if (overview === null) return context.json({ error: "channel_not_found" }, 404);
-    return context.json(looked.state === null ? overview : {
-      ...overview,
-      streamState: looked.state,
-      streamStartedAt: looked.startedAt,
-    });
+    const channelNamespace = Reflect.get(context.env, "CHANNEL") as Env["CHANNEL"] | undefined;
+    const observedAt = overview.streamStateCheckedAt === undefined || overview.streamStateCheckedAt === null
+      ? Number.NaN
+      : Date.parse(overview.streamStateCheckedAt);
+    const streamStateIsStale = !Number.isFinite(observedAt) || Date.parse(checkedAt) - observedAt >= HELIX_STREAM_STATE_TTL_MS;
+    if (channelNamespace !== undefined && streamStateIsStale) {
+      const object = channelNamespace.get(channelNamespace.idFromName(channelId));
+      scheduleBackgroundWork(context, (async () => {
+        if (await object.getTwitchRateLimitRetryAfter() !== null) return;
+        const lease = await object.beginStreamStateRefresh();
+        if (lease === null) return;
+        try {
+          const result = await lookupAndRefreshStreamState(context.env, channelId, checkedAt);
+          if (result.rateLimited) {
+            await object.setTwitchRateLimitRetryAfter(Date.now() + TWITCH_RATE_LIMIT_COOLDOWN_MS);
+            console.warn("Background stream-state refresh was rate-limited.", channelId);
+          }
+        } catch (error: unknown) {
+          console.warn("Background stream-state refresh failed.", channelId, error);
+        } finally {
+          await object.endStreamStateRefresh(lease);
+        }
+      })());
+    }
+    return context.json(overview);
   },
 );
 
@@ -439,7 +460,7 @@ panelRouter.get(
   async (context) => {
     const session = context.get("session");
     const channelId = context.req.param("channelId");
-    const overview = await getSystemOverviewForUser(context.env.DB, session.userId, channelId);
+    const overview = await measureServerTiming(context, "d1", () => getSystemOverviewForUser(context.env.DB, session.userId, channelId));
     return overview === null
       ? context.json({ error: "channel_not_found" }, 404)
       : context.json(overview);

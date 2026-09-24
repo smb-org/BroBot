@@ -86,6 +86,18 @@ export const moduleBroadcasterScopeState = async (
   return { required, missing: required.filter((scope) => !granted.has(scope)) };
 };
 
+/** Reads a channel's broadcaster identity once, then derives every module's scope state. */
+export const moduleBroadcasterScopeStates = async (
+  db: D1Database,
+  channelId: string,
+): Promise<Map<string, ModuleBroadcasterScopeState>> => {
+  const granted = new Set(await broadcasterIdentityScopes(db, channelId));
+  return new Map(MODULES.map((module) => {
+    const required = declaredScopes(module);
+    return [module.id, { required, missing: required.filter((scope) => !granted.has(scope)) }];
+  }));
+};
+
 export const moduleHasRequiredBroadcasterScopes = (
   module: BotModule,
   grantedScopes: readonly string[],

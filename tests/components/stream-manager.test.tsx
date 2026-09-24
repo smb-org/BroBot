@@ -367,7 +367,7 @@ describe("Stream Manager warnings and errors feed", () => {
       if (path === "/api/channels/kanal-a/events") {
         return Promise.resolve(jsonResponse({
           entries: [
-            { eventId: "raid", createdAt: "2026-09-22T10:05:00.000Z", moduleId: "channel_events", triggerId: "t0", code: "channel_events.raid.incoming", detail: "{\"source\":\"sensitron\",\"viewers\":1}", actorUserId: null, actorLogin: null, actorDisplayName: null },
+            { eventId: "raid", createdAt: "2026-09-22T10:05:00.000Z", moduleId: "channel_events", triggerId: "t0", code: "channel_events.raid.incoming", detail: "{\"source\":\"raider_b\",\"viewers\":1}", actorUserId: null, actorLogin: null, actorDisplayName: null },
             { eventId: "ad", createdAt: "2026-09-22T10:04:00.000Z", moduleId: "ads", triggerId: "t2", code: "ads.commercial.failed", detail: "{\"reason\":\"rate_limited\"}", actorUserId: null, actorLogin: null, actorDisplayName: null },
             { eventId: "clip", createdAt: "2026-09-22T10:03:00.000Z", moduleId: "host", triggerId: "t3", code: "host.clip.failed", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null },
             { eventId: "warning", createdAt: "2026-09-22T10:02:00.000Z", moduleId: "raid", triggerId: "t5", code: "raid.invalid", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null },
@@ -386,7 +386,7 @@ describe("Stream Manager warnings and errors feed", () => {
     const adText = await screen.findByText("Werbeeinblendung nicht gestartet: Twitch-Abklingzeit aktiv");
     expect(screen.getByText("Raid verworfen: ungültige Daten")).toBeInTheDocument();
     expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Raid von sensitron/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raid von raider_b/u)).not.toBeInTheDocument();
     expect(screen.queryByText(/Sub von/u)).not.toBeInTheDocument();
     expect(screen.getByRole("list").querySelectorAll("li")).toHaveLength(3);
     const link = adText.closest("a");

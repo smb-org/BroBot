@@ -391,6 +391,7 @@ export interface DashboardTexts {
     streamLive: (duration: string | null) => string;
     streamOffline: string;
     streamUnknown: string;
+    streamChecked: (relativeTime: string) => string;
   };
   status: {
     connected: string;
@@ -761,6 +762,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
       streamOffline: "Offline",
       streamUnknown: "Status unbekannt",
+      streamChecked: (relativeTime) => `Zustand geprüft ${relativeTime}`,
     },
     status: {
       connected: "Verbunden", revoked: "Widerrufen", error: "Fehler",
@@ -842,7 +844,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       changedTruncated: "geändert (Text länger als die Vorschau)",
       filter: "Filter", person: "Person",
       personHint: "Wer die Aktion ausgeführt hat, nicht wer betroffen war.",
-      personPlaceholder: "Login oder ID, z. B. sensitron",
+      personPlaceholder: "Login oder ID, z. B. beispielnutzer",
       area: "Bereich", allAreas: "Alle Bereiche",
       areaLabels: { module: "Module", command: "Textbefehle", member: "Mitglieder", channel: "Kanal", overlay: "Overlay" },
       activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen", noMatches: "Keine Einträge passen zu den Filtern.",
@@ -976,6 +978,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       streamLive: (duration) => duration === null ? "Live" : `Live · ${duration} h`,
       streamOffline: "Offline",
       streamUnknown: "Status unknown",
+      streamChecked: (relativeTime) => `State checked ${relativeTime}`,
     },
     status: {
       connected: "Connected", revoked: "Revoked", error: "Error", loginIdentityMissing: "Login identity missing",
@@ -1052,7 +1055,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       changedTruncated: "changed (text longer than preview)",
       filter: "Filters", person: "Person",
       personHint: "Who performed the action, not who was affected by it.",
-      personPlaceholder: "Login or ID, e.g. sensitron",
+      personPlaceholder: "Login or ID, e.g. example_user",
       area: "Area", allAreas: "All areas",
       areaLabels: { module: "Modules", command: "Text commands", member: "Members", channel: "Channel", overlay: "Overlay" },
       activeFilters: "Active filters:", resetFilters: "Reset filters", noMatches: "No entries match the filters.",
@@ -1583,6 +1586,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.suppressed": (detail) => `Aktion unterdrückt: ${detail.action === "chat" ? "Chatnachricht" : detail.action === "announcement" ? "Ankündigung" : "Shoutout"} wegen Kanal-Stummschaltung`,
     "host.chat.failed": "Chat-Nachricht fehlgeschlagen",
     "host.chat.sent": "Chat-Nachricht gesendet",
+    "host.chat.skipped": "Chat-Nachricht übersprungen: Zeitplan hat sich in letzter Sekunde geändert",
     "host.announcement.sent": (detail) => `Chat-Ankündigung gesendet: ${detailText(detail, "text", "ohne Text")}`,
     "host.announcement.failed": (detail) => {
       const reason = eventCauseText("host.announcement.failed", detail, "de") ?? "unbekannter Grund";
@@ -1680,6 +1684,7 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "host.action.suppressed": (detail) => `Action suppressed: ${detail.action === "chat" ? "chat message" : detail.action === "announcement" ? "announcement" : "shoutout"} while the channel is muted`,
     "host.chat.failed": "Chat message failed",
     "host.chat.sent": "Chat message sent",
+    "host.chat.skipped": "Chat message skipped: schedule changed at the last moment",
     "host.announcement.sent": (detail) => `Chat announcement sent: ${detailText(detail, "text", "no text")}`,
     "host.announcement.failed": (detail) => {
       const reason = eventCauseText("host.announcement.failed", detail, "en") ?? "unknown reason";
@@ -1790,6 +1795,7 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "host.action.suppressed": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "host.chat.failed": { family: "operations", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
   "host.chat.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
+  "host.chat.skipped": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.announcement.failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "host.announcement.sent": { family: "operations", tier: "outlined", word: { de: "Info", en: "Info" }, numberKey: null, tone: "info" },
   "template_truncated": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
@@ -1959,7 +1965,7 @@ export const auditActionLabel = (
 
 const memberAsWords: LocaleCatalog<string> = { de: "als", en: "as" };
 
-/** The connector between a member's login and their role in an audit row's subject, e.g. "sensitron als Bediener" (#181). */
+/** The connector between a member's login and their role in an audit row's subject, e.g. "beispielnutzer als Bediener" (#181). */
 export const memberAsWord = (language: DashboardLanguage = dashboardLanguage()): string => memberAsWords[language];
 
 /**

@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   processAdPrewarning: vi.fn().mockResolvedValue(undefined),
+  refreshAdPrewarningAlarm: vi.fn().mockResolvedValue(undefined),
+  getAdSchedule: vi.fn(),
 }));
 
 vi.mock("../../src/worker/ad-prewarning", () => mocks);
+vi.mock("../../src/modules/ads/adapters/prewarning-alarm", () => ({ refreshAdPrewarningAlarm: mocks.refreshAdPrewarningAlarm }));
+vi.mock("../../src/modules/ads/adapters/ad-schedule", () => ({ getAdSchedule: mocks.getAdSchedule }));
 
 import type {
   RealtimeEnvelope,
@@ -12,6 +16,7 @@ import type {
   RealtimePanelPrincipal,
   RealtimePrincipal,
 } from "../../src/realtime-contract";
+import type { AdsSchedule } from "../../src/modules/ads/contracts";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
 
@@ -164,6 +169,10 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   const object = Object.create(ChannelObject.prototype) as ChannelObject;
   (object as unknown as { ctx: DurableObjectState }).ctx = state;
   (object as unknown as { env: Env }).env = { DB: database ?? ({ prepare: () => prepared } as unknown as D1Database) } as Env;
+  (object as unknown as { adScheduleRefresh: Promise<unknown> | null }).adScheduleRefresh = null;
+  (object as unknown as { adScheduleRefreshStartedAt: number }).adScheduleRefreshStartedAt = 0;
+  (object as unknown as { adScheduleRefreshGeneration: number }).adScheduleRefreshGeneration = 0;
+  (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
   return object;
 };
 
@@ -191,7 +200,18 @@ const eventMessage: RealtimeEnvelope<"event_log.new"> = {
 describe("ChannelObject realtime path", () => {
   afterEach(() => {
     vi.useRealTimers();
-    mocks.processAdPrewarning.mockClear();
+    mocks.processAdPrewarning.mockReset().mockResolvedValue(undefined);
+    mocks.refreshAdPrewarningAlarm.mockReset().mockResolvedValue(undefined);
+    mocks.getAdSchedule.mockReset();
+  });
+
+  const adSchedule = (nextAdAt: string | null): AdsSchedule => ({
+    nextAdAt,
+    duration: 60,
+    lastAdAt: null,
+    prerollFreeTime: 120,
+    snoozeCount: 1,
+    snoozeRefreshAt: null,
   });
 
   it("rejects a connection without a principal with 403", () => {
@@ -288,7 +308,67 @@ describe("ChannelObject realtime path", () => {
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("overlay_elements"));
   });
 
-  it("enumerates ordinary sockets once per batch and routes variable changes to both client kinds", async () => {
+  it("rejects a bound handshake revoked while its variable lookup awaits", async () => {
+    const token: RealtimeOverlayPrincipal = {
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-during-lookup",
+      overlayId: "overlay-a",
+      expiresAt: null,
+    };
+    let releaseLookup!: () => void;
+    let signalLookupStarted!: () => void;
+    const lookupGate = new Promise<void>((resolve) => { releaseLookup = resolve; });
+    const lookupStarted = new Promise<void>((resolve) => { signalLookupStarted = resolve; });
+    const prepare = vi.fn((query: string) => ({
+      bind: vi.fn(() => ({
+        first: vi.fn().mockResolvedValue({ token_id: token.tokenId }),
+        all: vi.fn(async () => {
+          if (query.includes("overlay_elements")) {
+            signalLookupStarted();
+            await lookupGate;
+            return { results: [{ variable_name: "score" }] };
+          }
+          return { results: [] };
+        }),
+      })),
+    }));
+    const object = objectFor([], { prepare } as unknown as D1Database);
+    const accept = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx.acceptWebSocket;
+
+    const handshake = object.fetch(upgradeRequest(token));
+    await lookupStarted;
+    await object.revokeToken(token.tokenId);
+    releaseLookup();
+    const response = await handshake;
+
+    expect(response.status).toBe(403);
+    expect(accept).not.toHaveBeenCalled();
+    expect(prepare).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps stream-state refreshes away from overlay sockets", async () => {
+    const panel = socketFor(validPrincipal());
+    const overlay = overlaySocketFor({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", expiresAt: null });
+    const object = objectFor([panel, overlay]);
+    const message: RealtimeEnvelope<"stream.state.changed"> = {
+      version: 1,
+      id: "stream-state-1",
+      createdAt: "2026-09-24T12:00:00.000Z",
+      channelId: "kanal-a",
+      type: "stream.state.changed",
+      payload: { state: "online", startedAt: "2026-09-24T11:00:00.000Z", changedAt: "2026-09-24T12:00:00.000Z" },
+    };
+
+    await object.publish([message]);
+
+    expect(panel.send.mock.calls).toHaveLength(1);
+    expect(overlay.send.mock.calls).toHaveLength(0);
+    expect(typeOfSerializedMessage(panel.send.mock.calls[0]?.[0] ?? "")).toBe("stream.state.changed");
+  });
+
+  it("publishes a list once and routes variable changes to both client kinds", async () => {
     const panel = socketFor(validPrincipal());
     const overlay = overlaySocketFor({
       v: 1,
@@ -399,6 +479,7 @@ describe("ChannelObject realtime path", () => {
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("overlay_elements"));
     expect(overlay.serializeAttachment.mock.calls).toEqual([
+      [expect.objectContaining({ referencedVariableNames: ["score"], mappingRefreshPending: true })],
       [expect.objectContaining({ referencedVariableNames: ["bonus", "score"] })],
     ]);
 
@@ -419,6 +500,76 @@ describe("ChannelObject realtime path", () => {
 
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(JSON.parse(overlay.send.mock.calls[1]?.[0] ?? "null")).toEqual(newlyReferencedVariable);
+  });
+
+  it("refreshes a failed overlay mapping on the next hibernation-safe security alarm", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const overlay = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a",
+      expiresAt: null, referencedVariableNames: ["score"],
+    });
+    let mappingReads = 0;
+    const prepare = vi.fn((query: string) => ({
+      bind: vi.fn(() => ({
+        first: vi.fn().mockResolvedValue({ token_id: "token-a" }),
+        all: vi.fn(() => {
+          if (query.includes("FROM overlay_tokens")) return Promise.resolve({ results: [{ token_id: "token-a" }] });
+          if (query.includes("FROM overlay_elements")) {
+            mappingReads += 1;
+            if (mappingReads === 1) return Promise.reject(new Error("D1 temporarily unavailable"));
+            return Promise.resolve({ results: [{ overlay_id: "overlay-a", variable_name: "bonus" }] });
+          }
+          return Promise.resolve({ results: [] });
+        }),
+      })),
+    }));
+    const database = { prepare } as unknown as D1Database;
+    const beforeWake = objectFor([overlay], database);
+    const logError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const changed: RealtimeEnvelope<"overlay.changed"> = {
+      version: 1,
+      id: "overlay-change-unavailable",
+      createdAt: "2026-09-24T12:00:00.000Z",
+      channelId: "kanal-a",
+      type: "overlay.changed",
+      payload: { overlayId: "overlay-a", revision: 2 },
+    };
+
+    try {
+      await beforeWake.publish([changed]);
+      expect(storageOf(beforeWake).values.get("overlay_mapping_pending:overlay-a")).toBe(true);
+      expect(overlay.deserializeAttachment()).toMatchObject({ mappingRefreshPending: true });
+
+      const previousState = beforeWake as unknown as { ctx: DurableObjectState; env: Env };
+      const afterWake = Object.create(ChannelObject.prototype) as ChannelObject;
+      (afterWake as unknown as { ctx: DurableObjectState }).ctx = previousState.ctx;
+      (afterWake as unknown as { env: Env }).env = previousState.env;
+      vi.setSystemTime(now + 60_000);
+      await afterWake.alarm();
+
+      expect(mappingReads).toBe(2);
+      expect(storageOf(afterWake).values.has("overlay_mapping_pending:overlay-a")).toBe(false);
+      expect(overlay.deserializeAttachment()).toMatchObject({ referencedVariableNames: ["bonus"] });
+      expect(overlay.deserializeAttachment()).not.toHaveProperty("mappingRefreshPending");
+
+      const variableChange: RealtimeEnvelope<"variables.changed"> = {
+        version: 1,
+        id: "variables-after-security-refresh",
+        createdAt: "2026-09-24T12:01:00.000Z",
+        channelId: "kanal-a",
+        type: "variables.changed",
+        payload: { set: [{ name: "score", value: 1 }, { name: "bonus", value: 3 }], removed: [] },
+      };
+      await afterWake.publish([variableChange]);
+
+      expect(JSON.parse(overlay.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+        payload: { set: [{ name: "bonus", value: 3 }], removed: [] },
+      });
+    } finally {
+      logError.mockRestore();
+    }
   });
 
   it("does not read D1 for variable changes after the socket mapping is attached", async () => {
@@ -479,6 +630,144 @@ describe("ChannelObject realtime path", () => {
     expect(secondOverlay.send.mock.calls).toHaveLength(0);
     expect(legacyOverlay.send.mock.calls).toHaveLength(0);
     expect(panel.send.mock.calls.map(([message]) => typeOfSerializedMessage(message))).toEqual(["overlay.changed"]);
+  });
+
+  it("coalesces ad-schedule refreshes and pushes panel-only updates while reconciling alarms", async () => {
+    const panel = socketFor(validPrincipal());
+    const overlay = overlaySocketFor({ v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-1", expiresAt: null });
+    const object = objectFor([panel, overlay]);
+    const schedule = adSchedule("2026-09-24T19:00:00.000Z");
+    let resolveFetch: ((result: { fetched: boolean; reason: string | null; detail: Record<string, string | number | boolean | null>; schedule: AdsSchedule }) => void) | undefined;
+    mocks.getAdSchedule.mockImplementationOnce(() => new Promise((resolve) => { resolveFetch = resolve; }));
+
+    const firstRefresh = object.refreshAdSchedule();
+    const coalescedRefresh = object.refreshAdSchedule();
+    await vi.waitFor(() => { expect(mocks.getAdSchedule).toHaveBeenCalledTimes(1); });
+    resolveFetch?.({ fetched: true, reason: null, detail: {}, schedule });
+    const [first, coalesced] = await Promise.all([firstRefresh, coalescedRefresh]);
+    expect(first).toEqual(coalesced);
+    expect(first.changed).toBe(true);
+    expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(1);
+    expect(panel.send.mock.calls).toHaveLength(1);
+    expect(typeOfSerializedMessage(panel.send.mock.calls[0]?.[0] ?? "")).toBe("ads.schedule.updated");
+    expect(overlay.send.mock.calls).toHaveLength(0);
+
+    mocks.getAdSchedule.mockResolvedValueOnce({ fetched: true, reason: null, detail: {}, schedule });
+    const second = await object.refreshAdSchedule();
+    expect(second.changed).toBe(false);
+    expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(2);
+    expect(panel.send.mock.calls).toHaveLength(2);
+    const updated = JSON.parse(panel.send.mock.calls[1]?.[0] ?? "{}") as { payload?: { asOf?: string } };
+    expect(updated.payload?.asOf).toBe(second.cache?.asOf);
+    expect(overlay.send.mock.calls).toHaveLength(0);
+  });
+
+  it("does not let an in-flight schedule fetch overwrite a newer snooze", async () => {
+    const object = objectFor([]);
+    const original = adSchedule("2026-09-24T19:00:00.000Z");
+    const snoozed = adSchedule("2026-09-24T19:15:00.000Z");
+    await object.storeAdSchedule(original, "2026-09-24T12:00:00.000Z");
+    let resolveFetch: ((result: { fetched: boolean; reason: string | null; detail: Record<string, string | number | boolean | null>; schedule: AdsSchedule }) => void) | undefined;
+    mocks.getAdSchedule.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFetch = resolve;
+    }));
+
+    const refresh = object.refreshAdSchedule();
+    await vi.waitFor(() => { expect(mocks.getAdSchedule).toHaveBeenCalledTimes(1); });
+    await object.storeAdSchedule(snoozed, "2026-09-24T12:01:00.000Z");
+    resolveFetch?.({ fetched: true, reason: null, detail: {}, schedule: original });
+
+    const result = await refresh;
+    expect(result.changed).toBe(false);
+    await expect(object.getCachedAdSchedule()).resolves.toEqual({ schedule: snoozed, asOf: "2026-09-24T12:01:00.000Z" });
+  });
+
+  it("rejects an EventSub schedule save based on an older cache generation", async () => {
+    const object = objectFor([]);
+    const initial = adSchedule("2026-09-24T19:00:00.000Z");
+    const latest = adSchedule("2026-09-24T19:30:00.000Z");
+    const staleFetch = adSchedule("2026-09-24T18:45:00.000Z");
+    await object.storeAdSchedule(initial, "2026-09-24T12:00:00.000Z");
+    const fetchGeneration = await object.getAdScheduleGeneration();
+    await object.storeAdSchedule(latest, "2026-09-24T12:01:00.000Z");
+
+    await expect(object.storeAdSchedule(
+      staleFetch,
+      "2026-09-24T12:02:00.000Z",
+      undefined,
+      fetchGeneration,
+    )).resolves.toBeNull();
+    await expect(object.getCachedAdSchedule()).resolves.toEqual({ schedule: latest, asOf: "2026-09-24T12:01:00.000Z" });
+  });
+
+  it("serializes cached alarm reconciliation with a newer schedule save", async () => {
+    const object = objectFor([]);
+    const older = adSchedule("2026-09-24T19:00:00.000Z");
+    const newer = adSchedule("2026-09-24T19:30:00.000Z");
+    await object.storeAdSchedule(older, "2026-09-24T12:00:00.000Z");
+    mocks.refreshAdPrewarningAlarm.mockClear();
+    let finishOlderReconcile!: () => void;
+    const olderReconcileBlocked = new Promise<void>((resolve) => { finishOlderReconcile = resolve; });
+    const alarmScheduleWrites: Array<string | null> = [];
+    mocks.refreshAdPrewarningAlarm.mockImplementation(async (_env: unknown, _channelId: string, schedule: AdsSchedule) => {
+      if (schedule.nextAdAt === older.nextAdAt) await olderReconcileBlocked;
+      alarmScheduleWrites.push(schedule.nextAdAt);
+    });
+
+    const olderReconcile = object.reconcileCachedAdPrewarning();
+    await vi.waitFor(() => { expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(1); });
+    const newerSave = object.storeAdSchedule(newer, "2026-09-24T12:01:00.000Z");
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(1);
+
+    finishOlderReconcile();
+    await Promise.all([olderReconcile, newerSave]);
+
+    expect(alarmScheduleWrites).toEqual([older.nextAdAt, newer.nextAdAt]);
+    await expect(object.getCachedAdSchedule()).resolves.toEqual({ schedule: newer, asOf: "2026-09-24T12:01:00.000Z" });
+  });
+
+  it("retries failed alarm reconciliation independently of schedule changes and notices scope changes", async () => {
+    const object = objectFor([]);
+    const schedule = adSchedule("2026-09-24T19:00:00.000Z");
+    mocks.refreshAdPrewarningAlarm.mockRejectedValueOnce(new Error("D1 unavailable"));
+
+    await expect(object.storeAdSchedule(schedule, "2026-09-24T12:00:00.000Z", ["channel:manage:ads"])).resolves.toEqual({
+      schedule,
+      asOf: "2026-09-24T12:00:00.000Z",
+    });
+    await object.reconcileCachedAdPrewarning(["channel:manage:ads"]);
+    await object.reconcileCachedAdPrewarning([]);
+
+    expect(mocks.refreshAdPrewarningAlarm).toHaveBeenCalledTimes(3);
+    expect(storageOf(object).values.has("ads:prewarning_reconciled")).toBe(true);
+  });
+
+  it("expires a stuck refresh coalescer so a later caller can start another fetch", async () => {
+    vi.useFakeTimers();
+    const object = objectFor([]);
+    mocks.getAdSchedule.mockImplementation(() => new Promise(() => undefined));
+
+    const first = object.refreshAdSchedule();
+    await vi.waitFor(() => { expect(mocks.getAdSchedule).toHaveBeenCalledTimes(1); });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(first).resolves.toMatchObject({ reason: "timeout" });
+
+    const second = object.refreshAdSchedule();
+    await vi.waitFor(() => { expect(mocks.getAdSchedule).toHaveBeenCalledTimes(2); });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(second).resolves.toMatchObject({ reason: "timeout" });
+  });
+
+  it("leases stream-state refreshes durably for one channel at a time", async () => {
+    const object = objectFor([]);
+    const first = await object.beginStreamStateRefresh(100);
+    expect(first).toEqual(expect.any(String));
+    await expect(object.beginStreamStateRefresh(101)).resolves.toBeNull();
+    await object.endStreamStateRefresh(first ?? "");
+    const next = await object.beginStreamStateRefresh(102);
+    expect(next).toEqual(expect.any(String));
+    await object.endStreamStateRefresh(next ?? "");
   });
 
   it("closes an expired overlay socket before considering its recipient type", async () => {

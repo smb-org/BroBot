@@ -46,6 +46,18 @@ export const sendChatMessage = async (
   text: string,
   replyToMessageId: string | undefined,
   fetcher: typeof fetch = fetch,
+  /**
+   * Re-checked immediately before the Helix POST, after the identity and
+   * token awaits above -- the only two awaits between a caller's own
+   * decision and the actual network call. Lets a caller like the ad
+   * prewarning (whose text can go stale while this function is still
+   * awaiting bot identity/token) bail out right before sending instead of
+   * announcing an outcome it already knows is wrong.
+   * ponytail: the one window this can't close is the POST's own network
+   * latency below -- inherent, and acceptable for an informational chat
+   * warning.
+   */
+  stillValid?: () => Promise<boolean>,
 ): Promise<ChatSendResult> => {
   const preparedText = truncateChatText(text);
   const textDetail = { text: truncateTo200Chars(preparedText.text) };
@@ -62,6 +74,10 @@ export const sendChatMessage = async (
     );
   } catch {
     return { sent: false, truncated: preparedText.truncated, reason: "app_token_unavailable", detail: textDetail };
+  }
+
+  if (stillValid !== undefined && !(await stillValid())) {
+    return { sent: false, truncated: preparedText.truncated, reason: "stale_before_send", detail: textDetail };
   }
 
   const payload: Record<string, string | boolean> = {

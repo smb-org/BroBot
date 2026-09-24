@@ -529,7 +529,7 @@ describe("Dashboard skeleton", () => {
       moduleId: "channel_events",
       triggerId: "raid-trigger",
       code: "channel_events.raid.incoming",
-      detail: '{"source":"sensitron","viewers":1}',
+      detail: '{"source":"raider_b","viewers":1}',
       actorUserId: null,
       actorLogin: null,
       actorDisplayName: null,
@@ -556,7 +556,7 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
 
-    expect(await screen.findByText("Raid von sensitron mit 1 Zuschauern")).toBeInTheDocument();
+    expect(await screen.findByText("Raid von raider_b mit 1 Zuschauern")).toBeInTheDocument();
     const initialRequest = fetcher.mock.calls.map(([input]) => requestUrl(input)).find((url) => url.pathname.endsWith("/events"));
     expect(initialRequest?.search).toBe("");
     const socket = TestWebSocket.instances[0];
@@ -1912,6 +1912,48 @@ describe("Dashboard skeleton", () => {
     expect(screen.queryByText("Keine Module aktiv.")).not.toBeInTheDocument();
   });
 
+  it("uses module state folded into the channel payload without a second module request", async () => {
+    const modules = [{ id: "text_commands", enabled: true, settings: "{}" }];
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules };
+    const channelOverview = { ...overview(channel), modules, activeModules: [{ moduleId: "text_commands", settings: "{}" }] };
+    const requested: string[] = [];
+    stubDashboardFetch((url) => {
+      requested.push(url.pathname);
+      if (url.pathname.endsWith("/overview")) return jsonResponse(channelOverview);
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+
+    expect(await within(screen.getByRole("main")).findByRole("link", { name: /Textbefehle/ })).toBeInTheDocument();
+    expect(requested).not.toContain("/api/channels/kanal-a/modules");
+  });
+
+  it("does not request system data on Variables or Overlay links pages", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      requested.push(url.pathname);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/channels/kanal-a/variables") return jsonResponse({ variables: [], maximum: 25 });
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return jsonResponse({ tokens: [], nextOffset: null });
+      return jsonResponse({}, 404);
+    }));
+
+    window.history.replaceState({}, "", "/channels/kanal-a/variables");
+    render(<DashboardApp />);
+    expect(await screen.findByRole("heading", { name: "Kanalvariablen", level: 1 })).toBeInTheDocument();
+    expect(requested).not.toContain("/api/channels/kanal-a/system");
+
+    cleanup();
+    requested.length = 0;
+    window.history.replaceState({}, "", "/channels/kanal-a/overlay-links");
+    render(<DashboardApp />);
+    expect(await screen.findByRole("heading", { name: "Overlay-Links", level: 1 })).toBeInTheDocument();
+    expect(requested).not.toContain("/api/channels/kanal-a/system");
+  });
+
   it("puts Stream Manager actions and warnings before modules and the compact healthy state", async () => {
     const channel = {
       ...healthyChannel("kanal-a", "Alpha"),
@@ -2068,6 +2110,110 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Automatische Aktionen fortsetzen" })).toBeInTheDocument();
     expect(document.querySelector(".dashboard-header__control-state .ui-icon")).toBeInTheDocument();
     expect(screen.getByText("Pausiert")).toBeInTheDocument();
+  });
+
+  it("keeps a control edit's fresher overview state against an older, slower reconnect reload", async () => {
+    const pausedChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      controls: {
+        mute: { active: false, until: null as string | null, mode: null as "timed" | "until_stream_end" | "unlimited" | null },
+        pause: { active: true, until: null, mode: "unlimited" as const },
+      },
+    };
+    const resumedControls = { ...pausedChannel.controls, pause: { active: false, until: null, mode: null } };
+    let resolveReconnectReload: ((response: Response) => void) | undefined;
+    const reconnectReload = new Promise<Response>((resolve) => { resolveReconnectReload = resolve; });
+    let overviewRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [pausedChannel], bot: pausedChannel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/controls/pause" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ controls: resumedControls }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overview") {
+        overviewRequestCount += 1;
+        // 1st: initial mount load. 2nd: the reconnect reload, held open so it
+        // resolves after the control edit's own refresh below (3rd). 3rd: the
+        // control edit's refresh, resolved immediately with the new state.
+        if (overviewRequestCount === 1) return Promise.resolve(jsonResponse(overview(pausedChannel)));
+        if (overviewRequestCount === 2) return reconnectReload;
+        return Promise.resolve(jsonResponse(overview({ ...pausedChannel, controls: resumedControls })));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("brobot:realtime-connected", { detail: { channelId: "kanal-a" } }));
+    });
+    await waitFor(() => { expect(overviewRequestCount).toBe(2); });
+
+    fireEvent.click(screen.getByRole("button", { name: "Automatische Aktionen fortsetzen" }));
+    await screen.findByRole("button", { name: "Automatische Aktionen pausieren" });
+    await waitFor(() => { expect(overviewRequestCount).toBe(3); });
+
+    await act(async () => {
+      resolveReconnectReload?.(jsonResponse(overview(pausedChannel)));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: "Automatische Aktionen pausieren" })).toBeInTheDocument();
+  });
+
+  it("keeps a control edit's fresher overview state against a slower initial overview load", async () => {
+    const pausedChannel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      controls: {
+        mute: { active: false, until: null as string | null, mode: null as "timed" | "until_stream_end" | "unlimited" | null },
+        pause: { active: true, until: null, mode: "unlimited" as const },
+      },
+    };
+    const resumedControls = { ...pausedChannel.controls, pause: { active: false, until: null, mode: null } };
+    let resolveInitialLoad: ((response: Response) => void) | undefined;
+    const initialLoad = new Promise<Response>((resolve) => { resolveInitialLoad = resolve; });
+    let overviewRequestCount = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [pausedChannel], bot: pausedChannel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
+      if (url.pathname === "/api/channels/kanal-a/controls/pause" && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ controls: resumedControls }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overview") {
+        overviewRequestCount += 1;
+        // 1st: the initial mount load, held open so it resolves after the
+        // control edit's own refresh below (2nd), which resolves immediately
+        // with the new state.
+        if (overviewRequestCount === 1) return initialLoad;
+        return Promise.resolve(jsonResponse(overview({ ...pausedChannel, controls: resumedControls })));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    // The pause control comes from the channel list, so it's available
+    // before the (held-back) initial overview fetch resolves.
+    fireEvent.click(await screen.findByRole("button", { name: "Automatische Aktionen fortsetzen" }));
+    await screen.findByRole("button", { name: "Automatische Aktionen pausieren" });
+    await waitFor(() => { expect(overviewRequestCount).toBe(2); });
+
+    // The stale initial response arrives last and must not overwrite the
+    // control edit's newer state.
+    await act(async () => {
+      resolveInitialLoad?.(jsonResponse(overview(pausedChannel)));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: "Automatische Aktionen pausieren" })).toBeInTheDocument();
   });
 
   it("shows an offline stream-end control as pending and keeps its disable action available", async () => {
@@ -2355,6 +2501,213 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => {
       expect(fetcher.mock.calls.some(([input, init]) =>
         requestUrl(input).pathname === "/api/channels/kanal-a/clips" && init?.method === "POST")).toBe(true);
+    });
+  });
+
+  it("updates stored stream status from the panel realtime socket", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      modules: [],
+      controls: {
+        mute: { active: false, until: null, mode: null },
+        pause: { active: false, pending: true, until: null, mode: "until_stream_end" as const },
+      },
+    };
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/system") return jsonResponse(system);
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a/system");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "System", level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    const channelDataAge = document.querySelector(".dashboard-header__status .data-age:not(.dashboard-header__stream-age)")?.textContent;
+    const changedAt = relativeIso(1_000);
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "stream-state-panel-1",
+      createdAt: new Date().toISOString(),
+      channelId: "kanal-a",
+      type: "stream.state.changed",
+      payload: {
+        state: "online",
+        startedAt: relativeIso(-60 * 60 * 1000),
+        changedAt,
+        checkedAt: changedAt,
+        controls: {
+          mute: { active: false, until: null, mode: null },
+          pause: { active: true, until: null, mode: "until_stream_end" },
+        },
+      },
+    }));
+
+    expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+    expect(screen.getByText(/^Zustand geprüft/)).toBeInTheDocument();
+    expect(screen.getByText(/^Pausiert ·/)).toBeInTheDocument();
+    expect(screen.queryByText("Gilt ab dem nächsten Stream")).not.toBeInTheDocument();
+    expect(document.querySelector(".dashboard-header__status .data-age:not(.dashboard-header__stream-age)")?.textContent).toBe(channelDataAge);
+
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "stream-state-panel-old",
+      createdAt: new Date().toISOString(),
+      channelId: "kanal-a",
+      type: "stream.state.changed",
+      payload: { state: "offline", startedAt: null, changedAt: relativeIso(-1_000), checkedAt: relativeIso(-1_000) },
+    }));
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+  });
+
+  it("keeps a newer realtime stream update when an older channels refresh finishes later", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      streamStateChangedAt: relativeIso(-10_000),
+      streamStateCheckedAt: relativeIso(-10_000),
+      controls: {
+        mute: { active: false, until: null, mode: null },
+        pause: { active: false, pending: true, until: null, mode: "until_stream_end" as const },
+      },
+    };
+    let channelsCalls = 0;
+    let resolveDelayedChannels: ((response: Response) => void) | undefined;
+    const delayedChannels = new Promise<Response>((resolve) => { resolveDelayedChannels = resolve; });
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") {
+        channelsCalls += 1;
+        return channelsCalls === 1
+          ? Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }))
+          : delayedChannels;
+      }
+      if (path === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(overview(channel)));
+      if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (path === "/api/channels/kanal-a/events") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    expect(await screen.findByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(channelsCalls).toBe(2));
+
+    const changedAt = relativeIso(1_000);
+    socket.receive(JSON.stringify({
+      version: 1,
+      id: "stream-state-newer-than-http",
+      createdAt: new Date().toISOString(),
+      channelId: "kanal-a",
+      type: "stream.state.changed",
+      payload: {
+        state: "online",
+        startedAt: relativeIso(-60 * 60 * 1000),
+        changedAt,
+        checkedAt: changedAt,
+        controls: {
+          mute: { active: false, until: null, mode: null },
+          pause: { active: true, until: null, mode: "until_stream_end" },
+        },
+      },
+    }));
+    expect(await screen.findByText(/^Live ·/)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveDelayedChannels?.(jsonResponse({ channels: [channel], bot: channel.bot }));
+      await delayedChannels;
+    });
+
+    expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
+    expect(screen.getByText(/^Pausiert ·/)).toBeInTheDocument();
+    expect(screen.queryByText("Gilt ab dem nächsten Stream")).not.toBeInTheDocument();
+  });
+
+  it("keeps a newer realtime stream and control update when an older overview finishes later", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      streamStateChangedAt: relativeIso(-10_000),
+      streamStateCheckedAt: relativeIso(-10_000),
+    };
+    let resolveOverview: ((response: Response) => void) | undefined;
+    const delayedOverview = new Promise<Response>((resolve) => { resolveOverview = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (path === "/api/channels/kanal-a/overview") return delayedOverview;
+      if (path === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (path === "/api/channels/kanal-a/events") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+    expect(await screen.findByText("Alpha — kanal-a")).toBeInTheDocument();
+    const changedAt = relativeIso(1_000);
+    window.dispatchEvent(new CustomEvent("brobot:realtime", {
+      detail: {
+        version: 1,
+        id: "stream-state-newer-than-overview",
+        createdAt: new Date().toISOString(),
+        channelId: "kanal-a",
+        type: "stream.state.changed",
+        payload: {
+          state: "online",
+          startedAt: relativeIso(-60 * 60 * 1000),
+          changedAt,
+          checkedAt: changedAt,
+          controls: {
+            mute: { active: false, until: null, mode: null },
+            pause: { active: true, until: null, mode: "until_stream_end" },
+          },
+        },
+      },
+    }));
+    expect(await screen.findByText(/^Pausiert ·/)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveOverview?.(jsonResponse(overview(channel)));
+      await delayedOverview;
+    });
+
+    await waitFor(() => expect(document.querySelector(".dashboard-header__stream")).toHaveAttribute("data-state", "live"));
+    expect(screen.getByText(/^Pausiert ·/)).toBeInTheDocument();
+    expect(screen.queryByText("Gilt ab dem nächsten Stream")).not.toBeInTheDocument();
+  });
+
+  it("reconciles the channel overview when its realtime socket connects", async () => {
+    const channel = {
+      ...healthyChannel("kanal-a", "Alpha"),
+      streamStateCheckedAt: "2026-09-24T12:00:00.000Z",
+      streamStateChangedAt: "2026-09-24T11:00:00.000Z",
+    };
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    const fetcher = stubDashboardFetch((url) => {
+      if (url.pathname.endsWith("/overview")) return jsonResponse(overview(channel));
+      if (url.pathname.endsWith("/modules")) return jsonResponse({ modules: [] });
+      if (url.pathname.endsWith("/events")) return jsonResponse({ entries: [], nextCursor: null });
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a/overview");
+
+    render(<DashboardApp />);
+
+    await screen.findByRole("heading", { name: "Alpha", level: 1 });
+    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(1));
+    const socket = TestWebSocket.instances[0];
+    if (socket === undefined) throw new Error("Realtime-Socket fehlt");
+    socket.open();
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/overview"))).toHaveLength(2);
     });
   });
 

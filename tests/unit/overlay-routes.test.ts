@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SQLInputValue } from "node:sqlite";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { authRouter } from "../../src/worker/auth/routes";
@@ -840,6 +841,73 @@ describe("Overlay routes", () => {
     });
     await expect(bootstrapB.json()).resolves.toMatchObject({ overlay: { id: "overlay-b", revision: 4 }, variables: { score: 99 } });
     expect(unreferenced.status).toBe(404);
+  });
+
+  it("does not return a bound variable dropped while its reader runs", async () => {
+    await insertMember(database, "kanal-a");
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('kanal-a', 'score', 99, '2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, width, height, css, revision, created_at, updated_at)
+       VALUES ('overlay-a', 'kanal-a', 'Gameplay', 1920, 1080, '', 1, ?, ?)`,
+    ).bind("2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, variable_name)
+       VALUES ('element-a', 'kanal-a', 'overlay-a', 'variable', 'score')`,
+    ).run();
+    const issued = await issueTestToken(database, {
+      channelId: "kanal-a", pepper: environment.OVERLAY_TOKEN_PEPPER,
+      publicOrigin: environment.PUBLIC_ORIGIN, expiresAt: null, createdAt: "2026-09-18T00:00:00.000Z",
+    });
+    await database.prepare("UPDATE overlay_tokens SET overlay_id = 'overlay-a' WHERE token_id = ?")
+      .bind(issued.tokenId).run();
+
+    const originalPrepare = database.prepare.bind(database);
+    const preparedSql: string[] = [];
+    let overlayElementDropped = false;
+    const dropOverlayElement = async (): Promise<void> => {
+      if (overlayElementDropped) return;
+      overlayElementDropped = true;
+      await originalPrepare(
+        "DELETE FROM overlay_elements WHERE channel_id = 'kanal-a' AND overlay_id = 'overlay-a' AND variable_name = 'score'",
+      ).run();
+    };
+    const interleavedDatabase = {
+      prepare(sql: string): D1PreparedStatement {
+        preparedSql.push(sql);
+        const statement = originalPrepare(sql);
+        return {
+          bind(...values: SQLInputValue[]): D1PreparedStatement {
+            const bound = statement.bind(...values);
+            return {
+              first: async () => {
+                const isJoinedRead = sql.includes("FROM channel_variables AS variable") &&
+                  sql.includes("JOIN overlay_elements AS element");
+                const isMembershipRead = sql.includes("SELECT 1 AS present") &&
+                  sql.includes("FROM overlay_elements");
+                if (isJoinedRead) await dropOverlayElement();
+                const result = await bound.first();
+                if (isMembershipRead) await dropOverlayElement();
+                return result;
+              },
+              all: () => bound.all(),
+              run: () => bound.run(),
+            } as unknown as D1PreparedStatement;
+          },
+        } as unknown as D1PreparedStatement;
+      },
+    } as unknown as D1Database;
+    environment.DB = interleavedDatabase;
+
+    const response = await authRouter.fetch(new Request(variablePath("score"), {
+      headers: { Authorization: `Bearer ${tokenFromIssuedUrl(issued.overlayUrl)}` },
+    }), environment);
+
+    expect(response.status).toBe(404);
+    expect(preparedSql.filter((sql) => sql.includes("JOIN overlay_elements AS element"))).toHaveLength(1);
+    expect(preparedSql.some((sql) => sql.includes("SELECT 1 AS present") && sql.includes("FROM overlay_elements"))).toBe(false);
   });
 
   it("keeps channel-wide legacy tokens on the existing variable path", async () => {

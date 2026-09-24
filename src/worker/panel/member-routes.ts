@@ -22,6 +22,7 @@ import { CHANNEL_ROLES, canManage, type AuditAction, type ChannelRole } from "..
 import { revokeRealtimeUser } from "../realtime";
 import { fetchTwitchUserByLogin, type TwitchUser } from "../shoutout";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
+import { measureServerTiming } from "../server-timing";
 
 interface MemberRouteEnvironment {
   Bindings: Env;
@@ -139,9 +140,11 @@ memberRouter.get("/api/channels/:channelId/members", async (context) => {
   const serializedCursor = context.req.query("cursor");
   const cursor = serializedCursor === undefined ? null : decodeChannelMemberCursor(serializedCursor);
   if (serializedCursor !== undefined && cursor === null) return context.json({ error: "pagination_cursor_invalid" }, 400);
-  const page = await listChannelMembers(context.env.DB, channelId, limit, cursor);
-  const names = await fetchTwitchUsersById(fetch, context.env, page.members.map((member) => member.userId));
-  const broadcasterCount = await countBroadcasterMembers(context.env.DB, channelId);
+  const [page, broadcasterCount] = await measureServerTiming(context, "d1", () => Promise.all([
+    listChannelMembers(context.env.DB, channelId, limit, cursor),
+    countBroadcasterMembers(context.env.DB, channelId),
+  ]));
+  const names = await measureServerTiming(context, "helix", () => fetchTwitchUsersById(fetch, context.env, page.members.map((member) => member.userId)));
   return context.json({
     members: page.members.map((member) => memberResponseWithNames(member, names)),
     nextCursor: page.nextCursor,

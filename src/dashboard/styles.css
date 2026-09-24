@@ -641,6 +641,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
   .dashboard-header__channel { min-width: 0; }
   .dashboard-header__status .led,
   .dashboard-header__status .data-age { display: none; }
+  .dashboard-header__status .dashboard-header__stream-age { display: inline-flex; }
   .dashboard-header__status { gap: 8px; min-width: 0; }
   .dashboard-header__controls { justify-self: end; }
   .dashboard-header__control-buttons { gap: 4px; }

@@ -36,6 +36,7 @@ import {
 import { decodeCursor, encodeCursor } from "../db/cursor";
 import { listAllBroadcasterScopes } from "../module-scopes";
 import { mapChannelControls, type ChannelControlFields } from "../db/channel-controls";
+import { getPanelModuleDataForChannels, getPanelModuleStatesForChannels } from "./module-repository";
 
 interface ChannelStateRow {
   channel_id: string;
@@ -76,6 +77,8 @@ interface ChannelStateRow {
   eventsub_error_updated_at: string | null;
   stream_state: ChannelStreamState | null;
   stream_started_at: string | null;
+  stream_state_changed_at: string | null;
+  stream_state_checked_at: string | null;
   stream_id: string | null;
   muted: ChannelControlFields["muted"];
   muted_until: string | null;
@@ -87,11 +90,6 @@ interface ChannelStateRow {
   pause_until_stream_end: ChannelControlFields["pause_until_stream_end"];
   pause_stream_started_at: string | null;
   pause_stream_id: string | null;
-}
-
-interface ActiveModuleRow {
-  module_id: string;
-  settings: string;
 }
 
 interface AuditLogRow {
@@ -167,6 +165,14 @@ export const channelStateQuery = `
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
              LIMIT 1) AS stream_state,
+           (SELECT stream_state.changed_at
+              FROM channel_stream_state AS stream_state
+             WHERE stream_state.channel_id = channel.channel_id
+             LIMIT 1) AS stream_state_changed_at,
+           (SELECT COALESCE(stream_state.checked_at, stream_state.changed_at)
+              FROM channel_stream_state AS stream_state
+             WHERE stream_state.channel_id = channel.channel_id
+             LIMIT 1) AS stream_state_checked_at,
            (SELECT stream_state.started_at
               FROM channel_stream_state AS stream_state
              WHERE stream_state.channel_id = channel.channel_id
@@ -365,6 +371,8 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   chatSubscriptionNeeded: row.chat_subscription_needed === 1,
   streamState: row.stream_state,
   streamStartedAt: row.stream_started_at,
+  streamStateChangedAt: row.stream_state_changed_at,
+  streamStateCheckedAt: row.stream_state_checked_at,
   controls: mapChannelControls(row, new Date().toISOString()),
   tokens: mapTokens(row),
   lastError: mapLastError(row),
@@ -392,26 +400,25 @@ const listChannelStateRows = async (db: D1Database, userId: string): Promise<Cha
 export const listChannelsForUser = async (
   db: D1Database,
   userId: string,
-): Promise<PanelChannelState[]> => (await listChannelStateRows(db, userId)).map(mapChannelState);
+): Promise<PanelChannelState[]> => {
+  const rows = await listChannelStateRows(db, userId);
+  const modules = await getPanelModuleStatesForChannels(db, rows.map((row) => row.channel_id));
+  return rows.map((row) => ({ ...mapChannelState(row), modules: modules.get(row.channel_id) ?? [] }));
+};
 
 export const getChannelOverviewForUser = async (
   db: D1Database,
   userId: string,
   channelId: string,
 ): Promise<PanelChannelOverview | null> => {
-  const row = await getChannelStateRow(db, userId, channelId);
+  const [row, moduleData] = await Promise.all([
+    getChannelStateRow(db, userId, channelId),
+    getPanelModuleDataForChannels(db, [channelId]),
+  ]);
   if (row === null) return null;
-  const result = await db.prepare(
-    `SELECT module_id, settings
-       FROM channel_modules
-      WHERE channel_id = ? AND enabled = 1
-      ORDER BY module_id`,
-  ).bind(channelId).all<ActiveModuleRow>();
-  const activeModules: PanelActiveModule[] = result.results.map((module) => ({
-    moduleId: module.module_id,
-    settings: module.settings,
-  }));
-  return { ...mapChannelState(row), activeModules };
+  const moduleStates = moduleData.states.get(channelId) ?? [];
+  const activeModules: PanelActiveModule[] = moduleData.active.get(channelId) ?? [];
+  return { ...mapChannelState(row), modules: moduleStates, activeModules };
 };
 
 export const getSystemOverviewForUser = async (
@@ -419,9 +426,11 @@ export const getSystemOverviewForUser = async (
   userId: string,
   channelId: string,
 ): Promise<PanelSystemResponse | null> => {
-  const row = await getChannelStateRow(db, userId, channelId);
+  const [row, subscriptions] = await Promise.all([
+    getChannelStateRow(db, userId, channelId),
+    listEventSubSubscriptions(db, channelId),
+  ]);
   if (row === null) return null;
-  const subscriptions = await listEventSubSubscriptions(db, channelId);
   return {
     broadcasterConnection: row.broadcaster_connection === 1 ? "connected" : "not_connected",
     bot: mapBotStatus(row),

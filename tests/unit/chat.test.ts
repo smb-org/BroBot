@@ -97,6 +97,31 @@ describe("Helix chat", () => {
     }
   });
 
+  /**
+   * A caller (the ad prewarning) can learn its text went stale while this
+   * function was still awaiting bot identity/token. `stillValid` is checked
+   * right before the POST, after both those awaits, so it must be able to
+   * cancel a send that has already gotten that far.
+   */
+  it("skips the Helix POST when stillValid turns false after the identity/token awaits", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedBot(database);
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        data: [{ is_sent: true, message_id: "nachricht-1" }],
+      }), { status: 200 }));
+      const stillValid = vi.fn().mockResolvedValue(false);
+
+      await expect(sendChatMessage(environment(database), "kanal-a", "hallo", undefined, fetcher, stillValid))
+        .resolves.toMatchObject({ sent: false, reason: "stale_before_send" });
+
+      expect(stillValid).toHaveBeenCalledOnce();
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
   it("still distinguishes a network error from a timeout", async () => {
     const database = new TestD1Database();
     try {

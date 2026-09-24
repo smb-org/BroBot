@@ -100,6 +100,12 @@ export interface PanelChannelState {
   streamState?: ChannelStreamState | null;
   /** EventSub stream.online time, present only while the stored state is online. */
   streamStartedAt?: string | null;
+  /** Latest stream-state transition timestamp used to order realtime updates. */
+  streamStateChangedAt?: string | null;
+  /** Most recent successful observation of the stream state. */
+  streamStateCheckedAt?: string | null;
+  /** Dashboard sidebar state loaded with the channel list, avoiding a second page request. */
+  modules?: PanelModuleState[];
   /** Operational channel brakes; absent only when talking to an older worker. */
   controls?: PanelChannelControls;
   tokens: PanelTokenStatus;
@@ -129,6 +135,7 @@ export interface PanelActiveModule {
 }
 
 export interface PanelChannelOverview extends PanelChannelState {
+  modules?: PanelModuleState[];
   activeModules: PanelActiveModule[];
 }
 

@@ -255,10 +255,10 @@ describe("auditSubjectText", () => {
       before: "null",
       after: JSON.stringify({ role: "operator" }),
       subjectUserId: "300111222",
-      subjectLogin: "sensitron",
+      subjectLogin: "member_c",
       subjectDisplayName: null,
     });
-    expect(auditSubjectText(entry, "de")).toBe("@sensitron als Bediener");
+    expect(auditSubjectText(entry, "de")).toBe("@member_c als Bediener");
   });
 
   it("uses the connector word for the requested language", () => {
@@ -270,7 +270,7 @@ describe("auditSubjectText", () => {
       before: "null",
       after: JSON.stringify({ role: "operator" }),
       subjectUserId: "300111222",
-      subjectLogin: "sensitron",
+      subjectLogin: "member_c",
       subjectDisplayName: null,
     });
     expect(auditSubjectText(entry, "en")).toContain(" as ");

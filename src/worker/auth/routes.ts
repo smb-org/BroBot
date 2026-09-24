@@ -71,7 +71,7 @@ import {
 import { canManage, type ApiErrorCode } from "../../contracts/values";
 import { findChannelVariable } from "../db/channel-variables";
 import { getOverlayBindingForToken } from "./overlay-token-repository";
-import { getOverlayForChannel, getOverlayVariableValues, overlayUsesVariable } from "../db/overlays";
+import { getOverlayForChannel, getOverlayVariableValues } from "../db/overlays";
 
 const nowIso = (): string => new Date().toISOString();
 const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -412,10 +412,19 @@ authRouter.get("/api/overlay/variables/:name", async (context) => {
     return context.json({ error: "variable_data_invalid" satisfies ApiErrorCode }, 400);
   }
   const overlayId = await getOverlayBindingForToken(context.env.DB, record.channelId, record.tokenId);
-  if (overlayId !== null && !await overlayUsesVariable(context.env.DB, record.channelId, overlayId, name)) {
-    return context.json({ error: "overlay_variable_not_found" satisfies ApiErrorCode }, 404);
-  }
-  const variable = await findChannelVariable(context.env.DB, record.channelId, name);
+  const variable = overlayId === null
+    ? await findChannelVariable(context.env.DB, record.channelId, name)
+    : await context.env.DB.prepare(
+      `SELECT variable.name, variable.value
+         FROM channel_variables AS variable
+         JOIN overlay_elements AS element
+           ON element.channel_id = variable.channel_id
+          AND element.variable_name = variable.name
+        WHERE variable.channel_id = ?
+          AND element.overlay_id = ?
+          AND variable.name = ?
+        LIMIT 1`,
+    ).bind(record.channelId, overlayId, name).first<{ name: string; value: number }>();
   if (variable === null) {
     return context.json({ error: "overlay_variable_not_found" satisfies ApiErrorCode }, 404);
   }

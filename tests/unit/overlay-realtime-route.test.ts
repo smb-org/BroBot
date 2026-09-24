@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX, REALTIME_PROTOCOL } from "../../src/realtime-contract";
+import type { RealtimeMessage } from "../../src/realtime-contract";
 import { hashOverlayToken } from "../../src/worker/auth/crypto";
-import { realtimeRouter } from "../../src/worker/realtime";
+import { publishOverlayChanged, realtimeRouter } from "../../src/worker/realtime";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -146,5 +147,28 @@ describe("overlay realtime route", () => {
     expect(noUpgrade.status).toBe(426);
     expect(noVersion.status).toBe(426);
     expect(state.fetchStub).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed overlay.changed publish once with the same message", async () => {
+    const publishedBatches: RealtimeMessage[][] = [];
+    const publish = vi.fn((messages: readonly RealtimeMessage[]) => {
+      publishedBatches.push([...messages]);
+      return publishedBatches.length === 1
+        ? Promise.reject(new Error("Durable Object temporarily unavailable"))
+        : Promise.resolve();
+    });
+    const namespace = {
+      idFromName: vi.fn(() => "object:kanal-a"),
+      get: vi.fn(() => ({ publish })),
+    } as unknown as Env["CHANNEL"];
+
+    await publishOverlayChanged(namespace, "kanal-a", [{ overlayId: "overlay-a", revision: 2 }]);
+
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publishedBatches[0]).toEqual(publishedBatches[1]);
+    expect(publishedBatches[0]?.[0]).toMatchObject({
+      type: "overlay.changed",
+      payload: { overlayId: "overlay-a", revision: 2 },
+    });
   });
 });

@@ -161,9 +161,12 @@ describe("lookupAndRefreshStreamState", () => {
       const result = await lookupAndRefreshStreamState(environment(database, publish), "kanal-a", NOW, helixResponse(true, startedAt));
 
       expect(result).toMatchObject({ state: "online", startedAt });
-      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish).toHaveBeenCalledTimes(2);
       expect(publish.mock.calls[0]?.[0]).toMatchObject([
         { type: "variables.changed", payload: { set: [{ name: "score", value: 0 }], removed: [] } },
+      ]);
+      expect(publish.mock.calls[1]?.[0]).toMatchObject([
+        { type: "stream.state.changed", payload: { state: "online", startedAt } },
       ]);
       await expect(database.prepare("SELECT value FROM channel_variables WHERE name = 'score'").first())
         .resolves.toEqual({ value: 0 });
@@ -232,6 +235,48 @@ describe("lookupAndRefreshStreamState", () => {
       await expect(database.prepare(
         "SELECT state, source, started_at FROM channel_stream_state WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ state: "online", source: "helix", started_at: "2026-09-23T11:58:00.000Z" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("pushes a changed stream state to open panels after a Helix refresh", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "offline", STALE, "helix");
+      await withAppToken(database);
+      const publish = vi.fn();
+
+      await lookupAndRefreshStreamState(environment(database, publish), "kanal-a", NOW,
+        helixResponse(true, "2026-09-23T11:58:00.000Z"));
+
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([{
+        type: "stream.state.changed",
+        channelId: "kanal-a",
+        payload: { state: "online", startedAt: "2026-09-23T11:58:00.000Z" },
+      }]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("publishes a successful unchanged refresh so panels can update the observation age", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "offline", STALE, "helix");
+      await withAppToken(database);
+      const publish = vi.fn();
+
+      await lookupAndRefreshStreamState(environment(database, publish), "kanal-a", NOW, helixResponse(false));
+
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([{
+        type: "stream.state.changed",
+        payload: { state: "offline", changedAt: NOW, checkedAt: NOW },
+      }]);
     } finally {
       database.close();
     }
@@ -325,9 +370,10 @@ describe("lookupAndRefreshStreamState", () => {
          VALUES ('kanal-a', 1, NULL, 1, 1, NULL, 1, ?)`,
       ).bind(STALE).run();
       await withAppToken(database);
+      const publish = vi.fn();
 
       const result = await lookupAndRefreshStreamState(
-        { ...environment(database), DB: databaseWithStreamTransitionAfterRefresh(database) },
+        { ...environment(database, publish), DB: databaseWithStreamTransitionAfterRefresh(database) },
         "kanal-a",
         NOW,
         helixResponse(false),
@@ -345,6 +391,15 @@ describe("lookupAndRefreshStreamState", () => {
       ).first()).resolves.toEqual({
         muted: 1, mute_until_stream_end: 1, paused: 1, pause_until_stream_end: 1, updated_at: "2026-09-23T12:00:01.000Z",
       });
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([{
+        type: "stream.state.changed",
+        payload: {
+          controls: {
+            mute: { active: true, mode: "until_stream_end" },
+            pause: { active: true, mode: "until_stream_end" },
+          },
+        },
+      }]);
     } finally {
       database.close();
     }
