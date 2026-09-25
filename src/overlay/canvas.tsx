@@ -43,19 +43,26 @@ const renderElement = (
   if (value === undefined) return null;
 
   const scale = element.scalePercent / 100;
-  // Width must stay intrinsic and independent of `left`/`x`: an absolutely positioned box
-  // otherwise shrinks to the remaining space near the canvas edge, so the measured size (and
-  // thus the editor's position clamp) would depend on where the element sits.
+  // Width must stay intrinsic and independent of `left`/`x` in the composition: an absolutely
+  // positioned box otherwise shrinks to the remaining space near the canvas edge, so the measured
+  // size (and thus the editor's position clamp) would depend on where the element sits. The
+  // isolated/legacy path (a single element at its standalone origin, e.g. an unbound #text= link
+  // rendered into a narrow OBS browser source) keeps its original shrink-to-fit/wrap behavior.
   const style: CSSProperties = {
     position: isolated ? "relative" : "absolute",
     left: isolated ? 0 : element.x,
     top: isolated ? 0 : element.y,
-    width: "max-content",
+    ...(isolated ? {} : { width: "max-content" }),
     transform: `scale(${String(scale)})`,
     transformOrigin: "top left",
     zIndex: element.z,
   };
-  return <div data-element={element.id} data-kind={element.kind} style={style}>
+  return <div
+    data-element={element.id}
+    data-kind={element.kind}
+    className={isolated ? undefined : "brobot-overlay-composition-element"}
+    style={style}
+  >
     <VariableValueView
       name={element.variableName}
       text={element.text}

@@ -153,7 +153,7 @@ describe("Overlay composition editor", () => {
     const outputMarkup = output.container.querySelector(".brobot-overlay")?.outerHTML;
     expect(previewMarkup).toBe(outputMarkup);
     expect(previewDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain(".brobot-variable");
-    expect(previewMarkup).toMatchInlineSnapshot(`"<div class="brobot-overlay" style="position: relative; width: 1280px; height: 720px;"><div data-element="element-a" data-kind="variable" style="position: absolute; left: 30px; top: 49px; width: max-content; transform: scale(1); transform-origin: top left; z-index: 0;"><div class="brobot-variable" data-variable="score"><span class="brobot-variable__text">Score: </span><span class="brobot-variable__value">1,234</span></div></div></div>"`);
+    expect(previewMarkup).toMatchInlineSnapshot(`"<div class="brobot-overlay" style="position: relative; width: 1280px; height: 720px;"><div data-element="element-a" data-kind="variable" class="brobot-overlay-composition-element" style="position: absolute; left: 30px; top: 49px; width: max-content; transform: scale(1); transform-origin: top left; z-index: 0;"><div class="brobot-variable" data-variable="score"><span class="brobot-variable__text">Score: </span><span class="brobot-variable__value">1,234</span></div></div></div>"`);
     output.unmount();
 
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
