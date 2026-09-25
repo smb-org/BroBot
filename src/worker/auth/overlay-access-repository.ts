@@ -35,6 +35,7 @@ export interface OverlayAccessListEntry {
   expiresAt: string | null;
   revokedAt: string | null;
   lastUsedAt: string | null;
+  recoverable: boolean;
 }
 
 interface OverlayAccessRow {
@@ -101,12 +102,12 @@ export const listOverlayAccesses = async (
   overlayId: string,
 ): Promise<OverlayAccessListEntry[]> => {
   const result = await db.prepare(
-    `SELECT token_id, overlay_id, label, created_at, expires_at, revoked_at, last_used_at
+    `SELECT token_id, overlay_id, secret_envelope, label, created_at, expires_at, revoked_at, last_used_at
        FROM overlay_tokens
       WHERE channel_id = ? AND overlay_id = ?
       ORDER BY created_at DESC, token_id DESC`,
   ).bind(channelId, overlayId).all<Pick<OverlayAccessRow,
-    "token_id" | "overlay_id" | "label" | "created_at" | "expires_at" | "revoked_at" | "last_used_at">>();
+    "token_id" | "overlay_id" | "secret_envelope" | "label" | "created_at" | "expires_at" | "revoked_at" | "last_used_at">>();
   return result.results.flatMap((row) => row.overlay_id === null ? [] : [{
     tokenId: row.token_id,
     overlayId: row.overlay_id,
@@ -115,6 +116,7 @@ export const listOverlayAccesses = async (
     expiresAt: row.expires_at,
     revokedAt: row.revoked_at,
     lastUsedAt: row.last_used_at,
+    recoverable: typeof row.secret_envelope === "string" && row.secret_envelope.length > 0,
   }]);
 };
 

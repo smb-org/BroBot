@@ -199,7 +199,7 @@ export const OverlayStatusView = (): ReactElement | null => {
 };
 
 /** Keeps the version view as the default and loads the variable widget only when configured. */
-export const OverlayEntry = (): ReactElement => {
+export const OverlayEntry = ({ onTokenBound }: { onTokenBound?: () => void }): ReactElement => {
   const [config, setConfig] = useState(readOverlayEntryConfig);
 
   useEffect(() => {
@@ -210,6 +210,10 @@ export const OverlayEntry = (): ReactElement => {
 
   if (config.kind === "status") return <OverlayStatusView />;
   return <Suspense fallback={null}>
-    <LazyVariableOverlay key={`${config.token ?? ""}:${config.name}:${config.text}`} {...config} />
+    <LazyVariableOverlay
+      key={`${config.token ?? ""}:${config.name}:${config.text}`}
+      {...config}
+      {...(onTokenBound === undefined ? {} : { onTokenBound })}
+    />
   </Suspense>;
 };

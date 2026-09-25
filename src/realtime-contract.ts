@@ -7,6 +7,8 @@ export type RealtimeProtocolVersion = 1;
 
 export const REALTIME_PROTOCOL = "brobot.v1";
 export const OVERLAY_TOKEN_SUBPROTOCOL_PREFIX = "brobot.token.";
+export const OVERLAY_ACCESS_BOUND_CLOSE_CODE = 4005;
+export const OVERLAY_ACCESS_BOUND_CLOSE_REASON = "Overlay access bound";
 
 export const REALTIME_MESSAGE_TYPES = [
   "system.hello",

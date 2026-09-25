@@ -134,6 +134,75 @@ describe("OverlayShell and OverlayCanvas", () => {
     });
   });
 
+  it("renders stored text for a bound legacy token and ignores fragment configuration", async () => {
+    window.history.replaceState(null, "", "/overlay#token=fictional-token&var=score&text=Fragment%20override%3A%20%7Bvalue%7D");
+    const payload = {
+      language: "en",
+      overlay: {
+        id: "imported-overlay", revision: 1, width: 1920, height: 1080, css: "",
+        elements: [{ ...element("imported-element", 0, 0, 100, 0), text: "Imported: {value}" }],
+      },
+      variables: { score: 1200 },
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+
+    await waitFor(() => expect(container.querySelector('[data-element="imported-element"]')).not.toBeNull());
+    expect(container.querySelector('[data-element="imported-element"] .brobot-variable__text')).toHaveTextContent("Imported:");
+    expect(container).not.toHaveTextContent("Fragment override");
+    expect(fetcher).toHaveBeenCalledWith("/api/overlay/bootstrap", expect.objectContaining({
+      headers: { Authorization: "Bearer fictional-token" },
+    }));
+  });
+
+  it.each([
+    ["without a placeholder", "Legacy score"],
+    ["with multiple placeholders", "Legacy {value} plus {value}"],
+  ])("preserves legacy rendering %s after the token is bound", async (_description, legacyText) => {
+    const fragment = new URLSearchParams({ token: "fictional-token", var: "score", text: legacyText });
+    window.history.replaceState(null, "", `/overlay#${fragment.toString()}`);
+    let bootstrapRequests = 0;
+    const boundPayload = {
+      language: "en",
+      overlay: {
+        id: "imported-overlay", revision: 1, width: 1920, height: 1080, css: "",
+        elements: [{ ...element("imported-element", 0, 0, 100, 0), text: legacyText }],
+      },
+      variables: { score: 1200 },
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      if (input === "/api/overlay/bootstrap") {
+        bootstrapRequests += 1;
+        return Promise.resolve(new Response(JSON.stringify(bootstrapRequests === 1
+          ? { language: "en", overlay: null, variables: { score: 1200 } }
+          : boundPayload), { status: 200 }));
+      }
+      if (input === "/api/overlay/variables/score") {
+        return Promise.resolve(new Response(JSON.stringify({ name: "score", value: 1200 }), {
+          status: 200,
+          headers: { "Content-Language": "en" },
+        }));
+      }
+      const requestDescription = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+      return Promise.reject(new Error(`Unexpected request ${requestDescription}.`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    await waitFor(() => expect(realtimeCallbacks?.onTokenBound).toBeTypeOf("function"));
+    await waitFor(() => expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("1,200"));
+    const legacyRendering = container.textContent;
+    const legacyCallbacks = realtimeCallbacks;
+
+    act(() => legacyCallbacks?.onTokenBound?.());
+
+    await waitFor(() => expect(container.querySelector('[data-element="imported-element"]')).not.toBeNull());
+    expect(bootstrapRequests).toBe(2);
+    expect(container.textContent).toBe(legacyRendering);
+  });
+
   it("updates live values, debounces overlay changes, and reloads after reconnect", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(overlayPayload()));
     vi.stubGlobal("fetch", fetcher);

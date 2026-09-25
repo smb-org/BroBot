@@ -14,6 +14,7 @@ interface OverlayVariableProperties {
   token: string | null;
   name: string;
   text: string;
+  onTokenBound?: () => void;
 }
 
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -61,7 +62,7 @@ const hasVariableHint = (
   name: string,
 ): boolean => message.payload.set.some((variable) => variable.name === name) || message.payload.removed.includes(name);
 
-export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties): ReactElement | null => {
+export const VariableOverlay = ({ token, name, text, onTokenBound }: OverlayVariableProperties): ReactElement | null => {
   const [current, setCurrent] = useState<OverlayVariableValue | null>(null);
 
   useEffect(() => {
@@ -158,6 +159,14 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
       stopRetryTimer();
       setCurrent(null);
     }, {
+      onTokenBound: () => {
+        invalidatePendingLoad();
+        stopReloadTimer();
+        stopMaximumReloadTimer();
+        stopRetryTimer();
+        setCurrent(null);
+        onTokenBound?.();
+      },
       onOpen: () => {
         stopRetryTimer();
         retryAttempt = 0;
@@ -182,7 +191,7 @@ export const VariableOverlay = ({ token, name, text }: OverlayVariableProperties
       stopRetryTimer();
       stopRealtime();
     };
-  }, [name, token]);
+  }, [name, onTokenBound, token]);
 
   if (token === null || !VARIABLE_NAME_PATTERN.test(name) || current === null || current.language === null) return null;
   return <VariableValueView name={name} text={text} value={current.value} language={current.language} />;
