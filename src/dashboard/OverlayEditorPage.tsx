@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { OVERLAY_ELEMENT_MAXIMUM_COUNT } from "../contracts/values";
@@ -28,7 +28,7 @@ import {
 } from "./api";
 import { apiErrorText, dashboardLanguage, overlaysTexts } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, NumberField, SaveBar, Select, Switch, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, NumberField, SaveBar, Select, Switch, type IconName, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -87,6 +87,87 @@ interface PreviewEventHandlers {
   pointerUp: (event: PointerEvent) => void;
   keyDown: (event: KeyboardEvent) => void;
 }
+
+type OverlayStyleSection = "font" | "outline" | "shadow" | "background";
+
+interface StyleDisclosureSectionProperties {
+  section: OverlayStyleSection;
+  icon: IconName;
+  title: string;
+  summary: string;
+  defaultExpanded: boolean;
+  children: ReactNode;
+}
+
+function StyleDisclosureSection({ section, icon, title, summary, defaultExpanded, children }: StyleDisclosureSectionProperties): ReactElement {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const panelId = `overlay-editor-style-section-${section}`;
+  return <section className="overlay-editor__style-section" data-style-section={section}>
+    <h3 className="overlay-editor__style-section-heading">
+      <button type="button" className="overlay-editor__style-section-toggle" aria-expanded={expanded} aria-controls={panelId} onClick={() => { setExpanded((current) => !current); }}>
+        <span className="overlay-editor__style-section-icon" data-style-icon={section}><Icon name={icon} size={16} /></span>
+        <span className="overlay-editor__style-section-title">{title}</span>
+        <span className="overlay-editor__style-section-summary" title={summary}>{summary}</span>
+        <span className="overlay-editor__style-section-chevron" aria-hidden="true" />
+      </button>
+    </h3>
+    <div className="overlay-editor__style-section-fields" id={panelId} hidden={!expanded}>{children}</div>
+  </section>;
+}
+
+const styleSectionHasValues = (style: OverlayStyle, section: OverlayStyleSection): boolean => {
+  switch (section) {
+    case "font":
+      return style.fontFamily !== undefined || style.fontSize !== undefined || style.fontWeight !== undefined || style.color !== undefined
+        || style.textAlign !== undefined || style.lineHeight !== undefined || style.letterSpacing !== undefined;
+    case "outline":
+      return style.stroke !== undefined;
+    case "shadow":
+      return style.shadow !== undefined;
+    case "background":
+      return style.background !== undefined || style.padding !== undefined || style.borderRadius !== undefined;
+  }
+};
+
+const styleSectionSummary = (
+  style: OverlayStyle,
+  section: OverlayStyleSection,
+  unsetLabel: string,
+  leftAlignmentLabel: string,
+  centerAlignmentLabel: string,
+  rightAlignmentLabel: string,
+): string => {
+  const values: string[] = [];
+  const add = (value: string | undefined): void => { if (value !== undefined) values.push(value); };
+  switch (section) {
+    case "font":
+      add(style.fontFamily);
+      add(style.fontSize === undefined ? undefined : `${String(style.fontSize)} px`);
+      add(style.fontWeight === undefined ? undefined : String(style.fontWeight));
+      add(style.color);
+      add(style.textAlign === "left" ? leftAlignmentLabel : style.textAlign === "center" ? centerAlignmentLabel : style.textAlign === "right" ? rightAlignmentLabel : undefined);
+      add(style.lineHeight === undefined ? undefined : String(style.lineHeight));
+      add(style.letterSpacing === undefined ? undefined : `${String(style.letterSpacing)} px`);
+      break;
+    case "outline":
+      add(style.stroke?.width === undefined ? undefined : `${String(style.stroke.width)} px`);
+      add(style.stroke?.color);
+      break;
+    case "shadow":
+      add(style.shadow?.x === undefined ? undefined : `X ${String(style.shadow.x)} px`);
+      add(style.shadow?.y === undefined ? undefined : `Y ${String(style.shadow.y)} px`);
+      add(style.shadow?.blur === undefined ? undefined : `${String(style.shadow.blur)} px`);
+      add(style.shadow?.color);
+      break;
+    case "background":
+      add(style.background?.color);
+      add(style.background?.opacityPercent === undefined ? undefined : `${String(style.background.opacityPercent)}%`);
+      add(style.padding === undefined ? undefined : `${String(style.padding)} px`);
+      add(style.borderRadius === undefined ? undefined : `${String(style.borderRadius)} px`);
+      break;
+  }
+  return values.length === 0 ? unsetLabel : values.join(" · ");
+};
 
 const saveableElement = (element: PanelOverlayElement): PanelOverlayElement => ({
   id: element.id,
@@ -359,6 +440,11 @@ function OverlayEditorWorkspace({
     const root = frameDocument.createElement("div");
     root.id = "root";
     frameDocument.body.replaceChildren(root);
+    const boundsHost = frameDocument.createElement("div");
+    boundsHost.dataset.brobotEditorBoundsLayer = "";
+    Object.assign(boundsHost.style, { position: "fixed", inset: "0", zIndex: "2147483647", pointerEvents: "none" });
+    boundsHost.attachShadow({ mode: "open" });
+    frameDocument.body.appendChild(boundsHost);
     const variableStyle = frameDocument.createElement("style");
     variableStyle.textContent = variableViewCss;
     frameDocument.head.appendChild(variableStyle);
@@ -393,6 +479,35 @@ function OverlayEditorWorkspace({
     }
     style.textContent = sanitizeOverlayCss(draft.css);
   }, [draft.css, previewFrameRoot]);
+
+  useLayoutEffect(() => {
+    const root = previewFrameRootRef.current;
+    if (root === null) return;
+    const boundsHost = root.ownerDocument.querySelector<HTMLElement>("[data-brobot-editor-bounds-layer]");
+    if (boundsHost === null) return;
+    const boundsRoot = boundsHost.shadowRoot;
+    if (boundsRoot === null) return;
+    const mutedBoundsColor = getComputedStyle(document.documentElement).getPropertyValue("--brand-line").trim() || "#60758c";
+    const selectedBoundsColor = getComputedStyle(document.documentElement).getPropertyValue("--brand-text").trim() || "#9bc3ed";
+    const bounds = Array.from(root.querySelectorAll<HTMLElement>("[data-element]"), (element) => {
+      const elementId = element.dataset.element;
+      if (elementId === undefined) return null;
+      const rect = element.getBoundingClientRect();
+      const bound = root.ownerDocument.createElement("div");
+      bound.className = "bound";
+      bound.dataset.brobotEditorBound = elementId;
+      bound.dataset.selected = String(elementId === selectedElementId);
+      const selected = elementId === selectedElementId;
+      Object.assign(bound.style, {
+        position: "absolute", boxSizing: "border-box", pointerEvents: "none",
+        left: `${String(rect.left)}px`, top: `${String(rect.top)}px`,
+        width: `${String(rect.width)}px`, height: `${String(rect.height)}px`,
+        border: `2px ${selected ? "solid" : "dashed"} ${selected ? selectedBoundsColor : mutedBoundsColor}`,
+      });
+      return bound;
+    }).filter((bound): bound is HTMLDivElement => bound !== null);
+    boundsRoot.replaceChildren(...bounds);
+  }, [draft, liveVariables, previewFrameRoot, selectedElementId]);
 
   useEffect(() => {
     if (selectedElementId === null || previewFrameRoot === null) return;
@@ -520,11 +635,12 @@ function OverlayEditorWorkspace({
     label: string,
     value: number | undefined,
     onChange: (next: number | undefined) => void,
-    options: { min?: number; max?: number; unit?: string } = {},
+    options: { min?: number; max?: number; unit?: string; ariaLabel?: string } = {},
   ): ReactElement => <NumberField id={id} label={label} value={value ?? ""}
     {...(options.min === undefined ? {} : { min: options.min })}
     {...(options.max === undefined ? {} : { max: options.max })}
     {...(options.unit === undefined ? {} : { unit: options.unit })}
+    {...(options.ariaLabel === undefined ? {} : { ariaLabel: options.ariaLabel })}
     disabled={!canEdit || styleLocked} onChange={(next) => {
       if (typeof next !== "number") {
         onChange(undefined);
@@ -851,13 +967,13 @@ function OverlayEditorWorkspace({
         <div className="overlay-editor__editor-tabs" role="tablist" aria-label={labels.editorProperties}>
           <button type="button" role="tab" id="overlay-editor-tab-properties" data-editor-tab="properties" tabIndex={editorTab === "properties" ? 0 : -1}
             aria-selected={editorTab === "properties"} aria-controls="overlay-editor-panel-properties" onKeyDown={handleEditorTabKeyDown}
-            onClick={() => { setEditorTab("properties"); }}><Icon name="tabSettings" size={16} />{labels.editorPropertiesTab}</button>
+            aria-label={labels.editorPropertiesTab} onClick={() => { setEditorTab("properties"); }}><Icon name="tabSettings" size={16} /><span>{labels.editorPropertiesTabShort}</span></button>
           <button type="button" role="tab" id="overlay-editor-tab-style" data-editor-tab="style" tabIndex={editorTab === "style" ? 0 : -1}
             aria-selected={editorTab === "style"} aria-controls="overlay-editor-panel-style" onKeyDown={handleEditorTabKeyDown}
-            onClick={() => { setEditorTab("style"); }}><Icon name="tabAdvanced" size={16} />{labels.editorStyleTab}</button>
+            aria-label={labels.editorStyleTab} onClick={() => { setEditorTab("style"); }}><Icon name="tabAdvanced" size={16} /><span>{labels.editorStyleTabShort}</span></button>
           <button type="button" role="tab" id="overlay-editor-tab-css" data-editor-tab="css" tabIndex={editorTab === "css" ? 0 : -1}
             aria-selected={editorTab === "css"} aria-controls="overlay-editor-panel-css" onKeyDown={handleEditorTabKeyDown}
-            onClick={() => { setEditorTab("css"); }}><Icon name="tabCode" size={16} />{labels.editorCssTab}</button>
+            aria-label={labels.editorCssTab} onClick={() => { setEditorTab("css"); }}><Icon name="tabCode" size={16} /><span>{labels.editorCssTabShort}</span></button>
         </div>
         <div role="tabpanel" id="overlay-editor-panel-properties" aria-labelledby="overlay-editor-tab-properties" hidden={editorTab !== "properties"}>
         {initialNotice === null ? null : <p className="form-error" role="alert">{initialNotice.kind === "element-limit" ? labels.editorElementLimit : labels.editorMissingPrefill(initialNotice.name)}</p>}
@@ -914,64 +1030,102 @@ function OverlayEditorWorkspace({
                   {...(canManage ? {} : { title: labels.editorStyleReadOnlyReason, describedBy: "overlay-style-disabled-reason" })}
                   onClick={rewriteStylesFromEditor}>{labels.editorStyleRewrite}</Button>
               </div> : null}
-              <div className="overlay-editor__style-grid">
-                <Select id="overlay-editor-style-system-font" label={labels.editorStyleFontSystem}
-                  value={SYSTEM_FONT_FAMILIES.includes(targetStyle.fontFamily as (typeof SYSTEM_FONT_FAMILIES)[number]) ? targetStyle.fontFamily ?? null : null}
-                  disabled={!canEdit || styleLocked}
-                  {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
-                  options={SYSTEM_FONT_FAMILIES.map((fontFamily) => ({ value: fontFamily, label: fontFamily }))}
-                  onChange={(value) => { if (value !== null) updateStyleProperty("fontFamily", value); }} />
-                <Field id="overlay-editor-style-font-family" label={labels.editorStyleFontFamily} hint={labels.editorStyleFontCustomHint}
-                  value={targetStyle.fontFamily ?? ""} maxLength={80}
-                  countLabel={labels.editorStyleFontFamilyCount}
-                  disabled={!canEdit || styleLocked} onChange={(value) => { updateStyleProperty("fontFamily", value.length === 0 ? undefined : value); }} />
-                {renderStyleNumber("overlay-editor-style-font-size", labels.editorStyleFontSize, targetStyle.fontSize,
-                  (value) => { updateStyleProperty("fontSize", value); }, { min: 1, max: 500, unit: "px" })}
-                <Select id="overlay-editor-style-font-weight" label={labels.editorStyleFontWeight}
-                  value={targetStyle.fontWeight === undefined ? null : String(targetStyle.fontWeight)} disabled={!canEdit || styleLocked}
-                  {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
-                  options={[400, 500, 600, 700].map((weight) => ({ value: String(weight), label: String(weight) }))}
-                  onChange={(value) => { updateStyleProperty("fontWeight", value === null ? undefined : Number(value) as 400 | 500 | 600 | 700); }} />
-                <ColorField id="overlay-editor-style-color" label={labels.editorStyleColor} value={targetStyle.color}
-                  unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
-                  onChange={(value) => { updateStyleProperty("color", value); }} />
-                <Select id="overlay-editor-style-alignment" label={labels.editorStyleAlignment} hint={labels.editorStyleAlignmentHint}
-                  value={targetStyle.textAlign ?? null} disabled={!canEdit || styleLocked}
-                  {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
-                  options={[
-                    { value: "left", label: labels.editorStyleLeft },
-                    { value: "center", label: labels.editorStyleCenter },
-                    { value: "right", label: labels.editorStyleRight },
-                  ]}
-                  onChange={(value) => { updateStyleProperty("textAlign", value === "left" || value === "center" || value === "right" ? value : undefined); }} />
-                {renderStyleNumber("overlay-editor-style-line-height", labels.editorStyleLineHeight, targetStyle.lineHeight,
-                  (value) => { updateStyleProperty("lineHeight", value); }, { min: 0.5, max: 3 })}
-                {renderStyleNumber("overlay-editor-style-letter-spacing", labels.editorStyleLetterSpacing, targetStyle.letterSpacing,
-                  (value) => { updateStyleProperty("letterSpacing", value); }, { min: -100, max: 100, unit: "px" })}
-                {renderStyleNumber("overlay-editor-style-stroke-width", labels.editorStyleStrokeWidth, targetStyle.stroke?.width,
-                  (value) => { updateStyleProperty("stroke", value === undefined ? undefined : { width: value, color: targetStyle.stroke?.color ?? "#000000" }); }, { min: 0.1, max: 20, unit: "px" })}
-                <ColorField id="overlay-editor-style-stroke-color" label={labels.editorStyleStrokeColor} value={targetStyle.stroke?.color}
-                  unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
-                  onChange={(value) => { updateStyleProperty("stroke", value === undefined ? undefined : { width: targetStyle.stroke?.width ?? 2, color: value }); }} />
-                {renderStyleNumber("overlay-editor-style-shadow-x", labels.editorStyleShadowX, targetStyle.shadow?.x,
-                  (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: value, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px" })}
-                {renderStyleNumber("overlay-editor-style-shadow-y", labels.editorStyleShadowY, targetStyle.shadow?.y,
-                  (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: value, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px" })}
-                {renderStyleNumber("overlay-editor-style-shadow-blur", labels.editorStyleShadowBlur, targetStyle.shadow?.blur,
-                  (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: value, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: 0, max: 100, unit: "px" })}
-                <ColorField id="overlay-editor-style-shadow-color" label={labels.editorStyleShadowColor} value={targetStyle.shadow?.color}
-                  unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
-                  onChange={(value) => { updateStyleProperty("shadow", value === undefined ? undefined : { x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: value }); }} />
-                <ColorField id="overlay-editor-style-background-color" label={labels.editorStyleBackgroundColor} value={targetStyle.background?.color}
-                  unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
-                  onChange={(value) => { updateStyleProperty("background", value === undefined ? undefined : { color: value, opacityPercent: targetStyle.background?.opacityPercent ?? 100 }); }} />
-                {renderStyleNumber("overlay-editor-style-background-opacity", labels.editorStyleBackgroundOpacity, targetStyle.background?.opacityPercent,
-                  (value) => { updateStyleProperty("background", value === undefined ? undefined : { color: targetStyle.background?.color ?? "#000000", opacityPercent: Math.round(Math.max(0, Math.min(100, value))) }); }, { min: 0, max: 100, unit: "%" })}
-                {renderStyleNumber("overlay-editor-style-padding", labels.editorStylePadding, targetStyle.padding,
-                  (value) => { updateStyleProperty("padding", value); }, { min: 0, max: 100, unit: "px" })}
-                {renderStyleNumber("overlay-editor-style-radius", labels.editorStyleRadius, targetStyle.borderRadius,
-                  (value) => { updateStyleProperty("borderRadius", value); }, { min: 0, max: 100, unit: "px" })}
-              </div>
+              <StyleDisclosureSection key={`${effectiveStyleTargetId}:font`} section="font" icon="styleFont" title={labels.editorStyleFontSection}
+                summary={styleSectionSummary(targetStyle, "font", labels.editorStyleSectionUnset, labels.editorStyleLeft, labels.editorStyleCenter, labels.editorStyleRight)} defaultExpanded>
+                <div className="overlay-editor__style-grid">
+                  {/* Own rows, not a compact pair: the custom-name hint and character
+                      counter need the full panel width, or the hint wraps one syllable
+                      per line in the ~280px properties column (#237). */}
+                  <Select id="overlay-editor-style-system-font" label={labels.editorStyleFontSystem}
+                    value={SYSTEM_FONT_FAMILIES.includes(targetStyle.fontFamily as (typeof SYSTEM_FONT_FAMILIES)[number]) ? targetStyle.fontFamily ?? null : null}
+                    disabled={!canEdit || styleLocked}
+                    {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
+                    options={SYSTEM_FONT_FAMILIES.map((fontFamily) => ({ value: fontFamily, label: fontFamily }))}
+                    onChange={(value) => { if (value !== null) updateStyleProperty("fontFamily", value); }} />
+                  <Field id="overlay-editor-style-font-family" label={labels.editorStyleFontFamily} hint={labels.editorStyleFontCustomHint}
+                    value={targetStyle.fontFamily ?? ""} maxLength={80}
+                    countLabel={labels.editorStyleFontFamilyCount}
+                    disabled={!canEdit || styleLocked} onChange={(value) => { updateStyleProperty("fontFamily", value.length === 0 ? undefined : value); }} />
+                  <div className="overlay-editor__style-pair">
+                    {renderStyleNumber("overlay-editor-style-font-size", labels.editorStyleFontSize, targetStyle.fontSize,
+                      (value) => { updateStyleProperty("fontSize", value); }, { min: 1, max: 500, unit: "px" })}
+                    <Select id="overlay-editor-style-font-weight" label={labels.editorStyleFontWeight}
+                      value={targetStyle.fontWeight === undefined ? null : String(targetStyle.fontWeight)} disabled={!canEdit || styleLocked}
+                      {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
+                      options={[400, 500, 600, 700].map((weight) => ({ value: String(weight), label: String(weight) }))}
+                      onChange={(value) => { updateStyleProperty("fontWeight", value === null ? undefined : Number(value) as 400 | 500 | 600 | 700); }} />
+                  </div>
+                  <div className="overlay-editor__style-pair">
+                    <ColorField id="overlay-editor-style-color" label={labels.editorStyleColor} value={targetStyle.color}
+                      unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                      onChange={(value) => { updateStyleProperty("color", value); }} />
+                    <Select id="overlay-editor-style-alignment" label={labels.editorStyleAlignment} hint={labels.editorStyleAlignmentHint}
+                      value={targetStyle.textAlign ?? null} disabled={!canEdit || styleLocked}
+                      {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
+                      options={[
+                        { value: "left", label: labels.editorStyleLeft },
+                        { value: "center", label: labels.editorStyleCenter },
+                        { value: "right", label: labels.editorStyleRight },
+                      ]}
+                      onChange={(value) => { updateStyleProperty("textAlign", value === "left" || value === "center" || value === "right" ? value : undefined); }} />
+                  </div>
+                  <div className="overlay-editor__style-pair">
+                    {renderStyleNumber("overlay-editor-style-line-height", labels.editorStyleLineHeight, targetStyle.lineHeight,
+                      (value) => { updateStyleProperty("lineHeight", value); }, { min: 0.5, max: 3 })}
+                    {renderStyleNumber("overlay-editor-style-letter-spacing", labels.editorStyleLetterSpacing, targetStyle.letterSpacing,
+                      (value) => { updateStyleProperty("letterSpacing", value); }, { min: -100, max: 100, unit: "px" })}
+                  </div>
+                </div>
+              </StyleDisclosureSection>
+              <StyleDisclosureSection key={`${effectiveStyleTargetId}:outline`} section="outline" icon="styleOutline" title={labels.editorStyleOutlineSection}
+                summary={styleSectionSummary(targetStyle, "outline", labels.editorStyleSectionUnset, labels.editorStyleLeft, labels.editorStyleCenter, labels.editorStyleRight)} defaultExpanded={styleSectionHasValues(targetStyle, "outline")}>
+                <div className="overlay-editor__style-grid">
+                  <div className="overlay-editor__style-pair">
+                    {renderStyleNumber("overlay-editor-style-stroke-width", labels.editorStyleStrokeWidth, targetStyle.stroke?.width,
+                      (value) => { updateStyleProperty("stroke", value === undefined ? undefined : { width: value, color: targetStyle.stroke?.color ?? "#000000" }); }, { min: 0.1, max: 20, unit: "px" })}
+                    <ColorField id="overlay-editor-style-stroke-color" label={labels.editorStyleStrokeColor} value={targetStyle.stroke?.color}
+                      unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                      onChange={(value) => { updateStyleProperty("stroke", value === undefined ? undefined : { width: targetStyle.stroke?.width ?? 2, color: value }); }} />
+                  </div>
+                </div>
+              </StyleDisclosureSection>
+              <StyleDisclosureSection key={`${effectiveStyleTargetId}:shadow`} section="shadow" icon="styleShadow" title={labels.editorStyleShadowSection}
+                summary={styleSectionSummary(targetStyle, "shadow", labels.editorStyleSectionUnset, labels.editorStyleLeft, labels.editorStyleCenter, labels.editorStyleRight)} defaultExpanded={styleSectionHasValues(targetStyle, "shadow")}>
+                <div className="overlay-editor__style-grid">
+                  {/* Short visible labels: the section heading already says "Shadow", and the
+                      full names ("Shadow X offset" etc.) still reach assistive tech via
+                      `ariaLabel`, which overrides the visible <label> as the accessible name (#237). */}
+                  <div className="overlay-editor__style-pair overlay-editor__style-pair--triple">
+                    {renderStyleNumber("overlay-editor-style-shadow-x", labels.editorStyleShadowXShort, targetStyle.shadow?.x,
+                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: value, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px", ariaLabel: labels.editorStyleShadowX })}
+                    {renderStyleNumber("overlay-editor-style-shadow-y", labels.editorStyleShadowYShort, targetStyle.shadow?.y,
+                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: value, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px", ariaLabel: labels.editorStyleShadowY })}
+                    {renderStyleNumber("overlay-editor-style-shadow-blur", labels.editorStyleShadowBlurShort, targetStyle.shadow?.blur,
+                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: value, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: 0, max: 100, unit: "px", ariaLabel: labels.editorStyleShadowBlur })}
+                  </div>
+                  <ColorField id="overlay-editor-style-shadow-color" label={labels.editorStyleShadowColor} value={targetStyle.shadow?.color}
+                    unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                    onChange={(value) => { updateStyleProperty("shadow", value === undefined ? undefined : { x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: value }); }} />
+                </div>
+              </StyleDisclosureSection>
+              <StyleDisclosureSection key={`${effectiveStyleTargetId}:background`} section="background" icon="styleBackground" title={labels.editorStyleBackgroundSection}
+                summary={styleSectionSummary(targetStyle, "background", labels.editorStyleSectionUnset, labels.editorStyleLeft, labels.editorStyleCenter, labels.editorStyleRight)} defaultExpanded={styleSectionHasValues(targetStyle, "background")}>
+                <div className="overlay-editor__style-grid">
+                  <div className="overlay-editor__style-pair">
+                    <ColorField id="overlay-editor-style-background-color" label={labels.editorStyleBackgroundColor} value={targetStyle.background?.color}
+                      unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                      onChange={(value) => { updateStyleProperty("background", value === undefined ? undefined : { color: value, opacityPercent: targetStyle.background?.opacityPercent ?? 100 }); }} />
+                    {renderStyleNumber("overlay-editor-style-background-opacity", labels.editorStyleBackgroundOpacity, targetStyle.background?.opacityPercent,
+                      (value) => { updateStyleProperty("background", value === undefined ? undefined : { color: targetStyle.background?.color ?? "#000000", opacityPercent: Math.round(Math.max(0, Math.min(100, value))) }); }, { min: 0, max: 100, unit: "%" })}
+                  </div>
+                  <div className="overlay-editor__style-pair">
+                    {renderStyleNumber("overlay-editor-style-padding", labels.editorStylePadding, targetStyle.padding,
+                      (value) => { updateStyleProperty("padding", value); }, { min: 0, max: 100, unit: "px" })}
+                    {renderStyleNumber("overlay-editor-style-radius", labels.editorStyleRadius, targetStyle.borderRadius,
+                      (value) => { updateStyleProperty("borderRadius", value); }, { min: 0, max: 100, unit: "px" })}
+                  </div>
+                </div>
+              </StyleDisclosureSection>
               <div className="overlay-editor__style-actions">
                 <Button variant="neutral" disabled={!canEdit || styleLocked}
                   {...(canManage ? {} : { title: labels.editorStyleReadOnlyReason, describedBy: "overlay-style-disabled-reason" })}
@@ -1002,7 +1156,11 @@ function OverlayEditorWorkspace({
       invalidMessage={textIsValid ? labels.editorStyleCssLimit : labels.editorTextHint}
       warnings={dirty ? [labels.editorUnsaved] : []}
       warningStatusLabel={(_warnings, justSaved) => justSaved ? labels.editorSaved : labels.editorUnsaved}
-      footer={saved ? labels.editorSaved : dirty ? labels.editorUnsaved : labels.editorClean}
+      // The status line already shows the "unsaved"/"saved" message (via `warnings`/`warningStatusLabel`
+      // above); the footer would otherwise repeat the exact same text next to the buttons. Only the
+      // clean, no-changes-yet state has nothing on the status line, so the footer fills that gap instead
+      // of duplicating it.
+      {...(dirty || saved ? {} : { footer: labels.editorClean })}
       {...(canManage ? {} : { saveDescribedBy: "overlay-editor-readonly-reason", saveTitle: labels.editorReadOnly })}
       onSave={() => { void save(); }} onDiscard={discard}
       saveLabel={labels.editorSave} discardLabel={labels.editorDiscard} savedLabel={labels.editorSaved} pendingLabel={labels.editorSaving} />

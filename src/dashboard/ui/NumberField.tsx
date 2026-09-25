@@ -7,6 +7,11 @@ import { describedHelper, useDisabledFieldReason } from "./DisabledFieldReason";
 
 interface NumberFieldBaseProps {
   label: string;
+  /** Accessible name override for a short visible `label` (e.g. "X" inside a
+   *  "Shadow" section) that still needs a full name for assistive tech --
+   *  `aria-label` on the input takes precedence over the associated
+   *  `<label>` when computing the accessible name. */
+  ariaLabel?: string;
   hint?: string;
   error?: string;
   unit?: string;
@@ -33,6 +38,7 @@ export type NumberFieldProps = NumberFieldBaseProps & (
  */
 export function NumberField({
   label,
+  ariaLabel,
   hint,
   error,
   unit,
@@ -56,6 +62,7 @@ export function NumberField({
   const input = (
     <NumberInput
       label={label}
+      aria-label={ariaLabel}
       description={hint === undefined && disabledReason === null ? undefined : <span className="ui-number-field__description">{describedHelper(hint, disabledReason, `number-${id ?? label}`)}</span>}
       error={error ? `× ${error}` : undefined}
       inputWrapperOrder={["label", "input", "description", "error"]}
