@@ -16,7 +16,7 @@ const glyphs = {
   minus: IconMinus, plus: IconPlus, member: IconUser, memberAdd: IconUserPlus, memberRemove: IconUserMinus,
   tierEveryone: IconUsers, tierSubscriber: IconStar, tierVip: IconDiamond,
   tierModerator: IconSword, tierBroadcaster: IconVideo,
-  tabSettings: IconSettings, tabAdvanced: IconAdjustmentsHorizontal,
+  tabSettings: IconSettings, tabAdvanced: IconAdjustmentsHorizontal, tabCode: IconBraces,
   tabMessages: IconMessage, tabPrewarning: IconBellRinging,
   broadcast: IconBroadcast, "broadcast-off": IconBroadcastOff, "volume-3": IconVolume3,
   "volume-off": IconVolumeOff, "player-pause": IconPlayerPause, "player-play": IconPlayerPlay,

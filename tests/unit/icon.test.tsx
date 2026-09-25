@@ -31,6 +31,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   tierBroadcaster: true,
   tabSettings: true,
   tabAdvanced: true,
+  tabCode: true,
   tabMessages: true,
   tabPrewarning: true,
   broadcast: true,

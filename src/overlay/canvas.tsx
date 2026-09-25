@@ -52,7 +52,7 @@ const renderElement = (
     left: isolated ? 0 : element.x,
     top: isolated ? 0 : element.y,
     ...(isolated ? {} : { width: "max-content" }),
-    transform: `scale(${String(scale)})`,
+    transform: isolated ? `scale(${String(scale)})` : `scale(${String(scale)}) translateX(var(--brobot-overlay-anchor-x, 0%))`,
     transformOrigin: "top left",
     zIndex: element.z,
   };
