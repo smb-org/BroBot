@@ -112,7 +112,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(container.querySelector(".brobot-overlay")).toHaveStyle({ width: "1920px", height: "1080px" });
     expect(container.querySelector('[data-element="element-first"]')).toHaveStyle({ left: "20px", top: "30px", zIndex: "4", width: "max-content" });
     expect(container.querySelector('[data-element="element-first"]')).toHaveClass("brobot-overlay-composition-element");
-    expect(container.querySelector('[data-element="element-third"]')).toHaveStyle({ left: "120px", top: "140px", transform: "scale(0.75)" });
+    expect(container.querySelector('[data-element="element-third"]')).toHaveStyle({ left: "120px", top: "140px", transform: "scale(0.75) translateX(var(--brobot-overlay-anchor-x, 0%))" });
     expect(container.querySelector('[data-element="element-second"]')).not.toBeNull();
     expect(container.querySelectorAll(".brobot-variable")).toHaveLength(3);
     expect(container.querySelectorAll(".brobot-variable__text")).toHaveLength(3);
