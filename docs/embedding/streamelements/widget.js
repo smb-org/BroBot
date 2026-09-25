@@ -18,10 +18,15 @@ function buildValidatedOverlaySrc(overlayUrl, brobotAddress) {
 
     var fragment = new URLSearchParams(parsedUrl.hash.slice(1));
     var tokens = fragment.getAll('token');
-    if (fragment.size !== 1 || tokens.length !== 1 || !/^[A-Za-z0-9_-]{43}$/.test(tokens[0])) return null;
+    var elements = fragment.getAll('element');
+    if ((fragment.size !== 1 && fragment.size !== 2) || tokens.length !== 1 || elements.length > 1 ||
+        (fragment.size === 2 && elements.length !== 1) || !/^[A-Za-z0-9_-]{43}$/.test(tokens[0])) return null;
+    if (elements.length === 1 && !/^[A-Za-z0-9_-]{1,64}$/.test(elements[0])) return null;
 
     var safeUrl = new URL(parsedUrl.pathname, addressUrl.origin);
-    safeUrl.hash = new URLSearchParams({ token: tokens[0] }).toString();
+    var safeFragment = { token: tokens[0] };
+    if (elements.length === 1) safeFragment.element = elements[0];
+    safeUrl.hash = new URLSearchParams(safeFragment).toString();
     return safeUrl.href;
   } catch {
     return null;
