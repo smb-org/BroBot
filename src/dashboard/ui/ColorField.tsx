@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 
+import { Button } from "./Button";
 import { useDisabledFieldReason } from "./DisabledFieldReason";
 
 export interface ColorFieldProps {
@@ -28,8 +29,10 @@ export function ColorField({ id, label, value, unsetLabel, clearLabel, onChange,
       </span>
       {value === undefined
         ? <span className="ui-color-field__unset" id={unsetDescriptionId} role="note">{unsetLabel}</span>
-        : <button type="button" className="ui-color-field__clear" aria-label={clearLabel} disabled={disabled}
-          aria-describedby={reasonId} onClick={() => { onChange(undefined); }}>{clearLabel}</button>}
+        // Icon-only so swatch + clear fit on one line in a half-width column (#237);
+        // `title` gives it a native tooltip on top of the `ariaLabel` accessible name.
+        : <Button icon="close" iconOnly ariaLabel={clearLabel} title={clearLabel} disabled={disabled}
+          {...(reasonId === undefined ? {} : { describedBy: reasonId })} onClick={() => { onChange(undefined); }} />}
       {disabledReason === null ? null : <span className="sr-only" id={reasonId}>{disabledReason.reason}</span>}
     </div>
   </div>;

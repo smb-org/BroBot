@@ -299,7 +299,7 @@ describe("Overlay composition editor", () => {
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
     expect(screen.getByRole("combobox", { name: "Anchor" })).toBeInTheDocument();
-    expect(screen.getByText("Sets the direction in which text grows.")).toBeInTheDocument();
+    expect(screen.getByText("Sets the growth direction.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
     const elementId = alignedOverlay.elements[0]?.id;
     if (elementId === undefined) throw new Error("Aligned test element is missing.");

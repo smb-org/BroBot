@@ -71,7 +71,7 @@
 .overlay-editor__style-grid { display: grid; min-width: 0; gap: var(--s2); }
 .overlay-editor__style-pair { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s2); }
 .overlay-editor__style-pair > * { min-width: 0; }
-.overlay-editor__style-pair--triple { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.overlay-editor__style-pair--triple { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
 @container overlay-style (max-width: 259px) {
   .overlay-editor__style-pair,
   .overlay-editor__style-pair--triple { grid-template-columns: minmax(0, 1fr); }
@@ -90,14 +90,11 @@
 .ui-color-field__swatch input[data-unset="true"]:focus-visible + .ui-color-field__empty-swatch { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .ui-color-field input:disabled { cursor: not-allowed; }
 .ui-color-field__unset { color: var(--text-2); font-size: 12px; }
-.ui-color-field__clear { min-height: 44px; padding: var(--s1) var(--s2); border: 1px solid var(--line-strong); border-radius: var(--r-control); background: transparent; color: var(--text-2); cursor: pointer; }
-.ui-color-field__clear:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
-.ui-color-field__clear:disabled { cursor: not-allowed; }
 .overlay-editor__style-lock { display: grid; gap: var(--s2); padding: var(--s3); border: 1px solid var(--warn); border-radius: var(--r-control); background: var(--warning-surface); color: var(--text); }
 .overlay-editor__style-lock p, .overlay-editor__code-actions p { margin: 0; }
 .overlay-editor__style-actions, .overlay-editor__code-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); }
 .overlay-editor__css-code textarea { display: block; width: 100%; min-height: 320px; resize: vertical; padding: var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-well); color: var(--text); font-family: var(--mantine-font-family-monospace); font-size: 12px; line-height: 1.5; tab-size: 2; }
-.overlay-editor__css-code textarea:focus-visible, .ui-color-field__swatch input:focus-visible, .ui-color-field__clear:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+.overlay-editor__css-code textarea:focus-visible, .ui-color-field__swatch input:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 /* No box-shadow per DESIGN.md's no-shadow rule (no depth/gradient/shimmer); the border already separates it from the content above. */
 .overlay-editor .ui-save-bar--persistent { position: sticky; z-index: 2; bottom: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--r-panel); }
 

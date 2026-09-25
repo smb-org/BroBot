@@ -635,11 +635,12 @@ function OverlayEditorWorkspace({
     label: string,
     value: number | undefined,
     onChange: (next: number | undefined) => void,
-    options: { min?: number; max?: number; unit?: string } = {},
+    options: { min?: number; max?: number; unit?: string; ariaLabel?: string } = {},
   ): ReactElement => <NumberField id={id} label={label} value={value ?? ""}
     {...(options.min === undefined ? {} : { min: options.min })}
     {...(options.max === undefined ? {} : { max: options.max })}
     {...(options.unit === undefined ? {} : { unit: options.unit })}
+    {...(options.ariaLabel === undefined ? {} : { ariaLabel: options.ariaLabel })}
     disabled={!canEdit || styleLocked} onChange={(next) => {
       if (typeof next !== "number") {
         onChange(undefined);
@@ -1032,18 +1033,19 @@ function OverlayEditorWorkspace({
               <StyleDisclosureSection key={`${effectiveStyleTargetId}:font`} section="font" icon="styleFont" title={labels.editorStyleFontSection}
                 summary={styleSectionSummary(targetStyle, "font", labels.editorStyleSectionUnset, labels.editorStyleLeft, labels.editorStyleCenter, labels.editorStyleRight)} defaultExpanded>
                 <div className="overlay-editor__style-grid">
-                  <div className="overlay-editor__style-pair">
-                    <Select id="overlay-editor-style-system-font" label={labels.editorStyleFontSystem}
-                      value={SYSTEM_FONT_FAMILIES.includes(targetStyle.fontFamily as (typeof SYSTEM_FONT_FAMILIES)[number]) ? targetStyle.fontFamily ?? null : null}
-                      disabled={!canEdit || styleLocked}
-                      {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
-                      options={SYSTEM_FONT_FAMILIES.map((fontFamily) => ({ value: fontFamily, label: fontFamily }))}
-                      onChange={(value) => { if (value !== null) updateStyleProperty("fontFamily", value); }} />
-                    <Field id="overlay-editor-style-font-family" label={labels.editorStyleFontFamily} hint={labels.editorStyleFontCustomHint}
-                      value={targetStyle.fontFamily ?? ""} maxLength={80}
-                      countLabel={labels.editorStyleFontFamilyCount}
-                      disabled={!canEdit || styleLocked} onChange={(value) => { updateStyleProperty("fontFamily", value.length === 0 ? undefined : value); }} />
-                  </div>
+                  {/* Own rows, not a compact pair: the custom-name hint and character
+                      counter need the full panel width, or the hint wraps one syllable
+                      per line in the ~280px properties column (#237). */}
+                  <Select id="overlay-editor-style-system-font" label={labels.editorStyleFontSystem}
+                    value={SYSTEM_FONT_FAMILIES.includes(targetStyle.fontFamily as (typeof SYSTEM_FONT_FAMILIES)[number]) ? targetStyle.fontFamily ?? null : null}
+                    disabled={!canEdit || styleLocked}
+                    {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
+                    options={SYSTEM_FONT_FAMILIES.map((fontFamily) => ({ value: fontFamily, label: fontFamily }))}
+                    onChange={(value) => { if (value !== null) updateStyleProperty("fontFamily", value); }} />
+                  <Field id="overlay-editor-style-font-family" label={labels.editorStyleFontFamily} hint={labels.editorStyleFontCustomHint}
+                    value={targetStyle.fontFamily ?? ""} maxLength={80}
+                    countLabel={labels.editorStyleFontFamilyCount}
+                    disabled={!canEdit || styleLocked} onChange={(value) => { updateStyleProperty("fontFamily", value.length === 0 ? undefined : value); }} />
                   <div className="overlay-editor__style-pair">
                     {renderStyleNumber("overlay-editor-style-font-size", labels.editorStyleFontSize, targetStyle.fontSize,
                       (value) => { updateStyleProperty("fontSize", value); }, { min: 1, max: 500, unit: "px" })}
@@ -1090,13 +1092,16 @@ function OverlayEditorWorkspace({
               <StyleDisclosureSection key={`${effectiveStyleTargetId}:shadow`} section="shadow" icon="styleShadow" title={labels.editorStyleShadowSection}
                 summary={styleSectionSummary(targetStyle, "shadow", labels.editorStyleSectionUnset, labels.editorStyleLeft, labels.editorStyleCenter, labels.editorStyleRight)} defaultExpanded={styleSectionHasValues(targetStyle, "shadow")}>
                 <div className="overlay-editor__style-grid">
+                  {/* Short visible labels: the section heading already says "Shadow", and the
+                      full names ("Shadow X offset" etc.) still reach assistive tech via
+                      `ariaLabel`, which overrides the visible <label> as the accessible name (#237). */}
                   <div className="overlay-editor__style-pair overlay-editor__style-pair--triple">
-                    {renderStyleNumber("overlay-editor-style-shadow-x", labels.editorStyleShadowX, targetStyle.shadow?.x,
-                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: value, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px" })}
-                    {renderStyleNumber("overlay-editor-style-shadow-y", labels.editorStyleShadowY, targetStyle.shadow?.y,
-                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: value, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px" })}
-                    {renderStyleNumber("overlay-editor-style-shadow-blur", labels.editorStyleShadowBlur, targetStyle.shadow?.blur,
-                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: value, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: 0, max: 100, unit: "px" })}
+                    {renderStyleNumber("overlay-editor-style-shadow-x", labels.editorStyleShadowXShort, targetStyle.shadow?.x,
+                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: value, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px", ariaLabel: labels.editorStyleShadowX })}
+                    {renderStyleNumber("overlay-editor-style-shadow-y", labels.editorStyleShadowYShort, targetStyle.shadow?.y,
+                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: value, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px", ariaLabel: labels.editorStyleShadowY })}
+                    {renderStyleNumber("overlay-editor-style-shadow-blur", labels.editorStyleShadowBlurShort, targetStyle.shadow?.blur,
+                      (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: value, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: 0, max: 100, unit: "px", ariaLabel: labels.editorStyleShadowBlur })}
                   </div>
                   <ColorField id="overlay-editor-style-shadow-color" label={labels.editorStyleShadowColor} value={targetStyle.shadow?.color}
                     unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}

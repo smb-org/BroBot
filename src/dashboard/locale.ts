@@ -287,6 +287,7 @@ export interface OverlaysTexts {
   editorStyleAlignment: string; editorStyleAlignmentHint: string; editorStyleLeft: string; editorStyleCenter: string; editorStyleRight: string;
   editorStyleLineHeight: string; editorStyleLetterSpacing: string; editorStyleStrokeWidth: string; editorStyleStrokeColor: string;
   editorStyleShadowX: string; editorStyleShadowY: string; editorStyleShadowBlur: string; editorStyleShadowColor: string;
+  editorStyleShadowXShort: string; editorStyleShadowYShort: string; editorStyleShadowBlurShort: string;
   editorStyleBackgroundColor: string; editorStyleBackgroundOpacity: string; editorStylePadding: string; editorStyleRadius: string;
   editorStyleReset: string; editorStyleLocked: string; editorStyleRewrite: string; editorStyleOwnCssHint: string;
   editorStyleReadOnlyReason: string;
@@ -348,10 +349,11 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorStyleFontFamily: "Schriftart oder eigener Name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} Zeichen`,
     editorStyleColorUnset: "Nicht gesetzt", editorStyleColorClear: "Farbe entfernen",
     editorStyleFontSize: "Schriftgröße", editorStyleFontWeight: "Schriftstärke", editorStyleColor: "Textfarbe",
-    editorStyleAlignment: "Anker", editorStyleAlignmentHint: "Bestimmt die Wuchsrichtung des Textes.",
+    editorStyleAlignment: "Anker", editorStyleAlignmentHint: "Legt die Wuchsrichtung fest.",
     editorStyleLeft: "Links", editorStyleCenter: "Mittig", editorStyleRight: "Rechts",
     editorStyleLineHeight: "Zeilenhöhe", editorStyleLetterSpacing: "Buchstabenabstand", editorStyleStrokeWidth: "Konturstärke", editorStyleStrokeColor: "Konturfarbe",
     editorStyleShadowX: "Schatten X-Versatz", editorStyleShadowY: "Schatten Y-Versatz", editorStyleShadowBlur: "Schattenunschärfe", editorStyleShadowColor: "Schattenfarbe",
+    editorStyleShadowXShort: "X", editorStyleShadowYShort: "Y", editorStyleShadowBlurShort: "Unschärfe",
     editorStyleBackgroundColor: "Hintergrundfarbe", editorStyleBackgroundOpacity: "Hintergrund-Deckkraft", editorStylePadding: "Innenabstand", editorStyleRadius: "Rundung",
     editorStyleReset: "Stil zurücksetzen", editorStyleLocked: "Der Stilblock wurde im Code geändert oder enthält unbekannte CSS-Eigenschaften. Die Stilfelder sind gesperrt.",
     editorStyleRewrite: "Aus Editor neu schreiben", editorStyleOwnCssHint: "Eigenes CSS unterhalb des verwalteten Blocks gewinnt bei gleichen Eigenschaften.",
@@ -442,10 +444,11 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorStyleFontFamily: "Font family or custom name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} characters`,
     editorStyleColorUnset: "Not set", editorStyleColorClear: "Clear color",
     editorStyleFontSize: "Font size", editorStyleFontWeight: "Font weight", editorStyleColor: "Text color",
-    editorStyleAlignment: "Anchor", editorStyleAlignmentHint: "Sets the direction in which text grows.",
+    editorStyleAlignment: "Anchor", editorStyleAlignmentHint: "Sets the growth direction.",
     editorStyleLeft: "Left", editorStyleCenter: "Center", editorStyleRight: "Right",
     editorStyleLineHeight: "Line height", editorStyleLetterSpacing: "Letter spacing", editorStyleStrokeWidth: "Outline width", editorStyleStrokeColor: "Outline color",
     editorStyleShadowX: "Shadow X offset", editorStyleShadowY: "Shadow Y offset", editorStyleShadowBlur: "Shadow blur", editorStyleShadowColor: "Shadow color",
+    editorStyleShadowXShort: "X", editorStyleShadowYShort: "Y", editorStyleShadowBlurShort: "Blur",
     editorStyleBackgroundColor: "Background color", editorStyleBackgroundOpacity: "Background opacity", editorStylePadding: "Padding", editorStyleRadius: "Corner radius",
     editorStyleReset: "Reset style", editorStyleLocked: "The style block was changed in code or contains unknown CSS properties. Style fields are locked.",
     editorStyleRewrite: "Rewrite from editor", editorStyleOwnCssHint: "Custom CSS below the managed block wins when it sets the same properties.",
