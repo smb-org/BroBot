@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
+import { generateOverlayStyleBlock } from "../../src/dashboard/overlay-style-model";
 import { OverlayCanvas } from "../../src/overlay/canvas";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -167,6 +168,76 @@ describe("Overlay composition editor", () => {
     expect(body.elements[0]).toMatchObject({ x: 30, y: 49 });
   });
 
+  it("applies overlay and element typography to the rendered preview text", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const styledOverlay = {
+      ...initialOverlay,
+      css: generateOverlayStyleBlock({
+        overlay: {
+          fontFamily: "Georgia", fontSize: 30, color: "#112233", textAlign: "center",
+          stroke: { width: 2, color: "#223344" },
+          shadow: { x: 1, y: 2, blur: 3, color: "#556677" },
+        },
+        elements: { "element-a": { fontFamily: "Arial", fontSize: 32, color: "#445566", textAlign: "right" } },
+      }),
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: styledOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
+    await waitFor(() => expect(previewFrame?.contentDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain(".brobot-overlay :where(.brobot-variable)"));
+    const variableText = previewFrame?.contentDocument?.querySelector<HTMLElement>('[data-variable="score"]');
+    if (variableText === null || variableText === undefined) throw new Error("Overlay preview text is missing.");
+    const computedStyle = previewFrame?.contentWindow?.getComputedStyle(variableText);
+
+    expect(computedStyle?.fontFamily).toContain("Arial");
+    expect(computedStyle?.fontSize).toBe("32px");
+    expect(computedStyle?.color).toBe("rgb(68, 85, 102)");
+    expect(computedStyle?.textAlign).toBe("right");
+    expect(computedStyle?.getPropertyValue("-webkit-text-stroke")).toContain("2px");
+    expect(computedStyle?.textShadow).toContain("1px 2px 3px");
+  });
+
+  it("clears an unsettable style color and shows its empty state", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const styledOverlay = {
+      ...initialOverlay,
+      css: generateOverlayStyleBlock({ overlay: { color: "#123456" }, elements: {} }),
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: styledOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    const textColorInput = screen.getByLabelText("Text color");
+    expect(textColorInput).toHaveValue("#123456");
+    fireEvent.click(screen.getByRole("button", { name: "Clear color" }));
+
+    expect(within(textColorInput.closest(".ui-color-field") as HTMLElement).getByText("Not set")).toBeInTheDocument();
+    expect(textColorInput).toHaveAttribute("data-unset", "true");
+    const previewFrame = document.querySelector<HTMLIFrameElement>("iframe[data-testid='overlay-editor-renderer']");
+    expect(previewFrame?.contentDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).not.toContain("color: #123456;");
+  });
+
   it("locks the style fields after a code edit and rewrites the managed block from the editor", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
@@ -318,10 +389,17 @@ describe("Overlay composition editor", () => {
 
   it("shows operator add, remove and Save actions disabled with the read-only reason", async () => {
     const operatorChannel = { ...channel, role: "operator" };
+    const operatorOverlay = {
+      ...initialOverlay,
+      css: generateOverlayStyleBlock({
+        overlay: {},
+        elements: { "element-a": { fontSize: 28, color: "#123456" } },
+      }),
+    };
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [operatorChannel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: operatorOverlay }));
       if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
       if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
       return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
@@ -331,9 +409,14 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
-    const reason = screen.getByText("Bediener können die Komposition ansehen, aber nicht ändern.");
+    const reason = screen.getByText("Bediener können die Komposition ansehen, aber nicht ändern.", { selector: "p" });
     expect(reason).toHaveTextContent("Bediener können die Komposition ansehen, aber nicht ändern.");
     expect(reason).toHaveAttribute("id", "overlay-editor-readonly-reason");
+    const addVariableSelect = screen.getByRole("combobox", { name: "Kanalvariable auswählen" });
+    expect(addVariableSelect).toBeDisabled();
+    const addVariableReasonId = addVariableSelect.getAttribute("aria-describedby");
+    expect(addVariableReasonId).toBe(`overlay-editor-readonly-reason-select-${addVariableSelect.id}`);
+    expect(addVariableReasonId === null ? null : document.getElementById(addVariableReasonId)).toHaveTextContent("Bediener können die Komposition ansehen, aber nicht ändern.");
     const actions = [
       screen.getByRole("button", { name: "Variable anzeigen" }),
       screen.getByRole("button", { name: "Element entfernen" }),
@@ -346,6 +429,17 @@ describe("Overlay composition editor", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Stil-Editor" }));
     expect(screen.getByText("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByLabelText("Textfarbe")).toBeDisabled();
+    const styleTarget = screen.getByRole("combobox", { name: "Stil anwenden auf" });
+    expect(styleTarget).toBeEnabled();
+    fireEvent.click(styleTarget);
+    fireEvent.click(await screen.findByRole("option", { name: "Element: Score", hidden: true }));
+    expect(screen.getByRole("spinbutton", { name: "Schriftgröße" })).toHaveValue("28");
+    expect(screen.getByLabelText("Textfarbe")).toHaveValue("#123456");
+    const systemFont = screen.getByRole("combobox", { name: "Systemschrift auswählen" });
+    expect(systemFont).toBeDisabled();
+    const styleReasonId = systemFont.getAttribute("aria-describedby");
+    expect(styleReasonId).toBe(`overlay-style-disabled-reason-select-${systemFont.id}`);
+    expect(styleReasonId === null ? null : document.getElementById(styleReasonId)).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
     fireEvent.click(screen.getByRole("tab", { name: "CSS-Code" }));
     expect(screen.getByText("Bediener können das Overlay-CSS kopieren, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "CSS-Code" })).toBeDisabled();

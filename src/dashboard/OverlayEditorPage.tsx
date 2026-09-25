@@ -27,7 +27,7 @@ import {
 } from "./api";
 import { apiErrorText, dashboardLanguage, overlaysTexts } from "./locale";
 import { useRealtimeVariableUpdates } from "./realtime";
-import { Button, CodeField, ColorField, ConfirmDialog, Field, NumberField, SaveBar, Select, Switch, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, CodeField, ColorField, ConfirmDialog, Field, Icon, NumberField, SaveBar, Select, Switch, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
 import "./overlay-editor.css";
 
 interface OverlayEditorPageProperties {
@@ -781,11 +781,13 @@ function OverlayEditorWorkspace({
           </li>)}
         </ul>}
         <div className="overlay-editor__add-element">
-          <Select id="overlay-editor-variable" label={labels.editorChooseVariable} value={addVariableName || null}
-            disabled={!canEdit || variables.length === 0 || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
-            {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
-            options={variables.map(({ name }) => ({ value: name, label: name }))}
-            onChange={(value) => { if (value !== null) setChosenVariableName(value); }} />
+          <DisabledFieldReasonContext.Provider value={canManage ? null : { id: "overlay-editor-readonly-reason", reason: labels.editorReadOnly }}>
+            <Select id="overlay-editor-variable" label={labels.editorChooseVariable} value={addVariableName || null}
+              disabled={!canEdit || variables.length === 0 || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
+              {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
+              options={variables.map(({ name }) => ({ value: name, label: name }))}
+              onChange={(value) => { if (value !== null) setChosenVariableName(value); }} />
+          </DisabledFieldReasonContext.Provider>
           <Button variant="neutral" disabled={!canEdit || variables.length === 0 || draft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT}
             {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
             onClick={insertVariable}>{labels.editorAddVariable}</Button>
@@ -818,13 +820,13 @@ function OverlayEditorWorkspace({
         <div className="overlay-editor__editor-tabs" role="tablist" aria-label={labels.editorProperties}>
           <button type="button" role="tab" id="overlay-editor-tab-properties" data-editor-tab="properties" tabIndex={editorTab === "properties" ? 0 : -1}
             aria-selected={editorTab === "properties"} aria-controls="overlay-editor-panel-properties" onKeyDown={handleEditorTabKeyDown}
-            onClick={() => { setEditorTab("properties"); }}>{labels.editorPropertiesTab}</button>
+            onClick={() => { setEditorTab("properties"); }}><Icon name="tabSettings" size={16} />{labels.editorPropertiesTab}</button>
           <button type="button" role="tab" id="overlay-editor-tab-style" data-editor-tab="style" tabIndex={editorTab === "style" ? 0 : -1}
             aria-selected={editorTab === "style"} aria-controls="overlay-editor-panel-style" onKeyDown={handleEditorTabKeyDown}
-            onClick={() => { setEditorTab("style"); }}>{labels.editorStyleTab}</button>
+            onClick={() => { setEditorTab("style"); }}><Icon name="tabAdvanced" size={16} />{labels.editorStyleTab}</button>
           <button type="button" role="tab" id="overlay-editor-tab-css" data-editor-tab="css" tabIndex={editorTab === "css" ? 0 : -1}
             aria-selected={editorTab === "css"} aria-controls="overlay-editor-panel-css" onKeyDown={handleEditorTabKeyDown}
-            onClick={() => { setEditorTab("css"); }}>{labels.editorCssTab}</button>
+            onClick={() => { setEditorTab("css"); }}><Icon name="tabCode" size={16} />{labels.editorCssTab}</button>
         </div>
         <div role="tabpanel" id="overlay-editor-panel-properties" aria-labelledby="overlay-editor-tab-properties" hidden={editorTab !== "properties"}>
         {initialNotice === null ? null : <p className="form-error" role="alert">{initialNotice.kind === "element-limit" ? labels.editorElementLimit : labels.editorMissingPrefill(initialNotice.name)}</p>}
@@ -867,17 +869,16 @@ function OverlayEditorWorkspace({
         <div role="tabpanel" id="overlay-editor-panel-style" aria-labelledby="overlay-editor-tab-style" hidden={editorTab !== "style"}>
           <DisabledFieldReasonContext.Provider value={styleLockedReason.length === 0 ? null : { id: "overlay-style-disabled-reason", reason: styleLockedReason }}>
             <div className="overlay-editor__style-fields">
-              <Select id="overlay-editor-style-target" label={labels.editorStyleTarget} value={effectiveStyleTargetId} disabled={!canEdit || styleLocked}
-                {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
+              <Select id="overlay-editor-style-target" label={labels.editorStyleTarget} value={effectiveStyleTargetId}
                 options={[
                   { value: "overlay", label: labels.editorStyleOverlayTarget },
                   ...draft.elements.map((element) => ({ value: element.id, label: labels.editorStyleElementTarget(element.label || element.variableName || element.id) })),
                 ]}
                 onChange={(value) => { if (value !== null) setStyleTargetId(value); }} />
-              {!canManage ? <p className="muted" role="note">{labels.editorStyleReadOnlyReason}</p> : null}
+              {!canManage ? <p className="muted" id="overlay-style-disabled-reason" role="note">{labels.editorStyleReadOnlyReason}</p> : null}
               <p className="form-hint">{labels.editorStyleOwnCssHint}</p>
               {styleLocked ? <div className="overlay-editor__style-lock" role="status">
-                <p>{labels.editorStyleLocked}</p>
+                <p {...(canManage ? { id: "overlay-style-disabled-reason" } : {})}>{labels.editorStyleLocked}</p>
                 <Button variant="neutral" disabled={!canEdit || parsedStyleBlock.contentStart === null}
                   {...(canManage ? {} : { title: labels.editorStyleReadOnlyReason, describedBy: "overlay-style-disabled-reason" })}
                   onClick={rewriteStylesFromEditor}>{labels.editorStyleRewrite}</Button>
@@ -900,7 +901,8 @@ function OverlayEditorWorkspace({
                   {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
                   options={[400, 500, 600, 700].map((weight) => ({ value: String(weight), label: String(weight) }))}
                   onChange={(value) => { updateStyleProperty("fontWeight", value === null ? undefined : Number(value) as 400 | 500 | 600 | 700); }} />
-                <ColorField id="overlay-editor-style-color" label={labels.editorStyleColor} value={targetStyle.color ?? "#ffffff"} disabled={!canEdit || styleLocked}
+                <ColorField id="overlay-editor-style-color" label={labels.editorStyleColor} value={targetStyle.color}
+                  unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
                   onChange={(value) => { updateStyleProperty("color", value); }} />
                 <Select id="overlay-editor-style-alignment" label={labels.editorStyleAlignment}
                   value={targetStyle.textAlign ?? null} disabled={!canEdit || styleLocked}
@@ -917,18 +919,21 @@ function OverlayEditorWorkspace({
                   (value) => { updateStyleProperty("letterSpacing", value); }, { min: -100, max: 100, unit: "px" })}
                 {renderStyleNumber("overlay-editor-style-stroke-width", labels.editorStyleStrokeWidth, targetStyle.stroke?.width,
                   (value) => { updateStyleProperty("stroke", value === undefined ? undefined : { width: value, color: targetStyle.stroke?.color ?? "#000000" }); }, { min: 0.1, max: 20, unit: "px" })}
-                <ColorField id="overlay-editor-style-stroke-color" label={labels.editorStyleStrokeColor} value={targetStyle.stroke?.color ?? "#000000"} disabled={!canEdit || styleLocked}
-                  onChange={(value) => { updateStyleProperty("stroke", { width: targetStyle.stroke?.width ?? 2, color: value }); }} />
+                <ColorField id="overlay-editor-style-stroke-color" label={labels.editorStyleStrokeColor} value={targetStyle.stroke?.color}
+                  unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                  onChange={(value) => { updateStyleProperty("stroke", value === undefined ? undefined : { width: targetStyle.stroke?.width ?? 2, color: value }); }} />
                 {renderStyleNumber("overlay-editor-style-shadow-x", labels.editorStyleShadowX, targetStyle.shadow?.x,
                   (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: value, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px" })}
                 {renderStyleNumber("overlay-editor-style-shadow-y", labels.editorStyleShadowY, targetStyle.shadow?.y,
                   (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: value, blur: targetStyle.shadow?.blur ?? 4, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: -100, max: 100, unit: "px" })}
                 {renderStyleNumber("overlay-editor-style-shadow-blur", labels.editorStyleShadowBlur, targetStyle.shadow?.blur,
                   (value) => { updateStyleProperty("shadow", value === undefined ? undefined : { ...targetStyle.shadow, x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: value, color: targetStyle.shadow?.color ?? "#000000" }); }, { min: 0, max: 100, unit: "px" })}
-                <ColorField id="overlay-editor-style-shadow-color" label={labels.editorStyleShadowColor} value={targetStyle.shadow?.color ?? "#000000"} disabled={!canEdit || styleLocked}
-                  onChange={(value) => { updateStyleProperty("shadow", { x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: value }); }} />
-                <ColorField id="overlay-editor-style-background-color" label={labels.editorStyleBackgroundColor} value={targetStyle.background?.color ?? "#000000"} disabled={!canEdit || styleLocked}
-                  onChange={(value) => { updateStyleProperty("background", { color: value, opacityPercent: targetStyle.background?.opacityPercent ?? 100 }); }} />
+                <ColorField id="overlay-editor-style-shadow-color" label={labels.editorStyleShadowColor} value={targetStyle.shadow?.color}
+                  unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                  onChange={(value) => { updateStyleProperty("shadow", value === undefined ? undefined : { x: targetStyle.shadow?.x ?? 0, y: targetStyle.shadow?.y ?? 2, blur: targetStyle.shadow?.blur ?? 4, color: value }); }} />
+                <ColorField id="overlay-editor-style-background-color" label={labels.editorStyleBackgroundColor} value={targetStyle.background?.color}
+                  unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                  onChange={(value) => { updateStyleProperty("background", value === undefined ? undefined : { color: value, opacityPercent: targetStyle.background?.opacityPercent ?? 100 }); }} />
                 {renderStyleNumber("overlay-editor-style-background-opacity", labels.editorStyleBackgroundOpacity, targetStyle.background?.opacityPercent,
                   (value) => { updateStyleProperty("background", value === undefined ? undefined : { color: targetStyle.background?.color ?? "#000000", opacityPercent: Math.round(Math.max(0, Math.min(100, value))) }); }, { min: 0, max: 100, unit: "%" })}
                 {renderStyleNumber("overlay-editor-style-padding", labels.editorStylePadding, targetStyle.padding,

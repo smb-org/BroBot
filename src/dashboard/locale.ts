@@ -279,6 +279,7 @@ export interface OverlaysTexts {
   editorStyleTarget: string; editorStyleOverlayTarget: string; editorStyleElementTarget: (name: string) => string;
   editorStyleFontSystem: string; editorStyleFontCustomHint: string;
   editorStyleFontFamily: string; editorStyleFontFamilyCount: (count: number, maximum: number) => string;
+  editorStyleColorUnset: string; editorStyleColorClear: string;
   editorStyleFontSize: string; editorStyleFontWeight: string; editorStyleColor: string;
   editorStyleAlignment: string; editorStyleLeft: string; editorStyleCenter: string; editorStyleRight: string;
   editorStyleLineHeight: string; editorStyleLetterSpacing: string; editorStyleStrokeWidth: string; editorStyleStrokeColor: string;
@@ -323,11 +324,12 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", lastUsedNever: "nie", never: "Nie", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
     editorBack: "Zurück zu Overlays", editorLoading: "Overlay wird geladen …", editorLoadError: "Das Overlay konnte nicht geladen werden.",
     editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
-    editorPropertiesTab: "Eigenschaften", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
+    editorPropertiesTab: "Position", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
     editorStyleTarget: "Stil anwenden auf", editorStyleOverlayTarget: "Overlay-Vorgabe",
     editorStyleElementTarget: (name) => `Element: ${name}`,
     editorStyleFontSystem: "Systemschrift auswählen", editorStyleFontCustomHint: "Wähle eine Systemschrift oder gib einen eigenen Namen ein.",
     editorStyleFontFamily: "Schriftart oder eigener Name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} Zeichen`,
+    editorStyleColorUnset: "Nicht gesetzt", editorStyleColorClear: "Farbe entfernen",
     editorStyleFontSize: "Schriftgröße", editorStyleFontWeight: "Schriftstärke", editorStyleColor: "Textfarbe",
     editorStyleAlignment: "Ausrichtung", editorStyleLeft: "Links", editorStyleCenter: "Mittig", editorStyleRight: "Rechts",
     editorStyleLineHeight: "Zeilenhöhe", editorStyleLetterSpacing: "Buchstabenabstand", editorStyleStrokeWidth: "Konturstärke", editorStyleStrokeColor: "Konturfarbe",
@@ -390,11 +392,12 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", lastUsedNever: "never", never: "Never", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
     editorBack: "Back to overlays", editorLoading: "Loading overlay …", editorLoadError: "The overlay could not be loaded.",
     editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
-    editorPropertiesTab: "Properties", editorStyleTab: "Style editor", editorCssTab: "CSS code",
+    editorPropertiesTab: "Layout", editorStyleTab: "Style editor", editorCssTab: "CSS code",
     editorStyleTarget: "Apply style to", editorStyleOverlayTarget: "Overlay default",
     editorStyleElementTarget: (name) => `Element: ${name}`,
     editorStyleFontSystem: "Choose a system font", editorStyleFontCustomHint: "Choose a system font or enter a custom font name.",
     editorStyleFontFamily: "Font family or custom name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} characters`,
+    editorStyleColorUnset: "Not set", editorStyleColorClear: "Clear color",
     editorStyleFontSize: "Font size", editorStyleFontWeight: "Font weight", editorStyleColor: "Text color",
     editorStyleAlignment: "Alignment", editorStyleLeft: "Left", editorStyleCenter: "Center", editorStyleRight: "Right",
     editorStyleLineHeight: "Line height", editorStyleLetterSpacing: "Letter spacing", editorStyleStrokeWidth: "Outline width", editorStyleStrokeColor: "Outline color",

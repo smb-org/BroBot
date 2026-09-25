@@ -47,6 +47,40 @@ describe("overlay style block model", () => {
     expect(block.indexOf("element_a")).toBeLessThan(block.indexOf("element_b"));
   });
 
+  it("targets the rendered variable text for overlay and element styles", () => {
+    const content = generateOverlayStyleContent(styles);
+
+    expect(content).toContain(".brobot-overlay :where(.brobot-variable) {");
+    expect(content).toContain('[data-element="element_a"] :where(.brobot-variable) {');
+    expect(content).toContain('[data-element="element_b"] :where(.brobot-variable) {');
+  });
+
+  it("round-trips every integer background opacity percentage", () => {
+    for (let opacityPercent = 0; opacityPercent <= 100; opacityPercent += 1) {
+      const block = generateOverlayStyleBlock({
+        overlay: { background: { color: "#123456", opacityPercent } },
+        elements: {},
+      });
+      const parsed = parseOverlayStyleBlock(block);
+
+      expect(parsed, `opacity ${String(opacityPercent)}% should parse`).toMatchObject({
+        kind: "valid",
+        styles: { overlay: { background: { color: "#123456", opacityPercent } } },
+      });
+    }
+  });
+
+  it("continues to read managed blocks with legacy wrapper selectors", () => {
+    const legacyBlock = `${OVERLAY_STYLE_BEGIN_MARKER}\n.brobot-overlay {\n  color: #ffffff;\n}\n\n[data-element="element-a"] {\n  font-size: 32px;\n}\n${OVERLAY_STYLE_END_MARKER}`;
+    const parsed = parseOverlayStyleBlock(legacyBlock);
+
+    expect(parsed).toMatchObject({
+      kind: "valid",
+      styles: { overlay: { color: "#ffffff" }, elements: { "element-a": { fontSize: 32 } } },
+    });
+    expect(parsed.kind === "valid" ? generateOverlayStyleContent(parsed.styles) : "").toContain('[data-element="element-a"] :where(.brobot-variable) {');
+  });
+
   it("keeps every byte outside the managed markers when rewriting the block", () => {
     const prefix = "/* custom header */\r\n";
     const suffix = "\r\n[data-element=\"element_a\"] .brobot-variable__value { color: gold; }\r\n";
