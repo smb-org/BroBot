@@ -112,6 +112,9 @@ realtimeRouter.get(
 );
 
 realtimeRouter.get("/ws/overlay", async (context) => {
+  // Overlay sockets are authorized by the unguessable token subprotocol. Keep
+  // this route usable from sandboxed widgets, whose Origin is the opaque `null`
+  // origin; the cookie-authenticated panel socket retains its Origin check.
   if (context.req.raw.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return new Response("WebSocket upgrade required.", { status: 426 });
   }

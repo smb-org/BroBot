@@ -1,9 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+import { e2eWorkerEnvironment } from "./tests/e2e/worker-fixtures";
 
-const vitePort = process.env.PLAYWRIGHT_PORT === undefined ? 5173 : Number(process.env.PLAYWRIGHT_PORT);
-if (!Number.isInteger(vitePort) || vitePort < 1 || vitePort > 65535) {
-  throw new Error("PLAYWRIGHT_PORT must be a valid TCP port number.");
-}
+const playwrightPort = process.env.PLAYWRIGHT_PORT ?? "5174";
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+const workerBindings = Object.entries(e2eWorkerEnvironment)
+  .map(([name, value]) => `--var ${shellQuote(`${name}:${value}`)}`)
+  .join(" ");
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -13,15 +15,15 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: [["html", { open: "never" }], ["list"]],
   use: {
-    baseURL: `http://localhost:${String(vitePort)}`,
+    baseURL: `http://localhost:${playwrightPort}`,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
   webServer: [
     {
-      command: `./node_modules/.bin/vite --host 127.0.0.1 --port ${String(vitePort)} --strictPort`,
-      url: `http://localhost:${String(vitePort)}/`,
-      reuseExistingServer: !process.env.CI && process.env.PLAYWRIGHT_PORT === undefined,
+      command: `./node_modules/.bin/vite --host 127.0.0.1 --port ${playwrightPort} --strictPort`,
+      url: `http://localhost:${playwrightPort}/`,
+      reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
     {
@@ -31,13 +33,14 @@ export default defineConfig({
       // Deshalb muss vor dem E2E-Start ein Build laufen; `pretest:e2e` stellt
       // das bei `pnpm run test:e2e` sicher, ein direkter Playwright-Aufruf
       // setzt einen aktuellen Build voraus.
-      command: "./node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to .wrangler/e2e-worker --show-interactive-dev-session=false",
+      command: `./node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to .wrangler/e2e-worker --show-interactive-dev-session=false ${workerBindings}`,
       // Port statt Adresse: /healthz meldet bewusst 503, solange Secrets oder
       // Schema fehlen. Playwright wartet auf 2xx und liefe sonst in die
       // Zeitüberschreitung, obwohl der Worker längst antwortet.
       port: 8787,
       reuseExistingServer: false,
       timeout: 120_000,
+      env: e2eWorkerEnvironment,
     },
   ],
   projects: [{ name: "chromium-desktop", use: { ...devices["Desktop Chrome"] } }],

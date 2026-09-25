@@ -1,0 +1,11 @@
+# Vite assets are static Cloudflare assets. CORS lets the sandboxed overlay
+# iframe load JS, CSS, and fonts from its opaque origin without invoking Worker.
+/_app/*
+  Cache-Control: public, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff
+  Access-Control-Allow-Origin: *
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff
+  Access-Control-Allow-Origin: *
