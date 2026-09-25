@@ -30,16 +30,23 @@ test("dashboard and overlay load as separate surfaces", async ({ page }) => {
     });
   });
   // Playwright runs against the local Vite server, whose HTML entry is overlay.html.
+  const validBootstrap = overlayPage.waitForResponse("**/api/overlay/bootstrap");
   await overlayPage.goto("/overlay.html#token=e2e-token");
-  await expect(overlayPage.locator("#root")).toBeEmpty();
+  const validBootstrapResponse = await validBootstrap;
+  expect(validBootstrapResponse.request().headers().authorization).toBe("Bearer e2e-token");
+  expect(validBootstrapResponse.status()).toBe(200);
   await expect(overlayPage.locator("#root")).toBeEmpty();
   await expect(overlayPage.locator("html")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(overlayPage.locator("body")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(overlayPage.locator("#root")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  const invalidBootstrap = overlayPage.waitForResponse("**/api/overlay/bootstrap");
   await overlayPage.evaluate(() => {
     document.body.dataset.sameDocumentMarker = "preserved";
     window.location.hash = "token=invalid-token";
   });
+  const invalidBootstrapResponse = await invalidBootstrap;
+  expect(invalidBootstrapResponse.request().headers().authorization).toBe("Bearer invalid-token");
+  expect(invalidBootstrapResponse.status()).toBe(401);
   await expect(overlayPage.locator("#root")).toBeEmpty();
   await expect(overlayPage.locator("body")).toHaveAttribute("data-same-document-marker", "preserved");
   await overlayPage.close();

@@ -89,8 +89,13 @@ Overlay mit der ausgewählten Kanalvariable und dem Anzeigetext und bindet den
 bestehenden Token daran. Benutzerdefiniertes OBS-CSS und dortige Positionen
 werden nicht übernommen. Da derselbe Token mehrere alte Fragment-Links bedient
 haben kann, zeigen alle diese Quellen nach dem Import dasselbe gespeicherte
-Overlay. Der Import schließt die verbundene alte Echtzeitquelle; richte danach
-die Quelle über den Einrichtungsassistenten neu ein.
+Overlay. Der Import speichert kein wiederherstellbares Secret für den
+übernommenen Token; die bestehende OBS- oder Widget-Quelle mit dem alten Link
+läuft unverändert weiter, aber der Einrichtungsassistent kann diesen Zugang
+danach nicht mehr erneut anzeigen. Um dieselbe Quelle über den Assistenten neu
+einzurichten oder eine zusätzliche Quelle anzubinden, stelle einen neuen
+benannten Zugang aus (oder ersetze den importierten Zugang) und verwende
+dessen Link.
 
 Aktive Alt-Links können im selben Bereich gelistet und widerrufen werden. Neue
 ungebundene Links lassen sich nicht mehr ausstellen; neue Quellen erhalten
@@ -127,15 +132,18 @@ Bei `SESSION_COOKIE_KEYS` und `TWITCH_EVENTSUB_SECRET` signiert nur `active`
 neu. Ein Eintrag unter `retired` bleibt so lange erhalten, bis keine alten
 Cookies beziehungsweise EventSub-Abonnements mehr existieren.
 
-Bei `TOKEN_ENCRYPTION_KEYS` verschlüsselt `active` neue Twitch-Tokens. Ein
-`retired`-Eintrag bleibt erhalten, bis die Prüfung auf verbleibende
-Ciphertexte mit seiner `keyId` keinen Treffer mehr liefert. Die Prüfung muss
-beide Tokenbestände umfassen: `bot_identity` sowie
-`twitch_login_identity`, jeweils für Access- und Refresh-Ciphertext. Erst
-wenn diese Bestandsprüfung null Treffer ergibt, darf der alte Eintrag aus dem
-Ring entfernt werden. Ein fehlgeschlagener Refresh kann einen alten
+Bei `TOKEN_ENCRYPTION_KEYS` verschlüsselt `active` neue Twitch-Tokens sowie
+neue Overlay-Zugangs-Secrets. Ein `retired`-Eintrag bleibt erhalten, bis die
+Prüfung auf verbleibende Ciphertexte mit seiner `keyId` keinen Treffer mehr
+liefert. Die Prüfung muss drei Tokenbestände umfassen: `bot_identity` sowie
+`twitch_login_identity`, jeweils für Access- und Refresh-Ciphertext, und
+`overlay_tokens.secret_envelope` für die erneut anzeigbaren Overlay-Zugänge.
+Erst wenn diese Bestandsprüfung null Treffer ergibt, darf der alte Eintrag aus
+dem Ring entfernt werden. Ein fehlgeschlagener Refresh kann einen alten
 Ciphertext länger als die normale Übergangszeit erhalten; sieben Tage sind
-deshalb keine ausreichende Freigabe allein aufgrund des Alters.
+deshalb keine ausreichende Freigabe allein aufgrund des Alters. Wird ein alter
+Schlüssel entfernt, während noch ein `secret_envelope` damit verschlüsselt
+ist, schlägt **Link erneut anzeigen** für diesen Zugang fehl.
 
 Der Worker bevorzugt `TOKEN_ENCRYPTION_KEYS`. Während der Übergangsphase
 akzeptiert er ersatzweise noch `SESSION_ENCRYPTION_KEYS`, damit ein

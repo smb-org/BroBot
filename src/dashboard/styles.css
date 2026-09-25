@@ -654,13 +654,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-token-link { overflow-wrap: anywhere; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-raised); color: var(--text); font-size: 12px; }
 .overlay-token-properties { overflow-wrap: anywhere; }
 .overlay-token-properties dd { min-width: 0; }
-.overlay-obs-instructions { margin: 8px 0 12px; }
-.overlay-obs-instructions__content { display: grid; gap: 8px; max-width: 760px; padding: 8px 0; }
-.overlay-obs-instructions__content :is(ol, ul, p, pre) { margin: 0; }
-.overlay-obs-instructions__content :is(ol, ul) { padding-left: 22px; }
-.overlay-obs-instructions__content pre { overflow-x: auto; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-raised); color: var(--text); }
-.overlay-obs-instructions__content code { font: 12px/1.45 "IBM Plex Mono", ui-monospace, monospace; }
-
 @media (max-width: 480px) {
   .overlay-tokens-table th:nth-child(2),
   .overlay-tokens-table td:nth-child(2),

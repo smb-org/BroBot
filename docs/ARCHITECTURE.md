@@ -93,7 +93,10 @@ wird nur beim Ausstellen oder erneuten Anzeigen an berechtigte Mitglieder
 zurückgegeben; sie enthält den Token im Fragment, das Browser nicht an den
 Worker oder als `Referer` senden. OAuth- und Twitch-Tokens kommen nie in diese
 URL. Das Fragment bleibt in OBS und den Widget-Einstellungen sichtbar und ist
-wie ein Passwort zu schützen.
+wie ein Passwort zu schützen. Ausnahme: ein aus einem Alt-Link importierter
+Zugang bindet einen bestehenden Token, ohne ein wiederherstellbares Secret
+dafür zu speichern; für ihn bleibt **Link erneut anzeigen** dauerhaft leer,
+auch ohne Schlüsselrotation.
 
 Die Quelle lädt `GET /api/overlay/bootstrap` mit dem Token als
 `Authorization: Bearer`-Header. Der Worker gibt nur das gebundene Overlay und

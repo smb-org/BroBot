@@ -512,41 +512,6 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
 
 export const overlaysTexts = (language: DashboardLanguage = dashboardLanguage()): OverlaysTexts => overlaysCatalog[language];
 
-export interface OverlayObsInstructionsTexts {
-  summary: string;
-  addBrowserSource: string;
-  sourceSize: string;
-  refreshWhenActive: string;
-  shutdownWhenHidden: string;
-  customCss: string;
-  secret: string;
-}
-
-const overlayObsInstructionsCatalog: LocaleCatalog<OverlayObsInstructionsTexts> = {
-  de: {
-    summary: "In OBS einrichten",
-    addBrowserSource: "Füge in OBS eine Browserquelle hinzu und setze den vollständigen Overlay-Link als URL ein.",
-    sourceSize: "Empfohlener Start: 800 × 120 px. Der Text passt sich dem aktuellen Variablenwert an; plane Platz für den längsten erwarteten Text ein.",
-    refreshWhenActive: "„Browser bei Szenenaktivierung aktualisieren“ ausgeschaltet lassen.",
-    shutdownWhenHidden: "„Deaktivieren, wenn Quelle nicht sichtbar ist“ ausgeschaltet lassen.",
-    customCss: "Zum Anpassen füge dieses CSS in den Einstellungen der Browserquelle in „Benutzerdefiniertes CSS“ ein:",
-    secret: "Der Link enthält ein Geheimnis. Du kannst ihn in der Zugangsliste des Overlays widerrufen.",
-  },
-  en: {
-    summary: "Set up in OBS",
-    addBrowserSource: "Add a Browser Source in OBS and paste the complete overlay link into its URL field.",
-    sourceSize: "Suggested starting size: 800 × 120 px. The text follows the current variable value; leave room for the longest text you expect.",
-    refreshWhenActive: "Leave “Refresh browser when scene becomes active” off.",
-    shutdownWhenHidden: "Leave “Shutdown source when not visible” off.",
-    customCss: "To style the widget, paste this CSS into the Browser Source’s Custom CSS field:",
-    secret: "The link contains a secret. You can revoke it in the overlay's access list.",
-  },
-};
-
-export const overlayObsInstructionsTexts = (
-  language: DashboardLanguage = dashboardLanguage(),
-): OverlayObsInstructionsTexts => overlayObsInstructionsCatalog[language];
-
 export interface DashboardTexts {
   header: {
     connectionRunning: string;
