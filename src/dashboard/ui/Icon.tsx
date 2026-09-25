@@ -1,7 +1,7 @@
 import {
-  IconAd2, IconAdjustmentsHorizontal, IconAlertTriangle, IconArrowUp, IconBellRinging, IconCheck, IconChevronLeft, IconCopy,
+  IconAd2, IconAdjustmentsHorizontal, IconAlertTriangle, IconArrowUp, IconBackground, IconBellRinging, IconBorderAll, IconCheck, IconChevronLeft, IconCopy,
   IconDiamond, IconExternalLink, IconInfoCircle, IconKey, IconLock, IconMinus, IconMovie, IconPlus, IconRefresh,
-  IconMessage, IconSearch, IconSettings, IconSpeakerphone, IconStar, IconSword, IconTrash, IconUser, IconUserMinus,
+  IconMessage, IconSearch, IconSettings, IconShadow, IconSpeakerphone, IconStar, IconSword, IconTrash, IconTypography, IconUser, IconUserMinus,
   IconUserPlus, IconUsers, IconVideo, IconX, IconBroadcast, IconBroadcastOff, IconClockHour4,
   IconPlayerPause, IconPlayerPlay, IconVolume3, IconVolumeOff, IconBraces,
 } from "@tabler/icons-react";
@@ -17,6 +17,7 @@ const glyphs = {
   tierEveryone: IconUsers, tierSubscriber: IconStar, tierVip: IconDiamond,
   tierModerator: IconSword, tierBroadcaster: IconVideo,
   tabSettings: IconSettings, tabAdvanced: IconAdjustmentsHorizontal, tabCode: IconBraces,
+  styleFont: IconTypography, styleOutline: IconBorderAll, styleShadow: IconShadow, styleBackground: IconBackground,
   tabMessages: IconMessage, tabPrewarning: IconBellRinging,
   broadcast: IconBroadcast, "broadcast-off": IconBroadcastOff, "volume-3": IconVolume3,
   "volume-off": IconVolumeOff, "player-pause": IconPlayerPause, "player-play": IconPlayerPlay,

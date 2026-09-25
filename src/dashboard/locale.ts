@@ -276,6 +276,7 @@ export interface OverlaysTexts {
   editComposition: string; editorBack: string; editorLoading: string; editorLoadError: string;
   editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
   editorPropertiesTab: string; editorStyleTab: string; editorCssTab: string;
+  editorPropertiesTabShort: string; editorStyleTabShort: string; editorCssTabShort: string;
   editorStyleTarget: string; editorStyleOverlayTarget: string; editorStyleElementTarget: (name: string) => string;
   editorStyleFontSystem: string; editorStyleFontCustomHint: string;
   editorStyleFontSection: string; editorStyleOutlineSection: string; editorStyleShadowSection: string; editorStyleBackgroundSection: string;
@@ -338,6 +339,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorBack: "Zurück zu Overlays", editorLoading: "Overlay wird geladen …", editorLoadError: "Das Overlay konnte nicht geladen werden.",
     editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
     editorPropertiesTab: "Position", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
+    editorPropertiesTabShort: "Position", editorStyleTabShort: "Stil", editorCssTabShort: "CSS",
     editorStyleTarget: "Stil anwenden auf", editorStyleOverlayTarget: "Overlay-Vorgabe",
     editorStyleElementTarget: (name) => `Element: ${name}`,
     editorStyleFontSection: "Schrift", editorStyleOutlineSection: "Kontur", editorStyleShadowSection: "Schatten", editorStyleBackgroundSection: "Hintergrund & Abstand",
@@ -431,6 +433,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorBack: "Back to overlays", editorLoading: "Loading overlay …", editorLoadError: "The overlay could not be loaded.",
     editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
     editorPropertiesTab: "Layout", editorStyleTab: "Style editor", editorCssTab: "CSS code",
+    editorPropertiesTabShort: "Layout", editorStyleTabShort: "Style", editorCssTabShort: "CSS",
     editorStyleTarget: "Apply style to", editorStyleOverlayTarget: "Overlay default",
     editorStyleElementTarget: (name) => `Element: ${name}`,
     editorStyleFontSection: "Font", editorStyleOutlineSection: "Outline", editorStyleShadowSection: "Shadow", editorStyleBackgroundSection: "Background & spacing",

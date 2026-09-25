@@ -434,6 +434,7 @@ describe("Overlay composition editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear color" }));
 
     expect(within(textColorInput.closest(".ui-color-field") as HTMLElement).getByText("Not set")).toBeInTheDocument();
+    expect(textColorInput).toHaveAccessibleDescription("Not set");
     expect(textColorInput).toHaveAttribute("data-unset", "true");
     expect(textColorInput.parentElement).toHaveAttribute("data-unset", "true");
     expect(textColorInput.parentElement?.querySelector(".ui-color-field__empty-swatch")).toBeInTheDocument();
@@ -458,9 +459,12 @@ describe("Overlay composition editor", () => {
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
 
-    for (const [title, expanded] of [["Font", true], ["Outline", false], ["Shadow", false], ["Background & spacing", false]] as const) {
+    for (const [title, expanded, section] of [
+      ["Font", true, "font"], ["Outline", false, "outline"], ["Shadow", false, "shadow"], ["Background & spacing", false, "background"],
+    ] as const) {
       const disclosure = screen.getByRole("button", { name: new RegExp(`^${title}`) });
       expect(disclosure).toHaveAttribute("aria-expanded", String(expanded));
+      expect(disclosure.querySelector(`[data-style-icon="${section}"] svg`)).toBeInTheDocument();
       const panelId = disclosure.getAttribute("aria-controls");
       if (panelId === null) throw new Error(`${title} disclosure has no controlled panel.`);
       const panel = document.getElementById(panelId);
@@ -881,12 +885,19 @@ describe("Overlay composition editor", () => {
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname.endsWith("/overlays/overlay-a") && init?.method === "PUT")).toHaveLength(1);
   });
 
-  it("marks the selected composition element in the injected preview style and clears it once nothing is selected", async () => {
+  it("keeps selected and dashed preview bounds visible when authored CSS hides element outlines", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const firstElement = initialOverlay.elements[0];
+    if (firstElement === undefined) throw new Error("Overlay test element is missing.");
+    const overlayWithConflictingCss = {
+      ...initialOverlay,
+      css: `${initialOverlay.css}\n.brobot-overlay [data-element] { outline: none !important; }`,
+      elements: [firstElement, { ...firstElement, id: "element-b", label: "Second", x: 480 }],
+    };
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
-      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: overlayWithConflictingCss }));
       if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
       if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
       return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
@@ -898,16 +909,31 @@ describe("Overlay composition editor", () => {
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
     await waitFor(() => {
-      const style = previewFrame?.contentDocument?.querySelector<HTMLStyleElement>("style[data-brobot-editor-selection]");
-      expect(style?.textContent).toContain('[data-element="element-a"]');
+      const bounds = previewFrame?.contentDocument?.querySelector<HTMLElement>("[data-brobot-editor-bounds-layer]")?.shadowRoot;
+      expect(bounds?.querySelector('[data-brobot-editor-bound="element-a"]')).toBeInTheDocument();
+      expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toBeInTheDocument();
     });
-    const selectionStyle = previewFrame?.contentDocument?.querySelector<HTMLStyleElement>("style[data-brobot-editor-selection]");
-    expect(selectionStyle?.textContent).toContain("outline");
+    const previewDocument = previewFrame?.contentDocument;
+    const boundsHost = previewDocument?.querySelector<HTMLElement>("[data-brobot-editor-bounds-layer]");
+    const bounds = boundsHost?.shadowRoot;
+    const selectedBound = bounds?.querySelector<HTMLElement>('[data-brobot-editor-bound="element-a"]');
+    const unselectedBound = bounds?.querySelector<HTMLElement>('[data-brobot-editor-bound="element-b"]');
+    expect(selectedBound).toHaveAttribute("data-selected", "true");
+    expect(selectedBound?.style.borderStyle).toBe("solid");
+    expect(unselectedBound).toHaveAttribute("data-selected", "false");
+    expect(unselectedBound?.style.borderStyle).toBe("dashed");
+    expect(unselectedBound?.closest(".brobot-overlay")).toBeNull();
+    expect(previewDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain("outline: none !important");
+    const renderedElement = previewDocument?.querySelector<HTMLElement>('[data-element="element-a"]');
+    if (renderedElement === null || renderedElement === undefined) throw new Error("Overlay preview element is missing.");
+    expect(previewFrame?.contentWindow?.getComputedStyle(renderedElement).outlineStyle).toBe("none");
     const baseStyle = previewFrame?.contentDocument?.head.querySelector("style");
-    expect(baseStyle?.textContent).toContain("[data-element]{outline");
+    expect(baseStyle?.textContent).not.toContain("[data-element]");
 
     fireEvent.click(screen.getByRole("button", { name: "Remove element" }));
-    await waitFor(() => expect(previewFrame?.contentDocument?.querySelector<HTMLStyleElement>("style[data-brobot-editor-selection]")?.textContent).toBe(""));
+    await waitFor(() => expect(bounds?.querySelector('[data-brobot-editor-bound="element-b"]')).toHaveAttribute("data-selected", "true"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove element" }));
+    await waitFor(() => expect(bounds?.querySelectorAll("[data-brobot-editor-bound]")).toHaveLength(0));
   });
 
   it("shows the unsaved-changes status only once on the save bar", async () => {
