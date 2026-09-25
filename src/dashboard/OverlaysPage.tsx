@@ -60,6 +60,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
   const [accessName, setAccessName] = useState("");
   const [secret, setSecret] = useState<ScopedOverlaySecret | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<PanelOverlayAccess | null>(null);
   const [legacyTokens, setLegacyTokens] = useState<readonly PanelOverlayToken[]>([]);
   const [legacyNextOffset, setLegacyNextOffset] = useState<number | null>(null);
@@ -77,6 +78,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
     secretVersion.current++;
     setSecret(null);
     setCopied(false);
+    setShowSecret(false);
   }, []);
   const changeSelection = useCallback((nextId: string | null): void => {
     invalidateSecret();
@@ -240,6 +242,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
   const saveIssuedSecret = (issued: PanelIssuedOverlayAccess, overlayId: string): void => {
     setSecret({ ...issued, overlayId });
     setCopied(false);
+    setShowSecret(false);
   };
 
   const issue = async (): Promise<void> => {
@@ -343,9 +346,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
     setPending(true);
     setLegacyError(null);
     try {
-      await revokeOverlayToken(channelId, legacyRevokeTarget.id, labels.legacyRevocationReason);
+      const result = await revokeOverlayToken(channelId, legacyRevokeTarget.id, labels.legacyRevocationReason);
       setLegacyRevokeTarget(null);
-      setNotice(labels.revoked);
+      setNotice(result.closingPending ? labels.revokedPending : labels.revoked);
       await loadLegacyTokens();
     } catch (caught) {
       setLegacyError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
@@ -357,6 +360,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
   const isAccessActive = (access: PanelOverlayAccess): boolean => access.revokedAt === null &&
     (access.expiresAt === null || Date.parse(access.expiresAt) > now);
   const manageReason = canManage ? undefined : labels.managementLocked;
+  const legacyRevokeIdentity = legacyRevokeTarget === null
+    ? labels.legacyTokenName
+    : `${labels.legacyTokenName} (${legacyRevokeTarget.id.slice(0, 8)})`;
   const list = <section className="overlays-page config-section" aria-label={labels.list}>
     <div className="section-heading">
       <h1>{labels.title}</h1>
@@ -387,6 +393,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
       <p className="muted">{labels.legacyDescription}</p>
       <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item">
         <div><strong>{labels.legacyTokenName}</strong>
+          <span className="muted">{labels.legacyTokenId}: {token.id.slice(0, 8)}</span>
           <span className="muted">{labels.legacyCreatedAt}: {formatTimestamp(token.createdAt)}</span>
           <span className="muted">{token.createdBy ?? labels.legacyCreatedByUnknown}</span>
           <span className="muted">{token.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(token.lastUsedAt)}`}</span>
@@ -449,6 +456,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
           </li>)}</ul>}
           {secret === null || secret.overlayId !== selectedId || !canManage ? null : <div className="overlay-access-secret" aria-label={labels.issue}>
             <p className="overlay-access-secret__masked"><code>{maskOverlaySecret(secret.overlayUrl)}</code></p>
+            <Button variant="neutral" disabled={pending} onClick={() => { setShowSecret((current) => !current); }}>
+              {showSecret ? labels.hideLink : labels.showLink}
+            </Button>
+            {showSecret ? <Field id="overlay-access-full-link" label={labels.fullLink} value={secret.overlayUrl} onChange={() => {}} readOnly mono /> : null}
             <Button variant="neutral" disabled={pending} onClick={() => { void copySecret(); }}>{copied ? labels.copied : labels.copy}</Button>
           </div>}
           <OverlayObsInstructions />
@@ -468,9 +479,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
       description={revokeTarget?.label ?? ""} confirmLabel={`${labels.revoke}: ${revokeTarget?.label ?? ""}`} cancelLabel={labels.cancel}
       onCancel={() => { setRevokeTarget(null); }} onConfirm={() => { void revoke(); }} pending={pending} danger {...(error === null ? {} : { error })} />
     <ConfirmDialog opened={legacyRevokeTarget !== null}
-      title={labels.legacyRevokeTitle(labels.legacyTokenName)}
-      description={labels.legacyRevokeDescription(labels.legacyTokenName)}
-      confirmLabel={labels.legacyRevokeConfirm(labels.legacyTokenName)} cancelLabel={labels.cancel}
+      title={labels.legacyRevokeTitle(legacyRevokeIdentity)}
+      description={labels.legacyRevokeDescription(legacyRevokeIdentity)}
+      confirmLabel={labels.legacyRevokeConfirm(legacyRevokeIdentity)} cancelLabel={labels.cancel}
       onCancel={() => { setLegacyRevokeTarget(null); }} onConfirm={() => { void revokeLegacy(); }} pending={pending} danger
       {...(legacyError === null ? {} : { error: legacyError })} />
   </>;

@@ -276,13 +276,13 @@ export interface OverlaysTexts {
   name: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
   createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; never: string;
   openAccesses: string; issue: string; issueLabel: string; issueHint: string; copy: string; copied: string;
-  copyError: string; reveal: string; replace: string; revoke: string; revoked: string; revokedPending: string;
+  copyError: string; showLink: string; hideLink: string; fullLink: string; reveal: string; replace: string; revoke: string; revoked: string; revokedPending: string;
   active: string; expired: string; revokedStatus: string; noAccesses: string; delete: string; deleteTitle: (name: string) => string;
   deleteDescription: (name: string) => string; deleteConfirm: (name: string) => string; close: string;
   conflict: string; guide: string; issueReason: string; readOnly: string; elementCount: (count: number) => string;
   missingVariable: (name: string) => string;
   legacyTitle: string; legacyDescription: string; legacyTokenName: string; legacyCreatedByUnknown: string;
-  legacyCreatedAt: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
+  legacyCreatedAt: string; legacyTokenId: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
   legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string;
 }
 
@@ -295,7 +295,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Eigene Fläche", createSubmit: "Overlay anlegen", cancel: "Abbrechen",
     elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", never: "Nie", openAccesses: "Zugänge verwalten",
     issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.", copy: "Link kopieren",
-    copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", reveal: "Link erneut anzeigen", replace: "Ersetzen", revoke: "Widerrufen",
+    copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", showLink: "Link anzeigen", hideLink: "Link verbergen", fullLink: "Vollständiger Link", reveal: "Link erneut anzeigen", replace: "Ersetzen", revoke: "Widerrufen",
     revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", active: "Aktiv",
     expired: "Abgelaufen", revokedStatus: "Widerrufen", noAccesses: "Für dieses Overlay gibt es noch keine Zugänge.", delete: "Overlay löschen",
     deleteTitle: (name) => `Overlay ${name} löschen?`, deleteDescription: (name) => `„${name}“ und seine Elemente werden gelöscht; alle zugehörigen Zugänge werden widerrufen.`,
@@ -305,7 +305,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     missingVariable: (name) => `Variable ${name} fehlt`,
     legacyTitle: "Alte Links (Konfiguration im Link)",
     legacyDescription: "Diese ungebundenen Links verwenden noch die alte Konfiguration im Fragment. Hier kannst du sie widerrufen.",
-    legacyTokenName: "Unbenannter Alt-Link", legacyCreatedByUnknown: "Ersteller unbekannt", legacyCreatedAt: "Erstellt",
+    legacyTokenName: "Unbenannter Alt-Link", legacyCreatedByUnknown: "Ersteller unbekannt", legacyCreatedAt: "Erstellt", legacyTokenId: "Link-ID",
     legacyRevokeTitle: (name) => `Alten Link ${name} widerrufen?`,
     legacyRevokeDescription: (name) => `Der alte Link ${name} wird sofort ungültig. Verbundene Quellen werden geschlossen.`,
     legacyRevokeConfirm: (name) => `${name} widerrufen`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden",
@@ -318,7 +318,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Custom size", createSubmit: "Create overlay", cancel: "Cancel",
     elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", never: "Never", openAccesses: "Manage accesses",
     issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.", copy: "Copy link",
-    copied: "Copied", copyError: "The link could not be copied.", reveal: "Show link again", replace: "Replace", revoke: "Revoke",
+    copied: "Copied", copyError: "The link could not be copied.", showLink: "Show link", hideLink: "Hide link", fullLink: "Full link", reveal: "Show link again", replace: "Replace", revoke: "Revoke",
     revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", active: "Active",
     expired: "Expired", revokedStatus: "Revoked", noAccesses: "This overlay has no accesses yet.", delete: "Delete overlay",
     deleteTitle: (name) => `Delete overlay ${name}?`, deleteDescription: (name) => `“${name}” and its elements will be deleted; all of its accesses will be revoked.`,
@@ -328,7 +328,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     missingVariable: (name) => `Variable ${name} is missing`,
     legacyTitle: "Legacy links (configuration in the link)",
     legacyDescription: "These unbound links still use the old fragment configuration. You can revoke them here.",
-    legacyTokenName: "Unnamed legacy link", legacyCreatedByUnknown: "Creator unknown", legacyCreatedAt: "Created",
+    legacyTokenName: "Unnamed legacy link", legacyCreatedByUnknown: "Creator unknown", legacyCreatedAt: "Created", legacyTokenId: "Link ID",
     legacyRevokeTitle: (name) => `Revoke legacy link ${name}?`,
     legacyRevokeDescription: (name) => `The legacy link ${name} will stop working immediately. Connected sources will be closed.`,
     legacyRevokeConfirm: (name) => `Revoke ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more",

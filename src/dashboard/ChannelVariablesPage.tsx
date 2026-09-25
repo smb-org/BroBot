@@ -33,6 +33,66 @@ interface ChannelVariablesPageProperties {
 
 const normalizedVariableName = (value: string): string => value.trim().toLowerCase();
 const variableNamePattern = /^[a-z][a-z0-9_]{0,31}$/u;
+const overlayElementGap = 24;
+const overlayElementLineHeight = 53;
+const overlayRenderedValueEstimate = "999,999,999";
+
+interface OverlayElementBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const estimatedOverlayTextWidth = (text: string): number => {
+  const renderedText = text.includes("{value}")
+    ? text.replaceAll("{value}", overlayRenderedValueEstimate)
+    : `${text} ${overlayRenderedValueEstimate}`;
+  return Array.from(renderedText).length * 24;
+};
+
+const estimatedOverlayElementBounds = (element: Pick<PanelOverlayElement, "text" | "x" | "y">, canvasWidth: number): OverlayElementBounds => {
+  const availableWidth = Math.max(1, canvasWidth - element.x);
+  const textWidth = estimatedOverlayTextWidth(element.text);
+  return {
+    x: element.x,
+    y: element.y,
+    width: Math.min(textWidth, availableWidth),
+    height: Math.ceil(textWidth / availableWidth) * overlayElementLineHeight,
+  };
+};
+
+const nextOverlayElementPosition = (
+  elements: readonly PanelOverlayElement[],
+  canvasWidth: number,
+  canvasHeight: number,
+  text: string,
+): { x: number; y: number } | null => {
+  if (elements.length === 0) return { x: 0, y: 0 };
+
+  const bounds = elements.map((element) => estimatedOverlayElementBounds(element, canvasWidth));
+  const lowestBottom = Math.max(...bounds.map((element) => element.y + element.height));
+  const newAtOrigin = estimatedOverlayElementBounds({ text, x: 0, y: lowestBottom + overlayElementGap }, canvasWidth);
+  if (lowestBottom + overlayElementGap + newAtOrigin.height <= canvasHeight) {
+    return { x: 0, y: lowestBottom + overlayElementGap };
+  }
+
+  // When the full composition has no vertical room left, try columns from
+  // left to right. A new column starts to the right of the element that
+  // blocks it; later additions can continue below the last item in it.
+  const candidateXs = [...new Set(bounds.flatMap((element) => [element.x, element.x + element.width + overlayElementGap]))]
+    .filter((x) => x > 0)
+    .sort((left, right) => left - right);
+  for (const x of candidateXs) {
+    const newElement = estimatedOverlayElementBounds({ text, x, y: 0 }, canvasWidth);
+    if (x + newElement.width > canvasWidth) continue;
+    const blockers = bounds.filter((element) => element.x < x + newElement.width && element.x + element.width > x);
+    const y = blockers.length === 0 ? 0 : Math.max(...blockers.map((element) => element.y + element.height)) + overlayElementGap;
+    if (y + newElement.height <= canvasHeight) return { x, y };
+  }
+  return null;
+};
+
 const saveableOverlayElement = (element: PanelOverlayElement): Omit<PanelOverlayElement, "missingVariableName"> => ({
   id: element.id,
   kind: element.kind,
@@ -260,9 +320,15 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       } else {
         if (overlaySelection.length === 0) return;
         const overlay = (await fetchOverlay(channelId, overlaySelection)).overlay;
+        const text = `${selected.name}: {value}`;
+        const position = nextOverlayElementPosition(overlay.elements, overlay.width, overlay.height, text);
+        if (position === null) {
+          setOverlayError(labels.saveError);
+          return;
+        }
         const element = {
           id: crypto.randomUUID(), kind: "variable" as const, label: "", variableName: selected.name,
-          text: `${selected.name}: {value}`, config: {}, x: 0, y: 0, scalePercent: 100,
+          text, config: {}, ...position, scalePercent: 100,
           z: overlay.elements.length, inComposition: true,
         };
         await saveOverlay(channelId, overlay.id, overlay.revision, {

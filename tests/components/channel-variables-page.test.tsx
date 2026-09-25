@@ -66,10 +66,14 @@ describe("Channel variables page", () => {
     expect(screen.queryByText("Overlay-Link")).not.toBeInTheDocument();
   });
 
-  it("adds a variable element through the overlay save API and opens that overlay", async () => {
+  it("adds a variable below existing elements through the overlay save API", async () => {
+    const existingElement = {
+      id: "element-existing", kind: "variable", label: "Previous score", variableName: "previous",
+      text: "Previous score: {value}", config: {}, x: 0, y: 100, scalePercent: 100, z: 0, inComposition: true,
+    };
     const storedOverlay = {
       id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 2,
-      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z", elements: [],
+      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z", elements: [existingElement],
     };
     const savedBodies: Record<string, unknown>[] = [];
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
@@ -77,7 +81,7 @@ describe("Channel variables page", () => {
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
       if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
       if (url.pathname === "/api/channels/kanal-a/overlays" && (init?.method ?? "GET") === "GET") {
-        return Promise.resolve(jsonResponse({ overlays: [{ id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 2, elementCount: 0 }], maximum: 20, elementMaximum: 20 }));
+        return Promise.resolve(jsonResponse({ overlays: [{ id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 2, elementCount: 1 }], maximum: 20, elementMaximum: 20 }));
       }
       if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: storedOverlay }));
       if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
@@ -99,11 +103,55 @@ describe("Channel variables page", () => {
     fireEvent.click(within(confirmation).getByRole("button", { name: "Variable hinzufügen" }));
 
     await vi.waitFor(() => { expect(savedBodies).toHaveLength(1); });
-    const body = savedBodies[0] as { baseRevision: number; elements: Array<{ variableName: string; text: string }> } | undefined;
+    const body = savedBodies[0] as { baseRevision: number; elements: Array<{ id: string; variableName: string | null; text: string; x: number; y: number }> } | undefined;
     if (body === undefined) throw new Error("Overlay save request is missing.");
     expect(body.baseRevision).toBe(2);
-    expect(body.elements).toEqual([expect.objectContaining({ variableName: "score", text: "score: {value}" })]);
+    expect(body.elements).toHaveLength(2);
+    expect(body.elements[0]).toEqual(expect.objectContaining({ id: "element-existing", x: 0, y: 100 }));
+    expect(body.elements[1]).toEqual(expect.objectContaining({ variableName: "score", text: "score: {value}", x: 0 }));
+    expect(body.elements[1]?.y).toBeGreaterThan(100);
     expect(onOpenOverlay).toHaveBeenCalledWith("overlay-a");
+  });
+
+  it("wraps a new variable into another column when the lowest element is near the canvas bottom", async () => {
+    const existingElement = {
+      id: "element-existing", kind: "variable", label: "Previous score", variableName: "previous",
+      text: "Previous score: {value}", config: {}, x: 0, y: 1020, scalePercent: 100, z: 0, inComposition: true,
+    };
+    const overlay = {
+      id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 2,
+      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z", elements: [existingElement],
+    };
+    const savedBodies: Array<{ elements: Array<{ id: string; x: number; y: number }> }> = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays" && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve(jsonResponse({ overlays: [{ id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 2, elementCount: 1 }], maximum: 20, elementMaximum: 20 }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) as { elements: Array<{ id: string; x: number; y: number }> } : { elements: [] };
+        savedBodies.push(body);
+        return Promise.resolve(jsonResponse({ overlay: { ...overlay, revision: 3, elements: body.elements } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.click(screen.getByRole("button", { name: "In Overlay verwenden" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Variable hinzufügen" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Variable hinzufügen" }));
+
+    await vi.waitFor(() => { expect(savedBodies).toHaveLength(1); });
+    const savedBody = savedBodies[0];
+    if (savedBody === undefined) throw new Error("Overlay save request is missing.");
+    const newElement = savedBody.elements.find((element) => element.id !== "element-existing");
+    expect(newElement?.x).toBeGreaterThan(0);
+    expect(newElement?.y).toBe(0);
+    expect(newElement?.x).toBeLessThan(1920);
   });
 
   it("creates a new overlay and its first element in one save after live-change confirmation", async () => {
