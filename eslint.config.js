@@ -85,6 +85,8 @@ const panelBoundaryPatterns = [
   richTextareaBoundaryPattern,
 ];
 
+const sharedOverlayRendererBoundaryPattern = panelBoundaryPatterns[2];
+
 const panelRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
   ...panelBoundaryPatterns.filter((pattern) => pattern !== mantineBoundaryPattern && pattern !== tablerBoundaryPattern && pattern !== richTextareaBoundaryPattern),
@@ -176,6 +178,17 @@ export default defineConfig(
       "no-restricted-imports": [
         "error",
         { patterns: panelBoundaryPatterns },
+      ],
+    },
+  },
+  {
+    // Der Kompositionseditor bindet den identischen Canvas-Renderer wie die Ausgabe
+    // ein. Diese eine Ansicht darf deshalb gezielt src/overlay/canvas importieren.
+    files: ["src/dashboard/OverlayEditorPage.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: panelBoundaryPatterns.filter((pattern) => pattern !== sharedOverlayRendererBoundaryPattern) },
       ],
     },
   },
