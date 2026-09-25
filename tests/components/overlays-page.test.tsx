@@ -1,4 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { URL as NodeURL } from "node:url";
+import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import streamElementsFields from "../../docs/embedding/streamelements/fields.json?raw";
@@ -38,6 +41,24 @@ const requestPath = (input: RequestInfo | URL): string => {
   return new URL(input, window.location.href).pathname;
 };
 const requestBody = (init: RequestInit | undefined): string => typeof init?.body === "string" ? init.body : "";
+const dashboardStyles = readFileSync(new NodeURL("../../src/dashboard/styles.css", import.meta.url), "utf8");
+
+const validateWithWidget = (overlayUrl: string, brobotAddress: string): { src: string; errorDisplay: string } => {
+  const widgetRuntime: { loadWidget?: (event: unknown) => void } = {};
+  const frame = { style: { display: "" }, src: "" };
+  const error = { style: { display: "" }, textContent: "" };
+  runInNewContext(streamElementsJs, {
+    window: { addEventListener: (_event: string, listener: (event: unknown) => void) => { widgetRuntime.loadWidget = listener; } },
+    document: { getElementById: (id: string) => id === "brobotOverlayFrame" ? frame : error },
+    navigator: { language: "en-US" },
+    URL,
+    URLSearchParams,
+  });
+  const loadWidget = widgetRuntime.loadWidget;
+  if (loadWidget === undefined) throw new Error("Widget did not register its load handler.");
+  loadWidget({ detail: { fieldData: { overlayUrl, brobotAddress } } });
+  return { src: frame.src, errorDisplay: error.style.display };
+};
 
 const setBrowserLanguage = (language: string): void => {
   Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
@@ -56,6 +77,7 @@ describe("Overlays page", () => {
     secondOverlay?: boolean;
     accessLastUsedAt?: string | null;
     accessRecoverable?: boolean;
+    removeElementOnReplace?: boolean;
     legacyClosingPending?: boolean;
     legacyTokens?: Array<{ id: string; name: string | null; createdAt: string; createdBy: string | null; lastUsedAt: string | null; expiresAt: string | null }>;
   } = {}) => {
@@ -66,6 +88,7 @@ describe("Overlays page", () => {
     }];
     let legacyTokens = [...(options.legacyTokens ?? [])];
     let importedOverlay: typeof overlay | null = null;
+    let currentOverlay = overlay;
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.href);
       const method = init?.method ?? "GET";
@@ -100,7 +123,7 @@ describe("Overlays page", () => {
         legacyTokens = [];
         return jsonResponse({ overlay: importedOverlay }, 201);
       }
-      if (url.pathname === "/api/channels/channel-a/overlays/overlay-a" && method === "GET") return jsonResponse({ overlay });
+      if (url.pathname === "/api/channels/channel-a/overlays/overlay-a" && method === "GET") return jsonResponse({ overlay: currentOverlay });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-b" && method === "GET") return jsonResponse({ overlay: overlayB });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-imported" && method === "GET" && importedOverlay !== null) return jsonResponse({ overlay: importedOverlay });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-a/accesses" && method === "GET") {
@@ -114,7 +137,10 @@ describe("Overlays page", () => {
         return jsonResponse(issued, 201);
       }
       if (url.pathname.endsWith("/access-a/reveal") && method === "POST") return jsonResponse({ overlayUrl: secret });
-      if (url.pathname.endsWith("/access-a/replace") && method === "POST") return jsonResponse({ tokenId: "access-replaced", overlayUrl: secret, label: "OBS Main PC 2", expiresAt: null }, 201);
+      if (url.pathname.endsWith("/access-a/replace") && method === "POST") {
+        if (options.removeElementOnReplace) currentOverlay = { ...overlay, revision: 5, elements: [] };
+        return jsonResponse({ tokenId: "access-replaced", overlayUrl: secret, label: "OBS Main PC 2", expiresAt: null }, 201);
+      }
       if (url.pathname.endsWith("/access-a/revoke") && method === "POST") {
         accesses = accesses.map((item) => item.tokenId === "access-a" ? { ...item, revokedAt: "2026-09-24T12:00:00.000Z" } : item);
         return new Response(null, { status: 204 });
@@ -254,7 +280,7 @@ describe("Overlays page", () => {
   it("issues and copies a link, re-shows and replaces access, and confirms revocation", async () => {
     const fetcher = routeFetcher();
     vi.stubGlobal("fetch", fetcher);
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
@@ -339,17 +365,31 @@ describe("Overlays page", () => {
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
     fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
+    const tabs = within(assistant).getAllByRole("tab");
+    for (const tab of tabs) {
+      const panelId = tab.getAttribute("aria-controls");
+      expect(panelId).not.toBeNull();
+      const panel = document.getElementById(panelId ?? "");
+      expect(panel).toBeInTheDocument();
+      expect(panel?.hidden).toBe(tab.getAttribute("aria-selected") !== "true");
+    }
+    expect(within(assistant).getAllByRole("tabpanel", { hidden: true })).toHaveLength(3);
+    expect(within(assistant).getAllByRole("tab").find((tab) => tab.getAttribute("aria-selected") === "false")).toHaveClass("overlay-setup__tab");
+    expect(dashboardStyles).toMatch(/\.overlay-setup__tab\s*\{[^}]*min-height:\s*44px/u);
+    expect(dashboardStyles).toMatch(/\.overlay-setup__panel\[hidden\]\s*\{[^}]*display:\s*none/u);
+    expect(dashboardStyles).toMatch(/\.overlay-elements-list\s*\{[^}]*list-style:\s*none/u);
+    expect(document.querySelector(".overlay-elements-list")).toHaveClass("overlay-elements-list");
     expect(assistant).toHaveTextContent("Breite und Höhe: 1920 × 1080 px");
     expect(assistant).toHaveTextContent("Quelle hinzufügen");
     expect(assistant).toHaveTextContent("Browser auswählen");
-    expect(assistant).toHaveTextContent("Benutzerdefiniertes CSS");
+    expect(assistant).toHaveTextContent("Die Anzeige ist maskiert; der kopierte Link enthält den Zugangstoken.");
     expect(assistant).toHaveTextContent("Eigenes CSS gehört in den Stil des Overlays.");
     expect(within(assistant).getByRole("tab", { name: "OBS" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByText("Overlay-Link", { selector: ".overlay-access-secret" })).not.toBeInTheDocument();
   });
 
   it("switches setup platform tabs and copies the source embedding files verbatim", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     vi.stubGlobal("fetch", routeFetcher());
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
@@ -363,6 +403,8 @@ describe("Overlays page", () => {
     const streamElementsTab = within(assistant).getByRole("tab", { name: "StreamElements" });
     expect(streamElementsTab).toHaveAttribute("aria-selected", "true");
     expect(assistant).toHaveTextContent("Overlay → Add Widget → Static/Custom → Custom Widget");
+    expect(assistant).toHaveTextContent("brobotAddress");
+    expect(assistant).toHaveTextContent("overlayUrl");
     fireEvent.click(within(assistant).getByRole("button", { name: "HTML kopieren" }));
     fireEvent.click(within(assistant).getByRole("button", { name: "JS kopieren" }));
     fireEvent.click(within(assistant).getByRole("button", { name: "Fields kopieren" }));
@@ -384,7 +426,7 @@ describe("Overlays page", () => {
   it("copies a selected element URL through the access reveal flow without rendering its token", async () => {
     const fetcher = routeFetcher();
     vi.stubGlobal("fetch", fetcher);
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
@@ -398,13 +440,72 @@ describe("Overlays page", () => {
     expect(assistant).toHaveTextContent("Breite ≈ Elementbreite × Skalierung; Höhe nach Inhalt.");
     expect(assistant).toHaveTextContent("#token=••••••&element=element-a");
 
+    fireEvent.click(within(assistant).getByRole("button", { name: "Link zum Kopieren anzeigen" }));
+    await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/reveal"))).toBe(true); });
+    expect(writeText).not.toHaveBeenCalled();
     fireEvent.click(within(assistant).getByRole("button", { name: "Overlay-Link kopieren" }));
-    await vi.waitFor(() => { expect(writeText).toHaveBeenCalledWith(`${secret}&element=element-a`); });
+    await vi.waitFor(() => { expect(writeText).toHaveBeenLastCalledWith(`${secret}&element=element-a`); });
     expect(await within(assistant).findByRole("button", { name: "Overlay-Link kopiert" })).toBeInTheDocument();
-    expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/reveal"))).toBe(true);
+    const copiedElementUrl = writeText.mock.calls[0]?.[0];
+    if (typeof copiedElementUrl !== "string") throw new Error("The selected element URL was not copied.");
+    const elementFields = {
+      brobotAddress: { value: new URL(copiedElementUrl).origin },
+      overlayUrl: { value: copiedElementUrl },
+    };
+    const validation = validateWithWidget(elementFields.overlayUrl.value, elementFields.brobotAddress.value);
+    expect(validation.errorDisplay).toBe("none");
+    expect(validation.src).toBe(copiedElementUrl);
     expect(document.body.textContent).not.toContain("f".repeat(43));
     expect([...document.querySelectorAll("input, textarea")].some((element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
       ? element.value.includes("f".repeat(43)) : false)).toBe(false);
+
+  });
+
+  it("copies the whole overlay when a refreshed composition removes the selected element", async () => {
+    const fetcher = routeFetcher({ removeElementOnReplace: true });
+    vi.stubGlobal("fetch", fetcher);
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
+    const output = within(assistant).getByRole("combobox", { name: "Ausgabe" });
+    fireEvent.click(output);
+    fireEvent.click(await screen.findByRole("option", { name: "Einzelnes Element: Score" }));
+
+    const accessRow = within(inspector).getByText("OBS Main PC").closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    fireEvent.click(within(accessRow).getByRole("button", { name: "Ersetzen" }));
+    await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/replace"))).toBe(true); });
+    await vi.waitFor(() => { expect(output).toHaveValue("Ganzes Overlay"); });
+    expect(assistant).toHaveTextContent("Breite und Höhe: 1920 × 1080 px");
+
+    fireEvent.click(within(assistant).getByRole("button", { name: "Link zum Kopieren anzeigen" }));
+    await vi.waitFor(() => { expect(fetcher.mock.calls.filter(([input]) => requestPath(input).endsWith("/access-a/reveal")).length).toBeGreaterThan(0); });
+    fireEvent.click(within(assistant).getByRole("button", { name: "Overlay-Link kopieren" }));
+    await vi.waitFor(() => { expect(writeText).toHaveBeenCalledWith(secret); });
+    const copiedUrl = writeText.mock.calls[0]?.[0];
+    if (typeof copiedUrl !== "string") throw new Error("The whole overlay URL was not copied after the selection became stale.");
+    const wholeOverlayFields = {
+      brobotAddress: { value: new URL(copiedUrl).origin },
+      overlayUrl: { value: copiedUrl },
+    };
+    const validation = validateWithWidget(wholeOverlayFields.overlayUrl.value, wholeOverlayFields.brobotAddress.value);
+    expect(validation.errorDisplay).toBe("none");
+    expect(validation.src).toBe(copiedUrl);
+  });
+
+  it.each([
+    `${secret}&element=bad%20id`,
+    `${secret}&element=${"x".repeat(65)}`,
+    `${secret}&debug=1`,
+  ])("rejects an invalid custom widget fragment: %s", (overlayUrl) => {
+    const validation = validateWithWidget(overlayUrl, new URL(overlayUrl).origin);
+    expect(validation.src).toBe("");
+    expect(validation.errorDisplay).toBe("block");
   });
 
   it("keeps setup instructions and snippet copying available to operators but explains disabled access copying", async () => {
@@ -417,7 +518,7 @@ describe("Overlays page", () => {
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
     fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
     const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
-    const copyUrl = within(assistant).getByRole("button", { name: "Overlay-Link kopieren" });
+    const copyUrl = within(assistant).getByRole("button", { name: "Link zum Kopieren anzeigen" });
     expect(copyUrl).toBeDisabled();
     expect(assistant).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Overlay-Zugänge kopieren.");
     expect(within(assistant).getByRole("tab", { name: "OBS" })).toBeEnabled();
@@ -429,9 +530,17 @@ describe("Overlays page", () => {
   });
 
   it.each([
-    { language: "de-DE", assistant: "Einrichtungsassistent", target: "Zielsystem" },
-    { language: "en-US", assistant: "Setup assistant", target: "Target platform" },
-  ])("localizes setup labels in $language", async ({ language, assistant: assistantLabel, target }) => {
+    {
+      language: "de-DE", assistant: "Einrichtungsassistent", target: "Zielsystem",
+      obsCopy: "Die Anzeige ist maskiert; der kopierte Link enthält den Zugangstoken.",
+      fields: "brobotAddress auf den HTTPS-Ursprung des Overlay-Links und overlayUrl auf den vollständigen Link mit Zugangstoken setzen",
+    },
+    {
+      language: "en-US", assistant: "Setup assistant", target: "Target platform",
+      obsCopy: "The displayed URL is masked; the copied link includes the access token.",
+      fields: "set brobotAddress to the HTTPS origin of the overlay link and overlayUrl to the full link containing the access token",
+    },
+  ])("localizes setup labels in $language", async ({ language, assistant: assistantLabel, target, obsCopy, fields }) => {
     setBrowserLanguage(language);
     vi.stubGlobal("fetch", routeFetcher());
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
@@ -440,6 +549,12 @@ describe("Overlays page", () => {
     fireEvent.click(within(inspector).getByRole("button", { name: language === "de-DE" ? "Einrichten" : "Set up" }));
     const assistant = within(inspector).getByRole("region", { name: assistantLabel });
     expect(within(assistant).getByRole("tablist", { name: target })).toBeInTheDocument();
+    const obsTab = within(assistant).getByRole("tab", { name: "OBS" });
+    expect(document.getElementById(obsTab.getAttribute("aria-controls") ?? "")?.textContent).toContain(obsCopy);
+    const streamElementsTab = within(assistant).getByRole("tab", { name: "StreamElements" });
+    expect(document.getElementById(streamElementsTab.getAttribute("aria-controls") ?? "")?.textContent).toContain(fields);
+    const soundAlertsTab = within(assistant).getByRole("tab", { name: "Sound Alerts" });
+    expect(document.getElementById(soundAlertsTab.getAttribute("aria-controls") ?? "")?.textContent).toContain(fields);
   });
 
   it("keeps legacy links manageable on a channel with no overlays", async () => {

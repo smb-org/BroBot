@@ -50,6 +50,12 @@ const elementOutputUrl = (overlayUrl: string, elementId: string | null): string 
   ? overlayUrl
   : `${overlayUrl}${overlayUrl.includes("#") ? "&" : "#"}element=${encodeURIComponent(elementId)}`;
 
+const selectedOutputElementId = (elements: PanelOverlay["elements"], output: string): string | null => {
+  if (!output.startsWith("element:")) return null;
+  const requestedId = output.slice("element:".length);
+  return elements.find((element) => element.id === requestedId)?.id ?? null;
+};
+
 const parseLegacyOverlayLink = (value: string): { token: string; variableName: string; text: string } | null => {
   try {
     const url = new URL(value.trim(), window.location.origin);
@@ -82,6 +88,7 @@ interface OverlaySetupAssistantProperties {
   canCopyUrl: boolean;
   copyUrlReason: string | null;
   copiedUrl: boolean;
+  urlActionLabel: string;
   pending: boolean;
   onCopyUrl: () => void;
   copiedSnippet: string | null;
@@ -100,6 +107,7 @@ function OverlaySetupAssistant({
   canCopyUrl,
   copyUrlReason,
   copiedUrl,
+  urlActionLabel,
   pending,
   onCopyUrl,
   copiedSnippet,
@@ -107,11 +115,11 @@ function OverlaySetupAssistant({
 }: OverlaySetupAssistantProperties): ReactElement {
   const instanceId = useId();
   const targetTabRefs = useRef<Record<SetupTarget, HTMLButtonElement | null>>({ obs: null, streamelements: null, soundalerts: null });
-  const selectedElement = output.startsWith("element:")
-    ? overlay.elements.find((element) => element.id === output.slice("element:".length)) ?? null
-    : null;
+  const outputElementId = selectedOutputElementId(overlay.elements, output);
+  const selectedElement = outputElementId === null
+    ? null
+    : overlay.elements.find((element) => element.id === outputElementId) ?? null;
   const effectiveOutput = selectedElement === null ? "whole" : output;
-  const outputElementId = selectedElement?.id ?? null;
   const visibleOutputUrl = elementOutputUrl(visibleUrl, outputElementId);
   const outputOptions = [
     { value: "whole", label: labels.setupWholeOverlay },
@@ -138,14 +146,14 @@ function OverlaySetupAssistant({
     onTargetChange(nextTarget);
     targetTabRefs.current[nextTarget]?.focus();
   };
-  const snippetCards = setupSnippets.map((snippet) => {
+  const snippetCards = (snippetTarget: SetupTarget): ReactElement[] => setupSnippets.map((snippet) => {
     const label = snippet.kind === "html" ? labels.setupHtml : snippet.kind === "js" ? labels.setupJs : labels.setupFields;
-    const copyKey = `${target}:${snippet.kind}`;
+    const copyKey = `${snippetTarget}:${snippet.kind}`;
     const wasCopied = copiedSnippet === copyKey;
     return <article className="overlay-setup__snippet" key={snippet.kind}>
       <div className="overlay-setup__snippet-heading">
         <h4>{label}</h4>
-        <Button variant="neutral" disabled={pending} onClick={() => { onCopySnippet(target, snippet.kind, snippet.content); }}>
+        <Button variant="neutral" disabled={pending} onClick={() => { onCopySnippet(snippetTarget, snippet.kind, snippet.content); }}>
           {wasCopied ? labels.setupSnippetCopied(label) : labels.setupCopySnippet(label)}
         </Button>
       </div>
@@ -171,7 +179,7 @@ function OverlaySetupAssistant({
       <p className="overlay-setup__masked-url"><code>{visibleOutputUrl}</code></p>
       <Button variant="neutral" disabled={!canCopyUrl || pending}
         {...(copyUrlReason === null ? {} : { describedBy: `${instanceId}-setup-copy-reason`, title: copyUrlReason })}
-        onClick={onCopyUrl}>{copiedUrl ? labels.setupCopiedUrl : labels.setupCopyUrl}</Button>
+        onClick={onCopyUrl}>{copiedUrl ? labels.setupCopiedUrl : urlActionLabel}</Button>
       {copyUrlReason === null ? null : <p id={`${instanceId}-setup-copy-reason`} className="muted" role="note">{copyUrlReason}</p>}
     </div>
     <div className="overlay-setup__tabs" role="tablist" aria-label={labels.setupTarget}>
@@ -180,8 +188,9 @@ function OverlaySetupAssistant({
         tabIndex={target === item ? 0 : -1} className="overlay-setup__tab" onClick={() => { onTargetChange(item); }}
         onKeyDown={onTargetTabKeyDown}>{targetLabels[item]}</button>)}
     </div>
-    <div id={panelId(target)} role="tabpanel" aria-labelledby={tabId(target)} tabIndex={0} className="overlay-setup__panel">
-      {target === "obs" ? <>
+    {setupTargets.map((item) => <div key={item} id={panelId(item)} role="tabpanel" aria-labelledby={tabId(item)} tabIndex={0}
+      hidden={target !== item} className="overlay-setup__panel">
+      {item === "obs" ? <>
         <ol>
           <li>{labels.setupObsAddSource}</li>
           <li>{labels.setupObsBrowser}</li>
@@ -190,10 +199,10 @@ function OverlaySetupAssistant({
           <li>{labels.setupObsClearCss}</li>
         </ol>
         <p className="muted" role="note">{labels.setupObsCssNote}</p>
-      </> : target === "streamelements" ? <>
+      </> : item === "streamelements" ? <>
         <p>{labels.setupStreamElementsPath}</p>
         <p>{labels.setupStreamElementsPaste}</p>
-        <div className="overlay-setup__snippets">{snippetCards}</div>
+        <div className="overlay-setup__snippets">{snippetCards(item)}</div>
         <p className="muted">{outputElementId === null
           ? labels.setupStreamElementsWholePlacement(overlay.width, overlay.height)
           : labels.setupStreamElementsElementPlacement}</p>
@@ -201,9 +210,9 @@ function OverlaySetupAssistant({
         <p>{labels.setupSoundAlertsPath}</p>
         <p className="muted" role="note">{labels.setupSoundAlertsUnverified}</p>
         <p>{labels.setupSoundAlertsFallback}</p>
-        <div className="overlay-setup__snippets">{snippetCards}</div>
+        <div className="overlay-setup__snippets">{snippetCards(item)}</div>
       </>}
-    </div>
+    </div>)}
   </section>;
 }
 
@@ -497,14 +506,21 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     if (setupAccess === null || selectedOverlay === null || !canManage || pending || !isAccessActive(setupAccess) || !setupAccess.recoverable) return;
     const overlayId = selectedOverlay.id;
     const requestedChannelId = channelId;
-    setPending(true);
-    setSetupCopiedUrl(false);
-    setError(null);
     try {
-      const overlayUrl = await revealAccessUrl(setupAccess);
-      if (overlayUrl === null || !accessContextIsCurrent(overlayId, requestedChannelId)) return;
-      const elementId = setupOutput.startsWith("element:") ? setupOutput.slice("element:".length) : null;
-      await navigator.clipboard.writeText(elementOutputUrl(overlayUrl, elementId));
+      const overlayUrl = secret?.overlayId === overlayId && secret.tokenId === setupAccess.tokenId
+        ? secret.overlayUrl
+        : null;
+      setSetupCopiedUrl(false);
+      setError(null);
+      if (overlayUrl === null) {
+        setPending(true);
+        await revealAccessUrl(setupAccess);
+        return;
+      }
+      const elementId = selectedOutputElementId(selectedOverlay.elements, setupOutput);
+      const copyPromise = navigator.clipboard.writeText(elementOutputUrl(overlayUrl, elementId));
+      setPending(true);
+      await copyPromise;
       if (accessContextIsCurrent(overlayId, requestedChannelId)) setSetupCopiedUrl(true);
     } catch (caught) {
       if (accessContextIsCurrent(overlayId, requestedChannelId)) {
@@ -629,6 +645,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       : !setupAccess.recoverable ? labels.accessUnrecoverable
         : !isAccessActive(setupAccess) ? labels.setupAccessInactive : null;
   const setupCanCopyUrl = setupAccess !== null && setupCopyUrlReason === null;
+  const setupUrlRevealed = setupAccess !== null && secret?.overlayId === selectedId && secret.tokenId === setupAccess.tokenId;
   const setupBaseUrl = setupAccess !== null && secret?.overlayId === selectedId && secret.tokenId === setupAccess.tokenId
     ? maskOverlaySecret(secret.overlayUrl)
     : `${window.location.origin}/overlay#token=••••••`;
@@ -716,7 +733,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       {onOpenEditor === undefined ? null : <Button variant="primary" onClick={() => { onOpenEditor(selectedOverlay.id); }}>{labels.editComposition}</Button>}
       <section className="overlay-elements-section" aria-label={labels.elements}>
         <h3>{labels.elements}</h3>
-        {selectedOverlay.elements.length === 0 ? <p className="muted">{labels.elementCount(0)}</p> : <ul>{selectedOverlay.elements.map((element) => <li key={element.id}>
+        {selectedOverlay.elements.length === 0 ? <p className="muted">{labels.elementCount(0)}</p> : <ul className="overlay-elements-list">{selectedOverlay.elements.map((element) => <li key={element.id}>
           {element.label || element.id}{element.variableName === null ? <span className="muted"> · {element.missingVariableName === undefined || element.missingVariableName === null ? "—" : labels.missingVariable(element.missingVariableName)}</span> : null}
         </li>)}</ul>}
       </section>
@@ -756,7 +773,8 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
           {setupAccess === null ? null : <OverlaySetupAssistant labels={labels} overlay={selectedOverlay} access={setupAccess}
             target={setupTarget} onTargetChange={(target) => { setSetupTarget(target); setSetupCopiedSnippet(null); }}
             output={setupOutput} onOutputChange={(output) => { setSetupOutput(output); setSetupCopiedUrl(false); }}
-            visibleUrl={setupBaseUrl} canCopyUrl={setupCanCopyUrl} copyUrlReason={setupCopyUrlReason} copiedUrl={setupCopiedUrl} pending={pending}
+            visibleUrl={setupBaseUrl} canCopyUrl={setupCanCopyUrl} copyUrlReason={setupCopyUrlReason} copiedUrl={setupCopiedUrl}
+            urlActionLabel={setupUrlRevealed ? labels.setupCopyRevealedUrl : labels.setupRevealUrl} pending={pending}
             onCopyUrl={() => { void copySetupUrl(); }} copiedSnippet={setupCopiedSnippet}
             onCopySnippet={(target, kind, content) => { void copySetupSnippet(target, kind, content); }} />}
           {secret === null || secret.overlayId !== selectedId || !canManage ? null : <div className="overlay-access-secret" aria-label={labels.issue}>
