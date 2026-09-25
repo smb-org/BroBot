@@ -110,7 +110,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1);
     expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledWith("fictional-token", expect.any(Function), expect.any(Object));
     expect(container.querySelector(".brobot-overlay")).toHaveStyle({ width: "1920px", height: "1080px" });
-    expect(container.querySelector('[data-element="element-first"]')).toHaveStyle({ left: "20px", top: "30px", zIndex: "4" });
+    expect(container.querySelector('[data-element="element-first"]')).toHaveStyle({ left: "20px", top: "30px", zIndex: "4", width: "max-content" });
     expect(container.querySelector('[data-element="element-third"]')).toHaveStyle({ left: "120px", top: "140px", transform: "scale(0.75)" });
     expect(container.querySelector('[data-element="element-second"]')).not.toBeNull();
     expect(container.querySelectorAll(".brobot-variable")).toHaveLength(3);
@@ -130,6 +130,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(container.querySelector('[data-element="element-second"]')).toHaveStyle({
       left: "0px",
       top: "0px",
+      width: "max-content",
       transform: "scale(1.5)",
     });
   });

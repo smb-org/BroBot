@@ -3,4 +3,7 @@
   color: rgba(255, 255, 255, 0.96);
   font: 700 48px/1.1 system-ui, sans-serif;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  /* Element text is single-line by design (100-char limit, plain input field); keep it from
+     wrapping so the wrapper's intrinsic width stays correct regardless of canvas position. */
+  white-space: nowrap;
 }
