@@ -1,0 +1,8 @@
+{
+  "overlayUrl": {
+    "type": "text",
+    "label": "Overlay-URL / Overlay URL (vollständiger Link mit Zugangstoken)",
+    "value": "https://brobot.example.invalid/overlay#token=DEIN_TOKEN",
+    "group": "BroBot"
+  }
+}

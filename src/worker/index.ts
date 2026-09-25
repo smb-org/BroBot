@@ -48,6 +48,33 @@ const overlayDocument = async (
   return addOverlayContentSecurityPolicy(response, publicOrigin);
 };
 
+const isTokenAuthenticatedOverlayApi = (pathname: string): boolean =>
+  pathname === "/api/overlay/bootstrap" || /^\/api\/overlay\/variables\/[^/]+$/u.test(pathname);
+
+const addWildcardCors = (response: Response, extraHeaders?: HeadersInit): Response => {
+  const headers = new Headers(response.headers);
+  headers.set("Access-Control-Allow-Origin", "*");
+  if (extraHeaders !== undefined) {
+    new Headers(extraHeaders).forEach((value, name) => {
+      headers.set(name, value);
+    });
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
+
+const overlayApiPreflight = (): Response => addWildcardCors(
+  new Response(null, { status: 204 }),
+  {
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization",
+    "Access-Control-Max-Age": "600",
+  },
+);
+
 app.use("/api/*", serverTimingMiddleware);
 app.route("/", authRouter);
 app.route("/", platformRouter);
@@ -93,6 +120,13 @@ app.get("/overlay.html", (context) => overlayDocument(
 app.all("*", (context) => context.env.ASSETS.fetch(context.req.raw));
 
 export default {
-  fetch: app.fetch,
+  fetch: async (request, env, executionContext) => {
+    const pathname = new URL(request.url).pathname;
+    const overlayApi = isTokenAuthenticatedOverlayApi(pathname);
+    if (overlayApi && request.method === "OPTIONS") return overlayApiPreflight();
+
+    const response = await app.fetch(request, env, executionContext);
+    return overlayApi ? addWildcardCors(response) : response;
+  },
   scheduled,
 } satisfies ExportedHandler<Env>;

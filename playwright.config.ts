@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const playwrightPort = process.env.PLAYWRIGHT_PORT ?? "5174";
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
@@ -8,14 +10,14 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: [["html", { open: "never" }], ["list"]],
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: `http://localhost:${playwrightPort}`,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
   webServer: [
     {
-      command: "./node_modules/.bin/vite --host 127.0.0.1",
-      url: "http://localhost:5173/",
+      command: `./node_modules/.bin/vite --host 127.0.0.1 --port ${playwrightPort} --strictPort`,
+      url: `http://localhost:${playwrightPort}/`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
@@ -33,6 +35,7 @@ export default defineConfig({
       port: 8787,
       reuseExistingServer: false,
       timeout: 120_000,
+      env: { PUBLIC_ORIGIN: "http://127.0.0.1:8787" },
     },
   ],
   projects: [{ name: "chromium-desktop", use: { ...devices["Desktop Chrome"] } }],

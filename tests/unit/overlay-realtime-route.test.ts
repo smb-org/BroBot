@@ -36,11 +36,12 @@ const insertToken = async (
 
 const overlayRequest = (
   value: string,
-  options: { protocols?: string; url?: string } = {},
+  options: { protocols?: string; url?: string; origin?: string } = {},
 ): Request => new Request(options.url ?? "https://brobot.example/ws/overlay", {
   headers: {
     Upgrade: "websocket",
     "Sec-WebSocket-Protocol": options.protocols ?? `${REALTIME_PROTOCOL}, ${OVERLAY_TOKEN_SUBPROTOCOL_PREFIX}${value}`,
+    ...(options.origin === undefined ? {} : { Origin: options.origin }),
   },
 });
 
@@ -105,6 +106,18 @@ describe("overlay realtime route", () => {
       overlayId: "overlay-b",
       expiresAt: null,
     });
+  });
+
+  it("accepts an opaque null Origin for token-authenticated overlay sockets", async () => {
+    const state = await setup();
+    database = state.database;
+    await insertToken(state.database, "kanal-a");
+
+    const response = await realtimeRouter.fetch(overlayRequest(token, { origin: "null" }), state.env);
+
+    expect(response.status).toBe(200);
+    expect(state.idFromName).toHaveBeenCalledWith("kanal-a");
+    expect(state.fetchStub).toHaveBeenCalledTimes(1);
   });
 
   it("rejects missing, revoked, and expired overlay tokens before reaching a channel object", async () => {
