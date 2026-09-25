@@ -87,6 +87,7 @@ export interface PanelChannelState {
   channelId: string;
   login: string;
   displayName: string;
+  language: "de" | "en";
   role: ChannelRole;
   broadcasterConnection: PanelBroadcasterConnectionStatus;
   channelBotConsent: PanelChannelBotConsentStatus;

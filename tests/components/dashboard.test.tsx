@@ -17,6 +17,7 @@ const healthyChannel = (channelId: string, displayName: string) => ({
   channelId,
   login: channelId,
   displayName,
+  language: "de",
   role: "manager",
   broadcasterConnection: "connected",
   channelBotConsent: "granted",
@@ -217,6 +218,41 @@ describe("Dashboard skeleton", () => {
       channelId: "kanal-a",
       section: "audit",
     });
+  });
+
+  it("recognizes an overlay composition editor deep link and preserves its draft variable", () => {
+    const route = parseDashboardRoute("/channels/kanal-a/overlays/overlay-a", "?variable=score");
+    expect(route).toEqual({
+      kind: "channel",
+      channelId: "kanal-a",
+      section: "overlays",
+      editorOverlayId: "overlay-a",
+      initialVariable: "score",
+    });
+    expect(dashboardRoutePath(route)).toBe("/channels/kanal-a/overlays/overlay-a?variable=score");
+  });
+
+  it("opens the overlay editor route with a live renderer preview", async () => {
+    const channel = healthyChannel("kanal-a", "Alpha");
+    stubDashboardFetch((url) => {
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return jsonResponse({ overlay: {
+        id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1280, height: 720, css: "", revision: 4,
+        createdAt: "2026-09-24T10:00:00.000Z", updatedAt: "2026-09-24T10:00:00.000Z",
+        elements: [{ id: "element-a", kind: "variable", label: "Score", variableName: "score", text: "Score: {value}", config: {}, x: 24, y: 32, scalePercent: 100, z: 0, inComposition: true }],
+      } });
+      if (url.pathname === "/api/channels/kanal-a/variables") return jsonResponse({ variables: [{
+        channelId: "kanal-a", name: "score", value: 1234, description: "Current score", resetOnStreamStart: false,
+        createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z", usages: [],
+      }], count: 1, maximum: 25 });
+      if (url.pathname === "/api/channels/kanal-a/overlays") return jsonResponse({ overlays: [], maximum: 20, elementMaximum: 20 });
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return jsonResponse({ tokens: [], nextOffset: null });
+    }, [channel]);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]')?.contentDocument?.querySelector(".brobot-variable")).toHaveTextContent("Score: 1.234"));
   });
 
   it("keeps multiple event tones in a deep link", () => {

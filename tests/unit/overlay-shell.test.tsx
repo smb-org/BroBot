@@ -110,7 +110,8 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1);
     expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledWith("fictional-token", expect.any(Function), expect.any(Object));
     expect(container.querySelector(".brobot-overlay")).toHaveStyle({ width: "1920px", height: "1080px" });
-    expect(container.querySelector('[data-element="element-first"]')).toHaveStyle({ left: "20px", top: "30px", zIndex: "4" });
+    expect(container.querySelector('[data-element="element-first"]')).toHaveStyle({ left: "20px", top: "30px", zIndex: "4", width: "max-content" });
+    expect(container.querySelector('[data-element="element-first"]')).toHaveClass("brobot-overlay-composition-element");
     expect(container.querySelector('[data-element="element-third"]')).toHaveStyle({ left: "120px", top: "140px", transform: "scale(0.75)" });
     expect(container.querySelector('[data-element="element-second"]')).not.toBeNull();
     expect(container.querySelectorAll(".brobot-variable")).toHaveLength(3);
@@ -127,11 +128,16 @@ describe("OverlayShell and OverlayCanvas", () => {
 
     await waitFor(() => expect(container.querySelector('[data-element="element-second"]')).not.toBeNull());
     expect(container.querySelectorAll("[data-element]")).toHaveLength(1);
-    expect(container.querySelector('[data-element="element-second"]')).toHaveStyle({
+    const isolatedElement = container.querySelector('[data-element="element-second"]');
+    expect(isolatedElement).toHaveStyle({
       left: "0px",
       top: "0px",
       transform: "scale(1.5)",
     });
+    // Isolated/legacy rendering (e.g. an unbound #text= link in a narrow OBS browser source)
+    // keeps its original shrink-to-fit/wrap behavior: no forced width, no composition class.
+    expect(isolatedElement).not.toHaveClass("brobot-overlay-composition-element");
+    expect(isolatedElement?.getAttribute("style")).not.toContain("max-content");
   });
 
   it("renders stored text for a bound legacy token and ignores fragment configuration", async () => {

@@ -13,6 +13,9 @@ export type DashboardRoute =
     channelId: string;
     section: "overview" | "system" | "members" | "variables" | "overlays" | "events" | "modules" | "audit";
     overlayId?: string;
+    editorOverlayId?: string;
+    initialVariable?: string;
+    initialOverlayName?: string;
     filters?: PanelEventFilters;
     auditFilters?: PanelAuditFilters;
   }
@@ -93,6 +96,21 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     if (channelId === null || moduleId === null) return { kind: "overview" };
     return { kind: "module", channelId, moduleId };
   }
+  if (segments.length === 4 && segments[0] === "channels" && segments[2] === "overlays") {
+    const channelId = decodeSegment(segments[1] ?? "");
+    const editorOverlayId = decodeSegment(segments[3] ?? "");
+    if (channelId === null || editorOverlayId === null) return { kind: "overview" };
+    const initialVariable = new URLSearchParams(search).get("variable");
+    const initialOverlayName = new URLSearchParams(search).get("name");
+    return {
+      kind: "channel",
+      channelId,
+      section: "overlays",
+      editorOverlayId,
+      ...(initialVariable === null || initialVariable.length === 0 ? {} : { initialVariable }),
+      ...(editorOverlayId === "new" && initialOverlayName !== null && initialOverlayName.length > 0 ? { initialOverlayName } : {}),
+    };
+  }
   const channelSections = ["system", "members", "variables", "overlays", "overlay-links", "events", "modules", "audit"];
   if (segments[0] !== "channels" || (segments.length !== 2 && segments.length !== 3) ||
       (segments.length === 3 && !channelSections.includes(segments[2] ?? ""))) return { kind: "overview" };
@@ -129,6 +147,14 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "module") return `${base}/modules/${encodeURIComponent(route.moduleId)}`;
   if (route.section === "overview") return base;
   const path = `${base}/${route.section}`;
+  if (route.section === "overlays" && route.editorOverlayId !== undefined) {
+    const editorPath = `${path}/${encodeURIComponent(route.editorOverlayId)}`;
+    const params = new URLSearchParams();
+    if (route.editorOverlayId === "new" && route.initialOverlayName !== undefined) params.set("name", route.initialOverlayName);
+    if (route.initialVariable !== undefined) params.set("variable", route.initialVariable);
+    const query = params.toString();
+    return query.length === 0 ? editorPath : `${editorPath}?${query}`;
+  }
   if (route.section === "overlays" && route.overlayId !== undefined) {
     return `${path}?${new URLSearchParams({ overlay: route.overlayId }).toString()}`;
   }

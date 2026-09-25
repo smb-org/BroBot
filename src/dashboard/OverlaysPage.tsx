@@ -28,6 +28,7 @@ interface OverlaysPageProperties {
   channelId: string;
   canManage: boolean;
   initialSelection?: string;
+  onOpenEditor?: (overlayId: string) => void;
 }
 
 const blankOverlayName = "";
@@ -54,7 +55,7 @@ interface ScopedOverlaySecret extends PanelIssuedOverlayAccess {
   overlayId: string;
 }
 
-export function OverlaysPage({ channelId, canManage, initialSelection }: OverlaysPageProperties): ReactElement {
+export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEditor }: OverlaysPageProperties): ReactElement {
   const language = dashboardLanguage();
   const labels = overlaysTexts(language);
   const [overlays, setOverlays] = useState<readonly PanelOverlaySummary[]>([]);
@@ -497,6 +498,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
     {selectedOverlay === null ? <p className="loading-line">{labels.loading}</p> : <div className="overlay-inspector">
       <dl className="properties"><div><dt>{labels.width} × {labels.height}</dt><dd>{selectedOverlay.width} × {selectedOverlay.height}</dd></div>
         <div><dt>{labels.elements}</dt><dd>{selectedOverlay.elements.length}</dd></div></dl>
+      {onOpenEditor === undefined ? null : <Button variant="primary" onClick={() => { onOpenEditor(selectedOverlay.id); }}>{labels.editComposition}</Button>}
       <section className="overlay-elements-section" aria-label={labels.elements}>
         <h3>{labels.elements}</h3>
         {selectedOverlay.elements.length === 0 ? <p className="muted">{labels.elementCount(0)}</p> : <ul>{selectedOverlay.elements.map((element) => <li key={element.id}>

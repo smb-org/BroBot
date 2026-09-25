@@ -826,7 +826,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 
 .ui-switch__control { position: relative; display: grid; place-items: center; width: 44px; height: 44px; }
 .ui-switch__input { position: absolute; z-index: 1; inset: 0; width: 44px; height: 44px; margin: 0; opacity: 0; cursor: pointer; }
-.ui-switch__input:disabled { cursor: not-allowed; }
+/* Overrides the generic `input:disabled { opacity: .55 }` rule below, which would otherwise
+   expose the native checkbox (it is only meant to be an invisible hit target). */
+.ui-switch__input:disabled,
+.ui-switch-field__input:disabled,
+.ui-switch-card__input:disabled { cursor: not-allowed; opacity: 0; }
 .ui-switch__input:checked + .switch__track,
 .ui-switch__input:checked ~ .switch__track,
 .ui-switch-field__input:checked + .ui-switch-field__label .switch__track,
@@ -843,11 +847,16 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-switch__control .switch__thumb, .ui-switch-field__label .switch__thumb, .ui-switch-card__heading > .switch__track .switch__thumb { display: block; width: 14px; height: 14px; border-radius: var(--r-control); background: var(--text); transition: none; }
 .ui-switch { display: grid; justify-items: end; gap: 4px; min-width: 44px; }
 .ui-switch__label { color: var(--text-2); font-size: 12px; }
-.ui-switch__control .ui-switch__input:disabled + .switch__track { opacity: .45; }
+.ui-switch__control .ui-switch__input:disabled + .switch__track,
+.ui-switch-field__input:disabled + .ui-switch-field__label .switch__track,
+.ui-switch-card__input:disabled ~ .switch__track { opacity: .45; }
 .ui-switch-field { display: grid; gap: 4px; min-width: 0; }
 .ui-switch-field__row { position: relative; min-height: 44px; }
 .ui-switch-field__label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; color: var(--text); font-size: 14px; cursor: pointer; }
-.ui-switch-field__input { position: absolute; z-index: 1; top: 0; right: 0; width: 44px; height: 44px; margin: 0; opacity: 0; cursor: pointer; }
+/* `left`/`bottom` are reset here because this shares `.ui-switch__input` (inset: 0) on the
+   same element; without this, the two rules conflict and the browser anchors the box to
+   `left: 0` instead of `right: 0`, moving the hit target to the far side of the row. */
+.ui-switch-field__input { position: absolute; z-index: 1; top: 0; right: 0; left: auto; bottom: auto; width: 44px; height: 44px; margin: 0; opacity: 0; cursor: pointer; }
 .ui-switch-field__hint, .ui-switch__hint { color: var(--text-3); font-size: 12px; line-height: 1.4; }
 .ui-switch-card { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: transparent; }
 .ui-switch-card:hover { border-color: var(--line-light); }
@@ -855,7 +864,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-switch-card__label { display: grid; gap: 2px; min-width: 0; cursor: pointer; }
 .ui-switch-card__title { color: var(--text); font-size: 14px; font-weight: 500; }
 .ui-switch-card__description { color: var(--text-3); font-size: 12px; line-height: 1.4; }
-.ui-switch-card__input { position: absolute; z-index: 1; top: 0; right: 0; width: 44px; height: 44px; margin: 0; opacity: 0; cursor: pointer; }
+.ui-switch-card__input { position: absolute; z-index: 1; top: 0; right: 0; left: auto; bottom: auto; width: 44px; height: 44px; margin: 0; opacity: 0; cursor: pointer; }
 .ui-switch-card__children { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .ui-switch-card__children fieldset { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .ui-switch-card__children fieldset:disabled { opacity: .55; }

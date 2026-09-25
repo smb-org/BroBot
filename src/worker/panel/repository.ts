@@ -42,6 +42,7 @@ interface ChannelStateRow {
   channel_id: string;
   login: string;
   display_name: string;
+  language: "de" | "en";
   role: ChannelRole;
   broadcaster_connection: number;
   full_consent: number;
@@ -142,7 +143,7 @@ export const decodeLogCursor = (serialized: string): LogCursor | null => decodeC
 });
 
 export const channelStateQuery = `
-    SELECT channel.channel_id, channel.login, channel.display_name, member.role,
+    SELECT channel.channel_id, channel.login, channel.display_name, channel.language, member.role,
            CASE WHEN broadcaster_identity.status = 'connected' THEN 1 ELSE 0 END AS broadcaster_connection,
            channel.full_consent AS full_consent,
            broadcaster_identity.scopes_json AS broadcaster_scopes_json,
@@ -360,6 +361,7 @@ const mapChannelState = (row: ChannelStateRow): PanelChannelState => ({
   channelId: row.channel_id,
   login: row.login,
   displayName: row.display_name,
+  language: row.language,
   role: row.role,
   broadcasterConnection: row.broadcaster_connection === 1 ? "connected" : "not_connected",
   channelBotConsent: row.channel_bot_consent === 1 ? "granted" : "missing",

@@ -4,3 +4,11 @@
   font: 700 48px/1.1 system-ui, sans-serif;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
+
+/* Composition elements are single-line by design (100-char limit, plain input field); keep them
+   from wrapping so the wrapper's intrinsic width stays correct regardless of canvas position.
+   Scoped to the composition wrapper only: the isolated/legacy path (e.g. an unbound #text= link
+   rendered into a narrow OBS browser source) keeps its original wrapping behavior. */
+.brobot-overlay-composition-element .brobot-variable {
+  white-space: nowrap;
+}

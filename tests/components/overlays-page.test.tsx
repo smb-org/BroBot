@@ -208,6 +208,19 @@ describe("Overlays page", () => {
     for (const action of actions) expect(action).toHaveAttribute("data-variant", "default");
   });
 
+  it("opens the selected overlay composition editor", async () => {
+    const fetcher = routeFetcher();
+    vi.stubGlobal("fetch", fetcher);
+    const onOpenEditor = vi.fn();
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage onOpenEditor={onOpenEditor} /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+    await screen.findByRole("region", { name: "Zugänge" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Komposition bearbeiten" }));
+
+    expect(onOpenEditor).toHaveBeenCalledWith("overlay-a");
+  });
+
   it.each([
     {
       language: "de-DE",

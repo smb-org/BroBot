@@ -29,6 +29,14 @@ const richTextareaBoundaryPattern = {
   group: ["rich-textarea", "rich-textarea/*"],
   message: "Import rich-textarea only from src/dashboard/ui/.",
 };
+const overlayViewBoundaryPattern = {
+  regex: "(^|/)overlay(/|$)",
+  message: "Panel views may not import overlay modules.",
+};
+const overlayEditorImportBoundaryPattern = {
+  regex: "(^|/)overlay/(?!canvas(?:\\.[^/]+)?$|model(?:\\.[^/]+)?$|variable\\.css(?:\\?inline)?$)",
+  message: "The overlay editor may only import the shared canvas, model types and variable styles.",
+};
 
 const moduleIsolationPatterns = [
   {
@@ -76,10 +84,7 @@ const panelBoundaryPatterns = [
     regex: "(^|/)(repository|adapters)(?:\\.[^/]+)?(?:/|$)",
     message: "Panel-Ansichten dürfen keine Repository- oder Adapterdateien importieren.",
   },
-  {
-    regex: "(^|/)overlay(/|$)",
-    message: "Panel-Ansichten dürfen keine Overlay-Ansichten importieren.",
-  },
+  overlayViewBoundaryPattern,
   mantineBoundaryPattern,
   tablerBoundaryPattern,
   richTextareaBoundaryPattern,
@@ -176,6 +181,16 @@ export default defineConfig(
       "no-restricted-imports": [
         "error",
         { patterns: panelBoundaryPatterns },
+      ],
+    },
+  },
+  {
+    // The editor shares the canvas and variable styles with the live overlay renderer.
+    files: ["src/dashboard/OverlayEditorPage.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: panelBoundaryPatterns.map((pattern) => pattern === overlayViewBoundaryPattern ? overlayEditorImportBoundaryPattern : pattern) },
       ],
     },
   },
