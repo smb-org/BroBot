@@ -415,3 +415,66 @@ fragt dieses Tag ab und braucht kein Klassenfeld. Beides bleibt beim
 Hibernieren erhalten. Kanalweite Alt-Zugänge tragen `overlayId: null` und
 erhalten keine `overlay.changed`-Nachricht. Die Nutzlast enthält keine neuen
 Streamdaten, daher ändert sich das Restfenster aus Abschnitt 7 nicht.
+
+## Nachtrag: Modul-Elemente in Overlays (#221)
+
+**Stand:** 25. September 2026
+**Status: angenommen** — freigegeben durch den Product Owner am 25. September 2026.
+
+Ein Modul kann über `overlayElements` kleine, eigenständige Elemente für eine
+Overlay-Komposition deklarieren. Die Deklaration hält Konfigurationsparser,
+Version und Standardgröße am Contract; das Render-Modul und ein optionaler
+Editor werden erst bei Bedarf per `import()` geladen. Für gespeicherte Elemente
+bleiben `kind` und `config_json` in `overlay_elements` maßgeblich. Beim
+Bootstrap wird `initialState` nur für aktivierte Module ausgeführt. Ein
+deaktiviertes Modul bleibt im gespeicherten Entwurf sichtbar, rendert aber
+nichts und lädt keinen Modul-Overlay-Chunk.
+
+Der Executor präfigiert `ModuleAction.overlay.type` mit der vom Host bekannten
+Modulkennung und erzeugt `modul.<moduleId>.<type>`. Modulaktionen wählen weder
+Kanal noch Empfänger. Vor dem Aufruf des Durable Object löst der Worker über
+`overlay_elements` die Overlay-IDs auf, die ein Element dieses Moduls
+enthalten; für nicht verpflichtende Module muss es im Kanal aktiviert sein.
+Die IDs dienen nur intern der Zustellung, werden vor dem Socket-Versand
+entfernt. Das Durable Object fragt D1 auf diesem Sendepfad nicht ab. Neue
+Modulnachrichten sind ausschließlich für Overlay-Sockets klassifiziert.
+
+Für den Werbe-Countdown wird die Nutzlast in Bootstrap und in
+`modul.ads.countdown` exakt so festgelegt:
+
+```ts
+type AdsCountdownState = {
+  nextAdAt: string | null; // ISO-8601-Zeitpunkt in UTC
+  duration: number | null; // geplante Dauer in Sekunden
+  snoozeCount: number | null; // Twitch Get Ad Schedule snooze_count
+  snoozeRefreshAt: string | null; // Twitch snooze_refresh_at, ISO-8601 in UTC
+  serverNow: string; // Serverzeit als ISO-8601 in UTC
+};
+```
+
+Die Nutzlast enthält genau diese fünf Felder, ohne Kanal- oder Overlay-ID.
+`nextAdAt` und `duration` sind `null`, wenn Twitch keinen Werbeblock geplant
+hat. Bei einem geplanten Block ist `nextAdAt` ein UTC-Zeitpunkt; `duration`
+ist die positive Ganzzahl in Sekunden oder `null`, wenn Twitch keine Dauer
+liefert. Die beiden Snooze-Felder übernehmen Twitchs `snooze_count` und
+`snooze_refresh_at` oder sind jeweils `null`, wenn Twitch keinen Wert liefert.
+`serverNow` wird bei Bootstrap und jeder Nachricht neu
+gesetzt. Der Browser bestimmt daraus einen Zeitversatz zur monotonen Uhr von
+`performance.now()`; die lokale Uhr der OBS-Quelle beeinflusst den Countdown
+nicht.
+
+Vor `nextAdAt` zeigt das Element „Werbung in m:ss“. Zwischen `nextAdAt` und
+`nextAdAt + duration` zeigt es „Werbung läuft · m:ss“ und zählt bis zum Ende
+des Werbeblocks. Nach diesem Zeitpunkt wird es ausgeblendet. Ist `duration`
+`null`, wird es ab `nextAdAt` ausgeblendet. Mit der standardmäßig deaktivierten
+Option „Snooze-Info anzeigen“ bleibt es bei dieser einen Zeile; ist die Option
+aktiv, zeigt eine zweite Zeile die verbleibenden Verschiebungen oder bei null
+verfügbaren Verschiebungen den Countdown bis `snoozeRefreshAt`.
+
+Das Snapshot in Migration 0015 hält Zeitplan und Snooze-Felder für den initialen
+Overlay-Bootstrap. Fehlt der neue D1-Eintrag, übernimmt der Worker den bereits
+im Kanal-Durable-Object gespeicherten Zeitplan, bevor er den Bootstrap erstellt.
+Eine Änderung an Zeitplan oder Snooze-Stand sendet `modul.ads.countdown` nur an
+Overlays, deren deklariertes Element `ads.countdown` ist. Modul-Toggles senden
+für betroffene Overlays `overlay.changed`, damit offene Quellen ihren Bootstrap
+neu laden. Es gibt keine Nachricht pro Sekunde und keine D1-Schreibung pro Tick.

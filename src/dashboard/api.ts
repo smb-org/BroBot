@@ -18,7 +18,7 @@ import type {
   PanelSystemResponse,
   PanelTwitchUser,
 } from "../panel-contract";
-import type { ChannelControlDuration, ChannelRole } from "../contracts/values";
+import type { ChannelControlDuration, ChannelRole, OverlayElementKind } from "../contracts/values";
 
 import { PanelApiError } from "../contracts/panel-error";
 
@@ -103,7 +103,7 @@ export interface PanelOverlayTokensResponse {
 
 export interface PanelOverlayElement {
   id: string;
-  kind: "variable";
+  kind: OverlayElementKind;
   label: string;
   variableName: string | null;
   missingVariableName?: string | null;

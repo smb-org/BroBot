@@ -27,6 +27,7 @@ describe("stored overlays migration", () => {
       database.exec(readMigration("0012_overlays.sql"));
       database.exec(readMigration("0013_overlay_accesses.sql"));
       database.exec(readMigration("0014_overlay_missing_variable.sql"));
+      database.exec(readMigration("0015_ads_countdown_state.sql"));
       database.exec(`
         INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
         VALUES ('overlay-a', 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z');
@@ -43,6 +44,17 @@ describe("stored overlays migration", () => {
       expect(database.prepare(
         "SELECT overlay_id, label, secret_envelope FROM overlay_tokens WHERE token_id = 'legacy-token'",
       ).get()).toEqual({ overlay_id: null, label: "", secret_envelope: null });
+
+      database.prepare(
+        `INSERT INTO ads_countdown_state
+           (channel_id, next_ad_at, duration, snooze_count, snooze_refresh_at, updated_at)
+         VALUES ('channel-a', '2026-09-24T12:00:00.000Z', 90, 2, '2026-09-24T12:30:00.000Z', '2026-09-24T11:59:00.000Z')`,
+      ).run();
+      expect(database.prepare(
+        "SELECT next_ad_at, duration, snooze_count, snooze_refresh_at FROM ads_countdown_state WHERE channel_id = 'channel-a'",
+      ).get()).toEqual({
+        next_ad_at: "2026-09-24T12:00:00.000Z", duration: 90, snooze_count: 2, snooze_refresh_at: "2026-09-24T12:30:00.000Z",
+      });
 
       database.prepare(
         `INSERT INTO overlay_tokens (token_id, channel_id, token_hash, created_at, overlay_id, label, secret_envelope)

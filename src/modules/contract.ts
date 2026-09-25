@@ -6,6 +6,35 @@ import type { TemplateContext, TemplateFields } from "../template";
 import type { SettingsEditorDefinition } from "../dashboard/ui";
 export type { PanelTemplateWarning, PanelTemplateWarningResponse } from "../panel-contract";
 
+export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+export type JsonObject = Readonly<Record<string, JsonValue>>;
+
+export interface ModuleOverlayElementProps {
+  config: Readonly<Record<string, unknown>>;
+  state: Readonly<Record<string, unknown>> | null;
+  now: number;
+  language?: "de" | "en";
+}
+
+export interface OverlayElementEditorProps {
+  config: JsonObject;
+  onChange: (config: JsonObject) => void;
+  language?: "de" | "en";
+  readOnly?: boolean;
+  readOnlyReason?: string;
+}
+
+export interface ModuleOverlayElementDefinition {
+  kind: `${string}.${string}`;
+  configVersion: number;
+  defaultSize: { width: number; height: number };
+  defaultConfig: JsonObject;
+  parseConfig: (raw: unknown) => JsonObject | null;
+  initialState?: (db: D1Database, channelId: string, config: JsonObject) => Promise<JsonObject>;
+  load: () => Promise<{ default: ComponentType<ModuleOverlayElementProps> }>;
+  editor?: () => Promise<{ default: ComponentType<OverlayElementEditorProps> }>;
+}
+
 export { truncateTo200Chars, textFingerprintIfTruncated } from "../text";
 export {
   closestTemplateVariable,
@@ -102,7 +131,7 @@ export type ModuleAction =
   | { kind: "announcement"; text: string }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "shoutout"; targetLogin: string }
-  | { kind: "overlay"; type: string; payload: Readonly<Record<string, unknown>> };
+  | { kind: "overlay"; type: string; elementKind: string; payload: Readonly<Record<string, unknown>> };
 
 /**
  * What a module describes as the result of processing. It executes nothing
@@ -453,6 +482,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   broadcasterScopes?: readonly string[];
   eventSubTypes?: readonly string[];
   routes?: Hono<ModuleRouteEnvironment>;
+  /** Overlay presentation declarations, with view and editor chunks loaded on demand. */
+  overlayElements?: readonly ModuleOverlayElementDefinition[];
   /**
    * The business entry point. A pure function: it describes what should
    * happen and executes nothing. The host executes the actions and logs
@@ -474,12 +505,6 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   // Module migrations and further action kinds join the contract once the
   // first module needs them. Command processing launched with
   // ModuleResult.
-  /**
-   * Deliberately just a lazy import: Vite can cut its own chunk, so a
-   * disabled module costs zero overlay bytes. Do not turn this into a
-   * direct import.
-   */
-  overlay?: () => Promise<{ default: ComponentType }>;
   /**
    * This view also stays deliberately lazy: a disabled module should
    * likewise cost zero bytes in the panel bundle. Do not turn this into a

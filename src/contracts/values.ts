@@ -63,7 +63,7 @@ export const CHANNEL_VARIABLE_MAXIMUM_VALUE = 999_999_999;
 export const OVERLAY_MAXIMUM_COUNT = 20;
 export const OVERLAY_ELEMENT_MAXIMUM_COUNT = 20;
 export const OVERLAY_ELEMENT_KINDS = ["variable"] as const;
-export type OverlayElementKind = (typeof OVERLAY_ELEMENT_KINDS)[number];
+export type OverlayElementKind = (typeof OVERLAY_ELEMENT_KINDS)[number] | `${string}.${string}`;
 
 /** Closed reasons persisted when an overlay access is revoked. */
 export const OVERLAY_ACCESS_REVOCATION_REASONS = ["manual", "overlay_deleted"] as const;

@@ -1,5 +1,7 @@
-import { Component, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Component, lazy, Suspense, type ComponentType, type CSSProperties, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
 
+import type { ModuleOverlayElementProps } from "../modules/contract";
+import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
 import { VariableValueView } from "./variable-view";
 import type { BoundOverlayData, OverlayElementData, OverlayLanguage } from "./model";
 
@@ -30,17 +32,16 @@ class ElementErrorBoundary extends Component<ElementBoundaryProperties, ElementB
   }
 }
 
+const lazyModuleElements = new Map<string, LazyExoticComponent<ComponentType<ModuleOverlayElementProps>>>(
+  MODULE_OVERLAY_ELEMENTS.map(({ definition }) => [definition.kind, lazy(definition.load)]),
+);
+
 const renderElement = (
   element: OverlayElementData,
   language: OverlayLanguage,
   variables: Readonly<Record<string, number>>,
   isolated: boolean,
 ): ReactElement | null => {
-  if (element.kind !== "variable" || element.variableName === null) return null;
-  if (!Object.hasOwn(variables, element.variableName)) return null;
-  const value = variables[element.variableName];
-  if (value === undefined) return null;
-
   const scale = element.scalePercent / 100;
   // Width must stay intrinsic and independent of `left`/`x` in the composition: an absolutely
   // positioned box otherwise shrinks to the remaining space near the canvas edge, so the measured
@@ -56,10 +57,31 @@ const renderElement = (
     transformOrigin: "top left",
     zIndex: element.z,
   };
+  const wrapperClass = isolated ? undefined : "brobot-overlay-composition-element";
+  if (element.kind !== "variable") {
+    const ModuleElement = lazyModuleElements.get(element.kind);
+    if (ModuleElement === undefined || element.moduleEnabled !== true) return null;
+    return <div
+      data-element={element.id}
+      data-kind={element.kind}
+      className={wrapperClass}
+      style={style}
+    >
+      <Suspense fallback={null}><ModuleElement
+        config={element.config ?? {}}
+        state={element.state ?? null}
+        now={Date.now()}
+        language={language}
+      /></Suspense>
+    </div>;
+  }
+  if (element.variableName === null || !Object.hasOwn(variables, element.variableName)) return null;
+  const value = variables[element.variableName];
+  if (value === undefined) return null;
   return <div
     data-element={element.id}
     data-kind={element.kind}
-    className={isolated ? undefined : "brobot-overlay-composition-element"}
+    className={wrapperClass}
     style={style}
   >
     <VariableValueView

@@ -293,6 +293,8 @@ export interface OverlaysTexts {
   editorStyleReadOnlyReason: string;
   editorStyleCodeHint: string; editorCssReadOnlyReason: string; editorStyleCopy: string; editorStyleCopied: string; editorStyleCopyError: string; editorStyleCssLimit: string;
   editorNoElements: string; editorNoSelection: string; editorReadOnly: string; editorChooseVariable: string;
+  editorModuleElements: string; editorNoEnabledModuleElements: string; editorAdCountdown: string; editorAddAdCountdown: string;
+  editorAdsModule: string; editorModuleElement: string; editorModuleDisabled: (moduleName: string) => string;
   editorAddVariable: string; editorAdd: string; editorLabel: string; editorDisplayText: string;
   editorVariable: string; editorX: string; editorY: string; editorScale: string; editorZ: string;
   editorMoveForward: string; editorMoveBackward: string; editorRemove: string; editorInComposition: string;
@@ -362,7 +364,10 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCssReadOnlyReason: "Bediener können das Overlay-CSS kopieren, aber nicht ändern.",
     editorStyleCopy: "CSS kopieren", editorStyleCopied: "CSS kopiert", editorStyleCopyError: "CSS konnte nicht kopiert werden.",
     editorStyleCssLimit: "Overlay-CSS darf höchstens 16.000 Zeichen enthalten.",
-    editorNoElements: "Noch keine Elemente. Füge eine Kanalvariable hinzu.", editorNoSelection: "Wähle ein Element aus.", editorReadOnly: "Bediener können die Komposition ansehen, aber nicht ändern.",
+    editorNoElements: "Noch keine Elemente. Füge eine Kanalvariable oder ein Modul-Element hinzu.", editorNoSelection: "Wähle ein Element aus.", editorReadOnly: "Bediener können die Komposition ansehen, aber nicht ändern.",
+    editorModuleElements: "Modul-Elemente", editorNoEnabledModuleElements: "Aktiviere ein Modul, um dessen Elemente hinzuzufügen.",
+    editorAdCountdown: "Werbe-Countdown", editorAddAdCountdown: "Werbe-Countdown hinzufügen", editorAdsModule: "Werbung",
+    editorModuleElement: "Modul-Element", editorModuleDisabled: (moduleName) => `Modul ${moduleName} ist deaktiviert.`,
     editorChooseVariable: "Kanalvariable auswählen", editorAddVariable: "Variable anzeigen", editorAdd: "Hinzufügen", editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
     editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
     editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorRemove: "Element entfernen", editorInComposition: "In der Komposition anzeigen",
@@ -457,7 +462,10 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCssReadOnlyReason: "Operators can copy overlay CSS, but cannot change it.",
     editorStyleCopy: "Copy CSS", editorStyleCopied: "CSS copied", editorStyleCopyError: "CSS could not be copied.",
     editorStyleCssLimit: "Overlay CSS can contain at most 16,000 characters.",
-    editorNoElements: "No elements yet. Add a channel variable.", editorNoSelection: "Select an element.", editorReadOnly: "Operators can view the composition, but cannot edit it.",
+    editorNoElements: "No elements yet. Add a channel variable or module element.", editorNoSelection: "Select an element.", editorReadOnly: "Operators can view the composition, but cannot edit it.",
+    editorModuleElements: "Module elements", editorNoEnabledModuleElements: "Enable a module to add its elements.",
+    editorAdCountdown: "Ad countdown", editorAddAdCountdown: "Add ad countdown", editorAdsModule: "Ads",
+    editorModuleElement: "Module element", editorModuleDisabled: (moduleName) => `${moduleName} module is disabled.`,
     editorChooseVariable: "Choose a channel variable", editorAddVariable: "Show variable", editorAdd: "Add", editorLabel: "Element label", editorDisplayText: "Display text",
     editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Scale (%)", editorZ: "Layer (z)",
     editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorRemove: "Remove element", editorInComposition: "Show in composition",

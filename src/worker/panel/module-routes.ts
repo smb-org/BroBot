@@ -26,6 +26,7 @@ import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
 import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
+import { publishOverlayChanged } from "../realtime";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -227,6 +228,22 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       dependentMutations,
     );
   if (!changed) return context.json({ error: "module_changed_concurrently" }, 409);
+  const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];
+  if (overlayKinds.length > 0) {
+    const placeholders = overlayKinds.map(() => "?").join(", ");
+    const affectedOverlays = await context.env.DB.prepare(
+      `SELECT DISTINCT overlay.overlay_id, overlay.revision
+         FROM overlays AS overlay
+         JOIN overlay_elements AS element
+           ON element.channel_id = overlay.channel_id AND element.overlay_id = overlay.overlay_id
+        WHERE overlay.channel_id = ? AND element.kind IN (${placeholders})
+        ORDER BY overlay.overlay_id`,
+    ).bind(channelId, ...overlayKinds).all<{ overlay_id: string; revision: number }>();
+    await publishOverlayChanged(context.env.CHANNEL, channelId, affectedOverlays.results.map(({ overlay_id, revision }) => ({
+      overlayId: overlay_id,
+      revision,
+    })));
+  }
   try {
     await maintainEventSubSubscriptions(context.env, now, fetch, channelId);
   } catch {

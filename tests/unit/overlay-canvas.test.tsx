@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { generateOverlayStyleBlock } from "../../src/dashboard/overlay-style-model";
@@ -46,5 +46,27 @@ describe("OverlayCanvas anchors", () => {
     expect(element).not.toBeNull();
     expect(element?.className).toBe("");
     expect(element?.style.transform).toBe("scale(1.5)");
+  });
+
+  it("loads registered module elements through their declared lazy loader", async () => {
+    render(<OverlayCanvas
+      overlay={{
+        ...overlay,
+        elements: [{
+          id: "countdown-a", kind: "ads.countdown", label: "Countdown", variableName: null, text: "", config: {},
+          state: {
+            nextAdAt: "2026-09-25T12:02:30.000Z", duration: 180, snoozeCount: 2, snoozeRefreshAt: null,
+            serverNow: "2026-09-25T12:00:00.000Z", isSample: true,
+          },
+          moduleEnabled: true, x: 0, y: 0, scalePercent: 100, z: 0, inComposition: true,
+        }],
+      }}
+      language="en"
+      variables={{}}
+      elementId={null}
+    />);
+
+    await waitFor(() => expect(screen.getByText("Ad in 2:30")).toBeInTheDocument());
+    expect(screen.getByText("Sample")).toBeInTheDocument();
   });
 });

@@ -14,6 +14,14 @@ const testModule: BotModule<typeof testModuleSchema> = {
   id: "test-modul",
   settingsSchema: testModuleSchema,
   defaultSettings: { betrag: 42 },
+  overlayElements: [{
+    kind: "test-modul.countdown",
+    configVersion: 1,
+    defaultSize: { width: 200, height: 80 },
+    defaultConfig: {},
+    parseConfig: () => ({}),
+    load: () => Promise.resolve({ default: () => null }),
+  }],
   eventSubTypes: ["channel.chat.message"],
   onEnable: ({ DB, prepareModuleAudit, now }, channelId) => {
     if (!prepareEnableCommand || prepareModuleAudit === undefined) return;
@@ -218,6 +226,44 @@ describe("Module management in the panel", () => {
       { id: "channel_events", enabled: true, settings: '{"betrag":42}', mandatory: true },
       { id: "clips", enabled: false, settings: "{}", mandatory: false },
     ]);
+  });
+
+  it("invalidates only overlays containing the toggled module's declared element", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-countdown', 'kanal-a', 'Countdown', ?, ?), ('overlay-other', 'kanal-a', 'Other', ?, ?)`,
+    ).bind("2026-09-25T12:00:00.000Z", "2026-09-25T12:00:00.000Z", "2026-09-25T12:00:00.000Z", "2026-09-25T12:00:00.000Z").run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind)
+       VALUES ('element-countdown', 'kanal-a', 'overlay-countdown', 'test-modul.countdown'),
+              ('element-other', 'kanal-a', 'overlay-other', 'test-modul.other')`,
+    ).run();
+    const publish = vi.fn((messages: readonly unknown[]) => {
+      void messages;
+      return Promise.resolve();
+    });
+    environment = {
+      ...environment,
+      CHANNEL: {
+        idFromName: vi.fn(() => "channel-object"),
+        get: vi.fn(() => ({ publish })),
+      },
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(publish).toHaveBeenCalledOnce();
+    expect(publish.mock.calls[0]?.[0]).toMatchObject([{
+      type: "overlay.changed",
+      payload: { overlayId: "overlay-countdown", revision: 1 },
+    }]);
   });
 
   it("toggles a default-enabled module off and keeps it off with no fallback resurrecting it", async () => {

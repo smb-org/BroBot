@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
-import type { RealtimeEnvelope } from "../realtime-contract";
+import type { ModuleOverlayRealtimeEnvelope, RealtimeEnvelope } from "../realtime-contract";
 import { sanitizeOverlayCss } from "../contracts/overlay-css";
 import { connectOverlayRealtime } from "./realtime";
 import { OverlayCanvas } from "./canvas";
@@ -53,7 +53,9 @@ const isOverlayLanguage = (value: unknown): value is OverlayLanguage => value ==
 const isOverlayElement = (value: unknown): value is OverlayElementData => isRecord(value) &&
   typeof value.id === "string" && value.id.length > 0 && typeof value.kind === "string" &&
   typeof value.label === "string" && (value.variableName === null || typeof value.variableName === "string") &&
-  typeof value.text === "string" && isInteger(value.x) && isInteger(value.y) &&
+  typeof value.text === "string" && (value.config === undefined || isRecord(value.config)) &&
+  (value.state === undefined || value.state === null || isRecord(value.state)) &&
+  (value.moduleEnabled === undefined || typeof value.moduleEnabled === "boolean") && isInteger(value.x) && isInteger(value.y) &&
   isInteger(value.scalePercent) && value.scalePercent >= 25 && value.scalePercent <= 400 &&
   isInteger(value.z) && typeof value.inComposition === "boolean";
 
@@ -106,6 +108,23 @@ const applyVariableMessage = (
   return { ...bootstrap, variables };
 };
 
+const applyModuleMessage = (
+  bootstrap: OverlayBootstrapData,
+  message: ModuleOverlayRealtimeEnvelope,
+): OverlayBootstrapData => {
+  if (bootstrap.overlay === null) return bootstrap;
+  const kind = message.type.slice("modul.".length);
+  return {
+    ...bootstrap,
+    overlay: {
+      ...bootstrap.overlay,
+      elements: bootstrap.overlay.elements.map((element) => element.kind === kind && element.moduleEnabled === true
+        ? { ...element, state: message.payload }
+        : element),
+    },
+  };
+};
+
 const applyPendingVariableChanges = (
   bootstrap: OverlayBootstrapData,
   changes: ReadonlyMap<string, number | null>,
@@ -155,6 +174,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
     let retryTimer: number | null = null;
     let retryAttempt = 0;
     const pendingVariableChanges = new Map<string, number | null>();
+    const pendingModuleMessages: ModuleOverlayRealtimeEnvelope[] = [];
 
     const install = (next: OverlayBootstrapData | null, nextState: LoadState): void => {
       bootstrapRef.current = next;
@@ -223,8 +243,13 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         }
         const parsed = parseBootstrap(payload);
         if (parsed === null) throw new Error("Overlay bootstrap response had an invalid shape.");
-        const next = applyPendingVariableChanges(parsed, pendingVariableChanges);
+        const next = pendingModuleMessages.reduce(
+          (current, message) => applyModuleMessage(current, message),
+          applyPendingVariableChanges(parsed, pendingVariableChanges),
+        );
+        pendingModuleMessages.length = 0;
         pendingVariableChanges.clear();
+        pendingModuleMessages.length = 0;
         document.documentElement.lang = next.language;
         install(next, next.overlay === null ? "unbound" : "ready");
         if (next.overlay !== null) startRealtime();
@@ -304,6 +329,14 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
             return;
           }
           if (message.payload.overlayId === current.overlay?.id) scheduleReload();
+        },
+        onModuleMessage: (message) => {
+          const current = bootstrapRef.current;
+          if (loadInFlight || current === null) pendingModuleMessages.push(message);
+          if (current === null) return;
+          const next = applyModuleMessage(current, message);
+          bootstrapRef.current = next;
+          setBootstrap(next);
         },
       });
     };

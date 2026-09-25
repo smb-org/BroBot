@@ -9,7 +9,8 @@ import type {
 import {
   OVERLAY_ACCESS_BOUND_CLOSE_CODE,
   OVERLAY_ACCESS_BOUND_CLOSE_REASON,
-  REALTIME_RECIPIENTS,
+  isModuleOverlayRealtimeEnvelope,
+  realtimeRecipients,
 } from "../../realtime-contract";
 import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
@@ -17,12 +18,15 @@ import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protoc
 import type { AdsSchedule } from "../../modules/ads/contracts";
 import type { HelixRequest, HelixRequestOptions } from "../../modules/contract";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
+import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
+import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
 import { refreshAdPrewarningAlarm } from "../../modules/ads/adapters/prewarning-alarm";
 import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarning-alarm";
 import { getAppAccessToken } from "../app-token";
 import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
+import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -49,13 +53,28 @@ const AD_SCHEDULE_CACHE_KEY = "ads:schedule";
 const AD_SCHEDULE_GENERATION_KEY = "ads:schedule_generation";
 const AD_PREWARNING_RECONCILED_KEY = "ads:prewarning_reconciled";
 const TWITCH_RETRY_AFTER_KEY = "twitch:retry_after";
+const AD_COUNTDOWN_REFRESH_ATTEMPT_KEY = "ads:countdown_refresh_attempt";
+const AD_COUNTDOWN_REFRESH_DEADLINE_KEY = "ads:countdown_refresh_deadline";
+const AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY = "ads:countdown_refresh_retry_count";
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
+const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
+const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
+const AD_COUNTDOWN_REFRESH_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
 const STREAM_REFRESH_LEASE_KEY = "stream_state_refresh_lease";
 const STREAM_REFRESH_LEASE_MS = 30_000;
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
 const SOCKET_TRANSIENT_CODE = 4008;
 const SOCKET_POLICY_VIOLATION_CODE = 1008;
+
+const adCountdownRefreshAt = (schedule: AdsSchedule): number | null => {
+  if (schedule.nextAdAt === null || typeof schedule.duration !== "number" ||
+      !Number.isFinite(schedule.duration) || schedule.duration < 0) return null;
+  const nextAdAt = Date.parse(schedule.nextAdAt);
+  return Number.isFinite(nextAdAt)
+    ? nextAdAt + schedule.duration * 1_000 + AD_COUNTDOWN_REFRESH_BUFFER_MS
+    : null;
+};
 
 export interface CachedAdSchedule {
   schedule: AdsSchedule;
@@ -218,16 +237,45 @@ export class ChannelObject extends DurableObject<Env> {
       const channelId = this.ownChannelId();
       if (channelId === null) throw new Error("Channel-bound data requires a named Durable Object.");
       const cache = { schedule, asOf } satisfies CachedAdSchedule;
-      const changed = await this.ctx.storage.transaction(async (transaction) => {
+      const countdownState = adCountdownStateForSchedule(schedule, asOf);
+      const change = await this.ctx.storage.transaction(async (transaction) => {
         const currentGeneration = await transaction.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
         if (expectedGeneration !== undefined && currentGeneration !== expectedGeneration) return null;
         const previous = await transaction.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
+        const previousCountdownState = previous === undefined ? null : adCountdownStateForSchedule(previous.schedule, previous.asOf);
         await transaction.put(AD_SCHEDULE_GENERATION_KEY, currentGeneration + 1);
         await transaction.put(AD_SCHEDULE_CACHE_KEY, cache);
-        return previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule);
+        return {
+          changed: previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule),
+          countdownChanged: previousCountdownState === null ||
+            previousCountdownState.nextAdAt !== countdownState.nextAdAt ||
+            previousCountdownState.duration !== countdownState.duration ||
+            previousCountdownState.snoozeCount !== countdownState.snoozeCount ||
+            previousCountdownState.snoozeRefreshAt !== countdownState.snoozeRefreshAt,
+        };
       });
-      if (changed === null) return null;
+      if (change === null) return null;
       if (reconcileAlarm) await this.reconcileAdPrewarning(schedule, grantedScopes);
+      try {
+        await writeAdCountdownState(this.env.DB, channelId, countdownState, asOf);
+      } catch (error: unknown) {
+        console.warn("Ad countdown state snapshot could not be stored.", error);
+      }
+      await this.reconcileAdCountdownRefresh(schedule);
+      if (change.countdownChanged) {
+        try {
+          const publishedAt = new Date().toISOString();
+          const prepared = await prepareModuleOverlayRealtimeMessage(
+            this.env.DB,
+            channelId,
+            "ads",
+            createAdCountdownOverlayAction({ ...countdownState, serverNow: publishedAt }),
+          );
+          if (prepared.outcome === "ready") await this.publish([prepared.message]);
+        } catch (error: unknown) {
+          console.warn("Ad countdown overlay update could not be sent.", error);
+        }
+      }
       await this.publish([{
         version: 1,
         id: crypto.randomUUID(),
@@ -236,7 +284,7 @@ export class ChannelObject extends DurableObject<Env> {
         type: "ads.schedule.updated",
         payload: { schedule, asOf },
       }]);
-      return changed;
+      return change.changed;
     });
   }
 
@@ -278,6 +326,31 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async getAdScheduleGeneration(): Promise<number> {
     return await this.ctx.storage.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
+  }
+
+  /** Refreshes stale countdown data at most once per minute for this channel. */
+  public async refreshAdScheduleForCountdown(): Promise<AdScheduleRefreshResult | null> {
+    const now = Date.now();
+    const cached = await this.getCachedAdSchedule();
+    const cachedAt = cached === null ? Number.NaN : Date.parse(cached.asOf);
+    const nextAdAt = cached?.schedule.nextAdAt === null || cached?.schedule.nextAdAt === undefined
+      ? null
+      : Date.parse(cached.schedule.nextAdAt);
+    const durationMs = typeof cached?.schedule.duration === "number" && Number.isFinite(cached.schedule.duration)
+      ? cached.schedule.duration * 1_000
+      : null;
+    const adEnded = nextAdAt !== null && Number.isFinite(nextAdAt)
+      && nextAdAt <= now && (durationMs === null || now >= nextAdAt + durationMs);
+    const stale = cached === null || !Number.isFinite(cachedAt) || now - cachedAt >= AD_COUNTDOWN_SCHEDULE_TTL_MS || adEnded;
+    if (!stale) return null;
+
+    const claimed = await this.ctx.storage.transaction(async (transaction) => {
+      const previousAttempt = await transaction.get<number>(AD_COUNTDOWN_REFRESH_ATTEMPT_KEY);
+      if (typeof previousAttempt === "number" && now - previousAttempt < AD_COUNTDOWN_SCHEDULE_TTL_MS) return false;
+      await transaction.put(AD_COUNTDOWN_REFRESH_ATTEMPT_KEY, now);
+      return true;
+    });
+    return claimed ? this.refreshAdSchedule() : null;
   }
 
   public async refreshAdSchedule(grantedScopes?: readonly string[]): Promise<AdScheduleRefreshResult> {
@@ -359,6 +432,7 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<CachedAdSchedule | null> {
     const saved = await this.saveAdSchedule(schedule, asOf, grantedScopes, expectedGeneration, reconcileAlarm);
     if (saved === null) return null;
+    await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
     return { schedule, asOf };
   }
 
@@ -371,6 +445,100 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async setTwitchRateLimitRetryAfter(retryAfter: number): Promise<void> {
     await this.ctx.storage.put(TWITCH_RETRY_AFTER_KEY, retryAfter);
+  }
+
+  private async hasAdCountdownOverlay(channelId: string): Promise<boolean> {
+    const result = await this.env.DB.prepare(
+      `SELECT 1 AS present
+         FROM overlay_elements
+        WHERE channel_id = ? AND kind = 'ads.countdown'
+        LIMIT 1`,
+    ).bind(channelId).all<{ present: number }>();
+    return result.results.length > 0;
+  }
+
+  private async clearAdCountdownRefresh(clearRetries = true): Promise<void> {
+    await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_DEADLINE_KEY);
+    if (clearRetries) await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async reconcileAdCountdownRefresh(schedule: AdsSchedule): Promise<void> {
+    const refreshAt = adCountdownRefreshAt(schedule);
+    if (refreshAt === null) {
+      await this.clearAdCountdownRefresh(false);
+      return;
+    }
+
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    try {
+      if (!await this.hasAdCountdownOverlay(channelId)) {
+        await this.clearAdCountdownRefresh();
+        return;
+      }
+
+      const now = Date.now();
+      if (refreshAt > now) await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
+      await this.ctx.storage.put(
+        AD_COUNTDOWN_REFRESH_DEADLINE_KEY,
+        Math.max(refreshAt, now + AD_COUNTDOWN_REFRESH_BUFFER_MS),
+      );
+      await this.scheduleEarliestAlarm();
+    } catch (error: unknown) {
+      console.warn("Ad countdown refresh alarm could not be reconciled.", error);
+    }
+  }
+
+  private async retryAdCountdownRefresh(): Promise<void> {
+    const retryCount = await this.ctx.storage.get<number>(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY) ?? 0;
+    const retryDelay = AD_COUNTDOWN_REFRESH_RETRY_DELAYS_MS[retryCount];
+    if (retryDelay === undefined || !Number.isInteger(retryCount) || retryCount < 0) {
+      await this.clearAdCountdownRefresh();
+      return;
+    }
+
+    const retryAt = Date.now() + retryDelay;
+    await this.ctx.storage.put(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY, retryCount + 1);
+    await this.ctx.storage.put(AD_COUNTDOWN_REFRESH_DEADLINE_KEY, retryAt);
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async refreshCountdownScheduleFromAlarm(): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+
+    const existingDeadline = await this.ctx.storage.get<number>(AD_COUNTDOWN_REFRESH_DEADLINE_KEY);
+    if (typeof existingDeadline === "number" && Number.isFinite(existingDeadline) && existingDeadline > Date.now()) return;
+
+    let hasOverlay: boolean;
+    try {
+      hasOverlay = await this.hasAdCountdownOverlay(channelId);
+    } catch (error: unknown) {
+      console.warn("Ad countdown overlay lookup failed during refresh.", error);
+      await this.retryAdCountdownRefresh();
+      return;
+    }
+    if (!hasOverlay) {
+      await this.clearAdCountdownRefresh();
+      return;
+    }
+
+    try {
+      await this.refreshAdScheduleForCountdown();
+      const cache = await this.getCachedAdSchedule();
+      const nextRefreshAt = cache === null ? null : adCountdownRefreshAt(cache.schedule);
+      if (nextRefreshAt !== null && nextRefreshAt > Date.now()) {
+        await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_RETRY_COUNT_KEY);
+        await this.ctx.storage.put(AD_COUNTDOWN_REFRESH_DEADLINE_KEY, nextRefreshAt);
+        await this.scheduleEarliestAlarm();
+      } else {
+        await this.retryAdCountdownRefresh();
+      }
+    } catch (error: unknown) {
+      console.warn("Ad countdown schedule refresh failed.", error);
+      await this.retryAdCountdownRefresh();
+    }
   }
 
   /** A durable short lease coalesces overview-triggered refreshes across Worker isolates. */
@@ -396,6 +564,7 @@ export class ChannelObject extends DurableObject<Env> {
       this.ctx.storage.get(SECURITY_DEADLINE_KEY),
       this.ctx.storage.get(SECURITY_RETRY_KEY),
       this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
+      this.ctx.storage.get(AD_COUNTDOWN_REFRESH_DEADLINE_KEY),
     ]);
     const retryDeadline = deadlines[1];
     const securityDeadline = deadlines[0];
@@ -629,26 +798,39 @@ export class ChannelObject extends DurableObject<Env> {
       throw new Error("Realtime message belongs to a foreign channel.");
     }
     const now = Date.now();
-    const ordinarySockets = messages.some((message) => message.type !== "overlay.changed")
+    const ordinarySockets = messages.some((message) => message.type !== "overlay.changed" &&
+      !isModuleOverlayRealtimeEnvelope(message))
       ? this.ctx.getWebSockets()
       : [];
     const overlaySocketsById = new Map<string, WebSocket[]>();
-    const changedOverlayIds = new Set(messages.flatMap((message) =>
-      message.type === "overlay.changed" ? [message.payload.overlayId] : []));
-    for (const overlayId of changedOverlayIds) {
+    const targetedOverlayIds = new Set(messages.flatMap((message) =>
+      message.type === "overlay.changed" ? [message.payload.overlayId]
+        : isModuleOverlayRealtimeEnvelope(message) ? [...(message.overlayIds ?? [])] : []));
+    for (const overlayId of targetedOverlayIds) {
       overlaySocketsById.set(overlayId, this.ctx.getWebSockets(`overlay:${overlayId}`));
     }
     const serialized = messages.map((envelope) => ({
       envelope,
-      payload: JSON.stringify(envelope.type === "variables.changed"
-        ? { ...envelope, payload: { set: envelope.payload.set, removed: envelope.payload.removed } }
-        : envelope),
+      payload: JSON.stringify(isModuleOverlayRealtimeEnvelope(envelope)
+        ? {
+          version: envelope.version,
+          id: envelope.id,
+          createdAt: envelope.createdAt,
+          channelId: envelope.channelId,
+          type: envelope.type,
+          payload: envelope.payload,
+        }
+        : envelope.type === "variables.changed"
+          ? { ...envelope, payload: { set: envelope.payload.set, removed: envelope.payload.removed } }
+          : envelope),
       sockets: envelope.type === "overlay.changed"
         ? [
           ...this.ctx.getWebSockets("kind:panel"),
           ...(overlaySocketsById.get(envelope.payload.overlayId) ?? []),
         ]
-        : ordinarySockets,
+        : isModuleOverlayRealtimeEnvelope(envelope)
+          ? [...new Set((envelope.overlayIds ?? []).flatMap((overlayId) => overlaySocketsById.get(overlayId) ?? []))]
+          : ordinarySockets,
     }));
     for (const message of serialized) {
       const envelope = message.envelope;
@@ -681,7 +863,7 @@ export class ChannelObject extends DurableObject<Env> {
           serializedPayload = JSON.stringify({ ...envelope, payload: { set, removed } });
         }
         try {
-          const recipients: readonly RealtimeRecipientKind[] = REALTIME_RECIPIENTS[envelope.type];
+          const recipients: readonly RealtimeRecipientKind[] = realtimeRecipients(envelope.type);
           if (recipients.includes(principal.kind)) webSocket.send(serializedPayload);
         } catch {
           closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");
@@ -747,14 +929,16 @@ export class ChannelObject extends DurableObject<Env> {
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     await this.pruneRevokedTokenMarkers(now);
-    const [securityDeadline, warningDeadline] = await Promise.all([
+    const [securityDeadline, warningDeadline, countdownDeadline] = await Promise.all([
       this.ctx.storage.get(SECURITY_DEADLINE_KEY),
       this.ctx.storage.get(AD_PREWARNING_DEADLINE_KEY),
+      this.ctx.storage.get(AD_COUNTDOWN_REFRESH_DEADLINE_KEY),
     ]);
     const securityDue = typeof securityDeadline === "number" && Number.isFinite(securityDeadline) && securityDeadline <= now;
     const retryDeadline = await this.ctx.storage.get(SECURITY_RETRY_KEY);
     const securityRetryDue = typeof retryDeadline === "number" && Number.isFinite(retryDeadline) && retryDeadline <= now;
     const warningDue = typeof warningDeadline === "number" && Number.isFinite(warningDeadline) && warningDeadline <= now;
+    const countdownRefreshDue = typeof countdownDeadline === "number" && Number.isFinite(countdownDeadline) && countdownDeadline <= now;
     const expired = new Set<WebSocket>();
     const revoked = new Set<WebSocket>();
     const overlayBindingChanged = new Set<WebSocket>();
@@ -766,6 +950,7 @@ export class ChannelObject extends DurableObject<Env> {
     let transientFailure = false;
 
     if (warningDue) await this.ctx.storage.delete(AD_PREWARNING_DEADLINE_KEY);
+    if (countdownRefreshDue) await this.ctx.storage.delete(AD_COUNTDOWN_REFRESH_DEADLINE_KEY);
 
     const principals = webSockets.map((webSocket) => ({ webSocket, principal: readAttachment(webSocket) }));
 
@@ -927,6 +1112,7 @@ export class ChannelObject extends DurableObject<Env> {
         console.error("Ad prewarning could not be processed in the alarm.", error);
       }
     }
+    if (countdownRefreshDue) await this.refreshCountdownScheduleFromAlarm();
     await this.scheduleEarliestAlarm();
   }
 

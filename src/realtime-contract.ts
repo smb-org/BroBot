@@ -18,7 +18,9 @@ export const REALTIME_MESSAGE_TYPES = [
   "ads.schedule.updated",
   "stream.state.changed",
 ] as const;
-export type RealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
+export type FixedRealtimeMessageType = (typeof REALTIME_MESSAGE_TYPES)[number];
+export type ModuleOverlayRealtimeMessageType = `modul.${string}.${string}`;
+export type RealtimeMessageType = FixedRealtimeMessageType | ModuleOverlayRealtimeMessageType;
 
 export interface RealtimeEventLogHint {
   eventId: string;
@@ -53,7 +55,7 @@ export interface RealtimePayloads {
   };
 }
 
-export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageType> = {
+type FixedRealtimeEnvelope<Type extends FixedRealtimeMessageType> = {
   version: RealtimeProtocolVersion;
   id: string;
   createdAt: string;
@@ -62,9 +64,30 @@ export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageT
   payload: RealtimePayloads[Type];
 };
 
-export type RealtimeMessage = {
-  [Type in RealtimeMessageType]: RealtimeEnvelope<Type>;
-}[RealtimeMessageType];
+/** `overlayIds` is executor routing metadata and is removed before socket delivery. */
+export type ModuleOverlayRealtimeEnvelope<Type extends ModuleOverlayRealtimeMessageType = ModuleOverlayRealtimeMessageType> = {
+  version: RealtimeProtocolVersion;
+  id: string;
+  createdAt: string;
+  channelId: string;
+  type: Type;
+  payload: Readonly<Record<string, unknown>>;
+  overlayIds?: readonly string[];
+};
+
+export type RealtimeEnvelope<Type extends RealtimeMessageType = RealtimeMessageType> =
+  Type extends FixedRealtimeMessageType ? FixedRealtimeEnvelope<Type>
+    : Type extends ModuleOverlayRealtimeMessageType ? ModuleOverlayRealtimeEnvelope<Type>
+      : never;
+
+export type RealtimeMessage = RealtimeEnvelope;
+
+export const isModuleOverlayRealtimeMessageType = (type: string): type is ModuleOverlayRealtimeMessageType =>
+  /^modul\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_-]*$/u.test(type);
+
+export const isModuleOverlayRealtimeEnvelope = (
+  message: RealtimeMessage,
+): message is ModuleOverlayRealtimeEnvelope => isModuleOverlayRealtimeMessageType(message.type);
 
 export type RealtimeRecipientKind = "panel" | "overlay";
 
@@ -76,7 +99,10 @@ export const REALTIME_RECIPIENTS = {
   "overlay.changed": ["panel", "overlay"],
   "ads.schedule.updated": ["panel"],
   "stream.state.changed": ["panel"],
-} as const satisfies Record<RealtimeMessageType, readonly RealtimeRecipientKind[]>;
+} as const satisfies Record<FixedRealtimeMessageType, readonly RealtimeRecipientKind[]>;
+
+export const realtimeRecipients = (type: RealtimeMessageType): readonly RealtimeRecipientKind[] =>
+  isModuleOverlayRealtimeMessageType(type) ? ["overlay"] : REALTIME_RECIPIENTS[type];
 
 export type RealtimePanelPrincipal = {
   v: RealtimeProtocolVersion;

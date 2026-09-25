@@ -54,6 +54,10 @@ const moduleIsolationPatterns = [
 
 const overlayBoundaryPatterns = [
   {
+    regex: "^\\.\\./modules/[^/]+/overlay/(?!element(?:\\.[^/]+)?$)",
+    message: "Module overlay views must be loaded through their registered dynamic loader.",
+  },
+  {
     regex: "(^|/)worker(/|$)",
     message: "Overlay-Ansichten dürfen nichts aus src/worker importieren.",
   },

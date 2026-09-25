@@ -449,19 +449,39 @@ describe("dispatch and execution", () => {
     }
   });
 
-  it("doesn't silently drop an overlay action", async () => {
+  it("routes an overlay action to overlays that contain its module element", async () => {
     const database = new TestD1Database();
     try {
       await withBot(database);
       const fetcher = sent();
-      await runDispatch(database, [fakeModule("modul-a", () => ({
-        actions: [{ kind: "overlay", type: "konfetti", payload: {} }],
+      await database.prepare(
+        `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+         VALUES ('overlay-a', 'kanal-a', 'Gameplay', ?, ?)`,
+      ).bind(NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
+         VALUES ('element-a', 'kanal-a', 'overlay-a', 'ads.countdown', 'Werbung', NULL, '', '{}')`,
+      ).run();
+      await activate(database, "kanal-a", "ads");
+      const publish = vi.fn();
+      await dispatchEventSubNotification({ ...environment(database, publish) }, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "overlay-action-trigger",
+        payload: { message: { text: "!hallo" }, chatter_user_id: "user-1", chatter_user_login: "alice" },
+        receivedAt: NOW,
+      }, fetcher, [fakeModule("ads", () => ({
+        actions: [{ kind: "overlay", type: "konfetti", elementKind: "ads.countdown", payload: {} }],
         diagnostics: [],
-      }))], fetcher);
+      }))]);
 
       expect(fetcher).not.toHaveBeenCalled();
-      const rows = await eventLog(database);
-      expect(rows.map((row) => row.code)).toEqual(["host.overlay.not_executed"]);
+      expect(publish.mock.calls).toHaveLength(1);
+      expect(publish.mock.calls[0]?.[0]).toMatchObject([{
+        type: "modul.ads.konfetti",
+        payload: {},
+        overlayIds: ["overlay-a"],
+      }]);
     } finally {
       database.close();
     }

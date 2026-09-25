@@ -4,6 +4,8 @@ import {
   REALTIME_PROTOCOL,
 } from "../realtime-contract";
 import type { RealtimeEnvelope } from "../realtime-contract";
+import type { ModuleOverlayRealtimeEnvelope } from "../realtime-contract";
+import { isModuleOverlayRealtimeMessageType } from "../realtime-contract";
 
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
@@ -17,6 +19,7 @@ export interface OverlayRealtimeCallbacks {
   onOpen?: (reconnected: boolean) => void;
   onMessage?: (message: RealtimeEnvelope<"variables.changed">) => void;
   onOverlayChanged?: (message: RealtimeEnvelope<"overlay.changed">) => void;
+  onModuleMessage?: (message: ModuleOverlayRealtimeEnvelope) => void;
   onTokenBound?: () => void;
 }
 
@@ -173,6 +176,8 @@ export const connectOverlayRealtime = (
         callbacks.onMessage?.(parsed as RealtimeEnvelope<"variables.changed">);
       } else if (parsed.type === "overlay.changed" && isOverlayChangedPayload(parsed.payload)) {
         callbacks.onOverlayChanged?.(parsed as RealtimeEnvelope<"overlay.changed">);
+      } else if (typeof parsed.type === "string" && isModuleOverlayRealtimeMessageType(parsed.type) && isRecord(parsed.payload)) {
+        callbacks.onModuleMessage?.(parsed as ModuleOverlayRealtimeEnvelope);
       }
     });
 

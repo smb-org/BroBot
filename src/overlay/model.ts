@@ -6,6 +6,9 @@ export interface OverlayElementData {
   label: string;
   variableName: string | null;
   text: string;
+  config?: Readonly<Record<string, unknown>>;
+  state?: Readonly<Record<string, unknown>> | null;
+  moduleEnabled?: boolean;
   x: number;
   y: number;
   scalePercent: number;

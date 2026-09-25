@@ -201,6 +201,104 @@ describe("overlay access routes", () => {
     await expect(bootstrap.json()).resolves.toMatchObject({ overlay: null, variables: {} });
   });
 
+  it.each([
+    ["enabled", 1, true],
+    ["disabled", 0, false],
+  ] as const)("bootstraps an ads module element when the module is %s", async (_description, enabled, expectedEnabled) => {
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('channel-a', 'ads', ?, '{}')",
+    ).bind(enabled).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements
+        (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
+       VALUES ('element-countdown', 'channel-a', 'overlay-a', 'ads.countdown', 'Werbung', NULL, '', '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO ads_countdown_state
+         (channel_id, next_ad_at, duration, snooze_count, snooze_refresh_at, updated_at)
+       VALUES ('channel-a', '2026-09-25T12:01:00.000Z', 90, 2, '2026-09-25T12:30:00.000Z', '2026-09-25T12:00:00.000Z')`,
+    ).run();
+    const issued = await issueAccess(environment, "OBS countdown");
+    const token = tokenFromUrl(issued.overlayUrl);
+
+    const bootstrap = await authRouter.fetch(new Request("https://brobot.example/api/overlay/bootstrap", {
+      headers: { Authorization: `Bearer ${token}` },
+    }), environment);
+    const body = await bootstrap.json<{
+      overlay: { elements: Array<{ kind: string; moduleEnabled?: boolean; state?: Record<string, unknown> | null }> } | null;
+    }>();
+
+    expect(bootstrap.status).toBe(200);
+    expect(body.overlay?.elements[0]).toMatchObject({
+      kind: "ads.countdown",
+      moduleEnabled: expectedEnabled,
+      state: expectedEnabled ? {
+        nextAdAt: "2026-09-25T12:01:00.000Z",
+        duration: 90,
+        snoozeCount: 2,
+        snoozeRefreshAt: "2026-09-25T12:30:00.000Z",
+      } : null,
+    });
+    if (expectedEnabled) {
+      expect(typeof body.overlay?.elements[0]?.state?.serverNow).toBe("string");
+    }
+  });
+
+  it("hydrates a missing ads snapshot from the existing Durable Object schedule cache", async () => {
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('channel-a', 'ads', 1, '{}')",
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements
+        (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
+       VALUES ('element-countdown', 'channel-a', 'overlay-a', 'ads.countdown', 'Werbung', NULL, '', '{}')`,
+    ).run();
+    const cachedSchedule = {
+      nextAdAt: "2026-09-25T12:15:00.000Z",
+      duration: 90,
+      lastAdAt: null,
+      prerollFreeTime: 0,
+      snoozeCount: 1,
+      snoozeRefreshAt: "2026-09-25T12:30:00.000Z",
+    };
+    const getCachedAdSchedule = vi.fn(() => Promise.resolve({ schedule: cachedSchedule, asOf: "2026-09-25T12:00:00.000Z" }));
+    const refreshAdScheduleForCountdown = vi.fn().mockResolvedValue(null);
+    environment.CHANNEL = {
+      idFromName: vi.fn(() => "channel-object"),
+      get: vi.fn(() => ({ getCachedAdSchedule, refreshAdScheduleForCountdown })),
+    } as unknown as Env["CHANNEL"];
+    const issued = await issueAccess(environment, "OBS countdown");
+    const token = tokenFromUrl(issued.overlayUrl);
+
+    const bootstrap = await authRouter.fetch(new Request("https://brobot.example/api/overlay/bootstrap", {
+      headers: { Authorization: `Bearer ${token}` },
+    }), environment);
+    const body = await bootstrap.json<{
+      overlay: { elements: Array<{ state?: Record<string, unknown> | null }> } | null;
+    }>();
+    const snapshot = await database.prepare(
+      "SELECT next_ad_at, duration, snooze_count, snooze_refresh_at FROM ads_countdown_state WHERE channel_id = 'channel-a'",
+    ).first<Record<string, unknown>>();
+
+    expect(bootstrap.status).toBe(200);
+    expect(refreshAdScheduleForCountdown).toHaveBeenCalledOnce();
+    expect(getCachedAdSchedule).toHaveBeenCalledOnce();
+    expect(body.overlay?.elements[0]?.state).toMatchObject({
+      nextAdAt: cachedSchedule.nextAdAt,
+      duration: 90,
+      snoozeCount: 1,
+      snoozeRefreshAt: cachedSchedule.snoozeRefreshAt,
+    });
+    expect(typeof body.overlay?.elements[0]?.state?.serverNow).toBe("string");
+    expect(body.overlay?.elements[0]?.state?.serverNow).not.toBe("2026-09-25T12:00:00.000Z");
+    expect(snapshot).toEqual({
+      next_ad_at: cachedSchedule.nextAdAt,
+      duration: 90,
+      snooze_count: 1,
+      snooze_refresh_at: cachedSchedule.snoozeRefreshAt,
+    });
+  });
+
   it("keeps the old access active when replacing it", async () => {
     const oldAccess = await issueAccess(environment, "OBS main");
     const replacement = await post(overlayAccessRouter, accessPath(oldAccess.tokenId, "replace"), environment);
