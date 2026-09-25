@@ -15,6 +15,7 @@ export type DashboardRoute =
     overlayId?: string;
     editorOverlayId?: string;
     initialVariable?: string;
+    initialOverlayName?: string;
     filters?: PanelEventFilters;
     auditFilters?: PanelAuditFilters;
   }
@@ -100,12 +101,14 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     const editorOverlayId = decodeSegment(segments[3] ?? "");
     if (channelId === null || editorOverlayId === null) return { kind: "overview" };
     const initialVariable = new URLSearchParams(search).get("variable");
+    const initialOverlayName = new URLSearchParams(search).get("name");
     return {
       kind: "channel",
       channelId,
       section: "overlays",
       editorOverlayId,
       ...(initialVariable === null || initialVariable.length === 0 ? {} : { initialVariable }),
+      ...(editorOverlayId === "new" && initialOverlayName !== null && initialOverlayName.length > 0 ? { initialOverlayName } : {}),
     };
   }
   const channelSections = ["system", "members", "variables", "overlays", "overlay-links", "events", "modules", "audit"];
@@ -146,9 +149,11 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   const path = `${base}/${route.section}`;
   if (route.section === "overlays" && route.editorOverlayId !== undefined) {
     const editorPath = `${path}/${encodeURIComponent(route.editorOverlayId)}`;
-    return route.initialVariable === undefined
-      ? editorPath
-      : `${editorPath}?${new URLSearchParams({ variable: route.initialVariable }).toString()}`;
+    const params = new URLSearchParams();
+    if (route.editorOverlayId === "new" && route.initialOverlayName !== undefined) params.set("name", route.initialOverlayName);
+    if (route.initialVariable !== undefined) params.set("variable", route.initialVariable);
+    const query = params.toString();
+    return query.length === 0 ? editorPath : `${editorPath}?${query}`;
   }
   if (route.section === "overlays" && route.overlayId !== undefined) {
     return `${path}?${new URLSearchParams({ overlay: route.overlayId }).toString()}`;

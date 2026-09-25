@@ -42,6 +42,7 @@ export interface SelectProps {
   name?: string;
   id?: string;
   title?: string;
+  describedBy?: string;
 }
 
 /**
@@ -65,6 +66,7 @@ export function Select({
   name,
   id,
   title,
+  describedBy,
 }: SelectProps) {
   return (
     <MantineSelect
@@ -83,6 +85,7 @@ export function Select({
       name={name}
       id={id}
       title={title}
+      aria-describedby={describedBy}
       allowDeselect={false}
       comboboxProps={{ shadow: "xs", width: "max-content" }}
       renderOption={renderOption}

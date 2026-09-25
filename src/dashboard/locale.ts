@@ -200,6 +200,7 @@ export interface ChannelVariablesTexts {
   chooseOverlay: string;
   createOverlay: string;
   newOverlayName: string;
+  defaultOverlayName: (variableName: string) => string;
   openEditor: string;
   reconnect: string;
   variableMissing: string;
@@ -230,6 +231,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     conflict: "Die Variable wurde inzwischen geändert.", created: "Variable angelegt.", updated: "Variable gespeichert.",
     useInOverlay: "In Overlay verwenden", useOverlayHint: "Wähle ein Overlay. Die Variable wird im Editor als ungespeicherter Entwurf eingefügt.",
     chooseOverlay: "Overlay auswählen", createOverlay: "Neues Overlay", newOverlayName: "Name des neuen Overlays",
+    defaultOverlayName: (variableName) => `Overlay ${variableName}`,
     openEditor: "Editor öffnen", reconnect: "Neu verbinden", variableMissing: "Variable fehlt — neu wählen.",
     reconnectConflict: "Das Overlay-Element wurde inzwischen geändert. Lade die Seite neu, bevor du es verbindest.",
     legacyRenameWarning: "Alte Links mit #var=… zeigen diese Variable nach der Umbenennung nicht mehr an.",
@@ -256,6 +258,7 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     conflict: "This variable has changed since it was loaded.", created: "Variable created.", updated: "Variable saved.",
     useInOverlay: "Use in overlay", useOverlayHint: "Choose an overlay. The variable is added as an unsaved draft in the editor.",
     chooseOverlay: "Choose an overlay", createOverlay: "New overlay", newOverlayName: "New overlay name",
+    defaultOverlayName: (variableName) => `${variableName} overlay`,
     openEditor: "Open editor", reconnect: "Reconnect", variableMissing: "Variable missing — choose it again.",
     reconnectConflict: "This overlay element has changed. Reload the page before reconnecting it.",
     legacyRenameWarning: "Old links using #var=… will stop showing this variable after it is renamed.",

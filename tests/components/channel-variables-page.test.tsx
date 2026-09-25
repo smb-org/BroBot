@@ -101,7 +101,7 @@ describe("Channel variables page", () => {
     expect(requests.some(({ path }) => path.endsWith("/overlays/overlay-a"))).toBe(false);
   });
 
-  it("creates an empty overlay shell before opening the editor with a variable draft", async () => {
+  it("keeps a new overlay local until its editor is saved", async () => {
     const requests: Array<{ path: string; method: string; body?: string }> = [];
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
@@ -124,9 +124,8 @@ describe("Channel variables page", () => {
     fireEvent.click(screen.getByRole("button", { name: "In Overlay verwenden" }));
     fireEvent.click(await screen.findByRole("button", { name: "Editor öffnen" }));
 
-    await vi.waitFor(() => { expect(onOpenOverlay).toHaveBeenCalledWith("overlay-new", "score"); });
-    const create = requests.find(({ path, method }) => path.endsWith("/overlays") && method === "POST");
-    expect(create?.body).toBe(JSON.stringify({ name: "score overlay", width: 1920, height: 1080 }));
+    expect(onOpenOverlay).toHaveBeenCalledWith("new", "score", "Overlay score");
+    expect(requests.some(({ path, method }) => path.endsWith("/overlays") && method === "POST")).toBe(false);
     expect(requests.some(({ method }) => method === "PUT")).toBe(false);
   });
 

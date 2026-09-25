@@ -17,6 +17,7 @@ const healthyChannel = (channelId: string, displayName: string) => ({
   channelId,
   login: channelId,
   displayName,
+  language: "de",
   role: "manager",
   broadcasterConnection: "connected",
   channelBotConsent: "granted",

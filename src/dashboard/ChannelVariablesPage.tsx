@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 
 import {
   changeChannelVariableValue,
-  createOverlay,
   createChannelVariable,
   deleteChannelVariable,
   fetchOverlay,
@@ -28,7 +27,7 @@ interface ChannelVariablesPageProperties {
   initialSelection?: string;
   /** Clears the parent-owned request after this page has applied it. */
   onInitialSelectionConsumed?: (name: string) => void;
-  onOpenOverlay?: (overlayId: string, initialVariableName?: string) => void;
+  onOpenOverlay?: (overlayId: string, initialVariableName?: string, newOverlayName?: string) => void;
 }
 
 const normalizedVariableName = (value: string): string => value.trim().toLowerCase();
@@ -230,7 +229,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       setOverlayOptions(result.overlays.map(({ id, name, elementCount }) => ({ id, name, elementCount })));
       setOverlaySelection(result.overlays[0]?.id ?? "");
       setCreatingOverlay(result.overlays.length === 0);
-      setNewOverlayName(`${selected.name} overlay`);
+      setNewOverlayName(labels.defaultOverlayName(selected.name));
       setUseOverlayOpen(true);
     } catch (caught) {
       setOverlayError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
@@ -238,27 +237,16 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
       setOverlayPending(false);
     }
   };
-  const addVariableElement = async (): Promise<void> => {
+  const addVariableElement = (): void => {
     if (selected === null || !canManageContent || overlayPending) return;
-    setOverlayPending(true);
-    setOverlayError(null);
-    try {
-      if (creatingOverlay) {
-        if (newOverlayName.trim().length === 0) return;
-        const overlayId = (await createOverlay(channelId, {
-          name: newOverlayName.trim(), width: 1920, height: 1080,
-        })).overlay.id;
-        setUseOverlayOpen(false);
-        onOpenOverlay?.(overlayId, selected.name);
-      } else {
-        if (overlaySelection.length === 0) return;
-        setUseOverlayOpen(false);
-        onOpenOverlay?.(overlaySelection, selected.name);
-      }
-    } catch (caught) {
-      setOverlayError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.saveError) : labels.saveError);
-    } finally {
-      setOverlayPending(false);
+    if (creatingOverlay) {
+      if (newOverlayName.trim().length === 0) return;
+      setUseOverlayOpen(false);
+      onOpenOverlay?.("new", selected.name, newOverlayName.trim());
+    } else {
+      if (overlaySelection.length === 0) return;
+      setUseOverlayOpen(false);
+      onOpenOverlay?.(overlaySelection, selected.name);
     }
   };
   const reconnectElement = async (usage: PanelChannelVariable["usages"][number]): Promise<void> => {
@@ -400,7 +388,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
             {creatingOverlay ? <Field id="channel-variable-new-overlay-name" label={labels.newOverlayName} value={newOverlayName} maxLength={40} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={overlayPending} onChange={setNewOverlayName} /> : null}
             <div className="channel-variable-use-overlay__actions">
               <Button variant="primary" disabled={overlayPending || (creatingOverlay ? newOverlayName.trim().length === 0 : overlaySelection.length === 0)}
-                onClick={() => { void addVariableElement(); }}>{labels.openEditor}</Button>
+                onClick={addVariableElement}>{labels.openEditor}</Button>
               <Button variant="subtle" disabled={overlayPending} onClick={() => { setUseOverlayOpen(false); }}>{labels.discard}</Button>
             </div>
           </div> : null}

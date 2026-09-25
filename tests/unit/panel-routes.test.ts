@@ -636,6 +636,7 @@ describe("Panel read endpoints", () => {
     await insertChannel(database, "kanal-a", "Alpha");
     await insertChannel(database, "kanal-b", "Beta");
     await insertChannel(database, "kanal-c", "Gamma");
+    await database.prepare("UPDATE channels SET language = 'en' WHERE channel_id = ?").bind("kanal-a").run();
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
     await insertMember(database, "kanal-b", "user-2", "broadcaster");
@@ -649,15 +650,15 @@ describe("Panel read endpoints", () => {
       environment,
     );
     const body = await response.json<{
-      channels: Array<{ channelId: string; role: string }>;
+      channels: Array<{ channelId: string; role: string; language: string }>;
       viewerIsBot: boolean;
       botLogin?: string;
     }>();
 
     expect(response.status).toBe(200);
     expect(body.channels).toEqual([
-      expect.objectContaining({ channelId: "kanal-a", role: "manager" }),
-      expect.objectContaining({ channelId: "kanal-c", role: "operator" }),
+      expect.objectContaining({ channelId: "kanal-a", role: "manager", language: "en" }),
+      expect.objectContaining({ channelId: "kanal-c", role: "operator", language: "de" }),
     ]);
     expect(body.viewerIsBot).toBe(false);
     expect(body).not.toHaveProperty("botLogin");

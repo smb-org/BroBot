@@ -23,6 +23,8 @@ export interface SaveBarProps {
   discardLabel: string;
   savedLabel: string;
   pendingLabel: string;
+  saveDescribedBy?: string;
+  saveTitle?: string;
 }
 
 export function SaveBar({
@@ -44,6 +46,8 @@ export function SaveBar({
   discardLabel,
   savedLabel,
   pendingLabel,
+  saveDescribedBy,
+  saveTitle,
 }: SaveBarProps) {
   if (!persistent && !dirty && !saved) return null;
 
@@ -83,6 +87,8 @@ export function SaveBar({
             onClick={invalidAction && onInvalidSave !== undefined ? onInvalidSave : onSave}
             disabled={saveDisabled && !invalidAction}
             ariaDisabled={invalidAction}
+            {...(saveDescribedBy === undefined ? {} : { describedBy: saveDescribedBy })}
+            {...(saveTitle === undefined ? {} : { title: saveTitle })}
           >
             {saveLabel}
           </Button>

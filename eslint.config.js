@@ -29,6 +29,14 @@ const richTextareaBoundaryPattern = {
   group: ["rich-textarea", "rich-textarea/*"],
   message: "Import rich-textarea only from src/dashboard/ui/.",
 };
+const overlayViewBoundaryPattern = {
+  regex: "(^|/)overlay(/|$)",
+  message: "Panel views may not import overlay modules.",
+};
+const overlayEditorImportBoundaryPattern = {
+  regex: "(^|/)overlay/(?!canvas(?:\\.[^/]+)?$|model(?:\\.[^/]+)?$|variable\\.css(?:\\?inline)?$)",
+  message: "The overlay editor may only import the shared canvas, model types and variable styles.",
+};
 
 const moduleIsolationPatterns = [
   {
@@ -76,16 +84,11 @@ const panelBoundaryPatterns = [
     regex: "(^|/)(repository|adapters)(?:\\.[^/]+)?(?:/|$)",
     message: "Panel-Ansichten dürfen keine Repository- oder Adapterdateien importieren.",
   },
-  {
-    regex: "(^|/)overlay(/|$)",
-    message: "Panel-Ansichten dürfen keine Overlay-Ansichten importieren.",
-  },
+  overlayViewBoundaryPattern,
   mantineBoundaryPattern,
   tablerBoundaryPattern,
   richTextareaBoundaryPattern,
 ];
-
-const sharedOverlayRendererBoundaryPattern = panelBoundaryPatterns[2];
 
 const panelRestrictedImportPatterns = [
   ...moduleIsolationPatterns,
@@ -182,13 +185,12 @@ export default defineConfig(
     },
   },
   {
-    // Der Kompositionseditor bindet den identischen Canvas-Renderer wie die Ausgabe
-    // ein. Diese eine Ansicht darf deshalb gezielt src/overlay/canvas importieren.
+    // The editor shares the canvas and variable styles with the live overlay renderer.
     files: ["src/dashboard/OverlayEditorPage.tsx"],
     rules: {
       "no-restricted-imports": [
         "error",
-        { patterns: panelBoundaryPatterns.filter((pattern) => pattern !== sharedOverlayRendererBoundaryPattern) },
+        { patterns: panelBoundaryPatterns.map((pattern) => pattern === overlayViewBoundaryPattern ? overlayEditorImportBoundaryPattern : pattern) },
       ],
     },
   },
