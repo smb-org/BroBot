@@ -1,4 +1,10 @@
 {
+  "brobotAddress": {
+    "type": "text",
+    "label": "BroBot-Adresse / BroBot address (HTTPS origin)",
+    "value": "https://brobot.example.invalid",
+    "group": "BroBot"
+  },
   "overlayUrl": {
     "type": "text",
     "label": "Overlay-URL / Overlay URL (vollständiger Link mit Zugangstoken)",

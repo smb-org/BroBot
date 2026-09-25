@@ -1,4 +1,10 @@
 import { expect, test } from "@playwright/test";
+import {
+  createE2ESessionCredentials,
+  e2eChannelId,
+  e2eOverlayToken,
+  seedE2EOverlay,
+} from "./worker-fixtures";
 
 const bootstrap = {
   language: "en",
@@ -103,4 +109,66 @@ test("a sandboxed opaque-origin embed loads bootstrap and applies a realtime upd
   await expect(frame.locator(".brobot-variable__value")).toHaveText("42");
   expect(overlayAssetCorsHeaders.length).toBeGreaterThan(0);
   expect(overlayAssetCorsHeaders).toContain("*");
+});
+
+test("a sandboxed embed bootstraps through Worker CORS and receives a real Worker variable update", async ({ page }) => {
+  seedE2EOverlay();
+  const credentials = createE2ESessionCredentials();
+  const bootstrapResponseStatuses: number[] = [];
+  const bootstrapCorsOrigins: string[] = [];
+  const overlayAssetCorsHeaders: Array<string | undefined> = [];
+  const realtimeFrames: string[] = [];
+
+  page.on("response", (response) => {
+    const pathname = new URL(response.url()).pathname;
+    if (pathname === "/api/overlay/bootstrap") {
+      bootstrapResponseStatuses.push(response.status());
+      bootstrapCorsOrigins.push(response.headers()["access-control-allow-origin"] ?? "");
+    }
+    if (pathname.startsWith("/_app/")) {
+      overlayAssetCorsHeaders.push(response.headers()["access-control-allow-origin"]);
+    }
+  });
+  page.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname !== "/ws/overlay") return;
+    socket.on("framereceived", ({ payload }) => {
+      realtimeFrames.push(typeof payload === "string" ? payload : payload.toString("utf8"));
+    });
+  });
+
+  await page.goto(`/tests/e2e/fixtures/overlay-embed.html#token=${e2eOverlayToken}`);
+  const frame = page.frameLocator("#overlay-frame");
+  await expect.poll(() => frame.locator("body").evaluate(() => globalThis.origin)).toBe("null");
+  await expect(frame.locator(".brobot-variable__value")).toHaveText("7");
+  await expect.poll(() => realtimeFrames.some((message) => message.includes('"system.hello"'))).toBe(true);
+  await expect.poll(() => bootstrapResponseStatuses.includes(200)).toBe(true);
+  await expect.poll(() => bootstrapCorsOrigins.includes("*")).toBe(true);
+  expect(overlayAssetCorsHeaders).toContain("*");
+
+  const response = await page.request.post(
+    `http://127.0.0.1:8787/api/channels/${e2eChannelId}/variables/score/value`,
+    {
+      headers: {
+        Cookie: `__Host-brobot_session=${credentials.cookie}; __Host-brobot_csrf=${credentials.csrfToken}`,
+        "X-CSRF-Token": credentials.csrfToken,
+      },
+      data: { operation: "set", amount: 42 },
+    },
+  );
+  expect(response.status()).toBe(200);
+
+  await expect.poll(() => realtimeFrames.some((frameText) => {
+    try {
+      const message: unknown = JSON.parse(frameText);
+      if (typeof message !== "object" || message === null || !("type" in message) ||
+          message.type !== "variables.changed" || !("payload" in message)) return false;
+      const payload: unknown = message.payload;
+      if (typeof payload !== "object" || payload === null || !("set" in payload) || !Array.isArray(payload.set)) return false;
+      return payload.set.some((entry: unknown) => typeof entry === "object" && entry !== null &&
+        "name" in entry && entry.name === "score" && "value" in entry && entry.value === 42);
+    } catch {
+      return false;
+    }
+  })).toBe(true);
+  await expect(frame.locator(".brobot-variable__value")).toHaveText("42");
 });

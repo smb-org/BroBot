@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>BroBot overlay embed test</title></head>
+  <body>
+    <iframe id="overlay-frame" title="BroBot overlay" sandbox="allow-scripts"></iframe>
+    <script>
+      var token = new URLSearchParams(window.location.hash.slice(1)).get('token') || '';
+      document.getElementById('overlay-frame').src =
+        'http://127.0.0.1:8787/overlay.html#token=' + encodeURIComponent(token);
+    </script>
+  </body>
+</html>
