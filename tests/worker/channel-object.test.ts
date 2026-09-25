@@ -172,6 +172,15 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   return object;
 };
 
+const databaseWithCountdownOverlay = (): D1Database => {
+  const statement = {
+    bind: vi.fn(() => statement),
+    all: vi.fn().mockResolvedValue({ results: [{ overlay_id: "overlay-countdown" }] }),
+    run: vi.fn().mockResolvedValue({ success: true }),
+  };
+  return { prepare: vi.fn(() => statement) } as unknown as D1Database;
+};
+
 const typeOfSerializedMessage = (serialized: string): string | null => {
   let parsed: unknown;
   try {
@@ -833,6 +842,93 @@ describe("ChannelObject realtime path", () => {
     await expect(object.refreshAdScheduleForCountdown()).resolves.toBeNull();
     expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
     expect(storageOf(object).values.get("ads:countdown_refresh_attempt")).toBe(Date.now());
+  });
+
+  it("schedules a countdown refresh after ad end without replacing earlier alarms", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-25T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([], databaseWithCountdownOverlay());
+    const storage = storageOf(object);
+    storage.values.set("security_round", now + 2_000);
+    storage.values.set("ad_prewarning", now + 1_000);
+    const schedule = adSchedule("2026-09-25T12:02:00.000Z");
+
+    await object.storeAdSchedule(schedule, new Date(now).toISOString());
+
+    expect(storage.values.get("ads:countdown_refresh_deadline")).toBe(now + 210_000);
+    expect(storage.values.get("security_round")).toBe(now + 2_000);
+    expect(storage.values.get("ad_prewarning")).toBe(now + 1_000);
+    expect(storage.setAlarm).toHaveBeenLastCalledWith(now + 1_000);
+  });
+
+  it("does not schedule countdown refreshes without a countdown overlay", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
+    const object = objectFor([]);
+
+    await object.storeAdSchedule(adSchedule("2026-09-25T12:01:00.000Z"), new Date().toISOString());
+
+    expect(storageOf(object).values.has("ads:countdown_refresh_deadline")).toBe(false);
+    expect(storageOf(object).setAlarm).not.toHaveBeenCalled();
+  });
+
+  it("refreshes and publishes the new countdown schedule from its alarm", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-25T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const overlay = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-countdown",
+      overlayId: "overlay-countdown",
+      expiresAt: null,
+    });
+    const object = objectFor([overlay], databaseWithCountdownOverlay());
+    const endedSchedule = { ...adSchedule(new Date(now).toISOString()), duration: 30 };
+    const nextSchedule = adSchedule("2026-09-25T12:15:00.000Z");
+    mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule: nextSchedule });
+    await object.storeAdSchedule(endedSchedule, new Date(now).toISOString());
+    vi.setSystemTime(now + 60_000);
+
+    await object.alarm();
+
+    const messages = overlay.send.mock.calls.map(([serialized]) => JSON.parse(serialized) as {
+      type?: string;
+      payload?: { nextAdAt?: string };
+    });
+    expect(messages.some((message) => message.type === "modul.ads.countdown" &&
+      message.payload?.nextAdAt === nextSchedule.nextAdAt)).toBe(true);
+    expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+    expect(storageOf(object).values.get("ads:countdown_refresh_deadline"))
+      .toBe(Date.parse(nextSchedule.nextAdAt as string) + (nextSchedule.duration ?? 0) * 1_000 + 30_000);
+  });
+
+  it("backs off countdown refresh retries and stops after the retry limit", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-25T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([], databaseWithCountdownOverlay());
+    mocks.getAdSchedule.mockResolvedValue({ fetched: false, reason: "unavailable", detail: {}, schedule: null });
+    await object.storeAdSchedule({ ...adSchedule(new Date(now).toISOString()), duration: 0 }, new Date(now).toISOString());
+    const retryDelays = [60_000, 5 * 60_000, 15 * 60_000];
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const deadline = storageOf(object).values.get("ads:countdown_refresh_deadline");
+      expect(typeof deadline).toBe("number");
+      vi.setSystemTime(deadline as number);
+      await object.alarm();
+      const retryDelay = retryDelays[attempt];
+      if (retryDelay !== undefined) {
+        expect(storageOf(object).values.get("ads:countdown_refresh_deadline"))
+          .toBe(Date.now() + retryDelay);
+      }
+    }
+
+    expect(mocks.getAdSchedule).toHaveBeenCalledTimes(4);
+    expect(storageOf(object).values.has("ads:countdown_refresh_deadline")).toBe(false);
+    expect(storageOf(object).values.has("ads:countdown_refresh_retry_count")).toBe(false);
   });
 
   it("refreshes the next countdown schedule as soon as the cached ad ends", async () => {
