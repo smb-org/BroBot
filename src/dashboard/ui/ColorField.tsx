@@ -18,9 +18,12 @@ export function ColorField({ id, label, value, unsetLabel, clearLabel, onChange,
   return <div className="ui-color-field">
     <label htmlFor={id}>{label}</label>
     <div className="ui-color-field__controls">
-      <input id={id} type="color" aria-label={label} value={value ?? "#ffffff"} data-unset={value === undefined} disabled={disabled}
-        aria-describedby={reasonId}
-        onChange={(event) => { onChange(event.currentTarget.value); }} />
+      <span className="ui-color-field__swatch" data-unset={value === undefined}>
+        <input id={id} type="color" aria-label={label} value={value ?? "#ffffff"} data-unset={value === undefined} disabled={disabled}
+          aria-describedby={reasonId}
+          onChange={(event) => { onChange(event.currentTarget.value); }} />
+        {value === undefined ? <span className="ui-color-field__empty-swatch" aria-hidden="true" /> : null}
+      </span>
       {value === undefined
         ? <span className="ui-color-field__unset" role="note">{unsetLabel}</span>
         : <button type="button" className="ui-color-field__clear" aria-label={clearLabel} disabled={disabled}

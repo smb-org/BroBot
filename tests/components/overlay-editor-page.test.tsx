@@ -299,7 +299,7 @@ describe("Overlay composition editor", () => {
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
     expect(screen.getByRole("combobox", { name: "Anchor" })).toBeInTheDocument();
-    expect(screen.getByText("Left: the value grows to the right. Center: it grows in both directions. Right: it grows to the left.")).toBeInTheDocument();
+    expect(screen.getByText("Sets the direction in which text grows.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
     const elementId = alignedOverlay.elements[0]?.id;
     if (elementId === undefined) throw new Error("Aligned test element is missing.");
@@ -435,8 +435,87 @@ describe("Overlay composition editor", () => {
 
     expect(within(textColorInput.closest(".ui-color-field") as HTMLElement).getByText("Not set")).toBeInTheDocument();
     expect(textColorInput).toHaveAttribute("data-unset", "true");
+    expect(textColorInput.parentElement).toHaveAttribute("data-unset", "true");
+    expect(textColorInput.parentElement?.querySelector(".ui-color-field__empty-swatch")).toBeInTheDocument();
     const previewFrame = document.querySelector<HTMLIFrameElement>("iframe[data-testid='overlay-editor-renderer']");
     expect(previewFrame?.contentDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).not.toContain("color: #123456;");
+  });
+
+  it("opens the font disclosure by default and leaves unset sections collapsed with summaries", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+
+    for (const [title, expanded] of [["Font", true], ["Outline", false], ["Shadow", false], ["Background & spacing", false]] as const) {
+      const disclosure = screen.getByRole("button", { name: new RegExp(`^${title}`) });
+      expect(disclosure).toHaveAttribute("aria-expanded", String(expanded));
+      const panelId = disclosure.getAttribute("aria-controls");
+      if (panelId === null) throw new Error(`${title} disclosure has no controlled panel.`);
+      const panel = document.getElementById(panelId);
+      expect(panel).toBeInTheDocument();
+      if (expanded) expect(panel).not.toHaveAttribute("hidden");
+      else {
+        expect(panel).toHaveAttribute("hidden");
+        expect(within(disclosure).getByText("not set")).toBeInTheDocument();
+      }
+    }
+    expect(screen.getByRole("spinbutton", { name: "Font size" })).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "Outline width" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Outline/ }));
+
+    expect(screen.getByRole("button", { name: /^Outline/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("spinbutton", { name: "Outline width" })).toBeInTheDocument();
+  });
+
+  it("auto-opens style sections that contain values and summarizes those values", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const styledOverlay = {
+      ...initialOverlay,
+      css: generateOverlayStyleBlock({
+        overlay: {
+          fontFamily: "Arial", fontSize: 32, fontWeight: 700, color: "#abcdef", textAlign: "center", lineHeight: 1.2, letterSpacing: 1,
+          stroke: { width: 2, color: "#000000" },
+          shadow: { x: 1, y: 2, blur: 3, color: "#112233" },
+          background: { color: "#445566", opacityPercent: 75 }, padding: 8, borderRadius: 12,
+        },
+        elements: {},
+      }),
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: styledOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+
+    for (const title of ["Font", "Outline", "Shadow", "Background & spacing"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${title}`) })).toHaveAttribute("aria-expanded", "true");
+    }
+    expect(screen.getByText("Arial · 32 px · 700 · #abcdef · Center · 1.2 · 1 px")).toBeInTheDocument();
+    expect(screen.getByText("2 px · #000000")).toBeInTheDocument();
+    expect(screen.getByText("X 1 px · Y 2 px · 3 px · #112233")).toBeInTheDocument();
+    expect(screen.getByText("#445566 · 75% · 8 px · 12 px")).toBeInTheDocument();
   });
 
   it("locks the style fields after a code edit and rewrites the managed block from the editor", async () => {
@@ -594,7 +673,7 @@ describe("Overlay composition editor", () => {
       ...initialOverlay,
       css: generateOverlayStyleBlock({
         overlay: {},
-        elements: { "element-a": { fontSize: 28, color: "#123456" } },
+        elements: { "element-a": { fontSize: 28, color: "#123456", stroke: { width: 2, color: "#112233" } } },
       }),
     };
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
@@ -636,6 +715,17 @@ describe("Overlay composition editor", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Element: Score", hidden: true }));
     expect(screen.getByRole("spinbutton", { name: "Schriftgröße" })).toHaveValue("28");
     expect(screen.getByLabelText("Textfarbe")).toHaveValue("#123456");
+    const outlineWidth = screen.getByRole("spinbutton", { name: "Konturstärke" });
+    expect(outlineWidth).toHaveValue("2");
+    expect(outlineWidth).toBeDisabled();
+    const shadowDisclosure = screen.getByRole("button", { name: /^Schatten/ });
+    expect(shadowDisclosure).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(shadowDisclosure);
+    const shadowX = screen.getByRole("spinbutton", { name: "Schatten X-Versatz" });
+    expect(shadowX).toBeDisabled();
+    const shadowReasonId = shadowX.getAttribute("aria-describedby");
+    expect(shadowReasonId).not.toBeNull();
+    expect(document.getElementById(shadowReasonId ?? "")).toHaveTextContent("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.");
     const systemFont = screen.getByRole("combobox", { name: "Systemschrift auswählen" });
     expect(systemFont).toBeDisabled();
     const styleReasonId = systemFont.getAttribute("aria-describedby");
@@ -789,5 +879,58 @@ describe("Overlay composition editor", () => {
     fireEvent.click(within(guard).getByRole("button", { name: "Verwerfen und verlassen" }));
     expect(await screen.findByRole("heading", { name: "Kanalvariablen", level: 1 })).toBeInTheDocument();
     expect(fetcher.mock.calls.filter(([input, init]) => requestUrl(input).pathname.endsWith("/overlays/overlay-a") && init?.method === "PUT")).toHaveLength(1);
+  });
+
+  it("marks the selected composition element in the injected preview style and clears it once nothing is selected", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
+    await waitFor(() => {
+      const style = previewFrame?.contentDocument?.querySelector<HTMLStyleElement>("style[data-brobot-editor-selection]");
+      expect(style?.textContent).toContain('[data-element="element-a"]');
+    });
+    const selectionStyle = previewFrame?.contentDocument?.querySelector<HTMLStyleElement>("style[data-brobot-editor-selection]");
+    expect(selectionStyle?.textContent).toContain("outline");
+    const baseStyle = previewFrame?.contentDocument?.head.querySelector("style");
+    expect(baseStyle?.textContent).toContain("[data-element]{outline");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove element" }));
+    await waitFor(() => expect(previewFrame?.contentDocument?.querySelector<HTMLStyleElement>("style[data-brobot-editor-selection]")?.textContent).toBe(""));
+  });
+
+  it("shows the unsaved-changes status only once on the save bar", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const saveBar = document.querySelector<HTMLElement>(".ui-save-bar");
+    if (saveBar === null) throw new Error("Save bar is missing.");
+    expect(within(saveBar).queryByText("Unsaved changes")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Element label" }), { target: { value: "Score label" } });
+
+    expect(within(saveBar).getAllByText("Unsaved changes")).toHaveLength(1);
   });
 });
