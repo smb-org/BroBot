@@ -1,6 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import streamElementsFields from "../../docs/embedding/streamelements/fields.json?raw";
+import streamElementsHtml from "../../docs/embedding/streamelements/widget.html?raw";
+import streamElementsJs from "../../docs/embedding/streamelements/widget.js?raw";
 import { OverlaysPage } from "../../src/dashboard/OverlaysPage";
 import { UiProvider } from "../../src/dashboard/ui";
 import { jsonResponse } from "../unit/fixtures";
@@ -204,7 +207,7 @@ describe("Overlays page", () => {
     expect(within(accessRow).getByText(status)).toHaveClass("overlay-access-list__status");
 
     const actions = within(accessRow).getAllByRole("button");
-    expect(actions).toHaveLength(3);
+    expect(actions).toHaveLength(4);
     for (const action of actions) expect(action).toHaveAttribute("data-variant", "default");
   });
 
@@ -329,16 +332,114 @@ describe("Overlays page", () => {
     expect(fetcher.mock.calls.filter(([input]) => requestPath(input).endsWith("/overlays/overlay-a")).length).toBeGreaterThan(1);
   });
 
-  it("keeps the OBS setup guide inside the access list", async () => {
+  it("shows localized OBS setup steps inside the selected access", async () => {
     vi.stubGlobal("fetch", routeFetcher());
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
     fireEvent.click(await screen.findByText("Gameplay"));
-    const summaryText = await screen.findByText("In OBS einrichten");
-    const summary = summaryText.closest("details");
-    expect(summary).not.toBeNull();
-    fireEvent.click(summaryText);
-    expect(summary).toHaveTextContent("Benutzerdefiniertes CSS");
-    expect(screen.queryByText("Overlay-Link")).not.toBeInTheDocument();
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
+    expect(assistant).toHaveTextContent("Breite und Höhe: 1920 × 1080 px");
+    expect(assistant).toHaveTextContent("Quelle hinzufügen");
+    expect(assistant).toHaveTextContent("Browser auswählen");
+    expect(assistant).toHaveTextContent("Benutzerdefiniertes CSS");
+    expect(assistant).toHaveTextContent("Eigenes CSS gehört in den Stil des Overlays.");
+    expect(within(assistant).getByRole("tab", { name: "OBS" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByText("Overlay-Link", { selector: ".overlay-access-secret" })).not.toBeInTheDocument();
+  });
+
+  it("switches setup platform tabs and copies the source embedding files verbatim", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    vi.stubGlobal("fetch", routeFetcher());
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
+
+    const obsTab = within(assistant).getByRole("tab", { name: "OBS" });
+    fireEvent.keyDown(obsTab, { key: "ArrowRight" });
+    const streamElementsTab = within(assistant).getByRole("tab", { name: "StreamElements" });
+    expect(streamElementsTab).toHaveAttribute("aria-selected", "true");
+    expect(assistant).toHaveTextContent("Overlay → Add Widget → Static/Custom → Custom Widget");
+    fireEvent.click(within(assistant).getByRole("button", { name: "HTML kopieren" }));
+    fireEvent.click(within(assistant).getByRole("button", { name: "JS kopieren" }));
+    fireEvent.click(within(assistant).getByRole("button", { name: "Fields kopieren" }));
+    expect(writeText).toHaveBeenNthCalledWith(1, streamElementsHtml);
+    expect(writeText).toHaveBeenNthCalledWith(2, streamElementsJs);
+    expect(writeText).toHaveBeenNthCalledWith(3, streamElementsFields);
+    expect(await within(assistant).findByRole("button", { name: "Fields kopiert" })).toBeInTheDocument();
+
+    const soundAlertsTab = within(assistant).getByRole("tab", { name: "Sound Alerts" });
+    fireEvent.click(soundAlertsTab);
+    expect(soundAlertsTab).toHaveAttribute("aria-selected", "true");
+    expect(assistant).toHaveTextContent("Scenes → Add Widget → Import Widget");
+    expect(assistant).toHaveTextContent("noch nicht am echten Sound-Alerts-Produkt geprüft");
+    expect(within(assistant).getByRole("button", { name: "HTML kopieren" })).toBeInTheDocument();
+    expect(within(assistant).getByRole("button", { name: "JS kopieren" })).toBeInTheDocument();
+    expect(within(assistant).getByRole("button", { name: "Fields kopieren" })).toBeInTheDocument();
+  });
+
+  it("copies a selected element URL through the access reveal flow without rendering its token", async () => {
+    const fetcher = routeFetcher();
+    vi.stubGlobal("fetch", fetcher);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
+    const output = within(assistant).getByRole("combobox", { name: "Ausgabe" });
+    fireEvent.click(output);
+    fireEvent.click(await screen.findByRole("option", { name: "Einzelnes Element: Score" }));
+    expect(assistant).toHaveTextContent("Breite ≈ Elementbreite × Skalierung; Höhe nach Inhalt.");
+    expect(assistant).toHaveTextContent("#token=••••••&element=element-a");
+
+    fireEvent.click(within(assistant).getByRole("button", { name: "Overlay-Link kopieren" }));
+    await vi.waitFor(() => { expect(writeText).toHaveBeenCalledWith(`${secret}&element=element-a`); });
+    expect(await within(assistant).findByRole("button", { name: "Overlay-Link kopiert" })).toBeInTheDocument();
+    expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/reveal"))).toBe(true);
+    expect(document.body.textContent).not.toContain("f".repeat(43));
+    expect([...document.querySelectorAll("input, textarea")].some((element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+      ? element.value.includes("f".repeat(43)) : false)).toBe(false);
+  });
+
+  it("keeps setup instructions and snippet copying available to operators but explains disabled access copying", async () => {
+    const fetcher = routeFetcher();
+    vi.stubGlobal("fetch", fetcher);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    fireEvent.click(within(inspector).getByRole("button", { name: "Einrichten" }));
+    const assistant = within(inspector).getByRole("region", { name: "Einrichtungsassistent" });
+    const copyUrl = within(assistant).getByRole("button", { name: "Overlay-Link kopieren" });
+    expect(copyUrl).toBeDisabled();
+    expect(assistant).toHaveTextContent("Nur Broadcaster und Verwalter dürfen Overlay-Zugänge kopieren.");
+    expect(within(assistant).getByRole("tab", { name: "OBS" })).toBeEnabled();
+    fireEvent.click(within(assistant).getByRole("tab", { name: "StreamElements" }));
+    fireEvent.click(within(assistant).getByRole("button", { name: "HTML kopieren" }));
+    expect(writeText).toHaveBeenCalledWith(streamElementsHtml);
+    fireEvent.click(copyUrl);
+    expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/access-a/reveal"))).toBe(false);
+  });
+
+  it.each([
+    { language: "de-DE", assistant: "Einrichtungsassistent", target: "Zielsystem" },
+    { language: "en-US", assistant: "Setup assistant", target: "Target platform" },
+  ])("localizes setup labels in $language", async ({ language, assistant: assistantLabel, target }) => {
+    setBrowserLanguage(language);
+    vi.stubGlobal("fetch", routeFetcher());
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+    const inspector = await screen.findByRole("region", { name: language === "de-DE" ? "Zugänge" : "Accesses" });
+    fireEvent.click(within(inspector).getByRole("button", { name: language === "de-DE" ? "Einrichten" : "Set up" }));
+    const assistant = within(inspector).getByRole("region", { name: assistantLabel });
+    expect(within(assistant).getByRole("tablist", { name: target })).toBeInTheDocument();
   });
 
   it("keeps legacy links manageable on a channel with no overlays", async () => {

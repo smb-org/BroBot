@@ -20,6 +20,7 @@ interface ButtonBaseProps {
   /** Points at the reason line for a disabled action -- visible, disabled,
    *  with its reason at the point of effect (editor-konzept 6). */
   describedBy?: string;
+  ariaPressed?: boolean;
   onClick?: () => void;
   type?: "button" | "submit";
   /** Initial focus inside a `ConfirmDialog`: Mantine honors the focus target. */
@@ -91,6 +92,7 @@ export function Button(props: ButtonProps) {
     ref,
     className,
     describedBy,
+    ariaPressed,
   } = props;
   const iconOnly = props.iconOnly === true;
   const icon = props.icon;
@@ -126,6 +128,7 @@ export function Button(props: ButtonProps) {
       type={type}
       aria-label={iconOnly ? props.ariaLabel : undefined}
       aria-describedby={describedBy}
+      aria-pressed={ariaPressed}
       title={title}
       data-autofocus={autoFocus ? true : undefined}
       className={buttonClassName}
