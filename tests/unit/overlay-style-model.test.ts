@@ -70,15 +70,25 @@ describe("overlay style block model", () => {
     }
   });
 
-  it("continues to read managed blocks with legacy wrapper selectors", () => {
-    const legacyBlock = `${OVERLAY_STYLE_BEGIN_MARKER}\n.brobot-overlay {\n  color: #ffffff;\n}\n\n[data-element="element-a"] {\n  font-size: 32px;\n}\n${OVERLAY_STYLE_END_MARKER}`;
-    const parsed = parseOverlayStyleBlock(legacyBlock);
+  it.each([
+    ["overlay wrappers", `${OVERLAY_STYLE_BEGIN_MARKER}\n.brobot-overlay {\n  color: #ffffff;\n}\n${OVERLAY_STYLE_END_MARKER}`],
+    ["element wrappers", `${OVERLAY_STYLE_BEGIN_MARKER}\n[data-element="element-a"] {\n  font-size: 32px;\n}\n${OVERLAY_STYLE_END_MARKER}`],
+  ])("locks legacy %s targets as hand-edited CSS", (_description, legacyBlock) => {
+    expect(parseOverlayStyleBlock(legacyBlock).kind).toBe("invalid");
+  });
 
-    expect(parsed).toMatchObject({
+  it.each([
+    ["left", "0%"],
+    ["center", "-50%"],
+    ["right", "-100%"],
+  ] as const)("writes the %s composition anchor from managed alignment", (alignment, translation) => {
+    const content = generateOverlayStyleContent({ overlay: {}, elements: { "element-a": { textAlign: alignment } } });
+
+    expect(content).toContain(`.brobot-overlay .brobot-overlay-composition-element[data-element="element-a"] {\n  --brobot-overlay-anchor-x: ${translation};\n}`);
+    expect(parseOverlayStyleBlock(generateOverlayStyleBlock({ overlay: {}, elements: { "element-a": { textAlign: alignment } } }))).toMatchObject({
       kind: "valid",
-      styles: { overlay: { color: "#ffffff" }, elements: { "element-a": { fontSize: 32 } } },
+      styles: { elements: { "element-a": { textAlign: alignment } } },
     });
-    expect(parsed.kind === "valid" ? generateOverlayStyleContent(parsed.styles) : "").toContain('[data-element="element-a"] :where(.brobot-variable) {');
   });
 
   it("keeps every byte outside the managed markers when rewriting the block", () => {

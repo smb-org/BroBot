@@ -10,6 +10,7 @@ import { clampOverlayEditorPosition, overlayEditorPositionLimits, UNMEASURED_ELE
 import {
   parseOverlayStyleBlock,
   replaceOverlayStyleBlock,
+  type OverlayStyleAlignment,
   type OverlayStyle,
   type OverlayStyleDocument,
 } from "./overlay-style-model";
@@ -317,6 +318,9 @@ function OverlayEditorWorkspace({
   const targetStyle: OverlayStyle = effectiveStyleTargetId === "overlay"
     ? effectiveStyleDocument.overlay
     : effectiveStyleDocument.elements[effectiveStyleTargetId] ?? {};
+  const elementHorizontalAnchor = (element: PanelOverlayElement): OverlayStyleAlignment =>
+    effectiveStyleDocument.elements[element.id]?.textAlign ?? effectiveStyleDocument.overlay.textAlign ?? "left";
+  const selectedElementAnchor = selectedElement === null ? "left" : elementHorizontalAnchor(selectedElement);
   const styleLockedReason = !canManage ? labels.editorStyleReadOnlyReason : styleLocked ? labels.editorStyleLocked : "";
   const fitScale = viewportSize.width === 0 || viewportSize.height === 0
     ? 1
@@ -324,7 +328,7 @@ function OverlayEditorWorkspace({
   const canvasScale = fitScale * previewZoom / 100;
   const textIsValid = draft.elements.every((element) => element.text.match(/\{value\}/gu)?.length === 1);
   const canvasSize = { width: draft.width, height: draft.height };
-  const selectedPositionLimits = overlayEditorPositionLimits(canvasSize, selectedElementSize);
+  const selectedPositionLimits = overlayEditorPositionLimits(canvasSize, selectedElementSize, selectedElementAnchor);
 
   useEffect(() => {
     const viewport = previewViewportRef.current;
@@ -366,7 +370,7 @@ function OverlayEditorWorkspace({
     setPreviewFrameRoot(root);
   }, [labels.editorPreviewCanvas]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = previewFrameRootRef.current;
     if (root === null) return;
     root.style.position = "relative";
@@ -378,7 +382,7 @@ function OverlayEditorWorkspace({
     root.style.outline = "none";
   }, [draft.height, draft.width, previewFrameRoot]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = previewFrameRootRef.current;
     if (root === null) return;
     let style = root.ownerDocument.querySelector<HTMLStyleElement>("style[data-brobot-overlay-css]");
@@ -421,7 +425,7 @@ function OverlayEditorWorkspace({
   };
 
   const clampPosition = (element: PanelOverlayElement, x: number, y: number): { x: number; y: number } =>
-    clampOverlayEditorPosition({ x, y }, canvasSize, renderedElementSize(element.id));
+    clampOverlayEditorPosition({ x, y }, canvasSize, renderedElementSize(element.id), elementHorizontalAnchor(element));
 
   const updateElement = useCallback((elementId: string, update: Partial<PanelOverlayElement>): void => {
     setDraft((current) => ({
@@ -451,12 +455,9 @@ function OverlayEditorWorkspace({
       ? { ...effectiveStyleDocument, overlay: nextTarget }
       : {
         ...effectiveStyleDocument,
-        elements: {
-          ...effectiveStyleDocument.elements,
-          ...(Object.keys(nextTarget).length === 0
-            ? Object.fromEntries(Object.entries(effectiveStyleDocument.elements).filter(([id]) => id !== effectiveStyleTargetId))
-            : { [effectiveStyleTargetId]: nextTarget }),
-        },
+        elements: Object.keys(nextTarget).length === 0
+          ? Object.fromEntries(Object.entries(effectiveStyleDocument.elements).filter(([id]) => id !== effectiveStyleTargetId))
+          : { ...effectiveStyleDocument.elements, [effectiveStyleTargetId]: nextTarget },
       };
     writeStyleDocument(next);
   };
@@ -550,10 +551,11 @@ function OverlayEditorWorkspace({
       { x: selectedElement.x, y: selectedElement.y },
       { width: draft.width, height: draft.height },
       { width: bounds.width, height: bounds.height },
+      selectedElementAnchor,
     );
     if (clamped.x !== selectedElement.x || clamped.y !== selectedElement.y) updateElement(selectedElement.id, clamped);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes `selectedElement` (x/y change every drag frame); only the fields that can change its rendered size should retrigger this.
-  }, [selectedElementId, selectedElement?.inComposition, selectedElementScalePercent, selectedElementText, selectedElementLiveValue, draft.width, draft.height, previewFrameRoot, updateElement]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes `selectedElement` (x/y change every drag frame); CSS, content, scale, and value changes can change its rendered bounds.
+  }, [selectedElementId, selectedElement?.inComposition, selectedElementScalePercent, selectedElementText, selectedElementLiveValue, selectedElementAnchor, draft.css, draft.width, draft.height, previewFrameRoot, updateElement]);
 
   const discard = useCallback((): void => {
     setDraft(baseline.draft);
@@ -843,7 +845,7 @@ function OverlayEditorWorkspace({
             countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
             onChange={(text) => { updateElement(selectedElement.id, { text }); }} />
           <div className="overlay-editor__numeric-fields">
-            <NumberField id="overlay-editor-x" label={labels.editorX} min={0} max={selectedPositionLimits.x} value={selectedElement.x} disabled={!canEdit}
+            <NumberField id="overlay-editor-x" label={labels.editorX} min={selectedPositionLimits.minX} max={selectedPositionLimits.x} value={selectedElement.x} disabled={!canEdit}
               onChange={(x) => { if (typeof x === "number") updateElement(selectedElement.id, clampPosition(selectedElement, x, selectedElement.y)); }} />
             <NumberField id="overlay-editor-y" label={labels.editorY} min={0} max={selectedPositionLimits.y} value={selectedElement.y} disabled={!canEdit}
               onChange={(y) => { if (typeof y === "number") updateElement(selectedElement.id, clampPosition(selectedElement, selectedElement.x, y)); }} />
@@ -904,7 +906,7 @@ function OverlayEditorWorkspace({
                 <ColorField id="overlay-editor-style-color" label={labels.editorStyleColor} value={targetStyle.color}
                   unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
                   onChange={(value) => { updateStyleProperty("color", value); }} />
-                <Select id="overlay-editor-style-alignment" label={labels.editorStyleAlignment}
+                <Select id="overlay-editor-style-alignment" label={labels.editorStyleAlignment} hint={labels.editorStyleAlignmentHint}
                   value={targetStyle.textAlign ?? null} disabled={!canEdit || styleLocked}
                   {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}
                   options={[

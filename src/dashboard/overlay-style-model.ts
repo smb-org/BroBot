@@ -18,12 +18,14 @@ export interface OverlayStyleBackground {
   opacityPercent: number;
 }
 
+export type OverlayStyleAlignment = "left" | "center" | "right";
+
 export interface OverlayStyle {
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: 400 | 500 | 600 | 700;
   color?: string;
-  textAlign?: "left" | "center" | "right";
+  textAlign?: OverlayStyleAlignment;
   lineHeight?: number;
   letterSpacing?: number;
   stroke?: OverlayStyleStroke;
@@ -159,23 +161,33 @@ const styleDeclarations = (style: OverlayStyle): readonly string[] => {
 
 const hasStyle = (style: OverlayStyle): boolean => styleDeclarations(style).length > 0;
 
-const styleRules = (styles: OverlayStyleDocument, legacyTargets = false): readonly string[] => {
+const anchorTranslation = (alignment: OverlayStyleAlignment): string =>
+  alignment === "center" ? "-50%" : alignment === "right" ? "-100%" : "0%";
+
+const anchorRule = (selector: string, alignment: OverlayStyleAlignment): string =>
+  `${selector} {\n  --brobot-overlay-anchor-x: ${anchorTranslation(alignment)};\n}`;
+
+const styleRules = (styles: OverlayStyleDocument): readonly string[] => {
   const rules: string[] = [];
-  const overlaySelector = legacyTargets ? ".brobot-overlay" : ".brobot-overlay :where(.brobot-variable)";
-  if (hasStyle(styles.overlay)) rules.push(`${overlaySelector} {\n${styleDeclarations(styles.overlay).join("\n")}\n}`);
+  if (hasStyle(styles.overlay)) {
+    rules.push(`.brobot-overlay :where(.brobot-variable) {\n${styleDeclarations(styles.overlay).join("\n")}\n}`);
+    if (styles.overlay.textAlign !== undefined) {
+      rules.push(anchorRule(".brobot-overlay .brobot-overlay-composition-element", styles.overlay.textAlign));
+    }
+  }
   for (const elementId of Object.keys(styles.elements).filter((id) => elementIdPattern.test(id)).sort()) {
     const style = styles.elements[elementId];
     if (style !== undefined && hasStyle(style)) {
-      const selector = legacyTargets ? `[data-element="${elementId}"]` : `[data-element="${elementId}"] :where(.brobot-variable)`;
-      rules.push(`${selector} {\n${styleDeclarations(style).join("\n")}\n}`);
+      rules.push(`[data-element="${elementId}"] :where(.brobot-variable) {\n${styleDeclarations(style).join("\n")}\n}`);
+      if (style.textAlign !== undefined) {
+        rules.push(anchorRule(`.brobot-overlay .brobot-overlay-composition-element[data-element="${elementId}"]`, style.textAlign));
+      }
     }
   }
   return rules;
 };
 
 export const generateOverlayStyleContent = (styles: OverlayStyleDocument): string => styleRules(styles).join("\n\n");
-
-const generateLegacyOverlayStyleContent = (styles: OverlayStyleDocument): string => styleRules(styles, true).join("\n\n");
 
 export const generateOverlayStyleBlock = (styles: OverlayStyleDocument): string =>
   `${OVERLAY_STYLE_BEGIN_MARKER}\n${generateOverlayStyleContent(styles)}\n${OVERLAY_STYLE_END_MARKER}`;
@@ -202,7 +214,7 @@ const parseDeclarations = (lines: readonly string[]): OverlayStyle | null => {
     fontSize?: number;
     fontWeight?: 400 | 500 | 600 | 700;
     color?: string;
-    textAlign?: "left" | "center" | "right";
+    textAlign?: OverlayStyleAlignment;
     lineHeight?: number;
     letterSpacing?: number;
     stroke?: OverlayStyleStroke;
@@ -323,32 +335,43 @@ const parseContent = (content: string): OverlayStyleDocument | null => {
   const styles: { overlay: OverlayStyle; elements: Record<string, OverlayStyle> } = { overlay: {}, elements: {} };
   const rules = body.split("\n\n");
   let previousSelectorOrder = "";
-  let sawRule = false;
+  let overlayStyleSeen = false;
   for (const rule of rules) {
     const lines = rule.split("\n");
     const selectorLine = lines.shift();
-    const selectorMatch = selectorLine === ".brobot-overlay :where(.brobot-variable) {" || selectorLine === ".brobot-overlay {"
-      ? { kind: "overlay" as const }
-      : selectorLine === undefined ? null : /^\[data-element="([A-Za-z0-9_-]{1,64})"\](?: :where\(\.brobot-variable\))? \{$/u.exec(selectorLine);
-    if (selectorMatch === null) return null;
+    const overlayStyleSelector = selectorLine === ".brobot-overlay :where(.brobot-variable) {";
+    const overlayAnchorSelector = selectorLine === ".brobot-overlay .brobot-overlay-composition-element {";
+    const elementStyleMatch = selectorLine === undefined ? null : /^\[data-element="([A-Za-z0-9_-]{1,64})"\] :where\(\.brobot-variable\) \{$/u.exec(selectorLine);
+    const elementAnchorMatch = selectorLine === undefined ? null : /^\.brobot-overlay \.brobot-overlay-composition-element\[data-element="([A-Za-z0-9_-]{1,64})"\] \{$/u.exec(selectorLine);
+    if (!overlayStyleSelector && !overlayAnchorSelector && elementStyleMatch === null && elementAnchorMatch === null) return null;
     const closing = lines.pop();
     if (closing !== "}") return null;
+    if (overlayAnchorSelector || elementAnchorMatch !== null) {
+      const anchorLine = lines.length === 1 ? lines[0] : undefined;
+      const anchorMatch = anchorLine === undefined ? null : /^ {2}--brobot-overlay-anchor-x: (0%|-50%|-100%);$/u.exec(anchorLine);
+      if (anchorMatch === null || anchorMatch[1] === undefined) return null;
+      const alignment = anchorMatch[1] === "-50%" ? "center" : anchorMatch[1] === "-100%" ? "right" : "left";
+      const currentAlignment = overlayAnchorSelector
+        ? styles.overlay.textAlign
+        : elementAnchorMatch?.[1] === undefined ? undefined : styles.elements[elementAnchorMatch[1]]?.textAlign;
+      if (currentAlignment !== alignment) return null;
+      continue;
+    }
     const parsed = parseDeclarations(lines);
     if (parsed === null) return null;
-    if ("kind" in selectorMatch) {
-      if (sawRule) return null;
+    if (overlayStyleSelector) {
+      if (overlayStyleSeen) return null;
       styles.overlay = parsed;
-      sawRule = true;
+      overlayStyleSeen = true;
     } else {
-      const elementId = selectorMatch[1];
-      if (elementId === undefined || Object.hasOwn(styles.elements, elementId)
-        || (previousSelectorOrder !== "" && elementId <= previousSelectorOrder)) return null;
+      const elementId = elementStyleMatch?.[1];
+      if (elementId === undefined || Object.hasOwn(styles.elements, elementId)) return null;
       styles.elements[elementId] = parsed;
+      if (previousSelectorOrder !== "" && elementId <= previousSelectorOrder) return null;
       previousSelectorOrder = elementId;
-      sawRule = true;
     }
   }
-  return generateOverlayStyleContent(styles) === body || generateLegacyOverlayStyleContent(styles) === body ? styles : null;
+  return generateOverlayStyleContent(styles) === body ? styles : null;
 };
 
 export const parseOverlayStyleBlock = (css: string): ParsedOverlayStyleBlock => {

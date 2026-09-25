@@ -281,7 +281,7 @@ export interface OverlaysTexts {
   editorStyleFontFamily: string; editorStyleFontFamilyCount: (count: number, maximum: number) => string;
   editorStyleColorUnset: string; editorStyleColorClear: string;
   editorStyleFontSize: string; editorStyleFontWeight: string; editorStyleColor: string;
-  editorStyleAlignment: string; editorStyleLeft: string; editorStyleCenter: string; editorStyleRight: string;
+  editorStyleAlignment: string; editorStyleAlignmentHint: string; editorStyleLeft: string; editorStyleCenter: string; editorStyleRight: string;
   editorStyleLineHeight: string; editorStyleLetterSpacing: string; editorStyleStrokeWidth: string; editorStyleStrokeColor: string;
   editorStyleShadowX: string; editorStyleShadowY: string; editorStyleShadowBlur: string; editorStyleShadowColor: string;
   editorStyleBackgroundColor: string; editorStyleBackgroundOpacity: string; editorStylePadding: string; editorStyleRadius: string;
@@ -331,7 +331,8 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorStyleFontFamily: "Schriftart oder eigener Name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} Zeichen`,
     editorStyleColorUnset: "Nicht gesetzt", editorStyleColorClear: "Farbe entfernen",
     editorStyleFontSize: "Schriftgröße", editorStyleFontWeight: "Schriftstärke", editorStyleColor: "Textfarbe",
-    editorStyleAlignment: "Ausrichtung", editorStyleLeft: "Links", editorStyleCenter: "Mittig", editorStyleRight: "Rechts",
+    editorStyleAlignment: "Anker", editorStyleAlignmentHint: "Links: Der Wert wächst nach rechts. Mittig: Er wächst zu beiden Seiten. Rechts: Er wächst nach links.",
+    editorStyleLeft: "Links", editorStyleCenter: "Mittig", editorStyleRight: "Rechts",
     editorStyleLineHeight: "Zeilenhöhe", editorStyleLetterSpacing: "Buchstabenabstand", editorStyleStrokeWidth: "Konturstärke", editorStyleStrokeColor: "Konturfarbe",
     editorStyleShadowX: "Schatten X-Versatz", editorStyleShadowY: "Schatten Y-Versatz", editorStyleShadowBlur: "Schattenunschärfe", editorStyleShadowColor: "Schattenfarbe",
     editorStyleBackgroundColor: "Hintergrundfarbe", editorStyleBackgroundOpacity: "Hintergrund-Deckkraft", editorStylePadding: "Innenabstand", editorStyleRadius: "Rundung",
@@ -399,7 +400,8 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorStyleFontFamily: "Font family or custom name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} characters`,
     editorStyleColorUnset: "Not set", editorStyleColorClear: "Clear color",
     editorStyleFontSize: "Font size", editorStyleFontWeight: "Font weight", editorStyleColor: "Text color",
-    editorStyleAlignment: "Alignment", editorStyleLeft: "Left", editorStyleCenter: "Center", editorStyleRight: "Right",
+    editorStyleAlignment: "Anchor", editorStyleAlignmentHint: "Left: the value grows to the right. Center: it grows in both directions. Right: it grows to the left.",
+    editorStyleLeft: "Left", editorStyleCenter: "Center", editorStyleRight: "Right",
     editorStyleLineHeight: "Line height", editorStyleLetterSpacing: "Letter spacing", editorStyleStrokeWidth: "Outline width", editorStyleStrokeColor: "Outline color",
     editorStyleShadowX: "Shadow X offset", editorStyleShadowY: "Shadow Y offset", editorStyleShadowBlur: "Shadow blur", editorStyleShadowColor: "Shadow color",
     editorStyleBackgroundColor: "Background color", editorStyleBackgroundOpacity: "Background opacity", editorStylePadding: "Padding", editorStyleRadius: "Corner radius",
