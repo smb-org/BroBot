@@ -221,6 +221,9 @@ export interface ModuleVariableReferenceUsage {
   moduleId: string;
   itemName: string;
   kind: "action" | "template" | "display";
+  overlayId?: string;
+  elementId?: string;
+  reconnect?: boolean;
 }
 
 export interface ModuleVariableReferences {

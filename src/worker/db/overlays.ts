@@ -21,6 +21,8 @@ export interface OverlayDraftElement {
   scalePercent: number;
   z: number;
   inComposition: boolean;
+  /** Read-only reconnect hint; omitted from save requests. */
+  missingVariableName?: string | null;
 }
 
 export interface OverlayDraft {
@@ -46,6 +48,8 @@ export interface OverlaySummary {
   height: number;
   revision: number;
   elementCount: number;
+  accessCount: number;
+  lastUsedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -76,10 +80,13 @@ interface OverlayElementRow {
   scale_percent: number;
   z: number;
   in_composition: number;
+  missing_variable_name: string | null;
 }
 
 interface OverlaySummaryRow extends OverlayRow {
   element_count: number;
+  access_count: number;
+  last_used_at: string | null;
 }
 
 const mapElement = (row: OverlayElementRow): OverlayDraftElement => ({
@@ -94,6 +101,7 @@ const mapElement = (row: OverlayElementRow): OverlayDraftElement => ({
   scalePercent: row.scale_percent,
   z: row.z,
   inComposition: row.in_composition === 1,
+  missingVariableName: row.missing_variable_name,
 });
 
 export const listOverlaysForChannel = async (
@@ -104,7 +112,14 @@ export const listOverlaysForChannel = async (
     `SELECT overlay.overlay_id, overlay.channel_id, overlay.name, overlay.width, overlay.height,
             overlay.css, overlay.revision, overlay.created_at, overlay.updated_at,
             (SELECT COUNT(*) FROM overlay_elements AS element
-              WHERE element.channel_id = overlay.channel_id AND element.overlay_id = overlay.overlay_id) AS element_count
+              WHERE element.channel_id = overlay.channel_id AND element.overlay_id = overlay.overlay_id) AS element_count,
+            (SELECT COUNT(*) FROM overlay_tokens AS access
+              WHERE access.channel_id = overlay.channel_id AND access.overlay_id = overlay.overlay_id
+                AND access.revoked_at IS NULL
+                AND (access.expires_at IS NULL OR
+                  (julianday(access.expires_at) IS NOT NULL AND julianday(access.expires_at) > julianday('now')))) AS access_count,
+            (SELECT MAX(access.last_used_at) FROM overlay_tokens AS access
+              WHERE access.channel_id = overlay.channel_id AND access.overlay_id = overlay.overlay_id) AS last_used_at
        FROM overlays AS overlay
       WHERE overlay.channel_id = ?
       ORDER BY overlay.created_at, overlay.overlay_id`,
@@ -116,6 +131,8 @@ export const listOverlaysForChannel = async (
     height: row.height,
     revision: row.revision,
     elementCount: row.element_count,
+    accessCount: row.access_count,
+    lastUsedAt: row.last_used_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
@@ -135,7 +152,7 @@ export const getOverlayForChannel = async (
   if (row === null) return null;
   const elements = await db.prepare(
     `SELECT element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
-            x, y, scale_percent, z, in_composition
+            x, y, scale_percent, z, in_composition, missing_variable_name
        FROM overlay_elements
       WHERE channel_id = ? AND overlay_id = ?
       ORDER BY z, element_id`,
@@ -319,7 +336,7 @@ export const updateOverlayDraftWithAudit = async (
     ).bind(before.channelId, before.id, element.id)),
     ...diff.changed.map((element) => db.prepare(
       `UPDATE overlay_elements
-          SET kind = ?, label = ?, variable_name = ?, text = ?, config_json = ?, x = ?, y = ?,
+          SET kind = ?, label = ?, variable_name = ?, missing_variable_name = NULL, text = ?, config_json = ?, x = ?, y = ?,
               scale_percent = ?, z = ?, in_composition = ?
         WHERE channel_id = ? AND overlay_id = ? AND element_id = ? AND changes() > 0`,
     ).bind(element.kind, element.label, element.variableName, element.text, JSON.stringify(element.config), element.x,
@@ -328,8 +345,8 @@ export const updateOverlayDraftWithAudit = async (
     ...diff.added.map((element) => db.prepare(
       `INSERT INTO overlay_elements
         (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json, x, y,
-         scale_percent, z, in_composition)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE changes() > 0`,
+         scale_percent, z, in_composition, missing_variable_name)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL WHERE changes() > 0`,
     ).bind(element.id, before.channelId, before.id, element.kind, element.label, element.variableName, element.text,
       JSON.stringify(element.config), element.x, element.y, element.scalePercent, element.z, element.inComposition ? 1 : 0)),
   ];

@@ -11,7 +11,8 @@ export type DashboardRoute =
   | {
     kind: "channel";
     channelId: string;
-    section: "overview" | "system" | "members" | "variables" | "overlay-links" | "events" | "modules" | "audit";
+    section: "overview" | "system" | "members" | "variables" | "overlays" | "events" | "modules" | "audit";
+    overlayId?: string;
     filters?: PanelEventFilters;
     auditFilters?: PanelAuditFilters;
   }
@@ -20,7 +21,7 @@ export type DashboardRoute =
 /** Routes whose page content cannot work until the installation bot is signed in. */
 export const dashboardRouteRequiresBot = (route: DashboardRoute): boolean =>
   route.kind === "overview" || route.kind === "module" || (route.kind === "channel" &&
-    route.section !== "system" && route.section !== "audit" && route.section !== "variables" && route.section !== "overlay-links");
+    route.section !== "system" && route.section !== "audit" && route.section !== "variables" && route.section !== "overlays");
 
 let suppressNextPopState = false;
 let historyIndex = 0;
@@ -92,7 +93,7 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     if (channelId === null || moduleId === null) return { kind: "overview" };
     return { kind: "module", channelId, moduleId };
   }
-  const channelSections = ["system", "members", "variables", "overlay-links", "events", "modules", "audit"];
+  const channelSections = ["system", "members", "variables", "overlays", "overlay-links", "events", "modules", "audit"];
   if (segments[0] !== "channels" || (segments.length !== 2 && segments.length !== 3) ||
       (segments.length === 3 && !channelSections.includes(segments[2] ?? ""))) return { kind: "overview" };
   const channelId = decodeSegment(segments[1] ?? "");
@@ -101,10 +102,15 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
   const route: DashboardRoute = {
     kind: "channel",
     channelId,
-    section: section === "system" || section === "members" || section === "variables" || section === "overlay-links" || section === "events" || section === "modules" || section === "audit"
+    section: section === "overlay-links" ? "overlays"
+      : section === "system" || section === "members" || section === "variables" || section === "overlays" || section === "events" || section === "modules" || section === "audit"
       ? section
       : "overview",
   };
+  if (route.section === "overlays") {
+    const overlayId = new URLSearchParams(search).get("overlay");
+    return overlayId === null || overlayId.length === 0 ? route : { ...route, overlayId };
+  }
   if (route.section === "events") {
     const filters = parseEventFilters(search);
     return filters === undefined ? route : { ...route, filters };
@@ -123,6 +129,9 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "module") return `${base}/modules/${encodeURIComponent(route.moduleId)}`;
   if (route.section === "overview") return base;
   const path = `${base}/${route.section}`;
+  if (route.section === "overlays" && route.overlayId !== undefined) {
+    return `${path}?${new URLSearchParams({ overlay: route.overlayId }).toString()}`;
+  }
   if (route.section === "events" && route.filters !== undefined) {
     const params = new URLSearchParams();
     if (route.filters.origin !== null) params.set("origin", route.filters.origin);
@@ -176,6 +185,10 @@ export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute, on
     const currentIndex = historyIndexFromState(window.history.state);
     historyIndex = currentIndex ?? 0;
     if (currentIndex === null) window.history.replaceState(historyStateWithIndex(historyIndex), "", window.location.href);
+    const canonicalPath = dashboardRoutePath(parseDashboardRoute(window.location.pathname, window.location.search));
+    if (`${window.location.pathname}${window.location.search}` !== canonicalPath) {
+      window.history.replaceState(historyStateWithIndex(historyIndex), "", canonicalPath);
+    }
     const onPopState = (): void => {
       const targetRoute = parseDashboardRoute(window.location.pathname, window.location.search);
       const targetIndex = historyIndexFromState(window.history.state);

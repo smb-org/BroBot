@@ -68,11 +68,11 @@ export const NAV_PAGES: readonly NavPageDefinition[] = [
     keywords: ["variable", "variablen", "counter", "zaehler"],
   },
   {
-    id: "overlay-links",
+    id: "overlays",
     group: "channel",
     iconKind: "token",
-    route: channelRoute("overlay-links"),
-    label: (texts) => texts.navigation.overlayTokens,
+    route: channelRoute("overlays"),
+    label: (texts) => texts.navigation.overlays,
     keywords: ["overlay", "obs", "link", "links", "token", "widget"],
   },
   {

@@ -58,7 +58,7 @@ import { EventsPage } from "./events/EventsPage";
 import { chronological, emptyEventFilter, eventFilterIsActive } from "./events/model";
 import { AuditPage } from "./audit/AuditPage";
 import { ChannelVariablesPage } from "./ChannelVariablesPage";
-import { OverlayTokensPage } from "./OverlayTokensPage";
+import { OverlaysPage } from "./OverlaysPage";
 import { emptyAuditFilter, auditFilterIsActive } from "./audit/model";
 import { useRealtimePanelMessages } from "./realtime";
 import { idleState, loadedState, loadingState, type LoadState, type LoadStateSetter } from "./load-state";
@@ -1884,7 +1884,7 @@ export const DashboardApp = (): ReactElement => {
   // fresh installation with zero released channels has nowhere else to
   // say it). The system page (bot status + sign-in live there) and the
   // platform page (releases channels) must stay reachable, or the block
-  // would also lock the only places that fix it. Overlay links and channel
+  // would also lock the only places that fix it. Overlays and channel
   // variables also remain reachable because their APIs do not depend on the bot.
   const botBlockingApplies = dashboardRouteRequiresBot(route);
   const showBotBlocking = botBlockingApplies && channels.status === "success" && !botSignedIn;
@@ -1933,8 +1933,8 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "overview" && overviewRoutePath === dashboardRoutePath(route) && overview.data !== null && overview.data.channelId === route.channelId ? <ChannelOverviewPage overview={overview.data} loadedAt={overview.loadedAt} moderatorCheck={moderatorCheck} onCheckModeratorStatus={() => { void handleModeratorStatusCheck(); }} onNavigate={navigate} modules={selectedChannel?.modules ?? overview.data.modules ?? modules.data?.modules ?? []} onModulesChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "members" && selectedChannel !== null && (members.data !== null || members.status !== "idle") ? <MembersPage key={route.channelId} channelId={route.channelId} ownRole={selectedChannel.role} ownUserId={members.data?.viewerUserId ?? ""} members={members.data?.members ?? []} broadcasterCount={members.data?.broadcasterCount ?? 0} nextCursor={members.data?.nextCursor ?? null} loading={members.status === "loading"} loadingNextPage={loadingNextMembersPage} error={members.error} onReload={reloadMembers} onLoadNextPage={loadNextMembersPage} onAuthenticationRequired={() => setAuthenticationRequired(true)} /> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection(name); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
-        {!showChannelNotReleased && route.kind === "channel" && route.section === "overlay-links" && selectedChannel !== null ? <OverlayTokensPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "variables" && selectedChannel !== null ? <ChannelVariablesPage key={route.channelId} channelId={route.channelId} canManage={canManage(selectedChannel.role)} onOpenCommand={(name) => { setPendingModuleSelection(name); navigate({ kind: "module", channelId: route.channelId, moduleId: "text_commands" }); }} onOpenOverlay={(overlayId) => { navigate({ kind: "channel", channelId: route.channelId, section: "overlays", overlayId }); }} onInitialSelectionConsumed={(name) => { setPendingVariableSelection((pending) => pending?.channelId === route.channelId && pending.name === name ? null : pending); }} {...(pendingVariableSelection?.channelId === route.channelId ? { initialSelection: pendingVariableSelection.name } : {})} /> : null}
+        {!showChannelNotReleased && route.kind === "channel" && route.section === "overlays" && selectedChannel !== null ? <OverlaysPage key={dashboardRoutePath(route)} channelId={route.channelId} canManage={canManage(selectedChannel.role)} {...(route.overlayId === undefined ? {} : { initialSelection: route.overlayId })} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace key={dashboardRoutePath(route)} channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onChanged={reloadModules} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.status === "loading" ? <p className="loading-line">{dashboardTexts().overview.loadState}</p> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "module" && overview.error !== null ? <ErrorPanel message={overview.error} /> : null}

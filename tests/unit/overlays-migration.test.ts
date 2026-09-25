@@ -26,6 +26,7 @@ describe("stored overlays migration", () => {
 
       database.exec(readMigration("0012_overlays.sql"));
       database.exec(readMigration("0013_overlay_accesses.sql"));
+      database.exec(readMigration("0014_overlay_missing_variable.sql"));
       database.exec(`
         INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
         VALUES ('overlay-a', 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z');
@@ -37,8 +38,8 @@ describe("stored overlays migration", () => {
         "SELECT width, height, css, revision FROM overlays WHERE channel_id = 'channel-a' AND overlay_id = 'overlay-a'",
       ).get()).toEqual({ width: 1920, height: 1080, css: "", revision: 1 });
       expect(database.prepare(
-        "SELECT variable_name, text, scale_percent, in_composition FROM overlay_elements WHERE channel_id = 'channel-a' AND element_id = 'element-a'",
-      ).get()).toEqual({ variable_name: "score", text: "Score {value}", scale_percent: 100, in_composition: 1 });
+        "SELECT variable_name, missing_variable_name, text, scale_percent, in_composition FROM overlay_elements WHERE channel_id = 'channel-a' AND element_id = 'element-a'",
+      ).get()).toEqual({ variable_name: "score", missing_variable_name: null, text: "Score {value}", scale_percent: 100, in_composition: 1 });
       expect(database.prepare(
         "SELECT overlay_id, label, secret_envelope FROM overlay_tokens WHERE token_id = 'legacy-token'",
       ).get()).toEqual({ overlay_id: null, label: "", secret_envelope: null });

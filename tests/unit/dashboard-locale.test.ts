@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, SHOUTOUT_SUPPRESSED_REASONS,
 } from "../../src/contracts/values";
-import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, eventCauseAlreadyShown, eventCauseText, eventText, eventToneEntries, overlayTokensTexts, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
+import { apiErrorText, channelVariablesTexts, dashboardLanguage, dashboardTexts, eventCauseAlreadyShown, eventCauseText, eventText, eventToneEntries, overlaysTexts, shoutoutFailureReasonText, type EventCode } from "../../src/dashboard/locale";
 import { roleLabel } from "../../src/dashboard/labels";
 import { eventSubName } from "../../src/dashboard/module-labels";
 
@@ -30,11 +30,11 @@ describe("dashboard locale", () => {
     expect(roleLabel("operator")).toBe("Bediener");
   });
 
-  it("states honestly in German and English when overlay windows are still closing", () => {
-    expect(overlayTokensTexts("de").revokedPending)
-      .toBe("Overlay-Link widerrufen. Verbundene Overlay-Fenster werden noch geschlossen.");
-    expect(overlayTokensTexts("en").revokedPending)
-      .toBe("Overlay link revoked. Connected overlay windows are still being closed.");
+  it("states honestly in German and English when overlay sources are still closing", () => {
+    expect(overlaysTexts("de").revokedPending)
+      .toBe("Zugang widerrufen. Verbundene Quellen werden noch geschlossen.");
+    expect(overlaysTexts("en").revokedPending)
+      .toBe("Access revoked. Connected sources are still closing.");
   });
 
   it("describes the variable reset timing without exposing the EventSub event name", () => {

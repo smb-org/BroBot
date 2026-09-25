@@ -1,5 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const vitePort = process.env.PLAYWRIGHT_PORT === undefined ? 5173 : Number(process.env.PLAYWRIGHT_PORT);
+if (!Number.isInteger(vitePort) || vitePort < 1 || vitePort > 65535) {
+  throw new Error("PLAYWRIGHT_PORT must be a valid TCP port number.");
+}
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
@@ -8,15 +13,15 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: [["html", { open: "never" }], ["list"]],
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: `http://localhost:${String(vitePort)}`,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
   webServer: [
     {
-      command: "./node_modules/.bin/vite --host 127.0.0.1",
-      url: "http://localhost:5173/",
-      reuseExistingServer: !process.env.CI,
+      command: `./node_modules/.bin/vite --host 127.0.0.1 --port ${String(vitePort)} --strictPort`,
+      url: `http://localhost:${String(vitePort)}/`,
+      reuseExistingServer: !process.env.CI && process.env.PLAYWRIGHT_PORT === undefined,
       timeout: 120_000,
     },
     {
