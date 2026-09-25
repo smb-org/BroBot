@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 
 import { OVERLAY_ELEMENT_MAXIMUM_COUNT } from "../contracts/values";
@@ -278,6 +278,8 @@ function OverlayEditorWorkspace({
   const selectedElement = draft.elements.find((element) => element.id === selectedElementId) ?? null;
   const selectedElementScalePercent = selectedElement?.scalePercent;
   const selectedElementText = selectedElement?.text;
+  const selectedElementVariableName = selectedElement?.variableName ?? null;
+  const selectedElementLiveValue = selectedElementVariableName === null ? undefined : liveVariables[selectedElementVariableName];
   const orderedElements = useMemo(() => [...draft.elements].sort((left, right) => right.z - left.z), [draft.elements]);
   const variablesByName = useMemo(() => new Set(variables.map(({ name }) => name)), [variables]);
   const addVariableName = variablesByName.has(chosenVariableName) ? chosenVariableName : variables[0]?.name ?? "";
@@ -402,6 +404,28 @@ function OverlayEditorWorkspace({
     setSaved(false);
     setError(undefined);
   }, []);
+
+  // Reclamp the selected element's position once its real rendered size is known: right after it
+  // is shown (`inComposition` turned on, correcting the immediate fallback-size clamp used at
+  // toggle time below) or after a scale/text/value change grows it, so it cannot stay, or become,
+  // clipped off the canvas edge. A layout effect runs synchronously right after the DOM commits
+  // the new render, so the measurement already reflects the change; it only writes back when the
+  // clamped position actually differs, so it settles in one pass instead of looping.
+  useLayoutEffect(() => {
+    if (selectedElement === null || !selectedElement.inComposition) return;
+    const root = previewFrameRootRef.current;
+    if (root === null) return;
+    const element = findRenderedElement(root, selectedElement.id);
+    if (element === undefined) return;
+    const bounds = element.getBoundingClientRect();
+    const clamped = clampOverlayEditorPosition(
+      { x: selectedElement.x, y: selectedElement.y },
+      { width: draft.width, height: draft.height },
+      { width: bounds.width, height: bounds.height },
+    );
+    if (clamped.x !== selectedElement.x || clamped.y !== selectedElement.y) updateElement(selectedElement.id, clamped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes `selectedElement` (x/y change every drag frame); only the fields that can change its rendered size should retrigger this.
+  }, [selectedElementId, selectedElement?.inComposition, selectedElementScalePercent, selectedElementText, selectedElementLiveValue, draft.width, draft.height, previewFrameRoot, updateElement]);
 
   const discard = useCallback((): void => {
     setDraft(baseline.draft);

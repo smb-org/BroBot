@@ -35,6 +35,27 @@ const requestUrl = (input: RequestInfo | URL): URL => input instanceof Request
   ? new URL(input.url)
   : input instanceof URL ? input : new URL(input, window.location.origin);
 
+interface WindowWithElementConstructor { Element: typeof Element }
+
+const previewFrameWindow = (): WindowWithElementConstructor => {
+  const frame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
+  if (frame?.contentWindow == null) throw new Error("Overlay preview frame window is missing.");
+  return frame.contentWindow as unknown as WindowWithElementConstructor;
+};
+
+// jsdom never lays elements out, so `getBoundingClientRect()` always reports {0, 0}; this stubs it
+// for one overlay element (matched by the `data-element` attribute `OverlayCanvas` sets) so reclamp
+// effects have a real size to react to. `sizeAt` can read the element's own inline style (e.g. its
+// `transform: scale(...)`) to reflect a scale change. The preview renders inside an <iframe>, which
+// is its own realm with its own `Element` class distinct from the top-level document's, so the
+// patch has to target that frame's own prototype (and can only be installed once it exists).
+const stubMeasuredElementSize = (frameWindow: WindowWithElementConstructor, elementId: string, sizeAt: (element: HTMLElement) => { width: number; height: number }): void => {
+  vi.spyOn(frameWindow.Element.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const { width, height } = this.dataset.element === elementId ? sizeAt(this) : { width: 0, height: 0 };
+    return { x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON: () => ({}) };
+  });
+};
+
 describe("Overlay composition editor", () => {
   afterEach(() => {
     cleanup();
@@ -255,9 +276,11 @@ describe("Overlay composition editor", () => {
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
   });
 
-  it("clamps a hidden element back on-canvas when composition is turned on", async () => {
+  it("clamps a hidden element back on-canvas once shown, using its real rendered size", async () => {
     // While `inComposition: false`, the element is not rendered, so the X/Y fields allowed the
     // full canvas range and a value chosen while hidden could leave it off-canvas once shown.
+    // Its real rendered size (300x40) is wider than the 40x40 fallback used at toggle time, so
+    // the fallback clamp alone would still leave part of it clipped past the canvas edge.
     const hiddenElement = {
       id: "element-hidden", kind: "variable", label: "Hidden", variableName: "score",
       text: "Hidden: {value}", config: {}, x: 1270, y: 700, scalePercent: 100, z: 1, inComposition: false,
@@ -278,14 +301,49 @@ describe("Overlay composition editor", () => {
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1270");
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("700");
+    stubMeasuredElementSize(previewFrameWindow(), "element-hidden", () => ({ width: 300, height: 40 }));
 
     const toggleRow = screen.getByText("In der Komposition anzeigen").closest(".ui-switch-field__row");
     const toggle = toggleRow?.querySelector<HTMLInputElement>('input[type="checkbox"]');
     if (toggle === null || toggle === undefined) throw new Error("Composition toggle is missing.");
     fireEvent.click(toggle);
 
-    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1240");
+    // Reclamped against the real 300x40 size once measured, fully inside the 1280x720 canvas
+    // (not left at 1240/680, which is only where the 40x40 fallback clamp would have put it).
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("980");
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("680");
+  });
+
+  it("reclamps position when a scale increase would push the element past the canvas edge", async () => {
+    const nearEdgeElement = {
+      id: "element-near-edge", kind: "variable", label: "Near edge", variableName: "score",
+      text: "Near: {value}", config: {}, x: 900, y: 100, scalePercent: 100, z: 1, inComposition: true,
+    };
+    const overlayWithNearEdgeElement = { ...initialOverlay, elements: [nearEdgeElement, initialOverlay.elements[0]] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: overlayWithNearEdgeElement }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("900");
+    // The rendered box grows with `scalePercent`, mirroring the `transform: scale(...)` OverlayCanvas applies.
+    stubMeasuredElementSize(previewFrameWindow(), "element-near-edge", (element) => {
+      const factor = Number(/scale\(([\d.]+)\)/.exec(element.style.transform)?.[1] ?? "1");
+      return { width: 300 * factor, height: 40 * factor };
+    });
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Skalierung (%)" }), { target: { value: "200" } });
+
+    // At 2x scale the element is 600px wide; 900 + 600 exceeds the 1280px canvas, so it is pulled back to fit.
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("680");
   });
 
   it("keeps a changed draft when a revision conflict is resolved", async () => {
