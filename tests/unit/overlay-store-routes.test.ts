@@ -215,6 +215,35 @@ describe("stored overlay routes", () => {
     ]);
   });
 
+  it("preserves a detached element's reconnect name when editing its composition properties", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-a', 'channel-a', 'Gameplay', '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
+                                     x, y, scale_percent, z, in_composition, missing_variable_name)
+       VALUES ('element-a', 'channel-a', 'overlay-a', 'variable', 'Score', NULL, 'Score: {value}', '{}', 0, 0, 100, 0, 1, 'score')`,
+    ).run();
+
+    const saved = await fetchPanel("manager-a", "/api/channels/channel-a/overlays/overlay-a", "PUT", {
+      baseRevision: 1,
+      name: "Gameplay",
+      width: 1920,
+      height: 1080,
+      css: "",
+      elements: [{ ...element("element-a"), x: 20 }],
+    });
+
+    expect(saved.status).toBe(200);
+    await expect(database.prepare(
+      "SELECT variable_name, missing_variable_name, x FROM overlay_elements WHERE element_id = 'element-a'",
+    ).first()).resolves.toEqual({ variable_name: null, missing_variable_name: "score", x: 20 });
+  });
+
   it("rejects imported or remote custom CSS when saving and reports localized errors", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");

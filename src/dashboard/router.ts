@@ -13,6 +13,8 @@ export type DashboardRoute =
     channelId: string;
     section: "overview" | "system" | "members" | "variables" | "overlays" | "events" | "modules" | "audit";
     overlayId?: string;
+    editorOverlayId?: string;
+    initialVariable?: string;
     filters?: PanelEventFilters;
     auditFilters?: PanelAuditFilters;
   }
@@ -93,6 +95,19 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     if (channelId === null || moduleId === null) return { kind: "overview" };
     return { kind: "module", channelId, moduleId };
   }
+  if (segments.length === 4 && segments[0] === "channels" && segments[2] === "overlays") {
+    const channelId = decodeSegment(segments[1] ?? "");
+    const editorOverlayId = decodeSegment(segments[3] ?? "");
+    if (channelId === null || editorOverlayId === null) return { kind: "overview" };
+    const initialVariable = new URLSearchParams(search).get("variable");
+    return {
+      kind: "channel",
+      channelId,
+      section: "overlays",
+      editorOverlayId,
+      ...(initialVariable === null || initialVariable.length === 0 ? {} : { initialVariable }),
+    };
+  }
   const channelSections = ["system", "members", "variables", "overlays", "overlay-links", "events", "modules", "audit"];
   if (segments[0] !== "channels" || (segments.length !== 2 && segments.length !== 3) ||
       (segments.length === 3 && !channelSections.includes(segments[2] ?? ""))) return { kind: "overview" };
@@ -129,6 +144,12 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "module") return `${base}/modules/${encodeURIComponent(route.moduleId)}`;
   if (route.section === "overview") return base;
   const path = `${base}/${route.section}`;
+  if (route.section === "overlays" && route.editorOverlayId !== undefined) {
+    const editorPath = `${path}/${encodeURIComponent(route.editorOverlayId)}`;
+    return route.initialVariable === undefined
+      ? editorPath
+      : `${editorPath}?${new URLSearchParams({ variable: route.initialVariable }).toString()}`;
+  }
   if (route.section === "overlays" && route.overlayId !== undefined) {
     return `${path}?${new URLSearchParams({ overlay: route.overlayId }).toString()}`;
   }

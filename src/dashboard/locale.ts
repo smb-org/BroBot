@@ -200,13 +200,11 @@ export interface ChannelVariablesTexts {
   chooseOverlay: string;
   createOverlay: string;
   newOverlayName: string;
-  addVariable: string;
+  openEditor: string;
   reconnect: string;
   variableMissing: string;
   reconnectConflict: string;
   legacyRenameWarning: string;
-  useOverlayConfirmTitle: string;
-  useOverlayConfirmDescription: string;
 }
 
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
@@ -230,13 +228,11 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
     valueLocked: "Nur Kanalmitglieder dürfen den Wert ändern.", limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
     conflict: "Die Variable wurde inzwischen geändert.", created: "Variable angelegt.", updated: "Variable gespeichert.",
-    useInOverlay: "In Overlay verwenden", useOverlayHint: "Vor dem Speichern bestätigst du, dass die Änderung sofort live geht.",
+    useInOverlay: "In Overlay verwenden", useOverlayHint: "Wähle ein Overlay. Die Variable wird im Editor als ungespeicherter Entwurf eingefügt.",
     chooseOverlay: "Overlay auswählen", createOverlay: "Neues Overlay", newOverlayName: "Name des neuen Overlays",
-    addVariable: "Variable hinzufügen", reconnect: "Neu verbinden", variableMissing: "Variable fehlt — neu wählen.",
+    openEditor: "Editor öffnen", reconnect: "Neu verbinden", variableMissing: "Variable fehlt — neu wählen.",
     reconnectConflict: "Das Overlay-Element wurde inzwischen geändert. Lade die Seite neu, bevor du es verbindest.",
     legacyRenameWarning: "Alte Links mit #var=… zeigen diese Variable nach der Umbenennung nicht mehr an.",
-    useOverlayConfirmTitle: "Variable sofort hinzufügen?",
-    useOverlayConfirmDescription: "Die Änderung wird sofort gespeichert und bei verbundenen Quellen unmittelbar sichtbar.",
   },
   en: {
     title: "Channel variables", list: "Variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
@@ -258,13 +254,11 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
     valueLocked: "Only channel members may change the value.", limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
     conflict: "This variable has changed since it was loaded.", created: "Variable created.", updated: "Variable saved.",
-    useInOverlay: "Use in overlay", useOverlayHint: "Before saving, confirm that the change goes live immediately.",
+    useInOverlay: "Use in overlay", useOverlayHint: "Choose an overlay. The variable is added as an unsaved draft in the editor.",
     chooseOverlay: "Choose an overlay", createOverlay: "New overlay", newOverlayName: "New overlay name",
-    addVariable: "Add variable", reconnect: "Reconnect", variableMissing: "Variable missing — choose it again.",
+    openEditor: "Open editor", reconnect: "Reconnect", variableMissing: "Variable missing — choose it again.",
     reconnectConflict: "This overlay element has changed. Reload the page before reconnecting it.",
     legacyRenameWarning: "Old links using #var=… will stop showing this variable after it is renamed.",
-    useOverlayConfirmTitle: "Add this variable now?",
-    useOverlayConfirmDescription: "The change is saved immediately and appears at once in connected sources.",
   },
 };
 
@@ -276,6 +270,19 @@ export interface OverlaysTexts {
   name: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
   createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; lastUsedNever: string; never: string; statusLabel: string;
   openAccesses: string; issue: string; issueLabel: string; issueHint: string; copy: string; copied: string;
+  editComposition: string; editorBack: string; editorLoading: string; editorLoadError: string;
+  editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
+  editorNoElements: string; editorNoSelection: string; editorReadOnly: string; editorChooseVariable: string;
+  editorAddVariable: string; editorAdd: string; editorLabel: string; editorDisplayText: string;
+  editorVariable: string; editorX: string; editorY: string; editorScale: string; editorZ: string;
+  editorMoveForward: string; editorMoveBackward: string; editorRemove: string; editorInComposition: string;
+  editorZoom: string; editorReference: (width: number, height: number) => string; editorTextHint: string;
+  editorElementLimit: string; editorMissingPrefill: (name: string) => string; editorSave: string;
+  editorDiscard: string; editorSaved: string; editorClean: string; editorUnsaved: string; editorSaving: string;
+  editorSaveError: string; editorConflictTitle: string; editorConflictDescription: string;
+  editorConflictKeep: string; editorConflictReload: string; editorConflictOverwrite: string;
+  editorUnsavedTitle: string; editorUnsavedDescription: string; editorContinue: string;
+  editorDiscardAndLeave: string; editorSaveAndLeave: string;
   copyError: string; showLink: string; hideLink: string; fullLink: string; reveal: string; replace: string; revoke: string; revoked: string; revokedPending: string;
   active: string; expired: string; revokedStatus: string; noAccesses: string; delete: string; deleteTitle: (name: string) => string;
   deleteDescription: (name: string) => string; deleteConfirm: (name: string) => string; close: string;
@@ -293,7 +300,21 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     actionError: "Die Änderung konnte nicht durchgeführt werden.", managementLocked: "Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.",
     create: "Neues Overlay", createTitle: "Neues Overlay anlegen", name: "Name", width: "Breite", height: "Höhe",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Eigene Fläche", createSubmit: "Overlay anlegen", cancel: "Abbrechen",
-    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", lastUsedNever: "nie", never: "Nie", statusLabel: "Status", openAccesses: "Zugänge verwalten",
+    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", lastUsedNever: "nie", never: "Nie", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
+    editorBack: "Zurück zu Overlays", editorLoading: "Overlay wird geladen …", editorLoadError: "Das Overlay konnte nicht geladen werden.",
+    editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
+    editorNoElements: "Noch keine Elemente. Füge eine Kanalvariable hinzu.", editorNoSelection: "Wähle ein Element aus.", editorReadOnly: "Bediener können die Komposition ansehen, aber nicht ändern.",
+    editorChooseVariable: "Kanalvariable auswählen", editorAddVariable: "Variable anzeigen", editorAdd: "Hinzufügen", editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
+    editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
+    editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorRemove: "Element entfernen", editorInComposition: "In der Komposition anzeigen",
+    editorZoom: "Vorschau-Zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} Referenz`, editorTextHint: "Genau ein {value}-Platzhalter ist erforderlich.",
+    editorElementLimit: "Pro Overlay sind höchstens 20 Elemente möglich.", editorMissingPrefill: (name) => `Die Variable ${name} ist nicht mehr verfügbar.`, editorSave: "Speichern",
+    editorDiscard: "Entwurf verwerfen", editorSaved: "Gespeichert — verbundene Quellen übernehmen die Änderungen sofort.", editorClean: "Gespeicherte Komposition. Änderungen werden erst nach dem Speichern live.",
+    editorUnsaved: "Ungespeicherte Änderungen", editorSaving: "Wird gespeichert …", editorSaveError: "Die Komposition konnte nicht gespeichert werden.",
+    editorConflictTitle: "Overlay wurde geändert", editorConflictDescription: "Eine andere Person hat dieses Overlay geändert. Du kannst die aktuelle Fassung laden oder deinen Entwurf überschreiben.",
+    editorConflictKeep: "Weiter bearbeiten", editorConflictReload: "Neu laden", editorConflictOverwrite: "Überschreiben",
+    editorUnsavedTitle: "Ungespeicherte Änderungen", editorUnsavedDescription: "Beim Verlassen gehen deine ungespeicherten Änderungen verloren.",
+    editorContinue: "Weiter bearbeiten", editorDiscardAndLeave: "Verwerfen und verlassen", editorSaveAndLeave: "Speichern und verlassen",
     issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.", copy: "Link kopieren",
     copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", showLink: "Link anzeigen", hideLink: "Link verbergen", fullLink: "Vollständiger Link", reveal: "Link erneut anzeigen", replace: "Ersetzen", revoke: "Widerrufen",
     revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", active: "Aktiv",
@@ -316,7 +337,21 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     actionError: "The change could not be completed.", managementLocked: "Only broadcasters and managers may change overlays or accesses.",
     create: "New overlay", createTitle: "Create an overlay", name: "Name", width: "Width", height: "Height",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Custom size", createSubmit: "Create overlay", cancel: "Cancel",
-    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", lastUsedNever: "never", never: "Never", statusLabel: "Status", openAccesses: "Manage accesses",
+    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", lastUsedNever: "never", never: "Never", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
+    editorBack: "Back to overlays", editorLoading: "Loading overlay …", editorLoadError: "The overlay could not be loaded.",
+    editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
+    editorNoElements: "No elements yet. Add a channel variable.", editorNoSelection: "Select an element.", editorReadOnly: "Operators can view the composition, but cannot edit it.",
+    editorChooseVariable: "Choose a channel variable", editorAddVariable: "Show variable", editorAdd: "Add", editorLabel: "Element label", editorDisplayText: "Display text",
+    editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Scale (%)", editorZ: "Layer (z)",
+    editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorRemove: "Remove element", editorInComposition: "Show in composition",
+    editorZoom: "Preview zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} reference`, editorTextHint: "Exactly one {value} placeholder is required.",
+    editorElementLimit: "An overlay can contain at most 20 elements.", editorMissingPrefill: (name) => `Variable ${name} is no longer available.`, editorSave: "Save",
+    editorDiscard: "Discard draft", editorSaved: "Saved — connected sources use the changes immediately.", editorClean: "Saved composition. Changes go live after you save.",
+    editorUnsaved: "Unsaved changes", editorSaving: "Saving …", editorSaveError: "The composition could not be saved.",
+    editorConflictTitle: "Overlay changed", editorConflictDescription: "Someone else changed this overlay. Reload the latest version or overwrite it with your draft.",
+    editorConflictKeep: "Keep editing", editorConflictReload: "Reload", editorConflictOverwrite: "Overwrite",
+    editorUnsavedTitle: "Unsaved changes", editorUnsavedDescription: "Your unsaved changes will be lost if you leave.",
+    editorContinue: "Keep editing", editorDiscardAndLeave: "Discard and leave", editorSaveAndLeave: "Save and leave",
     issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.", copy: "Copy link",
     copied: "Copied", copyError: "The link could not be copied.", showLink: "Show link", hideLink: "Hide link", fullLink: "Full link", reveal: "Show link again", replace: "Replace", revoke: "Revoke",
     revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", active: "Active",

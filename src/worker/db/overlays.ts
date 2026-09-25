@@ -349,10 +349,12 @@ export const updateOverlayDraftWithAudit = async (
     ).bind(before.channelId, before.id, element.id)),
     ...diff.changed.map((element) => db.prepare(
       `UPDATE overlay_elements
-          SET kind = ?, label = ?, variable_name = ?, missing_variable_name = NULL, text = ?, config_json = ?, x = ?, y = ?,
+          SET kind = ?, label = ?, variable_name = ?,
+              missing_variable_name = CASE WHEN ? IS NULL THEN missing_variable_name ELSE NULL END,
+              text = ?, config_json = ?, x = ?, y = ?,
               scale_percent = ?, z = ?, in_composition = ?
         WHERE channel_id = ? AND overlay_id = ? AND element_id = ? AND changes() > 0`,
-    ).bind(element.kind, element.label, element.variableName, element.text, JSON.stringify(element.config), element.x,
+    ).bind(element.kind, element.label, element.variableName, element.variableName, element.text, JSON.stringify(element.config), element.x,
       element.y, element.scalePercent, element.z, element.inComposition ? 1 : 0,
       before.channelId, before.id, element.id)),
     ...diff.added.map((element) => db.prepare(
