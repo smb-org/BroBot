@@ -62,6 +62,9 @@ const propertyOrder = [
 
 const markerPrefixStartPattern = /\/\*\s*brobot:style:(?:begin|end)\b/gu;
 const elementIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
+
+// Code-point order keeps the generated block identical across browser locales.
+const compareCodePoints = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 const hexColorPattern = /^#[0-9a-f]{6}$/u;
 
 const formatNumber = (value: number): string => {
@@ -175,7 +178,7 @@ const styleRules = (styles: OverlayStyleDocument): readonly string[] => {
       rules.push(anchorRule(".brobot-overlay .brobot-overlay-composition-element", styles.overlay.textAlign));
     }
   }
-  for (const elementId of Object.keys(styles.elements).filter((id) => elementIdPattern.test(id)).sort()) {
+  for (const elementId of Object.keys(styles.elements).filter((id) => elementIdPattern.test(id)).sort(compareCodePoints)) {
     const style = styles.elements[elementId];
     if (style !== undefined && hasStyle(style)) {
       rules.push(`[data-element="${elementId}"] :where(.brobot-variable) {\n${styleDeclarations(style).join("\n")}\n}`);
@@ -405,7 +408,7 @@ export const replaceOverlayStyleBlock = (
     overlay: styles.overlay,
     elements: Object.fromEntries(elementIds
       .filter((elementId) => elementIdPattern.test(elementId))
-      .sort()
+      .sort(compareCodePoints)
       .flatMap((elementId) => styles.elements[elementId] === undefined ? [] : [[elementId, styles.elements[elementId]]])),
   };
   const content = generateOverlayStyleContent(managedStyles);
