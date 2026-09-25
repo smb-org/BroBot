@@ -419,7 +419,7 @@ Streamdaten, daher ändert sich das Restfenster aus Abschnitt 7 nicht.
 ## Nachtrag: Modul-Elemente in Overlays (#221)
 
 **Stand:** 25. September 2026
-**Status: vorgeschlagen** — Freigabe durch den Product Owner ausstehend.
+**Status: angenommen** — freigegeben durch den Product Owner am 25. September 2026.
 
 Ein Modul kann über `overlayElements` kleine, eigenständige Elemente für eine
 Overlay-Komposition deklarieren. Die Deklaration hält Konfigurationsparser,
