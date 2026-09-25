@@ -57,7 +57,14 @@ describe("Channel variables page", () => {
     const resetSwitch = controls.getByRole("switch", { name: "Bei Streamstart auf null setzen" });
     expect(resetSwitch.closest(".ui-switch-card")).toBeInTheDocument();
     expect(resetSwitch.closest(".ui-switch")).toBeNull();
-    expect(within(resetSwitch.closest(".ui-switch-card") as HTMLElement).getByText("Wird zurückgesetzt, wenn der nächste Stream startet.")).toBeInTheDocument();
+    const resetCard = resetSwitch.closest(".ui-switch-card");
+    if (!(resetCard instanceof HTMLElement)) throw new Error("Reset switch card is missing.");
+    expect(within(resetCard).getByText("Wird zurückgesetzt, wenn der nächste Stream startet.")).toBeInTheDocument();
+    const permissionNote = inspector.querySelector(".switch-locked-reason");
+    if (!(permissionNote instanceof HTMLElement)) throw new Error("Reset switch permission note is missing.");
+    expect(permissionNote).toHaveAttribute("role", "note");
+    expect(permissionNote).toHaveTextContent(/Nur Broadcaster und Verwalter dürfen Variablen/u);
+    expect(resetCard).not.toContainElement(permissionNote);
     expect(await controls.findByRole("button", { name: "+1" })).toBeInTheDocument();
     expect(controls.getByRole("button", { name: "−1" })).toBeInTheDocument();
     expect(controls.getByRole("spinbutton", { name: "Setzen auf" })).toBeInTheDocument();
@@ -192,7 +199,7 @@ describe("Channel variables page", () => {
   });
 
   it("shows a reconnect hint without rebinding automatically and reconnects through a revision save", async () => {
-    const detached = { ...variable, usages: [{ moduleId: "overlays", itemName: "Gameplay → Score", kind: "display" as const, overlayId: "overlay-a", elementId: "element-a", reconnect: true }] };
+    const detached = { ...variable, usages: [{ moduleId: "overlays", itemName: "Gameplay", elementLabel: "Score", kind: "display" as const, overlayId: "overlay-a", elementId: "element-a", reconnect: true }] };
     const overlay = {
       id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 4,
       createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z",
@@ -213,6 +220,7 @@ describe("Channel variables page", () => {
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
     fireEvent.click(await screen.findByRole("row", { name: /score/i }));
 
+    expect(screen.getByRole("button", { name: "Gameplay → Score" })).toBeInTheDocument();
     expect(screen.getByText(/Variable fehlt — neu wählen/u)).toBeInTheDocument();
     expect(requests.some((request) => request.method === "PUT")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Neu verbinden" }));

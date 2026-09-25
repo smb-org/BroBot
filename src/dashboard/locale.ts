@@ -274,7 +274,7 @@ export interface OverlaysTexts {
   title: string; list: string; count: (count: number, maximum: number) => string; empty: string; loading: string;
   loadError: string; actionError: string; managementLocked: string; create: string; createTitle: string;
   name: string; width: string; height: string; standardSize: string; compactSize: string; customSize: string;
-  createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; never: string;
+  createSubmit: string; cancel: string; elements: string; accesses: string; lastUsedAt: string; lastUsedNever: string; never: string; statusLabel: string;
   openAccesses: string; issue: string; issueLabel: string; issueHint: string; copy: string; copied: string;
   copyError: string; showLink: string; hideLink: string; fullLink: string; reveal: string; replace: string; revoke: string; revoked: string; revokedPending: string;
   active: string; expired: string; revokedStatus: string; noAccesses: string; delete: string; deleteTitle: (name: string) => string;
@@ -293,7 +293,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     actionError: "Die Änderung konnte nicht durchgeführt werden.", managementLocked: "Nur Broadcaster und Verwalter dürfen Overlays oder Zugänge ändern.",
     create: "Neues Overlay", createTitle: "Neues Overlay anlegen", name: "Name", width: "Breite", height: "Höhe",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Eigene Fläche", createSubmit: "Overlay anlegen", cancel: "Abbrechen",
-    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", never: "Nie", openAccesses: "Zugänge verwalten",
+    elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", lastUsedNever: "nie", never: "Nie", statusLabel: "Status", openAccesses: "Zugänge verwalten",
     issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.", copy: "Link kopieren",
     copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", showLink: "Link anzeigen", hideLink: "Link verbergen", fullLink: "Vollständiger Link", reveal: "Link erneut anzeigen", replace: "Ersetzen", revoke: "Widerrufen",
     revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", active: "Aktiv",
@@ -316,7 +316,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     actionError: "The change could not be completed.", managementLocked: "Only broadcasters and managers may change overlays or accesses.",
     create: "New overlay", createTitle: "Create an overlay", name: "Name", width: "Width", height: "Height",
     standardSize: "1920 × 1080", compactSize: "1280 × 720", customSize: "Custom size", createSubmit: "Create overlay", cancel: "Cancel",
-    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", never: "Never", openAccesses: "Manage accesses",
+    elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", lastUsedNever: "never", never: "Never", statusLabel: "Status", openAccesses: "Manage accesses",
     issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.", copy: "Copy link",
     copied: "Copied", copyError: "The link could not be copied.", showLink: "Show link", hideLink: "Hide link", fullLink: "Full link", reveal: "Show link again", replace: "Replace", revoke: "Revoke",
     revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", active: "Active",

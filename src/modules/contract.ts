@@ -223,6 +223,7 @@ export interface ModuleVariableReferenceUsage {
   kind: "action" | "template" | "display";
   overlayId?: string;
   elementId?: string;
+  elementLabel?: string;
   reconnect?: boolean;
 }
 

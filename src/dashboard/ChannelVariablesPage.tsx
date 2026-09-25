@@ -172,8 +172,10 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
   const selected = useMemo(() => variables.find((variable) => variable.name === selectedName) ?? null, [selectedName, variables]);
   const hasLegacyLinks = legacyLinkStatus?.channelId === channelId && legacyLinkStatus.hasLinks;
   const selectedUsages = selected?.usages ?? [];
+  const overlayUsageLabel = (usage: PanelChannelVariable["usages"][number]): string =>
+    usage.elementLabel === undefined ? usage.itemName : `${usage.itemName} → ${usage.elementLabel}`;
   const usageNames = selectedUsages.map((usage) => usage.moduleId === "overlays"
-    ? usage.itemName
+    ? overlayUsageLabel(usage)
     : labels.usageLine(usage.moduleId, usage.itemName, usage.kind));
   const nameInvalid = !variableNamePattern.test(normalizedVariableName(draftName));
   const createDisabled = !canManageContent || variables.length >= maximum;
@@ -454,7 +456,7 @@ export function ChannelVariablesPage({ channelId, canManage: canManageContent, o
                 {usage.moduleId === "text_commands"
                   ? <Button variant="subtle" onClick={() => { onOpenCommand(usage.itemName.replace(/^!/u, "")); }}>{labels.usageLine(usage.moduleId, usage.itemName, usage.kind)}</Button>
                   : usage.moduleId === "overlays" && usage.overlayId !== undefined
-                    ? <><Button variant="subtle" onClick={() => { onOpenOverlay?.(usage.overlayId as string); }}>{usage.itemName}</Button>
+                    ? <><Button variant="subtle" onClick={() => { onOpenOverlay?.(usage.overlayId as string); }}>{overlayUsageLabel(usage)}</Button>
                       {usage.reconnect ? <><span className="muted"> · {labels.variableMissing}</span>
                         <Button variant="neutral" disabled={!canManageContent || overlayPending}
                           {...(!canManageContent ? { title: labels.managementLocked } : {})}

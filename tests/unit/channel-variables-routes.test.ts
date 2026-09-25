@@ -210,7 +210,8 @@ describe("Channel variable routes", () => {
     const listedBody: unknown = await listed.json();
     expect(listedBody).toMatchObject({ variables: [{ usages: [{
       moduleId: "overlays",
-      itemName: "Gameplay → Death Count",
+      itemName: "Gameplay",
+      elementLabel: "Death Count",
       kind: "display",
     }] }] });
 

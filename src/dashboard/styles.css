@@ -560,6 +560,15 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-tokens-table-wrap { width: 100%; }
 .overlays-table-wrap { width: 100%; }
 .overlays-table { min-width: 640px; }
+.overlays-table-wrap--inspector-open .overlays-table { width: 100%; min-width: 0; table-layout: fixed; }
+.overlays-table-wrap--inspector-open .overlays-table th:nth-child(1) { width: 100%; }
+.overlays-table-wrap--inspector-open .overlays-table th:nth-child(2),
+.overlays-table-wrap--inspector-open .overlays-table td:nth-child(2),
+.overlays-table-wrap--inspector-open .overlays-table th:nth-child(3),
+.overlays-table-wrap--inspector-open .overlays-table td:nth-child(3),
+.overlays-table-wrap--inspector-open .overlays-table th:nth-child(4),
+.overlays-table-wrap--inspector-open .overlays-table td:nth-child(4) { display: none; }
+.overlays-table-wrap--inspector-open .overlays-table tbody th { overflow-wrap: anywhere; }
 .overlays-table tbody tr { cursor: pointer; }
 .overlays-table tbody tr[aria-selected="true"] { background: var(--surface-raised); }
 .overlay-inspector,
@@ -573,6 +582,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-access-list { list-style: none; padding: 0; display: grid; gap: 10px; }
 .overlay-access-list__item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
 .overlay-access-list__item > div:first-child { display: grid; gap: 4px; }
+.overlay-access-list__status { display: inline-flex; width: fit-content; align-items: center; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-2); font-size: 11px; line-height: 1.35; }
+.overlay-access-list__status[data-status="active"] { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); color: var(--green); }
+.overlay-access-list__status[data-status="expired"],
+.overlay-access-list__status[data-status="revoked"] { border-color: var(--line); color: var(--text-3); }
 .overlay-access-list__actions,
 .overlay-custom-size,
 .overlay-form-actions,

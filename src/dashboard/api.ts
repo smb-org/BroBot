@@ -478,6 +478,7 @@ export interface PanelChannelVariableUsage {
   kind: "template" | "action" | "display";
   overlayId?: string;
   elementId?: string;
+  elementLabel?: string;
   reconnect?: boolean;
 }
 

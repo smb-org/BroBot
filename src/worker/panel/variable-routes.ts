@@ -77,7 +77,8 @@ export const referencesFor = async (
   const result: ModuleVariableReferenceUsage[] = moduleReferences.flat();
   result.push(...overlays.results.map((row) => ({
     moduleId: "overlays",
-    itemName: `${row.overlay_name} → ${row.element_label || row.element_id}`,
+    itemName: row.overlay_name,
+    elementLabel: row.element_label || row.element_id,
     kind: "display" as const,
     overlayId: row.overlay_id,
     elementId: row.element_id,

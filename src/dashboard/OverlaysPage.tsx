@@ -375,7 +375,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
     {loading ? <p className="loading-line">{labels.loading}</p> : null}
     {error === null ? null : <p className="form-error" role="alert">{error}</p>}
     {!loading && overlays.length === 0 ? <p className="empty-state">{labels.empty}</p> : null}
-    {!loading && overlays.length > 0 ? <div className="table-wrap overlays-table-wrap">
+    {!loading && overlays.length > 0 ? <div className={`table-wrap overlays-table-wrap${selectedId !== null || creating ? " overlays-table-wrap--inspector-open" : ""}`}>
       <table className="table overlays-table">
         <thead><tr><th scope="col">{labels.name}</th><th scope="col">{labels.elements}</th><th scope="col">{labels.accesses}</th><th scope="col">{labels.lastUsedAt}</th></tr></thead>
         <tbody>{overlays.map((overlay) => <tr key={overlay.id} tabIndex={0} aria-selected={overlay.id === selectedId}
@@ -445,15 +445,24 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
         <Field id="overlay-access-name" label={labels.issueLabel} hint={labels.issueHint} value={accessName} maxLength={40} countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canManage || pending} onChange={setAccessName} />
           <Button variant="primary" disabled={!canManage || pending || accessName.trim().length === 0}
             {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void issue(); }}>{labels.issue}</Button>
-          {accesses.length === 0 ? <p className="muted">{labels.noAccesses}</p> : <ul className="overlay-access-list">{accesses.map((access) => <li key={access.tokenId} className="overlay-access-list__item">
-            <div><strong>{access.label}</strong><span className="muted">{access.lastUsedAt === null ? labels.never : `${labels.lastUsedAt}: ${formatTimestamp(access.lastUsedAt)}`}</span>
-              <span className="muted">{access.revokedAt !== null ? labels.revokedStatus : isAccessActive(access) ? labels.active : labels.expired}</span></div>
-            <div className="overlay-access-list__actions">
-              <Button variant="subtle" disabled={!canManage || pending || !isAccessActive(access)} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void reveal(access); }}>{labels.reveal}</Button>
-              <Button variant="neutral" disabled={!canManage || pending || !isAccessActive(access)} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void replace(access); }}>{labels.replace}</Button>
-              <Button danger="subtle" disabled={!canManage || pending || !isAccessActive(access)} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setRevokeTarget(access); }}>{labels.revoke}</Button>
-            </div>
-          </li>)}</ul>}
+          {accesses.length === 0 ? <p className="muted">{labels.noAccesses}</p> : <ul className="overlay-access-list">{accesses.map((access) => {
+            const active = isAccessActive(access);
+            const status = access.revokedAt !== null ? labels.revokedStatus : active ? labels.active : labels.expired;
+            const statusTone = access.revokedAt !== null ? "revoked" : active ? "active" : "expired";
+            return (
+              <li key={access.tokenId} className="overlay-access-list__item">
+                <div><strong>{access.label}</strong>
+                  <span className="muted">{labels.lastUsedAt}: {access.lastUsedAt === null ? labels.lastUsedNever : formatTimestamp(access.lastUsedAt)}</span>
+                  <span className="overlay-access-list__status" data-status={statusTone}>{labels.statusLabel}: {status}</span>
+                </div>
+                <div className="overlay-access-list__actions">
+                  <Button variant="neutral" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void reveal(access); }}>{labels.reveal}</Button>
+                  <Button variant="neutral" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void replace(access); }}>{labels.replace}</Button>
+                  <Button danger="subtle" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setRevokeTarget(access); }}>{labels.revoke}</Button>
+                </div>
+              </li>
+            );
+          })}</ul>}
           {secret === null || secret.overlayId !== selectedId || !canManage ? null : <div className="overlay-access-secret" aria-label={labels.issue}>
             <p className="overlay-access-secret__masked"><code>{maskOverlaySecret(secret.overlayUrl)}</code></p>
             <Button variant="neutral" disabled={pending} onClick={() => { setShowSecret((current) => !current); }}>

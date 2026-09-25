@@ -50,7 +50,7 @@ export function Switch({ label, ariaLabel, checked, onChange, disabled, pending,
   );
   const visual = <span className="switch__track" aria-hidden="true"><span className="switch__thumb" /></span>;
   const hintLine = hint === undefined ? null : <span id={hintId} className="ui-switch__hint">{hint}</span>;
-  const reasonLine = lockedReason === undefined ? null : <span id={reasonId} className="switch-locked-reason">{lockedReason}</span>;
+  const reasonLine = lockedReason === undefined ? null : <span id={reasonId} className="switch-locked-reason" role="note">{lockedReason}</span>;
 
   if (layout === "inline") {
     return (
@@ -71,28 +71,29 @@ export function Switch({ label, ariaLabel, checked, onChange, disabled, pending,
       onChange(!checked);
     };
     return (
-      <div className={`ui-switch-card${checked ? " ui-switch-card--checked" : ""}`} aria-busy={pending} onClick={toggleCard}>
-        <div className="ui-switch-card__heading">
-          {input}
-          <label className="ui-switch-card__label" htmlFor={id}>
-            <span className="ui-switch-card__title" id={labelId}>{label}</span>
-            {description === undefined ? null : <span className="ui-switch-card__description" id={descriptionId}>{description}</span>}
-          </label>
-          {visual}
-        </div>
-        {!hasChildren ? null : (
-          <div className="ui-switch-card__children">
-            {checked ? null : reasonLine}
-            <DisabledFieldReasonContext.Provider value={!checked && lockedReason !== undefined && reasonId !== undefined ? { id: reasonId, reason: lockedReason } : null}>
-              <fieldset disabled={!checked || isDisabled} aria-describedby={checked ? undefined : reasonId}>
-                {children}
-              </fieldset>
-            </DisabledFieldReasonContext.Provider>
+      <>
+        <div className={`ui-switch-card${checked ? " ui-switch-card--checked" : ""}`} aria-busy={pending} onClick={toggleCard}>
+          <div className="ui-switch-card__heading">
+            {input}
+            <label className="ui-switch-card__label" htmlFor={id}>
+              <span className="ui-switch-card__title" id={labelId}>{label}</span>
+              {description === undefined ? null : <span className="ui-switch-card__description" id={descriptionId}>{description}</span>}
+            </label>
+            {visual}
           </div>
-        )}
-        {hintLine}
-        {!hasChildren ? reasonLine : null}
-      </div>
+          {!hasChildren ? null : (
+            <div className="ui-switch-card__children">
+              <DisabledFieldReasonContext.Provider value={!checked && lockedReason !== undefined && reasonId !== undefined ? { id: reasonId, reason: lockedReason } : null}>
+                <fieldset disabled={!checked || isDisabled} aria-describedby={checked ? undefined : reasonId}>
+                  {children}
+                </fieldset>
+              </DisabledFieldReasonContext.Provider>
+            </div>
+          )}
+          {hintLine}
+        </div>
+        {!hasChildren || !checked ? reasonLine : null}
+      </>
     );
   }
 

@@ -49,10 +49,11 @@ describe("Overlays page", () => {
     conflictDelete?: boolean;
     emptyOverlays?: boolean;
     secondOverlay?: boolean;
+    accessLastUsedAt?: string | null;
     legacyClosingPending?: boolean;
     legacyTokens?: Array<{ id: string; name: string | null; createdAt: string; createdBy: string | null; lastUsedAt: string | null; expiresAt: string | null }>;
   } = {}) => {
-    let accesses: AccessFixture[] = [access];
+    let accesses: AccessFixture[] = [{ ...access, ...(options.accessLastUsedAt === undefined ? {} : { lastUsedAt: options.accessLastUsedAt }) }];
     let legacyTokens = [...(options.legacyTokens ?? [])];
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.href);
@@ -105,10 +106,12 @@ describe("Overlays page", () => {
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
 
     const table = await screen.findByRole("table");
+    expect(table.closest(".overlays-table-wrap")).not.toHaveClass("overlays-table-wrap--inspector-open");
     expect(within(table).getByText("Gameplay")).toBeInTheDocument();
     expect(within(table).getAllByText("1", { selector: "td" })).toHaveLength(2);
     expect(within(table).queryByText("OBS Main PC")).not.toBeInTheDocument();
     fireEvent.click(within(table).getByText("Gameplay"));
+    expect(table.closest(".overlays-table-wrap")).toHaveClass("overlays-table-wrap--inspector-open");
 
     const inspector = await screen.findByRole("region", { name: "Zugänge" });
     expect(within(inspector).getByText("OBS Main PC")).toBeInTheDocument();
@@ -116,6 +119,10 @@ describe("Overlays page", () => {
     expect(within(inspector).getByRole("button", { name: "Link erneut anzeigen" })).toBeDisabled();
     expect(within(inspector).getByRole("button", { name: "Ersetzen" })).toBeDisabled();
     expect(within(inspector).getByRole("button", { name: "Widerrufen" })).toBeDisabled();
+    const accessRow = within(inspector).getByText("OBS Main PC").closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    expect(within(accessRow).getByText(/^Zuletzt benutzt:/u)).toHaveTextContent("Zuletzt benutzt: 24.09.2026");
+    expect(within(accessRow).getByText("Status: Aktiv")).toHaveClass("overlay-access-list__status");
     const fullInspector = document.querySelector(".list-detail__inspector");
     if (!(fullInspector instanceof HTMLElement)) throw new Error("Overlay inspector is missing.");
     expect(within(fullInspector).getByRole("button", { name: "Overlay löschen" })).toBeDisabled();
@@ -123,6 +130,26 @@ describe("Overlays page", () => {
     expect(document.querySelector("a[href*='token=']")).toBeNull();
     expect(within(inspector).getByRole("button", { name: "Ersetzen" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/reveal"))).toBe(false);
+  });
+
+  it.each([
+    { language: "de-DE", lastUsed: "Zuletzt benutzt: nie", status: "Status: Aktiv" },
+    { language: "en-US", lastUsed: "Last used: never", status: "Status: Active" },
+  ])("labels access metadata and uses secondary buttons in $language", async ({ language, lastUsed, status }) => {
+    setBrowserLanguage(language);
+    vi.stubGlobal("fetch", routeFetcher({ accessLastUsedAt: null }));
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+
+    const inspector = await screen.findByRole("region", { name: language === "en-US" ? "Accesses" : "Zugänge" });
+    const accessRow = within(inspector).getByText("OBS Main PC").closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    expect(within(accessRow).getByText(lastUsed)).toBeInTheDocument();
+    expect(within(accessRow).getByText(status)).toHaveClass("overlay-access-list__status");
+
+    const actions = within(accessRow).getAllByRole("button");
+    expect(actions).toHaveLength(3);
+    for (const action of actions) expect(action).toHaveAttribute("data-variant", "default");
   });
 
   it("issues and copies a link, re-shows and replaces access, and confirms revocation", async () => {
