@@ -288,6 +288,17 @@ export interface OverlaysTexts {
   editorDiscardAndLeave: string; editorSaveAndLeave: string;
   copyError: string; showLink: string; hideLink: string; fullLink: string; reveal: string; replace: string; revoke: string; revoked: string; revokedPending: string;
   accessUnrecoverable: string;
+  setup: string; setupAssistant: string; setupAccessSelected: (name: string) => string; setupTarget: string;
+  setupObs: string; setupStreamElements: string; setupSoundAlerts: string; setupOutput: string;
+  setupWholeOverlay: string; setupSingleElement: string; setupOverlayUrl: string; setupRevealUrl: string; setupCopyRevealedUrl: string; setupCopiedUrl: string;
+  setupDimensions: (width: number, height: number) => string; setupElementDimensions: string;
+  setupObsAddSource: string; setupObsBrowser: string; setupObsPasteUrl: string; setupObsSetSize: string; setupObsClearCss: string;
+  setupObsCssNote: string; setupStreamElementsPath: string; setupStreamElementsPaste: string;
+  setupStreamElementsWholePlacement: (width: number, height: number) => string; setupStreamElementsElementPlacement: string;
+  setupSoundAlertsPath: string; setupSoundAlertsImportFields: string; setupSoundAlertsFallback: string; setupSoundAlertsUnverified: string;
+  setupHtml: string; setupJs: string; setupFields: string; setupViewSnippet: string;
+  setupCopySnippet: (name: string) => string; setupSnippetCopied: (name: string) => string;
+  setupCopyUnavailable: string; setupAccessInactive: string;
   active: string; expired: string; revokedStatus: string; noAccesses: string; delete: string; deleteTitle: (name: string) => string;
   deleteDescription: (name: string) => string; deleteConfirm: (name: string) => string; close: string;
   conflict: string; guide: string; issueReason: string; readOnly: string; elementCount: (count: number) => string;
@@ -326,6 +337,28 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.", copy: "Link kopieren",
     copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", showLink: "Link anzeigen", hideLink: "Link verbergen", fullLink: "Vollständiger Link", reveal: "Link erneut anzeigen", replace: "Ersetzen", revoke: "Widerrufen",
     accessUnrecoverable: "Dieser alte Zugang kann nicht erneut angezeigt werden. Stelle einen neuen Zugang aus.",
+    setup: "Einrichten", setupAssistant: "Einrichtungsassistent", setupAccessSelected: (name) => `Zugang: ${name}`, setupTarget: "Zielsystem",
+    setupObs: "OBS", setupStreamElements: "StreamElements", setupSoundAlerts: "Sound Alerts", setupOutput: "Ausgabe",
+    setupWholeOverlay: "Ganzes Overlay", setupSingleElement: "Einzelnes Element", setupOverlayUrl: "Maskierter Overlay-Link (Anzeige)",
+    setupRevealUrl: "Link zum Kopieren anzeigen", setupCopyRevealedUrl: "Overlay-Link kopieren", setupCopiedUrl: "Overlay-Link kopiert",
+    setupDimensions: (width, height) => `Breite und Höhe: ${String(width)} × ${String(height)} px`,
+    setupElementDimensions: "Breite ≈ Elementbreite × Skalierung; Höhe nach Inhalt.",
+    setupObsAddSource: "Quelle hinzufügen", setupObsBrowser: "Browser auswählen", setupObsPasteUrl: "Die Anzeige ist maskiert; der kopierte Link enthält den Zugangstoken. Den Link kopieren und als URL einfügen.",
+    setupObsSetSize: "Breite und Höhe wie oben angegeben einstellen",
+    setupObsClearCss: "„Benutzerdefiniertes CSS“ leeren (OBS-Standard-CSS verwenden)",
+    setupObsCssNote: "Eigenes CSS gehört in den Stil des Overlays.",
+    setupStreamElementsPath: "Overlay → Add Widget → Static/Custom → Custom Widget",
+    setupStreamElementsPaste: "In HTML, JS und Fields einfügen. In Fields brobotAddress auf den HTTPS-Ursprung des Overlay-Links und overlayUrl auf den vollständigen Link mit Zugangstoken setzen; den CSS-Reiter leer lassen.",
+    setupStreamElementsWholePlacement: (width, height) => `Die Box auf 0/0 setzen und auf ${String(width)} × ${String(height)} skalieren.`,
+    setupStreamElementsElementPlacement: "Für andere Positionen empfiehlt sich die Einzelausgabe, damit nur ein Positionierungssystem aktiv ist.",
+    setupSoundAlertsPath: "Scenes → Add Widget → Import Widget",
+    setupSoundAlertsImportFields: "Nach dem Import in Fields brobotAddress auf den HTTPS-Ursprung des Overlay-Links und overlayUrl auf den vollständigen Link mit Zugangstoken setzen; sonst bleibt brobotAddress auf dem Platzhalterwert und das Widget lehnt den Overlay-Link ab.",
+    setupSoundAlertsFallback: "Alternativ ein Custom Widget anlegen und dieselben HTML-, JS- und Fields-Inhalte einsetzen. In Fields brobotAddress auf den HTTPS-Ursprung des Overlay-Links und overlayUrl auf den vollständigen Link mit Zugangstoken setzen; CSS leer lassen.",
+    setupSoundAlertsUnverified: "Dieser Klickpfad wurde noch nicht am echten Sound-Alerts-Produkt geprüft.",
+    setupHtml: "HTML", setupJs: "JS", setupFields: "Fields", setupViewSnippet: "Inhalt ansehen",
+    setupCopySnippet: (name) => `${name} kopieren`, setupSnippetCopied: (name) => `${name} kopiert`,
+    setupCopyUnavailable: "Nur Broadcaster und Verwalter dürfen Overlay-Zugänge kopieren.",
+    setupAccessInactive: "Dieser Zugang ist abgelaufen oder widerrufen und kann nicht kopiert werden.",
     revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", active: "Aktiv",
     expired: "Abgelaufen", revokedStatus: "Widerrufen", noAccesses: "Für dieses Overlay gibt es noch keine Zugänge.", delete: "Overlay löschen",
     deleteTitle: (name) => `Overlay ${name} löschen?`, deleteDescription: (name) => `„${name}“ und seine Elemente werden gelöscht; alle zugehörigen Zugänge werden widerrufen.`,
@@ -376,6 +409,28 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.", copy: "Copy link",
     copied: "Copied", copyError: "The link could not be copied.", showLink: "Show link", hideLink: "Hide link", fullLink: "Full link", reveal: "Show link again", replace: "Replace", revoke: "Revoke",
     accessUnrecoverable: "This legacy access cannot be shown again. Issue a new access.",
+    setup: "Set up", setupAssistant: "Setup assistant", setupAccessSelected: (name) => `Access: ${name}`, setupTarget: "Target platform",
+    setupObs: "OBS", setupStreamElements: "StreamElements", setupSoundAlerts: "Sound Alerts", setupOutput: "Output",
+    setupWholeOverlay: "Whole overlay", setupSingleElement: "Single element", setupOverlayUrl: "Masked overlay link (display)",
+    setupRevealUrl: "Reveal link for copying", setupCopyRevealedUrl: "Copy overlay link", setupCopiedUrl: "Overlay link copied",
+    setupDimensions: (width, height) => `Width and height: ${String(width)} × ${String(height)} px`,
+    setupElementDimensions: "Width ≈ element width × scale; height follows content.",
+    setupObsAddSource: "Add a source", setupObsBrowser: "Choose Browser", setupObsPasteUrl: "The displayed URL is masked; the copied link includes the access token. Copy that link and paste it as the URL.",
+    setupObsSetSize: "Set the width and height shown above",
+    setupObsClearCss: "Clear “Custom CSS” (use the OBS default CSS)",
+    setupObsCssNote: "Put custom CSS in the overlay's style.",
+    setupStreamElementsPath: "Overlay → Add Widget → Static/Custom → Custom Widget",
+    setupStreamElementsPaste: "Paste into HTML, JS and Fields. In Fields, set brobotAddress to the HTTPS origin of the overlay link and overlayUrl to the full link containing the access token; leave the CSS tab empty.",
+    setupStreamElementsWholePlacement: (width, height) => `Place the box at 0/0 and size it to ${String(width)} × ${String(height)}.`,
+    setupStreamElementsElementPlacement: "For other positions, single-element output is recommended so only one positioning system is active.",
+    setupSoundAlertsPath: "Scenes → Add Widget → Import Widget",
+    setupSoundAlertsImportFields: "After importing, in Fields set brobotAddress to the HTTPS origin of the overlay link and overlayUrl to the full link containing the access token; otherwise brobotAddress stays at its placeholder value and the widget rejects the overlay link.",
+    setupSoundAlertsFallback: "Alternatively add a Custom Widget and paste the same HTML, JS and Fields contents. In Fields, set brobotAddress to the HTTPS origin of the overlay link and overlayUrl to the full link containing the access token; leave CSS empty.",
+    setupSoundAlertsUnverified: "This click path has not yet been checked in the real Sound Alerts product.",
+    setupHtml: "HTML", setupJs: "JS", setupFields: "Fields", setupViewSnippet: "View contents",
+    setupCopySnippet: (name) => `Copy ${name}`, setupSnippetCopied: (name) => `${name} copied`,
+    setupCopyUnavailable: "Only broadcasters and managers may copy overlay access links.",
+    setupAccessInactive: "This access has expired or been revoked and cannot be copied.",
     revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", active: "Active",
     expired: "Expired", revokedStatus: "Revoked", noAccesses: "This overlay has no accesses yet.", delete: "Delete overlay",
     deleteTitle: (name) => `Delete overlay ${name}?`, deleteDescription: (name) => `“${name}” and its elements will be deleted; all of its accesses will be revoked.`,
