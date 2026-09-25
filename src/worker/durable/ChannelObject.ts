@@ -181,6 +181,8 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefreshStartedAt = 0;
   private adScheduleRefreshGeneration = 0;
   private adScheduleOperationQueue: Promise<void> = Promise.resolve();
+  // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
+  private recentlyBoundOverlayTokenIds = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -595,6 +597,11 @@ export class ChannelObject extends DurableObject<Env> {
         return new Response(null, { status: 503, headers: { "Retry-After": "1" } });
       }
     }
+    if (principal.kind === "overlay" && principal.overlayId === null &&
+        this.recentlyBoundOverlayTokenIds.has(principal.tokenId)) {
+      closeSocket(pair[1], OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
+      return new Response("Overlay token is now bound.", { status: 403 });
+    }
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
     await this.scheduleSecurityAlarm();
@@ -653,6 +660,11 @@ export class ChannelObject extends DurableObject<Env> {
         }
         if (isExpired(principal, now)) {
           closeSocket(webSocket, SOCKET_EXPIRED_CODE, "authorization expired");
+          continue;
+        }
+        if (envelope.type === "variables.changed" && principal.kind === "overlay" &&
+            principal.overlayId === null && this.recentlyBoundOverlayTokenIds.has(principal.tokenId)) {
+          closeSocket(webSocket, OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
           continue;
         }
         if (envelope.type === "overlay.changed" && principal.kind === "overlay" &&
@@ -718,6 +730,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async closeUnboundOverlayTokenSockets(tokenId: string): Promise<boolean> {
     const ownChannelId = this.ownChannelId();
+    this.recentlyBoundOverlayTokenIds.add(tokenId);
     let closed = true;
     for (const webSocket of this.ctx.getWebSockets(`token:${tokenId}`)) {
       const principal = readAttachment(webSocket);

@@ -82,6 +82,7 @@ const overlaySocketFor = (
 
 type StorageDouble = {
   values: Map<string, unknown>;
+  get: ReturnType<typeof vi.fn<(key: string) => Promise<unknown>>>;
   list: ReturnType<typeof vi.fn>;
   setAlarm: ReturnType<typeof vi.fn>;
   deleteAlarm: ReturnType<typeof vi.fn>;
@@ -95,6 +96,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   let transactionQueue = Promise.resolve();
   const storage: StorageDouble = {
     values,
+    get: vi.fn((key: string) => Promise.resolve(values.get(key))),
     list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => {
       const keys = [...values.keys()]
         .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
@@ -125,7 +127,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
     }),
     storage: {
       ...storage,
-      get: vi.fn((key: string) => Promise.resolve(values.get(key))),
+      get: storage.get,
       put: vi.fn((key: string, value: unknown) => {
         values.set(key, value);
         return Promise.resolve();
@@ -166,6 +168,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   (object as unknown as { adScheduleRefreshStartedAt: number }).adScheduleRefreshStartedAt = 0;
   (object as unknown as { adScheduleRefreshGeneration: number }).adScheduleRefreshGeneration = 0;
   (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
+  (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
   return object;
 };
 
@@ -513,6 +516,7 @@ describe("ChannelObject realtime path", () => {
     const afterWake = Object.create(ChannelObject.prototype) as ChannelObject;
     (afterWake as unknown as { ctx: DurableObjectState }).ctx = internals.ctx;
     (afterWake as unknown as { env: Env }).env = internals.env;
+    (afterWake as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
     const variableChange: RealtimeEnvelope<"variables.changed"> = {
       version: 1,
       id: "variables-after-wake",
@@ -570,6 +574,77 @@ describe("ChannelObject realtime path", () => {
     expect(closed).toBe(true);
     expect(legacy.close.mock.calls).toEqual([[OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON]]);
     expect(legacy.send.mock.calls).toHaveLength(0);
+  });
+
+  it("rejects a legacy handshake that reaches accept after the binding close scan", async () => {
+    const token: RealtimeOverlayPrincipal = {
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-bound-during-handshake",
+      overlayId: null,
+      expiresAt: null,
+    };
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn().mockResolvedValue({ token_id: token.tokenId, overlay_id: null }),
+      })),
+    }));
+    const object = objectFor([], { prepare } as unknown as D1Database);
+    const storage = storageOf(object);
+    const pair = new WebSocketPair();
+    const close = vi.spyOn(pair[1], "close");
+    vi.stubGlobal("WebSocketPair", function WebSocketPairDouble() { return pair; });
+    let releaseMarker!: () => void;
+    let signalMarkerRead!: () => void;
+    const markerGate = new Promise<void>((resolve) => { releaseMarker = resolve; });
+    const markerRead = new Promise<void>((resolve) => { signalMarkerRead = resolve; });
+    storage.get.mockImplementation(async (key: string) => {
+      if (key === `overlay_revoked:${token.tokenId}`) {
+        signalMarkerRead();
+        await markerGate;
+      }
+      return storage.values.get(key);
+    });
+    const accept = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx.acceptWebSocket;
+
+    const handshake = object.fetch(upgradeRequest(token));
+    await markerRead;
+    await object.closeUnboundOverlayTokenSockets(token.tokenId);
+    releaseMarker();
+    const response = await handshake;
+
+    expect(response.status).toBe(403);
+    expect(accept).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledWith(OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
+  });
+
+  it("does not deliver variables after a binding close fails and retries the close", async () => {
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null, expiresAt: null,
+    });
+    const sockets = [legacy];
+    legacy.close.mockImplementationOnce(() => { throw new Error("socket close failed"); })
+      .mockImplementation(() => { sockets.splice(sockets.indexOf(legacy), 1); });
+    const object = objectFor(sockets);
+    const variablesMessage: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "variables-after-failed-binding-close",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: { set: [{ name: "score", value: 12 }], removed: [] },
+    };
+
+    await expect(object.closeUnboundOverlayTokenSockets("token-legacy")).resolves.toBe(false);
+    await object.publish([variablesMessage]);
+
+    expect(legacy.close.mock.calls).toEqual([
+      [OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON],
+      [OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON],
+    ]);
+    expect(legacy.send.mock.calls).toHaveLength(0);
+    expect(sockets).toHaveLength(0);
   });
 
   it("checks the changed binding periodically after an import close fails", async () => {
@@ -658,6 +733,7 @@ describe("ChannelObject realtime path", () => {
     const objectAfterWake = Object.create(ChannelObject.prototype) as ChannelObject;
     (objectAfterWake as unknown as { ctx: DurableObjectState }).ctx = internals.ctx;
     (objectAfterWake as unknown as { env: Env }).env = internals.env;
+    (objectAfterWake as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
     const changed: RealtimeEnvelope<"overlay.changed"> = {
       version: 1,
       id: "overlay-change-1",
