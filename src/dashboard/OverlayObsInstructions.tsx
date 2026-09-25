@@ -24,7 +24,6 @@ export function OverlayObsInstructions(): ReactElement {
       <p>{labels.customCss}</p>
       <pre><code>{OBS_OVERLAY_CSS_EXAMPLE}</code></pre>
       <p>{labels.secret}</p>
-      <p>{labels.diagnostics}</p>
     </div>
   </details>;
 }

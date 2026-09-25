@@ -630,7 +630,7 @@ function OverlayEditorWorkspace({
     };
   }, [previewFrameRoot]);
 
-  const rendererMarkup = <OverlayCanvas overlay={rendererOverlay} language={language} variables={liveVariables} elementId={null} debug={false} />;
+  const rendererMarkup = <OverlayCanvas overlay={rendererOverlay} language={language} variables={liveVariables} elementId={null} />;
 
   return <div className="overlay-editor">
     <header className="overlay-editor__header">

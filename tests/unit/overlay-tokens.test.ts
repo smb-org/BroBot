@@ -2,10 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   authenticateOverlayToken,
-  issueOverlayToken,
   revokeOverlayToken,
-  type IssueOverlayTokenInput,
-  type IssuedOverlayToken,
 } from "../../src/worker/auth/overlay-token-service";
 import { hashOverlayToken } from "../../src/worker/auth/crypto";
 import { getOverlayBindingForToken } from "../../src/worker/auth/overlay-token-repository";
@@ -30,7 +27,6 @@ const insertChannel = async (database: TestD1Database, channelId: string): Promi
   ).run();
 };
 
-/** The actor under which the tests issue tokens; matches insertActor. */
 const TEST_ACTOR = { userId: "user-1", sessionId: "session-user-1" };
 
 const insertActor = async (database: TestD1Database, channelId: string): Promise<void> => {
@@ -57,17 +53,23 @@ const insertActor = async (database: TestD1Database, channelId: string): Promise
   ).bind(channelId, TEST_ACTOR.userId, "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z").run();
 };
 
-/** Issues a token and fails if the issuance was denied. */
-const issueTestToken = async (
+let testTokenNumber = 0;
+
+const insertUnboundToken = async (
   database: TestD1Database,
-  input: Omit<IssueOverlayTokenInput, "actor">,
-): Promise<IssuedOverlayToken> => {
-  const issued = await issueOverlayToken(
-    database as unknown as D1Database,
-    { ...input, actor: TEST_ACTOR },
-  );
-  if (issued === null) throw new Error("Overlay-Token wurde unerwartet nicht ausgegeben.");
-  return issued;
+  input: { channelId: string; pepper: string; publicOrigin: string; expiresAt: string | null; createdAt: string },
+): Promise<{ tokenId: string; overlayUrl: string; expiresAt: string | null }> => {
+  testTokenNumber += 1;
+  const tokenBytes = new Uint8Array(32).fill(testTokenNumber % 255);
+  const token = btoa(String.fromCharCode(...tokenBytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  const tokenId = `legacy-token-${String(testTokenNumber)}`;
+  await database.prepare(
+    `INSERT INTO overlay_tokens (token_id, channel_id, token_hash, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).bind(tokenId, input.channelId, await hashOverlayToken(token, input.pepper), input.expiresAt, input.createdAt).run();
+  const overlayUrl = new URL("/overlay", input.publicOrigin);
+  overlayUrl.hash = new URLSearchParams({ token }).toString();
+  return { tokenId, overlayUrl: overlayUrl.toString(), expiresAt: input.expiresAt };
 };
 
 const tokenFromUrl = (overlayUrl: string): string => {
@@ -133,8 +135,8 @@ describe("Overlay token service", () => {
     expect(otherPepper).not.toBe(first);
   });
 
-  it("issues a long token without expiry and accepts it only with the same pepper", async () => {
-    const issued = await issueTestToken(database, {
+  it("authenticates an existing unbound token only with the same pepper", async () => {
+    const issued = await insertUnboundToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -142,8 +144,6 @@ describe("Overlay token service", () => {
       createdAt: "2026-09-18T00:00:00.000Z",
     });
     const token = tokenFromUrl(issued.overlayUrl);
-    await expect(database.prepare("SELECT created_by_user_id FROM overlay_tokens WHERE token_id = ?")
-      .bind(issued.tokenId).first()).resolves.toEqual({ created_by_user_id: TEST_ACTOR.userId });
 
     expect(token).toHaveLength(43);
     expect(new URL(issued.overlayUrl).search).toBe("");
@@ -171,7 +171,7 @@ describe("Overlay token service", () => {
   });
 
   it("rejects a token after revocation", async () => {
-    const issued = await issueTestToken(database, {
+    const issued = await insertUnboundToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -194,8 +194,8 @@ describe("Overlay token service", () => {
     })).resolves.toBeNull();
   });
 
-  it("audits issuance and revocation without the token, and only on success", async () => {
-    const issued = await issueTestToken(database, {
+  it("audits revocation without the token, and only on success", async () => {
+    const issued = await insertUnboundToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -204,22 +204,7 @@ describe("Overlay token service", () => {
     });
     const token = tokenFromUrl(issued.overlayUrl);
 
-    await expect(readAudits(database)).resolves.toMatchObject({
-      results: [{
-        actor_user_id: TEST_ACTOR.userId,
-        channel_id: "kanal-a",
-        module_id: null,
-        action: "overlay.token.issued",
-        before_json: "null",
-        after_json: JSON.stringify({
-          tokenId: issued.tokenId,
-          createdAt: "2026-09-18T00:00:00.000Z",
-          expiresAt: "2099-09-18T12:00:00.000Z",
-          revokedAt: null,
-          revocationReason: null,
-        }),
-      }],
-    });
+    await expect(readAudits(database)).resolves.toMatchObject({ results: [] });
 
     await expect(revokeOverlayToken(database as unknown as D1Database, {
       actor: TEST_ACTOR,
@@ -230,29 +215,26 @@ describe("Overlay token service", () => {
     })).resolves.toBe(true);
 
     await expect(readAudits(database)).resolves.toMatchObject({
-      results: [
-        expect.anything(),
-        {
-          actor_user_id: TEST_ACTOR.userId,
-          channel_id: "kanal-a",
-          module_id: null,
-          action: "overlay.token.revoked",
-          before_json: JSON.stringify({
-            tokenId: issued.tokenId,
-            createdAt: "2026-09-18T00:00:00.000Z",
-            expiresAt: "2099-09-18T12:00:00.000Z",
-            revokedAt: null,
-            revocationReason: null,
-          }),
-          after_json: JSON.stringify({
-            tokenId: issued.tokenId,
-            createdAt: "2026-09-18T00:00:00.000Z",
-            expiresAt: "2099-09-18T12:00:00.000Z",
-            revokedAt: "2026-09-18T00:01:00.000Z",
-            revocationReason: "Quelle entfernt",
-          }),
-        },
-      ],
+      results: [{
+        actor_user_id: TEST_ACTOR.userId,
+        channel_id: "kanal-a",
+        module_id: null,
+        action: "overlay.token.revoked",
+        before_json: JSON.stringify({
+          tokenId: issued.tokenId,
+          createdAt: "2026-09-18T00:00:00.000Z",
+          expiresAt: "2099-09-18T12:00:00.000Z",
+          revokedAt: null,
+          revocationReason: null,
+        }),
+        after_json: JSON.stringify({
+          tokenId: issued.tokenId,
+          createdAt: "2026-09-18T00:00:00.000Z",
+          expiresAt: "2099-09-18T12:00:00.000Z",
+          revokedAt: "2026-09-18T00:01:00.000Z",
+          revocationReason: "Quelle entfernt",
+        }),
+      }],
     });
     const auditText = JSON.stringify(await readAudits(database));
     expect(auditText).not.toContain(token);
@@ -264,22 +246,12 @@ describe("Overlay token service", () => {
       reason: "Noch einmal",
       revokedAt: "2026-09-18T00:02:00.000Z",
     })).resolves.toBe(true);
-    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
-      .bind("kanal-a", TEST_ACTOR.userId).run();
-    await expect(issueOverlayToken(database as unknown as D1Database, {
-      channelId: "kanal-a",
-      actor: TEST_ACTOR,
-      pepper: pepper(4),
-      publicOrigin: "https://brobot.example",
-      expiresAt: null,
-      createdAt: "2026-09-18T00:03:00.000Z",
-    })).resolves.toBeNull();
     const finalAudits = await readAudits(database);
-    expect(finalAudits.results).toHaveLength(2);
+    expect(finalAudits.results).toHaveLength(1);
   });
 
-  it("denies the operator issuance and revocation in the mutation guard", async () => {
-    const issued = await issueTestToken(database, {
+  it("denies the operator revoking a legacy token in the mutation guard", async () => {
+    const issued = await insertUnboundToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -289,14 +261,6 @@ describe("Overlay token service", () => {
     await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
       .bind("kanal-a", TEST_ACTOR.userId).run();
 
-    await expect(issueOverlayToken(database as unknown as D1Database, {
-      channelId: "kanal-a",
-      actor: TEST_ACTOR,
-      pepper: pepper(4),
-      publicOrigin: "https://brobot.example",
-      expiresAt: null,
-      createdAt: "2026-09-18T00:01:00.000Z",
-    })).resolves.toBeNull();
     await expect(revokeOverlayToken(database as unknown as D1Database, {
       actor: TEST_ACTOR,
       channelId: "kanal-a",
@@ -320,7 +284,7 @@ describe("Overlay token service", () => {
   });
 
   it("rejects a token after its channel is deleted", async () => {
-    const issued = await issueTestToken(database, {
+    const issued = await insertUnboundToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -338,7 +302,7 @@ describe("Overlay token service", () => {
   });
 
   it("does not turn an in-flight bound request into a legacy request after overlay deletion", async () => {
-    const issued = await issueTestToken(database, {
+    const issued = await insertUnboundToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -377,7 +341,7 @@ describe("Overlay token service", () => {
   });
 
   it("writes last_used_at at most every five minutes", async () => {
-    const issued = await issueTestToken(database, {
+    const issued = await insertUnboundToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",
@@ -407,45 +371,8 @@ describe("Overlay token service", () => {
     expect(third?.lastUsedAt).toBe("2026-09-18T00:06:00.000Z");
   });
 
-  it("issues no token when membership is revoked between the guard and the mutation", async () => {
-    // request.text() sits between the guard and the issuance. A client can
-    // keep the body open until its access has been revoked. This reproduces
-    // an issuance after membership was revoked — an unbounded token.
-    await database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
-      .bind("kanal-a", TEST_ACTOR.userId).run();
-
-    await expect(issueOverlayToken(database as unknown as D1Database, {
-      channelId: "kanal-a",
-      actor: TEST_ACTOR,
-      pepper: pepper(4),
-      publicOrigin: "https://brobot.example",
-      expiresAt: null,
-      createdAt: "2026-09-18T00:00:00.000Z",
-    })).resolves.toBeNull();
-
-    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_tokens")
-      .first<{ count: number }>()).resolves.toEqual({ count: 0 });
-  });
-
-  it("issues no token when the session is revoked", async () => {
-    await database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ?")
-      .bind("2026-09-18T00:30:00.000Z", TEST_ACTOR.sessionId).run();
-
-    await expect(issueOverlayToken(database as unknown as D1Database, {
-      channelId: "kanal-a",
-      actor: TEST_ACTOR,
-      pepper: pepper(4),
-      publicOrigin: "https://brobot.example",
-      expiresAt: null,
-      createdAt: "2026-09-18T00:00:00.000Z",
-    })).resolves.toBeNull();
-
-    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_tokens")
-      .first<{ count: number }>()).resolves.toEqual({ count: 0 });
-  });
-
   it("doesn't revoke a token when the session is revoked", async () => {
-    const issued = await issueTestToken(database, {
+    const issued = await insertUnboundToken(database, {
       channelId: "kanal-a",
       pepper: pepper(4),
       publicOrigin: "https://brobot.example",

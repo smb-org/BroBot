@@ -11,7 +11,7 @@ export const overlayTokenRoles: readonly ChannelRole[] = MANAGING_ROLES;
 const OVERLAY_AUDIT_MODULE_ID = null;
 
 type OverlayTokenAuditSnapshot = Pick<
-  NewOverlayTokenRecord,
+  OverlayTokenRecord,
   "tokenId" | "createdAt" | "expiresAt" | "revokedAt" | "revocationReason"
 >;
 
@@ -31,7 +31,7 @@ const overlayTokenAuditSnapshot = (token: OverlayTokenAuditSnapshot): OverlayTok
   revocationReason: token.revocationReason,
 });
 
-export interface NewOverlayTokenRecord {
+export interface OverlayTokenRecord {
   tokenId: string;
   channelId: string;
   tokenHash: string;
@@ -40,9 +40,6 @@ export interface NewOverlayTokenRecord {
   revokedAt: string | null;
   revocationReason: string | null;
   lastUsedAt: string | null;
-}
-
-export interface OverlayTokenRecord extends NewOverlayTokenRecord {
   language: ModuleLanguage;
 }
 
@@ -149,49 +146,6 @@ export const listActiveOverlayTokens = async (
   };
 };
 
-/**
- * `request.text()` sits between the guard and this mutation. A client can
- * leave the body open until its membership is revoked or the session is
- * revoked, and only close it afterward. That's why the INSERT repeats the
- * check itself; without a live session no row is created.
- *
- * Returns: true if the token was issued.
- */
-export const createOverlayToken = async (
-  db: D1Database,
-  token: NewOverlayTokenRecord,
-  actor: ActorContext,
-): Promise<boolean> => {
-  const mutation = db.prepare(
-    `INSERT INTO overlay_tokens
-      (token_id, channel_id, token_hash, expires_at, created_at, created_by_user_id,
-       revoked_at, revocation_reason, last_used_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
-      WHERE 1 = 1
-      ${actorGuard(overlayTokenRoles)}`,
-  ).bind(
-    token.tokenId,
-    token.channelId,
-    token.tokenHash,
-    token.expiresAt,
-    token.createdAt,
-    actor.userId,
-    token.revokedAt,
-    token.revocationReason,
-    token.lastUsedAt,
-    ...bindActorGuard(actor, token.channelId, token.createdAt),
-  );
-  const audit = prepareModuleAudit(db, actor.userId, token.createdAt, {
-    channelId: token.channelId,
-    moduleId: OVERLAY_AUDIT_MODULE_ID,
-    action: "overlay.token.issued",
-    before: null,
-    after: overlayTokenAuditSnapshot(token),
-  });
-  const results = await db.batch([mutation, audit]);
-  return (results[0]?.meta.changes ?? 0) > 0;
-};
-
 export const getUsableOverlayToken = async (
   db: D1Database,
   tokenHash: string,
@@ -254,7 +208,7 @@ export const touchOverlayToken = async (
           OR julianday(last_used_at) <= julianday(?)
         )
       RETURNING ${overlayTokenReturningColumns}`,
-  ).bind(lastUsedAt, tokenId, channelId, cutoff).first<NewOverlayTokenRecord>();
+  ).bind(lastUsedAt, tokenId, channelId, cutoff).first<{ token_id: string }>();
   return result !== null;
 };
 

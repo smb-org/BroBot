@@ -8,7 +8,6 @@ interface OverlayCanvasProperties {
   language: OverlayLanguage;
   variables: Readonly<Record<string, number>>;
   elementId: string | null;
-  debug: boolean;
 }
 
 interface ElementBoundaryProperties {
@@ -73,7 +72,7 @@ const renderElement = (
 };
 
 /** Draws the stored composition, or the same element at its standalone origin. */
-export const OverlayCanvas = ({ overlay, language, variables, elementId, debug }: OverlayCanvasProperties): ReactElement | null => {
+export const OverlayCanvas = ({ overlay, language, variables, elementId }: OverlayCanvasProperties): ReactElement | null => {
   const isolatedElement = elementId === null
     ? null
     : overlay.elements.find((element) => element.id === elementId) ?? null;
@@ -96,6 +95,5 @@ export const OverlayCanvas = ({ overlay, language, variables, elementId, debug }
       {renderElement(element, language, variables, isolatedElement !== null)}
       </ElementErrorBoundary>;
     })}
-    {debug && elements.length === 0 ? <span className="brobot-overlay-debug">No visible overlay elements.</span> : null}
   </div>;
 };

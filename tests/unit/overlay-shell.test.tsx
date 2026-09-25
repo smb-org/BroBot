@@ -99,7 +99,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(overlayPayload());
     vi.stubGlobal("fetch", fetcher);
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
 
     await waitFor(() => expect(container.querySelectorAll("[data-element]")).toHaveLength(3));
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -121,10 +121,21 @@ describe("OverlayShell and OverlayCanvas", () => {
       .toBe(".brobot-overlay { color: white; }"));
   });
 
+  it("keeps a denied bootstrap transparent when a legacy debug fragment is present", async () => {
+    window.history.replaceState(null, "", "/overlay#token=fictional-token&debug=1");
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status: 403 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("renders one selected element at the origin with its stored scale", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(1200, ".brobot-overlay { color: white; }", false)));
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId="element-second" debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId="element-second" />);
 
     await waitFor(() => expect(container.querySelector('[data-element="element-second"]')).not.toBeNull());
     expect(container.querySelectorAll("[data-element]")).toHaveLength(1);
@@ -153,7 +164,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
 
     await waitFor(() => expect(container.querySelector('[data-element="imported-element"]')).not.toBeNull());
     expect(container.querySelector('[data-element="imported-element"] .brobot-variable__text')).toHaveTextContent("Imported:");
@@ -196,7 +207,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     });
     vi.stubGlobal("fetch", fetcher);
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(realtimeCallbacks?.onTokenBound).toBeTypeOf("function"));
     await waitFor(() => expect(container.querySelector(".brobot-variable__value")).toHaveTextContent("1,200"));
     const legacyRendering = container.textContent;
@@ -213,7 +224,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(overlayPayload()));
     vi.stubGlobal("fetch", fetcher);
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -255,7 +266,7 @@ describe("OverlayShell and OverlayCanvas", () => {
       .mockImplementationOnce(() => new Promise((resolve) => { finishReload = resolve; }));
     vi.stubGlobal("fetch", fetcher);
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(container.querySelector('[data-element="element-first"]')).not.toBeNull());
     act(() => realtimeCallbacks?.onOpen?.(true));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
@@ -275,7 +286,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(overlayPayload());
     vi.stubGlobal("fetch", fetcher);
 
-    render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     act(() => realtimeCallbacks?.onOpen?.(false));
 
@@ -288,7 +299,7 @@ describe("OverlayShell and OverlayCanvas", () => {
       .mockRejectedValueOnce(new Error("network unavailable"))
       .mockResolvedValueOnce(overlayPayload(3400));
     vi.stubGlobal("fetch", fetcher);
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
 
     await waitFor(() => expect(container.querySelector("[data-element]")).not.toBeNull());
     vi.useFakeTimers();
@@ -309,7 +320,7 @@ describe("OverlayShell and OverlayCanvas", () => {
 
   it("clears rendered content after revocation while the source is disconnected", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload()));
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(container.querySelector("[data-element]")).not.toBeNull());
     const terminalClose = realtimeMocks.connectOverlayRealtime.mock.calls[0]?.[1] as (() => void) | undefined;
 
@@ -327,7 +338,7 @@ describe("OverlayShell and OverlayCanvas", () => {
       .mockImplementationOnce(() => new Promise((resolve) => { finishBootstrap = resolve; }));
     vi.stubGlobal("fetch", fetcher);
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(container.querySelector("[data-element]")).not.toBeNull());
     await waitFor(() => expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1));
     const terminalClose = realtimeMocks.connectOverlayRealtime.mock.calls[0]?.[1] as (() => void) | undefined;
@@ -357,7 +368,7 @@ describe("OverlayShell and OverlayCanvas", () => {
       .mockResolvedValue(overlayPayload());
     vi.stubGlobal("fetch", fetcher);
 
-    render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    render(<OverlayShell token="fictional-token" elementId={null} />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -398,7 +409,7 @@ describe("OverlayShell and OverlayCanvas", () => {
       .mockResolvedValue(new Response(JSON.stringify({ name: "score", value: 12 }), { status: 200, headers: { "Content-Language": "en" } }));
     vi.stubGlobal("fetch", fetcher);
 
-    render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    render(<OverlayShell token="fictional-token" elementId={null} />);
 
     await waitFor(() => expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(fetcher.mock.calls.some(([input]) => input === "/api/overlay/variables/score")).toBe(true));
@@ -409,7 +420,7 @@ describe("OverlayShell and OverlayCanvas", () => {
   it("recovers an element boundary after its rendered value changes", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(13)));
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(container.querySelectorAll("[data-element]")).toHaveLength(2));
     act(() => realtimeCallbacks?.onMessage?.(createVariableMessage(1200)));
 
@@ -427,7 +438,7 @@ describe("OverlayShell and OverlayCanvas", () => {
       variables: {},
     }), { status: 200 })));
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(container.querySelector(".brobot-overlay")).not.toBeNull());
 
     expect(container.querySelector("[data-element]")).toBeNull();
@@ -436,7 +447,7 @@ describe("OverlayShell and OverlayCanvas", () => {
   it("keeps sibling elements visible when one variable element throws", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(13)));
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
 
     await waitFor(() => expect(container.querySelectorAll(".brobot-variable__value")).toHaveLength(2));
     expect(container.querySelectorAll("[data-element]")).toHaveLength(2);
@@ -446,7 +457,7 @@ describe("OverlayShell and OverlayCanvas", () => {
   it("leaves unknown standalone element IDs transparent", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload()));
 
-    const { container } = render(<OverlayShell token="fictional-token" elementId="unknown-element" debug={false} />);
+    const { container } = render(<OverlayShell token="fictional-token" elementId="unknown-element" />);
 
     await waitFor(() => expect(document.head.querySelector("style[data-brobot-overlay-css]")).not.toBeNull());
     expect(container).toBeEmptyDOMElement();
@@ -456,7 +467,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     const css = '@import url("https://assets.example/theme.css"); .brobot-overlay { background: url("https://assets.example/image.png"); mask: url("../assets/mask.svg"); }';
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(1200, css)));
 
-    render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+    render(<OverlayShell token="fictional-token" elementId={null} />);
 
     await waitFor(() => expect(document.head.querySelector("style[data-brobot-overlay-css]")?.textContent)
       .toContain("../assets/mask.svg"));

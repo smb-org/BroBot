@@ -159,9 +159,6 @@ const overlayTokensPath = (channelId: string, tokenId?: string): string =>
 export const fetchOverlayTokens = (channelId: string, offset = 0): Promise<PanelOverlayTokensResponse> =>
   requestJson<PanelOverlayTokensResponse>(`${overlayTokensPath(channelId)}${offset === 0 ? "" : `?offset=${String(offset)}`}`);
 
-export const issueOverlayToken = (channelId: string): Promise<{ tokenId: string; overlayUrl: string; expiresAt: string | null }> =>
-  requestMutation(overlayTokensPath(channelId), "POST", {});
-
 export const revokeOverlayToken = async (
   channelId: string,
   tokenId: string,

@@ -8,15 +8,7 @@ const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
 
 vi.mock("../../src/overlay/realtime", () => realtimeMocks);
 
-import * as overlayStatus from "../../src/overlay/status";
-import { OverlayStatusView } from "../../src/overlay/status";
-
-const versionResponse = (version: string): Response => new Response(
-  JSON.stringify({ version, language: "de" }),
-  { status: 200, headers: { "Content-Type": "application/json" } },
-);
-
-const invalidResponse = (): Response => new Response("", { status: 401 });
+import * as overlayLegacy from "../../src/overlay/legacy";
 
 const variableResponse = (name: string, value: number, language: "de" | "en" = "en"): Response => new Response(
   JSON.stringify({ name, value }),
@@ -27,13 +19,9 @@ const setFragment = (token: string): void => {
   window.history.replaceState(null, "", `/overlay#token=${token}`);
 };
 
-const setDebugFragment = (fragment = "erstes-token"): void => {
-  setFragment(`${fragment}&debug=1`);
-};
-
-describe("Overlay status view", () => {
+describe("Legacy variable overlay", () => {
   beforeEach(() => {
-    setDebugFragment();
+    setFragment("erstes-token");
     TestWebSocket.instances = [];
     vi.stubGlobal("WebSocket", TestWebSocket);
   });
@@ -46,160 +34,11 @@ describe("Overlay status view", () => {
     setFragment("");
   });
 
-  it.each([
-    ["backend error", invalidResponse()],
-    ["network error", new Error("Netzwerk unterbrochen")],
-  ])("stays completely empty on a %s", async (_description, failure) => {
-    const fetcher = vi.fn();
-    fetcher.mockImplementation(() => failure instanceof Error
-      ? Promise.reject(failure)
-      : Promise.resolve(failure));
-    vi.stubGlobal("fetch", fetcher);
-
-    const { container } = render(<OverlayStatusView />);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
-
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it("keeps the default status page empty and only shows diagnostics with debug=1", async () => {
-    const fetcher = vi.fn().mockResolvedValue(versionResponse("debug-version"));
-    vi.stubGlobal("fetch", fetcher);
-    setFragment("erstes-token");
-
-    const { container } = render(<OverlayStatusView />);
-    expect(container).toBeEmptyDOMElement();
-    expect(fetcher).not.toHaveBeenCalled();
-
-    act(() => {
-      setDebugFragment();
-      window.dispatchEvent(new Event("hashchange"));
-    });
-
-    await waitFor(() => expect(container).toHaveTextContent("Version debug-version"));
-    expect(fetcher).toHaveBeenCalledTimes(1);
-  });
-
-  it("retries after a startup error without reloading", async () => {
-    vi.useFakeTimers();
-    const fetcher = vi.fn()
-      .mockRejectedValueOnce(new Error("Worker nicht erreichbar"))
-      .mockResolvedValueOnce(versionResponse("wieder-da"));
-    vi.stubGlobal("fetch", fetcher);
-
-    const { container } = render(<OverlayStatusView />);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(container).toBeEmptyDOMElement();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-      await Promise.resolve();
-    });
-
-    expect(container).toHaveTextContent("Version wieder-da");
-    expect(fetcher).toHaveBeenCalledTimes(2);
-  });
-
-  it("re-checks a changed fragment token within the same document", async () => {
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(versionResponse("alt"))
-      .mockResolvedValueOnce(versionResponse("neu"));
-    vi.stubGlobal("fetch", fetcher);
-
-    const { container } = render(<OverlayStatusView />);
-    await waitFor(() => expect(container).toHaveTextContent("Version alt"));
-
-    act(() => {
-      setDebugFragment("zweites-token");
-      window.dispatchEvent(new Event("hashchange"));
-    });
-
-    await waitFor(() => expect(container).toHaveTextContent("Version neu"));
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls[1]?.[1]).toMatchObject({
-      headers: { Authorization: "Bearer zweites-token" },
-    });
-  });
-
-  it("turns a revocation into invisible content on the next poll", async () => {
-    vi.useFakeTimers();
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(versionResponse("laufend"))
-      .mockResolvedValueOnce(invalidResponse());
-    vi.stubGlobal("fetch", fetcher);
-
-    const { container } = render(<OverlayStatusView />);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(container).toHaveTextContent("Version laufend");
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-      await Promise.resolve();
-    });
-
-    expect(container).toBeEmptyDOMElement();
-    expect(fetcher).toHaveBeenCalledTimes(2);
-  });
-
-  it("restarts a terminally closed socket after a successful status poll", async () => {
-    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(versionResponse("laufend")));
-    vi.stubGlobal("fetch", fetcher);
-    realtimeMocks.connectOverlayRealtime.mockReturnValue(vi.fn());
-
-    render(<OverlayStatusView />);
-    await waitFor(() => expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1));
-
-    const onTerminalClose = realtimeMocks.connectOverlayRealtime.mock.calls[0]?.[1] as (() => void) | undefined;
-    expect(onTerminalClose).toBeTypeOf("function");
-    act(() => onTerminalClose?.());
-    await act(async () => {
-      await Promise.resolve();
-      window.dispatchEvent(new Event("hashchange"));
-    });
-
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(2));
-  });
-
-  it("moderately increases the interval after repeated failures", async () => {
-    vi.useFakeTimers();
-    const fetcher = vi.fn()
-      .mockRejectedValue(new Error("Worker nicht erreichbar"));
-    vi.stubGlobal("fetch", fetcher);
-
-    render(<OverlayStatusView />);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(fetcher).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-    });
-    expect(fetcher).toHaveBeenCalledTimes(2);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(119_999);
-    });
-    expect(fetcher).toHaveBeenCalledTimes(2);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(fetcher).toHaveBeenCalledTimes(3);
-  });
-
   it("renders the selected channel variable as text with stable styling classes", async () => {
     setFragment("erstes-token&var=score&text=Score%3A+%7Bvalue%7D");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(variableResponse("score", 12_345)));
     realtimeMocks.connectOverlayRealtime.mockReturnValue(vi.fn());
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     expect(typeof entry).toBe("function");
     if (typeof entry !== "function") return;
 
@@ -217,7 +56,7 @@ describe("Overlay status view", () => {
     setFragment("erstes-token&var=score&text=%3Cb%3E%7Bvalue%7D%3C%2Fb%3E");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(variableResponse("score", 7)));
     realtimeMocks.connectOverlayRealtime.mockReturnValue(vi.fn());
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     expect(typeof entry).toBe("function");
     if (typeof entry !== "function") return;
     const View = entry as ComponentType;
@@ -233,7 +72,7 @@ describe("Overlay status view", () => {
     setFragment("erstes-token&var=score&text=%7Bvalue%7D");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(variableResponse("score", 12_345, "de")));
     realtimeMocks.connectOverlayRealtime.mockReturnValue(vi.fn());
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     if (typeof entry !== "function") throw new Error("Overlay entry component is missing.");
     const View = entry as ComponentType;
 
@@ -255,7 +94,7 @@ describe("Overlay status view", () => {
       callbacks = handler as typeof callbacks;
       return vi.fn();
     });
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     if (typeof entry !== "function") throw new Error("Overlay entry component is missing.");
     const View = entry as ComponentType;
 
@@ -272,7 +111,7 @@ describe("Overlay status view", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status: 404 }));
     vi.stubGlobal("fetch", fetcher);
     realtimeMocks.connectOverlayRealtime.mockReturnValue(vi.fn());
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     if (typeof entry !== "function") throw new Error("Overlay entry component is missing.");
     const View = entry as ComponentType;
 
@@ -295,7 +134,7 @@ describe("Overlay status view", () => {
       callbacks = handler as typeof callbacks;
       return vi.fn();
     });
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     expect(typeof entry).toBe("function");
     if (typeof entry !== "function") return;
 
@@ -362,7 +201,7 @@ describe("Overlay status view", () => {
       callbacks = handler as typeof callbacks;
       return vi.fn();
     });
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     if (typeof entry !== "function") throw new Error("Overlay entry component is missing.");
     const View = entry as ComponentType;
 
@@ -407,7 +246,7 @@ describe("Overlay status view", () => {
       .mockResolvedValueOnce(variableResponse("score", 5));
     vi.stubGlobal("fetch", fetcher);
     realtimeMocks.connectOverlayRealtime.mockReturnValue(vi.fn());
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     if (typeof entry !== "function") throw new Error("Overlay entry component is missing.");
     const View = entry as ComponentType;
 
@@ -440,7 +279,7 @@ describe("Overlay status view", () => {
       callbacks = handler as typeof callbacks;
       return vi.fn();
     });
-    const entry = Reflect.get(overlayStatus, "OverlayEntry");
+    const entry = Reflect.get(overlayLegacy, "LegacyOverlayEntry");
     if (typeof entry !== "function") throw new Error("Overlay entry component is missing.");
     const View = entry as ComponentType;
 

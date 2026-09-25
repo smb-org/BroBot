@@ -15,7 +15,7 @@ test("dashboard and overlay load as separate surfaces", async ({ page }) => {
   await expect(page.getByText("Noch kein Kanal freigegeben")).toBeVisible();
 
   const overlayPage = await page.context().newPage();
-  await overlayPage.route("**/api/overlay/status", async (route) => {
+  await overlayPage.route("**/api/overlay/bootstrap", async (route) => {
     const authorization = route.request().headers().authorization;
     expect(route.request().url()).not.toContain("e2e-token");
     expect(route.request().headers().referer ?? "").not.toContain("e2e-token");
@@ -26,14 +26,13 @@ test("dashboard and overlay load as separate surfaces", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ version: "e2e-version", language: "de" }),
+      body: JSON.stringify({ language: "de", overlay: null, variables: {} }),
     });
   });
   // Playwright runs against the local Vite server, whose HTML entry is overlay.html.
   await overlayPage.goto("/overlay.html#token=e2e-token");
   await expect(overlayPage.locator("#root")).toBeEmpty();
-  await overlayPage.evaluate(() => { window.location.hash = "token=e2e-token&debug=1"; });
-  await expect(overlayPage.getByText("Version e2e-version")).toBeVisible();
+  await expect(overlayPage.locator("#root")).toBeEmpty();
   await expect(overlayPage.locator("html")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(overlayPage.locator("body")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(overlayPage.locator("#root")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");

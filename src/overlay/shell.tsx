@@ -7,8 +7,8 @@ import { OverlayCanvas } from "./canvas";
 import type { OverlayBootstrapData, OverlayElementData, OverlayLanguage } from "./model";
 
 const LazyLegacyOverlayEntry = lazy(async () => {
-  const module = await import("./status");
-  return { default: module.OverlayEntry };
+  const module = await import("./legacy");
+  return { default: module.LegacyOverlayEntry };
 });
 
 const renderLegacyOverlay = (onTokenBound: () => void): ReactElement =>
@@ -24,7 +24,6 @@ const MAX_LOAD_RETRY_ATTEMPT = 6;
 interface OverlayShellProperties {
   token: string;
   elementId: string | null;
-  debug: boolean;
 }
 
 type LoadState = "loading" | "ready" | "unbound" | "error" | "revoked";
@@ -138,10 +137,9 @@ const installOverlayCss = (css: string): (() => void) => {
 };
 
 /** Owns the source's bootstrap and realtime socket, then passes shared data to the canvas. */
-export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties): ReactElement | null => {
+export const OverlayShell = ({ token, elementId }: OverlayShellProperties): ReactElement | null => {
   const [bootstrap, setBootstrap] = useState<OverlayBootstrapData | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [diagnostic, setDiagnostic] = useState("Overlay data could not be loaded.");
   const bootstrapRef = useRef<OverlayBootstrapData | null>(null);
   const [bindingVersion, setBindingVersion] = useState(0);
   const reloadLegacyShell = useCallback((): void => { setBindingVersion((version) => version + 1); }, []);
@@ -212,7 +210,6 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
         if (!response.ok) {
           if (response.status >= 500 || response.status === 429) throw new Error("Overlay bootstrap request failed.");
           install(null, "error");
-          setDiagnostic("Overlay access is unavailable.");
           stopRetryTimer();
           return;
         }
@@ -231,7 +228,6 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
         document.documentElement.lang = next.language;
         install(next, next.overlay === null ? "unbound" : "ready");
         if (next.overlay !== null) startRealtime();
-        setDiagnostic("Overlay data could not be loaded.");
         retryAttempt = 0;
         stopRetryTimer();
       } catch {
@@ -239,7 +235,6 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
         // Once a source has rendered successfully, transient bootstrap failures
         // must not blank the stream. Keep the last frame while retrying.
         if (bootstrapRef.current === null) install(null, "error");
-        setDiagnostic("Overlay data could not be loaded.");
         scheduleRetry();
       } finally {
         if (activeController === controller) activeController = null;
@@ -283,7 +278,6 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
         stopRetryTimer();
         pendingVariableChanges.clear();
         install(null, "revoked");
-        setDiagnostic("Overlay access is unavailable.");
       }, {
         onOpen: () => {
           stopReloadTimer();
@@ -337,16 +331,12 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
     return renderLegacyOverlay(reloadLegacyShell);
   }
   if (loadState === "revoked") return null;
-  if (loadState === "error") {
-    if (debug && elementId === null) return renderLegacyOverlay(reloadLegacyShell);
-    return debug ? <span className="brobot-overlay-debug">{diagnostic}</span> : null;
-  }
+  if (loadState === "error") return null;
   if (bootstrap?.overlay === null || bootstrap === null) return null;
   return <OverlayCanvas
     overlay={bootstrap.overlay}
     language={bootstrap.language}
     variables={bootstrap.variables}
     elementId={elementId}
-    debug={debug}
   />;
 };

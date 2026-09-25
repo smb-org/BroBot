@@ -16,7 +16,7 @@ import {
   createChannelModuleWithAudit,
   updateChannelModuleWithAudit,
 } from "../../src/worker/db/channel-modules";
-import { createOverlayToken, revokeOverlayToken } from "../../src/worker/auth/overlay-token-repository";
+import { revokeOverlayToken } from "../../src/worker/auth/overlay-token-repository";
 import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import {
   changePlatformMember,
@@ -335,25 +335,6 @@ const actions: readonly RoleAction[] = [
       ).delete("kanal-a", "hallo", 1, actor, timestamp);
       return result.ok;
     },
-  },
-  {
-    name: "Issue overlay token",
-    source: "auth/overlay-token-repository.ts:createOverlayToken + actorGuard",
-    expected: allowed(true, true, false, false),
-    execute: (database) => createOverlayToken(
-      database as unknown as D1Database,
-      {
-        tokenId: "token-1",
-        channelId: "kanal-a",
-        tokenHash: "hash-token-1",
-        expiresAt: null,
-        createdAt: timestamp,
-        revokedAt: null,
-        revocationReason: null,
-        lastUsedAt: null,
-      },
-      actor,
-    ),
   },
   {
     name: "Revoke overlay token",

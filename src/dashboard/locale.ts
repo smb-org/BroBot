@@ -469,7 +469,6 @@ export interface OverlayObsInstructionsTexts {
   shutdownWhenHidden: string;
   customCss: string;
   secret: string;
-  diagnostics: string;
 }
 
 const overlayObsInstructionsCatalog: LocaleCatalog<OverlayObsInstructionsTexts> = {
@@ -481,7 +480,6 @@ const overlayObsInstructionsCatalog: LocaleCatalog<OverlayObsInstructionsTexts> 
     shutdownWhenHidden: "„Deaktivieren, wenn Quelle nicht sichtbar ist“ ausgeschaltet lassen.",
     customCss: "Zum Anpassen füge dieses CSS in den Einstellungen der Browserquelle in „Benutzerdefiniertes CSS“ ein:",
     secret: "Der Link enthält ein Geheimnis. Du kannst ihn in der Zugangsliste des Overlays widerrufen.",
-    diagnostics: "Für Diagnoseinformationen an einen Link ohne Widget &debug=1 im Fragment anhängen (zum Beispiel #token=…&debug=1). Ohne dieses Flag bleibt die Overlay-Seite leer.",
   },
   en: {
     summary: "Set up in OBS",
@@ -491,7 +489,6 @@ const overlayObsInstructionsCatalog: LocaleCatalog<OverlayObsInstructionsTexts> 
     shutdownWhenHidden: "Leave “Shutdown source when not visible” off.",
     customCss: "To style the widget, paste this CSS into the Browser Source’s Custom CSS field:",
     secret: "The link contains a secret. You can revoke it in the overlay's access list.",
-    diagnostics: "To show diagnostics on a link with no widget, append &debug=1 to its fragment (for example, #token=…&debug=1). Without this flag, the overlay page stays empty.",
   },
 };
 
