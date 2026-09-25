@@ -13,7 +13,7 @@ describe("overlay editor element bounds", () => {
 
   it("uses rendered dimensions after element scaling", () => {
     const renderedElement = { width: 450, height: 160 };
-    expect(overlayEditorPositionLimits({ width: 1280, height: 720 }, renderedElement)).toEqual({ x: 830, y: 560 });
+    expect(overlayEditorPositionLimits({ width: 1280, height: 720 }, renderedElement)).toEqual({ minX: 0, x: 830, y: 560 });
     expect(clampOverlayEditorPosition(
       { x: 1280, y: 720 },
       { width: 1280, height: 720 },
@@ -27,6 +27,18 @@ describe("overlay editor element bounds", () => {
       { width: 320, height: 180 },
       { width: 500, height: 240 },
     )).toEqual({ x: 0, y: 0 });
+  });
+
+  it.each([
+    ["center", 150, 1130],
+    ["right", 300, 1280],
+  ] as const)("clamps the whole element box for the %s anchor", (anchor, minX, maxX) => {
+    const canvas = { width: 1280, height: 720 };
+    const element = { width: 300, height: 40 };
+
+    expect(overlayEditorPositionLimits(canvas, element, anchor)).toEqual({ minX, x: maxX, y: 680 });
+    expect(clampOverlayEditorPosition({ x: 0, y: 100 }, canvas, element, anchor)).toEqual({ x: minX, y: 100 });
+    expect(clampOverlayEditorPosition({ x: 2000, y: 100 }, canvas, element, anchor)).toEqual({ x: maxX, y: 100 });
   });
 
   it("keeps a position set while hidden on-canvas once shown, using the unmeasured fallback size", () => {

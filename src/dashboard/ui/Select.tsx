@@ -2,6 +2,7 @@ import { Select as MantineSelect } from "@mantine/core";
 import type { ComboboxItem, ComboboxLikeRenderOptionInput } from "@mantine/core";
 import type { ReactNode } from "react";
 
+import { useDisabledFieldReason } from "./DisabledFieldReason";
 import { colors } from "./theme";
 
 export interface SelectOption {
@@ -68,11 +69,27 @@ export function Select({
   title,
   describedBy,
 }: SelectProps) {
+  const disabledReason = useDisabledFieldReason();
+  const contextualDescriptionId = describedBy !== undefined && disabledReason !== null && id !== undefined
+    ? `${describedBy}-select-${id}`
+    : undefined;
+  const description: ReactNode = contextualDescriptionId === undefined || disabledReason === null
+    ? hint
+    : <>
+      {hint === undefined ? null : <span>{hint}</span>}
+      <span className="sr-only">{disabledReason.reason}</span>
+    </>;
   return (
     <MantineSelect
       label={label}
       aria-label={ariaLabel}
-      description={hint}
+      description={description}
+      {...(contextualDescriptionId === undefined ? {} : {
+        descriptionProps: {
+          id: contextualDescriptionId,
+          ...(hint === undefined ? { className: "sr-only" } : {}),
+        },
+      })}
       inputWrapperOrder={["label", "input", "description", "error"]}
       error={error ? `× ${error}` : undefined}
       value={value}
