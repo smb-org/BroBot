@@ -516,6 +516,7 @@ export class ChannelObject extends DurableObject<Env> {
       hasOverlay = await this.hasAdCountdownOverlay(channelId);
     } catch (error: unknown) {
       console.warn("Ad countdown overlay lookup failed during refresh.", error);
+      await this.retryAdCountdownRefresh();
       return;
     }
     if (!hasOverlay) {

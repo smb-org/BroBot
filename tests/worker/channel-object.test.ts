@@ -181,6 +181,28 @@ const databaseWithCountdownOverlay = (): D1Database => {
   return { prepare: vi.fn(() => statement) } as unknown as D1Database;
 };
 
+/** The Nth call to the overlay_elements lookup (1-indexed) rejects; every other query succeeds. */
+const databaseWithFailingOverlayLookup = (failingCall: number): D1Database => {
+  let overlayLookupCalls = 0;
+  const prepare = vi.fn((sql: string) => ({
+    bind: vi.fn(() => ({
+      all: vi.fn(() => {
+        // "AS present" is unique to hasAdCountdownOverlay's own query; other
+        // overlay_elements queries (e.g. the module-overlay-realtime recipient
+        // lookup) always resolve so a later publish can still find the overlay.
+        if (!sql.includes("AS present")) return Promise.resolve({ results: [{ overlay_id: "overlay-countdown" }] });
+        overlayLookupCalls += 1;
+        return overlayLookupCalls === failingCall
+          ? Promise.reject(new Error("D1 unavailable"))
+          : Promise.resolve({ results: [{ present: 1 }] });
+      }),
+      first: vi.fn().mockResolvedValue(null),
+      run: vi.fn().mockResolvedValue({ success: true }),
+    })),
+  }));
+  return { prepare } as unknown as D1Database;
+};
+
 const typeOfSerializedMessage = (serialized: string): string | null => {
   let parsed: unknown;
   try {
@@ -892,6 +914,47 @@ describe("ChannelObject realtime path", () => {
     await object.storeAdSchedule(endedSchedule, new Date(now).toISOString());
     vi.setSystemTime(now + 60_000);
 
+    await object.alarm();
+
+    const messages = overlay.send.mock.calls.map(([serialized]) => JSON.parse(serialized) as {
+      type?: string;
+      payload?: { nextAdAt?: string };
+    });
+    expect(messages.some((message) => message.type === "modul.ads.countdown" &&
+      message.payload?.nextAdAt === nextSchedule.nextAdAt)).toBe(true);
+    expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+    expect(storageOf(object).values.get("ads:countdown_refresh_deadline"))
+      .toBe(Date.parse(nextSchedule.nextAdAt as string) + (nextSchedule.duration ?? 0) * 1_000 + 30_000);
+  });
+
+  it("retries the countdown refresh after a D1 overlay lookup failure, then refreshes on retry", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-25T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const overlay = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-countdown",
+      overlayId: "overlay-countdown",
+      expiresAt: null,
+    });
+    // Lookup #1 (reconcileAdCountdownRefresh during storeAdSchedule) succeeds;
+    // lookup #2 (the alarm's refreshCountdownScheduleFromAlarm) fails.
+    const object = objectFor([overlay], databaseWithFailingOverlayLookup(2));
+    const endedSchedule = { ...adSchedule(new Date(now).toISOString()), duration: 30 };
+    const nextSchedule = adSchedule("2026-09-25T12:15:00.000Z");
+    mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule: nextSchedule });
+    await object.storeAdSchedule(endedSchedule, new Date(now).toISOString());
+    vi.setSystemTime(now + 60_000);
+
+    await object.alarm();
+
+    expect(mocks.getAdSchedule).not.toHaveBeenCalled();
+    expect(storageOf(object).values.get("ads:countdown_refresh_deadline")).toBe(now + 60_000 + 60_000);
+    expect(storageOf(object).values.get("ads:countdown_refresh_retry_count")).toBe(1);
+
+    vi.setSystemTime(now + 60_000 + 60_000);
     await object.alarm();
 
     const messages = overlay.send.mock.calls.map(([serialized]) => JSON.parse(serialized) as {
