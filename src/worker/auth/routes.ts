@@ -286,6 +286,7 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
   }
   const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
   const elements = await hydrateModuleOverlayElements(context.env.DB, record.channelId, overlay.elements);
+  const responseNow = new Date().toISOString();
   return context.json({
     language: record.language,
     overlay: {
@@ -294,21 +295,26 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
       width: overlay.width,
       height: overlay.height,
       css: overlay.css,
-      elements: elements.map((element) => ({
-        id: element.id,
-        kind: element.kind,
-        label: element.label,
-        variableName: element.variableName,
-        text: element.text,
-        config: element.config,
-        ...(element.moduleEnabled === undefined ? {} : { moduleEnabled: element.moduleEnabled }),
-        ...(element.state === undefined ? {} : { state: element.state }),
-        x: element.x,
-        y: element.y,
-        scalePercent: element.scalePercent,
-        z: element.z,
-        inComposition: element.inComposition,
-      })),
+      elements: elements.map((element) => {
+        const state = element.kind === ADS_COUNTDOWN_ELEMENT_KIND && element.state !== undefined && element.state !== null
+          ? { ...element.state, serverNow: responseNow }
+          : element.state;
+        return {
+          id: element.id,
+          kind: element.kind,
+          label: element.label,
+          variableName: element.variableName,
+          text: element.text,
+          config: element.config,
+          ...(element.moduleEnabled === undefined ? {} : { moduleEnabled: element.moduleEnabled }),
+          ...(state === undefined ? {} : { state }),
+          x: element.x,
+          y: element.y,
+          scalePercent: element.scalePercent,
+          z: element.z,
+          inComposition: element.inComposition,
+        };
+      }),
     },
     variables,
   });

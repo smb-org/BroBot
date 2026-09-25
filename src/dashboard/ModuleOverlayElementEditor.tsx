@@ -10,6 +10,8 @@ interface ModuleOverlayElementEditorProperties {
   config: EditorJsonObject;
   language: "de" | "en";
   onChange: (config: EditorJsonObject) => void;
+  readOnly?: boolean;
+  readOnlyReason?: string;
 }
 
 const moduleElementEditors = new Map(
@@ -18,9 +20,15 @@ const moduleElementEditors = new Map(
     : [[definition.kind, lazy(definition.editor)] as const]),
 );
 
-export const ModuleOverlayElementEditor = ({ kind, config, language, onChange }: ModuleOverlayElementEditorProperties): ReactElement | null => {
+export const ModuleOverlayElementEditor = ({ kind, config, language, onChange, readOnly = false, readOnlyReason }: ModuleOverlayElementEditorProperties): ReactElement | null => {
   const editor = moduleElementEditors.get(kind);
   if (editor === undefined) return null;
 
-  return <Suspense fallback={null}>{createElement(editor, { config, language, onChange })}</Suspense>;
+  return <Suspense fallback={null}>{createElement(editor, {
+    config,
+    language,
+    onChange,
+    readOnly,
+    ...(readOnlyReason === undefined ? {} : { readOnlyReason }),
+  })}</Suspense>;
 };

@@ -1,5 +1,5 @@
 import type { ModuleOverlayElementDefinition } from "./contract";
-import { adsCountdownElement } from "./ads/overlay/element";
+import { adsOverlayElements } from "./ads/overlay/element";
 
 export interface RegisteredOverlayElement {
   moduleId: string;
@@ -7,5 +7,5 @@ export interface RegisteredOverlayElement {
 }
 
 export const MODULE_OVERLAY_ELEMENTS: readonly RegisteredOverlayElement[] = [
-  { moduleId: "ads", definition: adsCountdownElement },
+  ...adsOverlayElements.map((definition) => ({ moduleId: "ads", definition })),
 ];

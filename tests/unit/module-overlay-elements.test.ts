@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { BotModule, JsonObject, ModuleOverlayElementDefinition } from "../../src/modules/contract";
 import { adsModule } from "../../src/modules/ads";
-import { validateModuleOverlayElements } from "../../src/modules/registry";
+import { MODULES, validateModuleOverlayElements } from "../../src/modules/registry";
+import { MODULE_OVERLAY_ELEMENTS } from "../../src/modules/overlay-element-registry";
 
 const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => ({
   id,
@@ -49,5 +50,19 @@ describe("module overlay element declarations", () => {
     expect(countdown?.parseConfig({ showSnoozeInfo: true })).toEqual({ showSnoozeInfo: true });
     expect(countdown?.parseConfig({ showSnoozeInfo: "yes" })).toBeNull();
     expect(countdown?.parseConfig({ html: "<b>unsafe</b>" })).toBeNull();
+  });
+
+  it("provides a client loader for every server-registered overlay element", () => {
+    const serverElements = MODULES.flatMap((module) => (module.overlayElements ?? []).map(({ kind }) => ({
+      moduleId: module.id,
+      kind,
+    })));
+    const clientElements = MODULE_OVERLAY_ELEMENTS.map(({ moduleId, definition }) => ({
+      moduleId,
+      kind: definition.kind,
+    }));
+
+    expect(clientElements).toEqual(serverElements);
+    expect(MODULE_OVERLAY_ELEMENTS.every(({ definition }) => typeof definition.load === "function")).toBe(true);
   });
 });

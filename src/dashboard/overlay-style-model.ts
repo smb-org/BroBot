@@ -394,7 +394,15 @@ export const parseOverlayStyleBlock = (css: string): ParsedOverlayStyleBlock => 
     || (afterEnd.length > 0 && !afterEnd.startsWith("\n") && !afterEnd.startsWith("\r\n"))) {
     return { kind: "invalid", contentStart: null, contentEnd: null };
   }
-  const parsed = parseContent(css.slice(contentStart, contentEnd));
+  const content = css.slice(contentStart, contentEnd);
+  // Blocks emitted before module text existed used `.brobot-variable` alone.
+  // Normalize only those exact generated selectors before parsing; an editor
+  // write then regenerates the block with the current selector form.
+  const normalizedContent = content
+    .replaceAll(".brobot-overlay :where(.brobot-variable) {", ".brobot-overlay :where(.brobot-variable, .brobot-module-text) {")
+    .replace(/(\[data-element="[A-Za-z0-9_-]{1,64}"\]) :where\(\.brobot-variable\) \{/gu,
+      "$1 :where(.brobot-variable, .brobot-module-text) {");
+  const parsed = parseContent(normalizedContent);
   if (parsed === null) return { kind: "invalid", contentStart, contentEnd };
   return { kind: "valid", styles: parsed, contentStart, contentEnd };
 };

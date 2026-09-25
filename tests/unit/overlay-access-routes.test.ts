@@ -262,9 +262,10 @@ describe("overlay access routes", () => {
       snoozeRefreshAt: "2026-09-25T12:30:00.000Z",
     };
     const getCachedAdSchedule = vi.fn(() => Promise.resolve({ schedule: cachedSchedule, asOf: "2026-09-25T12:00:00.000Z" }));
+    const refreshAdScheduleForCountdown = vi.fn().mockResolvedValue(null);
     environment.CHANNEL = {
       idFromName: vi.fn(() => "channel-object"),
-      get: vi.fn(() => ({ getCachedAdSchedule })),
+      get: vi.fn(() => ({ getCachedAdSchedule, refreshAdScheduleForCountdown })),
     } as unknown as Env["CHANNEL"];
     const issued = await issueAccess(environment, "OBS countdown");
     const token = tokenFromUrl(issued.overlayUrl);
@@ -280,6 +281,7 @@ describe("overlay access routes", () => {
     ).first<Record<string, unknown>>();
 
     expect(bootstrap.status).toBe(200);
+    expect(refreshAdScheduleForCountdown).toHaveBeenCalledOnce();
     expect(getCachedAdSchedule).toHaveBeenCalledOnce();
     expect(body.overlay?.elements[0]?.state).toMatchObject({
       nextAdAt: cachedSchedule.nextAdAt,
@@ -288,6 +290,7 @@ describe("overlay access routes", () => {
       snoozeRefreshAt: cachedSchedule.snoozeRefreshAt,
     });
     expect(typeof body.overlay?.elements[0]?.state?.serverNow).toBe("string");
+    expect(body.overlay?.elements[0]?.state?.serverNow).not.toBe("2026-09-25T12:00:00.000Z");
     expect(snapshot).toEqual({
       next_ad_at: cachedSchedule.nextAdAt,
       duration: 90,

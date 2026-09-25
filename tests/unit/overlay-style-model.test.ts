@@ -55,6 +55,32 @@ describe("overlay style block model", () => {
     expect(content).toContain('[data-element="element_b"] :where(.brobot-variable, .brobot-module-text) {');
   });
 
+  it("reads the previous managed selector format and migrates it on the next write", () => {
+    const prefix = "/* saved overlay */\n";
+    const previousBlock = `${OVERLAY_STYLE_BEGIN_MARKER}\n.brobot-overlay :where(.brobot-variable) {\n  font-size: 32px;\n  color: #ffffff;\n  text-align: center;\n}\n\n.brobot-overlay .brobot-overlay-composition-element {\n  --brobot-overlay-anchor-x: -50%;\n}\n\n[data-element="element_a"] :where(.brobot-variable) {\n  font-weight: 700;\n  color: #abcdef;\n}\n${OVERLAY_STYLE_END_MARKER}`;
+    const suffix = "\n/* user CSS */\n.brobot-overlay { opacity: 1; }";
+    const original = `${prefix}${previousBlock}${suffix}`;
+    const parsed = parseOverlayStyleBlock(original);
+
+    expect(parsed).toMatchObject({
+      kind: "valid",
+      styles: {
+        overlay: { fontSize: 32, color: "#ffffff", textAlign: "center" },
+        elements: { element_a: { fontWeight: 700, color: "#abcdef" } },
+      },
+    });
+    if (parsed.kind !== "valid") throw new Error("Previous style block did not parse.");
+
+    const migrated = replaceOverlayStyleBlock(original, parsed.styles, ["element_a"]);
+
+    expect(migrated.startsWith(prefix)).toBe(true);
+    expect(migrated.endsWith(suffix)).toBe(true);
+    expect(migrated).toContain(".brobot-overlay :where(.brobot-variable, .brobot-module-text) {");
+    expect(migrated).toContain('[data-element="element_a"] :where(.brobot-variable, .brobot-module-text) {');
+    expect(migrated).not.toContain(":where(.brobot-variable) {");
+    expect(parseOverlayStyleBlock(migrated).kind).toBe("valid");
+  });
+
   it("round-trips every integer background opacity percentage", () => {
     for (let opacityPercent = 0; opacityPercent <= 100; opacityPercent += 1) {
       const block = generateOverlayStyleBlock({

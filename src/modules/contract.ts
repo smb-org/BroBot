@@ -20,6 +20,8 @@ export interface OverlayElementEditorProps {
   config: JsonObject;
   onChange: (config: JsonObject) => void;
   language?: "de" | "en";
+  readOnly?: boolean;
+  readOnlyReason?: string;
 }
 
 export interface ModuleOverlayElementDefinition {

@@ -1099,6 +1099,8 @@ function OverlayEditorWorkspace({
               kind={selectedModuleOption.kind}
               config={selectedModuleOption.parseConfig(selectedElement.config) ?? selectedModuleOption.defaultConfig}
               language={language}
+              readOnly={!canManage}
+              {...(canManage ? {} : { readOnlyReason: labels.editorReadOnly })}
               onChange={(config) => { updateElement(selectedElement.id, { config }); }}
             />
           )}

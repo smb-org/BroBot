@@ -53,7 +53,9 @@ const AD_SCHEDULE_CACHE_KEY = "ads:schedule";
 const AD_SCHEDULE_GENERATION_KEY = "ads:schedule_generation";
 const AD_PREWARNING_RECONCILED_KEY = "ads:prewarning_reconciled";
 const TWITCH_RETRY_AFTER_KEY = "twitch:retry_after";
+const AD_COUNTDOWN_REFRESH_ATTEMPT_KEY = "ads:countdown_refresh_attempt";
 const AD_SCHEDULE_REFRESH_TIMEOUT_MS = 15_000;
+const AD_COUNTDOWN_SCHEDULE_TTL_MS = 60_000;
 const STREAM_REFRESH_LEASE_KEY = "stream_state_refresh_lease";
 const STREAM_REFRESH_LEASE_MS = 30_000;
 const SOCKET_EXPIRED_CODE = 4001;
@@ -248,11 +250,12 @@ export class ChannelObject extends DurableObject<Env> {
       }
       if (change.countdownChanged) {
         try {
+          const publishedAt = new Date().toISOString();
           const prepared = await prepareModuleOverlayRealtimeMessage(
             this.env.DB,
             channelId,
             "ads",
-            createAdCountdownOverlayAction(countdownState),
+            createAdCountdownOverlayAction({ ...countdownState, serverNow: publishedAt }),
           );
           if (prepared.outcome === "ready") await this.publish([prepared.message]);
         } catch (error: unknown) {
@@ -309,6 +312,31 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async getAdScheduleGeneration(): Promise<number> {
     return await this.ctx.storage.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
+  }
+
+  /** Refreshes stale countdown data at most once per minute for this channel. */
+  public async refreshAdScheduleForCountdown(): Promise<AdScheduleRefreshResult | null> {
+    const now = Date.now();
+    const cached = await this.getCachedAdSchedule();
+    const cachedAt = cached === null ? Number.NaN : Date.parse(cached.asOf);
+    const nextAdAt = cached?.schedule.nextAdAt === null || cached?.schedule.nextAdAt === undefined
+      ? null
+      : Date.parse(cached.schedule.nextAdAt);
+    const durationMs = typeof cached?.schedule.duration === "number" && Number.isFinite(cached.schedule.duration)
+      ? cached.schedule.duration * 1_000
+      : null;
+    const adEnded = nextAdAt !== null && Number.isFinite(nextAdAt)
+      && nextAdAt <= now && (durationMs === null || now >= nextAdAt + durationMs);
+    const stale = cached === null || !Number.isFinite(cachedAt) || now - cachedAt >= AD_COUNTDOWN_SCHEDULE_TTL_MS || adEnded;
+    if (!stale) return null;
+
+    const claimed = await this.ctx.storage.transaction(async (transaction) => {
+      const previousAttempt = await transaction.get<number>(AD_COUNTDOWN_REFRESH_ATTEMPT_KEY);
+      if (typeof previousAttempt === "number" && now - previousAttempt < AD_COUNTDOWN_SCHEDULE_TTL_MS) return false;
+      await transaction.put(AD_COUNTDOWN_REFRESH_ATTEMPT_KEY, now);
+      return true;
+    });
+    return claimed ? this.refreshAdSchedule() : null;
   }
 
   public async refreshAdSchedule(grantedScopes?: readonly string[]): Promise<AdScheduleRefreshResult> {

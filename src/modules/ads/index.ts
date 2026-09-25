@@ -5,7 +5,7 @@ import { processAdBreak } from "./service";
 import { adsRoutes } from "./routes";
 import { settingsVariableReferences } from "../contract";
 import { readAdCountdownState } from "./adapters/countdown-state";
-import { adsCountdownElement } from "./overlay/element";
+import { adsOverlayElements } from "./overlay/element";
 
 export { decideAdBreak, decideAdPrewarning, renderAdBreakText, renderPrewarningText } from "./domain";
 export { processAdBreak } from "./service";
@@ -33,10 +33,12 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   routes: adsRoutes,
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
-  overlayElements: [{
-    ...adsCountdownElement,
-    initialState: async (db, channelId) => ({ ...await readAdCountdownState(db, channelId) }),
-  }],
+  overlayElements: adsOverlayElements.map((element) => element.kind === "ads.countdown"
+    ? {
+      ...element,
+      initialState: async (db, channelId) => ({ ...await readAdCountdownState(db, channelId) }),
+    }
+    : element),
   immediateActions: {
     requires: ["streamLive"],
     load: () => import("./panel/immediate-actions"),

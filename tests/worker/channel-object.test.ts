@@ -818,6 +818,67 @@ describe("ChannelObject realtime path", () => {
     expect(overlay.send.mock.calls).toHaveLength(0);
   });
 
+  it("refreshes missing countdown schedules once per channel throttle window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
+    const object = objectFor([]);
+    const schedule = adSchedule("2026-09-25T12:01:00.000Z");
+    mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule });
+
+    const first = await object.refreshAdScheduleForCountdown();
+    expect(first).toMatchObject({ reason: null, cache: { schedule } });
+    expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+
+    await object.storeAdSchedule(schedule, "2026-09-25T11:00:00.000Z");
+    await expect(object.refreshAdScheduleForCountdown()).resolves.toBeNull();
+    expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+    expect(storageOf(object).values.get("ads:countdown_refresh_attempt")).toBe(Date.now());
+  });
+
+  it("refreshes the next countdown schedule as soon as the cached ad ends", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
+    const object = objectFor([]);
+    const runningAd = { ...adSchedule("2026-09-25T12:00:00.000Z"), duration: 30 };
+    const nextSchedule = adSchedule("2026-09-25T12:15:00.000Z");
+    mocks.getAdSchedule.mockResolvedValue({ fetched: true, reason: null, detail: {}, schedule: nextSchedule });
+    await object.storeAdSchedule(runningAd, "2026-09-25T12:00:00.000Z");
+
+    await expect(object.refreshAdScheduleForCountdown()).resolves.toBeNull();
+    expect(mocks.getAdSchedule).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    await expect(object.refreshAdScheduleForCountdown()).resolves.toMatchObject({ reason: null, cache: { schedule: nextSchedule } });
+    expect(mocks.getAdSchedule).toHaveBeenCalledOnce();
+  });
+
+  it("sets countdown server time when publishing the realtime payload", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
+    const overlay = overlaySocketFor({
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-1",
+      overlayId: "overlay-a",
+      expiresAt: null,
+    });
+    const statement = {
+      bind: vi.fn(() => statement),
+      all: vi.fn().mockResolvedValue({ results: [{ overlay_id: "overlay-a" }] }),
+      run: vi.fn().mockResolvedValue({ success: true }),
+    };
+    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
+    const object = objectFor([overlay], database);
+
+    await object.storeAdSchedule(adSchedule("2026-09-25T12:01:00.000Z"), "2026-09-25T11:59:55.000Z");
+
+    const message = JSON.parse(overlay.send.mock.calls[0]?.[0] ?? "{}") as {
+      payload?: { serverNow?: string };
+    };
+    expect(message.payload?.serverNow).toBe("2026-09-25T12:00:00.000Z");
+  });
+
   it("does not let an in-flight schedule fetch overwrite a newer snooze", async () => {
     const object = objectFor([]);
     const original = adSchedule("2026-09-24T19:00:00.000Z");

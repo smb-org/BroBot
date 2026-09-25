@@ -236,10 +236,11 @@ export const refreshAdPrewarning = async (
 ): Promise<void> => {
   const scheduler = schedulerFor(environment, channelId);
   const configured = await settingRecord(environment, channelId, triggerId, now, scheduler, shouldWriteDiagnostics);
-  if (configured === null || !configured.settings.prewarning) {
+  if (configured === null) {
     await clear(scheduler);
     return;
   }
+  if (!configured.settings.prewarning) await clear(scheduler);
 
   const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
   const result = alreadyFetchedSchedule ?? await getAdSchedule(
@@ -251,9 +252,9 @@ export const refreshAdPrewarning = async (
     fetcher,
   );
   if (!result.fetched || result.schedule === null) {
-    if (result.reason === "unauthorized") {
+    if (configured.settings.prewarning && result.reason === "unauthorized") {
       await scopeMissing(environment, channelId, triggerId, now, scheduler, shouldWriteDiagnostics);
-    } else {
+    } else if (configured.settings.prewarning) {
       if (shouldWriteDiagnostics) {
         await writeDiagnostics(environment, channelId, triggerId, now, [scheduleFailureDiagnostic(result)]);
       }
@@ -272,12 +273,13 @@ export const refreshAdPrewarning = async (
   if (currentSchedule === null) return;
   if (currentSchedule.nextAdAt === null) {
     if (!storedByChannelObject) await clear(scheduler);
-    if (shouldWriteDiagnostics) {
+    if (configured.settings.prewarning && shouldWriteDiagnostics) {
       await writeOne(environment, channelId, triggerId, now, "ads.prewarning.no_schedule");
     }
     return;
   }
 
+  if (!configured.settings.prewarning) return;
   if (!storedByChannelObject) await replanFromSchedule(scheduler, configured.settings, currentSchedule.nextAdAt);
 };
 

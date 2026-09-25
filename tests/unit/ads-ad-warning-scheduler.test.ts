@@ -137,4 +137,43 @@ describe("ad prewarning in the channel object", () => {
     expect(scheduleAdPrewarning).not.toHaveBeenCalled();
     expect(clearAdPrewarning).not.toHaveBeenCalled();
   });
+
+  it("refreshes countdown data from EventSub while ad prewarning is disabled", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:read:ads"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'ads', 1, '{"automatic":"a","manual":"m","prewarning":false,"leadSeconds":60,"prewarningText":"gleich {seconds}"}')`,
+    ).run();
+    const schedule = {
+      nextAdAt: "2026-09-21T12:05:00.000Z",
+      duration: 60,
+      lastAdAt: "2026-09-21T11:59:00.000Z",
+      prerollFreeTime: 120,
+      snoozeCount: 1,
+      snoozeRefreshAt: null,
+    };
+    const storeAdSchedule = vi.fn().mockResolvedValue({ schedule, asOf: "2026-09-21T12:00:00.000Z" });
+    const clearAdPrewarning = vi.fn().mockResolvedValue(undefined);
+    const scheduleAdPrewarning = vi.fn().mockResolvedValue(undefined);
+    const env = environment();
+    (env as unknown as { CHANNEL: Env["CHANNEL"] }).CHANNEL = {
+      idFromName: vi.fn(() => "kanal-a"),
+      get: () => ({ storeAdSchedule, clearAdPrewarning, scheduleAdPrewarning, getAdScheduleGeneration: vi.fn().mockResolvedValue(0) }),
+    } as unknown as Env["CHANNEL"];
+
+    await refreshAdPrewarning(
+      env,
+      "kanal-a",
+      "eventsub-ad-start",
+      "2026-09-21T12:00:00.000Z",
+      noNetwork,
+      { fetched: true, reason: null, detail: {}, schedule },
+    );
+
+    expect(storeAdSchedule).toHaveBeenCalledWith(schedule, "2026-09-21T12:00:00.000Z", undefined, 0, undefined);
+    expect(clearAdPrewarning).toHaveBeenCalledOnce();
+    expect(scheduleAdPrewarning).not.toHaveBeenCalled();
+  });
 });

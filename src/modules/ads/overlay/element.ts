@@ -17,3 +17,10 @@ export const adsCountdownElement = {
   load: () => import("./countdown"),
   editor: () => import("./countdown-editor"),
 };
+
+// This client-safe declaration is shared with the dashboard and overlay
+// registries. Server-only initial state is added by the ads module itself.
+export const adsOverlayElements = [{
+  ...adsCountdownElement,
+  kind: ADS_COUNTDOWN_ELEMENT_KIND as `${string}.${string}`,
+}];

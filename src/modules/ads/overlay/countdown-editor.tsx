@@ -6,9 +6,11 @@ interface AdsCountdownEditorProperties {
   config: EditorJsonObject;
   onChange: (config: EditorJsonObject) => void;
   language?: "de" | "en";
+  readOnly?: boolean;
+  readOnlyReason?: string;
 }
 
-const AdsCountdownEditor = ({ config, onChange, language = "en" }: AdsCountdownEditorProperties) => {
+const AdsCountdownEditor = ({ config, onChange, language = "en", readOnly = false, readOnlyReason }: AdsCountdownEditorProperties) => {
   const showSnoozeInfo = config.showSnoozeInfo === true;
   const labels = adsCountdownLabels(language);
 
@@ -16,7 +18,11 @@ const AdsCountdownEditor = ({ config, onChange, language = "en" }: AdsCountdownE
     <input
       type="checkbox"
       checked={showSnoozeInfo}
-      onChange={(event) => { onChange({ ...config, showSnoozeInfo: event.currentTarget.checked }); }}
+      disabled={readOnly}
+      {...(readOnlyReason === undefined ? {} : { title: readOnlyReason, "aria-describedby": "overlay-editor-readonly-reason" })}
+      onChange={(event) => {
+        if (!readOnly) onChange({ ...config, showSnoozeInfo: event.currentTarget.checked });
+      }}
     />
     <span>{labels.showSnoozeInfo}</span>
   </label>;
