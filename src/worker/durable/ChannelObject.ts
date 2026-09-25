@@ -84,7 +84,7 @@ type SessionValidityRow = {
   role: ChannelRole | null;
 };
 
-type TokenValidityRow = { token_id: string };
+type TokenValidityRow = { token_id: string; overlay_id: string | null };
 type RevokedTokenMarker = { revokedAt: number };
 
 type OverlayHandshakeWindow = { startedAt: number; count: number };
@@ -466,16 +466,15 @@ export class ChannelObject extends DurableObject<Env> {
     }
   }
 
-  private async isOverlayTokenValid(tokenId: string, channelId: string, nowIso: string): Promise<boolean> {
-    const row = await this.env.DB.prepare(
-      `SELECT token_id
+  private async getOverlayToken(tokenId: string, channelId: string, nowIso: string): Promise<TokenValidityRow | null> {
+    return await this.env.DB.prepare(
+      `SELECT token_id, overlay_id
          FROM overlay_tokens
         WHERE channel_id = ?
           AND token_id = ?
           AND revoked_at IS NULL
           AND (expires_at IS NULL OR expires_at > ?)`,
     ).bind(channelId, tokenId, nowIso).first<TokenValidityRow>();
-    return row !== null;
   }
 
   private async allowOverlayHandshake(tokenId: string, now: number): Promise<boolean> {
@@ -561,18 +560,20 @@ export class ChannelObject extends DurableObject<Env> {
     }
 
     const pair = new WebSocketPair();
-    let overlayTokenValidAtHandshake: boolean | undefined;
+    let overlayTokenAtHandshake: TokenValidityRow | null | undefined;
     if (principal.kind === "overlay") {
       try {
         // D1 protects handshakes whose in-memory revocation marker has aged
         // out. The marker is re-read at the final accept boundary below, so
         // it also catches a revoke that lands while this query is in flight.
-        overlayTokenValidAtHandshake = await this.isOverlayTokenValid(
+        // The same lookup reads the binding so a stale route principal cannot
+        // keep a legacy socket after an import binds its token.
+        overlayTokenAtHandshake = await this.getOverlayToken(
           principal.tokenId,
           ownChannelId,
           new Date().toISOString(),
         );
-        if (!overlayTokenValidAtHandshake) {
+        if (overlayTokenAtHandshake === null) {
           return new Response("Overlay token revoked.", { status: 403 });
         }
       } catch (error: unknown) {
@@ -585,7 +586,7 @@ export class ChannelObject extends DurableObject<Env> {
         // Re-read the durable marker immediately before acceptance and reuse
         // the D1 authorization result from this handshake.
         const marker: unknown = await this.ctx.storage.get(revokedTokenKey(principal.tokenId));
-        if (overlayTokenValidAtHandshake !== true || isExpired(principal, Date.now()) ||
+        if (overlayTokenAtHandshake === null || overlayTokenAtHandshake === undefined || isExpired(principal, Date.now()) ||
             hasActiveRevocationMarker(marker, Date.now())) {
           return new Response("Overlay token revoked.", { status: 403 });
         }
@@ -597,7 +598,13 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.acceptWebSocket(pair[1], tagsFor(principal));
     pair[1].serializeAttachment(principal);
     await this.scheduleSecurityAlarm();
-    pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
+    const overlayBindingChanged = principal.kind === "overlay" &&
+      overlayTokenAtHandshake?.overlay_id !== principal.overlayId;
+    if (overlayBindingChanged) {
+      closeSocket(pair[1], OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
+    } else {
+      pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
+    }
     return new Response(null, {
       status: 101,
       headers: { "Sec-WebSocket-Protocol": REALTIME_PROTOCOL },
@@ -737,6 +744,7 @@ export class ChannelObject extends DurableObject<Env> {
     const warningDue = typeof warningDeadline === "number" && Number.isFinite(warningDeadline) && warningDeadline <= now;
     const expired = new Set<WebSocket>();
     const revoked = new Set<WebSocket>();
+    const overlayBindingChanged = new Set<WebSocket>();
     // Sockets whose authorization batch could not be checked this round. They
     // are closed with the transient code so clients reconnect and are
     // re-authorized on handshake, instead of staying subscribed past the
@@ -812,16 +820,19 @@ export class ChannelObject extends DurableObject<Env> {
           const placeholders = batch.map(() => "?").join(", ");
           try {
             const result = await this.env.DB.prepare(
-              `SELECT token_id
+              `SELECT token_id, overlay_id
                  FROM overlay_tokens
                 WHERE channel_id = ?
                   AND token_id IN (${placeholders})
                   AND revoked_at IS NULL
                   AND (expires_at IS NULL OR expires_at > ?)`,
             ).bind(ownChannelId, ...batch, nowIso).all<TokenValidityRow>();
-            const validTokens = new Set(result.results.map((row) => row.token_id));
+            const validTokens = new Map(result.results.map((row) => [row.token_id, row.overlay_id]));
             for (const { webSocket, principal } of overlayPrincipals) {
-              if (batch.includes(principal.tokenId) && !validTokens.has(principal.tokenId)) revoked.add(webSocket);
+              if (!batch.includes(principal.tokenId)) continue;
+              const currentOverlayId = validTokens.get(principal.tokenId);
+              if (currentOverlayId === undefined) revoked.add(webSocket);
+              else if (currentOverlayId !== principal.overlayId) overlayBindingChanged.add(webSocket);
             }
           } catch (error: unknown) {
             transientFailure = true;
@@ -846,8 +857,11 @@ export class ChannelObject extends DurableObject<Env> {
     for (const webSocket of revoked) {
       if (!closeSocket(webSocket, SOCKET_REVOKED_CODE, "Authorization revoked")) closeFailure = true;
     }
+    for (const webSocket of overlayBindingChanged) {
+      if (!closeSocket(webSocket, OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON)) closeFailure = true;
+    }
     for (const webSocket of transientAuth) {
-      if (expired.has(webSocket) || revoked.has(webSocket)) continue;
+      if (expired.has(webSocket) || revoked.has(webSocket) || overlayBindingChanged.has(webSocket)) continue;
       if (!closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "authorization check unavailable")) closeFailure = true;
     }
     if (closeFailure) transientFailure = true;

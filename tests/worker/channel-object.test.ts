@@ -109,7 +109,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   const prepared = {
     bind: vi.fn(() => prepared),
     all: vi.fn().mockResolvedValue({ results: [] }),
-    first: vi.fn().mockResolvedValue({ token_id: "token-1" }),
+    first: vi.fn().mockResolvedValue({ token_id: "token-1", overlay_id: null }),
   };
   const getWebSockets = vi.fn((tag?: string) => tag === undefined
     ? sockets
@@ -193,6 +193,7 @@ const eventMessage: RealtimeEnvelope<"event_log.new"> = {
 describe("ChannelObject realtime path", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     mocks.processAdPrewarning.mockReset().mockResolvedValue(undefined);
     mocks.refreshAdPrewarningAlarm.mockReset().mockResolvedValue(undefined);
     mocks.getAdSchedule.mockReset();
@@ -280,7 +281,7 @@ describe("ChannelObject realtime path", () => {
     };
     const prepare = vi.fn(() => ({
       bind: vi.fn(() => ({
-        first: vi.fn().mockResolvedValue({ token_id: token.tokenId }),
+        first: vi.fn().mockResolvedValue({ token_id: token.tokenId, overlay_id: token.overlayId }),
       })),
     }));
     const object = objectFor([], { prepare } as unknown as D1Database);
@@ -293,6 +294,33 @@ describe("ChannelObject realtime path", () => {
     expect(accepted?.deserializeAttachment()).toEqual(token);
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("FROM overlay_tokens"));
+  });
+
+  it("closes a stale legacy handshake when its token is already bound", async () => {
+    const token: RealtimeOverlayPrincipal = {
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-bound-during-handshake",
+      overlayId: null,
+      expiresAt: null,
+    };
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn().mockResolvedValue({ token_id: token.tokenId, overlay_id: "overlay-current" }),
+      })),
+    }));
+    const object = objectFor([], { prepare } as unknown as D1Database);
+    const pair = new WebSocketPair();
+    const close = vi.spyOn(pair[1], "close");
+    const send = vi.spyOn(pair[1], "send");
+    vi.stubGlobal("WebSocketPair", function WebSocketPairDouble() { return pair; });
+
+    const response = await object.fetch(upgradeRequest(token));
+
+    expect(response.status).toBe(101);
+    expect(close).toHaveBeenCalledWith(OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("rechecks revocation immediately before accept when token validation awaits", async () => {
@@ -542,6 +570,44 @@ describe("ChannelObject realtime path", () => {
     expect(closed).toBe(true);
     expect(legacy.close.mock.calls).toEqual([[OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON]]);
     expect(legacy.send.mock.calls).toHaveLength(0);
+  });
+
+  it("checks the changed binding periodically after an import close fails", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null, expiresAt: null,
+    });
+    const sockets = [legacy];
+    legacy.close.mockImplementationOnce(() => { throw new Error("socket close failed"); })
+      .mockImplementation(() => { sockets.splice(sockets.indexOf(legacy), 1); });
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          all: vi.fn().mockResolvedValue({
+            results: [{ token_id: "token-legacy", overlay_id: "overlay-current" }],
+          }),
+        })),
+      })),
+    } as unknown as D1Database;
+    const object = objectFor(sockets, database);
+    const storage = storageOf(object);
+    await (object as unknown as { scheduleSecurityAlarm: () => Promise<void> }).scheduleSecurityAlarm();
+    const securityDeadline = storage.values.get("security_round");
+    expect(typeof securityDeadline).toBe("number");
+
+    await expect(object.closeUnboundOverlayTokenSockets("token-legacy")).resolves.toBe(false);
+    expect(storage.values.get("security_round")).toBe(securityDeadline);
+
+    vi.setSystemTime(securityDeadline as number);
+    await object.alarm();
+
+    expect(legacy.close.mock.calls).toEqual([
+      [OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON],
+      [OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON],
+    ]);
+    expect(sockets).toHaveLength(0);
   });
 
   it("does not read D1 while filtering write-routed variable changes", async () => {
@@ -1040,7 +1106,7 @@ describe("ChannelObject realtime path", () => {
                     user_id: `user-${String(sessionId).slice("session-".length)}`,
                     role: "operator",
                   }))
-                  : values.slice(1, -1).map((tokenId) => ({ token_id: tokenId })),
+                  : values.slice(1, -1).map((tokenId) => ({ token_id: tokenId, overlay_id: null })),
               }),
             };
           }),
