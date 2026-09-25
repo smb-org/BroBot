@@ -16,6 +16,7 @@ import type {
   RealtimePanelPrincipal,
   RealtimePrincipal,
 } from "../../src/realtime-contract";
+import { OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON } from "../../src/realtime-contract";
 import type { AdsSchedule } from "../../src/modules/ads/contracts";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
@@ -513,6 +514,34 @@ describe("ChannelObject realtime path", () => {
       payload: { set: [{ name: "score", value: 12 }, { name: "wins", value: 8 }], removed: ["streak"] },
     });
     expect(bound.serializeAttachment.mock.calls).toEqual([]);
+  });
+
+  it("closes an already-connected legacy source when its token becomes bound", async () => {
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null, expiresAt: null,
+    });
+    const sockets = [legacy];
+    legacy.close.mockImplementation(() => { sockets.splice(sockets.indexOf(legacy), 1); });
+    const object = objectFor(sockets);
+
+    const closed = await object.closeUnboundOverlayTokenSockets("token-legacy");
+    const variablesMessage: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "variables-after-binding",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: {
+        set: [{ name: "score", value: 12 }, { name: "wins", value: 8 }],
+        removed: ["streak"],
+        overlayIdsByVariable: { score: ["overlay-a"], wins: ["overlay-b"], streak: ["overlay-a"] },
+      },
+    };
+    await object.publish([variablesMessage]);
+
+    expect(closed).toBe(true);
+    expect(legacy.close.mock.calls).toEqual([[OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON]]);
+    expect(legacy.send.mock.calls).toHaveLength(0);
   });
 
   it("does not read D1 while filtering write-routed variable changes", async () => {

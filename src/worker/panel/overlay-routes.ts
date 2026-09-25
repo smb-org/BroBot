@@ -24,7 +24,7 @@ import { requireChannelAuthorization, type ChannelAuthorizationVariables } from 
 import { hashOverlayToken, isBase64url32Byte } from "../auth/crypto";
 import { actorOf } from "./member-routes";
 import { saveOverlayDraft } from "../overlays/service";
-import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
+import { closeRealtimeTokenBeforeResponse, closeRealtimeUnboundOverlayTokenBeforeResponse } from "../realtime-revocation";
 import { publishOverlayChanged } from "../realtime";
 
 interface OverlayRouteEnvironment {
@@ -48,7 +48,8 @@ const elementSchema = z.object({
   kind: z.enum(OVERLAY_ELEMENT_KINDS),
   label: z.string().max(40).default(""),
   variableName: z.string().regex(VARIABLE_PATTERN).nullable().default(null),
-  text: z.string().max(100).refine((value) => value.match(/\{value\}/gu)?.length === 1).default("{value}"),
+  // Legacy text can have zero or many markers; the renderer substitutes the first and preserves the remaining text.
+  text: z.string().max(100).default("{value}"),
   config: z.record(z.string(), z.json()).default({}),
   x: z.number().int().default(0),
   y: z.number().int().default(0),
@@ -199,8 +200,13 @@ overlayRouter.post("/api/channels/:channelId/overlays/import-legacy", async (con
 
   const overlay = await getOverlayForChannel(context.env.DB, channelId, overlayId);
   if (overlay === null) throw new Error("Imported overlay could not be read back.");
+  const socketsClosed = await closeRealtimeUnboundOverlayTokenBeforeResponse(
+    context.env.CHANNEL, channelId, imported.tokenId,
+  );
   await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId, revision: overlay.revision }]);
-  return context.json({ overlay }, 201);
+  return socketsClosed
+    ? context.json({ overlay }, 201)
+    : context.json({ overlay, closingPending: true }, 202);
 });
 
 overlayRouter.get("/api/channels/:channelId/overlays/:overlayId", async (context) => {

@@ -150,6 +150,7 @@ export interface PanelOverlayAccess {
   expiresAt: string | null;
   revokedAt: string | null;
   lastUsedAt: string | null;
+  recoverable: boolean;
 }
 
 const overlayTokensPath = (channelId: string, tokenId?: string): string =>
@@ -197,7 +198,7 @@ export const importLegacyOverlay = (channelId: string, input: {
   token: string;
   variableName: string;
   text: string;
-}): Promise<{ overlay: PanelOverlay }> =>
+}): Promise<{ overlay: PanelOverlay; closingPending?: boolean }> =>
   requestMutation(`${overlaysPath(channelId)}/import-legacy`, "POST", input);
 
 export const fetchOverlay = (channelId: string, overlayId: string): Promise<{ overlay: PanelOverlay }> =>

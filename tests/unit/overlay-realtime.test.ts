@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { connectOverlayRealtime } from "../../src/overlay/realtime";
-import { OVERLAY_TOKEN_SUBPROTOCOL_PREFIX, REALTIME_PROTOCOL } from "../../src/realtime-contract";
+import {
+  OVERLAY_ACCESS_BOUND_CLOSE_CODE,
+  OVERLAY_TOKEN_SUBPROTOCOL_PREFIX,
+  REALTIME_PROTOCOL,
+} from "../../src/realtime-contract";
 
 class FakeWebSocket {
   public static instances: FakeWebSocket[] = [];
@@ -158,6 +162,22 @@ describe("overlay realtime client", () => {
     FakeWebSocket.instances[0]?.dispatch("close", { code: 4003, reason: "revoked" } as CloseEvent);
     await vi.advanceTimersByTimeAsync(60_000);
 
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    stop();
+  });
+
+  it("reports when an access was bound and stops the legacy socket", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const onTokenBound = vi.fn();
+    const onTerminalClose = vi.fn();
+    const stop = connectOverlayRealtime("z".repeat(43), onTerminalClose, { onTokenBound });
+
+    FakeWebSocket.instances[0]?.dispatch("close", { code: OVERLAY_ACCESS_BOUND_CLOSE_CODE, reason: "bound" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(onTokenBound).toHaveBeenCalledTimes(1);
+    expect(onTerminalClose).not.toHaveBeenCalled();
     expect(FakeWebSocket.instances).toHaveLength(1);
     stop();
   });

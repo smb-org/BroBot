@@ -296,7 +296,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
   };
 
   const reveal = async (access: PanelOverlayAccess): Promise<void> => {
-    if (selectedOverlay === null || !canManage || pending || access.revokedAt !== null) return;
+    if (selectedOverlay === null || !canManage || pending || access.revokedAt !== null || !access.recoverable) return;
     const overlayId = selectedOverlay.id;
     invalidateSecret();
     const version = secretVersion.current;
@@ -399,7 +399,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
       setLegacyImportLink("");
       changeSelection(result.overlay.id);
       await Promise.all([load(), loadLegacyTokens()]);
-      setNotice(labels.legacyImportSuccess(result.overlay.name));
+      setNotice(result.closingPending ? labels.legacyImportClosingPending : labels.legacyImportSuccess(result.overlay.name));
     } catch (caught) {
       if (caught instanceof PanelApiError && caught.code === "overlay_token_not_found") {
         setLegacyImportError(labels.legacyImportTokenNotFound);
@@ -519,9 +519,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection }: Overlay
                   <span className="overlay-access-list__status" data-status={statusTone}>{labels.statusLabel}: {status}</span>
                 </div>
                 <div className="overlay-access-list__actions">
-                  <Button variant="neutral" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void reveal(access); }}>{labels.reveal}</Button>
+                  <Button variant="neutral" disabled={!canManage || pending || !active || !access.recoverable} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void reveal(access); }}>{labels.reveal}</Button>
                   <Button variant="neutral" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void replace(access); }}>{labels.replace}</Button>
                   <Button danger="subtle" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setRevokeTarget(access); }}>{labels.revoke}</Button>
+                  {!access.recoverable ? <span className="muted">{labels.accessUnrecoverable}</span> : null}
                 </div>
               </li>
             );

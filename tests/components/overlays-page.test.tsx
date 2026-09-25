@@ -12,7 +12,7 @@ const overlay = {
 };
 const access = {
   tokenId: "access-a", overlayId: "overlay-a", label: "OBS Main PC", createdAt: "2026-09-24T10:00:00.000Z",
-  expiresAt: null, revokedAt: null, lastUsedAt: "2026-09-24T11:00:00.000Z",
+  expiresAt: null, revokedAt: null, lastUsedAt: "2026-09-24T11:00:00.000Z", recoverable: true,
 };
 type AccessFixture = {
   tokenId: string;
@@ -22,6 +22,7 @@ type AccessFixture = {
   expiresAt: string | null;
   revokedAt: string | null;
   lastUsedAt: string | null;
+  recoverable: boolean;
 };
 const summary = { id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 4, elementCount: 1, accessCount: 1, lastUsedAt: access.lastUsedAt, createdAt: overlay.createdAt, updatedAt: overlay.updatedAt };
 const overlayB = { ...overlay, id: "overlay-b", name: "Second scene", revision: 1, elements: [] };
@@ -51,10 +52,15 @@ describe("Overlays page", () => {
     emptyOverlays?: boolean;
     secondOverlay?: boolean;
     accessLastUsedAt?: string | null;
+    accessRecoverable?: boolean;
     legacyClosingPending?: boolean;
     legacyTokens?: Array<{ id: string; name: string | null; createdAt: string; createdBy: string | null; lastUsedAt: string | null; expiresAt: string | null }>;
   } = {}) => {
-    let accesses: AccessFixture[] = [{ ...access, ...(options.accessLastUsedAt === undefined ? {} : { lastUsedAt: options.accessLastUsedAt }) }];
+    let accesses: AccessFixture[] = [{
+      ...access,
+      ...(options.accessLastUsedAt === undefined ? {} : { lastUsedAt: options.accessLastUsedAt }),
+      ...(options.accessRecoverable === undefined ? {} : { recoverable: options.accessRecoverable }),
+    }];
     let legacyTokens = [...(options.legacyTokens ?? [])];
     let importedOverlay: typeof overlay | null = null;
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
@@ -200,6 +206,33 @@ describe("Overlays page", () => {
     const actions = within(accessRow).getAllByRole("button");
     expect(actions).toHaveLength(3);
     for (const action of actions) expect(action).toHaveAttribute("data-variant", "default");
+  });
+
+  it.each([
+    {
+      language: "de-DE",
+      reveal: "Link erneut anzeigen",
+      replace: "Ersetzen",
+      hint: "Dieser alte Zugang kann nicht erneut angezeigt werden. Stelle einen neuen Zugang aus.",
+    },
+    {
+      language: "en-US",
+      reveal: "Show link again",
+      replace: "Replace",
+      hint: "This legacy access cannot be shown again. Issue a new access.",
+    },
+  ])("disables reveal for an imported access and explains how to issue a new one in $language", async ({ language, reveal, replace, hint }) => {
+    setBrowserLanguage(language);
+    vi.stubGlobal("fetch", routeFetcher({ accessRecoverable: false }));
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+
+    const inspector = await screen.findByRole("region", { name: language === "en-US" ? "Accesses" : "Zugänge" });
+    const accessRow = within(inspector).getByText("OBS Main PC").closest("li");
+    if (!(accessRow instanceof HTMLElement)) throw new Error("Access list row is missing.");
+    expect(within(accessRow).getByRole("button", { name: reveal })).toBeDisabled();
+    expect(within(accessRow).getByRole("button", { name: replace })).toBeEnabled();
+    expect(within(accessRow).getByText(hint)).toBeInTheDocument();
   });
 
   it("issues and copies a link, re-shows and replaces access, and confirms revocation", async () => {

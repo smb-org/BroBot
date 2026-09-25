@@ -6,7 +6,11 @@ import type {
   RealtimePrincipal,
   RealtimeRecipientKind,
 } from "../../realtime-contract";
-import { REALTIME_RECIPIENTS } from "../../realtime-contract";
+import {
+  OVERLAY_ACCESS_BOUND_CLOSE_CODE,
+  OVERLAY_ACCESS_BOUND_CLOSE_REASON,
+  REALTIME_RECIPIENTS,
+} from "../../realtime-contract";
 import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protocol";
@@ -702,6 +706,19 @@ export class ChannelObject extends DurableObject<Env> {
     }
     await this.stopSecurityAlarmIfIdle();
     if (!closed) await this.scheduleEarliestAlarm();
+    return closed;
+  }
+
+  public async closeUnboundOverlayTokenSockets(tokenId: string): Promise<boolean> {
+    const ownChannelId = this.ownChannelId();
+    let closed = true;
+    for (const webSocket of this.ctx.getWebSockets(`token:${tokenId}`)) {
+      const principal = readAttachment(webSocket);
+      if (principal?.kind !== "overlay" || principal.channelId !== ownChannelId ||
+          principal.tokenId !== tokenId || principal.overlayId !== null) continue;
+      if (!closeSocket(webSocket, OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON)) closed = false;
+    }
+    await this.stopSecurityAlarmIfIdle();
     return closed;
   }
 

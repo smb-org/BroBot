@@ -271,6 +271,21 @@ export const revokeRealtimeToken = async (
   }
 };
 
+export const closeRealtimeUnboundOverlayTokenSockets = async (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+  tokenId: string,
+): Promise<boolean> => {
+  try {
+    const object = channelObject(namespace, channelId);
+    if (object === null) return false;
+    return await object.closeUnboundOverlayTokenSockets(tokenId);
+  } catch (error: unknown) {
+    console.warn("Realtime legacy overlay sockets could not be closed.", error);
+    return false;
+  }
+};
+
 export const revokeRealtimeSessionForUser = async (
   db: D1Database,
   namespace: Env["CHANNEL"] | undefined,

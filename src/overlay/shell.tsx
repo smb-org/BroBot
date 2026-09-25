@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactElement } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { RealtimeEnvelope } from "../realtime-contract";
 import { sanitizeOverlayCss } from "../contracts/overlay-css";
@@ -10,6 +10,9 @@ const LazyLegacyOverlayEntry = lazy(async () => {
   const module = await import("./status");
   return { default: module.OverlayEntry };
 });
+
+const renderLegacyOverlay = (onTokenBound: () => void): ReactElement =>
+  <Suspense fallback={null}><LazyLegacyOverlayEntry onTokenBound={onTokenBound} /></Suspense>;
 
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 const RELOAD_DEBOUNCE_MS = 250;
@@ -140,6 +143,8 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [diagnostic, setDiagnostic] = useState("Overlay data could not be loaded.");
   const bootstrapRef = useRef<OverlayBootstrapData | null>(null);
+  const [bindingVersion, setBindingVersion] = useState(0);
+  const reloadLegacyShell = useCallback((): void => { setBindingVersion((version) => version + 1); }, []);
 
   useEffect(() => {
     const lifecycle: OverlayLifecycle = { disposed: false, revoked: false, requestNumber: 0, reloadPending: false };
@@ -319,7 +324,7 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
       stopRetryTimer();
       stopRealtime();
     };
-  }, [token]);
+  }, [bindingVersion, token]);
 
   useEffect(() => {
     const css = bootstrap?.overlay?.css;
@@ -329,11 +334,11 @@ export const OverlayShell = ({ token, elementId, debug }: OverlayShellProperties
 
   if (loadState === "unbound") {
     if (elementId !== null) return null;
-    return <Suspense fallback={null}><LazyLegacyOverlayEntry /></Suspense>;
+    return renderLegacyOverlay(reloadLegacyShell);
   }
   if (loadState === "revoked") return null;
   if (loadState === "error") {
-    if (debug && elementId === null) return <Suspense fallback={null}><LazyLegacyOverlayEntry /></Suspense>;
+    if (debug && elementId === null) return renderLegacyOverlay(reloadLegacyShell);
     return debug ? <span className="brobot-overlay-debug">{diagnostic}</span> : null;
   }
   if (bootstrap?.overlay === null || bootstrap === null) return null;

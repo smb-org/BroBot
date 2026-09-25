@@ -285,8 +285,13 @@ export const createOverlayWithAudit = async (
 };
 
 export type LegacyOverlayImportOutcome =
-  | { outcome: "imported"; rowsWritten: number }
-  | { outcome: "not_found" | "already_bound" | "invalid_reference" | "limit_reached" | "forbidden" | "conflict" };
+  | { outcome: "imported"; rowsWritten: number; tokenId: string }
+  | { outcome: "not_found" }
+  | { outcome: "already_bound" }
+  | { outcome: "invalid_reference" }
+  | { outcome: "limit_reached" }
+  | { outcome: "forbidden" }
+  | { outcome: "conflict" };
 
 interface LegacyOverlayImportTokenRow {
   token_id: string;
@@ -384,7 +389,7 @@ export const importLegacyOverlayWithAudit = async (
   });
   const results = await db.batch([mutation, overlay, element, audit]);
   if ((results[0]?.meta.changes ?? 0) > 0) {
-    return { outcome: "imported", rowsWritten: rowsWritten(results) };
+    return { outcome: "imported", rowsWritten: rowsWritten(results), tokenId: precondition.tokenId };
   }
 
   const afterFailure = await legacyOverlayImportPrecondition(db, input, changedAt);

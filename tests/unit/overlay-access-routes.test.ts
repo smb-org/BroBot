@@ -167,6 +167,26 @@ describe("overlay access routes", () => {
     await expect(reveal.json()).resolves.toEqual({ error: "overlay_access_unrecoverable" });
   });
 
+  it("marks imported accesses without a secret envelope as unrecoverable", async () => {
+    const issued = await issueAccess(environment, "OBS current");
+    await database.prepare(
+      `INSERT INTO overlay_tokens
+        (token_id, channel_id, overlay_id, token_hash, label, created_at)
+       VALUES ('legacy-access', 'channel-a', 'overlay-a', 'legacy-hash-for-list', 'OBS legacy', '2026-09-24T10:00:00.000Z')`,
+    ).run();
+
+    const response = await overlayAccessRouter.fetch(new Request(accessesPath, {
+      headers: await sessionHeaders(environment),
+    }), environment);
+    const body = await response.json<{ accesses: Array<{ tokenId: string; recoverable: boolean }> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.accesses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tokenId: issued.tokenId, recoverable: true }),
+      expect.objectContaining({ tokenId: "legacy-access", recoverable: false }),
+    ]));
+  });
+
   it("keeps legacy channel tokens usable and reports them as unrecoverable on re-show", async () => {
     const legacy = await issueOverlayToken(database as unknown as D1Database, {
       channelId: "channel-a",
