@@ -1,6 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+import { e2eWorkerEnvironment } from "./tests/e2e/worker-fixtures";
 
 const playwrightPort = process.env.PLAYWRIGHT_PORT ?? "5174";
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+const workerBindings = Object.entries(e2eWorkerEnvironment)
+  .map(([name, value]) => `--var ${shellQuote(`${name}:${value}`)}`)
+  .join(" ");
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -28,14 +33,14 @@ export default defineConfig({
       // Deshalb muss vor dem E2E-Start ein Build laufen; `pretest:e2e` stellt
       // das bei `pnpm run test:e2e` sicher, ein direkter Playwright-Aufruf
       // setzt einen aktuellen Build voraus.
-      command: "./node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to .wrangler/e2e-worker --show-interactive-dev-session=false",
+      command: `./node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to .wrangler/e2e-worker --show-interactive-dev-session=false ${workerBindings}`,
       // Port statt Adresse: /healthz meldet bewusst 503, solange Secrets oder
       // Schema fehlen. Playwright wartet auf 2xx und liefe sonst in die
       // Zeitüberschreitung, obwohl der Worker längst antwortet.
       port: 8787,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { PUBLIC_ORIGIN: "http://127.0.0.1:8787" },
+      env: e2eWorkerEnvironment,
     },
   ],
   projects: [{ name: "chromium-desktop", use: { ...devices["Desktop Chrome"] } }],
