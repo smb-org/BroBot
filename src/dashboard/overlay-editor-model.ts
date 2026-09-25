@@ -8,6 +8,13 @@ export interface OverlayEditorSize {
   height: number;
 }
 
+/**
+ * Used to clamp position when an element's real rendered size is not known yet
+ * (e.g. it is hidden with `inComposition: false` and about to be shown), so a
+ * position picked while the element was invisible cannot leave it off-canvas.
+ */
+export const UNMEASURED_ELEMENT_FALLBACK_SIZE: OverlayEditorSize = { width: 40, height: 40 };
+
 export const overlayEditorPositionLimits = (
   canvas: OverlayEditorSize,
   renderedElement: OverlayEditorSize,

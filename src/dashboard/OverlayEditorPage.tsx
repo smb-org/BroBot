@@ -6,7 +6,7 @@ import { sanitizeOverlayCss } from "../contracts/overlay-css";
 import { OverlayCanvas } from "../overlay/canvas";
 import type { BoundOverlayData, OverlayLanguage } from "../overlay/model";
 import variableViewCss from "../overlay/variable.css?inline";
-import { clampOverlayEditorPosition, overlayEditorPositionLimits } from "./overlay-editor-model";
+import { clampOverlayEditorPosition, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE } from "./overlay-editor-model";
 import {
   createOverlay,
   fetchChannelVariables,
@@ -312,19 +312,23 @@ function OverlayEditorWorkspace({
 
   const loadPreviewFrame = useCallback((frame: HTMLIFrameElement | null): void => {
     if (frame === null) return;
-    const document = frame.contentDocument;
-    if (document === null) return;
-    const base = document.createElement("base");
+    const frameDocument = frame.contentDocument;
+    if (frameDocument === null) return;
+    const base = frameDocument.createElement("base");
     base.href = "/overlay";
-    const baseStyle = document.createElement("style");
-    baseStyle.textContent = "html,body,#root{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}body{display:grid;place-items:center}#root:focus-visible{outline:2px solid #b26cfa;outline-offset:3px}#root:active{cursor:grabbing}";
-    document.head.replaceChildren(base, baseStyle);
-    const root = document.createElement("div");
+    // The iframe has its own document and cannot see the dashboard stylesheet, so the focus
+    // outline color is read from the dashboard's own token instead of a hardcoded value; the
+    // fallback is that same token's DESIGN.md value, used only if the property is unset (e.g. in tests).
+    const focusOutlineColor = getComputedStyle(document.documentElement).getPropertyValue("--brand-text").trim() || "#9bc3ed";
+    const baseStyle = frameDocument.createElement("style");
+    baseStyle.textContent = `html,body,#root{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}body{display:grid;place-items:center}#root:focus-visible{outline:2px solid ${focusOutlineColor};outline-offset:3px}#root:active{cursor:grabbing}`;
+    frameDocument.head.replaceChildren(base, baseStyle);
+    const root = frameDocument.createElement("div");
     root.id = "root";
-    document.body.replaceChildren(root);
-    const variableStyle = document.createElement("style");
+    frameDocument.body.replaceChildren(root);
+    const variableStyle = frameDocument.createElement("style");
     variableStyle.textContent = variableViewCss;
-    document.head.appendChild(variableStyle);
+    frameDocument.head.appendChild(variableStyle);
     root.setAttribute("role", "application");
     root.setAttribute("aria-label", labels.editorPreviewCanvas);
     root.tabIndex = 0;
@@ -375,11 +379,14 @@ function OverlayEditorWorkspace({
     };
   }, [draft.css, previewFrameRoot, selectedElementId, selectedElementScalePercent, selectedElementText]);
 
+  // An element hidden with `inComposition: false` is not in the DOM, so its size cannot be
+  // measured; fall back to a sensible minimum instead of {0, 0} so clamping still keeps it
+  // on-canvas once it is shown (a {0, 0} size would let X/Y range across the whole canvas).
   const renderedElementSize = (elementId: string): { width: number; height: number } => {
     const root = previewFrameRootRef.current;
-    if (root === null) return { width: 0, height: 0 };
+    if (root === null) return UNMEASURED_ELEMENT_FALLBACK_SIZE;
     const element = findRenderedElement(root, elementId);
-    if (element === undefined) return { width: 0, height: 0 };
+    if (element === undefined) return UNMEASURED_ELEMENT_FALLBACK_SIZE;
     const bounds = element.getBoundingClientRect();
     return { width: bounds.width, height: bounds.height };
   };
@@ -638,7 +645,7 @@ function OverlayEditorWorkspace({
           </div>
         </div>
         <div className="overlay-editor__preview-viewport" ref={previewViewportRef}>
-          <div className="overlay-editor__canvas-frame">
+          <div className="overlay-editor__canvas-frame" style={{ width: draft.width * canvasScale, height: draft.height * canvasScale }}>
             <iframe className="overlay-editor__preview-frame" data-testid="overlay-editor-renderer"
               title={labels.editorPreviewCanvas} sandbox="allow-same-origin"
               style={{ width: draft.width, height: draft.height, transform: `translate(-50%, -50%) scale(${String(canvasScale)})` }}
@@ -679,7 +686,9 @@ function OverlayEditorWorkspace({
             <Button variant="neutral" disabled={!canEdit || orderedElements.at(-1)?.id === selectedElement.id} onClick={() => { moveLayer(-1); }}>{labels.editorMoveBackward}</Button>
           </div>
           <Switch layout="inline" label={labels.editorInComposition} checked={selectedElement.inComposition} disabled={!canEdit}
-            onChange={(inComposition) => { updateElement(selectedElement.id, { inComposition }); }} />
+            onChange={(inComposition) => { updateElement(selectedElement.id, inComposition
+              ? { inComposition, ...clampPosition(selectedElement, selectedElement.x, selectedElement.y) }
+              : { inComposition }); }} />
           <Button danger="subtle" disabled={!canEdit}
             {...(canManage ? {} : { title: labels.editorReadOnly, describedBy: "overlay-editor-readonly-reason" })}
             onClick={removeElement}>{labels.editorRemove}</Button>

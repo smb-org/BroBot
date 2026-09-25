@@ -255,6 +255,39 @@ describe("Overlay composition editor", () => {
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
   });
 
+  it("clamps a hidden element back on-canvas when composition is turned on", async () => {
+    // While `inComposition: false`, the element is not rendered, so the X/Y fields allowed the
+    // full canvas range and a value chosen while hidden could leave it off-canvas once shown.
+    const hiddenElement = {
+      id: "element-hidden", kind: "variable", label: "Hidden", variableName: "score",
+      text: "Hidden: {value}", config: {}, x: 1270, y: 700, scalePercent: 100, z: 1, inComposition: false,
+    };
+    const overlayWithHiddenElement = { ...initialOverlay, elements: [hiddenElement, initialOverlay.elements[0]] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: overlayWithHiddenElement }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1270");
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("700");
+
+    const toggleRow = screen.getByText("In der Komposition anzeigen").closest(".ui-switch-field__row");
+    const toggle = toggleRow?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (toggle === null || toggle === undefined) throw new Error("Composition toggle is missing.");
+    fireEvent.click(toggle);
+
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("1240");
+    expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue("680");
+  });
+
   it("keeps a changed draft when a revision conflict is resolved", async () => {
     let putCount = 0;
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
