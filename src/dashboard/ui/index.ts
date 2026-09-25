@@ -17,6 +17,12 @@ export type { SidebarProps, SidebarEntry, SidebarGroup, SidebarModulesGroup } fr
 export { Field } from "./Field";
 export type { FieldProps } from "./Field";
 
+export { ColorField } from "./ColorField";
+export type { ColorFieldProps } from "./ColorField";
+
+export { CodeField } from "./CodeField";
+export type { CodeFieldProps } from "./CodeField";
+
 export { ReadOnlyTextArea } from "./ReadOnlyTextArea";
 
 export { FieldPair } from "./FieldPair";

@@ -275,6 +275,18 @@ export interface OverlaysTexts {
   openAccesses: string; issue: string; issueLabel: string; issueHint: string; copy: string; copied: string;
   editComposition: string; editorBack: string; editorLoading: string; editorLoadError: string;
   editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
+  editorPropertiesTab: string; editorStyleTab: string; editorCssTab: string;
+  editorStyleTarget: string; editorStyleOverlayTarget: string; editorStyleElementTarget: (name: string) => string;
+  editorStyleFontSystem: string; editorStyleFontCustomHint: string;
+  editorStyleFontFamily: string; editorStyleFontFamilyCount: (count: number, maximum: number) => string;
+  editorStyleFontSize: string; editorStyleFontWeight: string; editorStyleColor: string;
+  editorStyleAlignment: string; editorStyleLeft: string; editorStyleCenter: string; editorStyleRight: string;
+  editorStyleLineHeight: string; editorStyleLetterSpacing: string; editorStyleStrokeWidth: string; editorStyleStrokeColor: string;
+  editorStyleShadowX: string; editorStyleShadowY: string; editorStyleShadowBlur: string; editorStyleShadowColor: string;
+  editorStyleBackgroundColor: string; editorStyleBackgroundOpacity: string; editorStylePadding: string; editorStyleRadius: string;
+  editorStyleReset: string; editorStyleLocked: string; editorStyleRewrite: string; editorStyleOwnCssHint: string;
+  editorStyleReadOnlyReason: string;
+  editorStyleCodeHint: string; editorCssReadOnlyReason: string; editorStyleCopy: string; editorStyleCopied: string; editorStyleCopyError: string; editorStyleCssLimit: string;
   editorNoElements: string; editorNoSelection: string; editorReadOnly: string; editorChooseVariable: string;
   editorAddVariable: string; editorAdd: string; editorLabel: string; editorDisplayText: string;
   editorVariable: string; editorX: string; editorY: string; editorScale: string; editorZ: string;
@@ -311,6 +323,23 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     elements: "Elemente", accesses: "Zugänge", lastUsedAt: "Zuletzt benutzt", lastUsedNever: "nie", never: "Nie", statusLabel: "Status", openAccesses: "Zugänge verwalten", editComposition: "Komposition bearbeiten",
     editorBack: "Zurück zu Overlays", editorLoading: "Overlay wird geladen …", editorLoadError: "Das Overlay konnte nicht geladen werden.",
     editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
+    editorPropertiesTab: "Eigenschaften", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
+    editorStyleTarget: "Stil anwenden auf", editorStyleOverlayTarget: "Overlay-Vorgabe",
+    editorStyleElementTarget: (name) => `Element: ${name}`,
+    editorStyleFontSystem: "Systemschrift auswählen", editorStyleFontCustomHint: "Wähle eine Systemschrift oder gib einen eigenen Namen ein.",
+    editorStyleFontFamily: "Schriftart oder eigener Name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} Zeichen`,
+    editorStyleFontSize: "Schriftgröße", editorStyleFontWeight: "Schriftstärke", editorStyleColor: "Textfarbe",
+    editorStyleAlignment: "Ausrichtung", editorStyleLeft: "Links", editorStyleCenter: "Mittig", editorStyleRight: "Rechts",
+    editorStyleLineHeight: "Zeilenhöhe", editorStyleLetterSpacing: "Buchstabenabstand", editorStyleStrokeWidth: "Konturstärke", editorStyleStrokeColor: "Konturfarbe",
+    editorStyleShadowX: "Schatten X-Versatz", editorStyleShadowY: "Schatten Y-Versatz", editorStyleShadowBlur: "Schattenunschärfe", editorStyleShadowColor: "Schattenfarbe",
+    editorStyleBackgroundColor: "Hintergrundfarbe", editorStyleBackgroundOpacity: "Hintergrund-Deckkraft", editorStylePadding: "Innenabstand", editorStyleRadius: "Rundung",
+    editorStyleReset: "Stil zurücksetzen", editorStyleLocked: "Der Stilblock wurde im Code geändert oder enthält unbekannte CSS-Eigenschaften. Die Stilfelder sind gesperrt.",
+    editorStyleRewrite: "Aus Editor neu schreiben", editorStyleOwnCssHint: "Eigenes CSS unterhalb des verwalteten Blocks gewinnt bei gleichen Eigenschaften.",
+    editorStyleReadOnlyReason: "Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.",
+    editorStyleCodeHint: "Das Overlay-CSS ist die Quelle der Wahrheit. Änderungen bleiben im Entwurf, bis du speicherst.",
+    editorCssReadOnlyReason: "Bediener können das Overlay-CSS kopieren, aber nicht ändern.",
+    editorStyleCopy: "CSS kopieren", editorStyleCopied: "CSS kopiert", editorStyleCopyError: "CSS konnte nicht kopiert werden.",
+    editorStyleCssLimit: "Overlay-CSS darf höchstens 16.000 Zeichen enthalten.",
     editorNoElements: "Noch keine Elemente. Füge eine Kanalvariable hinzu.", editorNoSelection: "Wähle ein Element aus.", editorReadOnly: "Bediener können die Komposition ansehen, aber nicht ändern.",
     editorChooseVariable: "Kanalvariable auswählen", editorAddVariable: "Variable anzeigen", editorAdd: "Hinzufügen", editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
     editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
@@ -361,6 +390,23 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     elements: "Elements", accesses: "Accesses", lastUsedAt: "Last used", lastUsedNever: "never", never: "Never", statusLabel: "Status", openAccesses: "Manage accesses", editComposition: "Edit composition",
     editorBack: "Back to overlays", editorLoading: "Loading overlay …", editorLoadError: "The overlay could not be loaded.",
     editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
+    editorPropertiesTab: "Properties", editorStyleTab: "Style editor", editorCssTab: "CSS code",
+    editorStyleTarget: "Apply style to", editorStyleOverlayTarget: "Overlay default",
+    editorStyleElementTarget: (name) => `Element: ${name}`,
+    editorStyleFontSystem: "Choose a system font", editorStyleFontCustomHint: "Choose a system font or enter a custom font name.",
+    editorStyleFontFamily: "Font family or custom name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} characters`,
+    editorStyleFontSize: "Font size", editorStyleFontWeight: "Font weight", editorStyleColor: "Text color",
+    editorStyleAlignment: "Alignment", editorStyleLeft: "Left", editorStyleCenter: "Center", editorStyleRight: "Right",
+    editorStyleLineHeight: "Line height", editorStyleLetterSpacing: "Letter spacing", editorStyleStrokeWidth: "Outline width", editorStyleStrokeColor: "Outline color",
+    editorStyleShadowX: "Shadow X offset", editorStyleShadowY: "Shadow Y offset", editorStyleShadowBlur: "Shadow blur", editorStyleShadowColor: "Shadow color",
+    editorStyleBackgroundColor: "Background color", editorStyleBackgroundOpacity: "Background opacity", editorStylePadding: "Padding", editorStyleRadius: "Corner radius",
+    editorStyleReset: "Reset style", editorStyleLocked: "The style block was changed in code or contains unknown CSS properties. Style fields are locked.",
+    editorStyleRewrite: "Rewrite from editor", editorStyleOwnCssHint: "Custom CSS below the managed block wins when it sets the same properties.",
+    editorStyleReadOnlyReason: "Operators can view overlay styles, but cannot change them.",
+    editorStyleCodeHint: "Overlay CSS is the source of truth. Changes stay in the draft until you save.",
+    editorCssReadOnlyReason: "Operators can copy overlay CSS, but cannot change it.",
+    editorStyleCopy: "Copy CSS", editorStyleCopied: "CSS copied", editorStyleCopyError: "CSS could not be copied.",
+    editorStyleCssLimit: "Overlay CSS can contain at most 16,000 characters.",
     editorNoElements: "No elements yet. Add a channel variable.", editorNoSelection: "Select an element.", editorReadOnly: "Operators can view the composition, but cannot edit it.",
     editorChooseVariable: "Choose a channel variable", editorAddVariable: "Show variable", editorAdd: "Add", editorLabel: "Element label", editorDisplayText: "Display text",
     editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Scale (%)", editorZ: "Layer (z)",

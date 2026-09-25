@@ -167,6 +167,78 @@ describe("Overlay composition editor", () => {
     expect(body.elements[0]).toMatchObject({ x: 30, y: 49 });
   });
 
+  it("locks the style fields after a code edit and rewrites the managed block from the editor", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        const body = JSON.parse(init.body) as { css: string; elements: typeof initialOverlay.elements };
+        return Promise.resolve(jsonResponse({ overlay: { ...initialOverlay, css: body.css, elements: body.elements, revision: 5 } }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    fireEvent.change(screen.getByLabelText("Text color"), { target: { value: "#123456" } });
+    fireEvent.click(screen.getByRole("tab", { name: "CSS code" }));
+    const code = screen.getByRole("textbox", { name: "CSS code" });
+    const currentCss = (code as HTMLTextAreaElement).value;
+    expect(currentCss).toContain("color: #123456;");
+    fireEvent.change(code, { target: { value: currentCss.replace("color: #123456;", "color: hotpink;") } });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    const stylePanel = screen.getByRole("tabpanel", { name: "Style editor" });
+    expect(within(stylePanel).getByText(/style block was changed in code/i, { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Text color")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Rewrite from editor" }));
+    expect(screen.getByLabelText("Text color")).toBeEnabled();
+    expect(screen.getByLabelText("Text color")).toHaveValue("#123456");
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
+    const saveCall = fetcher.mock.calls.find(([, init]) => init?.method === "PUT");
+    if (saveCall === undefined || typeof saveCall[1]?.body !== "string") throw new Error("Overlay save request is missing.");
+    expect((JSON.parse(saveCall[1].body) as { css: string }).css).toContain("color: #123456;");
+  });
+
+  it("copies the complete CSS string from the code tab", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "clipboard");
+    const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: initialOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const previewViewport = document.querySelector<HTMLElement>(".overlay-editor__preview-viewport");
+    expect(previewViewport?.style.aspectRatio).toBe("1280 / 720");
+    fireEvent.click(screen.getByRole("tab", { name: "CSS code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy CSS" }));
+    expect(await screen.findByText("CSS copied")).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith(initialOverlay.css);
+    if (clipboardDescriptor === undefined) Reflect.deleteProperty(window.navigator, "clipboard");
+    else Object.defineProperty(window.navigator, "clipboard", clipboardDescriptor);
+  });
+
   it("consumes a variable deep link into an unsaved draft", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = requestUrl(input);
@@ -271,6 +343,13 @@ describe("Overlay composition editor", () => {
       expect(action).toBeDisabled();
       expect(action).toHaveAttribute("aria-describedby", "overlay-editor-readonly-reason");
     }
+    fireEvent.click(screen.getByRole("tab", { name: "Stil-Editor" }));
+    expect(screen.getByText("Bediener dürfen den Overlay-Stil ansehen, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Textfarbe")).toBeDisabled();
+    fireEvent.click(screen.getByRole("tab", { name: "CSS-Code" }));
+    expect(screen.getByText("Bediener können das Overlay-CSS kopieren, aber nicht ändern.", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "CSS-Code" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "CSS kopieren" })).toBeEnabled();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
   });
 
