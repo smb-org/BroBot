@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
+import { hashOverlayToken } from "../../src/worker/auth/crypto";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { panelRouter } from "../../src/worker/panel/routes";
 import type { RealtimeMessage } from "../../src/realtime-contract";
@@ -11,6 +12,7 @@ import { TestD1Database, type TestPreparedStatement, type TestD1Result } from ".
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
   SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
+  OVERLAY_TOKEN_PEPPER: key(4),
 };
 
 let database: TestD1Database;
@@ -19,6 +21,7 @@ let sqliteChanges = 0;
 let originalBatch: (statements: TestPreparedStatement[]) => Promise<TestD1Result[]>;
 let originalPrepare: (sql: string) => TestPreparedStatement;
 let realtimePublish: ReturnType<typeof vi.fn<(messages: readonly RealtimeMessage[]) => void>>;
+let realtimeLegacySocketClose: ReturnType<typeof vi.fn<(tokenId: string) => Promise<boolean>>>;
 
 const requestFor = async (userId: string, path: string, method = "GET", body?: unknown, includeCsrf = true): Promise<Request> => {
   const sessionId = `session-${userId}`;
@@ -42,12 +45,20 @@ const fetchPanel = async (userId: string, path: string, method = "GET", body?: u
   DB: database as unknown as D1Database,
   CHANNEL: {
     idFromName: (channelId: string) => channelId,
-    get: () => ({ publish: realtimePublish }),
+    get: () => ({ publish: realtimePublish, closeUnboundOverlayTokenSockets: realtimeLegacySocketClose }),
   },
     TWITCH_CLIENT_ID: "test-client-id",
     SESSION_COOKIE_KEYS: environmentKeys.SESSION_COOKIE_KEYS,
     SESSION_ENCRYPTION_KEYS: environmentKeys.SESSION_ENCRYPTION_KEYS,
+    OVERLAY_TOKEN_PEPPER: environmentKeys.OVERLAY_TOKEN_PEPPER,
   });
+
+const insertLegacyToken = async (channelId: string, tokenId: string, token: string): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO overlay_tokens (token_id, channel_id, token_hash, created_at)
+     VALUES (?, ?, ?, '2026-09-24T10:00:00.000Z')`,
+  ).bind(tokenId, channelId, await hashOverlayToken(token, environmentKeys.OVERLAY_TOKEN_PEPPER)).run();
+};
 
 const element = (id: string, x = 0) => ({
   id,
@@ -90,6 +101,7 @@ describe("stored overlay routes", () => {
   beforeEach(() => {
     database = new TestD1Database();
     realtimePublish = vi.fn<(messages: readonly RealtimeMessage[]) => void>();
+    realtimeLegacySocketClose = vi.fn<(tokenId: string) => Promise<boolean>>().mockResolvedValue(true);
     originalBatch = database.batch.bind(database);
     originalPrepare = database.prepare.bind(database);
     startD1WriteCapture();
@@ -159,6 +171,123 @@ describe("stored overlay routes", () => {
       .resolves.toEqual({ count: 1 });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a'").first())
       .resolves.toEqual({ count: 1 });
+  });
+
+  it("imports an active legacy link into one overlay and binds its token atomically", async () => {
+    await insertChannel(database, "channel-a");
+    await insertChannel(database, "channel-b");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertLoginIdentityAndSession(database, "operator-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await insertMember(database, "channel-b", "manager-a", "manager");
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    const createdVariable = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 12, description: "Score", resetOnStreamStart: false,
+    });
+    expect(createdVariable.status).toBe(201);
+
+    const channelToken = "a".repeat(43);
+    const otherChannelToken = "b".repeat(43);
+    const operatorToken = "c".repeat(43);
+    await insertLegacyToken("channel-a", "legacy-a", channelToken);
+    await insertLegacyToken("channel-b", "legacy-b", otherChannelToken);
+    await insertLegacyToken("channel-a", "legacy-c", operatorToken);
+
+    const importPath = "/api/channels/channel-a/overlays/import-legacy";
+    const crossChannel = await fetchPanel("manager-a", importPath, "POST", {
+      token: otherChannelToken, variableName: "score", text: "Imported: {value}",
+    });
+    expect(crossChannel.status).toBe(404);
+    await expect(crossChannel.json()).resolves.toEqual({ error: "overlay_token_not_found" });
+
+    const operatorImport = await fetchPanel("operator-a", importPath, "POST", {
+      token: operatorToken, variableName: "score", text: "Imported: {value}",
+    });
+    expect(operatorImport.status).toBe(403);
+
+    const imported = await fetchPanel("manager-a", importPath, "POST", {
+      token: channelToken, variableName: "score", text: "Stored: {value}",
+    });
+    expect(imported.status).toBe(201);
+    expect(realtimeLegacySocketClose).toHaveBeenCalledWith("legacy-a");
+    const body: { overlay: { id: string; name: string; width: number; height: number; elements: Array<Record<string, unknown>> } } = await imported.json();
+    expect(body.overlay).toMatchObject({ name: "score", width: 1920, height: 1080 });
+    expect(body.overlay.elements).toEqual([expect.objectContaining({
+      kind: "variable", label: "score", variableName: "score", text: "Stored: {value}",
+      x: 0, y: 0, scalePercent: 100, z: 0, inComposition: true,
+    })]);
+
+    const binding = await database.prepare(
+      "SELECT overlay_id, label, secret_envelope FROM overlay_tokens WHERE token_id = 'legacy-a'",
+    ).first();
+    expect(binding).toEqual({ overlay_id: body.overlay.id, label: "score", secret_envelope: null });
+    const audit = await database.prepare(
+      "SELECT action, after_json FROM audit_log WHERE action = 'overlay.legacy.imported'",
+    ).first<{ action: string; after_json: string }>();
+    expect(audit?.action).toBe("overlay.legacy.imported");
+    expect(JSON.parse(audit?.after_json ?? "{}") as Record<string, unknown>).toMatchObject({
+      overlayId: body.overlay.id, elementId: body.overlay.elements[0]?.id, tokenId: "legacy-a", variableName: "score",
+    });
+    expect(audit?.after_json).not.toContain(channelToken);
+
+    const repeated = await fetchPanel("manager-a", importPath, "POST", {
+      token: channelToken, variableName: "score", text: "Changed fragment: {value}",
+    });
+    expect(repeated.status).toBe(409);
+    await expect(repeated.json()).resolves.toEqual({ error: "overlay_token_already_bound" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlays WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 1 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'overlay.legacy.imported'").first())
+      .resolves.toEqual({ count: 1 });
+  });
+
+  it.each([
+    ["without a placeholder", "Score"],
+    ["with multiple placeholders", "Score {value} and {value}"],
+  ])("keeps legacy display text %s valid when an imported draft is saved", async (_description, legacyText) => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 12, description: "Score", resetOnStreamStart: false,
+    });
+    const token = "d".repeat(43);
+    await insertLegacyToken("channel-a", "legacy-display-text", token);
+
+    const imported = await fetchPanel("manager-a", "/api/channels/channel-a/overlays/import-legacy", "POST", {
+      token, variableName: "score", text: legacyText,
+    });
+    const body = await imported.json<{
+      overlay: { id: string; elements: Array<Record<string, unknown>> };
+    }>();
+    const savedElement = body.overlay.elements[0];
+    if (savedElement === undefined) throw new Error("Imported overlay element was missing.");
+    const firstElement = {
+      id: savedElement.id,
+      kind: savedElement.kind,
+      label: savedElement.label,
+      variableName: savedElement.variableName,
+      text: savedElement.text,
+      config: savedElement.config,
+      x: savedElement.x,
+      y: savedElement.y,
+      scalePercent: savedElement.scalePercent,
+      z: savedElement.z,
+      inComposition: savedElement.inComposition,
+    };
+    const saved = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${body.overlay.id}`, "PUT", {
+      baseRevision: 1,
+      name: "Updated imported overlay",
+      width: 1920,
+      height: 1080,
+      css: "",
+      elements: [firstElement, { ...element("second-element"), variableName: "score" }],
+    });
+    const savedBody = await saved.json<{ overlay: { elements: Array<{ text: string }> } }>();
+
+    expect(imported.status).toBe(201);
+    expect(saved.status).toBe(200);
+    expect(savedBody.overlay.elements.map(({ text }) => text)).toEqual([legacyText, "Score {value}"]);
   });
 
   it("rejects reconnect when the server already has another variable bound to the element", async () => {

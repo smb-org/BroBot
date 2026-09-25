@@ -7,6 +7,7 @@ import {
   fetchOverlayAccesses,
   fetchOverlays,
   fetchOverlayTokens,
+  importLegacyOverlay,
   issueOverlayAccess,
   PanelApiError,
   replaceOverlayAccess,
@@ -21,7 +22,7 @@ import {
 } from "./api";
 import { apiErrorText, dashboardLanguage, formatTimestamp, overlaysTexts } from "./locale";
 import { OverlayObsInstructions } from "./OverlayObsInstructions";
-import { Button, ConfirmDialog, Field, ListDetail, NumberField, Select, SubInspector } from "./ui";
+import { Button, ConfirmDialog, Field, FormDialog, ListDetail, NumberField, Select, SubInspector } from "./ui";
 
 interface OverlaysPageProperties {
   channelId: string;
@@ -32,6 +33,23 @@ interface OverlaysPageProperties {
 
 const blankOverlayName = "";
 const maskOverlaySecret = (overlayUrl: string): string => overlayUrl.replace(/([#&]token=)[^&]*/u, "$1••••••");
+const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
+
+const parseLegacyOverlayLink = (value: string): { token: string; variableName: string; text: string } | null => {
+  try {
+    const url = new URL(value.trim(), window.location.origin);
+    if (url.hash.length <= 1) return null;
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    const token = fragment.get("token");
+    const variableName = fragment.get("var");
+    const text = variableName === null ? null : fragment.get("text") ?? `${variableName}: {value}`;
+    if (token === null || !/^[A-Za-z0-9_-]{43}$/u.test(token) || variableName === null ||
+        !VARIABLE_NAME_PATTERN.test(variableName) || text === null || text.length > 100) return null;
+    return { token, variableName, text };
+  } catch {
+    return null;
+  }
+};
 
 interface ScopedOverlaySecret extends PanelIssuedOverlayAccess {
   overlayId: string;
@@ -67,6 +85,9 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   const [legacyNextOffset, setLegacyNextOffset] = useState<number | null>(null);
   const [legacyError, setLegacyError] = useState<string | null>(null);
   const [legacyRevokeTarget, setLegacyRevokeTarget] = useState<PanelOverlayToken | null>(null);
+  const [legacyImportOpen, setLegacyImportOpen] = useState(false);
+  const [legacyImportLink, setLegacyImportLink] = useState("");
+  const [legacyImportError, setLegacyImportError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const requestVersion = useRef(0);
@@ -91,10 +112,16 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     channelIdRef.current === requestedChannelId && permissionRef.current;
 
   useLayoutEffect(() => {
-    if (permissionRef.current !== canManage || channelIdRef.current !== channelId) invalidateSecret();
+    const accessContextChanged = permissionRef.current !== canManage || channelIdRef.current !== channelId;
+    if (accessContextChanged) invalidateSecret();
     if (channelIdRef.current !== channelId) {
       changeSelection(null);
       setSelectedOverlayData(null);
+    }
+    if (accessContextChanged) {
+      setLegacyImportOpen(false);
+      setLegacyImportLink("");
+      setLegacyImportError(null);
     }
     permissionRef.current = canManage;
     channelIdRef.current = channelId;
@@ -270,7 +297,7 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
   };
 
   const reveal = async (access: PanelOverlayAccess): Promise<void> => {
-    if (selectedOverlay === null || !canManage || pending || access.revokedAt !== null) return;
+    if (selectedOverlay === null || !canManage || pending || access.revokedAt !== null || !access.recoverable) return;
     const overlayId = selectedOverlay.id;
     invalidateSecret();
     const version = secretVersion.current;
@@ -358,6 +385,35 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
     }
   };
 
+  const importLegacy = async (): Promise<void> => {
+    if (!canManage || pending) return;
+    const parsed = parseLegacyOverlayLink(legacyImportLink);
+    if (parsed === null) {
+      setLegacyImportError(labels.legacyImportInvalidLink);
+      return;
+    }
+    setPending(true);
+    setLegacyImportError(null);
+    try {
+      const result = await importLegacyOverlay(channelId, parsed);
+      setLegacyImportOpen(false);
+      setLegacyImportLink("");
+      changeSelection(result.overlay.id);
+      await Promise.all([load(), loadLegacyTokens()]);
+      setNotice(result.closingPending ? labels.legacyImportClosingPending : labels.legacyImportSuccess(result.overlay.name));
+    } catch (caught) {
+      if (caught instanceof PanelApiError && caught.code === "overlay_token_not_found") {
+        setLegacyImportError(labels.legacyImportTokenNotFound);
+      } else if (caught instanceof PanelApiError && caught.code === "overlay_token_already_bound") {
+        setLegacyImportError(labels.legacyImportAlreadyBound);
+      } else {
+        setLegacyImportError(caught instanceof PanelApiError ? apiErrorText(caught.code, labels.actionError) : labels.actionError);
+      }
+    } finally {
+      setPending(false);
+    }
+  };
+
   const isAccessActive = (access: PanelOverlayAccess): boolean => access.revokedAt === null &&
     (access.expiresAt === null || Date.parse(access.expiresAt) > now);
   const manageReason = canManage ? undefined : labels.managementLocked;
@@ -390,7 +446,14 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       </table>
     </div> : null}
     {legacyTokens.length > 0 ? <section className="overlay-legacy-links" aria-label={labels.legacyTitle}>
-      <h2>{labels.legacyTitle}</h2>
+      <div className="overlay-legacy-links__heading">
+        <h2>{labels.legacyTitle}</h2>
+        {canManage ? <Button variant="neutral" disabled={pending} onClick={() => {
+          setLegacyImportLink("");
+          setLegacyImportError(null);
+          setLegacyImportOpen(true);
+        }}>{labels.legacyImport}</Button> : null}
+      </div>
       <p className="muted">{labels.legacyDescription}</p>
       <ul className="overlay-access-list">{legacyTokens.map((token) => <li key={token.id} className="overlay-access-list__item">
         <div><strong>{labels.legacyTokenName}</strong>
@@ -458,9 +521,10 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
                   <span className="overlay-access-list__status" data-status={statusTone}>{labels.statusLabel}: {status}</span>
                 </div>
                 <div className="overlay-access-list__actions">
-                  <Button variant="neutral" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void reveal(access); }}>{labels.reveal}</Button>
+                  <Button variant="neutral" disabled={!canManage || pending || !active || !access.recoverable} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void reveal(access); }}>{labels.reveal}</Button>
                   <Button variant="neutral" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { void replace(access); }}>{labels.replace}</Button>
                   <Button danger="subtle" disabled={!canManage || pending || !active} {...(manageReason === undefined ? {} : { title: manageReason })} onClick={() => { setRevokeTarget(access); }}>{labels.revoke}</Button>
+                  {!access.recoverable ? <span className="muted">{labels.accessUnrecoverable}</span> : null}
                 </div>
               </li>
             );
@@ -495,5 +559,27 @@ export function OverlaysPage({ channelId, canManage, initialSelection, onOpenEdi
       confirmLabel={labels.legacyRevokeConfirm(legacyRevokeIdentity)} cancelLabel={labels.cancel}
       onCancel={() => { setLegacyRevokeTarget(null); }} onConfirm={() => { void revokeLegacy(); }} pending={pending} danger
       {...(legacyError === null ? {} : { error: legacyError })} />
+    <FormDialog opened={legacyImportOpen} title={labels.legacyImportTitle}
+      description={labels.legacyImportDescription} confirmLabel={labels.legacyImportConfirm}
+      cancelLabel={labels.cancel} onCancel={() => {
+        setLegacyImportOpen(false);
+        setLegacyImportLink("");
+        setLegacyImportError(null);
+      }}
+      onConfirm={() => { void importLegacy(); }} pending={pending}
+      confirmDisabled={legacyImportLink.trim().length === 0}
+      {...(legacyImportError === null ? {} : { error: legacyImportError })}>
+      <div className="overlay-legacy-import-form">
+        <Field id="overlay-legacy-import-link" label={labels.legacyImportLinkLabel} value={legacyImportLink}
+          onChange={(value) => { setLegacyImportLink(value); setLegacyImportError(null); }}
+          placeholder={labels.legacyImportPlaceholder} mono disabled={pending}
+          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void importLegacy(); } }} />
+        <ul className="muted">
+          <li>{labels.legacyImportCssWarning}</li>
+          <li>{labels.legacyImportPositionWarning}</li>
+          <li>{labels.legacyImportTokenWarning}</li>
+        </ul>
+      </div>
+    </FormDialog>
   </>;
 }

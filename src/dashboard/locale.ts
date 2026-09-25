@@ -287,6 +287,7 @@ export interface OverlaysTexts {
   editorUnsavedTitle: string; editorUnsavedDescription: string; editorContinue: string;
   editorDiscardAndLeave: string; editorSaveAndLeave: string;
   copyError: string; showLink: string; hideLink: string; fullLink: string; reveal: string; replace: string; revoke: string; revoked: string; revokedPending: string;
+  accessUnrecoverable: string;
   active: string; expired: string; revokedStatus: string; noAccesses: string; delete: string; deleteTitle: (name: string) => string;
   deleteDescription: (name: string) => string; deleteConfirm: (name: string) => string; close: string;
   conflict: string; guide: string; issueReason: string; readOnly: string; elementCount: (count: number) => string;
@@ -294,6 +295,10 @@ export interface OverlaysTexts {
   legacyTitle: string; legacyDescription: string; legacyTokenName: string; legacyCreatedByUnknown: string;
   legacyCreatedAt: string; legacyTokenId: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
   legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string;
+  legacyImport: string; legacyImportTitle: string; legacyImportDescription: string; legacyImportLinkLabel: string;
+  legacyImportPlaceholder: string; legacyImportCssWarning: string; legacyImportPositionWarning: string;
+  legacyImportTokenWarning: string; legacyImportConfirm: string; legacyImportSuccess: (name: string) => string;
+  legacyImportInvalidLink: string; legacyImportTokenNotFound: string; legacyImportAlreadyBound: string; legacyImportClosingPending: string;
 }
 
 const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
@@ -320,6 +325,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorContinue: "Weiter bearbeiten", editorDiscardAndLeave: "Verwerfen und verlassen", editorSaveAndLeave: "Speichern und verlassen",
     issue: "Zugang ausstellen", issueLabel: "Name des Zugangs", issueHint: "Zum Beispiel OBS Hauptrechner.", copy: "Link kopieren",
     copied: "Kopiert", copyError: "Der Link konnte nicht kopiert werden.", showLink: "Link anzeigen", hideLink: "Link verbergen", fullLink: "Vollständiger Link", reveal: "Link erneut anzeigen", replace: "Ersetzen", revoke: "Widerrufen",
+    accessUnrecoverable: "Dieser alte Zugang kann nicht erneut angezeigt werden. Stelle einen neuen Zugang aus.",
     revoked: "Zugang widerrufen.", revokedPending: "Zugang widerrufen. Verbundene Quellen werden noch geschlossen.", active: "Aktiv",
     expired: "Abgelaufen", revokedStatus: "Widerrufen", noAccesses: "Für dieses Overlay gibt es noch keine Zugänge.", delete: "Overlay löschen",
     deleteTitle: (name) => `Overlay ${name} löschen?`, deleteDescription: (name) => `„${name}“ und seine Elemente werden gelöscht; alle zugehörigen Zugänge werden widerrufen.`,
@@ -333,6 +339,18 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyRevokeTitle: (name) => `Alten Link ${name} widerrufen?`,
     legacyRevokeDescription: (name) => `Der alte Link ${name} wird sofort ungültig. Verbundene Quellen werden geschlossen.`,
     legacyRevokeConfirm: (name) => `${name} widerrufen`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden",
+    legacyImport: "Importieren", legacyImportTitle: "Alten Link importieren",
+    legacyImportDescription: "Füge einen alten Overlay-Link ein. Nur Token, Variable und Anzeigetext werden an den Server gesendet.",
+    legacyImportLinkLabel: "Alter Overlay-Link",
+    legacyImportPlaceholder: "https://example.invalid/overlay#token=…&var=score&text=Score%3A+%7Bvalue%7D",
+    legacyImportCssWarning: "Benutzerdefiniertes OBS-CSS wird nicht importiert.",
+    legacyImportPositionWarning: "Positionen in OBS werden nicht importiert.",
+    legacyImportTokenWarning: "Ein Token kann mehrere unterschiedliche Fragment-Links bedient haben. Nach dem Import zeigen alle Quellen mit diesem Token dasselbe gespeicherte Overlay.",
+    legacyImportConfirm: "Link importieren", legacyImportSuccess: (name) => `Overlay „${name}“ wurde importiert.`,
+    legacyImportInvalidLink: "Der Link muss ein Token und eine Variable im Fragment enthalten.",
+    legacyImportTokenNotFound: "Der aktive Alt-Link gehört nicht zu diesem Kanal oder wurde widerrufen.",
+    legacyImportAlreadyBound: "Dieser Link wurde bereits an ein Overlay gebunden.",
+    legacyImportClosingPending: "Overlay importiert. Die verbundene alte Quelle wird noch geschlossen.",
   },
   en: {
     title: "Overlays", list: "Overlays", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
@@ -357,6 +375,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorContinue: "Keep editing", editorDiscardAndLeave: "Discard and leave", editorSaveAndLeave: "Save and leave",
     issue: "Issue access", issueLabel: "Access name", issueHint: "For example, OBS main PC.", copy: "Copy link",
     copied: "Copied", copyError: "The link could not be copied.", showLink: "Show link", hideLink: "Hide link", fullLink: "Full link", reveal: "Show link again", replace: "Replace", revoke: "Revoke",
+    accessUnrecoverable: "This legacy access cannot be shown again. Issue a new access.",
     revoked: "Access revoked.", revokedPending: "Access revoked. Connected sources are still closing.", active: "Active",
     expired: "Expired", revokedStatus: "Revoked", noAccesses: "This overlay has no accesses yet.", delete: "Delete overlay",
     deleteTitle: (name) => `Delete overlay ${name}?`, deleteDescription: (name) => `“${name}” and its elements will be deleted; all of its accesses will be revoked.`,
@@ -370,6 +389,18 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyRevokeTitle: (name) => `Revoke legacy link ${name}?`,
     legacyRevokeDescription: (name) => `The legacy link ${name} will stop working immediately. Connected sources will be closed.`,
     legacyRevokeConfirm: (name) => `Revoke ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more",
+    legacyImport: "Import", legacyImportTitle: "Import a legacy link",
+    legacyImportDescription: "Paste an old overlay link. Only its token, variable, and display text are sent to the server.",
+    legacyImportLinkLabel: "Legacy overlay link",
+    legacyImportPlaceholder: "https://example.invalid/overlay#token=…&var=score&text=Score%3A+%7Bvalue%7D",
+    legacyImportCssWarning: "OBS custom CSS is not imported.",
+    legacyImportPositionWarning: "OBS positions are not imported.",
+    legacyImportTokenWarning: "One token may have served several different fragment links. After import, all sources using this token show the same stored overlay.",
+    legacyImportConfirm: "Import link", legacyImportSuccess: (name) => `Overlay “${name}” was imported.`,
+    legacyImportInvalidLink: "The link must include a token and a variable in its fragment.",
+    legacyImportTokenNotFound: "The active legacy link does not belong to this channel or has been revoked.",
+    legacyImportAlreadyBound: "This link is already bound to an overlay.",
+    legacyImportClosingPending: "Overlay imported. The connected legacy source is still closing.",
   },
 };
 
@@ -1945,6 +1976,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.created": "Overlay erstellt",
     "overlay.updated": "Overlay geändert",
     "overlay.deleted": "Overlay gelöscht",
+    "overlay.legacy.imported": "Alter Overlay-Link importiert",
   },
   en: {
     "channel.released": "Channel released",
@@ -1975,6 +2007,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.created": "Overlay created",
     "overlay.updated": "Overlay updated",
     "overlay.deleted": "Overlay deleted",
+    "overlay.legacy.imported": "Legacy overlay link imported",
   },
 };
 
@@ -2125,6 +2158,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     overlay_css_invalid: "Overlay-CSS darf keine Stylesheets importieren und nur relative Asset-URLs verwenden.",
     overlay_data_invalid: "Overlay-Daten sind ungültig.",
     overlay_not_found: "Overlay nicht gefunden.",
+    overlay_token_already_bound: "Dieser Overlay-Link ist bereits an ein Overlay gebunden.",
     overlay_limit_reached: "Ein Kanal kann höchstens 20 Overlays haben.",
     overlay_element_limit_reached: "Ein Overlay kann höchstens 20 Elemente haben.",
     overlay_changed_concurrently: "Overlay wurde inzwischen geändert.",
@@ -2217,6 +2251,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     overlay_css_invalid: "Overlay CSS cannot import stylesheets and may use only relative asset URLs.",
     overlay_data_invalid: "Overlay data is invalid.",
     overlay_not_found: "Overlay not found.",
+    overlay_token_already_bound: "This overlay link is already bound to an overlay.",
     overlay_limit_reached: "A channel can have at most 20 overlays.",
     overlay_element_limit_reached: "An overlay can have at most 20 elements.",
     overlay_changed_concurrently: "The overlay has changed since it was loaded.",

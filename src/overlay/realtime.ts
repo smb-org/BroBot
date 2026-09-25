@@ -1,4 +1,5 @@
 import {
+  OVERLAY_ACCESS_BOUND_CLOSE_CODE,
   OVERLAY_TOKEN_SUBPROTOCOL_PREFIX,
   REALTIME_PROTOCOL,
 } from "../realtime-contract";
@@ -16,6 +17,7 @@ export interface OverlayRealtimeCallbacks {
   onOpen?: (reconnected: boolean) => void;
   onMessage?: (message: RealtimeEnvelope<"variables.changed">) => void;
   onOverlayChanged?: (message: RealtimeEnvelope<"overlay.changed">) => void;
+  onTokenBound?: () => void;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -177,6 +179,12 @@ export const connectOverlayRealtime = (
     activeSocket.addEventListener("close", (event: CloseEvent) => {
       if (socket === activeSocket) socket = null;
       if (disposed || fatalProtocolError) return;
+      if (event.code === OVERLAY_ACCESS_BOUND_CLOSE_CODE) {
+        fatalProtocolError = true;
+        stopReconnectTimer();
+        callbacks.onTokenBound?.();
+        return;
+      }
       if (event.code === SOCKET_EXPIRED_CODE || event.code === SOCKET_REVOKED_CODE ||
           event.code === SOCKET_POLICY_VIOLATION_CODE) {
         if (event.code === SOCKET_POLICY_VIOLATION_CODE) fatalProtocolError = true;

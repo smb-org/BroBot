@@ -270,6 +270,7 @@ export const AUDIT_ACTIONS = [
   "overlay.created",
   "overlay.updated",
   "overlay.deleted",
+  "overlay.legacy.imported",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type ModuleSettingsChangedAction = `${string}.settings_changed`;
@@ -384,6 +385,7 @@ export const API_ERROR_CODES = [
   "overlay_css_invalid",
   "overlay_data_invalid",
   "overlay_not_found",
+  "overlay_token_already_bound",
   "overlay_limit_reached",
   "overlay_element_limit_reached",
   "overlay_changed_concurrently",

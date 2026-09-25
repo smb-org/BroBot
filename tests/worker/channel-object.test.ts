@@ -16,6 +16,7 @@ import type {
   RealtimePanelPrincipal,
   RealtimePrincipal,
 } from "../../src/realtime-contract";
+import { OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON } from "../../src/realtime-contract";
 import type { AdsSchedule } from "../../src/modules/ads/contracts";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
@@ -81,6 +82,7 @@ const overlaySocketFor = (
 
 type StorageDouble = {
   values: Map<string, unknown>;
+  get: ReturnType<typeof vi.fn<(key: string) => Promise<unknown>>>;
   list: ReturnType<typeof vi.fn>;
   setAlarm: ReturnType<typeof vi.fn>;
   deleteAlarm: ReturnType<typeof vi.fn>;
@@ -94,6 +96,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   let transactionQueue = Promise.resolve();
   const storage: StorageDouble = {
     values,
+    get: vi.fn((key: string) => Promise.resolve(values.get(key))),
     list: vi.fn((options?: { prefix?: string; startAfter?: string; limit?: number }) => {
       const keys = [...values.keys()]
         .filter((key) => options?.prefix === undefined || key.startsWith(options.prefix))
@@ -108,7 +111,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   const prepared = {
     bind: vi.fn(() => prepared),
     all: vi.fn().mockResolvedValue({ results: [] }),
-    first: vi.fn().mockResolvedValue({ token_id: "token-1" }),
+    first: vi.fn().mockResolvedValue({ token_id: "token-1", overlay_id: null }),
   };
   const getWebSockets = vi.fn((tag?: string) => tag === undefined
     ? sockets
@@ -124,7 +127,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
     }),
     storage: {
       ...storage,
-      get: vi.fn((key: string) => Promise.resolve(values.get(key))),
+      get: storage.get,
       put: vi.fn((key: string, value: unknown) => {
         values.set(key, value);
         return Promise.resolve();
@@ -165,6 +168,7 @@ const objectFor = (sockets: SocketDouble[], database?: D1Database): ChannelObjec
   (object as unknown as { adScheduleRefreshStartedAt: number }).adScheduleRefreshStartedAt = 0;
   (object as unknown as { adScheduleRefreshGeneration: number }).adScheduleRefreshGeneration = 0;
   (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
+  (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
   return object;
 };
 
@@ -192,6 +196,7 @@ const eventMessage: RealtimeEnvelope<"event_log.new"> = {
 describe("ChannelObject realtime path", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     mocks.processAdPrewarning.mockReset().mockResolvedValue(undefined);
     mocks.refreshAdPrewarningAlarm.mockReset().mockResolvedValue(undefined);
     mocks.getAdSchedule.mockReset();
@@ -279,7 +284,7 @@ describe("ChannelObject realtime path", () => {
     };
     const prepare = vi.fn(() => ({
       bind: vi.fn(() => ({
-        first: vi.fn().mockResolvedValue({ token_id: token.tokenId }),
+        first: vi.fn().mockResolvedValue({ token_id: token.tokenId, overlay_id: token.overlayId }),
       })),
     }));
     const object = objectFor([], { prepare } as unknown as D1Database);
@@ -292,6 +297,33 @@ describe("ChannelObject realtime path", () => {
     expect(accepted?.deserializeAttachment()).toEqual(token);
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("FROM overlay_tokens"));
+  });
+
+  it("closes a stale legacy handshake when its token is already bound", async () => {
+    const token: RealtimeOverlayPrincipal = {
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-bound-during-handshake",
+      overlayId: null,
+      expiresAt: null,
+    };
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn().mockResolvedValue({ token_id: token.tokenId, overlay_id: "overlay-current" }),
+      })),
+    }));
+    const object = objectFor([], { prepare } as unknown as D1Database);
+    const pair = new WebSocketPair();
+    const close = vi.spyOn(pair[1], "close");
+    const send = vi.spyOn(pair[1], "send");
+    vi.stubGlobal("WebSocketPair", function WebSocketPairDouble() { return pair; });
+
+    const response = await object.fetch(upgradeRequest(token));
+
+    expect(response.status).toBe(101);
+    expect(close).toHaveBeenCalledWith(OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("rechecks revocation immediately before accept when token validation awaits", async () => {
@@ -484,6 +516,7 @@ describe("ChannelObject realtime path", () => {
     const afterWake = Object.create(ChannelObject.prototype) as ChannelObject;
     (afterWake as unknown as { ctx: DurableObjectState }).ctx = internals.ctx;
     (afterWake as unknown as { env: Env }).env = internals.env;
+    (afterWake as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
     const variableChange: RealtimeEnvelope<"variables.changed"> = {
       version: 1,
       id: "variables-after-wake",
@@ -513,6 +546,143 @@ describe("ChannelObject realtime path", () => {
       payload: { set: [{ name: "score", value: 12 }, { name: "wins", value: 8 }], removed: ["streak"] },
     });
     expect(bound.serializeAttachment.mock.calls).toEqual([]);
+  });
+
+  it("closes an already-connected legacy source when its token becomes bound", async () => {
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null, expiresAt: null,
+    });
+    const sockets = [legacy];
+    legacy.close.mockImplementation(() => { sockets.splice(sockets.indexOf(legacy), 1); });
+    const object = objectFor(sockets);
+
+    const closed = await object.closeUnboundOverlayTokenSockets("token-legacy");
+    const variablesMessage: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "variables-after-binding",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: {
+        set: [{ name: "score", value: 12 }, { name: "wins", value: 8 }],
+        removed: ["streak"],
+        overlayIdsByVariable: { score: ["overlay-a"], wins: ["overlay-b"], streak: ["overlay-a"] },
+      },
+    };
+    await object.publish([variablesMessage]);
+
+    expect(closed).toBe(true);
+    expect(legacy.close.mock.calls).toEqual([[OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON]]);
+    expect(legacy.send.mock.calls).toHaveLength(0);
+  });
+
+  it("rejects a legacy handshake that reaches accept after the binding close scan", async () => {
+    const token: RealtimeOverlayPrincipal = {
+      v: 1,
+      kind: "overlay",
+      channelId: "kanal-a",
+      tokenId: "token-bound-during-handshake",
+      overlayId: null,
+      expiresAt: null,
+    };
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn().mockResolvedValue({ token_id: token.tokenId, overlay_id: null }),
+      })),
+    }));
+    const object = objectFor([], { prepare } as unknown as D1Database);
+    const storage = storageOf(object);
+    const pair = new WebSocketPair();
+    const close = vi.spyOn(pair[1], "close");
+    vi.stubGlobal("WebSocketPair", function WebSocketPairDouble() { return pair; });
+    let releaseMarker!: () => void;
+    let signalMarkerRead!: () => void;
+    const markerGate = new Promise<void>((resolve) => { releaseMarker = resolve; });
+    const markerRead = new Promise<void>((resolve) => { signalMarkerRead = resolve; });
+    storage.get.mockImplementation(async (key: string) => {
+      if (key === `overlay_revoked:${token.tokenId}`) {
+        signalMarkerRead();
+        await markerGate;
+      }
+      return storage.values.get(key);
+    });
+    const accept = (object as unknown as { ctx: { acceptWebSocket: ReturnType<typeof vi.fn> } }).ctx.acceptWebSocket;
+
+    const handshake = object.fetch(upgradeRequest(token));
+    await markerRead;
+    await object.closeUnboundOverlayTokenSockets(token.tokenId);
+    releaseMarker();
+    const response = await handshake;
+
+    expect(response.status).toBe(403);
+    expect(accept).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledWith(OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
+  });
+
+  it("does not deliver variables after a binding close fails and retries the close", async () => {
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null, expiresAt: null,
+    });
+    const sockets = [legacy];
+    legacy.close.mockImplementationOnce(() => { throw new Error("socket close failed"); })
+      .mockImplementation(() => { sockets.splice(sockets.indexOf(legacy), 1); });
+    const object = objectFor(sockets);
+    const variablesMessage: RealtimeEnvelope<"variables.changed"> = {
+      version: 1,
+      id: "variables-after-failed-binding-close",
+      createdAt: "2026-09-24T12:00:01.000Z",
+      channelId: "kanal-a",
+      type: "variables.changed",
+      payload: { set: [{ name: "score", value: 12 }], removed: [] },
+    };
+
+    await expect(object.closeUnboundOverlayTokenSockets("token-legacy")).resolves.toBe(false);
+    await object.publish([variablesMessage]);
+
+    expect(legacy.close.mock.calls).toEqual([
+      [OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON],
+      [OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON],
+    ]);
+    expect(legacy.send.mock.calls).toHaveLength(0);
+    expect(sockets).toHaveLength(0);
+  });
+
+  it("checks the changed binding periodically after an import close fails", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null, expiresAt: null,
+    });
+    const sockets = [legacy];
+    legacy.close.mockImplementationOnce(() => { throw new Error("socket close failed"); })
+      .mockImplementation(() => { sockets.splice(sockets.indexOf(legacy), 1); });
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          all: vi.fn().mockResolvedValue({
+            results: [{ token_id: "token-legacy", overlay_id: "overlay-current" }],
+          }),
+        })),
+      })),
+    } as unknown as D1Database;
+    const object = objectFor(sockets, database);
+    const storage = storageOf(object);
+    await (object as unknown as { scheduleSecurityAlarm: () => Promise<void> }).scheduleSecurityAlarm();
+    const securityDeadline = storage.values.get("security_round");
+    expect(typeof securityDeadline).toBe("number");
+
+    await expect(object.closeUnboundOverlayTokenSockets("token-legacy")).resolves.toBe(false);
+    expect(storage.values.get("security_round")).toBe(securityDeadline);
+
+    vi.setSystemTime(securityDeadline as number);
+    await object.alarm();
+
+    expect(legacy.close.mock.calls).toEqual([
+      [OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON],
+      [OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON],
+    ]);
+    expect(sockets).toHaveLength(0);
   });
 
   it("does not read D1 while filtering write-routed variable changes", async () => {
@@ -563,6 +733,7 @@ describe("ChannelObject realtime path", () => {
     const objectAfterWake = Object.create(ChannelObject.prototype) as ChannelObject;
     (objectAfterWake as unknown as { ctx: DurableObjectState }).ctx = internals.ctx;
     (objectAfterWake as unknown as { env: Env }).env = internals.env;
+    (objectAfterWake as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
     const changed: RealtimeEnvelope<"overlay.changed"> = {
       version: 1,
       id: "overlay-change-1",
@@ -1011,7 +1182,7 @@ describe("ChannelObject realtime path", () => {
                     user_id: `user-${String(sessionId).slice("session-".length)}`,
                     role: "operator",
                   }))
-                  : values.slice(1, -1).map((tokenId) => ({ token_id: tokenId })),
+                  : values.slice(1, -1).map((tokenId) => ({ token_id: tokenId, overlay_id: null })),
               }),
             };
           }),
