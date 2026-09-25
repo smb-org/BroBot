@@ -595,6 +595,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-access-secret__masked code { font: 12px/1.45 "IBM Plex Mono", ui-monospace, monospace; }
 .overlay-legacy-links { display: grid; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 .overlay-legacy-links h2 { margin: 0; color: var(--text-2); font-size: 16px; }
+.overlay-legacy-links__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.overlay-legacy-import-form { display: grid; gap: 12px; }
+.overlay-legacy-import-form ul { margin: 0; padding-left: 20px; }
 .channel-variable-use-overlay { display: grid; gap: 10px; }
 .channel-variable-use-overlay__chooser { display: grid; gap: 10px; }
 .table.overlay-tokens-table { width: 100%; min-width: 0; table-layout: fixed; }

@@ -15,11 +15,13 @@ import {
   deleteOverlayWithAudit,
   getOverlayForChannel,
   hasChannelVariableForOverlay,
+  importLegacyOverlayWithAudit,
   isOverlayManagementAllowed,
   listOverlaysForChannel,
   type OverlayDraftElement,
 } from "../db/overlays";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
+import { hashOverlayToken, isBase64url32Byte } from "../auth/crypto";
 import { actorOf } from "./member-routes";
 import { saveOverlayDraft } from "../overlays/service";
 import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
@@ -113,6 +115,11 @@ const updateOverlaySchema = z.object({
 });
 
 const deleteOverlaySchema = z.object({ baseRevision: z.number().int().min(1) }).strict();
+const legacyOverlayImportSchema = z.object({
+  token: z.string().min(1).max(128),
+  variableName: z.string().regex(VARIABLE_PATTERN),
+  text: z.string().max(100),
+}).strict();
 
 const managementDenied = (context: { json: (body: { error: string }, status: 403) => Response }): Response =>
   context.json({ error: "overlay_management_denied" }, 403);
@@ -164,6 +171,36 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
     return context.json({ error: "overlay_limit_reached" }, 409);
   }
   return context.json({ error: "overlay_changed_concurrently" }, 409);
+});
+
+overlayRouter.post("/api/channels/:channelId/overlays/import-legacy", async (context) => {
+  if (!canManage(context.get("channelRole"))) return managementDenied(context);
+  const parsed = legacyOverlayImportSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success || !isBase64url32Byte(parsed.data.token)) {
+    return context.json({ error: "overlay_data_invalid" satisfies ApiErrorCode }, 400);
+  }
+
+  const channelId = context.req.param("channelId");
+  const overlayId = crypto.randomUUID();
+  const imported = await importLegacyOverlayWithAudit(context.env.DB, actorOf(context), {
+    overlayId,
+    elementId: crypto.randomUUID(),
+    channelId,
+    tokenHash: await hashOverlayToken(parsed.data.token, context.env.OVERLAY_TOKEN_PEPPER),
+    variableName: parsed.data.variableName,
+    text: parsed.data.text,
+  }, nowIso());
+  if (imported.outcome === "not_found") return context.json({ error: "overlay_token_not_found" satisfies ApiErrorCode }, 404);
+  if (imported.outcome === "already_bound") return context.json({ error: "overlay_token_already_bound" satisfies ApiErrorCode }, 409);
+  if (imported.outcome === "invalid_reference") return context.json({ error: "overlay_data_invalid" satisfies ApiErrorCode }, 400);
+  if (imported.outcome === "limit_reached") return context.json({ error: "overlay_limit_reached" satisfies ApiErrorCode }, 409);
+  if (imported.outcome === "forbidden") return managementDenied(context);
+  if (imported.outcome === "conflict") return context.json({ error: "overlay_changed_concurrently" satisfies ApiErrorCode }, 409);
+
+  const overlay = await getOverlayForChannel(context.env.DB, channelId, overlayId);
+  if (overlay === null) throw new Error("Imported overlay could not be read back.");
+  await publishOverlayChanged(context.env.CHANNEL, channelId, [{ overlayId, revision: overlay.revision }]);
+  return context.json({ overlay }, 201);
 });
 
 overlayRouter.get("/api/channels/:channelId/overlays/:overlayId", async (context) => {

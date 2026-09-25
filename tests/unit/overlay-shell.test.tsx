@@ -134,6 +134,29 @@ describe("OverlayShell and OverlayCanvas", () => {
     });
   });
 
+  it("renders stored text for a bound legacy token and ignores fragment configuration", async () => {
+    window.history.replaceState(null, "", "/overlay#token=fictional-token&var=score&text=Fragment%20override%3A%20%7Bvalue%7D");
+    const payload = {
+      language: "en",
+      overlay: {
+        id: "imported-overlay", revision: 1, width: 1920, height: 1080, css: "",
+        elements: [{ ...element("imported-element", 0, 0, 100, 0), text: "Imported: {value}" }],
+      },
+      variables: { score: 1200 },
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} debug={false} />);
+
+    await waitFor(() => expect(container.querySelector('[data-element="imported-element"]')).not.toBeNull());
+    expect(container.querySelector('[data-element="imported-element"] .brobot-variable__text')).toHaveTextContent("Imported:");
+    expect(container).not.toHaveTextContent("Fragment override");
+    expect(fetcher).toHaveBeenCalledWith("/api/overlay/bootstrap", expect.objectContaining({
+      headers: { Authorization: "Bearer fictional-token" },
+    }));
+  });
+
   it("updates live values, debounces overlay changes, and reloads after reconnect", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(overlayPayload()));
     vi.stubGlobal("fetch", fetcher);

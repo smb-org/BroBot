@@ -284,6 +284,115 @@ export const createOverlayWithAudit = async (
   return { changes: results[0]?.meta.changes ?? 0, rowsWritten: rowsWritten(results) };
 };
 
+export type LegacyOverlayImportOutcome =
+  | { outcome: "imported"; rowsWritten: number }
+  | { outcome: "not_found" | "already_bound" | "invalid_reference" | "limit_reached" | "forbidden" | "conflict" };
+
+interface LegacyOverlayImportTokenRow {
+  token_id: string;
+  overlay_id: string | null;
+  usable: number;
+}
+
+const readLegacyOverlayImportToken = (
+  db: D1Database,
+  channelId: string,
+  tokenHash: string,
+  now: string,
+): Promise<LegacyOverlayImportTokenRow | null> => db.prepare(
+  `SELECT token_id, overlay_id,
+          CASE WHEN revoked_at IS NULL AND (expires_at IS NULL OR
+            (julianday(expires_at) IS NOT NULL AND julianday(expires_at) > julianday(?)))
+            THEN 1 ELSE 0 END AS usable
+     FROM overlay_tokens
+    WHERE channel_id = ? AND token_hash = ?`,
+).bind(now, channelId, tokenHash).first<LegacyOverlayImportTokenRow>();
+
+const legacyOverlayImportPrecondition = async (
+  db: D1Database,
+  input: { channelId: string; tokenHash: string; variableName: string },
+  now: string,
+): Promise<{ tokenId: string } | LegacyOverlayImportOutcome> => {
+  const token = await readLegacyOverlayImportToken(db, input.channelId, input.tokenHash, now);
+  if (token === null) return { outcome: "not_found" };
+  if (token.overlay_id !== null) return { outcome: "already_bound" };
+  if (token.usable !== 1) return { outcome: "not_found" };
+  if (!await hasChannelVariableForOverlay(db, input.channelId, input.variableName)) return { outcome: "invalid_reference" };
+  if (await countOverlaysForChannel(db, input.channelId) >= OVERLAY_MAXIMUM_COUNT) return { outcome: "limit_reached" };
+  return { tokenId: token.token_id };
+};
+
+/**
+ * Turns an active legacy token into an overlay access in one D1 batch. The
+ * token hash is the only token representation stored or compared here.
+ */
+export const importLegacyOverlayWithAudit = async (
+  db: D1Database,
+  actor: ActorContext,
+  input: {
+    overlayId: string;
+    elementId: string;
+    channelId: string;
+    tokenHash: string;
+    variableName: string;
+    text: string;
+  },
+  changedAt: string,
+): Promise<LegacyOverlayImportOutcome> => {
+  const precondition = await legacyOverlayImportPrecondition(db, input, changedAt);
+  if ("outcome" in precondition) return precondition;
+
+  const mutation = db.prepare(
+    `UPDATE overlay_tokens
+        SET overlay_id = ?, label = ?
+      WHERE token_id = ?
+        AND channel_id = ?
+        AND token_hash = ?
+        AND overlay_id IS NULL
+        AND revoked_at IS NULL
+        AND (expires_at IS NULL OR
+          (julianday(expires_at) IS NOT NULL AND julianday(expires_at) > julianday(?)))
+        AND EXISTS (
+          SELECT 1 FROM channel_variables
+           WHERE channel_id = ? AND name = ?
+        )
+        AND (SELECT COUNT(*) FROM overlays WHERE channel_id = ?) < ?
+        ${actorGuard(MANAGING_ROLES)}`,
+  ).bind(
+    input.overlayId, input.variableName,
+    precondition.tokenId, input.channelId, input.tokenHash,
+    changedAt,
+    input.channelId, input.variableName,
+    input.channelId, OVERLAY_MAXIMUM_COUNT,
+    ...bindActorGuard(actor, input.channelId, changedAt),
+  );
+  const overlay = db.prepare(
+    `INSERT INTO overlays (overlay_id, channel_id, name, width, height, css, revision, created_at, updated_at)
+     SELECT ?, ?, ?, 1920, 1080, '', 1, ?, ? WHERE changes() > 0`,
+  ).bind(input.overlayId, input.channelId, input.variableName, changedAt, changedAt);
+  const element = db.prepare(
+    `INSERT INTO overlay_elements
+      (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
+       x, y, scale_percent, z, in_composition, missing_variable_name)
+     SELECT ?, ?, ?, 'variable', ?, ?, ?, '{}', 0, 0, 100, 0, 1, NULL WHERE changes() > 0`,
+  ).bind(input.elementId, input.channelId, input.overlayId, input.variableName, input.variableName, input.text);
+  const audit = prepareAudit(db, actor.userId, changedAt, input.channelId, null, "overlay.legacy.imported", null, {
+    overlayId: input.overlayId,
+    elementId: input.elementId,
+    tokenId: precondition.tokenId,
+    variableName: input.variableName,
+  });
+  const results = await db.batch([mutation, overlay, element, audit]);
+  if ((results[0]?.meta.changes ?? 0) > 0) {
+    return { outcome: "imported", rowsWritten: rowsWritten(results) };
+  }
+
+  const afterFailure = await legacyOverlayImportPrecondition(db, input, changedAt);
+  if ("outcome" in afterFailure) return afterFailure;
+  if (!await isOverlayManagementAllowed(db, actor, input.channelId, changedAt)) return { outcome: "forbidden" };
+  return { outcome: "conflict" };
+};
+
 export const isOverlayManagementAllowed = async (
   db: D1Database,
   actor: ActorContext,

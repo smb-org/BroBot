@@ -284,6 +284,10 @@ export interface OverlaysTexts {
   legacyTitle: string; legacyDescription: string; legacyTokenName: string; legacyCreatedByUnknown: string;
   legacyCreatedAt: string; legacyTokenId: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
   legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string;
+  legacyImport: string; legacyImportTitle: string; legacyImportDescription: string; legacyImportLinkLabel: string;
+  legacyImportPlaceholder: string; legacyImportCssWarning: string; legacyImportPositionWarning: string;
+  legacyImportTokenWarning: string; legacyImportConfirm: string; legacyImportSuccess: (name: string) => string;
+  legacyImportInvalidLink: string; legacyImportTokenNotFound: string; legacyImportAlreadyBound: string;
 }
 
 const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
@@ -309,6 +313,17 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyRevokeTitle: (name) => `Alten Link ${name} widerrufen?`,
     legacyRevokeDescription: (name) => `Der alte Link ${name} wird sofort ungültig. Verbundene Quellen werden geschlossen.`,
     legacyRevokeConfirm: (name) => `${name} widerrufen`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden",
+    legacyImport: "Importieren", legacyImportTitle: "Alten Link importieren",
+    legacyImportDescription: "Füge einen alten Overlay-Link ein. Nur Token, Variable und Anzeigetext werden an den Server gesendet.",
+    legacyImportLinkLabel: "Alter Overlay-Link",
+    legacyImportPlaceholder: "https://example.invalid/overlay#token=…&var=score&text=Score%3A+%7Bvalue%7D",
+    legacyImportCssWarning: "Benutzerdefiniertes OBS-CSS wird nicht importiert.",
+    legacyImportPositionWarning: "Positionen in OBS werden nicht importiert.",
+    legacyImportTokenWarning: "Ein Token kann mehrere unterschiedliche Fragment-Links bedient haben. Nach dem Import zeigen alle Quellen mit diesem Token dasselbe gespeicherte Overlay.",
+    legacyImportConfirm: "Link importieren", legacyImportSuccess: (name) => `Overlay „${name}“ wurde importiert.`,
+    legacyImportInvalidLink: "Der Link muss ein Token und eine Variable im Fragment enthalten.",
+    legacyImportTokenNotFound: "Der aktive Alt-Link gehört nicht zu diesem Kanal oder wurde widerrufen.",
+    legacyImportAlreadyBound: "Dieser Link wurde bereits an ein Overlay gebunden.",
   },
   en: {
     title: "Overlays", list: "Overlays", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
@@ -332,6 +347,17 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     legacyRevokeTitle: (name) => `Revoke legacy link ${name}?`,
     legacyRevokeDescription: (name) => `The legacy link ${name} will stop working immediately. Connected sources will be closed.`,
     legacyRevokeConfirm: (name) => `Revoke ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more",
+    legacyImport: "Import", legacyImportTitle: "Import a legacy link",
+    legacyImportDescription: "Paste an old overlay link. Only its token, variable, and display text are sent to the server.",
+    legacyImportLinkLabel: "Legacy overlay link",
+    legacyImportPlaceholder: "https://example.invalid/overlay#token=…&var=score&text=Score%3A+%7Bvalue%7D",
+    legacyImportCssWarning: "OBS custom CSS is not imported.",
+    legacyImportPositionWarning: "OBS positions are not imported.",
+    legacyImportTokenWarning: "One token may have served several different fragment links. After import, all sources using this token show the same stored overlay.",
+    legacyImportConfirm: "Import link", legacyImportSuccess: (name) => `Overlay “${name}” was imported.`,
+    legacyImportInvalidLink: "The link must include a token and a variable in its fragment.",
+    legacyImportTokenNotFound: "The active legacy link does not belong to this channel or has been revoked.",
+    legacyImportAlreadyBound: "This link is already bound to an overlay.",
   },
 };
 
@@ -1907,6 +1933,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.created": "Overlay erstellt",
     "overlay.updated": "Overlay geändert",
     "overlay.deleted": "Overlay gelöscht",
+    "overlay.legacy.imported": "Alter Overlay-Link importiert",
   },
   en: {
     "channel.released": "Channel released",
@@ -1937,6 +1964,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "overlay.created": "Overlay created",
     "overlay.updated": "Overlay updated",
     "overlay.deleted": "Overlay deleted",
+    "overlay.legacy.imported": "Legacy overlay link imported",
   },
 };
 
@@ -2087,6 +2115,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     overlay_css_invalid: "Overlay-CSS darf keine Stylesheets importieren und nur relative Asset-URLs verwenden.",
     overlay_data_invalid: "Overlay-Daten sind ungültig.",
     overlay_not_found: "Overlay nicht gefunden.",
+    overlay_token_already_bound: "Dieser Overlay-Link ist bereits an ein Overlay gebunden.",
     overlay_limit_reached: "Ein Kanal kann höchstens 20 Overlays haben.",
     overlay_element_limit_reached: "Ein Overlay kann höchstens 20 Elemente haben.",
     overlay_changed_concurrently: "Overlay wurde inzwischen geändert.",
@@ -2179,6 +2208,7 @@ export const apiErrorTexts: LocaleCatalog<Record<ApiErrorCode, string>> = {
     overlay_css_invalid: "Overlay CSS cannot import stylesheets and may use only relative asset URLs.",
     overlay_data_invalid: "Overlay data is invalid.",
     overlay_not_found: "Overlay not found.",
+    overlay_token_already_bound: "This overlay link is already bound to an overlay.",
     overlay_limit_reached: "A channel can have at most 20 overlays.",
     overlay_element_limit_reached: "An overlay can have at most 20 elements.",
     overlay_changed_concurrently: "The overlay has changed since it was loaded.",

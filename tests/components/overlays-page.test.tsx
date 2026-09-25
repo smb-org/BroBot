@@ -33,6 +33,7 @@ const requestPath = (input: RequestInfo | URL): string => {
   if (input instanceof URL) return input.pathname;
   return new URL(input, window.location.href).pathname;
 };
+const requestBody = (init: RequestInit | undefined): string => typeof init?.body === "string" ? init.body : "";
 
 const setBrowserLanguage = (language: string): void => {
   Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
@@ -55,6 +56,7 @@ describe("Overlays page", () => {
   } = {}) => {
     let accesses: AccessFixture[] = [{ ...access, ...(options.accessLastUsedAt === undefined ? {} : { lastUsedAt: options.accessLastUsedAt }) }];
     let legacyTokens = [...(options.legacyTokens ?? [])];
+    let importedOverlay: typeof overlay | null = null;
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.href);
       const method = init?.method ?? "GET";
@@ -64,7 +66,10 @@ describe("Overlays page", () => {
           { ...summary, accessCount: accesses.filter((item) => item.revokedAt === null).length },
           ...(options.secondOverlay ? [summaryB] : []),
         ];
-        return jsonResponse({ overlays: listed, maximum: 20, elementMaximum: 20 });
+        return jsonResponse({ overlays: importedOverlay === null ? listed : [
+          ...listed,
+          { ...summary, id: importedOverlay.id, name: importedOverlay.name, elementCount: importedOverlay.elements.length, accessCount: 1 },
+        ], maximum: 20, elementMaximum: 20 });
       }
       if (url.pathname === "/api/channels/channel-a/overlay-tokens" && method === "GET") return jsonResponse({ tokens: legacyTokens, nextOffset: null });
       if (url.pathname.startsWith("/api/channels/channel-a/overlay-tokens/") && url.pathname.endsWith("/revoke") && method === "POST") {
@@ -73,12 +78,27 @@ describe("Overlays page", () => {
         if (options.legacyClosingPending) return jsonResponse({ closingPending: true }, 202);
         return new Response(null, { status: 204 });
       }
+      if (url.pathname === "/api/channels/channel-a/overlays/import-legacy" && method === "POST") {
+        const body = JSON.parse(requestBody(init)) as { variableName: string; text: string };
+        const firstElement = overlay.elements[0];
+        if (firstElement === undefined) throw new Error("Overlay fixture is missing its element.");
+        importedOverlay = {
+          ...overlay,
+          id: "overlay-imported",
+          name: body.variableName,
+          elements: [{ ...firstElement, label: body.variableName, variableName: body.variableName, text: body.text, x: 0, y: 0 }],
+        };
+        legacyTokens = [];
+        return jsonResponse({ overlay: importedOverlay }, 201);
+      }
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-a" && method === "GET") return jsonResponse({ overlay });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-b" && method === "GET") return jsonResponse({ overlay: overlayB });
+      if (url.pathname === "/api/channels/channel-a/overlays/overlay-imported" && method === "GET" && importedOverlay !== null) return jsonResponse({ overlay: importedOverlay });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-a/accesses" && method === "GET") {
         return jsonResponse({ accesses, activeCount: accesses.filter((item) => item.revokedAt === null).length, maximum: 10 });
       }
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-b/accesses" && method === "GET") return jsonResponse({ accesses: [], activeCount: 0, maximum: 10 });
+      if (url.pathname === "/api/channels/channel-a/overlays/overlay-imported/accesses" && method === "GET") return jsonResponse({ accesses: [], activeCount: 0, maximum: 10 });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-a/accesses" && method === "POST") {
         const issued = { tokenId: "access-new", overlayUrl: secret, label: "OBS Backup PC", expiresAt: null };
         accesses = [...accesses, { ...access, tokenId: issued.tokenId, label: issued.label }];
@@ -101,7 +121,7 @@ describe("Overlays page", () => {
   };
 
   it("lists overlay counts and usage, and keeps operator management actions disabled without exposing links", async () => {
-    const fetcher = routeFetcher();
+    const fetcher = routeFetcher({ legacyTokens: [{ id: "legacy-token", name: null, createdAt: "2026-09-24T10:00:00.000Z", createdBy: null, lastUsedAt: null, expiresAt: null }] });
     vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
 
@@ -127,9 +147,39 @@ describe("Overlays page", () => {
     if (!(fullInspector instanceof HTMLElement)) throw new Error("Overlay inspector is missing.");
     expect(within(fullInspector).getByRole("button", { name: "Overlay löschen" })).toBeDisabled();
     expect(within(inspector).getByText(/Bediener können Overlays/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Importieren" })).not.toBeInTheDocument();
     expect(document.querySelector("a[href*='token=']")).toBeNull();
     expect(within(inspector).getByRole("button", { name: "Ersetzen" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/reveal"))).toBe(false);
+  });
+
+  it("parses a legacy link locally and sends only its token, variable, and text", async () => {
+    const fetcher = routeFetcher({ emptyOverlays: true, legacyTokens: [{
+      id: "legacy-token", name: null, createdAt: "2026-09-24T10:00:00.000Z", createdBy: null, lastUsedAt: null, expiresAt: null,
+    }] });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Importieren" }));
+    expect(await screen.findByText("Benutzerdefiniertes OBS-CSS wird nicht importiert.")).toBeInTheDocument();
+    expect(screen.getByText("Positionen in OBS werden nicht importiert.")).toBeInTheDocument();
+    expect(screen.getByText(/Ein Token kann mehrere unterschiedliche Fragment-Links/u)).toBeInTheDocument();
+
+    const token = "a".repeat(43);
+    const legacyLink = `https://example.invalid/overlay#token=${token}&var=score&text=Imported%3A+%7Bvalue%7D`;
+    fireEvent.change(screen.getByRole("textbox", { name: "Alter Overlay-Link" }), { target: { value: legacyLink } });
+    fireEvent.click(screen.getByRole("button", { name: "Link importieren" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Overlay „score“ wurde importiert.");
+    const importCall = fetcher.mock.calls.find(([input]) => requestPath(input).endsWith("/overlays/import-legacy"));
+    expect(importCall).toBeDefined();
+    const [request, init] = importCall ?? [];
+    const requestUrl = request instanceof Request ? new URL(request.url) : new URL(String(request), window.location.href);
+    expect(requestUrl.hash).toBe("");
+    expect(requestUrl.search).toBe("");
+    expect(JSON.parse(requestBody(init))).toEqual({ token, variableName: "score", text: "Imported: {value}" });
+    expect(requestBody(init)).not.toContain(legacyLink);
+    expect(await screen.findByText("score", { selector: ".overlays-table tbody th" })).toBeInTheDocument();
   });
 
   it.each([
