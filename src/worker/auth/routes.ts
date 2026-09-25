@@ -54,7 +54,6 @@ import { getSessionFromRequest } from "./session-access";
 import {
   authenticateOverlayToken,
   getActiveOverlayTokens,
-  issueOverlayToken,
   revokeOverlayToken,
 } from "./overlay-token-service";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
@@ -62,7 +61,6 @@ import { maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { revokeRealtimeSessionForUser } from "../realtime";
 import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
-import { authorizeOverlayAccessManager, getOverlayTokenForLegacyReveal } from "./overlay-access-repository";
 import { MODULES } from "../../modules/registry";
 import {
   listAllBroadcasterScopes,
@@ -154,39 +152,6 @@ interface JsonRecord {
 const isJsonRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-interface OverlayTokenExpiry {
-  valid: boolean;
-  expiresAt: string | null;
-  checkedAt: string;
-}
-
-const readOverlayTokenExpiry = async (
-  request: Request,
-): Promise<OverlayTokenExpiry> => {
-  const body = await request.text();
-  const checkedAt = nowIso();
-  if (body.trim().length === 0) return { valid: true, expiresAt: null, checkedAt };
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body) as unknown;
-  } catch {
-    return { valid: false, expiresAt: null, checkedAt };
-  }
-  if (!isJsonRecord(parsed) || parsed.expiresAt === undefined || parsed.expiresAt === null) {
-    return isJsonRecord(parsed)
-      ? { valid: true, expiresAt: null, checkedAt }
-      : { valid: false, expiresAt: null, checkedAt };
-  }
-  if (typeof parsed.expiresAt !== "string") return { valid: false, expiresAt: null, checkedAt };
-  const expiresTimestamp = Date.parse(parsed.expiresAt);
-  const nowTimestamp = Date.parse(checkedAt);
-  if (!Number.isFinite(expiresTimestamp) || !Number.isFinite(nowTimestamp) || expiresTimestamp <= nowTimestamp) {
-    return { valid: false, expiresAt: null, checkedAt };
-  }
-  return { valid: true, expiresAt: new Date(expiresTimestamp).toISOString(), checkedAt };
-};
-
 const readRevocationReason = async (request: Request): Promise<string | null> => {
   let parsed: unknown;
   try {
@@ -230,34 +195,6 @@ authRouter.get("/api/csrf", async (context) => {
   context.header("Set-Cookie", serializeCsrfCookie(token));
   return context.json({ token });
 });
-
-authRouter.post(
-  "/api/channels/:channelId/overlay-tokens",
-  requireChannelAuthorization(),
-  async (context) => {
-    if (!canManageOverlayTokens(context.get("channelRole"))) return overlayTokenManageDenied(context);
-    const channelId = context.req.param("channelId");
-
-    const expiry = await readOverlayTokenExpiry(context.req.raw);
-    if (!expiry.valid) return context.json({ error: "overlay_expiry_invalid" }, 400);
-    const now = expiry.checkedAt;
-
-    const issued = await issueOverlayToken(context.env.DB, {
-      channelId,
-      actor: {
-        userId: context.get("session").userId,
-        sessionId: context.get("session").sessionId,
-      },
-      pepper: context.env.OVERLAY_TOKEN_PEPPER,
-      publicOrigin: context.env.PUBLIC_ORIGIN,
-      expiresAt: expiry.expiresAt,
-      createdAt: now,
-    });
-    if (issued === null) return context.json({ error: "channel_access_denied" }, 403);
-    context.header("Cache-Control", "no-store");
-    return context.json(issued, 201);
-  },
-);
 
 authRouter.get(
   "/api/channels/:channelId/overlay-tokens",
@@ -320,45 +257,6 @@ authRouter.post(
     return context.body(null, 204);
   },
 );
-
-authRouter.post(
-  "/api/channels/:channelId/overlay-tokens/:tokenId/reveal",
-  requireChannelAuthorization(),
-  async (context) => {
-    if (!canManageOverlayTokens(context.get("channelRole"))) return overlayTokenManageDenied(context);
-    const now = nowIso();
-    const access = await getOverlayTokenForLegacyReveal(
-      context.env.DB,
-      context.req.param("channelId"),
-      context.req.param("tokenId"),
-      { userId: context.get("session").userId, sessionId: context.get("session").sessionId },
-      now,
-    );
-    context.header("Cache-Control", "no-store");
-    if (!access) {
-      if (!await authorizeOverlayAccessManager(context.env.DB, context.get("actor"), context.req.param("channelId"), now)) {
-        return overlayTokenManageDenied(context);
-      }
-      return context.json({ error: "overlay_token_not_found" }, 404);
-    }
-    return context.json({ error: "overlay_access_unrecoverable" }, 409);
-  },
-);
-
-authRouter.get("/api/overlay/status", async (context) => {
-  const token = readBearerToken(context.req.header("Authorization"));
-  if (token === null) return context.json({ error: "overlay_token_invalid" }, 401);
-
-  const record = await authenticateOverlayToken(context.env.DB, {
-    token,
-    pepper: context.env.OVERLAY_TOKEN_PEPPER,
-    now: nowIso(),
-  });
-  if (record === null) return context.json({ error: "overlay_token_invalid" }, 401);
-
-  context.header("Cache-Control", "no-store");
-  return context.json({ version: context.env.CF_VERSION_METADATA.id, language: record.language });
-});
 
 authRouter.get("/api/overlay/bootstrap", async (context) => {
   context.header("Cache-Control", "no-store");

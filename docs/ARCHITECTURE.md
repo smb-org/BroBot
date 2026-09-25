@@ -74,88 +74,72 @@ nicht-HttpOnly-Cookie als auch im `X-CSRF-Token`-Header zurückkommen; dadurch
 bleibt der Worker zustandslos und `SameSite=Lax` ist nicht die alleinige
 Abwehr.
 
-### OBS-Overlay-Nachweis
+### Gespeicherte Overlays und Browserausgabe
 
-Der Overlay-Zugang wird als langer, zufälliger Token in einer URL mit
-Fragment ausgegeben. In der ausgelieferten Umgebung ist der kanonische Pfad
-`/overlay#token=...`; lokal unter Vite bleibt der HTML-Einstieg
-`/overlay.html#token=...`. Die Ausgabe-URL verwendet `/overlay`, damit
-Cloudflare Assets nicht den weiterleitenden Alias `/overlay.html` verwenden. Das
-Fragment wird vom Browser weder beim HTTP-Request an den Worker gesendet noch
-in den `Referer`-Header übernommen. Deshalb gelangt der Token nicht über den
-initialen Seitenrequest oder an verlinkte Ziele. Die Overlay-Seite liest ihn
-lokal und verwendet ihn nur als `Authorization: Bearer`-Header für die
-Overlay-API; ein OAuth- oder Twitch-Token steht nie in der Overlay-URL. Dieser
-Header ist ein Secret und darf ebenfalls nicht protokolliert werden.
+Ein gespeichertes Overlay gehört zu genau einem Kanal. Es enthält Name,
+Leinwandgröße, optionale CSS-Regeln und geordnete Elemente mit Position,
+Skalierung, Sichtbarkeit und einer Referenz auf eine Kanalvariable. Dashboard
+und Editor verwalten diese Daten über
+`/api/channels/:channelId/overlays`; Änderungen werden mit Revisionen geprüft
+und über `overlay.changed` an verbundene Quellen gemeldet. Der Editor und die
+Browserausgabe verwenden dieselbe React-Renderstrecke, damit Vorschau und
+Stream denselben Inhalt zeigen.
 
-Für Live-Updates öffnet das Overlay `GET /ws/overlay` mit den Protokollen
-`brobot.v1` und `brobot.token.<token>`. Der Token wird nie als Socket-Query
-übertragen. Der Worker prüft ihn und leitet nur einen internen Prinzipal mit
-Kanal- und Token-ID an das jeweilige Kanal-Durable-Object weiter. Der
-Status-WebSocket-Client wird nach erfolgreicher Statusprüfung dynamisch geladen;
-die Variablenanzeige lädt ihren eigenen WebSocket-Client nur bei einer
-entsprechend konfigurierten Quelle. Beide verbinden mit exponentiellem Backoff
-neu.
+Für jedes gespeicherte Overlay können Broadcaster und Verwalter benannte
+Zugänge ausstellen. Ein Zugang ist an Kanal und Overlay gebunden. D1 speichert
+den Pepper-Hash zur Prüfung sowie den
+verschlüsselt gespeicherten Token zur erneuten Anzeige. Die vollständige URL
+wird nur beim Ausstellen oder erneuten Anzeigen an berechtigte Mitglieder
+zurückgegeben; sie enthält den Token im Fragment, das Browser nicht an den
+Worker oder als `Referer` senden. OAuth- und Twitch-Tokens kommen nie in diese
+URL. Das Fragment bleibt in OBS und den Widget-Einstellungen sichtbar und ist
+wie ein Passwort zu schützen. Ausnahme: ein aus einem Alt-Link importierter
+Zugang bindet einen bestehenden Token, ohne ein wiederherstellbares Secret
+dafür zu speichern; für ihn bleibt **Link erneut anzeigen** dauerhaft leer,
+auch ohne Schlüsselrotation.
 
-Für `/overlay` und `/overlay.html` erzeugt der Worker eine CSP aus
+Die Quelle lädt `GET /api/overlay/bootstrap` mit dem Token als
+`Authorization: Bearer`-Header. Der Worker gibt nur das gebundene Overlay und
+dessen referenzierte Variablen zurück. Der gemeinsame Canvas rendert die
+Komposition oder auf Wunsch ein einzelnes Element an seinem Ursprung. Bei
+Laufzeitfehlern bleiben Elementgrenzen transparent; Diagnoseinformationen
+erscheinen nicht in der Ausgabe.
+
+Live-Änderungen laufen über `GET /ws/overlay` mit den Subprotokollen
+`brobot.v1` und `brobot.token.<token>`. Der Token wird nicht als Socket-Query
+übertragen. Der Worker prüft ihn und leitet einen internen Prinzipal mit Kanal-
+und Token-ID an das Durable Object des Kanals weiter. Variablenereignisse
+aktualisieren die sichtbaren Werte; Änderungen am gespeicherten Overlay lösen
+einen Bootstrap aus. Nach einem abnormalen Socket-Schluss prüft der Client den
+Bootstrap vor einer Wiederverbindung. Widerruf leert die Ausgabe und beendet
+die Verbindung; vorübergehende Ladefehler lassen den letzten erfolgreichen
+Frame stehen.
+
+Für `/overlay` und `/overlay.html` erstellt der Worker die CSP aus
 `PUBLIC_ORIGIN`. Skripte, Styles, Bilder, Schriften und Verbindungen nennen
-diese Origin ausdrücklich, damit sie auch aus dem opaken Sandbox-Origin eines
-Widgets funktionieren. Inline-Styles sind für das eingefügte Overlay-CSS
-erlaubt. `default-src 'none'`, `base-uri 'none'` und `form-action 'none'`
-schließen die übrigen Ressourcenkategorien. Overlay-Antworten lassen
-`frame-ancestors` und `X-Frame-Options` aus, damit StreamElements- und
-OBS-Sandbox-Einbettungen funktionieren; Dashboard- und API-Antworten bleiben
-unverändert. Der CSS-Speichertest ist Defense-in-Depth. Die CSP erzwingt die
-Ressourcenrichtlinie auch für CSS-URL-Formen, die der Parser nicht erkennt.
+diese Origin ausdrücklich, damit auch opake Widget-Sandboxes laden können.
+Inline-Styles sind für das gespeicherte Overlay-CSS erlaubt. `default-src
+'none'`, `base-uri 'none'` und `form-action 'none'` sperren nicht benötigte
+Ressourcen. Overlay-Antworten setzen weder `frame-ancestors` noch
+`X-Frame-Options`, damit OBS, StreamElements und Sound Alerts die Ausgabe
+einbetten können. Dashboard und API behalten ihre eigenen Header.
 
-Nach einem abnormalen Socket-Schluss prüft der Client
-`/api/overlay/bootstrap`, bevor er erneut verbindet, und zusätzlich nach drei
-aufeinanderfolgenden abnormalen Schlüssen. Bei 401 oder 403 wird die Ausgabe
-geleert und die Wiederverbindung beendet. Vorübergehende Prüf- oder
-Bootstrap-Fehler lassen den zuletzt erfolgreichen Frame sichtbar, während die
-Wiederholungen weiterlaufen.
+### Alte Overlay-Links
 
-Diese Wahl schützt nicht vor Zugriff auf die OBS-Konfiguration: OBS speichert
-die vollständige Browserquellen-URL einschließlich Fragment im Klartext in
-der Szenensammlung. Wer Zugriff auf die Szenensammlung hat, hat damit Zugriff
-auf das Overlay. Die Ausgabe- und Widerrufs-Routen sind deshalb
-kanalgebunden und durch den gemeinsamen Session-, CSRF- und
-Mitgliedschafts-Guard geschützt.
+Bereits vorhandene ungebundene Tokens bleiben gültig. Ihr Bootstrap liefert
+`overlay: null`; Links mit `#token=…&var=<name>&text=<Vorlage>` laden eine
+Kanalvariable weiter über `GET /api/overlay/variables/:name` und zeigen genau
+ein Element. Auch diese Quellen erhalten Variablenänderungen über den
+Overlay-WebSocket. Die alte Route zum Ausstellen weiterer ungebundener Tokens
+ist entfernt.
 
-D1 speichert nur den mit `OVERLAY_TOKEN_PEPPER` gebildeten HMAC-Hash. Der
-Token gehört genau zu dem Kanal, der beim Guard aus dem Routenparameter
-ermittelt wird; der Status-Endpunkt ermittelt den Kanal ausschließlich aus
-dem Token. `expires_at` ist standardmäßig `NULL`, weil eine OBS-Quelle über
-Monate unverändert bleiben kann. Ein Ablaufzeitpunkt ist für zeitlich
-begrenzte Freigaben optional. `last_used_at` wird nur bei der ersten Nutzung
-oder nach mindestens fünf Minuten aktualisiert, damit regelmäßige
-HTTP-Statusabrufe keine fortlaufenden D1-Schreibvorgänge erzeugen.
-
-Der Status-Endpunkt liefert `CF_VERSION_METADATA.id`. Damit stammt die
-Diagnoseversion aus dem laufenden Deployment und nicht aus einer im
-Overlay-Bundle fest eingetragenen Versionszeichenkette. Sichtbar wird sie nur,
-wenn die URL im Fragment `debug=1` enthält; ohne Widget bleibt das Overlay
-standardmäßig leer.
-
-Die Variablenanzeige ist ebenfalls eine OBS-Browserquelle und wird lazy aus
-`src/overlay/` geladen. Ihre Konfiguration steht ausschließlich im Fragment:
-`#token=…&var=<name>&text=<Vorlage mit {value}>`. Eine Quelle zeigt genau eine
-Kanalvariable. Der token-gebundene Endpunkt
-`GET /api/overlay/variables/:name` leitet den Kanal nur aus dem Token-Datensatz
-ab und antwortet mit `{ name, value }`; `Content-Language` enthält die
-Kanalsprache und `Cache-Control: no-store` verhindert zwischengespeicherte
-Werte. Das Overlay lädt den Wert beim Start, nach einem Reconnect und 1,5
-Sekunden nach dem letzten passenden Variablenereignis erneut. Die Nachricht
-`variables.changed` wird sowohl an Panel- als auch Overlay-Sockets verteilt und
-enthält nur aktuelle Ganzzahlwerte und entfernte Namen. Ihre Empfänger stehen
-explizit in `src/realtime-contract.ts`. Im Chatpfad wird sie gemeinsam mit
-`event_log.new` durch denselben Durable-Object-Aufruf gesendet.
-
-Der Widget-Text wird als Text gerendert und verwendet die stabilen Klassen
-`.brobot-variable`, `.brobot-variable__text` und `.brobot-variable__value` für
-OBS-CSS. Nicht vorhandene oder gelöschte Variablen zeigen nichts. Die
-Zahlenformatierung nutzt den Sprachheader und den gemeinsamen Helper
-`src/text.ts`; das Overlay importiert dafür keinen Worker-Code.
+Das Dashboard listet aktive Alt-Links, kann sie widerrufen und sie in ein
+gespeichertes Overlay importieren. Beim Import wird der bestehende Token an das
+neue Overlay gebunden; der Import übernimmt die ausgewählte Variable und den
+Anzeigetext, aber keine OBS-Positionen oder benutzerdefiniertes CSS. Danach
+wird der alte Echtzeitkanal geschlossen. Die Token-Prüfung leitet den Kanal
+stets aus dem Token-Datensatz ab; ein Zugriff auf eine Variable oder ein
+Overlay aus einem anderen Kanal ist damit ausgeschlossen.
 
 ## Vorlagenvariablen und Kanalwerte
 

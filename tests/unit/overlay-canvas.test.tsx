@@ -25,7 +25,6 @@ describe("OverlayCanvas anchors", () => {
       language="en"
       variables={{ score: 1234 }}
       elementId={null}
-      debug={false}
     />);
 
     const element = container.querySelector<HTMLElement>('[data-element="element-a"]');
@@ -41,7 +40,6 @@ describe("OverlayCanvas anchors", () => {
       language="en"
       variables={{ score: 1234 }}
       elementId="element-a"
-      debug={false}
     />);
 
     const element = container.querySelector<HTMLElement>("[data-element]");

@@ -148,7 +148,6 @@ describe("Overlay composition editor", () => {
       language="en"
       variables={{ score: 1234 }}
       elementId={null}
-      debug={false}
     />);
     const previewMarkup = previewDocument?.querySelector(".brobot-overlay")?.outerHTML;
     const outputMarkup = output.container.querySelector(".brobot-overlay")?.outerHTML;

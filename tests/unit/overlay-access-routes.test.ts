@@ -3,8 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { authRouter } from "../../src/worker/auth/routes";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { decryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { issueOverlayToken } from "../../src/worker/auth/overlay-token-service";
+import { decryptJson, hashOverlayToken, parseKeyRing } from "../../src/worker/auth/crypto";
 import { overlayAccessRouter } from "../../src/worker/panel/overlay-access-routes";
 import { overlayRouter } from "../../src/worker/panel/overlay-routes";
 import { TestD1Database } from "./test-d1";
@@ -187,28 +186,19 @@ describe("overlay access routes", () => {
     ]));
   });
 
-  it("keeps legacy channel tokens usable and reports them as unrecoverable on re-show", async () => {
-    const legacy = await issueOverlayToken(database as unknown as D1Database, {
-      channelId: "channel-a",
-      actor: { userId: "user-1", sessionId: "session-1" },
-      pepper: environment.OVERLAY_TOKEN_PEPPER,
-      publicOrigin: environment.PUBLIC_ORIGIN,
-      expiresAt: null,
-      createdAt: new Date().toISOString(),
-    });
-    expect(legacy).not.toBeNull();
-    const token = tokenFromUrl(legacy?.overlayUrl ?? "");
-    const status = await authRouter.fetch(new Request("https://brobot.example/api/overlay/status", {
+  it("keeps legacy channel tokens usable through bootstrap", async () => {
+    const token = btoa(String.fromCharCode(...new Uint8Array(32).fill(37)))
+      .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    const tokenId = "legacy-channel-token";
+    await database.prepare(
+      `INSERT INTO overlay_tokens (token_id, channel_id, token_hash, created_at)
+       VALUES (?, 'channel-a', ?, ?)`,
+    ).bind(tokenId, await hashOverlayToken(token, environment.OVERLAY_TOKEN_PEPPER), new Date().toISOString()).run();
+    const bootstrap = await authRouter.fetch(new Request("https://brobot.example/api/overlay/bootstrap", {
       headers: { Authorization: `Bearer ${token}` },
     }), environment);
-    expect(status.status).toBe(200);
-
-    const reveal = await authRouter.fetch(new Request(
-      `https://brobot.example/api/channels/channel-a/overlay-tokens/${legacy?.tokenId ?? ""}/reveal`,
-      { method: "POST", headers: await sessionHeaders(environment) },
-    ), environment);
-    expect(reveal.status).toBe(409);
-    await expect(reveal.json()).resolves.toEqual({ error: "overlay_access_unrecoverable" });
+    expect(bootstrap.status).toBe(200);
+    await expect(bootstrap.json()).resolves.toMatchObject({ overlay: null, variables: {} });
   });
 
   it("keeps the old access active when replacing it", async () => {

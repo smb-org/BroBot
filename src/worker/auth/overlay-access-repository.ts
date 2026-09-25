@@ -171,22 +171,6 @@ export const getOverlayAccessForReveal = async (
   return row === null ? null : mapAccess(row);
 };
 
-export const getOverlayTokenForLegacyReveal = async (
-  db: D1Database,
-  channelId: string,
-  tokenId: string,
-  actor: ActorContext,
-  now: string,
-): Promise<boolean> => {
-  const row = await db.prepare(
-    `SELECT 1 AS present
-       FROM overlay_tokens
-      WHERE channel_id = ? AND token_id = ? AND overlay_id IS NULL
-        ${actorGuard(MANAGING_ROLES)}`,
-  ).bind(channelId, tokenId, ...bindActorGuard(actor, channelId, now)).first<{ present: number }>();
-  return row !== null;
-};
-
 export const countActiveOverlayAccesses = async (
   db: D1Database,
   channelId: string,

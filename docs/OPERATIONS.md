@@ -36,112 +36,70 @@
    Eine Broadcaster-Autorisierung entsteht erst mit einem Modul, das sie
    benötigt.
 
-## Overlay-Nachweis in OBS
+## Overlay einrichten und verwalten
 
-Das transparente Overlay ist standardmäßig leer, wenn kein Widget konfiguriert
-ist. Für eine technische Diagnose zeigt es mit `&debug=1` im URL-Fragment nach
-einem erfolgreichen HTTP-Statusabruf die Version aus `CF_VERSION_METADATA`.
+Öffne im Dashboard den gewünschten Kanal und wähle **Overlays**. Erstelle ein
+Overlay, lege Leinwandgröße und Namen fest und öffne den Editor, um
+Kanalvariablen als Elemente hinzuzufügen. Position, Skalierung, Ebenen und
+Sichtbarkeit werden im gespeicherten Overlay verwaltet.
 
-### Migration und Token ausgeben
+### OBS-Browserquelle
 
-Vor dem ersten Rollout alle ausstehenden D1-Migrationen aus `migrations/` in
-jeder Zielumgebung anwenden (siehe „Prüfung und Deployment" unten). Der
-Pepper bleibt ein Secret und wird nicht in die
-Browserquelle oder in die URL geschrieben.
+1. Stelle im Overlay unter **Zugänge** einen benannten Zugang aus, zum Beispiel
+   „OBS“. Die vollständige URL wird nur beim Ausstellen angezeigt; kopiere sie
+   dort oder zeige sie über **Link erneut anzeigen**.
+2. Öffne den Einrichtungsassistenten und wähle **OBS**. Entscheide, ob die
+   Quelle das ganze Overlay oder ein einzelnes Element ausgibt, und kopiere
+   den passenden Link.
+3. Lege in OBS eine **Browserquelle** an, füge den Link als URL ein und setze
+   Breite und Höhe auf die im Assistenten angezeigten Maße. Lass
+   „Browser aktualisieren, wenn Szene aktiv wird“ und „Quelle schließen, wenn
+   nicht sichtbar“ ausgeschaltet; die Quelle aktualisiert sich selbst.
+4. Lass OBS-„Benutzerdefiniertes CSS“ leer. Passe die Darstellung stattdessen
+   im CSS des gespeicherten Overlays an. Die Seite bleibt transparent.
 
-Die Ausgabe erfolgt mit einer angemeldeten Panel-Session. Zuerst über
-`GET /api/csrf` ein CSRF-Token beziehen; es muss im
-`__Host-brobot_csrf`-Cookie und im Header `X-CSRF-Token` zurückgesendet werden.
-Danach ohne Ablaufzeit ausgeben:
+### StreamElements und Sound Alerts
 
-```bash
-curl -sS -X POST https://<öffentlicher-origin>/api/channels/<channelId>/overlay-tokens \
-  -H 'Cookie: __Host-brobot_session=<session-cookie>; __Host-brobot_csrf=<csrf-token>' \
-  -H 'X-CSRF-Token: <csrf-token>' \
-  -H 'Content-Type: application/json' \
-  --data '{}'
-```
+Wähle im selben Einrichtungsassistenten **StreamElements** oder **Sound
+Alerts**. Für StreamElements kopiere die HTML-, JS- und Fields-Inhalte in ein
+Custom Widget. Für Sound Alerts folge dem Import- oder Custom-Widget-Pfad im
+Assistenten und übernimm dieselben Inhalte; der Assistent kennzeichnet den
+Importpfad als noch nicht verifiziert. Setze in Fields `brobotAddress`
+auf den HTTPS-Ursprung des Overlay-Links und `overlayUrl` auf die vollständige
+URL mit Token. Lass das CSS-Feld des Widget-Anbieters leer. Der Assistent
+zeigt auch, ob das ganze Overlay oder ein einzelnes Element ausgegeben wird
+und welche Platzierung dazu passt.
 
-Die Antwort enthält eine `tokenId`, die vollständige `overlayUrl` und
-`"expiresAt": null`. In der ausgelieferten Umgebung zeigt die `overlayUrl` auf
-den kanonischen Pfad `/overlay#token=...`; `/overlay.html` ist dort nur der
-weiterleitende Alias. Die `overlayUrl` genau einmal kopieren und in OBS
-einsetzen; der Klartext-Token wird nicht erneut angezeigt oder gespeichert.
-Für eine zeitlich begrenzte Freigabe kann statt `{}` ein zukünftiger Zeitpunkt
-angegeben werden:
+### Zugänge ersetzen und widerrufen
 
-```json
-{ "expiresAt": "2030-01-15T12:00:00.000Z" }
-```
+Jeder gespeicherte Zugang ist kanal- und overlaygebunden. In der Zugangsliste
+kannst du ihn erneut anzeigen, ersetzen oder widerrufen. Ersetzen stellt einen
+neuen Link aus. Aktualisiere die zugehörige OBS- oder Widget-Quelle mit dem
+neuen Link und widerrufe den alten Zugang, sobald die neue Quelle läuft. Beim
+Widerruf werden verbundene Echtzeitverbindungen geschlossen; eine Quelle mit
+widerrufenem Link bleibt leer. Ein Zugang bleibt gültig, bis er widerrufen
+wird oder das zugehörige Overlay gelöscht wird.
 
-Die URL enthält den Token im Fragment (`#token=...`), nicht in einer Query.
-Browser senden das Fragment nicht an den Worker. OBS speichert die komplette
-URL einschließlich Fragment jedoch in der Szenensammlung im Klartext; diese
-Szenensammlung ist deshalb wie ein Secret zu schützen. Twitch- oder
-OAuth-Tokens gehören niemals in diese URL.
+### Vorhandene Alt-Links importieren
 
-Neu ausgegebene, an ein gespeichertes Overlay gebundene Links liefern dessen
-Daten bereits über die Overlay-API aus. Die gemeinsame Browser-Renderstrecke
-für gespeicherte Overlays folgt mit #215; bis dahin sind diese Links API-only
-und werden noch nicht im Dashboard angeboten (#216).
+Die Dashboard-Seite **Overlays** zeigt aktive ungebundene Alt-Links im Bereich
+**Alte Links**. Wähle **Importieren** und füge den bisherigen Overlay-Link mit
+`#token=…&var=<name>&text=<Vorlage>` ein. Der Import erstellt ein gespeichertes
+Overlay mit der ausgewählten Kanalvariable und dem Anzeigetext und bindet den
+bestehenden Token daran. Benutzerdefiniertes OBS-CSS und dortige Positionen
+werden nicht übernommen. Da derselbe Token mehrere alte Fragment-Links bedient
+haben kann, zeigen alle diese Quellen nach dem Import dasselbe gespeicherte
+Overlay. Der Import speichert kein wiederherstellbares Secret für den
+übernommenen Token; die bestehende OBS- oder Widget-Quelle mit dem alten Link
+läuft unverändert weiter, aber der Einrichtungsassistent kann diesen Zugang
+danach nicht mehr erneut anzeigen. Um dieselbe Quelle über den Assistenten neu
+einzurichten oder eine zusätzliche Quelle anzubinden, stelle einen neuen
+benannten Zugang aus (oder ersetze den importierten Zugang) und verwende
+dessen Link.
 
-### Browserquelle einrichten
-
-1. In OBS eine **Browserquelle** anlegen und die ausgegebene `overlayUrl`
-   eintragen.
-2. Als Startgröße sind ungefähr **800 × 120 Pixel** sinnvoll. Der Widgettext
-   folgt dem aktuellen Variablenwert; die Breite sollte für den längsten
-   erwarteten Text reichen.
-3. **Browser aktualisieren, wenn Szene aktiv wird** und **Quelle schließen,
-   wenn nicht sichtbar** ausgeschaltet lassen. Die Browserquelle aktualisiert
-   sich selbst.
-4. Die Seite bleibt transparent. Eigenes CSS mit einer Hintergrundfarbe ist
-   nicht nötig.
-5. Für die Versionsdiagnose `&debug=1` an das URL-Fragment anhängen, zum
-   Beispiel `#token=…&debug=1`. Dies zeigt `Version <Deployment-ID>`; das Flag
-   für eine leere Overlay-Seite wieder entfernen.
-
-### Token widerrufen
-
-Mit der `tokenId` aus der Ausgabe widerruft der Betreiber genau diesen Zugang.
-Der Widerrufsgrund wird gespeichert:
-
-```bash
-curl -sS -X POST https://<öffentlicher-origin>/api/channels/<channelId>/overlay-tokens/<tokenId>/revoke \
-  -H 'Cookie: __Host-brobot_session=<session-cookie>; __Host-brobot_csrf=<csrf-token>' \
-  -H 'X-CSRF-Token: <csrf-token>' \
-  -H 'Content-Type: application/json' \
-  --data '{"reason":"OBS-Szenensammlung ersetzt"}'
-```
-
-Der Standardtoken läuft nicht ab. Das Betriebsmittel für eine nicht mehr
-gewünschte Quelle ist der einzelne Widerruf; ein optionaler Ablauf ist nur für
-bewusst befristete Freigaben vorgesehen. `last_used_at` wird höchstens einmal
-je fünf Minuten aktualisiert und eignet sich damit als grobes Lebenszeichen,
-ohne jeden Statusabruf als D1-Schreibvorgang zu speichern.
-
-### Schwarze oder leere Quelle diagnostizieren
-
-- Prüfen, ob die Browserquelle exakt die ausgegebene URL inklusive `#token=...`
-  verwendet. Den Token nicht in eine Query verschieben und nicht durch einen
-  Twitch- oder OAuth-Token ersetzen.
-- Für eine Versionsdiagnose `&debug=1` an das URL-Fragment anhängen und die
-  Browserquelle manuell aktualisieren. Ohne dieses Flag ist eine leere Fläche
-  ohne Widget das erwartete Verhalten. Bei einem widerrufenen, optional
-  abgelaufenen oder anderweitig ungültigen Token bleibt sie ebenfalls leer.
-- Prüfen, ob der Worker erreichbar ist und `/api/overlay/status` mit dem
-  gültigen Token den Status `200` liefert. Für diesen Test den Token nicht in
-  Logs, Tickets oder Screenshots kopieren.
-- Eine eigene OBS-CSS-Regel mit schwarzem `body`-Hintergrund entfernen. Die
-  Seite setzt `html`, `body`, `#root` und die gerenderte Fläche selbst auf
-  transparent.
-- Wenn mit gesetztem `debug=1` keine Version erscheint, zuerst Deployment und
-  D1-Migration prüfen. Ohne die `overlay_tokens`-Tabelle aus `migrations/` kann
-  der Worker keine Overlay-Zugänge validieren; ohne gültige
-  `CF_VERSION_METADATA`-Bindung kann keine aktuelle Deployment-ID angezeigt
-  werden.
-
-Die Secrets sind in `wrangler.jsonc` nur als Namen unter `secrets.required` dokumentiert. Die aktuelle Wrangler-Konfiguration akzeptiert dieses Feld und nutzt es auch für die Typgenerierung; Secret-Werte werden ausschließlich über Secret-Bindings beziehungsweise lokale Env-Dateien bereitgestellt.
+Aktive Alt-Links können im selben Bereich gelistet und widerrufen werden. Neue
+ungebundene Links lassen sich nicht mehr ausstellen; neue Quellen erhalten
+immer einen Zugang zu einem gespeicherten Overlay.
 
 ## Umgebungsvariablen und Bindings
 
@@ -174,15 +132,18 @@ Bei `SESSION_COOKIE_KEYS` und `TWITCH_EVENTSUB_SECRET` signiert nur `active`
 neu. Ein Eintrag unter `retired` bleibt so lange erhalten, bis keine alten
 Cookies beziehungsweise EventSub-Abonnements mehr existieren.
 
-Bei `TOKEN_ENCRYPTION_KEYS` verschlüsselt `active` neue Twitch-Tokens. Ein
-`retired`-Eintrag bleibt erhalten, bis die Prüfung auf verbleibende
-Ciphertexte mit seiner `keyId` keinen Treffer mehr liefert. Die Prüfung muss
-beide Tokenbestände umfassen: `bot_identity` sowie
-`twitch_login_identity`, jeweils für Access- und Refresh-Ciphertext. Erst
-wenn diese Bestandsprüfung null Treffer ergibt, darf der alte Eintrag aus dem
-Ring entfernt werden. Ein fehlgeschlagener Refresh kann einen alten
+Bei `TOKEN_ENCRYPTION_KEYS` verschlüsselt `active` neue Twitch-Tokens sowie
+neue Overlay-Zugangs-Secrets. Ein `retired`-Eintrag bleibt erhalten, bis die
+Prüfung auf verbleibende Ciphertexte mit seiner `keyId` keinen Treffer mehr
+liefert. Die Prüfung muss drei Tokenbestände umfassen: `bot_identity` sowie
+`twitch_login_identity`, jeweils für Access- und Refresh-Ciphertext, und
+`overlay_tokens.secret_envelope` für die erneut anzeigbaren Overlay-Zugänge.
+Erst wenn diese Bestandsprüfung null Treffer ergibt, darf der alte Eintrag aus
+dem Ring entfernt werden. Ein fehlgeschlagener Refresh kann einen alten
 Ciphertext länger als die normale Übergangszeit erhalten; sieben Tage sind
-deshalb keine ausreichende Freigabe allein aufgrund des Alters.
+deshalb keine ausreichende Freigabe allein aufgrund des Alters. Wird ein alter
+Schlüssel entfernt, während noch ein `secret_envelope` damit verschlüsselt
+ist, schlägt **Link erneut anzeigen** für diesen Zugang fehl.
 
 Der Worker bevorzugt `TOKEN_ENCRYPTION_KEYS`. Während der Übergangsphase
 akzeptiert er ersatzweise noch `SESSION_ENCRYPTION_KEYS`, damit ein
@@ -450,15 +411,12 @@ Erstsetzungsweg.
 `OVERLAY_TOKEN_PEPPER` ist kein Schlüsselring und hat keine `retired`-Einträge.
 Der Pepper kann aus den bestehenden HMAC-Hashes nicht zurückgerechnet werden;
 ein Austausch macht deshalb alle bisher ausgegebenen Overlay-Zugänge
-ungültig. Die Rotation ist vollständig als Neuausgabe auszuführen:
-
-1. Einen neuen Pepper erzeugen und als Secret setzen.
-2. Für jeden freigegebenen Kanal alle benötigten Overlay-Zugänge neu ausgeben
-   und die alten Zugänge widerrufen beziehungsweise als unbrauchbar behandeln.
-3. Jede OBS-Browserquelle mit der neuen `overlayUrl` neu einrichten. Jede
-   Quelle muss tatsächlich neu eingerichtet werden; ein bloßes Neuladen der
-   alten URL reicht nicht.
-4. Alle Quellen prüfen, bevor die Rotation als abgeschlossen gilt.
+ungültig. Vor der Rotation benötigte ungebundene Alt-Links zuerst importieren.
+Danach einen neuen Pepper als Secret setzen, in jedem gespeicherten Overlay
+neue Zugänge ausstellen und sämtliche OBS- und Widget-Quellen mit den neuen
+Links aktualisieren. Alte Links können nach dem Austausch weder genutzt noch
+importiert werden. Alle Quellen prüfen, bevor die Rotation als abgeschlossen
+gilt.
 
 Eine Pepper-Rotation darf daher nicht nach der Token-Schlüsselring-Anleitung
 mit einem ausgemusterten Eintrag durchgeführt werden.
