@@ -50,9 +50,9 @@ describe("overlay style block model", () => {
   it("targets the rendered variable text for overlay and element styles", () => {
     const content = generateOverlayStyleContent(styles);
 
-    expect(content).toContain(".brobot-overlay :where(.brobot-variable) {");
-    expect(content).toContain('[data-element="element_a"] :where(.brobot-variable) {');
-    expect(content).toContain('[data-element="element_b"] :where(.brobot-variable) {');
+    expect(content).toContain(".brobot-overlay :where(.brobot-variable, .brobot-module-text) {");
+    expect(content).toContain('[data-element="element_a"] :where(.brobot-variable, .brobot-module-text) {');
+    expect(content).toContain('[data-element="element_b"] :where(.brobot-variable, .brobot-module-text) {');
   });
 
   it("round-trips every integer background opacity percentage", () => {

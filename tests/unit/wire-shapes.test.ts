@@ -478,7 +478,7 @@ describe("serialized contract shapes", () => {
             get: () => ({
               publish: (messages: readonly RealtimeEnvelope[]) => {
                 const message = messages.find((entry) => entry.type === "event_log.new");
-                if (message?.type === "event_log.new") eventEnvelope = message as RealtimeEnvelope<"event_log.new">;
+                if (message?.type === "event_log.new") eventEnvelope = message;
                 return Promise.resolve();
               },
             }),

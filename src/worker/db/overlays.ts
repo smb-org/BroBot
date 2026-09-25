@@ -260,7 +260,7 @@ export const createOverlayWithAudit = async (
         ${actorGuard(MANAGING_ROLES)}`,
   ).bind(input.id, input.channelId, input.name, input.width, input.height, changedAt, changedAt,
     input.channelId, OVERLAY_MAXIMUM_COUNT,
-    input.initialElement === undefined ? 0 : 1,
+    input.initialElement?.kind === "variable" ? 1 : 0,
     input.channelId, input.initialElement?.variableName ?? "",
     ...bindActorGuard(actor, input.channelId, changedAt));
   const elementWrite = input.initialElement === undefined ? [] : [db.prepare(

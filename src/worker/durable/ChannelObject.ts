@@ -9,7 +9,8 @@ import type {
 import {
   OVERLAY_ACCESS_BOUND_CLOSE_CODE,
   OVERLAY_ACCESS_BOUND_CLOSE_REASON,
-  REALTIME_RECIPIENTS,
+  isModuleOverlayRealtimeEnvelope,
+  realtimeRecipients,
 } from "../../realtime-contract";
 import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
@@ -17,12 +18,15 @@ import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../realtime-protoc
 import type { AdsSchedule } from "../../modules/ads/contracts";
 import type { HelixRequest, HelixRequestOptions } from "../../modules/contract";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
+import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
+import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
 import { refreshAdPrewarningAlarm } from "../../modules/ads/adapters/prewarning-alarm";
 import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarning-alarm";
 import { getAppAccessToken } from "../app-token";
 import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
+import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
 const SECURITY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -218,16 +222,41 @@ export class ChannelObject extends DurableObject<Env> {
       const channelId = this.ownChannelId();
       if (channelId === null) throw new Error("Channel-bound data requires a named Durable Object.");
       const cache = { schedule, asOf } satisfies CachedAdSchedule;
-      const changed = await this.ctx.storage.transaction(async (transaction) => {
+      const countdownState = adCountdownStateForSchedule(schedule);
+      const change = await this.ctx.storage.transaction(async (transaction) => {
         const currentGeneration = await transaction.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
         if (expectedGeneration !== undefined && currentGeneration !== expectedGeneration) return null;
         const previous = await transaction.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
+        const previousCountdownState = previous === undefined ? null : adCountdownStateForSchedule(previous.schedule);
         await transaction.put(AD_SCHEDULE_GENERATION_KEY, currentGeneration + 1);
         await transaction.put(AD_SCHEDULE_CACHE_KEY, cache);
-        return previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule);
+        return {
+          changed: previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule),
+          countdownChanged: previousCountdownState === null ||
+            previousCountdownState.nextAdAt !== countdownState.nextAdAt ||
+            previousCountdownState.duration !== countdownState.duration,
+        };
       });
-      if (changed === null) return null;
+      if (change === null) return null;
       if (reconcileAlarm) await this.reconcileAdPrewarning(schedule, grantedScopes);
+      try {
+        await writeAdCountdownState(this.env.DB, channelId, countdownState, asOf);
+      } catch (error: unknown) {
+        console.warn("Ad countdown state snapshot could not be stored.", error);
+      }
+      if (change.countdownChanged) {
+        try {
+          const prepared = await prepareModuleOverlayRealtimeMessage(
+            this.env.DB,
+            channelId,
+            "ads",
+            createAdCountdownOverlayAction(countdownState),
+          );
+          if (prepared.outcome === "ready") await this.publish([prepared.message]);
+        } catch (error: unknown) {
+          console.warn("Ad countdown overlay update could not be sent.", error);
+        }
+      }
       await this.publish([{
         version: 1,
         id: crypto.randomUUID(),
@@ -236,7 +265,7 @@ export class ChannelObject extends DurableObject<Env> {
         type: "ads.schedule.updated",
         payload: { schedule, asOf },
       }]);
-      return changed;
+      return change.changed;
     });
   }
 
@@ -629,26 +658,39 @@ export class ChannelObject extends DurableObject<Env> {
       throw new Error("Realtime message belongs to a foreign channel.");
     }
     const now = Date.now();
-    const ordinarySockets = messages.some((message) => message.type !== "overlay.changed")
+    const ordinarySockets = messages.some((message) => message.type !== "overlay.changed" &&
+      !isModuleOverlayRealtimeEnvelope(message))
       ? this.ctx.getWebSockets()
       : [];
     const overlaySocketsById = new Map<string, WebSocket[]>();
-    const changedOverlayIds = new Set(messages.flatMap((message) =>
-      message.type === "overlay.changed" ? [message.payload.overlayId] : []));
-    for (const overlayId of changedOverlayIds) {
+    const targetedOverlayIds = new Set(messages.flatMap((message) =>
+      message.type === "overlay.changed" ? [message.payload.overlayId]
+        : isModuleOverlayRealtimeEnvelope(message) ? [...(message.overlayIds ?? [])] : []));
+    for (const overlayId of targetedOverlayIds) {
       overlaySocketsById.set(overlayId, this.ctx.getWebSockets(`overlay:${overlayId}`));
     }
     const serialized = messages.map((envelope) => ({
       envelope,
-      payload: JSON.stringify(envelope.type === "variables.changed"
-        ? { ...envelope, payload: { set: envelope.payload.set, removed: envelope.payload.removed } }
-        : envelope),
+      payload: JSON.stringify(isModuleOverlayRealtimeEnvelope(envelope)
+        ? {
+          version: envelope.version,
+          id: envelope.id,
+          createdAt: envelope.createdAt,
+          channelId: envelope.channelId,
+          type: envelope.type,
+          payload: envelope.payload,
+        }
+        : envelope.type === "variables.changed"
+          ? { ...envelope, payload: { set: envelope.payload.set, removed: envelope.payload.removed } }
+          : envelope),
       sockets: envelope.type === "overlay.changed"
         ? [
           ...this.ctx.getWebSockets("kind:panel"),
           ...(overlaySocketsById.get(envelope.payload.overlayId) ?? []),
         ]
-        : ordinarySockets,
+        : isModuleOverlayRealtimeEnvelope(envelope)
+          ? [...new Set((envelope.overlayIds ?? []).flatMap((overlayId) => overlaySocketsById.get(overlayId) ?? []))]
+          : ordinarySockets,
     }));
     for (const message of serialized) {
       const envelope = message.envelope;
@@ -681,7 +723,7 @@ export class ChannelObject extends DurableObject<Env> {
           serializedPayload = JSON.stringify({ ...envelope, payload: { set, removed } });
         }
         try {
-          const recipients: readonly RealtimeRecipientKind[] = REALTIME_RECIPIENTS[envelope.type];
+          const recipients: readonly RealtimeRecipientKind[] = realtimeRecipients(envelope.type);
           if (recipients.includes(principal.kind)) webSocket.send(serializedPayload);
         } catch {
           closeSocket(webSocket, SOCKET_TRANSIENT_CODE, "connection unavailable");

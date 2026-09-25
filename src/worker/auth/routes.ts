@@ -70,6 +70,7 @@ import { canManage, type ApiErrorCode } from "../../contracts/values";
 import { findChannelVariable } from "../db/channel-variables";
 import { getOverlayBindingForToken } from "./overlay-token-repository";
 import { getOverlayForChannel, getOverlayVariableValues } from "../db/overlays";
+import { hydrateModuleOverlayElements } from "../overlays/module-state";
 
 const nowIso = (): string => new Date().toISOString();
 const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -279,6 +280,7 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
     return context.json({ language: record.language, overlay: null, variables: {} });
   }
   const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
+  const elements = await hydrateModuleOverlayElements(context.env.DB, record.channelId, overlay.elements);
   return context.json({
     language: record.language,
     overlay: {
@@ -287,13 +289,15 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
       width: overlay.width,
       height: overlay.height,
       css: overlay.css,
-      elements: overlay.elements.map((element) => ({
+      elements: elements.map((element) => ({
         id: element.id,
         kind: element.kind,
         label: element.label,
         variableName: element.variableName,
         text: element.text,
         config: element.config,
+        ...(element.moduleEnabled === undefined ? {} : { moduleEnabled: element.moduleEnabled }),
+        ...(element.state === undefined ? {} : { state: element.state }),
         x: element.x,
         y: element.y,
         scalePercent: element.scalePercent,

@@ -712,6 +712,43 @@ describe("ChannelObject realtime path", () => {
     expect(delivered).not.toHaveProperty("payload.overlayIdsByVariable");
   });
 
+  it("routes module overlay messages only to the supplied overlay IDs", async () => {
+    const target = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-target", overlayId: "overlay-target", expiresAt: null,
+    });
+    const unrelated = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-other", overlayId: "overlay-other", expiresAt: null,
+    });
+    const legacy = overlaySocketFor({
+      v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-legacy", overlayId: null, expiresAt: null,
+    });
+    const panel = socketFor(validPrincipal());
+    const object = objectFor([target, unrelated, legacy, panel]);
+
+    await object.publish([{
+      version: 1,
+      id: "module-countdown-1",
+      createdAt: "2026-09-25T12:00:00.000Z",
+      channelId: "kanal-a",
+      type: "modul.ads.countdown",
+      payload: { nextAdAt: "2026-09-25T12:01:00.000Z", duration: 90 },
+      overlayIds: ["overlay-target"],
+    }]);
+
+    expect(target.send.mock.calls).toHaveLength(1);
+    expect(JSON.parse(target.send.mock.calls[0]?.[0] ?? "null")).toEqual({
+      version: 1,
+      id: "module-countdown-1",
+      createdAt: "2026-09-25T12:00:00.000Z",
+      channelId: "kanal-a",
+      type: "modul.ads.countdown",
+      payload: { nextAdAt: "2026-09-25T12:01:00.000Z", duration: 90 },
+    });
+    expect(unrelated.send.mock.calls).toHaveLength(0);
+    expect(legacy.send.mock.calls).toHaveLength(0);
+    expect(panel.send.mock.calls).toHaveLength(0);
+  });
+
   it("routes overlay changes by the durable overlay tag after a fresh object instance", async () => {
     const firstOverlay = overlaySocketFor({
       v: 1, kind: "overlay", channelId: "kanal-a", tokenId: "token-a", overlayId: "overlay-a", expiresAt: null,

@@ -201,6 +201,40 @@ describe("overlay access routes", () => {
     await expect(bootstrap.json()).resolves.toMatchObject({ overlay: null, variables: {} });
   });
 
+  it.each([
+    ["enabled", 1, true],
+    ["disabled", 0, false],
+  ] as const)("bootstraps an ads module element when the module is %s", async (_description, enabled, expectedEnabled) => {
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('channel-a', 'ads', ?, '{}')",
+    ).bind(enabled).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements
+        (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
+       VALUES ('element-countdown', 'channel-a', 'overlay-a', 'ads.countdown', 'Werbung', NULL, '', '{}')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO ads_countdown_state (channel_id, next_ad_at, duration, updated_at)
+       VALUES ('channel-a', '2026-09-25T12:01:00.000Z', 90, '2026-09-25T12:00:00.000Z')`,
+    ).run();
+    const issued = await issueAccess(environment, "OBS countdown");
+    const token = tokenFromUrl(issued.overlayUrl);
+
+    const bootstrap = await authRouter.fetch(new Request("https://brobot.example/api/overlay/bootstrap", {
+      headers: { Authorization: `Bearer ${token}` },
+    }), environment);
+    const body = await bootstrap.json<{
+      overlay: { elements: Array<{ kind: string; moduleEnabled?: boolean; state?: Record<string, unknown> | null }> } | null;
+    }>();
+
+    expect(bootstrap.status).toBe(200);
+    expect(body.overlay?.elements[0]).toMatchObject({
+      kind: "ads.countdown",
+      moduleEnabled: expectedEnabled,
+      state: expectedEnabled ? { nextAdAt: "2026-09-25T12:01:00.000Z", duration: 90 } : null,
+    });
+  });
+
   it("keeps the old access active when replacing it", async () => {
     const oldAccess = await issueAccess(environment, "OBS main");
     const replacement = await post(overlayAccessRouter, accessPath(oldAccess.tokenId, "replace"), environment);

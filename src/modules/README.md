@@ -62,7 +62,7 @@ Breite nicht. Eine Liste fehlender Berechtigungen ist kein Inspektor und trägt
 ## Registrierung
 
 1. Das Modulverzeichnis mit der Pflichtstruktur anlegen.
-2. Einen `BotModule`-Wert mit `id`, Settings-Schema und Defaults definieren; optionale EventSub-Typen, `handleEvent`, Routen sowie ein lazy Overlay und/oder Panel nur bei Bedarf ergänzen.
+2. Einen `BotModule`-Wert mit `id`, Settings-Schema und Defaults definieren; optionale EventSub-Typen, `handleEvent`, Routen sowie `overlayElements` und/oder Panel nur bei Bedarf ergänzen.
 3. Genau diesen Wert in `src/modules/registry.ts` in `MODULES` eintragen. Das ist die einzige globale Kenntnis aller Module.
 4. Prüfen: `pnpm run check`.
 
@@ -137,7 +137,20 @@ Kanal angeben — die Mandantentrennung liegt beim Host.
 Wirft `handleEvent`, hält das weder den Worker noch die übrigen Module auf. Der
 Fehler landet als `host.modul.fehler` im Ereignisprotokoll.
 
-Die optionalen Felder `overlay` und `panel` des Contracts müssen Funktionen sein, die jeweils ein `import()`-Promise zurückgeben. So kann Vite für beide Ansichten eigene Chunks schneiden; ein deaktiviertes Modul kostet im Overlay- und im Panel-Bundle null Bytes. Direkte Imports würden diese Bundle-Grenzen aufheben. Panel-Ansichten erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
+`overlayElements` deklariert pro Element einen eindeutigen, mit der Modulkennung
+präfigierten `kind`, eine `configVersion`, `defaultSize`, `parseConfig` und
+`load`. Der Render-Code wird mit `import()` geladen; ein optionaler Editor
+verwendet ebenfalls einen Lazy Loader. `initialState` erhält D1-Binding,
+Kanalkennung und validierte Konfiguration und läuft beim Bootstrap nur, wenn
+das Modul im Kanal aktiviert ist. Der Host speichert `kind` und Konfiguration
+als JSON; der Parser validiert sie beim Speichern. Eine deaktivierte Deklaration
+bleibt im Entwurf erhalten, rendert nicht und lädt ihren Overlay-Chunk nicht.
+Direkte Imports der Ansicht würden diese Bundle-Grenze aufheben.
+
+Das optionale Feld `panel` ist eine Funktion, die ein `import()`-Promise
+zurückgibt. So kann Vite für die Panel-Ansicht einen eigenen Chunk schneiden;
+ein deaktiviertes Modul kostet im Panel-Bundle null Bytes. Panel-Ansichten
+erhalten über `ModulePanelProperties` den bereits geprüften `channelId`.
 
 Textbefehle werden im Panel angelegt, bearbeitet und entfernt. Jede Zeile hat
 eine Art (`text`, `list` oder `shoutout`), einen Schalter und eine Mindeststufe

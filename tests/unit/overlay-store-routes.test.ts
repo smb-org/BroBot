@@ -398,6 +398,34 @@ describe("stored overlay routes", () => {
     expect(apiErrorTexts.en.overlay_css_invalid).toContain("Overlay CSS");
   });
 
+  it("validates module element config with its declared parser on save", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const overlayId = await createOverlay("manager-a", "channel-a", "Gameplay");
+    const countdownElement = {
+      ...element("countdown-element"),
+      kind: "ads.countdown",
+      label: "Werbung",
+      text: "",
+    };
+
+    const invalid = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
+      baseRevision: 1, name: "Gameplay", width: 1920, height: 1080, css: "",
+      elements: [{ ...countdownElement, config: { html: "<b>unsafe</b>" } }],
+    });
+    expect(invalid.status).toBe(400);
+
+    const valid = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
+      baseRevision: 1, name: "Gameplay", width: 1920, height: 1080, css: "",
+      elements: [{ ...countdownElement, config: {} }],
+    });
+    expect(valid.status).toBe(200);
+    await expect(valid.json()).resolves.toMatchObject({
+      overlay: { elements: [{ kind: "ads.countdown", config: {} }] },
+    });
+  });
+
   it("uses revision CAS, diffs element rows, checks SQLite changes, and skips unchanged drafts", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");

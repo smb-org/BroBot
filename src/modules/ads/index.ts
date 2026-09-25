@@ -4,12 +4,16 @@ import { DEFAULT_AUTOMATIC_TEXT, DEFAULT_MANUAL_TEXT, DEFAULT_PREWARNING_TEXT } 
 import { processAdBreak } from "./service";
 import { adsRoutes } from "./routes";
 import { settingsVariableReferences } from "../contract";
+import { readAdCountdownState } from "./adapters/countdown-state";
+import { ADS_COUNTDOWN_ELEMENT_KIND } from "./overlay/kinds";
 
 export { decideAdBreak, decideAdPrewarning, renderAdBreakText, renderPrewarningText } from "./domain";
 export { processAdBreak } from "./service";
 export type { AdsSettings, AdBreaksEvent } from "./contracts";
 export type { LastAdBreak, AdsSchedule, AdsScheduleResponse } from "./contracts";
 export { ADS_OPTIONAL_BROADCASTER_SCOPES, ADS_TEMPLATE_FIELDS, ADS_VARIABLES } from "./contracts";
+export { createAdCountdownOverlayAction } from "./overlay/countdown-action";
+export { ADS_COUNTDOWN_ELEMENT_KIND } from "./overlay/kinds";
 
 export const adsModule: BotModule<typeof adsSettingsSchema> = {
   id: "ads",
@@ -29,6 +33,17 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   routes: adsRoutes,
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
+  overlayElements: [{
+    kind: ADS_COUNTDOWN_ELEMENT_KIND,
+    configVersion: 1,
+    defaultSize: { width: 300, height: 80 },
+    parseConfig: (raw) => {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw) || Object.keys(raw).length !== 0) return null;
+      return {};
+    },
+    initialState: async (db, channelId) => ({ ...await readAdCountdownState(db, channelId) }),
+    load: () => import("./overlay/countdown"),
+  }],
   immediateActions: {
     requires: ["streamLive"],
     load: () => import("./panel/immediate-actions"),

@@ -415,3 +415,49 @@ fragt dieses Tag ab und braucht kein Klassenfeld. Beides bleibt beim
 Hibernieren erhalten. Kanalweite Alt-Zugänge tragen `overlayId: null` und
 erhalten keine `overlay.changed`-Nachricht. Die Nutzlast enthält keine neuen
 Streamdaten, daher ändert sich das Restfenster aus Abschnitt 7 nicht.
+
+## Nachtrag: Modul-Elemente in Overlays (#221)
+
+**Stand:** 25. September 2026
+**Status: vorgeschlagen** — Freigabe durch den Product Owner ausstehend.
+
+Ein Modul kann über `overlayElements` kleine, eigenständige Elemente für eine
+Overlay-Komposition deklarieren. Die Deklaration hält Konfigurationsparser,
+Version und Standardgröße am Contract; das Render-Modul und ein optionaler
+Editor werden erst bei Bedarf per `import()` geladen. Für gespeicherte Elemente
+bleiben `kind` und `config_json` in `overlay_elements` maßgeblich. Beim
+Bootstrap wird `initialState` nur für aktivierte Module ausgeführt. Ein
+deaktiviertes Modul bleibt im gespeicherten Entwurf sichtbar, rendert aber
+nichts und lädt keinen Modul-Overlay-Chunk.
+
+Der Executor präfigiert `ModuleAction.overlay.type` mit der vom Host bekannten
+Modulkennung und erzeugt `modul.<moduleId>.<type>`. Modulaktionen wählen weder
+Kanal noch Empfänger. Vor dem Aufruf des Durable Object löst der Worker über
+`overlay_elements` die Overlay-IDs auf, die ein Element dieses Moduls
+enthalten; für nicht verpflichtende Module muss es im Kanal aktiviert sein.
+Die IDs dienen nur intern der Zustellung, werden vor dem Socket-Versand
+entfernt. Das Durable Object fragt D1 auf diesem Sendepfad nicht ab. Neue
+Modulnachrichten sind ausschließlich für Overlay-Sockets klassifiziert.
+
+Für den Werbe-Countdown wird die Nutzlast exakt so festgelegt:
+
+```ts
+type AdsCountdownState = {
+  nextAdAt: string | null; // ISO-8601-Zeitpunkt in UTC
+  duration: number | null; // geplante Dauer in Sekunden
+};
+```
+
+`modul.ads.countdown` transportiert genau diese beiden Felder, ohne Kanal- oder
+Overlay-ID. `nextAdAt` ist `null`, wenn Twitch keinen Werbeblock geplant hat;
+`duration` ist dann ebenfalls `null`. Bei einem geplanten Block ist `nextAdAt`
+ein UTC-Zeitpunkt; `duration` ist die positive Ganzzahl in Sekunden oder
+`null`, wenn Twitch keine Dauer liefert. Die Nutzlast bleibt unter der
+vorhandenen 4-KiB-Grenze. Der Browser leitet den
+Countdown aus `nextAdAt` ab und aktualisiert ihn lokal; Sekunden-Ticks
+verursachen weder Realtime-Nachrichten noch D1-Schreibvorgänge. D1 hält nur den
+letzten Zeitplanstand für den initialen Overlay-Bootstrap.
+
+Der neue Nachrichtentyp wird bei einer Änderung von `nextAdAt` oder `duration`
+an die Overlays gesendet, die `ads.countdown` enthalten. Es gibt keine Nachricht
+pro Sekunde. Ein fehlender Zeitplan zeigt kein Element an.

@@ -2,11 +2,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import {
-  OVERLAY_ELEMENT_KINDS,
   OVERLAY_ELEMENT_MAXIMUM_COUNT,
   OVERLAY_MAXIMUM_COUNT,
   canManage,
   type ApiErrorCode,
+  type OverlayElementKind,
 } from "../../contracts/values";
 import { isOverlayCssSafe } from "../../contracts/overlay-css";
 import {
@@ -26,6 +26,8 @@ import { actorOf } from "./member-routes";
 import { saveOverlayDraft } from "../overlays/service";
 import { closeRealtimeTokenBeforeResponse, closeRealtimeUnboundOverlayTokenBeforeResponse } from "../realtime-revocation";
 import { publishOverlayChanged } from "../realtime";
+import { MODULES, moduleOverlayElementForKind } from "../../modules/registry";
+import type { JsonObject } from "../../modules/contract";
 
 interface OverlayRouteEnvironment {
   Bindings: Env;
@@ -39,13 +41,25 @@ const nowIso = (): string => new Date().toISOString();
 
 const nameSchema = z.string().trim().min(1).max(40);
 
-const elementConfigSchemas = {
-  variable: z.record(z.string(), z.json()),
-} as const;
+const variableElementConfigSchema = z.record(z.string(), z.json());
+
+export const parseOverlayElementConfig = (kind: string, raw: unknown): JsonObject | null => {
+  if (kind === "variable") {
+    const parsed = variableElementConfigSchema.safeParse(raw);
+    return parsed.success ? parsed.data : null;
+  }
+  const declaration = moduleOverlayElementForKind(kind, MODULES)?.definition;
+  if (declaration === undefined) return null;
+  try {
+    return declaration.parseConfig(raw);
+  } catch {
+    return null;
+  }
+};
 
 const elementSchema = z.object({
   id: z.string().regex(ID_PATTERN),
-  kind: z.enum(OVERLAY_ELEMENT_KINDS),
+  kind: z.string().min(1).max(80),
   label: z.string().max(40).default(""),
   variableName: z.string().regex(VARIABLE_PATTERN).nullable().default(null),
   // Legacy text can have zero or many markers; the renderer substitutes the first and preserves the remaining text.
@@ -66,8 +80,8 @@ const createOverlaySchema = z.object({
 }).strict().superRefine((input, context) => {
   const element = input.initialElement;
   if (element === undefined) return;
-  if (element.variableName === null) {
-    context.addIssue({ code: "custom", path: ["initialElement", "variableName"], message: "initial element must reference a variable" });
+  if (element.kind !== "variable" && element.variableName !== null) {
+    context.addIssue({ code: "custom", path: ["initialElement", "variableName"], message: "element variable reference does not match its kind" });
   }
   if (element.x < 0 || element.x > input.width) {
     context.addIssue({ code: "custom", path: ["initialElement", "x"], message: "x is outside the overlay" });
@@ -75,7 +89,7 @@ const createOverlaySchema = z.object({
   if (element.y < 0 || element.y > input.height) {
     context.addIssue({ code: "custom", path: ["initialElement", "y"], message: "y is outside the overlay" });
   }
-  if (!elementConfigSchemas[element.kind].safeParse(element.config).success ||
+  if (parseOverlayElementConfig(element.kind, element.config) === null ||
       new TextEncoder().encode(JSON.stringify(element.config)).byteLength > OVERLAY_ELEMENT_CONFIG_MAXIMUM_BYTES) {
     context.addIssue({ code: "custom", path: ["initialElement", "config"], message: "config is invalid" });
   }
@@ -105,7 +119,10 @@ const updateOverlaySchema = z.object({
     if (element.y < 0 || element.y > draft.height) {
       context.addIssue({ code: "custom", path: ["elements", index, "y"], message: "y is outside the overlay" });
     }
-    if (!elementConfigSchemas[element.kind].safeParse(element.config).success) {
+    if (element.kind !== "variable" && element.variableName !== null) {
+      context.addIssue({ code: "custom", path: ["elements", index, "variableName"], message: "element variable reference does not match its kind" });
+    }
+    if (parseOverlayElementConfig(element.kind, element.config) === null) {
       context.addIssue({ code: "custom", path: ["elements", index, "config"], message: "config is invalid for this element kind" });
     }
     const serializedConfig = JSON.stringify(element.config);
@@ -144,7 +161,11 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
   if (!parsed.success) return context.json({ error: "overlay_data_invalid" }, 400);
 
   const channelId = context.req.param("channelId");
-  const initialElement = parsed.data.initialElement as OverlayDraftElement | undefined;
+  const parsedInitialElement = parsed.data.initialElement as OverlayDraftElement | undefined;
+  const initialElement = parsedInitialElement === undefined ? undefined : {
+    ...parsedInitialElement,
+    config: parseOverlayElementConfig(parsedInitialElement.kind, parsedInitialElement.config) ?? {},
+  };
   if (initialElement !== undefined && initialElement.variableName !== null &&
       !await hasChannelVariableForOverlay(context.env.DB, channelId, initialElement.variableName)) {
     return context.json({ error: "overlay_data_invalid" satisfies ApiErrorCode }, 400);
@@ -239,7 +260,15 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
 
   const channelId = context.req.param("channelId");
   const overlayId = context.req.param("overlayId");
-  const { baseRevision, reconnectExpectation, ...draft } = parsed.data;
+  const { baseRevision, reconnectExpectation, ...parsedDraft } = parsed.data;
+  const draft = {
+    ...parsedDraft,
+    elements: parsedDraft.elements.map((element) => ({
+      ...element,
+      kind: element.kind as OverlayElementKind,
+      config: parseOverlayElementConfig(element.kind, element.config) ?? {},
+    })),
+  };
   const result = await saveOverlayDraft(context.env.DB, actorOf(context), channelId, overlayId,
     baseRevision, draft, nowIso(), reconnectExpectation);
   if (result.outcome === "not_found") return context.json({ error: "overlay_not_found" }, 404);

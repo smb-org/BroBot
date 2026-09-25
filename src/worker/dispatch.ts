@@ -9,6 +9,7 @@ import { sendChatMessage } from "./chat";
 import { sendChatAnnouncement } from "./announcement";
 import { fetchTwitchUserByLogin, sendShoutout } from "./shoutout";
 import { publishRealtimeMessages, publishVariablesChanged } from "./realtime";
+import { prepareModuleOverlayRealtimeMessage } from "./module-overlay-realtime";
 import { writeModuleDiagnostics, type WrittenModuleDiagnostic } from "./event-log";
 import { authorizeModuleMutation } from "./module-authorization";
 import { getAppAccessToken } from "./app-token";
@@ -301,6 +302,7 @@ export const selectModulesForEvent = (
 const runActions = async (
   environment: DispatchEnvironment,
   channelId: string,
+  module: BotModule,
   actions: readonly ModuleAction[],
   muted: boolean,
   fetcher: typeof fetch,
@@ -403,12 +405,21 @@ const runActions = async (
           : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } });
         continue;
       }
-      // The realtime path is #7. Until then, an overlay action doesn't
-      // silently vanish — it's logged as not executed.
-      diagnostics.push({
-        code: "host.overlay.not_executed" satisfies EventCode,
-        detail: { type: action.type },
-      });
+      const prepared = await prepareModuleOverlayRealtimeMessage(
+        environment.DB,
+        channelId,
+        module.id,
+        action,
+        module.mandatory === true,
+      );
+      if (prepared.outcome === "rejected") {
+        diagnostics.push({
+          code: "host.overlay.not_executed" satisfies EventCode,
+          detail: { type: action.type },
+        });
+      } else if (prepared.outcome === "ready") {
+        await publishRealtimeMessages(environment.CHANNEL, [prepared.message]);
+      }
     } catch (error: unknown) {
       // A failed action must not suppress the subsequent ordered actions,
       // e.g. the chat message after a shoutout.
@@ -667,7 +678,7 @@ export const dispatchEventSubNotification = async (
         overlayIdsByVariable.set(change.name, change.overlayIds);
       }
       try {
-        diagnostics.push(...await runActions(environment, event.channelId, result.actions, dispatchState.controls.mute.active, fetcher));
+        diagnostics.push(...await runActions(environment, event.channelId, module, result.actions, dispatchState.controls.mute.active, fetcher));
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }

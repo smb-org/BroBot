@@ -64,6 +64,75 @@ describe("Overlay composition editor", () => {
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
   });
 
+  it("adds enabled module elements with their declared default size", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    let savedOverlay = { ...initialOverlay, elements: [] as typeof initialOverlay.elements };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
+        { id: "ads", enabled: true, mandatory: false, settings: "{}" },
+      ] }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && method === "GET") return Promise.resolve(jsonResponse({ overlay: savedOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && method === "PUT") {
+        const requestBody = init?.body;
+        if (typeof requestBody !== "string") throw new Error("Overlay save body must be JSON text.");
+        const body = JSON.parse(requestBody) as { elements: typeof initialOverlay.elements };
+        savedOverlay = { ...savedOverlay, revision: savedOverlay.revision + 1, elements: body.elements };
+        return Promise.resolve(jsonResponse({ overlay: savedOverlay }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add ad countdown" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(savedOverlay.elements).toHaveLength(1));
+    expect(savedOverlay.elements[0]).toMatchObject({
+      kind: "ads.countdown",
+      config: {},
+      x: 490,
+      y: 320,
+      scalePercent: 100,
+    });
+  });
+
+  it("marks a stored module element when its module is disabled", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const firstElement = initialOverlay.elements[0];
+    if (firstElement === undefined) throw new Error("Overlay editor fixture element is missing.");
+    const disabledOverlay = { ...initialOverlay, elements: [{
+      ...firstElement,
+      kind: "ads.countdown",
+      label: "Ad countdown",
+      variableName: null,
+    }] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
+        { id: "ads", enabled: false, mandatory: false, settings: "{}" },
+      ] }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay: disabledOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    expect(await screen.findAllByText("Ads module is disabled.")).toHaveLength(2);
+  });
+
   it("formats preview values with the channel language instead of the browser locale", async () => {
     Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
     let savedOverlay = initialOverlay;
@@ -194,7 +263,7 @@ describe("Overlay composition editor", () => {
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
-    await waitFor(() => expect(previewFrame?.contentDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain(".brobot-overlay :where(.brobot-variable)"));
+    await waitFor(() => expect(previewFrame?.contentDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain(".brobot-overlay :where(.brobot-variable, .brobot-module-text)"));
     const variableText = previewFrame?.contentDocument?.querySelector<HTMLElement>('[data-variable="score"]');
     if (variableText === null || variableText === undefined) throw new Error("Overlay preview text is missing.");
     const computedStyle = previewFrame?.contentWindow?.getComputedStyle(variableText);

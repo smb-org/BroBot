@@ -173,7 +173,7 @@ const anchorRule = (selector: string, alignment: OverlayStyleAlignment): string 
 const styleRules = (styles: OverlayStyleDocument): readonly string[] => {
   const rules: string[] = [];
   if (hasStyle(styles.overlay)) {
-    rules.push(`.brobot-overlay :where(.brobot-variable) {\n${styleDeclarations(styles.overlay).join("\n")}\n}`);
+    rules.push(`.brobot-overlay :where(.brobot-variable, .brobot-module-text) {\n${styleDeclarations(styles.overlay).join("\n")}\n}`);
     if (styles.overlay.textAlign !== undefined) {
       rules.push(anchorRule(".brobot-overlay .brobot-overlay-composition-element", styles.overlay.textAlign));
     }
@@ -181,7 +181,7 @@ const styleRules = (styles: OverlayStyleDocument): readonly string[] => {
   for (const elementId of Object.keys(styles.elements).filter((id) => elementIdPattern.test(id)).sort(compareCodePoints)) {
     const style = styles.elements[elementId];
     if (style !== undefined && hasStyle(style)) {
-      rules.push(`[data-element="${elementId}"] :where(.brobot-variable) {\n${styleDeclarations(style).join("\n")}\n}`);
+      rules.push(`[data-element="${elementId}"] :where(.brobot-variable, .brobot-module-text) {\n${styleDeclarations(style).join("\n")}\n}`);
       if (style.textAlign !== undefined) {
         rules.push(anchorRule(`.brobot-overlay .brobot-overlay-composition-element[data-element="${elementId}"]`, style.textAlign));
       }
@@ -342,9 +342,9 @@ const parseContent = (content: string): OverlayStyleDocument | null => {
   for (const rule of rules) {
     const lines = rule.split("\n");
     const selectorLine = lines.shift();
-    const overlayStyleSelector = selectorLine === ".brobot-overlay :where(.brobot-variable) {";
+    const overlayStyleSelector = selectorLine === ".brobot-overlay :where(.brobot-variable, .brobot-module-text) {";
     const overlayAnchorSelector = selectorLine === ".brobot-overlay .brobot-overlay-composition-element {";
-    const elementStyleMatch = selectorLine === undefined ? null : /^\[data-element="([A-Za-z0-9_-]{1,64})"\] :where\(\.brobot-variable\) \{$/u.exec(selectorLine);
+    const elementStyleMatch = selectorLine === undefined ? null : /^\[data-element="([A-Za-z0-9_-]{1,64})"\] :where\(\.brobot-variable, \.brobot-module-text\) \{$/u.exec(selectorLine);
     const elementAnchorMatch = selectorLine === undefined ? null : /^\.brobot-overlay \.brobot-overlay-composition-element\[data-element="([A-Za-z0-9_-]{1,64})"\] \{$/u.exec(selectorLine);
     if (!overlayStyleSelector && !overlayAnchorSelector && elementStyleMatch === null && elementAnchorMatch === null) return null;
     const closing = lines.pop();
