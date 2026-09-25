@@ -46,12 +46,15 @@ describe("stored overlays migration", () => {
       ).get()).toEqual({ overlay_id: null, label: "", secret_envelope: null });
 
       database.prepare(
-        `INSERT INTO ads_countdown_state (channel_id, next_ad_at, duration, updated_at)
-         VALUES ('channel-a', '2026-09-24T12:00:00.000Z', 90, '2026-09-24T11:59:00.000Z')`,
+        `INSERT INTO ads_countdown_state
+           (channel_id, next_ad_at, duration, snooze_count, snooze_refresh_at, updated_at)
+         VALUES ('channel-a', '2026-09-24T12:00:00.000Z', 90, 2, '2026-09-24T12:30:00.000Z', '2026-09-24T11:59:00.000Z')`,
       ).run();
       expect(database.prepare(
-        "SELECT next_ad_at, duration FROM ads_countdown_state WHERE channel_id = 'channel-a'",
-      ).get()).toEqual({ next_ad_at: "2026-09-24T12:00:00.000Z", duration: 90 });
+        "SELECT next_ad_at, duration, snooze_count, snooze_refresh_at FROM ads_countdown_state WHERE channel_id = 'channel-a'",
+      ).get()).toEqual({
+        next_ad_at: "2026-09-24T12:00:00.000Z", duration: 90, snooze_count: 2, snooze_refresh_at: "2026-09-24T12:30:00.000Z",
+      });
 
       database.prepare(
         `INSERT INTO overlay_tokens (token_id, channel_id, token_hash, created_at, overlay_id, label, secret_envelope)

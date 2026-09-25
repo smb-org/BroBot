@@ -1,5 +1,6 @@
-import type { ModuleAction } from "../modules/contract";
+import type { BotModule, ModuleAction } from "../modules/contract";
 import type { ModuleOverlayRealtimeEnvelope } from "../realtime-contract";
+import { MODULES } from "../modules/registry";
 
 const OVERLAY_PAYLOAD_MAXIMUM_BYTES = 4_096;
 const OVERLAY_ACTION_TYPE_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/u;
@@ -16,8 +17,12 @@ export const prepareModuleOverlayRealtimeMessage = async (
   moduleId: string,
   action: Extract<ModuleAction, { kind: "overlay" }>,
   mandatory = false,
+  modules: readonly BotModule[] = MODULES,
 ): Promise<ModuleOverlayMessageResult> => {
-  if (!OVERLAY_ACTION_TYPE_PATTERN.test(action.type)) return { outcome: "rejected" };
+  if (!OVERLAY_ACTION_TYPE_PATTERN.test(action.type) || !action.elementKind.startsWith(`${moduleId}.`) ||
+      !modules.find((module) => module.id === moduleId)?.overlayElements?.some(({ kind }) => kind === action.elementKind)) {
+    return { outcome: "rejected" };
+  }
 
   let serializedPayload: string;
   try {
@@ -33,14 +38,14 @@ export const prepareModuleOverlayRealtimeMessage = async (
     `SELECT DISTINCT element.overlay_id
        FROM overlay_elements AS element
       WHERE element.channel_id = ?
-        AND element.kind LIKE ?
+        AND element.kind = ?
         AND (? = 1 OR EXISTS (
           SELECT 1 FROM channel_modules AS module
            WHERE module.channel_id = element.channel_id
              AND module.module_id = ? AND module.enabled = 1
         ))
       ORDER BY element.overlay_id`,
-  ).bind(channelId, `${moduleId}.%`, mandatory ? 1 : 0, moduleId).all<{ overlay_id: string }>();
+  ).bind(channelId, action.elementKind, mandatory ? 1 : 0, moduleId).all<{ overlay_id: string }>();
   const overlayIds = [...new Set(recipients.results.map(({ overlay_id }) => overlay_id))];
   if (overlayIds.length === 0) return { outcome: "no_recipients" };
 

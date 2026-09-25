@@ -93,13 +93,19 @@ describe("Overlay composition editor", () => {
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add ad countdown" }));
+    const snoozeInfo = await screen.findByRole("checkbox", { name: "Show snooze info" });
+    expect(snoozeInfo).not.toBeChecked();
+    const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
+    await waitFor(() => expect(previewFrame?.contentDocument?.body).toHaveTextContent("Ad in 2:30"));
+    expect(previewFrame?.contentDocument?.body).toHaveTextContent("Sample");
+    fireEvent.click(snoozeInfo);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(savedOverlay.elements).toHaveLength(1));
     expect(savedOverlay.elements[0]).toMatchObject({
       kind: "ads.countdown",
-      config: {},
+      config: { showSnoozeInfo: true },
       x: 490,
-      y: 320,
+      y: 312,
       scalePercent: 100,
     });
   });

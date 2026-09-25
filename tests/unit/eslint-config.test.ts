@@ -37,6 +37,13 @@ describe("effective ESLint module boundaries", () => {
     expect(rejects(restrictions, "zod")).toBe(true);
   });
 
+  it("blocks static module overlay view imports from the host renderer", async () => {
+    const restrictions = await restrictionsFor("src/overlay/canvas.tsx");
+
+    expect(rejects(restrictions, "../modules/ads/overlay/countdown")).toBe(true);
+    expect(rejects(restrictions, "../modules/overlay-element-registry")).toBe(false);
+  });
+
   it("keeps the panel boundaries and module isolation effective", async () => {
     const restrictions = await restrictionsFor("src/modules/example/panel/view.tsx");
 

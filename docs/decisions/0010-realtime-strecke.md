@@ -439,25 +439,42 @@ Die IDs dienen nur intern der Zustellung, werden vor dem Socket-Versand
 entfernt. Das Durable Object fragt D1 auf diesem Sendepfad nicht ab. Neue
 Modulnachrichten sind ausschließlich für Overlay-Sockets klassifiziert.
 
-Für den Werbe-Countdown wird die Nutzlast exakt so festgelegt:
+Für den Werbe-Countdown wird die Nutzlast in Bootstrap und in
+`modul.ads.countdown` exakt so festgelegt:
 
 ```ts
 type AdsCountdownState = {
   nextAdAt: string | null; // ISO-8601-Zeitpunkt in UTC
   duration: number | null; // geplante Dauer in Sekunden
+  snoozeCount: number | null; // Twitch Get Ad Schedule snooze_count
+  snoozeRefreshAt: string | null; // Twitch snooze_refresh_at, ISO-8601 in UTC
+  serverNow: string; // Serverzeit als ISO-8601 in UTC
 };
 ```
 
-`modul.ads.countdown` transportiert genau diese beiden Felder, ohne Kanal- oder
-Overlay-ID. `nextAdAt` ist `null`, wenn Twitch keinen Werbeblock geplant hat;
-`duration` ist dann ebenfalls `null`. Bei einem geplanten Block ist `nextAdAt`
-ein UTC-Zeitpunkt; `duration` ist die positive Ganzzahl in Sekunden oder
-`null`, wenn Twitch keine Dauer liefert. Die Nutzlast bleibt unter der
-vorhandenen 4-KiB-Grenze. Der Browser leitet den
-Countdown aus `nextAdAt` ab und aktualisiert ihn lokal; Sekunden-Ticks
-verursachen weder Realtime-Nachrichten noch D1-Schreibvorgänge. D1 hält nur den
-letzten Zeitplanstand für den initialen Overlay-Bootstrap.
+Die Nutzlast enthält genau diese fünf Felder, ohne Kanal- oder Overlay-ID.
+`nextAdAt` und `duration` sind `null`, wenn Twitch keinen Werbeblock geplant
+hat. Bei einem geplanten Block ist `nextAdAt` ein UTC-Zeitpunkt; `duration`
+ist die positive Ganzzahl in Sekunden oder `null`, wenn Twitch keine Dauer
+liefert. Die beiden Snooze-Felder übernehmen Twitchs `snooze_count` und
+`snooze_refresh_at` oder sind jeweils `null`, wenn Twitch keinen Wert liefert.
+`serverNow` wird bei Bootstrap und jeder Nachricht neu
+gesetzt. Der Browser bestimmt daraus einen Zeitversatz zur monotonen Uhr von
+`performance.now()`; die lokale Uhr der OBS-Quelle beeinflusst den Countdown
+nicht.
 
-Der neue Nachrichtentyp wird bei einer Änderung von `nextAdAt` oder `duration`
-an die Overlays gesendet, die `ads.countdown` enthalten. Es gibt keine Nachricht
-pro Sekunde. Ein fehlender Zeitplan zeigt kein Element an.
+Vor `nextAdAt` zeigt das Element „Werbung in m:ss“. Zwischen `nextAdAt` und
+`nextAdAt + duration` zeigt es „Werbung läuft · m:ss“ und zählt bis zum Ende
+des Werbeblocks. Nach diesem Zeitpunkt wird es ausgeblendet. Ist `duration`
+`null`, wird es ab `nextAdAt` ausgeblendet. Mit der standardmäßig deaktivierten
+Option „Snooze-Info anzeigen“ bleibt es bei dieser einen Zeile; ist die Option
+aktiv, zeigt eine zweite Zeile die verbleibenden Verschiebungen oder bei null
+verfügbaren Verschiebungen den Countdown bis `snoozeRefreshAt`.
+
+Das Snapshot in Migration 0015 hält Zeitplan und Snooze-Felder für den initialen
+Overlay-Bootstrap. Fehlt der neue D1-Eintrag, übernimmt der Worker den bereits
+im Kanal-Durable-Object gespeicherten Zeitplan, bevor er den Bootstrap erstellt.
+Eine Änderung an Zeitplan oder Snooze-Stand sendet `modul.ads.countdown` nur an
+Overlays, deren deklariertes Element `ads.countdown` ist. Modul-Toggles senden
+für betroffene Overlays `overlay.changed`, damit offene Quellen ihren Bootstrap
+neu laden. Es gibt keine Nachricht pro Sekunde und keine D1-Schreibung pro Tick.

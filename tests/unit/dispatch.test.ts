@@ -471,7 +471,7 @@ describe("dispatch and execution", () => {
         payload: { message: { text: "!hallo" }, chatter_user_id: "user-1", chatter_user_login: "alice" },
         receivedAt: NOW,
       }, fetcher, [fakeModule("ads", () => ({
-        actions: [{ kind: "overlay", type: "konfetti", payload: {} }],
+        actions: [{ kind: "overlay", type: "konfetti", elementKind: "ads.countdown", payload: {} }],
         diagnostics: [],
       }))]);
 

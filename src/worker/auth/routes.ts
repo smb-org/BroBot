@@ -71,6 +71,8 @@ import { findChannelVariable } from "../db/channel-variables";
 import { getOverlayBindingForToken } from "./overlay-token-repository";
 import { getOverlayForChannel, getOverlayVariableValues } from "../db/overlays";
 import { hydrateModuleOverlayElements } from "../overlays/module-state";
+import { hydrateCachedAdsCountdownSnapshot } from "../overlays/ads-countdown-cache";
+import { ADS_COUNTDOWN_ELEMENT_KIND } from "../../modules/ads/overlay/kinds";
 
 const nowIso = (): string => new Date().toISOString();
 const OVERLAY_VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -278,6 +280,9 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
   const overlay = await getOverlayForChannel(context.env.DB, record.channelId, overlayId);
   if (overlay === null) {
     return context.json({ language: record.language, overlay: null, variables: {} });
+  }
+  if (overlay.elements.some((element) => element.kind === ADS_COUNTDOWN_ELEMENT_KIND)) {
+    await hydrateCachedAdsCountdownSnapshot(context.env, record.channelId);
   }
   const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
   const elements = await hydrateModuleOverlayElements(context.env.DB, record.channelId, overlay.elements);

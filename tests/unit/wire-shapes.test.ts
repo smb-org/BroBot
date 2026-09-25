@@ -296,7 +296,7 @@ const moduleActions: readonly ModuleAction[] = [
   { kind: "announcement", text: "Hinweis" },
   { kind: "shoutout", targetChannelId: "kanal-b" },
   { kind: "shoutout", targetLogin: "streamerin" },
-  { kind: "overlay", type: "warning", payload: { text: "Hallo" } },
+  { kind: "overlay", type: "warning", elementKind: "ads.countdown", payload: { text: "Hallo" } },
 ];
 
 const moduleDiagnostic: ModuleDiagnostic = {
@@ -584,7 +584,7 @@ describe("serialized contract shapes", () => {
         "$.modules.action[]: kind,text",
         "$.modules.action[]: kind,targetChannelId",
         "$.modules.action[]: kind,targetLogin",
-        "$.modules.action[]: kind,payload,type",
+        "$.modules.action[]: elementKind,kind,payload,type",
         "$.modules.action[].payload: text",
         "$.modules.actor: login,role,userId",
         "$.modules.auditEntry: action,after,before,channelId,moduleId",
@@ -602,7 +602,7 @@ describe("serialized contract shapes", () => {
         "$.modules.result.actions[]: kind,text",
         "$.modules.result.actions[]: kind,targetChannelId",
         "$.modules.result.actions[]: kind,targetLogin",
-        "$.modules.result.actions[]: kind,payload,type",
+        "$.modules.result.actions[]: elementKind,kind,payload,type",
         "$.modules.result.actions[].payload: text",
         "$.modules.result.diagnostics[]: code,detail",
         "$.modules.result.diagnostics[].detail: alias,allowed,missing,reason,streamState,viewers",

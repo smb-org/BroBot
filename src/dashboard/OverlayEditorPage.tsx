@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { OVERLAY_ELEMENT_MAXIMUM_COUNT, type OverlayElementKind } from "../contracts/values";
+import { OVERLAY_ELEMENT_MAXIMUM_COUNT } from "../contracts/values";
 import { sanitizeOverlayCss } from "../contracts/overlay-css";
 import type { PanelModuleState } from "../panel-contract";
 import { OverlayCanvas } from "../overlay/canvas";
 import type { BoundOverlayData, OverlayLanguage } from "../overlay/model";
+import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
+import { ModuleOverlayElementEditor } from "./ModuleOverlayElementEditor";
 import variableViewCss from "../overlay/variable.css?inline";
 import { clampOverlayEditorPosition, overlayEditorPositionLimits, UNMEASURED_ELEMENT_FALLBACK_SIZE } from "./overlay-editor-model";
 import {
@@ -218,25 +220,30 @@ const createVariableElement = (name: string, elements: readonly PanelOverlayElem
   inComposition: true,
 });
 
+type EditorJsonValue = string | number | boolean | null | readonly EditorJsonValue[] | { readonly [key: string]: EditorJsonValue };
+type EditorJsonObject = Readonly<Record<string, EditorJsonValue>>;
+
 interface ModuleElementOption {
-  kind: OverlayElementKind;
+  kind: `${string}.${string}`;
   moduleId: string;
   defaultSize: { width: number; height: number };
-  defaultConfig: Readonly<Record<string, unknown>>;
+  defaultConfig: EditorJsonObject;
+  parseConfig: (raw: unknown) => EditorJsonObject | null;
   label: (labels: ReturnType<typeof overlaysTexts>) => string;
   addLabel: (labels: ReturnType<typeof overlaysTexts>) => string;
   moduleName: (labels: ReturnType<typeof overlaysTexts>) => string;
 }
 
-const MODULE_ELEMENT_OPTIONS: readonly ModuleElementOption[] = [{
-  kind: "ads.countdown",
-  moduleId: "ads",
-  defaultSize: { width: 300, height: 80 },
-  defaultConfig: {},
-  label: (labels) => labels.editorAdCountdown,
-  addLabel: (labels) => labels.editorAddAdCountdown,
-  moduleName: (labels) => labels.editorAdsModule,
-}];
+const MODULE_ELEMENT_OPTIONS: readonly ModuleElementOption[] = MODULE_OVERLAY_ELEMENTS.map(({ moduleId, definition }) => ({
+  kind: definition.kind,
+  moduleId,
+  defaultSize: definition.defaultSize,
+  defaultConfig: definition.defaultConfig,
+  parseConfig: definition.parseConfig,
+  label: (labels) => definition.kind === "ads.countdown" ? labels.editorAdCountdown : definition.kind,
+  addLabel: (labels) => definition.kind === "ads.countdown" ? labels.editorAddAdCountdown : `Add ${definition.kind}`,
+  moduleName: (labels) => moduleId === "ads" ? labels.editorAdsModule : moduleId,
+}));
 
 const moduleElementOption = (kind: string): ModuleElementOption | undefined =>
   MODULE_ELEMENT_OPTIONS.find((option) => option.kind === kind);
@@ -430,6 +437,7 @@ function OverlayEditorWorkspace({
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline.draft);
   const canEdit = canManage && !saving;
   const selectedElement = draft.elements.find((element) => element.id === selectedElementId) ?? null;
+  const selectedModuleOption = selectedElement === null ? undefined : moduleElementOption(selectedElement.kind);
   const selectedElementScalePercent = selectedElement?.scalePercent;
   const selectedElementText = selectedElement?.text;
   const selectedElementVariableName = selectedElement?.variableName ?? null;
@@ -437,6 +445,7 @@ function OverlayEditorWorkspace({
   const orderedElements = useMemo(() => [...draft.elements].sort((left, right) => right.z - left.z), [draft.elements]);
   const variablesByName = useMemo(() => new Set(variables.map(({ name }) => name)), [variables]);
   const addVariableName = variablesByName.has(chosenVariableName) ? chosenVariableName : variables[0]?.name ?? "";
+  const sampleServerNow = new Date().toISOString();
   const rendererOverlay: BoundOverlayData = {
     id: overlayId,
     revision: baseline.revision,
@@ -450,7 +459,14 @@ function OverlayEditorWorkspace({
       return {
         ...element,
         moduleEnabled: enabled,
-        state: null,
+        state: element.kind === "ads.countdown" ? {
+          nextAdAt: new Date(Date.parse(sampleServerNow) + 150_000).toISOString(),
+          duration: 180,
+          snoozeCount: 2,
+          snoozeRefreshAt: null,
+          serverNow: sampleServerNow,
+          isSample: true,
+        } : null,
       };
     }),
   };
@@ -1078,6 +1094,14 @@ function OverlayEditorWorkspace({
             : <p className="muted" role="note">{moduleElementOption(selectedElement.kind) !== undefined && !moduleIsEnabled(moduleElementOption(selectedElement.kind)?.moduleId ?? "")
               ? labels.editorModuleDisabled(moduleElementOption(selectedElement.kind)?.moduleName(labels) ?? selectedElement.kind)
               : labels.editorModuleElement}</p>}
+          {selectedModuleOption === undefined ? null : (
+            <ModuleOverlayElementEditor
+              kind={selectedModuleOption.kind}
+              config={selectedModuleOption.parseConfig(selectedElement.config) ?? selectedModuleOption.defaultConfig}
+              language={language}
+              onChange={(config) => { updateElement(selectedElement.id, { config }); }}
+            />
+          )}
           <Field id="overlay-editor-label" label={labels.editorLabel} value={selectedElement.label} maxLength={40}
             countLabel={(count, max) => `${String(count)} / ${String(max)}`} disabled={!canEdit}
             onChange={(label) => { updateElement(selectedElement.id, { label }); }} />

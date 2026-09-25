@@ -5,7 +5,7 @@ import { processAdBreak } from "./service";
 import { adsRoutes } from "./routes";
 import { settingsVariableReferences } from "../contract";
 import { readAdCountdownState } from "./adapters/countdown-state";
-import { ADS_COUNTDOWN_ELEMENT_KIND } from "./overlay/kinds";
+import { adsCountdownElement } from "./overlay/element";
 
 export { decideAdBreak, decideAdPrewarning, renderAdBreakText, renderPrewarningText } from "./domain";
 export { processAdBreak } from "./service";
@@ -34,15 +34,8 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   panel: () => import("./panel"),
   settingsEditor: () => import("./panel/settings-editor"),
   overlayElements: [{
-    kind: ADS_COUNTDOWN_ELEMENT_KIND,
-    configVersion: 1,
-    defaultSize: { width: 300, height: 80 },
-    parseConfig: (raw) => {
-      if (typeof raw !== "object" || raw === null || Array.isArray(raw) || Object.keys(raw).length !== 0) return null;
-      return {};
-    },
+    ...adsCountdownElement,
     initialState: async (db, channelId) => ({ ...await readAdCountdownState(db, channelId) }),
-    load: () => import("./overlay/countdown"),
   }],
   immediateActions: {
     requires: ["streamLive"],

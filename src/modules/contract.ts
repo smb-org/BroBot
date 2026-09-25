@@ -19,12 +19,14 @@ export interface ModuleOverlayElementProps {
 export interface OverlayElementEditorProps {
   config: JsonObject;
   onChange: (config: JsonObject) => void;
+  language?: "de" | "en";
 }
 
 export interface ModuleOverlayElementDefinition {
   kind: `${string}.${string}`;
   configVersion: number;
   defaultSize: { width: number; height: number };
+  defaultConfig: JsonObject;
   parseConfig: (raw: unknown) => JsonObject | null;
   initialState?: (db: D1Database, channelId: string, config: JsonObject) => Promise<JsonObject>;
   load: () => Promise<{ default: ComponentType<ModuleOverlayElementProps> }>;
@@ -127,7 +129,7 @@ export type ModuleAction =
   | { kind: "announcement"; text: string }
   | { kind: "shoutout"; targetChannelId: string }
   | { kind: "shoutout"; targetLogin: string }
-  | { kind: "overlay"; type: string; payload: Readonly<Record<string, unknown>> };
+  | { kind: "overlay"; type: string; elementKind: string; payload: Readonly<Record<string, unknown>> };
 
 /**
  * What a module describes as the result of processing. It executes nothing

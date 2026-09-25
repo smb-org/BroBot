@@ -11,6 +11,7 @@ const moduleWithInitialState = (initialState: NonNullable<NonNullable<BotModule[
     kind: "ads.countdown",
     configVersion: 1,
     defaultSize: { width: 300, height: 80 },
+    defaultConfig: {},
     parseConfig: () => ({}),
     initialState,
     load: () => Promise.resolve({ default: () => null }),

@@ -1,7 +1,7 @@
 import { Component, lazy, Suspense, type ComponentType, type CSSProperties, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
 
 import type { ModuleOverlayElementProps } from "../modules/contract";
-import { ADS_COUNTDOWN_ELEMENT_KIND } from "../modules/ads/overlay/kinds";
+import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
 import { VariableValueView } from "./variable-view";
 import type { BoundOverlayData, OverlayElementData, OverlayLanguage } from "./model";
 
@@ -32,9 +32,9 @@ class ElementErrorBoundary extends Component<ElementBoundaryProperties, ElementB
   }
 }
 
-const lazyModuleElements: Readonly<Record<string, LazyExoticComponent<ComponentType<ModuleOverlayElementProps>>>> = {
-  [ADS_COUNTDOWN_ELEMENT_KIND]: lazy(() => import("../modules/ads/overlay/countdown")),
-};
+const lazyModuleElements = new Map<string, LazyExoticComponent<ComponentType<ModuleOverlayElementProps>>>(
+  MODULE_OVERLAY_ELEMENTS.map(({ definition }) => [definition.kind, lazy(definition.load)]),
+);
 
 const renderElement = (
   element: OverlayElementData,
@@ -59,7 +59,7 @@ const renderElement = (
   };
   const wrapperClass = isolated ? undefined : "brobot-overlay-composition-element";
   if (element.kind !== "variable") {
-    const ModuleElement = lazyModuleElements[element.kind];
+    const ModuleElement = lazyModuleElements.get(element.kind);
     if (ModuleElement === undefined || element.moduleEnabled !== true) return null;
     return <div
       data-element={element.id}

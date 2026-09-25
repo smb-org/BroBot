@@ -12,6 +12,7 @@ const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => 
     kind: kind as `${string}.${string}`,
     configVersion: 1,
     defaultSize: { width: 200, height: 80 },
+    defaultConfig: {},
     parseConfig: (raw) => typeof raw === "object" && raw !== null && !Array.isArray(raw)
       ? raw as JsonObject
       : null,
@@ -37,13 +38,16 @@ describe("module overlay element declarations", () => {
 
     expect(countdown).toMatchObject({
       kind: "ads.countdown",
-      configVersion: 1,
-      defaultSize: { width: 300, height: 80 },
+      configVersion: 2,
+      defaultSize: { width: 300, height: 96 },
+      defaultConfig: { showSnoozeInfo: false },
     });
     expect(typeof countdown?.parseConfig).toBe("function");
     expect(typeof countdown?.load).toBe("function");
     expect(typeof countdown?.initialState).toBe("function");
-    expect(countdown?.parseConfig({})).toEqual({});
+    expect(countdown?.parseConfig({})).toEqual({ showSnoozeInfo: false });
+    expect(countdown?.parseConfig({ showSnoozeInfo: true })).toEqual({ showSnoozeInfo: true });
+    expect(countdown?.parseConfig({ showSnoozeInfo: "yes" })).toBeNull();
     expect(countdown?.parseConfig({ html: "<b>unsafe</b>" })).toBeNull();
   });
 });

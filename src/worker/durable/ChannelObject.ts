@@ -222,19 +222,21 @@ export class ChannelObject extends DurableObject<Env> {
       const channelId = this.ownChannelId();
       if (channelId === null) throw new Error("Channel-bound data requires a named Durable Object.");
       const cache = { schedule, asOf } satisfies CachedAdSchedule;
-      const countdownState = adCountdownStateForSchedule(schedule);
+      const countdownState = adCountdownStateForSchedule(schedule, asOf);
       const change = await this.ctx.storage.transaction(async (transaction) => {
         const currentGeneration = await transaction.get<number>(AD_SCHEDULE_GENERATION_KEY) ?? 0;
         if (expectedGeneration !== undefined && currentGeneration !== expectedGeneration) return null;
         const previous = await transaction.get<CachedAdSchedule>(AD_SCHEDULE_CACHE_KEY);
-        const previousCountdownState = previous === undefined ? null : adCountdownStateForSchedule(previous.schedule);
+        const previousCountdownState = previous === undefined ? null : adCountdownStateForSchedule(previous.schedule, previous.asOf);
         await transaction.put(AD_SCHEDULE_GENERATION_KEY, currentGeneration + 1);
         await transaction.put(AD_SCHEDULE_CACHE_KEY, cache);
         return {
           changed: previous === undefined || JSON.stringify(previous.schedule) !== JSON.stringify(schedule),
           countdownChanged: previousCountdownState === null ||
             previousCountdownState.nextAdAt !== countdownState.nextAdAt ||
-            previousCountdownState.duration !== countdownState.duration,
+            previousCountdownState.duration !== countdownState.duration ||
+            previousCountdownState.snoozeCount !== countdownState.snoozeCount ||
+            previousCountdownState.snoozeRefreshAt !== countdownState.snoozeRefreshAt,
         };
       });
       if (change === null) return null;

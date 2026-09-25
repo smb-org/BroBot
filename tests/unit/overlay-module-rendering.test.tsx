@@ -23,7 +23,10 @@ const overlay = (element?: Record<string, unknown>) => ({
     variableName: null,
     text: "",
     config: {},
-    state: { nextAdAt: "2026-09-25T12:00:10.000Z", duration: 90 },
+    state: {
+      nextAdAt: "2026-09-25T12:00:10.000Z", duration: 90, snoozeCount: 2, snoozeRefreshAt: null,
+      serverNow: "2026-09-25T12:00:00.000Z",
+    },
     moduleEnabled: true,
     x: 0,
     y: 0,
@@ -60,9 +63,15 @@ describe("lazy module overlay rendering", () => {
   });
 
   it("loads a module chunk only when the enabled element is present", async () => {
-    render(<OverlayCanvas overlay={overlay({ state: { nextAdAt: new Date(Date.now() + 20_000).toISOString(), duration: 90 } })} language="en" variables={{}} elementId={null} />);
+    render(<OverlayCanvas overlay={overlay({ state: {
+      nextAdAt: new Date(Date.now() + 20_000).toISOString(),
+      duration: 90,
+      snoozeCount: 2,
+      snoozeRefreshAt: null,
+      serverNow: new Date().toISOString(),
+    } })} language="en" variables={{}} elementId={null} />);
 
-    expect(await screen.findByText(/^Ad in \d+ seconds · 90 seconds$/u)).toBeInTheDocument();
+    expect(await screen.findByText(/^Ad in 0:20$/u)).toBeInTheDocument();
     expect(moduleChunkEvaluated).toHaveBeenCalledTimes(1);
   });
 });
