@@ -203,6 +203,10 @@ export interface ChannelVariablesTexts {
   addVariable: string;
   reconnect: string;
   variableMissing: string;
+  reconnectConflict: string;
+  legacyRenameWarning: string;
+  useOverlayConfirmTitle: string;
+  useOverlayConfirmDescription: string;
 }
 
 const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
@@ -226,9 +230,13 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Variablen anlegen, umbenennen, beschreiben oder löschen.",
     valueLocked: "Nur Kanalmitglieder dürfen den Wert ändern.", limitReached: "Die maximale Zahl der Kanalvariablen ist erreicht.", newVariable: "Neue Variable", save: "Speichern", discard: "Verwerfen", close: "Schließen",
     conflict: "Die Variable wurde inzwischen geändert.", created: "Variable angelegt.", updated: "Variable gespeichert.",
-    useInOverlay: "In Overlay verwenden", useOverlayHint: "Das Overlay erhält ein Variablen-Element und wird danach geöffnet.",
+    useInOverlay: "In Overlay verwenden", useOverlayHint: "Vor dem Speichern bestätigst du, dass die Änderung sofort live geht.",
     chooseOverlay: "Overlay auswählen", createOverlay: "Neues Overlay", newOverlayName: "Name des neuen Overlays",
     addVariable: "Variable hinzufügen", reconnect: "Neu verbinden", variableMissing: "Variable fehlt — neu wählen.",
+    reconnectConflict: "Das Overlay-Element wurde inzwischen geändert. Lade die Seite neu, bevor du es verbindest.",
+    legacyRenameWarning: "Alte Links mit #var=… zeigen diese Variable nach der Umbenennung nicht mehr an.",
+    useOverlayConfirmTitle: "Variable sofort hinzufügen?",
+    useOverlayConfirmDescription: "Die Änderung wird sofort gespeichert und bei verbundenen Quellen unmittelbar sichtbar.",
   },
   en: {
     title: "Channel variables", list: "Variables", create: "Create variable", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
@@ -250,9 +258,13 @@ const channelVariablesCatalog: LocaleCatalog<ChannelVariablesTexts> = {
     managementLocked: "Only broadcasters and managers may create, rename, describe, or delete variables.",
     valueLocked: "Only channel members may change the value.", limitReached: "The channel has reached its variable limit.", newVariable: "New variable", save: "Save", discard: "Discard", close: "Close",
     conflict: "This variable has changed since it was loaded.", created: "Variable created.", updated: "Variable saved.",
-    useInOverlay: "Use in overlay", useOverlayHint: "A variable element will be added to the overlay, then the overlay will open.",
+    useInOverlay: "Use in overlay", useOverlayHint: "Before saving, confirm that the change goes live immediately.",
     chooseOverlay: "Choose an overlay", createOverlay: "New overlay", newOverlayName: "New overlay name",
     addVariable: "Add variable", reconnect: "Reconnect", variableMissing: "Variable missing — choose it again.",
+    reconnectConflict: "This overlay element has changed. Reload the page before reconnecting it.",
+    legacyRenameWarning: "Old links using #var=… will stop showing this variable after it is renamed.",
+    useOverlayConfirmTitle: "Add this variable now?",
+    useOverlayConfirmDescription: "The change is saved immediately and appears at once in connected sources.",
   },
 };
 
@@ -269,6 +281,9 @@ export interface OverlaysTexts {
   deleteDescription: (name: string) => string; deleteConfirm: (name: string) => string; close: string;
   conflict: string; guide: string; issueReason: string; readOnly: string; elementCount: (count: number) => string;
   missingVariable: (name: string) => string;
+  legacyTitle: string; legacyDescription: string; legacyTokenName: string; legacyCreatedByUnknown: string;
+  legacyCreatedAt: string; legacyRevokeTitle: (name: string) => string; legacyRevokeDescription: (name: string) => string;
+  legacyRevokeConfirm: (name: string) => string; legacyRevocationReason: string; loadMore: string;
 }
 
 const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
@@ -288,6 +303,12 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     guide: "In OBS einrichten", issueReason: "Widerruf über das Dashboard", readOnly: "Bediener können Overlays und deren Verwendung ansehen, aber keine Zugänge verwalten.",
     elementCount: (count) => `${String(count)} Elemente`,
     missingVariable: (name) => `Variable ${name} fehlt`,
+    legacyTitle: "Alte Links (Konfiguration im Link)",
+    legacyDescription: "Diese ungebundenen Links verwenden noch die alte Konfiguration im Fragment. Hier kannst du sie widerrufen.",
+    legacyTokenName: "Unbenannter Alt-Link", legacyCreatedByUnknown: "Ersteller unbekannt", legacyCreatedAt: "Erstellt",
+    legacyRevokeTitle: (name) => `Alten Link ${name} widerrufen?`,
+    legacyRevokeDescription: (name) => `Der alte Link ${name} wird sofort ungültig. Verbundene Quellen werden geschlossen.`,
+    legacyRevokeConfirm: (name) => `${name} widerrufen`, legacyRevocationReason: "Über Alte Links im Dashboard widerrufen", loadMore: "Weitere laden",
   },
   en: {
     title: "Overlays", list: "Overlays", count: (count, maximum) => `${String(count)} of ${String(maximum)}`,
@@ -305,6 +326,12 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     guide: "Set up in OBS", issueReason: "Revoked from the dashboard", readOnly: "Operators can view overlays and their usage, but cannot manage accesses.",
     elementCount: (count) => `${String(count)} elements`,
     missingVariable: (name) => `Variable ${name} is missing`,
+    legacyTitle: "Legacy links (configuration in the link)",
+    legacyDescription: "These unbound links still use the old fragment configuration. You can revoke them here.",
+    legacyTokenName: "Unnamed legacy link", legacyCreatedByUnknown: "Creator unknown", legacyCreatedAt: "Created",
+    legacyRevokeTitle: (name) => `Revoke legacy link ${name}?`,
+    legacyRevokeDescription: (name) => `The legacy link ${name} will stop working immediately. Connected sources will be closed.`,
+    legacyRevokeConfirm: (name) => `Revoke ${name}`, legacyRevocationReason: "Revoked from Legacy links in the dashboard", loadMore: "Load more",
   },
 };
 

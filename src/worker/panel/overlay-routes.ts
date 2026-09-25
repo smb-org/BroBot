@@ -14,8 +14,10 @@ import {
   createOverlayWithAudit,
   deleteOverlayWithAudit,
   getOverlayForChannel,
+  hasChannelVariableForOverlay,
   isOverlayManagementAllowed,
   listOverlaysForChannel,
+  type OverlayDraftElement,
 } from "../db/overlays";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
 import { actorOf } from "./member-routes";
@@ -34,11 +36,6 @@ const OVERLAY_ELEMENT_CONFIG_MAXIMUM_BYTES = 4_096;
 const nowIso = (): string => new Date().toISOString();
 
 const nameSchema = z.string().trim().min(1).max(40);
-const createOverlaySchema = z.object({
-  name: nameSchema,
-  width: z.number().int().min(64).max(3840).default(1920),
-  height: z.number().int().min(64).max(2160).default(1080),
-}).strict();
 
 const elementConfigSchemas = {
   variable: z.record(z.string(), z.json()),
@@ -58,6 +55,29 @@ const elementSchema = z.object({
   inComposition: z.boolean().default(true),
 }).strict();
 
+const createOverlaySchema = z.object({
+  name: nameSchema,
+  width: z.number().int().min(64).max(3840).default(1920),
+  height: z.number().int().min(64).max(2160).default(1080),
+  initialElement: elementSchema.optional(),
+}).strict().superRefine((input, context) => {
+  const element = input.initialElement;
+  if (element === undefined) return;
+  if (element.variableName === null) {
+    context.addIssue({ code: "custom", path: ["initialElement", "variableName"], message: "initial element must reference a variable" });
+  }
+  if (element.x < 0 || element.x > input.width) {
+    context.addIssue({ code: "custom", path: ["initialElement", "x"], message: "x is outside the overlay" });
+  }
+  if (element.y < 0 || element.y > input.height) {
+    context.addIssue({ code: "custom", path: ["initialElement", "y"], message: "y is outside the overlay" });
+  }
+  if (!elementConfigSchemas[element.kind].safeParse(element.config).success ||
+      new TextEncoder().encode(JSON.stringify(element.config)).byteLength > OVERLAY_ELEMENT_CONFIG_MAXIMUM_BYTES) {
+    context.addIssue({ code: "custom", path: ["initialElement", "config"], message: "config is invalid" });
+  }
+});
+
 const updateOverlaySchema = z.object({
   baseRevision: z.number().int().min(1),
   name: nameSchema,
@@ -65,6 +85,10 @@ const updateOverlaySchema = z.object({
   height: z.number().int().min(64).max(2160),
   css: z.string().max(16_000),
   elements: z.array(elementSchema).max(OVERLAY_ELEMENT_MAXIMUM_COUNT),
+  reconnectExpectation: z.object({
+    elementId: z.string().regex(ID_PATTERN),
+    missingVariableName: z.string().regex(VARIABLE_PATTERN),
+  }).strict().optional(),
 }).strict().superRefine((draft, context) => {
   const identifiers = new Set<string>();
   draft.elements.forEach((element, index) => {
@@ -112,6 +136,11 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
   if (!parsed.success) return context.json({ error: "overlay_data_invalid" }, 400);
 
   const channelId = context.req.param("channelId");
+  const initialElement = parsed.data.initialElement as OverlayDraftElement | undefined;
+  if (initialElement !== undefined && initialElement.variableName !== null &&
+      !await hasChannelVariableForOverlay(context.env.DB, channelId, initialElement.variableName)) {
+    return context.json({ error: "overlay_data_invalid" satisfies ApiErrorCode }, 400);
+  }
   const now = nowIso();
   const id = crypto.randomUUID();
   const created = await createOverlayWithAudit(context.env.DB, actorOf(context), {
@@ -120,6 +149,7 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
     name: parsed.data.name,
     width: parsed.data.width,
     height: parsed.data.height,
+    ...(initialElement === undefined ? {} : { initialElement }),
   }, now);
   if (created.changes > 0) {
     const overlay = await getOverlayForChannel(context.env.DB, channelId, id);
@@ -166,14 +196,18 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
 
   const channelId = context.req.param("channelId");
   const overlayId = context.req.param("overlayId");
-  const { baseRevision, ...draft } = parsed.data;
+  const { baseRevision, reconnectExpectation, ...draft } = parsed.data;
   const result = await saveOverlayDraft(context.env.DB, actorOf(context), channelId, overlayId,
-    baseRevision, draft, nowIso());
+    baseRevision, draft, nowIso(), reconnectExpectation);
   if (result.outcome === "not_found") return context.json({ error: "overlay_not_found" }, 404);
   if (result.outcome === "forbidden") return managementDenied(context);
   if (result.outcome === "element_limit") return context.json({ error: "overlay_element_limit_reached" }, 409);
   if (result.outcome === "invalid_reference") return context.json({ error: "overlay_data_invalid" }, 400);
   if (result.outcome === "element_id_conflict") return context.json({ error: "overlay_element_id_conflict" }, 409);
+  if (result.outcome === "reconnect_conflict") return context.json({
+    error: "overlay_changed_concurrently",
+    currentRevision: result.current.revision,
+  }, 409);
   if (result.outcome === "conflict") {
     return context.json({
       error: "overlay_changed_concurrently",

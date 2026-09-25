@@ -134,6 +134,66 @@ describe("stored overlay routes", () => {
       .resolves.toEqual({ count: 0 });
   });
 
+  it("creates a new overlay and its first variable element atomically", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const variable = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+      name: "score", value: 1, description: "Score", resetOnStreamStart: false,
+    });
+    expect(variable.status).toBe(201);
+    const initialElement = { ...element("first-element"), variableName: "score", text: "score: {value}" };
+
+    const created = await fetchPanel("manager-a", "/api/channels/channel-a/overlays", "POST", {
+      name: "Gameplay", width: 1920, height: 1080, initialElement,
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json<{ overlay: { id: string; revision: number; elements: Array<{ variableName: string }> } }>();
+    expect(createdBody.overlay).toMatchObject({ revision: 1, elements: [{ variableName: "score" }] });
+
+    const duplicateElementCreate = await fetchPanel("manager-a", "/api/channels/channel-a/overlays", "POST", {
+      name: "Must roll back", width: 1920, height: 1080, initialElement,
+    });
+    expect(duplicateElementCreate.status).toBeGreaterThanOrEqual(400);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlays WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 1 });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM overlay_elements WHERE channel_id = 'channel-a'").first())
+      .resolves.toEqual({ count: 1 });
+  });
+
+  it("rejects reconnect when the server already has another variable bound to the element", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    for (const name of ["score", "other"]) {
+      const result = await fetchPanel("manager-a", "/api/channels/channel-a/variables", "POST", {
+        name, value: 1, description: name, resetOnStreamStart: false,
+      });
+      expect(result.status).toBe(201);
+    }
+    const overlayId = await createOverlay("manager-a", "channel-a", "Gameplay");
+    const currentElement = { ...element("element-a"), variableName: "other", text: "other: {value}" };
+    const currentSave = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
+      baseRevision: 1, name: "Gameplay", width: 1920, height: 1080, css: "", elements: [currentElement],
+    });
+    expect(currentSave.status).toBe(200);
+
+    const staleReconnect = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
+      baseRevision: 2,
+      name: "Gameplay",
+      width: 1920,
+      height: 1080,
+      css: "",
+      elements: [{ ...currentElement, variableName: "score", text: "score: {value}" }],
+      reconnectExpectation: { elementId: "element-a", missingVariableName: "score" },
+    });
+
+    expect(staleReconnect.status).toBe(409);
+    await expect(staleReconnect.json()).resolves.toMatchObject({ error: "overlay_changed_concurrently" });
+    await expect(database.prepare("SELECT variable_name FROM overlay_elements WHERE element_id = 'element-a'").first())
+      .resolves.toEqual({ variable_name: "other" });
+  });
+
   it("publishes the created, saved, and deleted overlay revisions", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");

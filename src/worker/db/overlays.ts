@@ -249,25 +249,38 @@ export const overlayElementIdCollisionGuard = (elementCount: number): string => 
 export const createOverlayWithAudit = async (
   db: D1Database,
   actor: ActorContext,
-  input: { id: string; channelId: string; name: string; width: number; height: number },
+  input: { id: string; channelId: string; name: string; width: number; height: number; initialElement?: OverlayDraftElement },
   changedAt: string,
 ): Promise<{ changes: number; rowsWritten: number }> => {
   const mutation = db.prepare(
     `INSERT INTO overlays (overlay_id, channel_id, name, width, height, revision, created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, 1, ?, ?
       WHERE (SELECT COUNT(*) FROM overlays WHERE channel_id = ?) < ?
+        AND (? = 0 OR EXISTS (SELECT 1 FROM channel_variables WHERE channel_id = ? AND name = ?))
         ${actorGuard(MANAGING_ROLES)}`,
   ).bind(input.id, input.channelId, input.name, input.width, input.height, changedAt, changedAt,
-    input.channelId, OVERLAY_MAXIMUM_COUNT, ...bindActorGuard(actor, input.channelId, changedAt));
+    input.channelId, OVERLAY_MAXIMUM_COUNT,
+    input.initialElement === undefined ? 0 : 1,
+    input.channelId, input.initialElement?.variableName ?? "",
+    ...bindActorGuard(actor, input.channelId, changedAt));
+  const elementWrite = input.initialElement === undefined ? [] : [db.prepare(
+    `INSERT INTO overlay_elements
+      (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json, x, y,
+       scale_percent, z, in_composition, missing_variable_name)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL WHERE changes() > 0`,
+  ).bind(input.initialElement.id, input.channelId, input.id, input.initialElement.kind, input.initialElement.label,
+    input.initialElement.variableName, input.initialElement.text, JSON.stringify(input.initialElement.config),
+    input.initialElement.x, input.initialElement.y, input.initialElement.scalePercent, input.initialElement.z,
+    input.initialElement.inComposition ? 1 : 0)];
   const audit = prepareAudit(db, actor.userId, changedAt, input.channelId, null, "overlay.created", null, {
     overlayId: input.id,
     name: input.name,
     width: input.width,
     height: input.height,
     revision: 1,
-    elementCount: 0,
+    elementCount: input.initialElement === undefined ? 0 : 1,
   });
-  const results = await db.batch([mutation, audit]);
+  const results = await db.batch([mutation, ...elementWrite, audit]);
   return { changes: results[0]?.meta.changes ?? 0, rowsWritten: rowsWritten(results) };
 };
 

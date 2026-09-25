@@ -185,22 +185,33 @@ const overlayAccessesPath = (channelId: string, overlayId: string, tokenId?: str
 export const fetchOverlays = (channelId: string): Promise<{ overlays: readonly PanelOverlaySummary[]; maximum: number; elementMaximum: number }> =>
   requestJson(overlaysPath(channelId));
 
-export const createOverlay = (channelId: string, input: { name: string; width: number; height: number }): Promise<{ overlay: PanelOverlay }> =>
+export const createOverlay = (channelId: string, input: {
+  name: string;
+  width: number;
+  height: number;
+  initialElement?: Omit<PanelOverlayElement, "missingVariableName">;
+}): Promise<{ overlay: PanelOverlay }> =>
   requestMutation(overlaysPath(channelId), "POST", input);
 
 export const fetchOverlay = (channelId: string, overlayId: string): Promise<{ overlay: PanelOverlay }> =>
   requestJson(overlaysPath(channelId, overlayId));
 
 export type PanelOverlayDraft = Pick<PanelOverlay, "name" | "width" | "height" | "css" | "elements">;
+export interface PanelOverlayReconnectExpectation {
+  elementId: string;
+  missingVariableName: string;
+}
 
 export const saveOverlay = (
   channelId: string,
   overlayId: string,
   baseRevision: number,
   draft: PanelOverlayDraft,
+  reconnectExpectation?: PanelOverlayReconnectExpectation,
 ): Promise<{ overlay: PanelOverlay }> => requestMutation(overlaysPath(channelId, overlayId), "PUT", {
   baseRevision,
   ...draft,
+  ...(reconnectExpectation === undefined ? {} : { reconnectExpectation }),
 });
 
 export const deleteOverlay = (channelId: string, overlayId: string, baseRevision: number): Promise<{ closingPending?: boolean } | undefined> =>

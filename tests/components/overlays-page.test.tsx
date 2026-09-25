@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OverlaysPage } from "../../src/dashboard/OverlaysPage";
@@ -24,7 +24,10 @@ type AccessFixture = {
   lastUsedAt: string | null;
 };
 const summary = { id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 4, elementCount: 1, accessCount: 1, lastUsedAt: access.lastUsedAt, createdAt: overlay.createdAt, updatedAt: overlay.updatedAt };
+const overlayB = { ...overlay, id: "overlay-b", name: "Second scene", revision: 1, elements: [] };
+const summaryB = { ...summary, id: "overlay-b", name: "Second scene", revision: 1, elementCount: 0, accessCount: 0, lastUsedAt: null };
 const secret = `https://brobot.example/overlay#token=${"f".repeat(43)}`;
+const maskedSecret = "https://brobot.example/overlay#token=••••••";
 const requestPath = (input: RequestInfo | URL): string => {
   if (input instanceof Request) return new URL(input.url).pathname;
   if (input instanceof URL) return input.pathname;
@@ -42,19 +45,37 @@ describe("Overlays page", () => {
     setBrowserLanguage("de-DE");
   });
 
-  const routeFetcher = (options: { conflictDelete?: boolean } = {}) => {
+  const routeFetcher = (options: {
+    conflictDelete?: boolean;
+    emptyOverlays?: boolean;
+    secondOverlay?: boolean;
+    legacyTokens?: Array<{ id: string; name: string | null; createdAt: string; createdBy: string | null; lastUsedAt: string | null; expiresAt: string | null }>;
+  } = {}) => {
     let accesses: AccessFixture[] = [access];
+    let legacyTokens = [...(options.legacyTokens ?? [])];
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.href);
       const method = init?.method ?? "GET";
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-test" });
       if (url.pathname === "/api/channels/channel-a/overlays" && method === "GET") {
-        return jsonResponse({ overlays: [{ ...summary, accessCount: accesses.filter((item) => item.revokedAt === null).length }], maximum: 20, elementMaximum: 20 });
+        const listed = options.emptyOverlays ? [] : [
+          { ...summary, accessCount: accesses.filter((item) => item.revokedAt === null).length },
+          ...(options.secondOverlay ? [summaryB] : []),
+        ];
+        return jsonResponse({ overlays: listed, maximum: 20, elementMaximum: 20 });
+      }
+      if (url.pathname === "/api/channels/channel-a/overlay-tokens" && method === "GET") return jsonResponse({ tokens: legacyTokens, nextOffset: null });
+      if (url.pathname.startsWith("/api/channels/channel-a/overlay-tokens/") && url.pathname.endsWith("/revoke") && method === "POST") {
+        const tokenId = url.pathname.split("/").at(-2);
+        legacyTokens = legacyTokens.filter((item) => item.id !== tokenId);
+        return new Response(null, { status: 204 });
       }
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-a" && method === "GET") return jsonResponse({ overlay });
+      if (url.pathname === "/api/channels/channel-a/overlays/overlay-b" && method === "GET") return jsonResponse({ overlay: overlayB });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-a/accesses" && method === "GET") {
         return jsonResponse({ accesses, activeCount: accesses.filter((item) => item.revokedAt === null).length, maximum: 10 });
       }
+      if (url.pathname === "/api/channels/channel-a/overlays/overlay-b/accesses" && method === "GET") return jsonResponse({ accesses: [], activeCount: 0, maximum: 10 });
       if (url.pathname === "/api/channels/channel-a/overlays/overlay-a/accesses" && method === "POST") {
         const issued = { tokenId: "access-new", overlayUrl: secret, label: "OBS Backup PC", expiresAt: null };
         accesses = [...accesses, { ...access, tokenId: issued.tokenId, label: issued.label }];
@@ -115,8 +136,10 @@ describe("Overlays page", () => {
 
     fireEvent.change(within(inspector).getByLabelText("Name des Zugangs"), { target: { value: "OBS Backup PC" } });
     fireEvent.click(within(inspector).getByRole("button", { name: "Zugang ausstellen" }));
-    const link = await screen.findByDisplayValue(secret);
-    expect(link).toHaveValue(secret);
+    expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(secret)).not.toBeInTheDocument();
+    expect([...document.querySelectorAll("input, textarea")].some((element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+      ? element.value.includes("f".repeat(43)) : false)).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Link kopieren" }));
     expect(writeText).toHaveBeenCalledWith(secret);
 
@@ -124,10 +147,10 @@ describe("Overlays page", () => {
     if (!(originalAccess instanceof HTMLElement)) throw new Error("Access list row is missing.");
     fireEvent.click(within(originalAccess).getByRole("button", { name: "Link erneut anzeigen" }));
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/reveal"))).toBe(true); });
-    expect(await screen.findByDisplayValue(secret)).toHaveValue(secret);
+    expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
     fireEvent.click(within(originalAccess).getByRole("button", { name: "Ersetzen" }));
     await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/replace"))).toBe(true); });
-    expect(await screen.findByDisplayValue(secret)).toHaveValue(secret);
+    expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([input]) => requestPath(input).includes("/access-a/replace"))).toBe(true);
 
     fireEvent.click(within(originalAccess).getByRole("button", { name: "Widerrufen" }));
@@ -164,5 +187,66 @@ describe("Overlays page", () => {
     fireEvent.click(summaryText);
     expect(summary).toHaveTextContent("Benutzerdefiniertes CSS");
     expect(screen.queryByText("Overlay-Link")).not.toBeInTheDocument();
+  });
+
+  it("keeps legacy links manageable on a channel with no overlays", async () => {
+    const fetcher = routeFetcher({ emptyOverlays: true, legacyTokens: [{
+      id: "legacy-access-a", name: null, createdAt: "2026-09-24T10:00:00.000Z", createdBy: "Sample creator",
+      lastUsedAt: null, expiresAt: null,
+    }] });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+
+    const legacy = await screen.findByRole("region", { name: "Alte Links (Konfiguration im Link)" });
+    expect(within(legacy).getByText("Unbenannter Alt-Link")).toBeInTheDocument();
+    fireEvent.click(within(legacy).getByRole("button", { name: "Widerrufen" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Unbenannter Alt-Link widerrufen" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Zugang widerrufen.");
+    const revoke = fetcher.mock.calls.find(([input, init]) => requestPath(input).endsWith("/legacy-access-a/revoke") && init?.method === "POST");
+    expect(revoke?.[1]?.body).toContain("Über Alte Links im Dashboard widerrufen");
+    expect(screen.queryByRole("region", { name: "Alte Links (Konfiguration im Link)" })).not.toBeInTheDocument();
+  });
+
+  it("clears an issued link immediately when the manager role is removed", async () => {
+    vi.stubGlobal("fetch", routeFetcher());
+    const page = render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByText("Gameplay"));
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    fireEvent.change(within(inspector).getByLabelText("Name des Zugangs"), { target: { value: "OBS Backup PC" } });
+    fireEvent.click(within(inspector).getByRole("button", { name: "Zugang ausstellen" }));
+    expect(await screen.findByText(maskedSecret)).toBeInTheDocument();
+
+    page.rerender(<UiProvider><OverlaysPage channelId="channel-a" canManage={false} /></UiProvider>);
+    expect(screen.queryByText(maskedSecret)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Link kopieren" })).not.toBeInTheDocument();
+  });
+
+  it("does not show a delayed reveal after the manager selects another overlay", async () => {
+    let resolveReveal: ((response: Response) => void) | null = null;
+    const fetcher = routeFetcher({ secondOverlay: true });
+    const original = fetcher.getMockImplementation();
+    fetcher.mockImplementation((input, init) => {
+      const path = requestPath(input);
+      if (path.endsWith("/access-a/reveal") && (init?.method ?? "GET") === "POST") {
+        return new Promise((resolve) => { resolveReveal = resolve; });
+      }
+      return original?.(input, init) ?? Promise.reject(new Error(`Unexpected request ${path}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><OverlaysPage channelId="channel-a" canManage /></UiProvider>);
+    const table = await screen.findByRole("table");
+    fireEvent.click(within(table).getByText("Gameplay"));
+    const inspector = await screen.findByRole("region", { name: "Zugänge" });
+    const row = within(inspector).getByText("OBS Main PC").closest("li");
+    if (!(row instanceof HTMLElement)) throw new Error("Access row is missing.");
+    fireEvent.click(within(row).getByRole("button", { name: "Link erneut anzeigen" }));
+    await vi.waitFor(() => { expect(resolveReveal).toBeTypeOf("function"); });
+    fireEvent.click(within(table).getByText("Second scene"));
+    await vi.waitFor(() => { expect(fetcher.mock.calls.some(([input]) => requestPath(input).endsWith("/overlays/overlay-b/accesses"))).toBe(true); });
+    act(() => { resolveReveal?.(jsonResponse({ overlayUrl: secret })); });
+
+    expect(screen.queryByText(maskedSecret)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Link kopieren" })).not.toBeInTheDocument();
   });
 });
