@@ -580,9 +580,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-access-list,
 .overlay-elements-section ul { margin: 0; padding-left: 20px; }
 .overlay-access-list { list-style: none; padding: 0; display: grid; gap: 10px; }
-.overlay-access-list__item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
+.overlay-access-list__item { border: 1px solid var(--line); border-radius: var(--r-control); padding: 10px; display: grid; gap: 8px; }
 .overlay-access-list__item > div:first-child { display: grid; gap: 4px; }
-.overlay-access-list__status { display: inline-flex; width: fit-content; align-items: center; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-2); font-size: 11px; line-height: 1.35; }
+.overlay-access-list__status { display: inline-flex; width: fit-content; align-items: center; padding: 2px 7px; border: 1px solid var(--line); border-radius: var(--r-control); color: var(--text-2); font-size: 12px; line-height: 1.35; }
 .overlay-access-list__status[data-status="active"] { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); color: var(--green); }
 .overlay-access-list__status[data-status="expired"],
 .overlay-access-list__status[data-status="revoked"] { border-color: var(--line); color: var(--text-3); }
@@ -590,11 +590,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .overlay-custom-size,
 .overlay-form-actions,
 .channel-variable-use-overlay__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
-.overlay-access-secret { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--surface-well); }
+.overlay-access-secret { display: grid; gap: 8px; padding: 12px; border-radius: var(--r-control); background: var(--surface-well); }
 .overlay-access-secret__masked { margin: 0; overflow-wrap: anywhere; }
 .overlay-access-secret__masked code { font: 12px/1.45 "IBM Plex Mono", ui-monospace, monospace; }
 .overlay-legacy-links { display: grid; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
-.overlay-legacy-links h2 { margin: 0; color: var(--text-2); font-size: 16px; }
+.overlay-legacy-links h2 { margin: 0; color: var(--text-2); }
 .channel-variable-use-overlay { display: grid; gap: 10px; }
 .channel-variable-use-overlay__chooser { display: grid; gap: 10px; }
 .table.overlay-tokens-table { width: 100%; min-width: 0; table-layout: fixed; }
