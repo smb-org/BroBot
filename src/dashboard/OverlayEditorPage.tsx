@@ -436,6 +436,7 @@ function OverlayEditorWorkspace({
     setError(undefined);
   }, []);
 
+
   const writeStyleDocument = (next: OverlayStyleDocument): void => {
     setStyleDocument(next);
     const css = replaceOverlayStyleBlock(draft.css, next, draft.elements.map(({ id }) => id));
@@ -539,7 +540,9 @@ function OverlayEditorWorkspace({
   // toggle time below) or after a scale/text/value change grows it, so it cannot stay, or become,
   // clipped off the canvas edge. A layout effect runs synchronously right after the DOM commits
   // the new render, so the measurement already reflects the change; it only writes back when the
-  // clamped position actually differs, so it settles in one pass instead of looping.
+  // clamped position actually differs, so it settles in one pass instead of looping. CSS- and
+  // canvas-size-driven reclamping is handled for every element (including this one) by the
+  // composition-wide effect below, so it is intentionally not a trigger here.
   useLayoutEffect(() => {
     if (selectedElement === null || !selectedElement.inComposition) return;
     const root = previewFrameRootRef.current;
@@ -554,8 +557,34 @@ function OverlayEditorWorkspace({
       selectedElementAnchor,
     );
     if (clamped.x !== selectedElement.x || clamped.y !== selectedElement.y) updateElement(selectedElement.id, clamped);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes `selectedElement` (x/y change every drag frame); CSS, content, scale, and value changes can change its rendered bounds.
-  }, [selectedElementId, selectedElement?.inComposition, selectedElementScalePercent, selectedElementText, selectedElementLiveValue, selectedElementAnchor, draft.css, draft.width, draft.height, previewFrameRoot, updateElement]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes `selectedElement`, `draft.css`/width/height (x/y change every drag frame; CSS and canvas-size reclamping is handled below for all elements).
+  }, [selectedElementId, selectedElement?.inComposition, selectedElementScalePercent, selectedElementText, selectedElementLiveValue, selectedElementAnchor, previewFrameRoot, updateElement]);
+
+  // Reclamp every composition element's position when the style CSS (or the canvas size) changes:
+  // an overlay-default rule such as a larger font-size or padding can grow any element's rendered
+  // box, not just the selected one, and leave an unselected element clipped near a canvas edge.
+  // Measures each element's real rendered box and writes back only the elements whose clamped
+  // position actually changed (via the same `updateElement` used elsewhere, so React 18 batches
+  // all of them into the one re-render this effect's own dependencies then settle against), so a
+  // CSS edit that grows nothing writes nothing back and cannot loop.
+  useLayoutEffect(() => {
+    const root = previewFrameRootRef.current;
+    if (root === null) return;
+    for (const element of draft.elements) {
+      if (!element.inComposition) continue;
+      const rendered = findRenderedElement(root, element.id);
+      if (rendered === undefined) continue;
+      const bounds = rendered.getBoundingClientRect();
+      const clamped = clampOverlayEditorPosition(
+        { x: element.x, y: element.y },
+        { width: draft.width, height: draft.height },
+        { width: bounds.width, height: bounds.height },
+        elementHorizontalAnchor(element),
+      );
+      if (clamped.x !== element.x || clamped.y !== element.y) updateElement(element.id, clamped);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally excludes `draft.elements`/`elementHorizontalAnchor` (x/y change every drag frame; only CSS- or canvas-size-driven growth should retrigger this).
+  }, [draft.css, draft.width, draft.height, previewFrameRoot, updateElement]);
 
   const discard = useCallback((): void => {
     setDraft(baseline.draft);

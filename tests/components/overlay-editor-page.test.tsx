@@ -364,6 +364,52 @@ describe("Overlay composition editor", () => {
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("780");
   });
 
+  it("reclamps an unselected element near the edge when an overlay-default style grows it", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    // The first element is selected by default and stays selected throughout; only the second,
+    // never-selected element sits near the right edge and must still be reclamped when the
+    // overlay-default font size grows it.
+    const selectedElement = { ...initialOverlay.elements[0], id: "element-selected", x: 24, y: 32 };
+    const nearEdgeElement = { ...initialOverlay.elements[0], id: "element-unselected-edge", label: "Edge", x: 900, y: 100, z: 1 };
+    const overlayWithBothElements = { ...initialOverlay, elements: [selectedElement, nearEdgeElement] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: overlayWithBothElements }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        const body = JSON.parse(init.body) as { css: string; elements: typeof initialOverlay.elements };
+        return Promise.resolve(jsonResponse({ overlay: { ...overlayWithBothElements, css: body.css, elements: body.elements, revision: 5 } }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue("24");
+    stubMeasuredElementSize(previewFrameWindow(), nearEdgeElement.id, (element) => {
+      const block = element.ownerDocument.querySelector("style[data-brobot-overlay-css]")?.textContent ?? "";
+      return { width: block.includes("font-size: 500px;") ? 500 : 300, height: 40 };
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Font size" }), { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetcher.mock.calls.filter(([, requestInit]) => requestInit?.method === "PUT")).toHaveLength(1));
+    const saveCall = fetcher.mock.calls.find(([, requestInit]) => requestInit?.method === "PUT");
+    if (saveCall === undefined || typeof saveCall[1]?.body !== "string") throw new Error("Overlay save request is missing.");
+    const saved = JSON.parse(saveCall[1].body) as { elements: typeof initialOverlay.elements };
+    const savedEdgeElement = saved.elements.find(({ id }) => id === nearEdgeElement.id);
+    // At 500px width the element no longer fits at x=900 inside the 1280px canvas and is pulled back
+    // to fit, even though it was never selected.
+    expect(savedEdgeElement?.x).toBe(780);
+  });
+
   it("clears an unsettable style color and shows its empty state", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const styledOverlay = {
