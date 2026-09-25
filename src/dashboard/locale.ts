@@ -295,7 +295,7 @@ export interface OverlaysTexts {
   setupObsAddSource: string; setupObsBrowser: string; setupObsPasteUrl: string; setupObsSetSize: string; setupObsClearCss: string;
   setupObsCssNote: string; setupStreamElementsPath: string; setupStreamElementsPaste: string;
   setupStreamElementsWholePlacement: (width: number, height: number) => string; setupStreamElementsElementPlacement: string;
-  setupSoundAlertsPath: string; setupSoundAlertsFallback: string; setupSoundAlertsUnverified: string;
+  setupSoundAlertsPath: string; setupSoundAlertsImportFields: string; setupSoundAlertsFallback: string; setupSoundAlertsUnverified: string;
   setupHtml: string; setupJs: string; setupFields: string; setupViewSnippet: string;
   setupCopySnippet: (name: string) => string; setupSnippetCopied: (name: string) => string;
   setupCopyUnavailable: string; setupAccessInactive: string;
@@ -352,6 +352,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     setupStreamElementsWholePlacement: (width, height) => `Die Box auf 0/0 setzen und auf ${String(width)} × ${String(height)} skalieren.`,
     setupStreamElementsElementPlacement: "Für andere Positionen empfiehlt sich die Einzelausgabe, damit nur ein Positionierungssystem aktiv ist.",
     setupSoundAlertsPath: "Scenes → Add Widget → Import Widget",
+    setupSoundAlertsImportFields: "Nach dem Import in Fields brobotAddress auf den HTTPS-Ursprung des Overlay-Links und overlayUrl auf den vollständigen Link mit Zugangstoken setzen; sonst bleibt brobotAddress auf dem Platzhalterwert und das Widget lehnt den Overlay-Link ab.",
     setupSoundAlertsFallback: "Alternativ ein Custom Widget anlegen und dieselben HTML-, JS- und Fields-Inhalte einsetzen. In Fields brobotAddress auf den HTTPS-Ursprung des Overlay-Links und overlayUrl auf den vollständigen Link mit Zugangstoken setzen; CSS leer lassen.",
     setupSoundAlertsUnverified: "Dieser Klickpfad wurde noch nicht am echten Sound-Alerts-Produkt geprüft.",
     setupHtml: "HTML", setupJs: "JS", setupFields: "Fields", setupViewSnippet: "Inhalt ansehen",
@@ -423,6 +424,7 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     setupStreamElementsWholePlacement: (width, height) => `Place the box at 0/0 and size it to ${String(width)} × ${String(height)}.`,
     setupStreamElementsElementPlacement: "For other positions, single-element output is recommended so only one positioning system is active.",
     setupSoundAlertsPath: "Scenes → Add Widget → Import Widget",
+    setupSoundAlertsImportFields: "After importing, in Fields set brobotAddress to the HTTPS origin of the overlay link and overlayUrl to the full link containing the access token; otherwise brobotAddress stays at its placeholder value and the widget rejects the overlay link.",
     setupSoundAlertsFallback: "Alternatively add a Custom Widget and paste the same HTML, JS and Fields contents. In Fields, set brobotAddress to the HTTPS origin of the overlay link and overlayUrl to the full link containing the access token; leave CSS empty.",
     setupSoundAlertsUnverified: "This click path has not yet been checked in the real Sound Alerts product.",
     setupHtml: "HTML", setupJs: "JS", setupFields: "Fields", setupViewSnippet: "View contents",

@@ -208,6 +208,7 @@ function OverlaySetupAssistant({
           : labels.setupStreamElementsElementPlacement}</p>
       </> : <>
         <p>{labels.setupSoundAlertsPath}</p>
+        <p>{labels.setupSoundAlertsImportFields}</p>
         <p className="muted" role="note">{labels.setupSoundAlertsUnverified}</p>
         <p>{labels.setupSoundAlertsFallback}</p>
         <div className="overlay-setup__snippets">{snippetCards(item)}</div>
