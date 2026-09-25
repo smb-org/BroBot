@@ -38,4 +38,36 @@ describe("overlay document security headers", () => {
     expect(api.headers.get("content-security-policy")).toBeNull();
     expect(api.headers.get("x-frame-options")).toBeNull();
   });
+
+  it.each([
+    "/api/overlay/bootstrap",
+    "/api/overlay/variables/score",
+  ])("sets wildcard CORS on overlay API errors and permits Authorization preflight for %s", async (path) => {
+    const error = await exports.default.fetch(new Request(`http://localhost${path}`));
+    expect(error.status).toBe(401);
+    expect(error.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(error.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+
+    const preflight = await exports.default.fetch(new Request(`http://localhost${path}`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "null",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization",
+      },
+    }));
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(preflight.headers.get("Access-Control-Allow-Headers")).toBe("Authorization");
+    expect(preflight.headers.get("Access-Control-Allow-Methods")).toContain("GET");
+    expect(preflight.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("keeps dashboard and cookie-authenticated panel routes same-origin only", async () => {
+    const dashboard = await exports.default.fetch(new Request("http://localhost/"));
+    const panelApi = await exports.default.fetch(new Request("http://localhost/api/channels/demo-channel/overlays"));
+
+    expect(dashboard.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(panelApi.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
 });
