@@ -31,31 +31,6 @@ describe("Channel variables page", () => {
     setBrowserLanguage("de-DE");
   });
 
-  it.each([
-    ["de-DE", "In OBS einrichten", "Füge in OBS eine Browserquelle hinzu", "Geheimnis", "jederzeit auf der Seite Overlay-Links widerrufen", "Diagnoseinformationen", "Benutzerdefiniertes CSS"],
-    ["en-US", "Set up in OBS", "Add a Browser Source in OBS", "contains a secret", "revoke it at any time on the Overlay links page", "show diagnostics", "Custom CSS"],
-  ])("shows the localized OBS guide in the variable overlay section (%s)", async (language, summary, sourceStep, secret, revoke, diagnostics, customCss) => {
-    setBrowserLanguage(language);
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
-    vi.stubGlobal("fetch", fetcher);
-
-    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
-    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
-
-    const disclosure = await screen.findByText(summary);
-    fireEvent.click(disclosure);
-    const guide = disclosure.closest("details");
-    expect(guide).not.toBeNull();
-    expect(guide).toHaveTextContent(sourceStep);
-    expect(guide).toHaveTextContent("800 × 120 px");
-    expect(guide).toHaveTextContent(secret);
-    expect(guide).toHaveTextContent(revoke);
-    expect(guide).toHaveTextContent(diagnostics);
-    expect(guide).toHaveTextContent("&debug=1");
-    expect(guide).toHaveTextContent(customCss);
-    expect(guide).toHaveTextContent("font: 700 48px system-ui, sans-serif");
-  });
-
   it("shows a spaced table, reset indicator, quick controls, and disabled Save for operators", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(jsonResponse({
       variables: [variable], count: 1, maximum: 25,
@@ -82,7 +57,14 @@ describe("Channel variables page", () => {
     const resetSwitch = controls.getByRole("switch", { name: "Bei Streamstart auf null setzen" });
     expect(resetSwitch.closest(".ui-switch-card")).toBeInTheDocument();
     expect(resetSwitch.closest(".ui-switch")).toBeNull();
-    expect(within(resetSwitch.closest(".ui-switch-card") as HTMLElement).getByText("Wird zurückgesetzt, wenn der nächste Stream startet.")).toBeInTheDocument();
+    const resetCard = resetSwitch.closest(".ui-switch-card");
+    if (!(resetCard instanceof HTMLElement)) throw new Error("Reset switch card is missing.");
+    expect(within(resetCard).getByText("Wird zurückgesetzt, wenn der nächste Stream startet.")).toBeInTheDocument();
+    const permissionNote = inspector.querySelector(".switch-locked-reason");
+    if (!(permissionNote instanceof HTMLElement)) throw new Error("Reset switch permission note is missing.");
+    expect(permissionNote).toHaveAttribute("role", "note");
+    expect(permissionNote).toHaveTextContent(/Nur Broadcaster und Verwalter dürfen Variablen/u);
+    expect(resetCard).not.toContainElement(permissionNote);
     expect(await controls.findByRole("button", { name: "+1" })).toBeInTheDocument();
     expect(controls.getByRole("button", { name: "−1" })).toBeInTheDocument();
     expect(controls.getByRole("spinbutton", { name: "Setzen auf" })).toBeInTheDocument();
@@ -91,98 +73,236 @@ describe("Channel variables page", () => {
     expect(screen.queryByText("Overlay-Link")).not.toBeInTheDocument();
   });
 
-  it("issues a token and builds a copyable overlay URL and OBS CSS for managers", async () => {
-    const issuedUrl = `https://brobot.example/overlay#token=${"s".repeat(43)}`;
+  it("adds a variable below existing elements through the overlay save API", async () => {
+    const existingElement = {
+      id: "element-existing", kind: "variable", label: "Previous score", variableName: "previous",
+      text: "Previous score: {value}", config: {}, x: 0, y: 100, scalePercent: 100, z: 0, inComposition: true,
+    };
+    const storedOverlay = {
+      id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 2,
+      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z", elements: [existingElement],
+    };
+    const savedBodies: Record<string, unknown>[] = [];
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url.endsWith("/api/csrf")) return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.endsWith("/api/channels/kanal-a/variables")) {
-        return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays" && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve(jsonResponse({ overlays: [{ id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 2, elementCount: 1 }], maximum: 20, elementMaximum: 20 }));
       }
-      if (url.endsWith("/api/channels/kanal-a/overlay-tokens") && init?.method === "POST") {
-        return Promise.resolve(jsonResponse({ tokenId: "token-1", overlayUrl: issuedUrl, expiresAt: null }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: storedOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        const savedBody = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+        savedBodies.push(savedBody);
+        return Promise.resolve(jsonResponse({ overlay: { ...storedOverlay, revision: 3, elements: savedBody.elements } }));
       }
-      return Promise.reject(new Error(`Unexpected request: ${url}`));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
     });
     vi.stubGlobal("fetch", fetcher);
+    const onOpenOverlay = vi.fn();
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} onOpenOverlay={onOpenOverlay} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.click(screen.getByRole("button", { name: "In Overlay verwenden" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Variable hinzufügen" }));
+    const confirmation = await screen.findByRole("dialog");
+    expect(within(confirmation).getByText(/sofort gespeichert und bei verbundenen Quellen unmittelbar sichtbar/u)).toBeInTheDocument();
+    expect(savedBodies).toHaveLength(0);
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Variable hinzufügen" }));
 
-    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
-    const row = await screen.findByRole("row", { name: /score/i });
-    fireEvent.click(row);
-
-    expect(await screen.findByText("Overlay-Link")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Anzeige"), { target: { value: "Punkte {value}" } });
-    fireEvent.click(screen.getByRole("button", { name: "Link erzeugen" }));
-
-    const overlayUrl = await screen.findByLabelText("Widget-URL");
-    expect(overlayUrl).toHaveValue(`http://localhost:3000/overlay#token=${"s".repeat(43)}&var=score&text=Punkte+%7Bvalue%7D`);
-    expect(fetcher.mock.calls.some(([input, init]) => {
-      const requestUrl = typeof input === "string" ? new URL(input, window.location.href)
-        : input instanceof URL ? input : new URL(input.url);
-      return requestUrl.pathname === "/api/channels/kanal-a/overlay-tokens" && init?.method === "POST";
-    })).toBe(true);
-    expect(screen.getByLabelText("OBS CSS")).toHaveValue(`.brobot-variable {
-  font: 700 48px system-ui, sans-serif;
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
-}`);
-    expect(screen.getByText(/Geheim: Wer den Link hat/i)).toBeInTheDocument();
+    await vi.waitFor(() => { expect(savedBodies).toHaveLength(1); });
+    const body = savedBodies[0] as { baseRevision: number; elements: Array<{ id: string; variableName: string | null; text: string; x: number; y: number }> } | undefined;
+    if (body === undefined) throw new Error("Overlay save request is missing.");
+    expect(body.baseRevision).toBe(2);
+    expect(body.elements).toHaveLength(2);
+    expect(body.elements[0]).toEqual(expect.objectContaining({ id: "element-existing", x: 0, y: 100 }));
+    expect(body.elements[1]).toEqual(expect.objectContaining({ variableName: "score", text: "score: {value}", x: 0 }));
+    expect(body.elements[1]?.y).toBeGreaterThan(100);
+    expect(onOpenOverlay).toHaveBeenCalledWith("overlay-a");
   });
 
-  it("reuses a pasted overlay token in the browser without issuing another token", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
-    vi.stubGlobal("fetch", fetcher);
-
-    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
-    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
-    fireEvent.change(screen.getByLabelText("Vorhandenen Overlay-Link einfügen"), {
-      target: { value: `https://brobot.example/overlay#token=${"e".repeat(43)}` },
+  it("wraps a new variable into another column when the lowest element is near the canvas bottom", async () => {
+    const existingElement = {
+      id: "element-existing", kind: "variable", label: "Previous score", variableName: "previous",
+      text: "Previous score: {value}", config: {}, x: 0, y: 1020, scalePercent: 100, z: 0, inComposition: true,
+    };
+    const overlay = {
+      id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 2,
+      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z", elements: [existingElement],
+    };
+    const savedBodies: Array<{ elements: Array<{ id: string; x: number; y: number }> }> = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays" && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve(jsonResponse({ overlays: [{ id: "overlay-a", name: "Gameplay", width: 1920, height: 1080, revision: 2, elementCount: 1 }], maximum: 20, elementMaximum: 20 }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) as { elements: Array<{ id: string; x: number; y: number }> } : { elements: [] };
+        savedBodies.push(body);
+        return Promise.resolve(jsonResponse({ overlay: { ...overlay, revision: 3, elements: body.elements } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
     });
-    fireEvent.click(screen.getByRole("button", { name: "Link übernehmen" }));
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.click(screen.getByRole("button", { name: "In Overlay verwenden" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Variable hinzufügen" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Variable hinzufügen" }));
 
-    expect(await screen.findByLabelText("Widget-URL")).toHaveValue(`http://localhost:3000/overlay#token=${"e".repeat(43)}&var=score&text=score%3A+%7Bvalue%7D`);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => { expect(savedBodies).toHaveLength(1); });
+    const savedBody = savedBodies[0];
+    if (savedBody === undefined) throw new Error("Overlay save request is missing.");
+    const newElement = savedBody.elements.find((element) => element.id !== "element-existing");
+    expect(newElement?.x).toBeGreaterThan(0);
+    expect(newElement?.y).toBe(0);
+    expect(newElement?.x).toBeLessThan(1920);
   });
 
-  it("keeps variable actions before a separated overlay section and a visible disabled import button", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+  it("creates a new overlay and its first element in one save after live-change confirmation", async () => {
+    const createdOverlay = {
+      id: "overlay-new", channelId: "kanal-a", name: "score overlay", width: 1920, height: 1080, css: "", revision: 1,
+      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z", elements: [],
+    };
+    const requests: Array<{ path: string; method: string; body?: string }> = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays" && method === "GET") return Promise.resolve(jsonResponse({ overlays: [], maximum: 20, elementMaximum: 20 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays" && method === "POST") {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as { initialElement: unknown } : { initialElement: null };
+        return Promise.resolve(jsonResponse({ overlay: { ...createdOverlay, elements: [body.initialElement] } }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
     vi.stubGlobal("fetch", fetcher);
+    const onOpenOverlay = vi.fn();
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} onOpenOverlay={onOpenOverlay} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.click(screen.getByRole("button", { name: "In Overlay verwenden" }));
+    expect(await screen.findByRole("textbox", { name: "Name des neuen Overlays" })).toHaveValue("score overlay");
+    fireEvent.click(screen.getByRole("button", { name: "Variable hinzufügen" }));
+    const confirmation = await screen.findByRole("dialog");
+    expect(within(confirmation).getByText(/sofort gespeichert und bei verbundenen Quellen unmittelbar sichtbar/u)).toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Variable hinzufügen" }));
 
+    await vi.waitFor(() => { expect(onOpenOverlay).toHaveBeenCalledWith("overlay-new"); });
+    const create = requests.find((request) => request.method === "POST" && request.path.endsWith("/overlays"));
+    expect(create?.body).toContain('"name":"score overlay"');
+    expect(create?.body).toContain('"variableName":"score"');
+    expect(requests.some((request) => request.method === "PUT")).toBe(false);
+  });
+
+  it("shows a reconnect hint without rebinding automatically and reconnects through a revision save", async () => {
+    const detached = { ...variable, usages: [{ moduleId: "overlays", itemName: "Gameplay", elementLabel: "Score", kind: "display" as const, overlayId: "overlay-a", elementId: "element-a", reconnect: true }] };
+    const overlay = {
+      id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 4,
+      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z",
+      elements: [{ id: "element-a", kind: "variable", label: "Score", variableName: null, missingVariableName: "score", text: "Score: {value}", config: {}, x: 0, y: 0, scalePercent: 100, z: 0, inComposition: true }],
+    };
+    const requests: Array<{ path: string; method: string; body?: string }> = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [detached], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && method === "GET") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && method === "PUT") return Promise.resolve(jsonResponse({ overlay: { ...overlay, revision: 5 } }));
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
     render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
     fireEvent.click(await screen.findByRole("row", { name: /score/i }));
 
-    const inspector = document.querySelector(".list-detail__inspector");
-    if (!(inspector instanceof HTMLElement)) throw new Error("Variable inspector is missing.");
-    const controls = within(inspector);
-    const precedes = (first: Node, second: Node): boolean =>
-      (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-    const variableName = controls.getByLabelText("Name");
-    const valueControls = inspector.querySelector(".channel-variable-value-controls");
-    const usages = controls.getByRole("heading", { name: "Verwendet in" });
-    const actions = inspector.querySelector(".channel-variable-editor__actions");
-    const overlaySection = controls.getByRole("region", { name: "Overlay-Link" });
-    const divider = within(overlaySection).getByRole("separator");
-    const deleteButton = controls.getByRole("button", { name: "Variable löschen" });
-    const useExistingButton = controls.getByRole("button", { name: "Link übernehmen" });
+    expect(screen.getByRole("button", { name: "Gameplay → Score" })).toBeInTheDocument();
+    expect(screen.getByText(/Variable fehlt — neu wählen/u)).toBeInTheDocument();
+    expect(requests.some((request) => request.method === "PUT")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Neu verbinden" }));
+    await vi.waitFor(() => { expect(requests.some((request) => request.method === "PUT")).toBe(true); });
+    const save = requests.find((request) => request.method === "PUT");
+    expect(save?.body).toContain('"variableName":"score"');
+    expect(save?.body).toContain('"baseRevision":4');
+    expect(save?.body).toContain('"reconnectExpectation":{"elementId":"element-a","missingVariableName":"score"}');
+  });
 
-    if (valueControls === null || actions === null) throw new Error("Variable controls are missing.");
-    expect(precedes(variableName, valueControls)).toBe(true);
-    expect(precedes(valueControls, usages)).toBe(true);
-    expect(precedes(usages, actions)).toBe(true);
-    expect(precedes(actions, overlaySection)).toBe(true);
-    expect(precedes(divider, within(overlaySection).getByRole("heading", { name: "Overlay-Link" }))).toBe(true);
-    expect(precedes(overlaySection, deleteButton)).toBe(true);
-    expect(inspector.querySelector(".channel-variable-editor")?.lastElementChild).toBe(deleteButton);
-    expect(useExistingButton).toBeDisabled();
-    expect(useExistingButton.style.opacity).toBe("0.7");
+  it("shows the reconnect action disabled with a reason for operators", async () => {
+    const detached = { ...variable, usages: [{ moduleId: "overlays", itemName: "Gameplay → Score", kind: "display" as const, overlayId: "overlay-a", elementId: "element-a", reconnect: true }] };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      return Promise.resolve(url.pathname.endsWith("/overlay-tokens")
+        ? jsonResponse({ tokens: [], nextOffset: null })
+        : jsonResponse({ variables: [detached], count: 1, maximum: 25 }));
+    }));
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage={false} onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    expect(screen.getByRole("button", { name: "Neu verbinden" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Neu verbinden" })).toHaveAttribute("title", expect.stringContaining("Nur Broadcaster"));
+  });
+
+  it("refuses to reconnect an element that the latest overlay response already binds to another variable", async () => {
+    const detached = { ...variable, usages: [{ moduleId: "overlays", itemName: "Gameplay → Score", kind: "display" as const, overlayId: "overlay-a", elementId: "element-a", reconnect: true }] };
+    const overlay = {
+      id: "overlay-a", channelId: "kanal-a", name: "Gameplay", width: 1920, height: 1080, css: "", revision: 5,
+      createdAt: "2026-09-24T00:00:00.000Z", updatedAt: "2026-09-24T00:00:00.000Z",
+      elements: [{ id: "element-a", kind: "variable", label: "Score", variableName: "other", missingVariableName: null, text: "Other: {value}", config: {}, x: 0, y: 0, scalePercent: 100, z: 0, inComposition: true }],
+    };
+    const requests: Array<{ path: string; method: string }> = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const method = init?.method ?? "GET";
+      requests.push({ path: url.pathname, method });
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [detached], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && method === "GET") return Promise.resolve(jsonResponse({ overlay }));
+      return Promise.reject(new Error(`Unexpected request ${method} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Neu verbinden" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Das Overlay-Element wurde inzwischen geändert.");
+    expect(requests.some((request) => request.method === "PUT")).toBe(false);
+  });
+
+  it.each([
+    ["de-DE", "Alte Links mit #var=… zeigen diese Variable nach der Umbenennung nicht mehr an."],
+    ["en-US", "Old links using #var=… will stop showing this variable after it is renamed."],
+  ])("warns about old fragment links in %s when legacy links exist", async (language, expectedWarning) => {
+    setBrowserLanguage(language);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [{ id: "legacy-link-a", name: null, createdAt: "2026-09-24T00:00:00.000Z", createdBy: "Sample creator", lastUsedAt: null, expiresAt: null }], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<UiProvider><ChannelVariablesPage channelId="kanal-a" canManage onOpenCommand={() => {}} /></UiProvider>);
+    fireEvent.click(await screen.findByRole("row", { name: /score/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "points" } });
+
+    expect(await screen.findByText(expectedWarning)).toBeInTheDocument();
   });
 
   it("coalesces variable hints, bounds continuous refreshes, and keeps one request in flight", async () => {
     let releaseThird: ((result: Response) => void) | null = null;
+    let variableRequestCount = 0;
     const fetcher = vi.fn<typeof fetch>();
-    fetcher.mockImplementation(() => fetcher.mock.calls.length === 3
-      ? new Promise((resolve) => { releaseThird = resolve; })
-      : Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 })));
+    fetcher.mockImplementation((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname.endsWith("/overlay-tokens")) return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      variableRequestCount++;
+      return variableRequestCount === 3
+        ? new Promise((resolve) => { releaseThird = resolve; })
+        : Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+    });
     vi.stubGlobal("fetch", fetcher);
     vi.stubGlobal("WebSocket", TestWebSocket);
 
@@ -197,7 +317,7 @@ describe("Channel variables page", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(variableRequestCount).toBe(2);
 
     const sendHint = (id: number): void => TestWebSocket.instances[0]?.dispatch("message", {
       data: JSON.stringify({
@@ -211,15 +331,15 @@ describe("Channel variables page", () => {
     } as MessageEvent<string>);
     for (let index = 0; index < 10; index++) sendHint(index);
     await act(async () => { await vi.advanceTimersByTimeAsync(119); });
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(variableRequestCount).toBe(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(variableRequestCount).toBe(3);
 
     for (let index = 10; index < 25; index++) {
       sendHint(index);
       await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     }
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(variableRequestCount).toBe(3);
     expect(releaseThird).toBeTypeOf("function");
     await act(async () => {
       releaseThird?.(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
@@ -228,9 +348,9 @@ describe("Channel variables page", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(variableRequestCount).toBe(4);
     fireEvent.focus(window);
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(5);
   });
 
   it("consumes each Spotlight selection, applies later requests on the mounted page, and does not replay one after returning", async () => {

@@ -188,6 +188,7 @@ describe("Channel Spotlight", () => {
   it('finds the events page by its "log" synonym (#208)', async () => { await findsPageByQuery("log", "Ereignisse"); });
   it('finds the audit log page by typing "audit" (#208)', async () => { await findsPageByQuery("audit", "Audit-Log"); });
   it('finds the variables page by typing "variab" (#208)', async () => { await findsPageByQuery("variab", "Variablen"); });
+  it('finds the Overlays page through the shared navigation definition (#216)', async () => { await findsPageByQuery("overlay", "Overlays"); });
 
   it("disables pages the router blocks while the installation bot is signed out", async () => {
     stubFetch();

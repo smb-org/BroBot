@@ -1929,7 +1929,7 @@ describe("Dashboard skeleton", () => {
     expect(requested).not.toContain("/api/channels/kanal-a/modules");
   });
 
-  it("does not request system data on Variables or Overlay links pages", async () => {
+  it("does not request system data on Variables or Overlays pages", async () => {
     const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
     const requested: string[] = [];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1937,7 +1937,7 @@ describe("Dashboard skeleton", () => {
       requested.push(url.pathname);
       if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/variables") return jsonResponse({ variables: [], maximum: 25 });
-      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return jsonResponse({ tokens: [], nextOffset: null });
+      if (url.pathname === "/api/channels/kanal-a/overlays") return jsonResponse({ overlays: [], maximum: 20 });
       return jsonResponse({}, 404);
     }));
 
@@ -1950,7 +1950,9 @@ describe("Dashboard skeleton", () => {
     requested.length = 0;
     window.history.replaceState({}, "", "/channels/kanal-a/overlay-links");
     render(<DashboardApp />);
-    expect(await screen.findByRole("heading", { name: "Overlay-Links", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overlays", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Overlays" })).toBeInTheDocument();
+    await waitFor(() => { expect(window.location.pathname).toBe("/channels/kanal-a/overlays"); });
     expect(requested).not.toContain("/api/channels/kanal-a/system");
   });
 

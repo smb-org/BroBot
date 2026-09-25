@@ -106,7 +106,6 @@ overlayAccessRouter.get(accessPath, async (context) => {
   const channelId = context.req.param("channelId");
   const overlayId = context.req.param("overlayId");
   const now = nowIso();
-  if (!canManage(context.get("channelRole")) || !await managementAllowed(context, now)) return denied(context);
   const overlay = await getOverlayForChannel(context.env.DB, channelId, overlayId);
   if (overlay === null) return context.json({ error: "overlay_not_found" }, 404);
   const accesses = await listOverlayAccessesForOverlay(context.env.DB, channelId, overlayId);

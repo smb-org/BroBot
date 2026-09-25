@@ -229,7 +229,7 @@ describe("overlay access routes", () => {
     expect(newAccess.expiresAt).toBe("2099-09-18T12:00:00.000Z");
   });
 
-  it("returns 403 to operators for issuing, revealing, replacing, and revoking accesses", async () => {
+  it("lets operators read access metadata but rejects issuing, revealing, replacing, and revoking", async () => {
     const access = await issueAccess(environment);
     await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'channel-a'").run();
 
@@ -242,7 +242,12 @@ describe("overlay access routes", () => {
       post(overlayAccessRouter, accessPath(access.tokenId, "replace"), environment),
       post(overlayAccessRouter, accessPath(access.tokenId, "revoke"), environment),
     ]);
-    expect([list.status, ...responses.map((response) => response.status)]).toEqual([403, 403, 403, 403, 403]);
+    expect([list.status, ...responses.map((response) => response.status)]).toEqual([200, 403, 403, 403, 403]);
+    const listed = await list.json<{ accesses: Record<string, unknown>[] }>();
+    expect(listed.accesses).toHaveLength(1);
+    expect(listed.accesses[0]).toMatchObject({ tokenId: access.tokenId, label: access.label });
+    expect(listed.accesses[0]).not.toHaveProperty("overlayUrl");
+    expect(listed.accesses[0]).not.toHaveProperty("secretEnvelope");
     expect(await database.prepare("SELECT revoked_at FROM overlay_tokens WHERE token_id = ?")
       .bind(access.tokenId).first()).toEqual({ revoked_at: null });
   });

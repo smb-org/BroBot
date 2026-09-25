@@ -65,19 +65,24 @@ export const referencesFor = async (
         : [module.variableReferences.usages(db, channelId, name)],
     )),
     db.prepare(
-      `SELECT overlay.name AS overlay_name, element.label AS element_label, element.element_id
+      `SELECT overlay.name AS overlay_name, element.label AS element_label, element.element_id,
+              element.overlay_id, CASE WHEN element.missing_variable_name = ? THEN 1 ELSE 0 END AS reconnect
          FROM overlay_elements AS element
          JOIN overlays AS overlay
            ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
-        WHERE element.channel_id = ? AND element.variable_name = ?
+        WHERE element.channel_id = ? AND (element.variable_name = ? OR element.missing_variable_name = ?)
         ORDER BY overlay.name, element.z, element.element_id`,
-    ).bind(channelId, name).all<{ overlay_name: string; element_label: string; element_id: string }>(),
+    ).bind(name, channelId, name, name).all<{ overlay_name: string; element_label: string; element_id: string; overlay_id: string; reconnect: number }>(),
   ]);
   const result: ModuleVariableReferenceUsage[] = moduleReferences.flat();
   result.push(...overlays.results.map((row) => ({
     moduleId: "overlays",
-    itemName: `${row.overlay_name} → ${row.element_label || row.element_id}`,
+    itemName: row.overlay_name,
+    elementLabel: row.element_label || row.element_id,
     kind: "display" as const,
+    overlayId: row.overlay_id,
+    elementId: row.element_id,
+    ...(row.reconnect === 1 ? { reconnect: true } : {}),
   })));
   return result;
 };
@@ -317,7 +322,7 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
     before.resetOnStreamStart ? 1 : 0, before.createdAt, before.updatedAt, ...authorization.values);
   const detachOverlayElements = context.env.DB.prepare(
     `UPDATE overlay_elements
-        SET variable_name = NULL
+        SET variable_name = NULL, missing_variable_name = ?
       WHERE channel_id = ? AND variable_name = ?
         AND EXISTS (
           SELECT 1 FROM channel_variables
@@ -325,7 +330,7 @@ variableRouter.delete("/api/channels/:channelId/variables/:name", async (context
              AND reset_on_stream_start = ? AND created_at = ? AND updated_at = ?
         )
         ${authorization.sql}`,
-  ).bind(channelId, name, channelId, name, before.value, before.description, before.resetOnStreamStart ? 1 : 0,
+  ).bind(name, channelId, name, channelId, name, before.value, before.description, before.resetOnStreamStart ? 1 : 0,
     before.createdAt, before.updatedAt, ...authorization.values);
   const mutation = context.env.DB.prepare(
     `DELETE FROM channel_variables

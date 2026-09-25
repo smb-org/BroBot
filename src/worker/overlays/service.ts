@@ -38,6 +38,7 @@ export type SaveOverlayDraftResult =
   | { outcome: "element_limit" }
   | { outcome: "invalid_reference" }
   | { outcome: "element_id_conflict" }
+  | { outcome: "reconnect_conflict"; current: OverlayRecord }
   | { outcome: "unchanged"; overlay: OverlayRecord; rowsWritten: 0 }
   | { outcome: "saved"; overlay: OverlayRecord; rowsWritten: number };
 
@@ -49,10 +50,19 @@ export const saveOverlayDraft = async (
   baseRevision: number,
   draft: OverlayDraft,
   changedAt: string,
+  reconnectExpectation?: { elementId: string; missingVariableName: string },
 ): Promise<SaveOverlayDraftResult> => {
   const before = await getOverlayForChannel(db, channelId, overlayId);
   if (before === null) return { outcome: "not_found" };
   if (draft.elements.length > OVERLAY_ELEMENT_MAXIMUM_COUNT) return { outcome: "element_limit" };
+  if (reconnectExpectation !== undefined) {
+    const currentElement = before.elements.find((element) => element.id === reconnectExpectation.elementId);
+    const submittedElement = draft.elements.find((element) => element.id === reconnectExpectation.elementId);
+    if (currentElement === undefined || currentElement.variableName !== null || currentElement.missingVariableName !== reconnectExpectation.missingVariableName ||
+        submittedElement?.variableName !== reconnectExpectation.missingVariableName) {
+      return { outcome: "reconnect_conflict", current: before };
+    }
+  }
   if (baseRevision !== before.revision) return { outcome: "conflict", current: before };
   const variableNames = [...new Set(draft.elements.flatMap((element) =>
     element.variableName === null ? [] : [element.variableName]))];

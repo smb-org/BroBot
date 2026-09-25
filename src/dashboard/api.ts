@@ -101,6 +101,57 @@ export interface PanelOverlayTokensResponse {
   nextOffset: number | null;
 }
 
+export interface PanelOverlayElement {
+  id: string;
+  kind: "variable";
+  label: string;
+  variableName: string | null;
+  missingVariableName?: string | null;
+  text: string;
+  config: Readonly<Record<string, unknown>>;
+  x: number;
+  y: number;
+  scalePercent: number;
+  z: number;
+  inComposition: boolean;
+}
+
+export interface PanelOverlay {
+  id: string;
+  channelId: string;
+  name: string;
+  width: number;
+  height: number;
+  css: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  elements: readonly PanelOverlayElement[];
+}
+
+export interface PanelOverlaySummary {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  revision: number;
+  elementCount: number;
+  accessCount: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PanelOverlayAccess {
+  tokenId: string;
+  overlayId: string;
+  label: string;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+}
+
 const overlayTokensPath = (channelId: string, tokenId?: string): string =>
   `${channelPath(channelId, "overlay-tokens")}${tokenId === undefined ? "" : `/${encodeURIComponent(tokenId)}/revoke`}`;
 
@@ -121,6 +172,79 @@ export const revokeOverlayToken = async (
     { reason },
   );
   return result ?? { closingPending: false };
+};
+
+const overlaysPath = (channelId: string, overlayId?: string): string =>
+  `${channelPath(channelId, "overlays")}${overlayId === undefined ? "" : `/${encodeURIComponent(overlayId)}`}`;
+
+const overlayAccessesPath = (channelId: string, overlayId: string, tokenId?: string, action?: "reveal" | "replace" | "revoke"): string => {
+  const base = `${overlaysPath(channelId, overlayId)}/accesses`;
+  return tokenId === undefined || action === undefined ? base : `${base}/${encodeURIComponent(tokenId)}/${action}`;
+};
+
+export const fetchOverlays = (channelId: string): Promise<{ overlays: readonly PanelOverlaySummary[]; maximum: number; elementMaximum: number }> =>
+  requestJson(overlaysPath(channelId));
+
+export const createOverlay = (channelId: string, input: {
+  name: string;
+  width: number;
+  height: number;
+  initialElement?: Omit<PanelOverlayElement, "missingVariableName">;
+}): Promise<{ overlay: PanelOverlay }> =>
+  requestMutation(overlaysPath(channelId), "POST", input);
+
+export const fetchOverlay = (channelId: string, overlayId: string): Promise<{ overlay: PanelOverlay }> =>
+  requestJson(overlaysPath(channelId, overlayId));
+
+export type PanelOverlayDraft = Pick<PanelOverlay, "name" | "width" | "height" | "css" | "elements">;
+export interface PanelOverlayReconnectExpectation {
+  elementId: string;
+  missingVariableName: string;
+}
+
+export const saveOverlay = (
+  channelId: string,
+  overlayId: string,
+  baseRevision: number,
+  draft: PanelOverlayDraft,
+  reconnectExpectation?: PanelOverlayReconnectExpectation,
+): Promise<{ overlay: PanelOverlay }> => requestMutation(overlaysPath(channelId, overlayId), "PUT", {
+  baseRevision,
+  ...draft,
+  ...(reconnectExpectation === undefined ? {} : { reconnectExpectation }),
+});
+
+export const deleteOverlay = (channelId: string, overlayId: string, baseRevision: number): Promise<{ closingPending?: boolean } | undefined> =>
+  requestMutation(overlaysPath(channelId, overlayId), "DELETE", { baseRevision });
+
+export const fetchOverlayAccesses = (channelId: string, overlayId: string): Promise<{
+  accesses: readonly PanelOverlayAccess[];
+  activeCount: number;
+  maximum: number;
+}> => requestJson(overlayAccessesPath(channelId, overlayId));
+
+export interface PanelIssuedOverlayAccess {
+  tokenId: string;
+  overlayUrl: string;
+  label: string;
+  expiresAt: string | null;
+  replacesTokenId?: string;
+}
+
+export const issueOverlayAccess = (channelId: string, overlayId: string, label: string): Promise<PanelIssuedOverlayAccess> =>
+  requestMutation(overlayAccessesPath(channelId, overlayId), "POST", { label });
+
+export const revealOverlayAccess = (channelId: string, overlayId: string, tokenId: string): Promise<{ overlayUrl: string }> =>
+  requestMutation(overlayAccessesPath(channelId, overlayId, tokenId, "reveal"), "POST", {});
+
+export const replaceOverlayAccess = (channelId: string, overlayId: string, tokenId: string): Promise<PanelIssuedOverlayAccess> =>
+  requestMutation(overlayAccessesPath(channelId, overlayId, tokenId, "replace"), "POST", {});
+
+export const revokeOverlayAccess = async (channelId: string, overlayId: string, tokenId: string): Promise<{ closingPending: boolean }> => {
+  const result = await requestMutation<{ closingPending?: boolean } | undefined>(
+    overlayAccessesPath(channelId, overlayId, tokenId, "revoke"), "POST", {},
+  );
+  return { closingPending: result?.closingPending ?? false };
 };
 
 const memberPath = (channelId: string, userId?: string): string =>
@@ -288,8 +412,8 @@ export const searchTwitchUser = async (
 
 const requestMutation = <T>(
   path: string,
-  method: "POST" | "PATCH" | "DELETE",
-  body?: Record<string, string | boolean | number | null>,
+  method: "POST" | "PATCH" | "DELETE" | "PUT",
+  body?: Record<string, unknown>,
 ): Promise<T> => requestJson<{ token: string }>("/api/csrf").then(({ token }) => requestJson<T>(path, {
   method,
   headers: {
@@ -352,6 +476,10 @@ export interface PanelChannelVariableUsage {
   moduleId: string;
   itemName: string;
   kind: "template" | "action" | "display";
+  overlayId?: string;
+  elementId?: string;
+  elementLabel?: string;
+  reconnect?: boolean;
 }
 
 export interface PanelChannelVariable extends PanelChannelVariableRecord {
