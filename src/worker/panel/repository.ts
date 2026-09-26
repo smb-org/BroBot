@@ -508,7 +508,11 @@ export const auditAreaSqlClause = (area: AuditArea): { sql: string; values: stri
  */
 export type ResolvedAuditPersonFilter =
   | { kind: "id"; userId: string }
-  | { kind: "loginLike"; pattern: string };
+  | { kind: "loginLike"; pattern: string }
+  // A local partial-login match no longer suppresses the exact Twitch
+  // lookup for other actors (review finding, #255) -- when both resolve,
+  // either one is enough for a row to match.
+  | { kind: "loginLikeOrId"; pattern: string; userId: string };
 
 export interface AuditQueryFilters {
   person: ResolvedAuditPersonFilter | null;
@@ -533,11 +537,19 @@ export const getAuditLogForChannel = async (
     if (filters.person.kind === "id") {
       where.push("actor_user_id = ?");
       filterValues.push(filters.person.userId);
+    } else if (filters.person.kind === "loginLike") {
+      // No inner channel_id subquery here -- the outer `channel_id = ?`
+      // already scopes every row this WHERE clause touches (review finding,
+      // #255).
+      where.push(
+        "actor_user_id IN (SELECT user_id FROM twitch_login_identity WHERE login LIKE ? ESCAPE '\\')",
+      );
+      filterValues.push(filters.person.pattern);
     } else {
       where.push(
-        "actor_user_id IN (SELECT user_id FROM twitch_login_identity WHERE login LIKE ? ESCAPE '\\' AND user_id IN (SELECT actor_user_id FROM audit_log WHERE channel_id = ?))",
+        "(actor_user_id IN (SELECT user_id FROM twitch_login_identity WHERE login LIKE ? ESCAPE '\\') OR actor_user_id = ?)",
       );
-      filterValues.push(filters.person.pattern, channelId);
+      filterValues.push(filters.person.pattern, filters.person.userId);
     }
   }
   if (filters.area !== null) {

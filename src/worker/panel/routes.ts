@@ -122,11 +122,16 @@ const isTwitchUserId = (value: string): boolean => /^\d+$/.test(value);
  * matched as a partial, case-insensitive login search against the locally
  * known audit actors (members and platform admins who logged in at least
  * once, in `twitch_login_identity`) -- so e.g. "member" finds "member_c"
- * (#250). Only when no local login matches at all does this fall back to
- * the previous exact Twitch lookup, which covers an actor whose identity row
- * is gone. A confirmed empty result means "no such person"; an upstream
- * failure stays distinct so the caller can report it instead of presenting
- * an empty page as if the login were missing.
+ * (#250).
+ *
+ * A local partial match is combined with, not a substitute for, the exact
+ * Twitch lookup of the same term: a search for "bob" must also find an actor
+ * who only ever acted under that exact login and has no identity row at
+ * all, even though some unrelated "bobby" identity happens to match the
+ * partial pattern (review finding, #255). Both are resolved and OR'd
+ * together; the Twitch lookup only runs for non-numeric input. If Twitch
+ * fails but a local match exists, that local match still wins over a hard
+ * failure; a confirmed empty result on both sides means "no such person".
  */
 type AuditPersonFilterResolution =
   | { kind: "resolved"; filters: AuditQueryFilters }
@@ -148,17 +153,30 @@ const resolveAuditPersonFilter = async (
   // is treated like no person filter at all (#250).
   if (term.length === 0) return { kind: "resolved", filters: { area: filters.area, person: null } };
   const likePattern = `%${escapeLoginLikeTerm(term)}%`;
-  if (await hasLoginIdentityMatchingPattern(environment.DB, likePattern, channelId)) {
-    return { kind: "resolved", filters: { area: filters.area, person: { kind: "loginLike", pattern: likePattern } } };
-  }
+  const hasLocalMatch = await hasLoginIdentityMatchingPattern(environment.DB, likePattern, channelId);
+  let exactUserId: string | null;
   try {
     const user = await fetchTwitchUserByLogin(fetch, environment, term, "app");
-    return user === null
-      ? { kind: "missing" }
-      : { kind: "resolved", filters: { area: filters.area, person: { kind: "id", userId: user.userId } } };
+    exactUserId = user?.userId ?? null;
   } catch {
-    return { kind: "failed" };
+    // Twitch is down: a local match still answers the query; only a
+    // completely empty result needs to surface as an error (#255).
+    return hasLocalMatch
+      ? { kind: "resolved", filters: { area: filters.area, person: { kind: "loginLike", pattern: likePattern } } }
+      : { kind: "failed" };
   }
+  if (hasLocalMatch && exactUserId !== null) {
+    return {
+      kind: "resolved",
+      filters: { area: filters.area, person: { kind: "loginLikeOrId", pattern: likePattern, userId: exactUserId } },
+    };
+  }
+  if (hasLocalMatch) {
+    return { kind: "resolved", filters: { area: filters.area, person: { kind: "loginLike", pattern: likePattern } } };
+  }
+  return exactUserId === null
+    ? { kind: "missing" }
+    : { kind: "resolved", filters: { area: filters.area, person: { kind: "id", userId: exactUserId } } };
 };
 
 // Only shares the parsing/error mechanics between the audit log and the

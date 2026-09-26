@@ -1129,12 +1129,13 @@ describe("Panel read endpoints", () => {
     expect(await invalidAreaResponse.json()).toEqual({ error: "audit_area_invalid" });
   });
 
-  it("matches the person filter as a case-insensitive partial login against local identities (#250)", async () => {
+  it("matches the person filter as a case-insensitive partial login against local identities, alongside the exact Twitch lookup (#250, #255)", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "operator");
     await insertLoginIdentity(database, "user-2", "member_c");
     await insertLoginIdentity(database, "user-3", "alice");
+    await insertDefaultAppAccessToken(database);
     await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
@@ -1143,7 +1144,10 @@ describe("Panel read endpoints", () => {
       "audit-member", "user-2", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
       "audit-alice", "user-3", "2026-09-18T03:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
     ).run();
-    const twitch = vi.fn();
+    // No exact "member" login on Twitch -- the local partial match still
+    // decides the result, but the exact lookup now always runs alongside it
+    // (#255) instead of being suppressed by the local match.
+    const twitch = vi.fn(() => Promise.resolve(Response.json({ data: [] })));
     vi.stubGlobal("fetch", twitch);
 
     const response = await panelRouter.fetch(
@@ -1155,8 +1159,7 @@ describe("Panel read endpoints", () => {
 
     expect(response.status).toBe(200);
     expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-member"]);
-    // The local match was used -- no Twitch fallback call.
-    expect(twitch).not.toHaveBeenCalled();
+    expect(twitch).toHaveBeenCalled();
   });
 
   it("treats % and _ in the person filter as literal characters, not LIKE wildcards (#250)", async () => {
@@ -1165,6 +1168,7 @@ describe("Panel read endpoints", () => {
     await insertMember(database, "kanal-a", "user-1", "operator");
     await insertLoginIdentity(database, "user-2", "mem_ber");
     await insertLoginIdentity(database, "user-3", "memxber");
+    await insertDefaultAppAccessToken(database);
     await database.prepare(
       `INSERT INTO audit_log
         (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
@@ -1173,6 +1177,7 @@ describe("Panel read endpoints", () => {
       "audit-underscore", "user-2", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
       "audit-x", "user-3", "2026-09-18T03:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
     ).run();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ data: [] }))));
 
     const response = await panelRouter.fetch(
       await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=mem_ber"),
@@ -1184,6 +1189,67 @@ describe("Panel read endpoints", () => {
     // Only the literal "mem_ber" login, not "memxber" which "_" would also
     // match if it were treated as a wildcard.
     expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-underscore"]);
+  });
+
+  it("combines a local partial-login match with the exact Twitch lookup, so one actor's partial match doesn't hide another's exact login (#255)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    // "bobby" has an identity row and only ever acted outside the module
+    // area -- it matches the "%bob%" pattern and would, on its own, satisfy
+    // the local-match preflight.
+    await insertLoginIdentity(database, "user-bobby", "bobby");
+    await insertDefaultAppAccessToken(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      "audit-bobby-member", "user-bobby", "2026-09-18T05:00:00.000Z", "kanal-a", "member.added", "null", "{}",
+      // "bob" has no twitch_login_identity row at all, only a module.enabled
+      // audit entry under its exact Twitch user id.
+      "audit-bob-module", "twitch-bob-id", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}",
+    ).run();
+    const twitch = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.searchParams.get("login")).toBe("bob");
+      return Promise.resolve(Response.json({ data: [{ id: "twitch-bob-id", login: "bob", display_name: "bob" }] }));
+    });
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=bob&area=module"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<{ auditId: string }> }>();
+
+    expect(response.status).toBe(200);
+    // The exact Twitch match for "bob" surfaces the module entry even though
+    // it's "bobby" whose login satisfies the local partial match.
+    expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-bob-module"]);
+  });
+
+  it("falls back to the local partial-login match when the exact Twitch lookup fails, instead of a 502 (#255)", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertLoginIdentity(database, "user-2", "member_c");
+    await insertDefaultAppAccessToken(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, action, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind("audit-member", "user-2", "2026-09-18T04:00:00.000Z", "kanal-a", "module.enabled", "{}", "{}").run();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("upstream unavailable", { status: 503 }))));
+
+    const response = await panelRouter.fetch(
+      await makeRequest("user-1", "/api/channels/kanal-a/audit-log?actor=member"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<{ auditId: string }> }>();
+
+    expect(response.status).toBe(200);
+    expect(body.entries.map((entry) => entry.auditId)).toEqual(["audit-member"]);
   });
 
   it("treats an empty person filter (\"@\" alone or whitespace) as no filter (#250)", async () => {

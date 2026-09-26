@@ -83,10 +83,18 @@ export const hasLoginIdentityMatchingPattern = async (
   likePattern: string,
   channelId: string,
 ): Promise<boolean> => {
+  // EXISTS against audit_log rather than an IN-list subquery -- the latter
+  // materializes every actor id the channel's audit log has ever seen on
+  // each search keystroke and each cursor page; EXISTS lets the planner use
+  // audit_log_channel_actor_created_idx(channel_id, actor_user_id, created_at)
+  // as an indexed lookup per candidate login instead (review finding, #255).
   const row = await db.prepare(
     `SELECT 1 AS is_present FROM twitch_login_identity
       WHERE login LIKE ? ESCAPE '\\'
-        AND user_id IN (SELECT actor_user_id FROM audit_log WHERE channel_id = ?)
+        AND EXISTS (
+          SELECT 1 FROM audit_log a
+           WHERE a.channel_id = ? AND a.actor_user_id = twitch_login_identity.user_id
+        )
       LIMIT 1`,
   ).bind(likePattern, channelId).first<{ is_present: number }>();
   return row !== null;
